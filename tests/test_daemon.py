@@ -104,3 +104,16 @@ def test_bare_apex_returns_404(fleet_home):
     # Request the fleet domain itself (no instance label)
     response = client.get("/api/tls-authorize", params={"domain": "fleet.example.test"})
     assert response.status_code == 404
+
+
+def test_dotted_label_returns_404(fleet_home):
+    """Spec §9.4: hostnames must be single-label. A label containing a dot
+    (e.g. a bogus multi-level subdomain) must be rejected before any
+    instance matching is attempted."""
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "a.b-demo--develop.fleet.example.test"}
+    )
+    assert response.status_code == 404

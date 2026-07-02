@@ -29,6 +29,8 @@ class Registry:
 
     @classmethod
     def load(cls, path: Path) -> "Registry":
+        if not path.exists():
+            raise RegistryError(f"{path}: registry not found; run 'fleet init' first")
         with open(path, "r", encoding="utf-8") as fh:
             data = _yaml.load(fh)
         if data is None:

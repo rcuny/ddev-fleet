@@ -1,7 +1,7 @@
 import pytest
 
 from fleet.core import instances
-from fleet.core.errors import DeployError
+from fleet.core.errors import DeployError, TokenError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult, run_streamed
 from fleet.core.secrets import write_secret
@@ -153,3 +153,23 @@ def test_deploy_git_excludes_asset_injected_files(fleet_home, git_repo):
     exclude_content = exclude_path.read_text(encoding="utf-8")
     assert ".ddev/config.fleet.yaml" in exclude_content
     assert ".env" in exclude_content
+
+
+def test_deploy_excludes_token_config_before_asset_injection_fails(fleet_home, git_repo):
+    """If asset token substitution raises TokenError, the live token file
+    written earlier in deploy() must already be git-excluded — closing the
+    window where a TokenError between write_fleet_config() and the final
+    ensure_git_exclude() would leave config.fleet.yaml committable."""
+    assets_dir = fleet_home / "assets" / "demo"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / "broken.txt").write_text("[[nope]]\n", encoding="utf-8")
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    with pytest.raises(TokenError):
+        instances.deploy(paths, registry, "demo", "develop", branch="main", runner=runner)
+
+    instance_dir = fleet_home / "instances" / "demo--develop"
+    exclude_path = instance_dir / ".git" / "info" / "exclude"
+    assert ".ddev/config.fleet.yaml" in exclude_path.read_text(encoding="utf-8")

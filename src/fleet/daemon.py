@@ -23,6 +23,9 @@ def create_app(fleet_home: Path) -> FastAPI:
             return JSONResponse(status_code=404, content={"detail": "unknown domain"})
 
         label = domain[: -len(suffix)]
+        if "." in label:
+            return JSONResponse(status_code=404, content={"detail": "unknown domain"})
+
         instances_path = registry.instances_path
         if not instances_path.exists():
             return JSONResponse(status_code=404, content={"detail": "unknown domain"})

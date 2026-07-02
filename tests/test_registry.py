@@ -160,3 +160,13 @@ def test_add_project_invalid_key_raises_registry_error(fleet_home, sample_regist
     with pytest.raises(RegistryError) as exc_info:
         registry.add_project("Bad_Key", "git@example.test:org/bad.git")
     assert "invalid project key" in str(exc_info.value)
+
+
+def test_load_missing_file_raises_actionable_registry_error(fleet_home):
+    """A nonexistent fleet.yml must raise RegistryError with guidance,
+    not a raw FileNotFoundError traceback in the CLI."""
+    path = fleet_home / "does-not-exist" / "fleet.yml"
+
+    with pytest.raises(RegistryError) as exc_info:
+        Registry.load(path)
+    assert "fleet init" in str(exc_info.value)

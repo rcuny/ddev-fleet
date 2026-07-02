@@ -1,3 +1,5 @@
+import errno
+
 import pytest
 
 from fleet.core.errors import LockHeldError
@@ -33,3 +35,23 @@ def test_lock_on_different_instances_does_not_conflict(tmp_path):
     with instance_lock(locks_dir, "oak--develop"):
         with instance_lock(locks_dir, "oak--piano"):
             pass
+
+
+def test_non_contention_oserror_is_not_swallowed_as_lock_held(tmp_path, monkeypatch):
+    """Only EAGAIN/EWOULDBLOCK (lock actually held) should become
+    LockHeldError. Any other OSError (e.g. ENOLCK, EIO) is a real fault
+    and must propagate unchanged, not be masked as lock contention."""
+    import fcntl
+
+    locks_dir = tmp_path / "locks"
+
+    def _raise_enolck(*args, **kwargs):
+        raise OSError(errno.ENOLCK, "no locks available")
+
+    monkeypatch.setattr(fcntl, "flock", _raise_enolck)
+
+    with pytest.raises(OSError) as exc_info:
+        with instance_lock(locks_dir, "oak--develop"):
+            pass
+    assert not isinstance(exc_info.value, LockHeldError)
+    assert exc_info.value.errno == errno.ENOLCK

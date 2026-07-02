@@ -1,6 +1,7 @@
 """Per-instance flock-based locking (spec §5.3)."""
 
 import contextlib
+import errno
 import fcntl
 from pathlib import Path
 from typing import Iterator
@@ -19,9 +20,11 @@ def instance_lock(locks_dir: Path, instance_id: str) -> Iterator[None]:
         try:
             fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
         except OSError as exc:
-            raise LockHeldError(
-                f"lock already held for instance {instance_id!r} ({lock_path})"
-            ) from exc
+            if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                raise LockHeldError(
+                    f"lock already held for instance {instance_id!r} ({lock_path})"
+                ) from exc
+            raise
         try:
             yield
         finally:
