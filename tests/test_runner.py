@@ -37,3 +37,13 @@ def test_run_streamed_echoes_when_requested(capsys):
     run_streamed(["echo", "hello"], echo=True)
     captured = capsys.readouterr()
     assert "hello" in captured.out
+
+
+def test_run_streamed_merges_stderr_into_lines(tmp_path):
+    result = run_streamed(
+        ["bash", "-c", "echo out-line; echo err-line >&2"],
+        echo=False,
+    )
+    assert result.returncode == 0
+    assert "out-line" in result.lines
+    assert "err-line" in result.lines
