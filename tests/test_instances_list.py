@@ -87,3 +87,34 @@ def test_list_instances_degrades_gracefully_when_runner_raises(fleet_home):
     assert statuses[0].instance_id == "demo--develop"
     assert statuses[0].state == "deployed"
     assert statuses[0].ram_mib is None
+
+
+def test_list_instances_fallback_for_dir_without_instance_yml(fleet_home):
+    registry = _registry(fleet_home)
+    paths = instances.FleetPaths.from_home(fleet_home)
+
+    # Create instance dir WITHOUT .fleet/instance.yml
+    instance_dir = fleet_home / "instances" / "demo--legacy"
+    instance_dir.mkdir(parents=True)
+
+    # Script the runner with empty/degraded responses
+    fake = FakeRunner(
+        scripted={
+            "ddev list --json-output": RunResult(
+                returncode=0, lines=[json.dumps({"raw": []})]
+            ),
+            "docker stats --no-stream --format {{json .}}": RunResult(
+                returncode=0, lines=[]
+            ),
+        }
+    )
+
+    statuses = instances.list_instances(paths, registry, runner=fake)
+
+    assert len(statuses) == 1
+    assert statuses[0].instance_id == "demo--legacy"
+    assert statuses[0].project == "demo"
+    assert statuses[0].instance == "legacy"
+    assert statuses[0].branch == ""
+    assert statuses[0].state == "deployed"
+    assert statuses[0].ram_mib is None
