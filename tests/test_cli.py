@@ -125,3 +125,129 @@ def test_init_skip_claude_creates_skeleton_non_interactively(tmp_path):
     assert registry.domain == "fleet.example.test"
     assert registry.project_keys() == []
     assert not (fleet_home / ".secrets").exists()
+
+
+def test_destroy_dispatch(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    recorder = []
+
+    def fake_destroy(paths, registry, instance_id, *, runner=None):
+        recorder.append(instance_id)
+
+    monkeypatch.setattr(cli.instances_mod, "destroy", fake_destroy)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "demo--develop"])
+
+    assert exit_code == 0
+    assert recorder == ["demo--develop"]
+
+
+def test_start_dispatch(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    recorder = []
+
+    def fake_start(paths, registry, instance_id, *, runner=None):
+        recorder.append(instance_id)
+
+    monkeypatch.setattr(cli.instances_mod, "start", fake_start)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "start", "demo--develop"])
+
+    assert exit_code == 0
+    assert recorder == ["demo--develop"]
+
+
+def test_stop_dispatch(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    recorder = []
+
+    def fake_stop(paths, registry, instance_id, *, runner=None):
+        recorder.append(instance_id)
+
+    monkeypatch.setattr(cli.instances_mod, "stop", fake_stop)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "stop", "demo--develop"])
+
+    assert exit_code == 0
+    assert recorder == ["demo--develop"]
+
+
+def test_fleet_home_flag_overrides_env(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+
+    env_home = fleet_home / "from-env"
+    flag_home = fleet_home / "from-flag"
+    (flag_home / "instances").mkdir(parents=True)
+    (flag_home / "assets").mkdir(parents=True)
+    (flag_home / "locks").mkdir(parents=True)
+    (flag_home / "fleet.yml").write_text(
+        f"""\
+fleet:
+  domain: fleet.example.test
+  assets_path: {flag_home / "assets"}
+  instances_path: {flag_home / "instances"}
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    instances: {{}}
+""",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("FLEET_HOME", str(env_home))
+
+    received_paths = []
+
+    def fake_list(paths, registry, **kw):
+        received_paths.append(paths)
+        return []
+
+    monkeypatch.setattr(cli.instances_mod, "list_instances", fake_list)
+
+    exit_code = cli.main(["--fleet-home", str(flag_home), "list"])
+
+    assert exit_code == 0
+    assert len(received_paths) == 1
+    assert received_paths[0].home == flag_home
+    assert received_paths[0].registry == flag_home / "fleet.yml"
+
+
+def test_usage_error_exits_2(fleet_home):
+    _write_minimal_registry(fleet_home)
+
+    import pytest
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(["--fleet-home", str(fleet_home), "definitely-not-a-command"])
+
+    assert exc.value.code == 2
+
+
+def test_project_add_post_deploy_round_trip(fleet_home):
+    _write_minimal_registry(fleet_home)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "project",
+            "add",
+            "newproj",
+            "--git=git@example.test:org/newproj.git",
+            "--post-deploy=composer install",
+            "--post-deploy=drush deploy",
+        ]
+    )
+
+    assert exit_code == 0
+    reloaded = Registry.load(fleet_home / "fleet.yml")
+    assert reloaded.has_project("newproj") is True
+    project_block = reloaded._data["projects"]["newproj"]
+    assert project_block["post_deploy"] == ["composer install", "drush deploy"]
