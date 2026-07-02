@@ -62,6 +62,15 @@
       --instrumentation-opt-in=false
   become: true
   become_user: "{{ fleet_user }}"
+  # become_user does NOT reset HOME — sudo leaves HOME=/root, so without
+  # this override `ddev config global` would write to /root/.ddev instead
+  # of {{ fleet_home_dir }}/.ddev, and the fleet.service daemon (User=fleet)
+  # would then see DDEV's default router ports (80/443), colliding with
+  # Caddy. The guard tasks above already read/write
+  # {{ fleet_home_dir }}/.ddev/global_config.yaml, so this keeps them
+  # pointed at the same file the daemon actually uses.
+  environment:
+    HOME: "{{ fleet_home_dir }}"
   changed_when: true
   when: >-
     ('router_http_port: ' + (ddev_router_http_port | string)) not in ddev_global_config_text

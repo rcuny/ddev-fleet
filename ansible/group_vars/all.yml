@@ -39,11 +39,11 @@ fleet_domain: fleet.personal.example
 acme_email: contact@personal.example
 
 # --- Caddy admin auth (spec §9.3) — AWAITS CONFIRMATION ---------------------
-# Placeholder hash — NOT a usable bcrypt hash. Generate the real value with
-# `caddy hash-password` and replace this line before relying on basic auth
-# (docs/runbook-server-rollout.md, step 3).
+# Placeholder hash — syntactically valid bcrypt of a discarded random secret
+# — auth FAILS CLOSED for every password until you replace it via
+# `caddy hash-password` (runbook step 3).
 fleet_admin_user: admin
-fleet_admin_bcrypt_hash: "$2a$14$REPLACE.ME.WITH.CADDY.HASH-PASSWORD.OUTPUT"
+fleet_admin_bcrypt_hash: "$2b$14$uENGKN0eNjTf0VTAIpyZmOFSr2HzXOldKWVn61SImgrIV1GnbcHx."
 
 # --- Product repo (spec §3.1, §17) — AWAITS CONFIRMATION --------------------
 fleet_repo_url: https://bitbucket.org/personal_maintainer/ddev-fleet.git

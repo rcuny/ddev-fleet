@@ -117,6 +117,34 @@ Additional live checks, not in spec §16 but load-bearing for this plan:
   Expected: both listeners show `127.0.0.1:8080` / `127.0.0.1:8443`, never
   `0.0.0.0` or `:::`.
 
+- **DDEV global config lands in the fleet user's HOME, not root's** —
+  confirm the router ports were written to `/home/fleet/.ddev`, never
+  `/root/.ddev`:
+
+  ```bash
+  sudo -u fleet cat /home/fleet/.ddev/global_config.yaml | grep router_
+  ```
+
+  Expected: `router_http_port: 8080` and `router_https_port: 8443` appear
+  in the output.
+
+- **`known_hosts` has entries for both git forges** — confirm the
+  ed25519-only keyscan seeded a usable entry for each:
+
+  ```bash
+  sudo -u fleet ssh-keygen -F bitbucket.org -f /home/fleet/.ssh/known_hosts
+  sudo -u fleet ssh-keygen -F github.com -f /home/fleet/.ssh/known_hosts
+  ```
+
+  Expected: both commands exit `0`.
+
+- **`fleet_admin_bcrypt_hash` is your own password, not the shipped
+  placeholder** — the shipped value in `ansible/group_vars/all.yml` is a
+  syntactically valid bcrypt hash of a discarded random secret, so it
+  fails closed (no password will match it), but it is NOT your password.
+  Confirm it was replaced with your own `caddy hash-password` output
+  (step 3, above) before exposing `fleet.<domain>` publicly.
+
 ## 7. Start the fleet daemon
 
 Only after section 6 passes:

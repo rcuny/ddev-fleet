@@ -54,6 +54,14 @@
     group: "{{ fleet_group }}"
     mode: "0700"
 
+- name: Ensure /home/fleet/.claude exists (spec §2 filesystem table)
+  ansible.builtin.file:
+    path: "{{ fleet_home_dir }}/.claude"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0700"
+
 - name: Generate the fleet deploy SSH key (never regenerate an existing key)
   community.crypto.openssh_keypair:
     path: "{{ fleet_home_dir }}/.ssh/id_ed25519"
@@ -105,7 +113,7 @@
   ansible.builtin.known_hosts:
     path: "{{ fleet_home_dir }}/.ssh/known_hosts"
     name: "{{ item.item }}"
-    key: "{{ lookup('ansible.builtin.pipe', 'ssh-keyscan -T 10 ' ~ item.item) }}"
+    key: "{{ lookup('ansible.builtin.pipe', 'ssh-keyscan -t ed25519 -T 10 ' ~ item.item) }}"
     state: present
   loop: "{{ fleet_user_known_hosts_check.results }}"
   loop_control:
