@@ -1,0 +1,19 @@
+[Unit]
+Description=ddev-fleet orchestrator
+After=docker.service
+Requires=docker.service
+
+[Service]
+User={{ fleet_user }}
+WorkingDirectory={{ fleet_opt_dir }}
+EnvironmentFile={{ fleet_srv_dir }}/.secrets
+ExecStart={{ fleet_opt_dir }}/venv/bin/uvicorn fleet.daemon:app --host 127.0.0.1 --port {{ fleet_daemon_port }}
+Restart=always
+
+# Hardening — MUST NOT constrain container mounts managed by DDEV/Docker.
+NoNewPrivileges=yes
+ProtectSystem=full
+ReadWritePaths={{ fleet_srv_dir }}
+
+[Install]
+WantedBy=multi-user.target

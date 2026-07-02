@@ -1,1 +1,72 @@
 ---
+- name: Ensure /opt/ddev-fleet exists and is owned by fleet
+  # bootstrap.sh performs the FIRST clone as root, before this play ever
+  # runs (spec §3.1) — this task re-chowns that root-owned checkout to
+  # fleet:fleet so the git/pip tasks below, which run as become_user
+  # fleet, can write to it. Harmless no-op on a directory that is already
+  # fleet-owned from a previous run of this role.
+  ansible.builtin.file:
+    path: "{{ fleet_opt_dir }}"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    recurse: true
+
+- name: Clone or update the ddev-fleet product repo
+  # First run: fresh clone. Redeploys: fetch + fast-forward to
+  # fleet_repo_version (update: true). accept_hostkey is a second line of
+  # defense on top of the known_hosts pre-seeding in role fleet_user (Task
+  # 5) — belt-and-suspenders, since this clone target may differ from the
+  # per-instance project repos that role seeds for. This task cannot run
+  # live inside the companion dev container (no SSH access to the forge,
+  # and no network egress assumed) — the in-container gate for this role
+  # is syntax-check + lint only; the real run happens on the host via
+  # bootstrap.sh / docs/runbook-server-rollout.md.
+  ansible.builtin.git:
+    repo: "{{ fleet_repo_url }}"
+    dest: "{{ fleet_opt_dir }}"
+    version: "{{ fleet_repo_version }}"
+    # update: false — bootstrap.sh owns clone/pull (as root, re-chowned above).
+    # A pull here would run as the fleet user over the network on EVERY play,
+    # and on the very first run the deploy key is not yet registered on the
+    # forge — it would fail. Upgrades = re-run bootstrap.sh.
+    update: false
+    accept_hostkey: true
+  become: true
+  become_user: "{{ fleet_user }}"
+
+- name: Ensure the fleet Python virtualenv exists
+  ansible.builtin.command:
+    cmd: "python3 -m venv {{ fleet_opt_dir }}/venv"
+    creates: "{{ fleet_opt_dir }}/venv/bin/python3"
+  become: true
+  become_user: "{{ fleet_user }}"
+
+- name: Install the fleet package (editable) into the venv
+  ansible.builtin.pip:
+    name: "."
+    chdir: "{{ fleet_opt_dir }}"
+    virtualenv: "{{ fleet_opt_dir }}/venv"
+    editable: true
+    extra_args: "--upgrade"
+  become: true
+  become_user: "{{ fleet_user }}"
+
+- name: Deploy the fleet.service systemd unit (spec §3.4)
+  ansible.builtin.template:
+    src: fleet.service.j2
+    dest: /etc/systemd/system/fleet.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon
+
+- name: Ensure fleet.service is enabled
+  # Not started here: the companion dev container has no systemd (PID 1)
+  # to manage services, so `state: started` fails on every in-container
+  # run. On the real host the runbook (Task 10, step 7) explicitly starts
+  # it after the spec §16 verification items pass.
+  ansible.builtin.systemd:
+    name: fleet.service
+    enabled: true
+    daemon_reload: true
