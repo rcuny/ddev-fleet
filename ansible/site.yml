@@ -1,0 +1,11 @@
+---
+- name: Provision ddev-fleet host
+  hosts: localhost
+  become: true
+  roles:
+    - base
+    - docker
+    - fleet_user
+    - ddev
+    - caddy
+    - fleet_service
