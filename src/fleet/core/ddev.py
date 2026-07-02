@@ -38,9 +38,9 @@ def list_projects(*, runner=run_streamed) -> list[dict]:
 
 
 def ram_usage(*, runner=run_streamed) -> dict[str, int]:
-    result = runner(["docker", "stats", "--no-stream", "--format", "{{json .}}"])
     usage: dict[str, int] = {}
     try:
+        result = runner(["docker", "stats", "--no-stream", "--format", "{{json .}}"])
         for line in result.lines:
             stripped = line.strip()
             if not stripped:

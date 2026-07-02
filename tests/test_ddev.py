@@ -55,3 +55,22 @@ def test_ram_usage_aggregates_two_containers_of_one_project():
 def test_ram_usage_returns_empty_dict_on_garbage():
     fake = FakeRunner(default=RunResult(returncode=0, lines=["not json at all"]))
     assert ddev.ram_usage(runner=fake) == {}
+
+
+def test_ram_usage_returns_empty_dict_when_runner_raises():
+    def exploding_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        raise FileNotFoundError("docker not found")
+
+    assert ddev.ram_usage(runner=exploding_runner) == {}
+
+
+def test_ram_usage_separates_two_projects():
+    lines = [
+        json.dumps({"Name": "ddev-oak--develop-web", "MemUsage": "150MiB / 2GiB"}),
+        json.dumps({"Name": "ddev-oak--develop-db", "MemUsage": "100MiB / 2GiB"}),
+        json.dumps({"Name": "ddev-other--main-web", "MemUsage": "200MiB / 2GiB"}),
+        json.dumps({"Name": "ddev-other--main-db", "MemUsage": "50MiB / 2GiB"}),
+    ]
+    fake = FakeRunner(default=RunResult(returncode=0, lines=lines))
+    result = ddev.ram_usage(runner=fake)
+    assert result == {"oak--develop": 250, "other--main": 250}
