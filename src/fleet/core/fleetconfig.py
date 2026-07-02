@@ -29,14 +29,19 @@ def ensure_git_exclude(instance_dir: Path, patterns: list[str]) -> None:
     exclude_path = instance_dir / ".git" / "info" / "exclude"
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
 
+    existing_text = ""
     existing_lines: list[str] = []
     if exclude_path.exists():
-        existing_lines = exclude_path.read_text(encoding="utf-8").splitlines()
+        existing_text = exclude_path.read_text(encoding="utf-8")
+        existing_lines = existing_text.splitlines()
 
     missing = [p for p in patterns if p not in existing_lines]
     if not missing:
         return
 
     with open(exclude_path, "a", encoding="utf-8") as fh:
+        needs_leading_newline = existing_text != "" and not existing_text.endswith("\n")
+        if needs_leading_newline:
+            fh.write("\n")
         for pattern in missing:
             fh.write(pattern + "\n")

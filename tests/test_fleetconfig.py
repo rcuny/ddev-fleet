@@ -50,3 +50,16 @@ def test_ensure_git_exclude_appends_only_missing_patterns(tmp_path):
 
     exclude_path = instance_dir / ".git" / "info" / "exclude"
     assert exclude_path.read_text(encoding="utf-8") == ".ddev/config.fleet.yaml\nanother.file\n"
+
+
+def test_ensure_git_exclude_handles_missing_trailing_newline(tmp_path):
+    instance = tmp_path / "inst"
+    (instance / ".git" / "info").mkdir(parents=True)
+    exclude = instance / ".git" / "info" / "exclude"
+    exclude.write_text("existing-pattern", encoding="utf-8")  # no trailing newline
+
+    ensure_git_exclude(instance, [".ddev/config.fleet.yaml"])
+
+    lines = exclude.read_text(encoding="utf-8").splitlines()
+    assert "existing-pattern" in lines
+    assert ".ddev/config.fleet.yaml" in lines

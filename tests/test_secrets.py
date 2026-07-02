@@ -38,3 +38,11 @@ def test_read_secrets_ignores_blank_lines_and_comments(tmp_path):
     path = tmp_path / ".secrets"
     path.write_text("# a comment\n\nFOO=bar\n", encoding="utf-8")
     assert read_secrets(path) == {"FOO": "bar"}
+
+
+def test_write_secret_upsert_keeps_mode_0600(tmp_path):
+    path = tmp_path / ".secrets"
+    write_secret(path, "A", "1")
+    write_secret(path, "A", "2")  # upsert
+    assert oct(path.stat().st_mode & 0o777) == "0o600"
+    assert read_secrets(path) == {"A": "2"}
