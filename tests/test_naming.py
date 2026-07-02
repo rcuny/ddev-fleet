@@ -4,14 +4,16 @@ from fleet.core.errors import ValidationError
 from fleet.core.naming import instance_id, validate_part
 
 
-@pytest.mark.parametrize("value", ["abc", "abc-123", "a", "oak", "another-drupal-site"])
+@pytest.mark.parametrize(
+    "value", ["abc", "abc-123", "a", "a1", "oak", "another-drupal-site", "my-project"]
+)
 def test_validate_part_accepts_valid_values(value):
     validate_part(value)  # must not raise
 
 
 @pytest.mark.parametrize(
     "value",
-    ["ABC", "Abc", "abc_def", "abc def", "abc--def", "", "abc.def"],
+    ["ABC", "Abc", "abc_def", "abc def", "abc--def", "", "abc.def", "-abc", "abc-"],
 )
 def test_validate_part_rejects_invalid_values(value):
     with pytest.raises(ValidationError):

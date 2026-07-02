@@ -4,20 +4,23 @@ import re
 
 from fleet.core.errors import ValidationError
 
-_PART_RE = re.compile(r"^[a-z0-9-]+$")
+_PART_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 _MAX_INSTANCE_ID_LENGTH = 63
 
 
 def validate_part(value: str) -> None:
     """Validate a single project key or instance name.
 
-    Must match ``^[a-z0-9-]+$`` and must not contain ``--`` (reserved as
-    the id separator between project and instance).
+    Must match ``^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`` — lowercase letters and
+    digits, with single dashes allowed only strictly between two
+    alphanumeric characters (no leading or trailing dash, single characters
+    still allowed) — and must not contain ``--`` (reserved as the id
+    separator between project and instance).
     """
     if not _PART_RE.match(value):
         raise ValidationError(
-            f"invalid name {value!r}: must match ^[a-z0-9-]+$ (lowercase "
-            "letters, digits, and single dashes only)"
+            f"invalid name {value!r}: must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ "
+            "(lowercase letters, digits, single dashes only, no leading/trailing dash)"
         )
     if "--" in value:
         raise ValidationError(
