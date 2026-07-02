@@ -68,3 +68,45 @@ def test_missing_domain_param_returns_422(fleet_home):
 
     response = client.get("/api/tls-authorize")
     assert response.status_code == 422
+
+
+def test_per_request_freshness(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    # Initially, newinst--x does not exist
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "newinst--x.fleet.example.test"}
+    )
+    assert response.status_code == 404
+
+    # Create the instance directory
+    (fleet_home / "instances" / "newinst--x").mkdir(parents=True)
+
+    # Request again, should now succeed (proves per-request freshness)
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "newinst--x.fleet.example.test"}
+    )
+    assert response.status_code == 200
+
+
+def test_hyphen_boundary_near_miss_returns_404(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    # demo--develop exists, but xdemo--develop (without hyphen prefix) must not match
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "xdemo--develop.fleet.example.test"}
+    )
+    assert response.status_code == 404
+
+
+def test_bare_apex_returns_404(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    # Request the fleet domain itself (no instance label)
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "fleet.example.test"}
+    )
+    assert response.status_code == 404
