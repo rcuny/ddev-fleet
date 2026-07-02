@@ -125,9 +125,13 @@ def deploy(
         write_fleet_config(instance_dir, inst_id, registry.domain, claude_token)
 
         context = build_context(project, instance, resolved.branch, registry.domain)
-        assets_mod.inject(registry.assets_path / project, instance_dir, context)
-
-        ensure_git_exclude(instance_dir, [".ddev/config.fleet.yaml"])
+        copied = assets_mod.inject(
+            registry.assets_path / project, instance_dir, context, runner=runner
+        )
+        exclude_patterns = [".ddev/config.fleet.yaml", ".fleet/"] + [
+            str(path.relative_to(instance_dir)) for path in copied
+        ]
+        ensure_git_exclude(instance_dir, exclude_patterns)
 
         start_result = ddev.start(instance_dir, runner=runner)
         if start_result.returncode != 0:

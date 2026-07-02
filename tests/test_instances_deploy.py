@@ -18,7 +18,7 @@ class HybridRunner:
 
     def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
         self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
-        if cmd[0] == "git":
+        if cmd[0] in ("git", "rsync"):
             return run_streamed(cmd, cwd=cwd, env=env, log_path=log_path, echo=False)
         return RunResult(returncode=0, lines=[])
 
@@ -116,5 +116,43 @@ def test_deploy_missing_claude_token_raises(fleet_home, git_repo):
     registry = Registry.load(paths.registry)
     runner = HybridRunner()
 
-    with pytest.raises(DeployError):
+    with pytest.raises(DeployError) as excinfo:
         instances.deploy(paths, registry, "demo", "develop", branch="main", runner=runner)
+
+    message = str(excinfo.value)
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in message
+    assert "fleet init" in message
+
+
+def test_instance_yaml_created_at_survives_redeploy(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+    info_path = fleet_home / "instances" / "demo--develop" / ".fleet" / "instance.yml"
+    first = info_path.read_text(encoding="utf-8")
+
+    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+    second = info_path.read_text(encoding="utf-8")
+
+    import re
+    created_first = re.search(r"created-at: (\S+)", first).group(1)
+    created_second = re.search(r"created-at: (\S+)", second).group(1)
+    assert created_first == created_second
+
+
+def test_deploy_git_excludes_asset_injected_files(fleet_home, git_repo):
+    assets_dir = fleet_home / "assets" / "demo"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / ".env").write_text("FOO=bar\n", encoding="utf-8")
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=runner)
+
+    instance_dir = fleet_home / "instances" / "demo--develop"
+    assert (instance_dir / ".env").exists()
+
+    exclude_path = instance_dir / ".git" / "info" / "exclude"
+    exclude_content = exclude_path.read_text(encoding="utf-8")
+    assert ".ddev/config.fleet.yaml" in exclude_content
+    assert ".env" in exclude_content
