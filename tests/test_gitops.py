@@ -1,6 +1,14 @@
 import subprocess
 
+import pytest
+
 from fleet.core import gitops
+from fleet.core.errors import DirtyWorktreeError
+
+try:
+    from .conftest import FakeRunner
+except ImportError:
+    from conftest import FakeRunner
 
 
 def _run_git(cmd, cwd):
@@ -65,6 +73,17 @@ def test_update_refuses_dirty_worktree_without_force(git_repo, tmp_path):
 
     with pytest.raises(DirtyWorktreeError):
         gitops.update(dest, "main")
+
+
+def test_update_dirty_refusal_happens_before_any_runner_call(git_repo, tmp_path):
+    dest = tmp_path / "cloned"
+    gitops.clone(str(git_repo["origin"]), "main", dest)
+    (dest / "README.md").write_text("dirty\n", encoding="utf-8")
+
+    fake = FakeRunner()
+    with pytest.raises(DirtyWorktreeError):
+        gitops.update(dest, "main", runner=fake)
+    assert fake.calls == []
 
 
 def test_update_proceeds_with_force_and_resets_to_origin_tip(git_repo, tmp_path):
