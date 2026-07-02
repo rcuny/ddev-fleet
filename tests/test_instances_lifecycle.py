@@ -91,7 +91,7 @@ def test_destroy_tolerates_ddev_delete_failure(fleet_home, git_repo):
         def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
             if cmd[:2] == ["ddev", "delete"]:
                 self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
-                return RunResult(returncode=1, lines=["error: containers already gone"])
+                raise RuntimeError("ddev delete exploded")
             return super().__call__(cmd, cwd=cwd, env=env, log_path=log_path, echo=echo)
 
     instance_dir = fleet_home / "instances" / "demo--develop"
@@ -110,13 +110,17 @@ def test_start_and_stop_compose_correct_argv(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
 
+    instance_dir = fleet_home / "instances" / "demo--develop"
+
     start_runner = HybridRunner()
     instances.start(paths, registry, "demo--develop", runner=start_runner)
     assert start_runner.calls[0]["cmd"] == ["ddev", "start"]
+    assert start_runner.calls[0]["cwd"] == instance_dir
 
     stop_runner = HybridRunner()
     instances.stop(paths, registry, "demo--develop", runner=stop_runner)
     assert stop_runner.calls[0]["cmd"] == ["ddev", "stop"]
+    assert stop_runner.calls[0]["cwd"] == instance_dir
 
 
 def test_start_missing_instance_dir_raises(fleet_home, git_repo):
