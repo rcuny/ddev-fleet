@@ -1,5 +1,8 @@
+import pytest
+
 from fleet.core.assets import inject
-from fleet.core.errors import TokenError
+from fleet.core.errors import FleetError, TokenError
+from fleet.core.runner import RunResult
 from fleet.core.tokens import build_context
 
 
@@ -96,3 +99,16 @@ def test_inject_raises_token_error_naming_the_file(tmp_path):
     except TokenError as exc:
         assert str(instance_dir / "bad.txt") in str(exc)
         assert "[[nonexistent-token]]" in str(exc)
+
+
+def test_inject_raises_when_rsync_fails(tmp_path):
+    assets_dir = tmp_path / "assets"
+    assets_dir.mkdir()
+    (assets_dir / "x.txt").write_text("hi\n", encoding="utf-8")
+    instance_dir = tmp_path / "inst"
+
+    def failing_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        return RunResult(returncode=23, lines=["rsync: some error"])
+
+    with pytest.raises(FleetError):
+        inject(assets_dir, instance_dir, {}, runner=failing_runner)
