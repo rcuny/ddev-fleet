@@ -76,20 +76,41 @@
     group: "{{ fleet_group }}"
     mode: "0644"
 
-- name: Pre-seed known_hosts for bitbucket.org and github.com
-  # TOFU caveat: ssh-keyscan trusts whatever host key each forge presents at
-  # provisioning time — standard practice for CI/deploy hosts, but NOT
-  # equivalent to out-of-band host-key verification. Accepted for v1
-  # (spec §3.5); re-run this task after deleting known_hosts if a forge
-  # ever rotates its host key.
-  ansible.builtin.known_hosts:
-    name: "{{ item }}"
-    key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519 ' + item) }}"
-    path: "{{ fleet_home_dir }}/.ssh/known_hosts"
-    state: present
+- name: Check which forge host keys are already in known_hosts
+  # First half of the TOFU pair below: probe before we ever call ssh-keyscan,
+  # so an already-seeded host never triggers a re-scan or a network call.
+  ansible.builtin.command:
+    argv:
+      - ssh-keygen
+      - -F
+      - "{{ item }}"
+      - -f
+      - "{{ fleet_home_dir }}/.ssh/known_hosts"
   loop:
     - bitbucket.org
     - github.com
+  register: fleet_user_known_hosts_check
+  changed_when: false
+  failed_when: false
+
+- name: Seed known_hosts for git forges (first run per host only — TOFU)
+  # TOFU caveat: ssh-keyscan trusts whatever host key each forge presents at
+  # provisioning time — standard practice for CI/deploy hosts, but NOT
+  # equivalent to out-of-band host-key verification. Accepted for v1
+  # (spec §3.5). This task only runs when the check above found no existing
+  # entry (rc != 0), so it seeds once on first provisioning and never
+  # re-scans afterwards — a forge rotating its host key now requires
+  # deliberate operator action (delete the known_hosts entry and re-run),
+  # not silent re-acceptance on every playbook run.
+  ansible.builtin.known_hosts:
+    path: "{{ fleet_home_dir }}/.ssh/known_hosts"
+    name: "{{ item.item }}"
+    key: "{{ lookup('ansible.builtin.pipe', 'ssh-keyscan -T 10 ' ~ item.item) }}"
+    state: present
+  loop: "{{ fleet_user_known_hosts_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.rc != 0
 
 - name: Fix ownership of the fleet SSH directory
   ansible.builtin.file:
