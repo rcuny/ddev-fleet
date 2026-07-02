@@ -1,1 +1,106 @@
 ---
+- name: Create the fleet system user
+  ansible.builtin.user:
+    name: "{{ fleet_user }}"
+    home: "{{ fleet_home_dir }}"
+    shell: /bin/bash
+    groups: docker
+    append: true
+    create_home: true
+
+- name: Create the /srv/fleet directory tree
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0750"
+  loop:
+    - "{{ fleet_srv_dir }}"
+    - "{{ fleet_srv_dir }}/assets"
+    - "{{ fleet_srv_dir }}/instances"
+    - "{{ fleet_srv_dir }}/locks"
+
+- name: Ensure .secrets exists with correct permissions (never overwrite content)
+  ansible.builtin.file:
+    path: "{{ fleet_srv_dir }}/.secrets"
+    state: touch
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0600"
+    modification_time: preserve
+    access_time: preserve
+
+- name: Seed fleet.yml if it does not already exist (never clobber a real registry)
+  ansible.builtin.copy:
+    dest: "{{ fleet_srv_dir }}/fleet.yml"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0640"
+    force: false
+    content: |
+      fleet:
+        domain: {{ fleet_domain }}
+        assets_path: {{ fleet_srv_dir }}/assets
+        instances_path: {{ fleet_srv_dir }}/instances
+
+      projects: {}
+
+- name: Ensure /home/fleet/.ssh exists
+  ansible.builtin.file:
+    path: "{{ fleet_home_dir }}/.ssh"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0700"
+
+- name: Generate the fleet deploy SSH key (never regenerate an existing key)
+  community.crypto.openssh_keypair:
+    path: "{{ fleet_home_dir }}/.ssh/id_ed25519"
+    type: ed25519
+    force: false
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0600"
+
+- name: Read the generated public key
+  ansible.builtin.slurp:
+    src: "{{ fleet_home_dir }}/.ssh/id_ed25519.pub"
+  register: fleet_user_pubkey_raw
+
+- name: Copy the public key to /srv/fleet/fleet-deploy-key.pub
+  ansible.builtin.copy:
+    dest: "{{ fleet_srv_dir }}/fleet-deploy-key.pub"
+    content: "{{ fleet_user_pubkey_raw.content | b64decode }}"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0644"
+
+- name: Pre-seed known_hosts for bitbucket.org and github.com
+  # TOFU caveat: ssh-keyscan trusts whatever host key each forge presents at
+  # provisioning time — standard practice for CI/deploy hosts, but NOT
+  # equivalent to out-of-band host-key verification. Accepted for v1
+  # (spec §3.5); re-run this task after deleting known_hosts if a forge
+  # ever rotates its host key.
+  ansible.builtin.known_hosts:
+    name: "{{ item }}"
+    key: "{{ lookup('pipe', 'ssh-keyscan -t ed25519 ' + item) }}"
+    path: "{{ fleet_home_dir }}/.ssh/known_hosts"
+    state: present
+  loop:
+    - bitbucket.org
+    - github.com
+
+- name: Fix ownership of the fleet SSH directory
+  ansible.builtin.file:
+    path: "{{ fleet_home_dir }}/.ssh"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0700"
+    recurse: true
+
+- name: Print the fleet deploy public key
+  ansible.builtin.debug:
+    msg: >-
+      Fleet deploy public key (add as a READ-ONLY deploy key on every forge
+      hosting a registered project): {{ fleet_user_pubkey_raw.content | b64decode }}
