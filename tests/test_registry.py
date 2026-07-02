@@ -115,3 +115,50 @@ def test_add_project_duplicate_raises(fleet_home, sample_registry_text):
 
     with pytest.raises(RegistryError):
         registry.add_project("demo", "git@example.test:org/demo.git")
+
+
+def test_resolve_with_no_post_deploy_returns_empty_list(fleet_home):
+    """When neither project nor instance defines post_deploy, resolve returns empty list."""
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  assets_path: {assets_path}
+  instances_path: {instances_path}
+
+projects:
+  testproj:
+    git: git@example.test:org/testproj.git
+    instances:
+      no-deploy:
+        branch: main
+"""
+    registry_text = registry_text.format(
+        assets_path=str(fleet_home / "assets"),
+        instances_path=str(fleet_home / "instances"),
+    )
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("testproj", "no-deploy")
+
+    assert resolved.post_deploy == []
+
+
+def test_register_instance_invalid_name_raises_registry_error(fleet_home, sample_registry_text):
+    """register_instance with invalid instance name raises RegistryError, not ValidationError."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    with pytest.raises(RegistryError) as exc_info:
+        registry.register_instance("demo", "Bad Name", "main")
+    assert "invalid instance name" in str(exc_info.value)
+
+
+def test_add_project_invalid_key_raises_registry_error(fleet_home, sample_registry_text):
+    """add_project with invalid key raises RegistryError, not ValidationError."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    with pytest.raises(RegistryError) as exc_info:
+        registry.add_project("Bad_Key", "git@example.test:org/bad.git")
+    assert "invalid project key" in str(exc_info.value)

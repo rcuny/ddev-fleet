@@ -118,7 +118,12 @@ class Registry:
     def register_instance(self, project: str, instance: str, branch: str) -> None:
         if not self.has_project(project):
             raise RegistryError(f"unknown project {project!r}")
-        instance_id(project, instance)  # raises ValidationError on bad names
+        try:
+            instance_id(project, instance)
+        except ValidationError as exc:
+            raise RegistryError(
+                f"invalid instance name for projects.{project}.instances.{instance}: {exc.message}"
+            ) from exc
 
         project_block = self._data["projects"][project]
         if project_block.get("instances") is None:
@@ -126,7 +131,10 @@ class Registry:
         project_block["instances"][instance] = {"branch": branch}
 
     def add_project(self, key: str, git_url: str, post_deploy: list[str] | None = None) -> None:
-        validate_part(key)
+        try:
+            validate_part(key)
+        except ValidationError as exc:
+            raise RegistryError(f"invalid project key {key!r}: {exc.message}") from exc
         if self._data.get("projects") is None:
             self._data["projects"] = {}
         if key in self._data["projects"]:
