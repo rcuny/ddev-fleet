@@ -49,7 +49,7 @@ def ram_usage(*, runner=run_streamed) -> dict[str, int]:
             name = entry.get("Name", "")
             if not name.startswith("ddev-"):
                 continue
-            without_prefix = name[len("ddev-"):]
+            without_prefix = name[len("ddev-") :]
             instance_id = without_prefix.rsplit("-", 1)[0]
             mib = _parse_mem_to_mib(entry.get("MemUsage", ""))
             usage[instance_id] = usage.get(instance_id, 0) + mib

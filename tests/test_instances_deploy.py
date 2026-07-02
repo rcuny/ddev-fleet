@@ -1,5 +1,3 @@
-from pathlib import Path
-
 import pytest
 
 from fleet.core import instances
@@ -52,9 +50,7 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     runner = HybridRunner()
 
-    url = instances.deploy(
-        paths, registry, "demo", "develop", branch="main", runner=runner
-    )
+    url = instances.deploy(paths, registry, "demo", "develop", branch="main", runner=runner)
 
     assert url == "https://demo--develop.fleet.example.test"
 
@@ -134,6 +130,7 @@ def test_instance_yaml_created_at_survives_redeploy(fleet_home, git_repo):
     second = info_path.read_text(encoding="utf-8")
 
     import re
+
     created_first = re.search(r"created-at: (\S+)", first).group(1)
     created_second = re.search(r"created-at: (\S+)", second).group(1)
     assert created_first == created_second

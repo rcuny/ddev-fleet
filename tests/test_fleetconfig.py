@@ -3,7 +3,9 @@ from fleet.core.fleetconfig import ensure_git_exclude, write_fleet_config
 
 def test_write_fleet_config_with_token(tmp_path):
     instance_dir = tmp_path / "instance"
-    path = write_fleet_config(instance_dir, "oak--develop", "fleet.example.test", "sk-ant-oat01-xyz")
+    path = write_fleet_config(
+        instance_dir, "oak--develop", "fleet.example.test", "sk-ant-oat01-xyz"
+    )
 
     assert path == instance_dir / ".ddev" / "config.fleet.yaml"
     assert path.read_text(encoding="utf-8") == (
@@ -19,8 +21,7 @@ def test_write_fleet_config_without_token(tmp_path):
     path = write_fleet_config(instance_dir, "oak--develop", "fleet.example.test", None)
 
     assert path.read_text(encoding="utf-8") == (
-        "name: oak--develop\n"
-        "project_tld: fleet.example.test\n"
+        "name: oak--develop\n" "project_tld: fleet.example.test\n"
     )
 
 

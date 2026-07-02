@@ -25,7 +25,9 @@ projects:
 def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
 
-    def fake_deploy(paths, registry, project, instance, *, branch=None, fresh=False, force=False, runner=None):
+    def fake_deploy(
+        paths, registry, project, instance, *, branch=None, fresh=False, force=False, runner=None
+    ):
         return "https://demo--develop.fleet.example.test"
 
     monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
@@ -66,7 +68,9 @@ def test_list_renders_table(fleet_home, monkeypatch, capsys):
             ram_mib=250,
         )
     ]
-    monkeypatch.setattr(cli.instances_mod, "list_instances", lambda paths, registry, **kw: fake_statuses)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: fake_statuses
+    )
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "list"])
 

@@ -75,18 +75,14 @@ def test_per_request_freshness(fleet_home):
     client = TestClient(create_app(fleet_home))
 
     # Initially, newinst--x does not exist
-    response = client.get(
-        "/api/tls-authorize", params={"domain": "newinst--x.fleet.example.test"}
-    )
+    response = client.get("/api/tls-authorize", params={"domain": "newinst--x.fleet.example.test"})
     assert response.status_code == 404
 
     # Create the instance directory
     (fleet_home / "instances" / "newinst--x").mkdir(parents=True)
 
     # Request again, should now succeed (proves per-request freshness)
-    response = client.get(
-        "/api/tls-authorize", params={"domain": "newinst--x.fleet.example.test"}
-    )
+    response = client.get("/api/tls-authorize", params={"domain": "newinst--x.fleet.example.test"})
     assert response.status_code == 200
 
 
@@ -106,7 +102,5 @@ def test_bare_apex_returns_404(fleet_home):
     client = TestClient(create_app(fleet_home))
 
     # Request the fleet domain itself (no instance label)
-    response = client.get(
-        "/api/tls-authorize", params={"domain": "fleet.example.test"}
-    )
+    response = client.get("/api/tls-authorize", params={"domain": "fleet.example.test"})
     assert response.status_code == 404

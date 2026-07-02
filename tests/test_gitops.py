@@ -68,8 +68,9 @@ def test_update_refuses_dirty_worktree_without_force(git_repo, tmp_path):
     gitops.clone(str(git_repo["origin"]), "main", dest)
     (dest / "README.md").write_text("dirty\n", encoding="utf-8")
 
-    from fleet.core.errors import DirtyWorktreeError
     import pytest
+
+    from fleet.core.errors import DirtyWorktreeError
 
     with pytest.raises(DirtyWorktreeError):
         gitops.update(dest, "main")

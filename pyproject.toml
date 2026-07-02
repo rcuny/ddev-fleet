@@ -37,3 +37,8 @@ select = ["E", "F", "I"]
 [tool.black]
 line-length = 100
 target-version = ["py311"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:Using `httpx` with `starlette.testclient` is deprecated:starlette.exceptions.StarletteDeprecationWarning:fastapi.testclient",
+]

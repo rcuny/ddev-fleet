@@ -11,7 +11,8 @@ def clone(git_url: str, branch: str, dest: Path, *, runner=run_streamed) -> None
     result = runner(["git", "clone", "--branch", branch, git_url, str(dest)])
     if result.returncode != 0:
         raise FleetError(
-            f"git clone --branch {branch} {git_url} {dest} failed with exit code {result.returncode}"
+            f"git clone --branch {branch} {git_url} {dest} "
+            f"failed with exit code {result.returncode}"
         )
 
 

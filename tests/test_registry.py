@@ -50,9 +50,7 @@ def test_registry_properties(fleet_home, sample_registry_text):
 
 
 def test_load_missing_git_key_names_the_key(fleet_home, sample_registry_text):
-    broken = sample_registry_text.replace(
-        "    git: git@example.test:org/demo.git\n", ""
-    )
+    broken = sample_registry_text.replace("    git: git@example.test:org/demo.git\n", "")
     path = _write(fleet_home / "fleet.yml", broken)
 
     with pytest.raises(RegistryError) as exc_info:

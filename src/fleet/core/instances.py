@@ -8,8 +8,8 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
-from fleet.core import ddev, gitops
 from fleet.core import assets as assets_mod
+from fleet.core import ddev, gitops
 from fleet.core.errors import DeployError, FleetError
 from fleet.core.fleetconfig import ensure_git_exclude, write_fleet_config
 from fleet.core.locks import instance_lock
@@ -171,7 +171,9 @@ def _destroy_locked(registry: Registry, instance_id: str, *, runner=run_streamed
         shutil.rmtree(instance_dir, ignore_errors=True)
 
 
-def destroy(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed) -> None:
+def destroy(
+    paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed
+) -> None:
     instance_dir = registry.instances_path / instance_id
     if not instance_dir.exists():
         raise FleetError(f"unknown instance {instance_id!r}: {instance_dir} does not exist")

@@ -52,7 +52,11 @@ class FakeRunner:
     """Records every call and returns a scripted RunResult per exact argv join,
     falling back to a default RunResult otherwise."""
 
-    def __init__(self, scripted: dict[str, RunResult] | None = None, default: RunResult | None = None):
+    def __init__(
+        self,
+        scripted: dict[str, RunResult] | None = None,
+        default: RunResult | None = None,
+    ):
         self.calls: list[dict] = []
         self._scripted = scripted or {}
         self._default = default if default is not None else RunResult(returncode=0, lines=[])

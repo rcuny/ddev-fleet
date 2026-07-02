@@ -1,8 +1,8 @@
 import json
 
-from tests.conftest import FakeRunner
 from fleet.core import ddev
 from fleet.core.runner import RunResult
+from tests.conftest import FakeRunner
 
 
 def test_start_composes_correct_argv(tmp_path):

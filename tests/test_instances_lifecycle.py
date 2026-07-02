@@ -56,9 +56,7 @@ def test_deploy_fresh_destroys_and_reclones(fleet_home, git_repo):
     (instance_dir / "stray-file.txt").write_text("leftover\n", encoding="utf-8")
 
     runner = HybridRunner()
-    instances.deploy(
-        paths, registry, "demo", "develop", branch="main", fresh=True, runner=runner
-    )
+    instances.deploy(paths, registry, "demo", "develop", branch="main", fresh=True, runner=runner)
 
     command_names = [call["cmd"][0] for call in runner.calls]
     assert command_names[0] == "ddev"  # ddev delete, from the fresh destroy, runs first
@@ -82,7 +80,6 @@ def test_destroy_removes_instance_dir_and_lock_file(fleet_home, git_repo):
 
 
 def test_destroy_tolerates_ddev_delete_failure(fleet_home, git_repo):
-    from fleet.core.runner import RunResult
 
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())

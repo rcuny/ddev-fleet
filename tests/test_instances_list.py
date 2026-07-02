@@ -100,12 +100,8 @@ def test_list_instances_fallback_for_dir_without_instance_yml(fleet_home):
     # Script the runner with empty/degraded responses
     fake = FakeRunner(
         scripted={
-            "ddev list --json-output": RunResult(
-                returncode=0, lines=[json.dumps({"raw": []})]
-            ),
-            "docker stats --no-stream --format {{json .}}": RunResult(
-                returncode=0, lines=[]
-            ),
+            "ddev list --json-output": RunResult(returncode=0, lines=[json.dumps({"raw": []})]),
+            "docker stats --no-stream --format {{json .}}": RunResult(returncode=0, lines=[]),
         }
     )
 
