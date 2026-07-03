@@ -1,3 +1,5 @@
+import pytest
+from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from fleet.daemon import create_app
@@ -194,3 +196,39 @@ def test_ws_log_waits_when_log_file_missing_then_streams_once_created(fleet_home
 
         second = ws.receive_text()
         assert second == "now it exists\n"
+
+
+def test_ws_log_invalid_instance_id_closes_without_server_error(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    with client.websocket_connect("/ws/instances/Bad_Id/log") as ws:
+        with pytest.raises(WebSocketDisconnect):
+            ws.receive_text()
+
+
+def test_ui_stop_invalid_instance_id_returns_400(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+
+    response = client.post("/ui/instances/Bad_Id/stop")
+
+    assert response.status_code == 400
+
+
+def test_ws_log_heartbeat_sends_empty_frame_when_idle(fleet_home):
+    _setup_fleet_home(fleet_home)
+    instance_dir = fleet_home / "instances" / "demo--develop"
+    log_path = instance_dir / ".fleet" / "deploy.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("line one\n", encoding="utf-8")
+
+    app = create_app(fleet_home, heartbeat_every=0.4)
+    client = TestClient(app)
+
+    with client.websocket_connect("/ws/instances/demo--develop/log") as ws:
+        first = ws.receive_text()
+        assert first == "line one\n"
+
+        heartbeat = ws.receive_text()
+        assert heartbeat == ""

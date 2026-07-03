@@ -162,3 +162,52 @@ def test_ui_stop_unknown_instance_returns_400(fleet_home):
     response = client.post("/ui/instances/nonexistent--x/stop")
 
     assert response.status_code == 400
+
+
+def test_job_panel_terminal_state_does_not_poll(fleet_home):
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["term1"] = Job(
+        id="term1", kind="deploy", instance_id="demo--develop", state="succeeded"
+    )
+
+    response = client.get("/ui/jobs/term1/panel")
+    assert response.status_code == 200
+    assert "every 2s" not in response.text
+    assert 'hx-preserve="true"' in response.text
+    assert 'id="log-term1"' in response.text
+
+
+def test_job_panel_running_state_keeps_polling(fleet_home):
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["run1"] = Job(
+        id="run1", kind="deploy", instance_id="demo--develop", state="running"
+    )
+
+    response = client.get("/ui/jobs/run1/panel")
+    assert response.status_code == 200
+    assert "every 2s" in response.text
+
+
+def test_ui_start_vanished_instance_row_returns_400(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    def fake_start(paths, registry, instance_id, **kw):
+        return None
+
+    def fake_list_instances(paths, registry, **kw):
+        return []
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "start", fake_start)
+    monkeypatch.setattr(daemon_mod.instances_mod, "list_instances", fake_list_instances)
+
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+    response = client.post("/ui/instances/demo--develop/start")
+
+    assert response.status_code == 400

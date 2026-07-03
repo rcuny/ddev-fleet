@@ -4,6 +4,7 @@
 
 import asyncio
 import os
+import re
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Query, WebSocket, WebSocketDisconnect
@@ -21,8 +22,17 @@ from fleet.jobs import JobManager
 _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 
+_INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
-def create_app(fleet_home: Path) -> FastAPI:
+_HEARTBEAT_EVERY = 15.0
+
+
+def _validate_instance_id(instance_id: str) -> None:
+    if not _INSTANCE_ID_RE.match(instance_id):
+        raise FleetError(f"invalid instance id {instance_id!r}")
+
+
+def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -> FastAPI:
     app = FastAPI()
     app.state.jobs = JobManager()
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
@@ -75,6 +85,10 @@ def create_app(fleet_home: Path) -> FastAPI:
     @app.websocket("/ws/instances/{instance_id}/log")
     async def ws_instance_log(websocket: WebSocket, instance_id: str):
         await websocket.accept()
+        if not _INSTANCE_ID_RE.match(instance_id):
+            await websocket.close(code=1008)
+            return
+
         registry = Registry.load(fleet_home / "fleet.yml")
         log_path = registry.instances_path / instance_id / ".fleet" / "deploy.log"
 
@@ -86,9 +100,14 @@ def create_app(fleet_home: Path) -> FastAPI:
                 offset = 0
                 await websocket.send_text("waiting for log...\n")
 
+            idle_elapsed = 0.0
             while True:
                 await asyncio.sleep(0.3)
                 if not log_path.exists():
+                    idle_elapsed += 0.3
+                    if idle_elapsed >= heartbeat_every:
+                        await websocket.send_text("")
+                        idle_elapsed = 0.0
                     continue
                 size = log_path.stat().st_size
                 if size > offset:
@@ -97,6 +116,12 @@ def create_app(fleet_home: Path) -> FastAPI:
                         chunk = fh.read()
                     offset = size
                     await websocket.send_text(chunk)
+                    idle_elapsed = 0.0
+                else:
+                    idle_elapsed += 0.3
+                    if idle_elapsed >= heartbeat_every:
+                        await websocket.send_text("")
+                        idle_elapsed = 0.0
         except WebSocketDisconnect:
             return
 
@@ -112,22 +137,31 @@ def create_app(fleet_home: Path) -> FastAPI:
 
     @app.post("/ui/instances/{instance_id}/start")
     async def ui_start(request: Request, instance_id: str):
+        _validate_instance_id(instance_id)
         paths, registry = _paths_and_registry()
         await asyncio.to_thread(instances_mod.start, paths, registry, instance_id)
         statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
-        status = next(s for s in statuses if s.instance_id == instance_id)
+        try:
+            status = next(s for s in statuses if s.instance_id == instance_id)
+        except StopIteration:
+            raise FleetError(f"instance {instance_id!r} no longer exists")
         return templates.TemplateResponse(request, "partials/instance_row.html", {"status": status})
 
     @app.post("/ui/instances/{instance_id}/stop")
     async def ui_stop(request: Request, instance_id: str):
+        _validate_instance_id(instance_id)
         paths, registry = _paths_and_registry()
         await asyncio.to_thread(instances_mod.stop, paths, registry, instance_id)
         statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
-        status = next(s for s in statuses if s.instance_id == instance_id)
+        try:
+            status = next(s for s in statuses if s.instance_id == instance_id)
+        except StopIteration:
+            raise FleetError(f"instance {instance_id!r} no longer exists")
         return templates.TemplateResponse(request, "partials/instance_row.html", {"status": status})
 
     @app.post("/ui/instances/{instance_id}/destroy")
     async def ui_destroy(instance_id: str):
+        _validate_instance_id(instance_id)
         paths, registry = _paths_and_registry()
         await asyncio.to_thread(instances_mod.destroy, paths, registry, instance_id)
         return HTMLResponse("")
