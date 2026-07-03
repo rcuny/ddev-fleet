@@ -1,0 +1,77 @@
+---
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the DDEV apt signing key
+  ansible.builtin.get_url:
+    url: https://pkg.ddev.com/apt/gpg.key
+    dest: /etc/apt/keyrings/ddev.asc
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the DDEV apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/ddev.asc] {{ ddev_apt_repo }} *"
+    filename: ddev
+    state: present
+    update_cache: true
+
+- name: Install the ddev package
+  ansible.builtin.apt:
+    name: ddev
+    state: present
+
+- name: Check whether a DDEV global config already exists
+  ansible.builtin.stat:
+    path: "{{ fleet_home_dir }}/.ddev/global_config.yaml"
+  become: true
+  become_user: "{{ fleet_user }}"
+  register: ddev_global_config_file
+
+- name: Read the current DDEV global config, if any
+  ansible.builtin.slurp:
+    src: "{{ fleet_home_dir }}/.ddev/global_config.yaml"
+  become: true
+  become_user: "{{ fleet_user }}"
+  register: ddev_global_config_raw
+  when: ddev_global_config_file.stat.exists
+
+- name: Compute the current global config text (empty string if absent)
+  ansible.builtin.set_fact:
+    ddev_global_config_text: >-
+      {{ (ddev_global_config_raw.content | b64decode)
+         if ddev_global_config_file.stat.exists else '' }}
+
+- name: Apply DDEV global router configuration (loopback-only, spec §9.2)
+  # DDEV's router binds 127.0.0.1 by default (router_bind_all_interfaces:
+  # false) — the runbook (Task 10) re-verifies this live, since it is
+  # load-bearing for the Caddy/DDEV port split (spec §9). Idempotence is
+  # pinned to the literal port lines already present in global_config.yaml
+  # rather than trusting `ddev config global`'s own change reporting.
+  ansible.builtin.command:
+    cmd: >-
+      ddev config global
+      --router-http-port={{ ddev_router_http_port }}
+      --router-https-port={{ ddev_router_https_port }}
+      --instrumentation-opt-in=false
+  become: true
+  become_user: "{{ fleet_user }}"
+  # become_user does NOT reset HOME — sudo leaves HOME=/root, so without
+  # this override `ddev config global` would write to /root/.ddev instead
+  # of {{ fleet_home_dir }}/.ddev, and the fleet.service daemon (User=fleet)
+  # would then see DDEV's default router ports (80/443), colliding with
+  # Caddy. The guard tasks above already read/write
+  # {{ fleet_home_dir }}/.ddev/global_config.yaml, so this keeps them
+  # pointed at the same file the daemon actually uses.
+  environment:
+    HOME: "{{ fleet_home_dir }}"
+  changed_when: true
+  when: >-
+    ('router_http_port: ' + (ddev_router_http_port | string)) not in ddev_global_config_text
+    or ('router_https_port: ' + (ddev_router_https_port | string)) not in ddev_global_config_text

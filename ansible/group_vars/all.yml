@@ -1,0 +1,56 @@
+---
+# ddev-fleet Ansible variables (spec §3.2, §16).
+#
+# Every variable below is a single-change knob. Items flagged "AWAITS
+# CONFIRMATION" are provisional defaults carried over from the design
+# spec's worked example and MUST be confirmed (or overridden here) before
+# a real server rollout — see docs/runbook-server-rollout.md.
+
+# --- OS assumption ----------------------------------------------------------
+# Roles use ansible.builtin.apt and assume a Debian-family host running
+# Debian 13 (trixie). On Ubuntu, ansible_distribution_release still
+# resolves correctly for the docker/ddev/caddy apt repos (they publish
+# Ubuntu codename lines too), but this combination has NOT been tested —
+# treat this as a documented assumption, not a guarantee.
+os_family_assumption: "Debian 13 (trixie)"
+
+# --- fleet user & filesystem (spec §2, §3.3) --------------------------------
+fleet_user: fleet
+fleet_group: fleet
+fleet_home_dir: /home/fleet
+fleet_srv_dir: /srv/fleet
+fleet_opt_dir: /opt/ddev-fleet
+
+# --- fleet daemon (spec §3.4, §13) ------------------------------------------
+fleet_daemon_port: 8765
+
+# --- DDEV router (spec §9.2) -------------------------------------------------
+ddev_router_http_port: 8080
+ddev_router_https_port: 8443
+
+# --- Domain & TLS (spec §9) — AWAITS CONFIRMATION ---------------------------
+# fleet_domain already includes the "fleet." label (it matches fleet.yml's
+# own `fleet.domain` field and the worked example FQDNs, e.g.
+# oak--develop.fleet.personal.example — spec §4.2/§7.3). The caddy role's
+# Caddyfile template therefore vhosts on `{{ fleet_domain }}` and
+# `*.{{ fleet_domain }}` directly, NOT `fleet.{{ fleet_domain }}` — see
+# this plan's "Judgment call flagged up front" note.
+fleet_domain: fleet.personal.example
+acme_email: contact@personal.example
+
+# --- Caddy admin auth (spec §9.3) — AWAITS CONFIRMATION ---------------------
+# Placeholder hash — syntactically valid bcrypt of a discarded random secret
+# — auth FAILS CLOSED for every password until you replace it via
+# `caddy hash-password` (runbook step 3).
+fleet_admin_user: admin
+fleet_admin_bcrypt_hash: "$2b$14$uENGKN0eNjTf0VTAIpyZmOFSr2HzXOldKWVn61SImgrIV1GnbcHx."
+
+# --- Product repo (spec §3.1, §17) — AWAITS CONFIRMATION --------------------
+fleet_repo_url: https://bitbucket.org/personal_maintainer/ddev-fleet.git
+fleet_repo_version: main
+
+# --- Package repos (pinned upstream URLs; package versions float to latest
+# stable at apply time, per spec §3 — no version pinning requirement) ------
+docker_apt_repo: "https://download.docker.com/linux/debian"
+ddev_apt_repo: "https://pkg.ddev.com/apt/"
+caddy_apt_repo: "https://dl.cloudsmith.io/public/caddy/stable/deb/debian"
