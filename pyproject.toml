@@ -10,7 +10,9 @@ requires-python = ">=3.11"
 dependencies = [
     "ruamel.yaml>=0.18",
     "fastapi>=0.110",
-    "uvicorn>=0.29",
+    "uvicorn[standard]>=0.30",
+    "jinja2>=3.1",
+    "python-multipart>=0.0.9",
 ]
 
 [project.optional-dependencies]
@@ -31,6 +33,9 @@ fleet = "fleet.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+fleet = ["static/*", "templates/*", "templates/partials/*"]
 
 [tool.ruff]
 line-length = 100
