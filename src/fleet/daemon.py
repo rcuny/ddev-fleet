@@ -2,10 +2,11 @@
 §13). Grows into the full web UI across this plan's remaining tasks.
 """
 
+import asyncio
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 
 from fleet.core.registry import Registry
@@ -50,6 +51,34 @@ def create_app(fleet_home: Path) -> FastAPI:
             "detail": job.detail,
             "log_path": job.log_path,
         }
+
+    @app.websocket("/ws/instances/{instance_id}/log")
+    async def ws_instance_log(websocket: WebSocket, instance_id: str):
+        await websocket.accept()
+        registry = Registry.load(fleet_home / "fleet.yml")
+        log_path = registry.instances_path / instance_id / ".fleet" / "deploy.log"
+
+        try:
+            if log_path.exists():
+                offset = log_path.stat().st_size
+                await websocket.send_text(log_path.read_text(encoding="utf-8"))
+            else:
+                offset = 0
+                await websocket.send_text("waiting for log...\n")
+
+            while True:
+                await asyncio.sleep(0.3)
+                if not log_path.exists():
+                    continue
+                size = log_path.stat().st_size
+                if size > offset:
+                    with open(log_path, "r", encoding="utf-8") as fh:
+                        fh.seek(offset)
+                        chunk = fh.read()
+                    offset = size
+                    await websocket.send_text(chunk)
+        except WebSocketDisconnect:
+            return
 
     return app
 
