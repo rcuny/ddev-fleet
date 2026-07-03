@@ -141,3 +141,24 @@ def test_ui_job_panel_known_job_renders_state(fleet_home):
     response = client.get("/ui/jobs/abc123/panel")
     assert response.status_code == 200
     assert "running" in response.text
+
+
+def test_ui_deploy_invalid_project_name_returns_400(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+
+    response = client.post(
+        "/ui/deploy", data={"project": "Bad_Name!", "instance": "develop", "branch": "main"}
+    )
+
+    assert response.status_code == 400
+    assert "invalid" in response.text
+
+
+def test_ui_stop_unknown_instance_returns_400(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+
+    response = client.post("/ui/instances/nonexistent--x/stop")
+
+    assert response.status_code == 400

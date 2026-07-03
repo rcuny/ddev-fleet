@@ -91,8 +91,17 @@ def deploy(
                 f"instance {instance!r} is not registered for project {project!r}; "
                 "--branch is required to auto-register it"
             )
-        registry.register_instance(project, instance, branch)
-        registry.save()
+        # Registry-wide lock: concurrent auto-registers each reload->modify->save
+        # atomically, so independent snapshots can no longer clobber each other.
+        # "registry" cannot collide with instance locks (their names always
+        # contain "--"). Refresh the caller's registry object in place (rather
+        # than rebinding to a new one) so callers holding onto `registry`
+        # across multiple deploy() calls keep seeing an up-to-date view.
+        with instance_lock(paths.locks, "registry"):
+            registry._data = Registry.load(paths.registry)._data
+            if not registry.has_instance(project, instance):
+                registry.register_instance(project, instance, branch)
+                registry.save()
 
     resolved = registry.resolve(project, instance)
     inst_id = resolved.instance_id

@@ -14,6 +14,7 @@ from starlette.requests import Request
 
 from fleet.core import instances as instances_mod
 from fleet.core import naming
+from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.jobs import JobManager
 
@@ -26,6 +27,10 @@ def create_app(fleet_home: Path) -> FastAPI:
     app.state.jobs = JobManager()
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+
+    @app.exception_handler(FleetError)
+    async def fleet_error_handler(request: Request, exc: FleetError):
+        return JSONResponse(status_code=400, content={"error": exc.message})
 
     def _paths_and_registry():
         paths = instances_mod.FleetPaths.from_home(fleet_home)
