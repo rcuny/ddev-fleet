@@ -103,17 +103,30 @@ def deploy(
         if fresh and instance_dir.exists():
             _destroy_locked(registry, inst_id, runner=runner)
 
+        clone_result = None
         if instance_dir.exists():
-            gitops.update(instance_dir, resolved.branch, force=force, runner=runner)
+            gitops.update(
+                instance_dir, resolved.branch, force=force, log_path=deploy_log, runner=runner
+            )
         else:
             # Clone must run before anything (even the deploy log) is created
             # inside instance_dir — git refuses to clone into a non-empty dir.
-            gitops.clone(registry.git_url(project), resolved.branch, instance_dir, runner=runner)
+            # So no log_path here: clone's captured output is appended to the
+            # deploy log after the fact, once instance_dir exists.
+            clone_result = gitops.clone(
+                registry.git_url(project),
+                resolved.branch,
+                instance_dir,
+                runner=runner,
+            )
 
         _append_log(
             deploy_log,
             f"deploy start: project={project} instance={instance} branch={resolved.branch}",
         )
+        if clone_result is not None:
+            for line in clone_result.lines:
+                _append_log(deploy_log, line)
 
         secrets = read_secrets(paths.secrets)
         claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -131,7 +144,7 @@ def deploy(
         )
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
 
-        start_result = ddev.start(instance_dir, runner=runner)
+        start_result = ddev.start(instance_dir, log_path=deploy_log, runner=runner)
         if start_result.returncode != 0:
             raise DeployError(
                 f"ddev start failed in {instance_dir} with exit code {start_result.returncode}"

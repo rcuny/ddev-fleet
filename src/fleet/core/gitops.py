@@ -4,16 +4,25 @@ import subprocess
 from pathlib import Path
 
 from fleet.core.errors import DirtyWorktreeError, FleetError
-from fleet.core.runner import run_streamed
+from fleet.core.runner import RunResult, run_streamed
 
 
-def clone(git_url: str, branch: str, dest: Path, *, runner=run_streamed) -> None:
+def clone(git_url: str, branch: str, dest: Path, *, runner=run_streamed) -> RunResult:
+    """Clone ``git_url`` at ``branch`` into ``dest``.
+
+    Deliberately takes no ``log_path``: streaming a log file into the clone's
+    own destination would create ``dest`` (non-empty) before git runs, and
+    ``git clone`` refuses a non-empty target. Instead the captured output is
+    returned as a ``RunResult`` so callers can append it to their log after
+    the clone completes.
+    """
     result = runner(["git", "clone", "--branch", branch, git_url, str(dest)])
     if result.returncode != 0:
         raise FleetError(
             f"git clone --branch {branch} {git_url} {dest} "
             f"failed with exit code {result.returncode}"
         )
+    return result
 
 
 def is_dirty(repo: Path) -> bool:
@@ -53,24 +62,31 @@ def has_unpushed(repo: Path) -> bool:
     return bool(result.stdout.strip())
 
 
-def update(repo: Path, branch: str, *, force: bool = False, runner=run_streamed) -> None:
+def update(
+    repo: Path,
+    branch: str,
+    *,
+    force: bool = False,
+    log_path: Path | None = None,
+    runner=run_streamed,
+) -> None:
     if not force and (is_dirty(repo) or has_unpushed(repo)):
         raise DirtyWorktreeError(
             f"{repo}: worktree is dirty or has unpushed commits; refusing to update "
             "without --force"
         )
 
-    result = runner(["git", "fetch", "origin"], cwd=repo)
+    result = runner(["git", "fetch", "origin"], cwd=repo, log_path=log_path)
     if result.returncode != 0:
         raise FleetError(f"git fetch origin failed in {repo} with exit code {result.returncode}")
 
-    result = runner(["git", "checkout", branch], cwd=repo)
+    result = runner(["git", "checkout", branch], cwd=repo, log_path=log_path)
     if result.returncode != 0:
         raise FleetError(
             f"git checkout {branch} failed in {repo} with exit code {result.returncode}"
         )
 
-    result = runner(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo)
+    result = runner(["git", "reset", "--hard", f"origin/{branch}"], cwd=repo, log_path=log_path)
     if result.returncode != 0:
         raise FleetError(
             f"git reset --hard origin/{branch} failed in {repo} with exit code {result.returncode}"

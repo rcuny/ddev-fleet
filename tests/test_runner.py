@@ -61,3 +61,10 @@ def test_run_streamed_wraps_missing_binary_in_fleet_error():
     with pytest.raises(FleetError) as exc_info:
         run_streamed(["definitely-not-a-real-binary-xyz"], echo=False)
     assert "definitely-not-a-real-binary-xyz" in str(exc_info.value)
+
+
+def test_run_streamed_creates_missing_log_parent_dir(tmp_path):
+    log_path = tmp_path / "nested" / "dir" / "log.txt"
+    assert not log_path.parent.exists()
+    run_streamed(["echo", "hello"], log_path=log_path, echo=False)
+    assert log_path.read_text(encoding="utf-8") == "hello\n"
