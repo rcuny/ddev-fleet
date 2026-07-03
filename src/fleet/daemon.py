@@ -6,13 +6,14 @@ import asyncio
 import os
 from pathlib import Path
 
-from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Form, Query, WebSocket, WebSocketDisconnect
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from fleet.core import instances as instances_mod
+from fleet.core import naming
 from fleet.core.registry import Registry
 from fleet.jobs import JobManager
 
@@ -103,6 +104,55 @@ def create_app(fleet_home: Path) -> FastAPI:
             "instances.html",
             {"statuses": statuses, "project_keys": registry.project_keys()},
         )
+
+    @app.post("/ui/instances/{instance_id}/start")
+    async def ui_start(request: Request, instance_id: str):
+        paths, registry = _paths_and_registry()
+        await asyncio.to_thread(instances_mod.start, paths, registry, instance_id)
+        statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
+        status = next(s for s in statuses if s.instance_id == instance_id)
+        return templates.TemplateResponse(request, "partials/instance_row.html", {"status": status})
+
+    @app.post("/ui/instances/{instance_id}/stop")
+    async def ui_stop(request: Request, instance_id: str):
+        paths, registry = _paths_and_registry()
+        await asyncio.to_thread(instances_mod.stop, paths, registry, instance_id)
+        statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
+        status = next(s for s in statuses if s.instance_id == instance_id)
+        return templates.TemplateResponse(request, "partials/instance_row.html", {"status": status})
+
+    @app.post("/ui/instances/{instance_id}/destroy")
+    async def ui_destroy(instance_id: str):
+        paths, registry = _paths_and_registry()
+        await asyncio.to_thread(instances_mod.destroy, paths, registry, instance_id)
+        return HTMLResponse("")
+
+    @app.post("/ui/deploy")
+    async def ui_deploy(
+        request: Request,
+        project: str = Form(...),
+        instance: str = Form(...),
+        branch: str = Form(""),
+        fresh: str = Form(""),
+    ):
+        paths, registry = _paths_and_registry()
+        inst_id = naming.instance_id(project, instance)
+        log_path = str(registry.instances_path / inst_id / ".fleet" / "deploy.log")
+
+        def run_deploy():
+            return instances_mod.deploy(
+                paths, registry, project, instance, branch=branch or None, fresh=bool(fresh)
+            )
+
+        job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
+        return templates.TemplateResponse(request, "partials/job_panel.html", {"job": job})
+
+    @app.get("/ui/jobs/{job_id}/panel")
+    async def ui_job_panel(request: Request, job_id: str):
+        job = app.state.jobs.get(job_id)
+        if job is None:
+            return JSONResponse(status_code=404, content={"detail": "unknown job"})
+        return templates.TemplateResponse(request, "partials/job_panel.html", {"job": job})
 
     return app
 
