@@ -14,6 +14,10 @@ def stop(instance_dir: Path, *, log_path: Path | None = None, runner=run_streame
     return runner(["ddev", "stop"], cwd=instance_dir, log_path=log_path)
 
 
+def restart(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
+    return runner(["ddev", "restart"], cwd=instance_dir, log_path=log_path)
+
+
 def delete(instance_dir: Path, *, runner=run_streamed) -> RunResult:
     # Flag names verified against the DDEV CLI at the time of writing; spec
     # §16 flags this as a verify-at-implementation point if a future DDEV

@@ -88,3 +88,11 @@ def test_stop_forwards_log_path(tmp_path):
     log_path = tmp_path / "deploy.log"
     ddev.stop(tmp_path, log_path=log_path, runner=fake)
     assert fake.calls[0]["log_path"] == log_path
+
+
+def test_restart_composes_correct_argv(tmp_path):
+    fake = FakeRunner()
+    ddev.restart(tmp_path, runner=fake)
+    assert fake.calls == [
+        {"cmd": ["ddev", "restart"], "cwd": tmp_path, "env": None, "log_path": None}
+    ]
