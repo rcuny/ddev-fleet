@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+<table id="instances-table">
+  <thead>
+    <tr>
+      <th>Instance</th><th>Project</th><th>Branch</th><th>State</th>
+      <th>URL</th><th>RAM (MiB)</th><th>Actions</th>
+    </tr>
+  </thead>
+  <tbody>
+    {% for status in statuses %}
+      {% include "partials/instance_row.html" %}
+    {% endfor %}
+  </tbody>
+</table>
+
+<h2>Deploy</h2>
+<form class="deploy-form" hx-post="/ui/deploy" hx-target="#job-panel-slot" hx-swap="innerHTML">
+  <label>Project
+    <select name="project" required>
+      {% for key in project_keys %}
+        <option value="{{ key }}">{{ key }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Instance <input type="text" name="instance" required></label>
+  <label>Branch <input type="text" name="branch"></label>
+  <label><input type="checkbox" name="fresh" value="true"> Fresh</label>
+  <button type="submit">Deploy</button>
+</form>
+
+<div id="job-panel-slot"></div>
+{% endblock %}

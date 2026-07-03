@@ -1,0 +1,25 @@
+# Global options block — MUST be first in the Caddyfile (spec §9.3).
+{
+    email {{ acme_email }}
+    on_demand_tls {
+        ask http://127.0.0.1:{{ fleet_daemon_port }}/api/tls-authorize
+    }
+}
+
+{{ fleet_domain }} {
+    reverse_proxy 127.0.0.1:{{ fleet_daemon_port }}
+    basic_auth {
+        {{ fleet_admin_user }} {{ fleet_admin_bcrypt_hash }}
+    }
+}
+
+*.{{ fleet_domain }} {
+    reverse_proxy https://127.0.0.1:{{ ddev_router_https_port }} {
+        transport http {
+            tls_insecure_skip_verify
+        }
+    }
+    tls {
+        on_demand
+    }
+}
