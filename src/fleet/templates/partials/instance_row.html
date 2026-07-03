@@ -1,0 +1,19 @@
+<tr id="row-{{ status.instance_id }}">
+  <td>{{ status.instance_id }}</td>
+  <td>{{ status.project }}</td>
+  <td>{{ status.branch }}</td>
+  <td>{{ status.state }}</td>
+  <td><a href="{{ status.url }}">{{ status.url }}</a></td>
+  <td>{{ status.ram_mib if status.ram_mib is not none else "-" }}</td>
+  <td>
+    <button hx-post="/ui/instances/{{ status.instance_id }}/start"
+            hx-target="#row-{{ status.instance_id }}" hx-swap="outerHTML">Start</button>
+    <button hx-post="/ui/instances/{{ status.instance_id }}/stop"
+            hx-target="#row-{{ status.instance_id }}" hx-swap="outerHTML">Stop</button>
+    <button class="destroy" hx-post="/ui/instances/{{ status.instance_id }}/destroy"
+            hx-target="#row-{{ status.instance_id }}" hx-swap="outerHTML"
+            hx-confirm="Destroy {{ status.instance_id }}? This removes containers and disk state.">
+      Destroy
+    </button>
+  </td>
+</tr>

@@ -91,8 +91,17 @@ def deploy(
                 f"instance {instance!r} is not registered for project {project!r}; "
                 "--branch is required to auto-register it"
             )
-        registry.register_instance(project, instance, branch)
-        registry.save()
+        # Registry-wide lock: concurrent auto-registers each reload->modify->save
+        # atomically, so independent snapshots can no longer clobber each other.
+        # "registry" cannot collide with instance locks (their names always
+        # contain "--"). Refresh the caller's registry object in place (rather
+        # than rebinding to a new one) so callers holding onto `registry`
+        # across multiple deploy() calls keep seeing an up-to-date view.
+        with instance_lock(paths.locks, "registry"):
+            registry.reload()
+            if not registry.has_instance(project, instance):
+                registry.register_instance(project, instance, branch)
+                registry.save()
 
     resolved = registry.resolve(project, instance)
     inst_id = resolved.instance_id
@@ -103,17 +112,30 @@ def deploy(
         if fresh and instance_dir.exists():
             _destroy_locked(registry, inst_id, runner=runner)
 
+        clone_result = None
         if instance_dir.exists():
-            gitops.update(instance_dir, resolved.branch, force=force, runner=runner)
+            gitops.update(
+                instance_dir, resolved.branch, force=force, log_path=deploy_log, runner=runner
+            )
         else:
             # Clone must run before anything (even the deploy log) is created
             # inside instance_dir — git refuses to clone into a non-empty dir.
-            gitops.clone(registry.git_url(project), resolved.branch, instance_dir, runner=runner)
+            # So no log_path here: clone's captured output is appended to the
+            # deploy log after the fact, once instance_dir exists.
+            clone_result = gitops.clone(
+                registry.git_url(project),
+                resolved.branch,
+                instance_dir,
+                runner=runner,
+            )
 
         _append_log(
             deploy_log,
             f"deploy start: project={project} instance={instance} branch={resolved.branch}",
         )
+        if clone_result is not None:
+            for line in clone_result.lines:
+                _append_log(deploy_log, line)
 
         secrets = read_secrets(paths.secrets)
         claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -131,7 +153,7 @@ def deploy(
         )
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
 
-        start_result = ddev.start(instance_dir, runner=runner)
+        start_result = ddev.start(instance_dir, log_path=deploy_log, runner=runner)
         if start_result.returncode != 0:
             raise DeployError(
                 f"ddev start failed in {instance_dir} with exit code {start_result.returncode}"
@@ -205,6 +227,39 @@ def stop(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_
             raise FleetError(
                 f"ddev stop failed for {instance_id!r} with exit code {result.returncode}"
             )
+
+
+def snapshot(
+    paths: FleetPaths,
+    registry: Registry,
+    instance_id: str,
+    *,
+    dest_rel: str = "dumps/db.sql.gz",
+    runner=run_streamed,
+) -> Path:
+    instance_dir = registry.instances_path / instance_id
+    if not instance_dir.exists():
+        raise FleetError(f"instance directory not found for {instance_id!r}")
+
+    info_path = instance_dir / ".fleet" / "instance.yml"
+    if info_path.exists():
+        with open(info_path, "r", encoding="utf-8") as fh:
+            data = _yaml.load(fh) or {}
+        project = str(data.get("project") or instance_id.split("--", 1)[0])
+    else:
+        project = instance_id.split("--", 1)[0]
+
+    dest = registry.assets_path / project / dest_rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    with instance_lock(paths.locks, instance_id):
+        result = runner(["ddev", "export-db", f"--file={dest}"], cwd=instance_dir)
+        if result.returncode != 0:
+            raise FleetError(
+                f"ddev export-db failed for {instance_id!r} with exit code {result.returncode}"
+            )
+
+    return dest
 
 
 @dataclass

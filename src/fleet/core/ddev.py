@@ -6,12 +6,16 @@ from pathlib import Path
 from fleet.core.runner import RunResult, run_streamed
 
 
-def start(instance_dir: Path, *, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "start"], cwd=instance_dir)
+def start(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
+    return runner(["ddev", "start"], cwd=instance_dir, log_path=log_path)
 
 
-def stop(instance_dir: Path, *, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "stop"], cwd=instance_dir)
+def stop(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
+    return runner(["ddev", "stop"], cwd=instance_dir, log_path=log_path)
+
+
+def restart(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
+    return runner(["ddev", "restart"], cwd=instance_dir, log_path=log_path)
 
 
 def delete(instance_dir: Path, *, runner=run_streamed) -> RunResult:

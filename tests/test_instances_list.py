@@ -114,3 +114,27 @@ def test_list_instances_fallback_for_dir_without_instance_yml(fleet_home):
     assert statuses[0].branch == ""
     assert statuses[0].state == "deployed"
     assert statuses[0].ram_mib is None
+
+
+def test_list_instances_missing_instances_dir_returns_empty_early(fleet_home):
+    nonexistent = fleet_home / "does-not-exist"
+    path = fleet_home / "fleet.yml"
+    path.write_text(
+        f"""\
+fleet:
+  domain: fleet.example.test
+  assets_path: {fleet_home / "assets"}
+  instances_path: {nonexistent}
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    instances: {{}}
+""",
+        encoding="utf-8",
+    )
+    registry = Registry.load(path)
+    paths = instances.FleetPaths.from_home(fleet_home)
+
+    assert not nonexistent.exists()
+    assert instances.list_instances(paths, registry, runner=FakeRunner()) == []

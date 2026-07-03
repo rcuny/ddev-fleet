@@ -1,0 +1,6 @@
+<div class="job-panel" id="job-panel-{{ job.id }}"
+     {% if job.state in ("queued", "running") %}hx-get="/ui/jobs/{{ job.id }}/panel" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
+  <p>Job {{ job.id }} ({{ job.kind }} {{ job.instance_id }}): <strong>{{ job.state }}</strong></p>
+  {% if job.detail %}<p>{{ job.detail }}</p>{% endif %}
+  <div class="job-log" id="log-{{ job.id }}" hx-preserve="true" data-ws-url="/ws/instances/{{ job.instance_id }}/log"></div>
+</div>

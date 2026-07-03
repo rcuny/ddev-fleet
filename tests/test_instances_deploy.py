@@ -155,6 +155,23 @@ def test_deploy_git_excludes_asset_injected_files(fleet_home, git_repo):
     assert ".env" in exclude_content
 
 
+def test_deploy_auto_register_race_does_not_clobber_concurrent_registration(fleet_home, git_repo):
+    """Two deploys auto-registering different instances from independent,
+    stale Registry snapshots must not lose either registration: the second
+    deploy's save() must not clobber the first's, even though registry_b was
+    loaded before registry_a's auto-register wrote anything back."""
+    paths, _ = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    registry_a = Registry.load(paths.registry)
+    registry_b = Registry.load(paths.registry)
+
+    instances.deploy(paths, registry_a, "demo", "one", branch="main", runner=HybridRunner())
+    instances.deploy(paths, registry_b, "demo", "two", branch="main", runner=HybridRunner())
+
+    reloaded = Registry.load(paths.registry)
+    assert reloaded.has_instance("demo", "one") is True
+    assert reloaded.has_instance("demo", "two") is True
+
+
 def test_deploy_excludes_token_config_before_asset_injection_fails(fleet_home, git_repo):
     """If asset token substitution raises TokenError, the live token file
     written earlier in deploy() must already be git-excluded — closing the

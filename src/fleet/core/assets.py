@@ -1,5 +1,6 @@
 """Asset mirror copy (rsync wrapper) + token substitution pass (spec §7)."""
 
+import shutil
 from pathlib import Path
 
 from fleet.core.errors import FleetError
@@ -29,3 +30,17 @@ def inject(
         copied.append(dest_path)
         substitute_file(dest_path, context)
     return copied
+
+
+def push(assets_dir: Path, src: Path, dest_rel: str) -> Path:
+    if not src.exists():
+        raise FleetError(f"asset source not found: {src}")
+
+    assets_root = assets_dir.resolve()
+    dest = (assets_dir / dest_rel).resolve()
+    if not dest.is_relative_to(assets_root):
+        raise FleetError(f"{dest_rel!r} escapes the asset tree {assets_dir}")
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dest)
+    return dest
