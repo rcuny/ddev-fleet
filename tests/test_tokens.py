@@ -85,3 +85,31 @@ def test_env_vars_maps_context_to_fleet_prefixed_names():
         "FLEET_INSTANCE_FQDN": "oak--develop.fleet.example.test",
         "FLEET_DOMAIN": "fleet.example.test",
     }
+
+
+def test_substitute_file_non_utf8_returns_false_unchanged(tmp_path):
+    path = tmp_path / "latin1.txt"
+    original = b"caf\xe9 [[project]]"  # invalid UTF-8, no null byte in the first 8 KiB
+    path.write_bytes(original)
+    context = build_context("demo", "develop", "main", "fleet.example.test")
+
+    result = substitute_file(path, context)
+
+    assert result is False
+    assert path.read_bytes() == original
+
+
+def test_substitute_file_exact_1mib_boundary_still_substitutes(tmp_path):
+    path = tmp_path / "exact.txt"
+    token_line = "PROJECT=[[project]]\n"
+    filler = "x" * (1024 * 1024 - len(token_line))
+    content = token_line + filler
+    assert len(content.encode("utf-8")) == 1024 * 1024
+    path.write_text(content, encoding="utf-8")
+    context = build_context("demo", "develop", "main", "fleet.example.test")
+
+    result = substitute_file(path, context)
+
+    assert result is True
+    rewritten = path.read_text(encoding="utf-8")
+    assert rewritten.startswith("PROJECT=demo\n")

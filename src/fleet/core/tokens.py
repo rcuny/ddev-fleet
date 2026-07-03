@@ -39,10 +39,12 @@ def substitute_text(text: str, context: dict[str, str]) -> str:
 def substitute_file(path: Path, context: dict[str, str]) -> bool:
     """Substitute tokens in-place in a single file.
 
-    Returns False (does nothing) for files larger than 1 MiB or containing
-    a null byte in the first 8 KiB (treated as binary). Returns True once
-    the file has been scanned and rewritten. Raises TokenError (naming the
-    file) if an unresolved token remains.
+    Returns False (does nothing) for files larger than 1 MiB, files
+    containing a null byte in the first 8 KiB (treated as binary), or files
+    that are not valid UTF-8 (treated as binary/skip, not an error — e.g. a
+    Latin-1 asset file that happens to sneak past the null-byte sniff).
+    Returns True once the file has been scanned and rewritten. Raises
+    TokenError (naming the file) if an unresolved token remains.
     """
     size = path.stat().st_size
     if size > _MAX_SUBSTITUTE_BYTES:
@@ -53,7 +55,11 @@ def substitute_file(path: Path, context: dict[str, str]) -> bool:
     if b"\x00" in head:
         return False
 
-    text = path.read_text(encoding="utf-8")
+    try:
+        text = path.read_text(encoding="utf-8")
+    except UnicodeDecodeError:
+        return False
+
     try:
         substituted = substitute_text(text, context)
     except TokenError as exc:
