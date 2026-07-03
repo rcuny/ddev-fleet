@@ -8,14 +8,28 @@ from pathlib import Path
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from starlette.requests import Request
 
+from fleet.core import instances as instances_mod
 from fleet.core.registry import Registry
 from fleet.jobs import JobManager
+
+_STATIC_DIR = Path(__file__).parent / "static"
+_TEMPLATES_DIR = Path(__file__).parent / "templates"
 
 
 def create_app(fleet_home: Path) -> FastAPI:
     app = FastAPI()
     app.state.jobs = JobManager()
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+
+    def _paths_and_registry():
+        paths = instances_mod.FleetPaths.from_home(fleet_home)
+        registry = Registry.load(paths.registry)
+        return paths, registry
 
     @app.get("/api/tls-authorize")
     def tls_authorize(domain: str = Query(...)):
@@ -79,6 +93,16 @@ def create_app(fleet_home: Path) -> FastAPI:
                     await websocket.send_text(chunk)
         except WebSocketDisconnect:
             return
+
+    @app.get("/")
+    async def index(request: Request):
+        paths, registry = _paths_and_registry()
+        statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
+        return templates.TemplateResponse(
+            request,
+            "instances.html",
+            {"statuses": statuses, "project_keys": registry.project_keys()},
+        )
 
     return app
 
