@@ -1,6 +1,6 @@
 import pytest
 
-from fleet.core.assets import inject
+from fleet.core.assets import inject, push
 from fleet.core.errors import FleetError, TokenError
 from fleet.core.runner import RunResult
 from fleet.core.tokens import build_context
@@ -112,3 +112,33 @@ def test_inject_raises_when_rsync_fails(tmp_path):
 
     with pytest.raises(FleetError):
         inject(assets_dir, instance_dir, {}, runner=failing_runner)
+
+
+def test_push_copies_file_into_assets_tree(tmp_path):
+    assets_dir = tmp_path / "assets" / "demo"
+    src = tmp_path / "source" / "db.sql.gz"
+    src.parent.mkdir(parents=True)
+    src.write_bytes(b"dump-bytes")
+
+    dest = push(assets_dir, src, "dumps/db.sql.gz")
+
+    assert dest == assets_dir / "dumps" / "db.sql.gz"
+    assert dest.read_bytes() == b"dump-bytes"
+
+
+def test_push_raises_when_src_missing(tmp_path):
+    assets_dir = tmp_path / "assets" / "demo"
+    src = tmp_path / "does-not-exist.sql"
+
+    with pytest.raises(FleetError):
+        push(assets_dir, src, "dumps/db.sql.gz")
+
+
+def test_push_refuses_dest_rel_that_escapes_assets_dir(tmp_path):
+    assets_dir = tmp_path / "assets" / "demo"
+    assets_dir.mkdir(parents=True)
+    src = tmp_path / "source.txt"
+    src.write_text("x", encoding="utf-8")
+
+    with pytest.raises(FleetError):
+        push(assets_dir, src, "../../escaped.txt")

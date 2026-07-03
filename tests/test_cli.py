@@ -255,3 +255,59 @@ def test_project_add_post_deploy_round_trip(fleet_home):
     assert reloaded.has_project("newproj") is True
     project_block = reloaded._data["projects"]["newproj"]
     assert project_block["post_deploy"] == ["composer install", "drush deploy"]
+
+
+def test_assets_push_dispatch(fleet_home, monkeypatch, capsys, tmp_path):
+    _write_minimal_registry(fleet_home)
+    recorder = []
+
+    def fake_push(assets_dir, src, dest_rel):
+        recorder.append((assets_dir, src, dest_rel))
+        return assets_dir / dest_rel
+
+    monkeypatch.setattr(cli.assets_mod, "push", fake_push)
+
+    src = tmp_path / "dump.sql.gz"
+    src.write_text("x", encoding="utf-8")
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "assets", "push", "demo", str(src), "dumps/db.sql.gz"]
+    )
+
+    assert exit_code == 0
+    assert recorder == [(fleet_home / "assets" / "demo", src, "dumps/db.sql.gz")]
+    assert "dumps/db.sql.gz" in capsys.readouterr().out
+
+
+def test_snapshot_dispatch(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    recorder = []
+
+    def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
+        recorder.append((instance_id, dest_rel))
+        return fleet_home / "assets" / "demo" / dest_rel
+
+    monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "snapshot", "demo--develop"])
+
+    assert exit_code == 0
+    assert recorder == [("demo--develop", "dumps/db.sql.gz")]
+
+
+def test_snapshot_dispatch_custom_dest_rel(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    recorder = []
+
+    def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
+        recorder.append((instance_id, dest_rel))
+        return fleet_home / "assets" / "demo" / dest_rel
+
+    monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "snapshot", "demo--develop", "--dest-rel=custom.sql.gz"]
+    )
+
+    assert exit_code == 0
+    assert recorder == [("demo--develop", "custom.sql.gz")]

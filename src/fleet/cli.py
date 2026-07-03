@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+from fleet.core import assets as assets_mod
 from fleet.core import instances as instances_mod
 from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
@@ -56,6 +57,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("ssh-key")
 
+    assets_parser = subparsers.add_parser("assets")
+    assets_subparsers = assets_parser.add_subparsers(dest="assets_command", required=True)
+    assets_push_parser = assets_subparsers.add_parser("push")
+    assets_push_parser.add_argument("project")
+    assets_push_parser.add_argument("src")
+    assets_push_parser.add_argument("dest_rel")
+
+    snapshot_parser = subparsers.add_parser("snapshot")
+    snapshot_parser.add_argument("instance_id")
+    snapshot_parser.add_argument("--dest-rel", default="dumps/db.sql.gz")
+
     return parser
 
 
@@ -81,6 +93,10 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_project(fleet_home, args)
         elif args.command == "ssh-key":
             _cmd_ssh_key(fleet_home, args)
+        elif args.command == "assets":
+            _cmd_assets(fleet_home, args)
+        elif args.command == "snapshot":
+            _cmd_snapshot(fleet_home, args)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
@@ -177,6 +193,22 @@ def _cmd_ssh_key(fleet_home: Path, args: argparse.Namespace) -> None:
     if not key_path.exists():
         raise FleetError(f"no deploy key found at {key_path}")
     print(key_path.read_text(encoding="utf-8").strip())
+
+
+def _cmd_assets(fleet_home: Path, args: argparse.Namespace) -> None:
+    if args.assets_command == "push":
+        paths = instances_mod.FleetPaths.from_home(fleet_home)
+        registry = Registry.load(paths.registry)
+        assets_dir = registry.assets_path / args.project
+        dest = assets_mod.push(assets_dir, Path(args.src), args.dest_rel)
+        print(dest)
+
+
+def _cmd_snapshot(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = Registry.load(paths.registry)
+    dest = instances_mod.snapshot(paths, registry, args.instance_id, dest_rel=args.dest_rel)
+    print(dest)
 
 
 if __name__ == "__main__":

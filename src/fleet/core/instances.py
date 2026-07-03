@@ -220,6 +220,39 @@ def stop(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_
             )
 
 
+def snapshot(
+    paths: FleetPaths,
+    registry: Registry,
+    instance_id: str,
+    *,
+    dest_rel: str = "dumps/db.sql.gz",
+    runner=run_streamed,
+) -> Path:
+    instance_dir = registry.instances_path / instance_id
+    if not instance_dir.exists():
+        raise FleetError(f"instance directory not found for {instance_id!r}")
+
+    info_path = instance_dir / ".fleet" / "instance.yml"
+    if info_path.exists():
+        with open(info_path, "r", encoding="utf-8") as fh:
+            data = _yaml.load(fh) or {}
+        project = str(data.get("project") or instance_id.split("--", 1)[0])
+    else:
+        project = instance_id.split("--", 1)[0]
+
+    dest = registry.assets_path / project / dest_rel
+    dest.parent.mkdir(parents=True, exist_ok=True)
+
+    with instance_lock(paths.locks, instance_id):
+        result = runner(["ddev", "export-db", f"--file={dest}"], cwd=instance_dir)
+        if result.returncode != 0:
+            raise FleetError(
+                f"ddev export-db failed for {instance_id!r} with exit code {result.returncode}"
+            )
+
+    return dest
+
+
 @dataclass
 class InstanceStatus:
     instance_id: str
