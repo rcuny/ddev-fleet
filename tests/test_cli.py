@@ -2,6 +2,7 @@ from fleet import cli
 from fleet.core.errors import DeployError
 from fleet.core.instances import InstanceStatus
 from fleet.core.registry import Registry
+from fleet.core.runner import RunResult
 
 
 def _write_minimal_registry(fleet_home):
@@ -311,3 +312,158 @@ def test_snapshot_dispatch_custom_dest_rel(fleet_home, monkeypatch):
 
     assert exit_code == 0
     assert recorder == [("demo--develop", "custom.sql.gz")]
+
+
+def test_mint_claude_token_parses_first_matching_line():
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        return RunResult(returncode=0, lines=["some banner", "sk-ant-oat01-abc123XYZ_-"])
+
+    assert cli._mint_claude_token(fake_runner) == "sk-ant-oat01-abc123XYZ_-"
+
+
+def test_mint_claude_token_returns_none_on_nonzero():
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        return RunResult(returncode=1, lines=["sk-ant-oat01-should-be-ignored"])
+
+    assert cli._mint_claude_token(fake_runner) is None
+
+
+def test_mint_claude_token_returns_none_when_no_match():
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        return RunResult(returncode=0, lines=["nothing matches here"])
+
+    assert cli._mint_claude_token(fake_runner) is None
+
+
+def test_init_warns_when_claude_token_minting_fails(tmp_path, monkeypatch, capsys):
+    fleet_home = tmp_path / "new-fleet-home"
+
+    def failing_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        return RunResult(returncode=1, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", failing_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test"])
+
+    assert exit_code == 0
+    assert "did not produce a token" in capsys.readouterr().err
+    assert not (fleet_home / ".secrets").exists()
+
+
+def test_init_skips_when_registry_already_exists(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test", "--skip-claude"]
+    )
+
+    assert exit_code == 0
+    assert "already exists — skipping" in capsys.readouterr().err
+
+
+def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
+    fleet_home, monkeypatch
+):
+    _write_minimal_registry(fleet_home)
+    for name in ("demo--develop", "demo--piano"):
+        inst_dir = fleet_home / "instances" / name
+        (inst_dir / ".fleet").mkdir(parents=True)
+        (inst_dir / ".fleet" / "instance.yml").write_text(
+            f"project: demo\ninstance: {name.split('--')[1]}\nbranch: main\n"
+            "created-at: '2026-07-01T00:00:00Z'\nlast-deployed-at: '2026-07-01T00:00:00Z'\n",
+            encoding="utf-8",
+        )
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        if cmd == ["claude", "setup-token"]:
+            return RunResult(returncode=0, lines=["sk-ant-oat01-newtoken"])
+        if cmd == ["ddev", "list", "--json-output"]:
+            return RunResult(
+                returncode=0,
+                lines=[
+                    '{"raw": [{"name": "demo--develop", "status": "running"}, '
+                    '{"name": "demo--piano", "status": "stopped"}]}'
+                ],
+            )
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+
+    assert exit_code == 0
+    restart_calls = [c for c in calls if c == ["ddev", "restart"]]
+    assert len(restart_calls) == 1
+
+    for name in ("demo--develop", "demo--piano"):
+        config = (fleet_home / "instances" / name / ".ddev" / "config.fleet.yaml").read_text(
+            encoding="utf-8"
+        )
+        assert "sk-ant-oat01-newtoken" in config
+
+    secrets = (fleet_home / ".secrets").read_text(encoding="utf-8")
+    assert "sk-ant-oat01-newtoken" in secrets
+
+
+def test_refresh_claude_token_skips_dirs_without_instance_yml(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--legacy").mkdir(parents=True)
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        if cmd == ["claude", "setup-token"]:
+            return RunResult(returncode=0, lines=["sk-ant-oat01-newtoken"])
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+
+    assert exit_code == 0
+    assert "no .fleet/instance.yml" in capsys.readouterr().err
+    assert not (fleet_home / "instances" / "demo--legacy" / ".ddev").exists()
+
+
+def test_refresh_claude_token_nonzero_exit_on_restart_failure(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    inst_dir = fleet_home / "instances" / "demo--develop"
+    (inst_dir / ".fleet").mkdir(parents=True)
+    (inst_dir / ".fleet" / "instance.yml").write_text(
+        "project: demo\ninstance: develop\nbranch: main\n"
+        "created-at: '2026-07-01T00:00:00Z'\nlast-deployed-at: '2026-07-01T00:00:00Z'\n",
+        encoding="utf-8",
+    )
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        if cmd == ["claude", "setup-token"]:
+            return RunResult(returncode=0, lines=["sk-ant-oat01-newtoken"])
+        if cmd == ["ddev", "list", "--json-output"]:
+            return RunResult(
+                returncode=0, lines=['{"raw": [{"name": "demo--develop", "status": "running"}]}']
+            )
+        if cmd == ["ddev", "restart"]:
+            return RunResult(returncode=1, lines=["boom"])
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+
+    assert exit_code == 1
+    assert "demo--develop" in capsys.readouterr().err
+
+
+def test_refresh_claude_token_raises_when_minting_fails(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+
+    def failing_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        return RunResult(returncode=1, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", failing_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+
+    assert exit_code == 1
+    assert "did not produce a token" in capsys.readouterr().err
