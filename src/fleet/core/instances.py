@@ -98,7 +98,7 @@ def deploy(
         # than rebinding to a new one) so callers holding onto `registry`
         # across multiple deploy() calls keep seeing an up-to-date view.
         with instance_lock(paths.locks, "registry"):
-            registry._data = Registry.load(paths.registry)._data
+            registry.reload()
             if not registry.has_instance(project, instance):
                 registry.register_instance(project, instance, branch)
                 registry.save()

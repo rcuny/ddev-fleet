@@ -152,6 +152,15 @@ class Registry:
             raise RegistryError(f"unknown project {project!r}")
         return str(self._data["projects"][project]["git"])
 
+    def reload(self) -> None:
+        """Re-read the registry file into this object in place.
+
+        Used under the registry lock so concurrent auto-registers merge
+        into the latest on-disk state instead of clobbering each other,
+        while callers holding this object keep an up-to-date view.
+        """
+        self._data = Registry.load(self._path)._data
+
     def save(self) -> None:
         with open(self._path, "w", encoding="utf-8") as fh:
             _yaml.dump(self._data, fh)
