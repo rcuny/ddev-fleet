@@ -39,6 +39,19 @@ checklist (DNS, admin password, deploy key, Claude token).
 | `fleet project add <key>` | `--git=<url> [--post-deploy=...]` | Registers a new project in `fleet.yml` |
 | `fleet ssh-key` | — | Prints the fleet deploy public key |
 | `fleet refresh-claude-token` | — | Rotates the Claude Code OAuth token fleet-wide |
+| `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
+| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/db.sql.gz]` | Runs `ddev export-db` into the project's asset tree |
+
+## Web UI
+
+Once `fleet.service` is running (see `docs/runbook-server-rollout.md`),
+browse to `https://fleet.<domain>` for the web UI: an instance list (id,
+project, branch, state, URL, RAM) with per-row Start/Stop/Destroy actions,
+a deploy form (project/instance/branch/fresh), and a live deploy log
+streamed over WebSocket while a deploy job runs. The UI has no login of
+its own — Caddy's `basic_auth` in front of `fleet.<domain>` is the single
+auth layer (spec §13); the daemon itself binds `127.0.0.1:8765` only and
+is unreachable except through Caddy.
 
 ## Repository layout
 

@@ -164,3 +164,31 @@ fleet deploy <project> <instance> --branch=<ref>
 ```
 
 then browse to the printed instance URL.
+
+## 9. Server-side Claude context
+
+Copy the CLI/registry reference doc into `/srv/fleet/` so `claude -p "..."`
+run on the server (spec §10.2) has grounded context:
+
+```bash
+cp /opt/ddev-fleet/docs/srv-fleet-CLAUDE.md /srv/fleet/CLAUDE.md
+```
+
+Re-run this after every `ddev-fleet` upgrade if `docs/srv-fleet-CLAUDE.md`
+changed.
+
+## 10. Web UI first-run check
+
+After `fleet.service` is running (section 7):
+
+```bash
+curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/api/jobs/nonexistent
+```
+
+Expected: `404`.
+
+Then, from a browser: visit `https://fleet.<domain>`, confirm the
+basic-auth prompt appears, log in, and confirm the instance deployed in
+section 8 is listed. Trigger a fresh deploy (or redeploy) from the UI's
+deploy form and confirm the live log pane updates over WebSocket while
+`post_deploy` runs.
