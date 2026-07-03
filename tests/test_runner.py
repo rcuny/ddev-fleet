@@ -1,3 +1,6 @@
+import pytest
+
+from fleet.core.errors import FleetError
 from fleet.core.runner import run_streamed
 
 
@@ -47,3 +50,14 @@ def test_run_streamed_merges_stderr_into_lines(tmp_path):
     assert result.returncode == 0
     assert "out-line" in result.lines
     assert "err-line" in result.lines
+
+
+def test_run_streamed_strips_trailing_cr(tmp_path):
+    result = run_streamed(["bash", "-c", "printf 'hello\\r\\n'"], echo=False)
+    assert result.lines == ["hello"]
+
+
+def test_run_streamed_wraps_missing_binary_in_fleet_error():
+    with pytest.raises(FleetError) as exc_info:
+        run_streamed(["definitely-not-a-real-binary-xyz"], echo=False)
+    assert "definitely-not-a-real-binary-xyz" in str(exc_info.value)

@@ -17,13 +17,16 @@ def clone(git_url: str, branch: str, dest: Path, *, runner=run_streamed) -> None
 
 
 def is_dirty(repo: Path) -> bool:
-    result = subprocess.run(
-        ["git", "status", "--porcelain"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "status", "--porcelain"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise FleetError(f"git status failed in {repo}: {exc.stderr.strip()}") from exc
     return bool(result.stdout.strip())
 
 
@@ -37,13 +40,16 @@ def has_unpushed(repo: Path) -> bool:
     if upstream.returncode != 0:
         return False
 
-    result = subprocess.run(
-        ["git", "rev-list", "@{u}..HEAD"],
-        cwd=str(repo),
-        capture_output=True,
-        text=True,
-        check=True,
-    )
+    try:
+        result = subprocess.run(
+            ["git", "rev-list", "@{u}..HEAD"],
+            cwd=str(repo),
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+    except subprocess.CalledProcessError as exc:
+        raise FleetError(f"git rev-list failed in {repo}: {exc.stderr.strip()}") from exc
     return bool(result.stdout.strip())
 
 

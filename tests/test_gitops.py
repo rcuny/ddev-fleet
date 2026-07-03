@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from fleet.core import gitops
-from fleet.core.errors import DirtyWorktreeError
+from fleet.core.errors import DirtyWorktreeError, FleetError
 
 try:
     from .conftest import FakeRunner
@@ -105,3 +105,17 @@ def test_update_proceeds_with_force_and_resets_to_origin_tip(git_repo, tmp_path)
 
     assert (dest / "README.md").read_text(encoding="utf-8") == "updated upstream\n"
     assert gitops.is_dirty(dest) is False
+
+
+def test_is_dirty_raises_fleet_error_on_non_repo_dir(tmp_path):
+    not_a_repo = tmp_path / "not-a-repo"
+    not_a_repo.mkdir()
+    with pytest.raises(FleetError):
+        gitops.is_dirty(not_a_repo)
+
+
+def test_has_unpushed_false_on_detached_head(git_repo, tmp_path):
+    dest = tmp_path / "cloned"
+    gitops.clone(str(git_repo["origin"]), "main", dest)
+    _run_git(["git", "checkout", "--detach", "HEAD"], cwd=dest)
+    assert gitops.has_unpushed(dest) is False
