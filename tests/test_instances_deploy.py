@@ -69,7 +69,15 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     assert "sk-ant-oat01-test" in config_path.read_text(encoding="utf-8")
 
     exclude_path = instance_dir / ".git" / "info" / "exclude"
-    assert ".ddev/config.fleet.yaml" in exclude_path.read_text(encoding="utf-8")
+    exclude_content = exclude_path.read_text(encoding="utf-8")
+    assert ".ddev/config.fleet.yaml" in exclude_content
+    assert ".ddev/web-build/Dockerfile.fleet-claude" in exclude_content
+
+    web_build_path = instance_dir / ".ddev" / "web-build" / "Dockerfile.fleet-claude"
+    assert web_build_path.exists()
+    assert "npm install -g @anthropic-ai/claude-code" in web_build_path.read_text(
+        encoding="utf-8"
+    )
 
     instance_yaml = instance_dir / ".fleet" / "instance.yml"
     assert instance_yaml.exists()

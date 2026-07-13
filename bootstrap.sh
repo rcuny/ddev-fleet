@@ -10,16 +10,29 @@ set -euo pipefail
 #   curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
 
 # NOTE: HTTPS default — at bootstrap time no SSH deploy key exists yet.
-# If the repo is PRIVATE: export FLEET_REPO_URL with an https app-password
-# URL, or pre-clone /opt/ddev-fleet manually before running this script.
+# Ways to get the code onto the box:
+#   - Public/authenticated git: leave FLEET_REPO_URL default or export an
+#     https app-password URL — the script clones/pulls it.
+#   - PRIVATE repo, no server-side git auth (recommended here): deliver a
+#     clean checkout out-of-band (e.g. rsync a `git archive` export to
+#     ${FLEET_OPT_DIR}) and run with FLEET_SKIP_FETCH=1 — the git step is
+#     then skipped entirely and the code already on disk is used as-is.
 FLEET_REPO_URL="${FLEET_REPO_URL:-https://bitbucket.org/personal_maintainer/ddev-fleet.git}"
 FLEET_OPT_DIR="${FLEET_OPT_DIR:-/opt/ddev-fleet}"
+FLEET_SKIP_FETCH="${FLEET_SKIP_FETCH:-}"
 
 echo "==> Installing git and ansible"
 apt-get update -y
 apt-get install -y git ansible
 
-if [ -d "${FLEET_OPT_DIR}/.git" ]; then
+if [ -n "${FLEET_SKIP_FETCH}" ]; then
+  echo "==> FLEET_SKIP_FETCH set — using code already present at ${FLEET_OPT_DIR} (no git clone/pull)"
+  if [ ! -f "${FLEET_OPT_DIR}/ansible/site.yml" ]; then
+    echo "ERROR: FLEET_SKIP_FETCH set but ${FLEET_OPT_DIR}/ansible/site.yml is missing." >&2
+    echo "       Deliver a clean checkout first, e.g. rsync a 'git archive' export to ${FLEET_OPT_DIR}." >&2
+    exit 1
+  fi
+elif [ -d "${FLEET_OPT_DIR}/.git" ]; then
   echo "==> ${FLEET_OPT_DIR} already exists — pulling latest"
   git -C "${FLEET_OPT_DIR}" pull --ff-only
 else
@@ -31,7 +44,13 @@ echo "==> Installing Ansible Galaxy collections"
 ansible-galaxy collection install -r "${FLEET_OPT_DIR}/ansible/requirements.yml"
 
 echo "==> Running the provisioning playbook"
-ansible-playbook -c local "${FLEET_OPT_DIR}/ansible/site.yml"
+if [ -n "${FLEET_SKIP_FETCH}" ]; then
+  # Also tell the playbook not to git-fetch the product repo (fleet_service
+  # role) — the code is already on disk, delivered out-of-band.
+  ansible-playbook -c local -e fleet_skip_fetch=true "${FLEET_OPT_DIR}/ansible/site.yml"
+else
+  ansible-playbook -c local "${FLEET_OPT_DIR}/ansible/site.yml"
+fi
 
 echo
 echo "==> Provisioning complete."

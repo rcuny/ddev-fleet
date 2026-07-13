@@ -18,14 +18,49 @@ fleet.<domain>       A     <server-ip>
 *.fleet.<domain>     A     <server-ip>
 ```
 
-## 2. Run bootstrap
+## 2. Deliver the code + run bootstrap
+
+The repo is PRIVATE, so there is no server-side git auth. **Recommended:
+push a clean checkout from a machine that already has the repo, then run
+bootstrap in skip-fetch mode** — nothing secret ever lands on the server.
+
+Set the login accordingly first. A minimal **Debian 13** cloud image logs
+in as `debian@` with passwordless `sudo` (root SSH disabled); a bare
+netinstall may allow `root@` directly. The verified 2026-07-13 rollout used
+`debian@` + `sudo`; substitute `SRV=debian@<server>` below (or `root@…`).
+
+The minimal image ships **no `rsync`**, so delivery uses a `tar`-over-ssh
+pipe (tar is in the base system — nothing to install on the server):
 
 ```bash
-# Repo is PRIVATE — the bare raw-URL one-liner is auth-gated. Either:
-#   (a) scp bootstrap.sh to the server, then: sudo bash bootstrap.sh
-#       (export FLEET_REPO_URL=https://<user>:<app-password>@bitbucket.org/personal_maintainer/ddev-fleet.git first), or
-#   (b) pre-clone the repo to /opt/ddev-fleet manually, then: sudo bash /opt/ddev-fleet/bootstrap.sh
-# public-repo variant: curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
+# --- on the build machine (has the repo) --------------------------------
+SRV=debian@<server>
+TMP="$(mktemp -d)"
+git -C /path/to/ddev-fleet archive --format=tar HEAD | tar -x -C "$TMP"   # pristine, no .git, no uncommitted cruft
+ssh "$SRV" 'sudo mkdir -p /opt/ddev-fleet'
+tar -C "$TMP" -cf - . | ssh "$SRV" 'sudo tar -C /opt/ddev-fleet -xf - && sudo chown -R root:root /opt/ddev-fleet'
+rm -rf "$TMP"
+
+# --- on the server ------------------------------------------------------
+ssh "$SRV" 'sudo env FLEET_SKIP_FETCH=1 bash /opt/ddev-fleet/bootstrap.sh'
+```
+
+`FLEET_SKIP_FETCH=1` makes bootstrap use the code already on disk and skip
+**both** git fetch points — its own clone/pull AND the `fleet_service`
+role's clone (via `-e fleet_skip_fetch=true`) — so a private repo needs no
+server-side auth. It aborts with a clear error if the code is missing. To
+upgrade later, re-run the same tar pipe + command. (`bootstrap.sh` is long —
+apt + Docker/DDEV/Caddy + playbook — so run it detached: `nohup … &` to a
+logfile and poll, rather than holding an SSH session open.)
+
+Alternative delivery methods (only if not using the tar pipe above):
+```bash
+# (a) install rsync on the server (sudo apt-get install -y rsync), then
+#     rsync -az --delete --rsync-path="sudo rsync" "$TMP"/ "$SRV":/opt/ddev-fleet/
+# (b) scp bootstrap.sh, clone over https with an app-password:
+#     export FLEET_REPO_URL=https://<user>:<app-password>@bitbucket.org/personal_maintainer/ddev-fleet.git; sudo bash bootstrap.sh
+# (c) pre-clone /opt/ddev-fleet manually, then: sudo bash /opt/ddev-fleet/bootstrap.sh
+# (d) public-repo one-liner: curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
 ```
 
 The first run uses the placeholder `fleet_admin_bcrypt_hash` in
