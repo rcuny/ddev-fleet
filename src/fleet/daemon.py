@@ -3,8 +3,12 @@
 """
 
 import asyncio
+import base64
+import hashlib
+import hmac
 import os
 import re
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Query, WebSocket, WebSocketDisconnect
@@ -32,9 +36,37 @@ def _validate_instance_id(instance_id: str) -> None:
         raise FleetError(f"invalid instance id {instance_id!r}")
 
 
+def mint_ws_token(secret: bytes, instance_id: str, *, ttl: float = 3600.0) -> str:
+    exp = int(time.time() + ttl)
+    msg = f"{instance_id}:{exp}".encode()
+    sig = hmac.new(secret, msg, hashlib.sha256).digest()
+    sig_b64 = base64.urlsafe_b64encode(sig).decode().rstrip("=")
+    return f"{exp}.{sig_b64}"
+
+
+def verify_ws_token(secret: bytes, token: str | None, instance_id: str) -> bool:
+    if not token or "." not in token:
+        return False
+    exp_str, sig_b64 = token.split(".", 1)
+    try:
+        exp = int(exp_str)
+    except ValueError:
+        return False
+    if time.time() > exp:
+        return False
+    msg = f"{instance_id}:{exp}".encode()
+    expected = hmac.new(secret, msg, hashlib.sha256).digest()
+    try:
+        got = base64.urlsafe_b64decode(sig_b64 + "=" * (-len(sig_b64) % 4))
+    except Exception:
+        return False
+    return hmac.compare_digest(expected, got)
+
+
 def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -> FastAPI:
     app = FastAPI()
     app.state.jobs = JobManager()
+    app.state.ws_secret = os.urandom(32)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
@@ -85,7 +117,10 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     @app.websocket("/ws/instances/{instance_id}/log")
     async def ws_instance_log(websocket: WebSocket, instance_id: str):
         await websocket.accept()
-        if not _INSTANCE_ID_RE.match(instance_id):
+        token = websocket.query_params.get("token")
+        if not _INSTANCE_ID_RE.match(instance_id) or not verify_ws_token(
+            app.state.ws_secret, token, instance_id
+        ):
             await websocket.close(code=1008)
             return
 
@@ -184,14 +219,20 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             )
 
         job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
-        return templates.TemplateResponse(request, "partials/job_panel.html", {"job": job})
+        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        return templates.TemplateResponse(
+            request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
+        )
 
     @app.get("/ui/jobs/{job_id}/panel")
     async def ui_job_panel(request: Request, job_id: str):
         job = app.state.jobs.get(job_id)
         if job is None:
             return JSONResponse(status_code=404, content={"detail": "unknown job"})
-        return templates.TemplateResponse(request, "partials/job_panel.html", {"job": job})
+        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        return templates.TemplateResponse(
+            request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
+        )
 
     return app
 

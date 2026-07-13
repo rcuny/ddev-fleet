@@ -7,10 +7,15 @@
 }
 
 {{ fleet_domain }} {
-    reverse_proxy 127.0.0.1:{{ fleet_daemon_port }}
-    basic_auth {
+    # Everything except the deploy-log WebSocket sits behind basic-auth.
+    # Browsers do not send basic-auth credentials on a WebSocket handshake,
+    # so /ws/* is exempted here; the daemon authenticates it instead with a
+    # short-lived, instance-scoped token in the query string.
+    @protected not path /ws/*
+    basic_auth @protected {
         {{ fleet_admin_user }} {{ fleet_admin_bcrypt_hash }}
     }
+    reverse_proxy 127.0.0.1:{{ fleet_daemon_port }}
 }
 
 *.{{ fleet_domain }} {
