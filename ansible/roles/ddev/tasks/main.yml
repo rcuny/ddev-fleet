@@ -17,7 +17,10 @@
 
 - name: Add the DDEV apt repository
   ansible.builtin.apt_repository:
-    repo: "deb [signed-by=/etc/apt/keyrings/ddev.asc] {{ ddev_apt_repo }} *"
+    # DDEV's flat apt repo: suite '*' AND component '*' (both required — a
+    # one-line entry needs URI SUITE COMPONENT; omitting the component gives
+    # apt "Malformed entry ... (Component)"). Matches DDEV's documented line.
+    repo: "deb [signed-by=/etc/apt/keyrings/ddev.asc] {{ ddev_apt_repo }} * *"
     filename: ddev
     state: present
     update_cache: true
