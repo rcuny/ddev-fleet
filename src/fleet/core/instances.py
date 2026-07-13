@@ -151,14 +151,13 @@ def deploy(
             )
         write_fleet_config(instance_dir, inst_id, registry.domain, claude_token)
         write_web_build(instance_dir)
-        settings_local = write_settings_local(instance_dir, registry.domain)
         excludes = [
             ".ddev/config.fleet.yaml",
             ".ddev/web-build/Dockerfile.fleet-claude",
             ".fleet/",
         ]
-        if settings_local is not None:
-            excludes.append(str(settings_local.relative_to(instance_dir)))
+        for injected in write_settings_local(instance_dir, registry.domain):
+            excludes.append(str(injected.relative_to(instance_dir)))
         ensure_git_exclude(instance_dir, excludes)
 
         context = build_context(project, instance, resolved.branch, registry.domain)

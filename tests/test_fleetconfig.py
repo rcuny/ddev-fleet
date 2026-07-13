@@ -86,13 +86,25 @@ def test_write_settings_local_writes_trusted_host(tmp_path):
     (ddev_dir / "config.yaml").write_text("docroot: web\n", encoding="utf-8")
     (instance_dir / "web" / "sites" / "default").mkdir(parents=True)
 
-    path = write_settings_local(instance_dir, "fleet.example.test")
+    result = write_settings_local(instance_dir, "fleet.example.test")
 
-    assert path == instance_dir / "web" / "sites" / "default" / "settings.local.php"
-    assert path.read_text(encoding="utf-8") == (
+    assert result == [
+        instance_dir / "web" / "sites" / "default" / "settings.local.php",
+        instance_dir / "web" / "sites" / "default" / "services.fleet.yml",
+    ]
+    assert result[0].read_text(encoding="utf-8") == (
         "<?php\n"
         "// fleet-managed: trust this instance's fleet hostname(s).\n"
         "$settings['trusted_host_patterns'][] = '^.+\\.fleet\\.example\\.test$';\n"
+        "// fleet-managed: neutralise any hardcoded session cookie_domain so login cookies\n"
+        "// are set for the current fleet host (services.fleet.yml is appended last, so it\n"
+        "// overrides the project's / DDEV's services container yamls).\n"
+        "$settings['container_yamls'][] = $app_root . '/' . $site_path . '/services.fleet.yml';\n"
+    )
+    assert result[1].read_text(encoding="utf-8") == (
+        "parameters:\n"
+        "  session.storage.options:\n"
+        "    cookie_domain: ''\n"
     )
 
 
@@ -103,17 +115,21 @@ def test_write_settings_local_no_docroot_uses_root(tmp_path):
     (ddev_dir / "config.yaml").write_text("name: demo--develop\n", encoding="utf-8")
     (instance_dir / "sites" / "default").mkdir(parents=True)
 
-    path = write_settings_local(instance_dir, "fleet.example.test")
+    result = write_settings_local(instance_dir, "fleet.example.test")
 
-    assert path == instance_dir / "sites" / "default" / "settings.local.php"
-    assert path.exists()
+    assert result == [
+        instance_dir / "sites" / "default" / "settings.local.php",
+        instance_dir / "sites" / "default" / "services.fleet.yml",
+    ]
+    assert result[0].exists()
+    assert result[1].exists()
 
 
 def test_write_settings_local_non_drupal_returns_none(tmp_path):
     instance_dir = tmp_path / "instance"
     instance_dir.mkdir(parents=True)
 
-    path = write_settings_local(instance_dir, "fleet.example.test")
+    result = write_settings_local(instance_dir, "fleet.example.test")
 
-    assert path is None
+    assert result == []
     assert not (instance_dir / "sites").exists()
