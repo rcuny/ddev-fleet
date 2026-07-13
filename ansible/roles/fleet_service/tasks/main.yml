@@ -74,3 +74,14 @@
     name: fleet.service
     enabled: true
     daemon_reload: true
+
+- name: Install the fleet-shell operator helper
+  # Convenience for host operators: `fleet-shell [instance]` drops into an
+  # interactive shell as the fleet user (which owns every DDEV instance),
+  # optionally inside an instance dir. See the script header for usage.
+  ansible.builtin.template:
+    src: fleet-shell.j2
+    dest: /usr/local/bin/fleet-shell
+    owner: root
+    group: root
+    mode: "0755"
