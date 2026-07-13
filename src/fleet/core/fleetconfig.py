@@ -40,6 +40,36 @@ def write_web_build(instance_dir: Path) -> Path:
     return dockerfile
 
 
+def _read_docroot(instance_dir: Path) -> str:
+    config_path = instance_dir / ".ddev" / "config.yaml"
+    if not config_path.exists():
+        return ""
+    with open(config_path, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh) or {}
+    return str(data.get("docroot") or "")
+
+
+def write_settings_local(instance_dir: Path, domain: str) -> Path | None:
+    """Inject sites/default/settings.local.php trusting the instance's fleet
+    hostname(s) so Drupal's trusted_host_patterns accepts the fleet domain.
+    Loads after settings.ddev.php (standard Drupal include). No-op (returns
+    None) if the project has no <docroot>/sites/default (non-Drupal)."""
+    docroot = _read_docroot(instance_dir)
+    base = instance_dir / docroot if docroot else instance_dir
+    sites_default = base / "sites" / "default"
+    if not sites_default.is_dir():
+        return None
+    escaped = domain.replace(".", "\\.")
+    content = (
+        "<?php\n"
+        "// fleet-managed: trust this instance's fleet hostname(s).\n"
+        f"$settings['trusted_host_patterns'][] = '^.+\\.{escaped}$';\n"
+    )
+    path = sites_default / "settings.local.php"
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
 def ensure_git_exclude(instance_dir: Path, patterns: list[str]) -> None:
     exclude_path = instance_dir / ".git" / "info" / "exclude"
     exclude_path.parent.mkdir(parents=True, exist_ok=True)

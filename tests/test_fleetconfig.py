@@ -1,4 +1,9 @@
-from fleet.core.fleetconfig import ensure_git_exclude, write_fleet_config, write_web_build
+from fleet.core.fleetconfig import (
+    ensure_git_exclude,
+    write_fleet_config,
+    write_settings_local,
+    write_web_build,
+)
 
 
 def test_write_fleet_config_with_token(tmp_path):
@@ -72,3 +77,43 @@ def test_ensure_git_exclude_handles_missing_trailing_newline(tmp_path):
     lines = exclude.read_text(encoding="utf-8").splitlines()
     assert "existing-pattern" in lines
     assert ".ddev/config.fleet.yaml" in lines
+
+
+def test_write_settings_local_writes_trusted_host(tmp_path):
+    instance_dir = tmp_path / "instance"
+    ddev_dir = instance_dir / ".ddev"
+    ddev_dir.mkdir(parents=True)
+    (ddev_dir / "config.yaml").write_text("docroot: web\n", encoding="utf-8")
+    (instance_dir / "web" / "sites" / "default").mkdir(parents=True)
+
+    path = write_settings_local(instance_dir, "fleet.example.test")
+
+    assert path == instance_dir / "web" / "sites" / "default" / "settings.local.php"
+    assert path.read_text(encoding="utf-8") == (
+        "<?php\n"
+        "// fleet-managed: trust this instance's fleet hostname(s).\n"
+        "$settings['trusted_host_patterns'][] = '^.+\\.fleet\\.example\\.test$';\n"
+    )
+
+
+def test_write_settings_local_no_docroot_uses_root(tmp_path):
+    instance_dir = tmp_path / "instance"
+    ddev_dir = instance_dir / ".ddev"
+    ddev_dir.mkdir(parents=True)
+    (ddev_dir / "config.yaml").write_text("name: demo--develop\n", encoding="utf-8")
+    (instance_dir / "sites" / "default").mkdir(parents=True)
+
+    path = write_settings_local(instance_dir, "fleet.example.test")
+
+    assert path == instance_dir / "sites" / "default" / "settings.local.php"
+    assert path.exists()
+
+
+def test_write_settings_local_non_drupal_returns_none(tmp_path):
+    instance_dir = tmp_path / "instance"
+    instance_dir.mkdir(parents=True)
+
+    path = write_settings_local(instance_dir, "fleet.example.test")
+
+    assert path is None
+    assert not (instance_dir / "sites").exists()
