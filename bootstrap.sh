@@ -44,7 +44,13 @@ echo "==> Installing Ansible Galaxy collections"
 ansible-galaxy collection install -r "${FLEET_OPT_DIR}/ansible/requirements.yml"
 
 echo "==> Running the provisioning playbook"
-ansible-playbook -c local "${FLEET_OPT_DIR}/ansible/site.yml"
+if [ -n "${FLEET_SKIP_FETCH}" ]; then
+  # Also tell the playbook not to git-fetch the product repo (fleet_service
+  # role) — the code is already on disk, delivered out-of-band.
+  ansible-playbook -c local -e fleet_skip_fetch=true "${FLEET_OPT_DIR}/ansible/site.yml"
+else
+  ansible-playbook -c local "${FLEET_OPT_DIR}/ansible/site.yml"
+fi
 
 echo
 echo "==> Provisioning complete."

@@ -51,6 +51,12 @@ fleet_admin_bcrypt_hash: "$2b$14$uENGKN0eNjTf0VTAIpyZmOFSr2HzXOldKWVn61SImgrIV1G
 # --- Product repo (spec §3.1, §17) — AWAITS CONFIRMATION --------------------
 fleet_repo_url: https://bitbucket.org/personal_maintainer/ddev-fleet.git
 fleet_repo_version: main
+# When true, the code is delivered out-of-band (e.g. rsync/tar of a clean
+# checkout to fleet_opt_dir) and BOTH fetch points — bootstrap.sh and the
+# fleet_service git task — are skipped, so no server-side git auth is needed
+# for a private repo. bootstrap.sh sets this via `-e fleet_skip_fetch=true`
+# when it is run with FLEET_SKIP_FETCH=1.
+fleet_skip_fetch: false
 
 # --- Package repos (pinned upstream URLs; package versions float to latest
 # stable at apply time, per spec §3 — no version pinning requirement) ------
