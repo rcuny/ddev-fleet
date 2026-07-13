@@ -2,6 +2,12 @@
 - name: Provision ddev-fleet host
   hosts: localhost
   become: true
+  # Flush queued handlers even if a later role fails. Without this, a task
+  # failing after the caddy role (which notifies "Reload caddy" on a changed
+  # Caddyfile) leaves caddy running its default package config — the deployed
+  # Caddyfile is on disk but never loaded, so :443 never comes up. Seen live
+  # on the first Debian 13 rollout when an unrelated later role failed.
+  force_handlers: true
   roles:
     - base
     - docker
