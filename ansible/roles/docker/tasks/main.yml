@@ -9,7 +9,7 @@
 
 - name: Download the Docker apt signing key
   ansible.builtin.get_url:
-    url: https://download.docker.com/linux/debian/gpg
+    url: "https://download.docker.com/linux/{{ ansible_distribution | lower }}/gpg"
     dest: /etc/apt/keyrings/docker.asc
     owner: root
     group: root

@@ -18,15 +18,40 @@ fleet.<domain>       A     <server-ip>
 *.fleet.<domain>     A     <server-ip>
 ```
 
-## 2. Run bootstrap
+## 2. Deliver the code + run bootstrap
+
+The repo is PRIVATE, so there is no server-side git auth. **Recommended:
+push a clean checkout from a machine that already has the repo, then run
+bootstrap in skip-fetch mode** — nothing secret ever lands on the server.
 
 ```bash
-# Repo is PRIVATE — the bare raw-URL one-liner is auth-gated. Either:
-#   (a) scp bootstrap.sh to the server, then: sudo bash bootstrap.sh
-#       (export FLEET_REPO_URL=https://<user>:<app-password>@bitbucket.org/personal_maintainer/ddev-fleet.git first), or
-#   (b) pre-clone the repo to /opt/ddev-fleet manually, then: sudo bash /opt/ddev-fleet/bootstrap.sh
-# public-repo variant: curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
+# --- on the build machine (has the repo) --------------------------------
+TMP="$(mktemp -d)"
+git -C /path/to/ddev-fleet archive --format=tar HEAD | tar -x -C "$TMP"   # pristine, no .git, no uncommitted cruft
+ssh root@<server> 'mkdir -p /opt/ddev-fleet'
+rsync -az --delete "$TMP"/ root@<server>:/opt/ddev-fleet/
+rm -rf "$TMP"
+
+# --- on the server ------------------------------------------------------
+ssh root@<server> 'FLEET_SKIP_FETCH=1 bash /opt/ddev-fleet/bootstrap.sh'
 ```
+
+`FLEET_SKIP_FETCH=1` tells bootstrap the code is already present and to
+skip the git clone/pull (it aborts with a clear error if the code is
+missing). To upgrade later, re-run the same rsync + command.
+
+Alternative delivery methods (only if not using the rsync path above):
+```bash
+# (a) scp bootstrap.sh, clone over https with an app-password:
+#     export FLEET_REPO_URL=https://<user>:<app-password>@bitbucket.org/personal_maintainer/ddev-fleet.git; sudo bash bootstrap.sh
+# (b) pre-clone /opt/ddev-fleet manually, then: sudo bash /opt/ddev-fleet/bootstrap.sh
+# (c) public-repo one-liner: curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
+```
+
+> Login user: on a fresh **Debian 13** netinstall root SSH is typically
+> available, so `root@<server>` works directly. If the image disables root
+> (e.g. a cloud Ubuntu image uses `ubuntu@` + `sudo`), adjust every command
+> in this runbook accordingly.
 
 The first run uses the placeholder `fleet_admin_bcrypt_hash` in
 `ansible/group_vars/all.yml` — basic auth will not yet accept a real
