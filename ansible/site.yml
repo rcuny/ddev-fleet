@@ -8,10 +8,25 @@
   # Caddyfile is on disk but never loaded, so :443 never comes up. Seen live
   # on the first Debian 13 rollout when an unrelated later role failed.
   force_handlers: true
+  pre_tasks:
+    # Host-local variable overrides live OUTSIDE /opt/ddev-fleet, so a code
+    # re-delivery (rsync/tar of a clean checkout) never reverts them. Use this
+    # for secrets like fleet_admin_bcrypt_hash: set the real hash in
+    # /etc/ddev-fleet/local-vars.yml on the host and the committed group_vars
+    # placeholder (fail-closed) is overridden. include_vars (precedence #18)
+    # outranks group_vars/all (#4), so the file's values win.
+    - name: Check for host-local variable overrides
+      ansible.builtin.stat:
+        path: /etc/ddev-fleet/local-vars.yml
+      register: _fleet_local_vars
+    - name: Load host-local variable overrides if present
+      ansible.builtin.include_vars: /etc/ddev-fleet/local-vars.yml
+      when: _fleet_local_vars.stat.exists
   roles:
     - base
     - docker
     - fleet_user
     - ddev
+    - claude_cli
     - caddy
     - fleet_service
