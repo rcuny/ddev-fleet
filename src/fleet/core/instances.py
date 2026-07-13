@@ -11,7 +11,7 @@ from ruamel.yaml import YAML
 from fleet.core import assets as assets_mod
 from fleet.core import ddev, gitops
 from fleet.core.errors import DeployError, FleetError
-from fleet.core.fleetconfig import ensure_git_exclude, write_fleet_config
+from fleet.core.fleetconfig import ensure_git_exclude, write_fleet_config, write_web_build
 from fleet.core.locks import instance_lock
 from fleet.core.registry import Registry
 from fleet.core.runner import run_streamed
@@ -145,7 +145,11 @@ def deploy(
                 "run 'fleet init' or set it before deploying"
             )
         write_fleet_config(instance_dir, inst_id, registry.domain, claude_token)
-        ensure_git_exclude(instance_dir, [".ddev/config.fleet.yaml", ".fleet/"])
+        write_web_build(instance_dir)
+        ensure_git_exclude(
+            instance_dir,
+            [".ddev/config.fleet.yaml", ".ddev/web-build/Dockerfile.fleet-claude", ".fleet/"],
+        )
 
         context = build_context(project, instance, resolved.branch, registry.domain)
         copied = assets_mod.inject(

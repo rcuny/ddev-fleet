@@ -25,6 +25,21 @@ def write_fleet_config(
     return config_path
 
 
+_CLAUDE_WEB_BUILD = "RUN npm install -g @anthropic-ai/claude-code\n"
+
+
+def write_web_build(instance_dir: Path) -> Path:
+    """Bake the Claude Code CLI into the instance's DDEV web image so
+    `ddev exec claude` works (the token is injected separately via
+    config.fleet.yaml's web_environment). DDEV concatenates
+    .ddev/web-build/Dockerfile.* onto the web image build."""
+    web_build_dir = instance_dir / ".ddev" / "web-build"
+    web_build_dir.mkdir(parents=True, exist_ok=True)
+    dockerfile = web_build_dir / "Dockerfile.fleet-claude"
+    dockerfile.write_text(_CLAUDE_WEB_BUILD, encoding="utf-8")
+    return dockerfile
+
+
 def ensure_git_exclude(instance_dir: Path, patterns: list[str]) -> None:
     exclude_path = instance_dir / ".git" / "info" / "exclude"
     exclude_path.parent.mkdir(parents=True, exist_ok=True)
