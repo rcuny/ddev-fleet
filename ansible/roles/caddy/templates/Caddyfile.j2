@@ -19,11 +19,14 @@
 }
 
 *.{{ fleet_domain }} {
-    reverse_proxy https://127.0.0.1:{{ ddev_router_https_port }} {
-        transport http {
-            tls_insecure_skip_verify
-        }
-    }
+    # Caddy terminates the client TLS (on-demand cert per instance) and proxies
+    # to DDEV's Traefik HTTP entrypoint. Proxying to Traefik's HTTPS port
+    # ({{ ddev_router_https_port }}) instead returns 404 — Traefik's HTTPS router
+    # matching does not engage for Caddy's proxied request — whereas the HTTP
+    # entrypoint routes correctly by Host header. Caddy sets
+    # X-Forwarded-Proto=https so Drupal still sees the request as secure; the
+    # 127.0.0.1 hop is plaintext-safe (never leaves the host).
+    reverse_proxy 127.0.0.1:{{ ddev_router_http_port }}
     tls {
         on_demand
     }
