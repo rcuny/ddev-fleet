@@ -27,8 +27,12 @@ def test_job_manager_end_to_end_and_concurrency_limit():
         assert manager.get(job_c.id).state == "queued"
 
         blocker.set()
+        # Wait for ALL three to reach a terminal state. Polling only job_c races:
+        # job_c starting means a slot freed (one of a/b finished), but the other
+        # can still be transitioning "running"->"succeeded" when we assert.
         for _ in range(200):
-            if manager.get(job_c.id).state == "succeeded":
+            states = [manager.get(j.id).state for j in (job_a, job_b, job_c)]
+            if all(s == "succeeded" for s in states):
                 break
             await asyncio.sleep(0.01)
 

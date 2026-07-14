@@ -14,10 +14,10 @@ def _run_git(cmd, cwd):
 
 
 def _make_paths_and_registry(fleet_home, git_url):
-    registry_path = fleet_home / "fleet.yml"
-    registry_path.write_text(_registry_text(fleet_home, git_url), encoding="utf-8")
-    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
     paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(_registry_text(fleet_home, git_url), encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
     registry = Registry.load(paths.registry)
     return paths, registry
 
@@ -25,24 +25,43 @@ def _make_paths_and_registry(fleet_home, git_url):
 def test_update_refuses_dirty_worktree_without_force(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     runner = HybridRunner()
-    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=runner)
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
 
-    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir = paths.instances / "demo--develop"
     (instance_dir / "README.md").write_text("dirty\n", encoding="utf-8")
 
     with pytest.raises(DirtyWorktreeError):
-        instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+        instances.deploy(
+            paths,
+            registry,
+            "demo",
+            "default",
+            branch="main",
+            label="develop",
+            runner=HybridRunner(),
+        )
 
 
 def test_update_succeeds_with_force(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
-    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
 
-    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir = paths.instances / "demo--develop"
     (instance_dir / "README.md").write_text("dirty\n", encoding="utf-8")
 
     url = instances.deploy(
-        paths, registry, "demo", "develop", branch="main", force=True, runner=HybridRunner()
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        force=True,
+        runner=HybridRunner(),
     )
     assert url == "https://demo--develop.fleet.example.test"
     assert (instance_dir / "README.md").read_text(encoding="utf-8") == "hello\n"
@@ -50,13 +69,24 @@ def test_update_succeeds_with_force(fleet_home, git_repo):
 
 def test_deploy_fresh_destroys_and_reclones(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
-    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
 
-    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir = paths.instances / "demo--develop"
     (instance_dir / "stray-file.txt").write_text("leftover\n", encoding="utf-8")
 
     runner = HybridRunner()
-    instances.deploy(paths, registry, "demo", "develop", branch="main", fresh=True, runner=runner)
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        fresh=True,
+        runner=runner,
+    )
 
     command_names = [call["cmd"][0] for call in runner.calls]
     assert command_names[0] == "ddev"  # ddev delete, from the fresh destroy, runs first
@@ -66,9 +96,11 @@ def test_deploy_fresh_destroys_and_reclones(fleet_home, git_repo):
 
 def test_destroy_removes_instance_dir_and_lock_file(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
-    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
 
-    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir = paths.instances / "demo--develop"
     lock_path = paths.locks / "demo--develop.lock"
     assert instance_dir.exists()
     assert lock_path.exists()
@@ -82,7 +114,9 @@ def test_destroy_removes_instance_dir_and_lock_file(fleet_home, git_repo):
 def test_destroy_tolerates_ddev_delete_failure(fleet_home, git_repo):
 
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
-    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
 
     class FailingDeleteRunner(HybridRunner):
         def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
@@ -91,7 +125,7 @@ def test_destroy_tolerates_ddev_delete_failure(fleet_home, git_repo):
                 raise RuntimeError("ddev delete exploded")
             return super().__call__(cmd, cwd=cwd, env=env, log_path=log_path, echo=echo)
 
-    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir = paths.instances / "demo--develop"
     instances.destroy(paths, registry, "demo--develop", runner=FailingDeleteRunner())
 
     assert not instance_dir.exists()
@@ -105,9 +139,11 @@ def test_destroy_unknown_instance_raises(fleet_home, git_repo):
 
 def test_start_and_stop_compose_correct_argv(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
-    instances.deploy(paths, registry, "demo", "develop", branch="main", runner=HybridRunner())
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
 
-    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir = paths.instances / "demo--develop"
 
     start_runner = HybridRunner()
     instances.start(paths, registry, "demo--develop", runner=start_runner)

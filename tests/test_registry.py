@@ -11,27 +11,51 @@ def _write(path: Path, text: str) -> Path:
     return path
 
 
-def test_load_resolves_project_default_post_deploy(fleet_home, sample_registry_text):
+def test_resolve_uses_project_default_template_post_deploy(fleet_home, sample_registry_text):
     path = _write(fleet_home / "fleet.yml", sample_registry_text)
     registry = Registry.load(path)
 
-    resolved = registry.resolve("demo", "develop")
+    resolved = registry.resolve("demo", "default", "main")
 
     assert resolved.project == "demo"
-    assert resolved.instance == "develop"
+    assert resolved.template == "default"
     assert resolved.branch == "main"
+    assert resolved.label == "main"
     assert resolved.post_deploy == ["echo project-default"]
-    assert resolved.instance_id == "demo--develop"
+    assert resolved.instance_id == "demo--main"
 
 
-def test_load_resolves_instance_post_deploy_replaces_default(fleet_home, sample_registry_text):
+def test_resolve_uses_named_template_post_deploy(fleet_home, sample_registry_text):
     path = _write(fleet_home / "fleet.yml", sample_registry_text)
     registry = Registry.load(path)
 
-    resolved = registry.resolve("demo", "custom")
+    resolved = registry.resolve("demo", "custom", "feature-x")
 
     assert resolved.branch == "feature-x"
+    assert resolved.label == "feature-x"
     assert resolved.post_deploy == ["echo instance-override"]
+    assert resolved.instance_id == "demo--feature-x"
+
+
+def test_resolve_label_defaults_to_slugified_branch(fleet_home, sample_registry_text):
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "feature/Foo Bar")
+
+    assert resolved.label == "feature-foo-bar"
+    assert resolved.instance_id == "demo--feature-foo-bar"
+
+
+def test_resolve_explicit_label_overrides_slugified_branch(fleet_home, sample_registry_text):
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "feature/foo", label="mylabel")
+
+    assert resolved.branch == "feature/foo"
+    assert resolved.label == "mylabel"
+    assert resolved.instance_id == "demo--mylabel"
 
 
 def test_registry_properties(fleet_home, sample_registry_text):
@@ -39,14 +63,50 @@ def test_registry_properties(fleet_home, sample_registry_text):
     registry = Registry.load(path)
 
     assert registry.domain == "fleet.example.test"
-    assert registry.assets_path == fleet_home / "assets"
-    assert registry.instances_path == fleet_home / "instances"
     assert registry.project_keys() == ["demo"]
     assert registry.has_project("demo") is True
     assert registry.has_project("nope") is False
-    assert registry.has_instance("demo", "develop") is True
-    assert registry.has_instance("demo", "nonexistent") is False
+    assert set(registry.template_keys("demo")) == {"default", "custom"}
     assert registry.git_url("demo") == "git@example.test:org/demo.git"
+    assert registry.project_defaults("demo") == ("default", "main")
+    assert registry.additional_hostnames("demo") == []
+
+
+def test_project_defaults_are_none_when_not_configured(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  bare:
+    git: git@example.test:org/bare.git
+    templates:
+      default: {}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    registry = Registry.load(path)
+
+    assert registry.project_defaults("bare") == (None, None)
+
+
+def test_additional_hostnames_returns_configured_list(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - www
+      - api
+    templates:
+      default: {}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    registry = Registry.load(path)
+
+    assert registry.additional_hostnames("demo") == ["www", "api"]
 
 
 def test_load_missing_git_key_names_the_key(fleet_home, sample_registry_text):
@@ -70,96 +130,68 @@ def test_load_invalid_project_key_names_the_key(fleet_home, sample_registry_text
     assert "Bad_Project" in str(exc_info.value)
 
 
+def test_load_template_with_branch_key_raises(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default:
+        branch: main
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+
+    with pytest.raises(RegistryError) as exc_info:
+        Registry.load(path)
+    assert "projects.demo.templates.default.branch" in str(exc_info.value)
+
+
 def test_resolve_unknown_project_raises(fleet_home, sample_registry_text):
     path = _write(fleet_home / "fleet.yml", sample_registry_text)
     registry = Registry.load(path)
 
     with pytest.raises(RegistryError):
-        registry.resolve("nonexistent", "develop")
+        registry.resolve("nonexistent", "default", "main")
 
 
-def test_register_instance_and_save_round_trip_preserves_comment(fleet_home, sample_registry_text):
-    path = _write(fleet_home / "fleet.yml", sample_registry_text)
-    registry = Registry.load(path)
-
-    registry.register_instance("demo", "newinst", "release-1")
-    registry.save()
-
-    assert registry.has_instance("demo", "newinst") is True
-    saved_text = path.read_text(encoding="utf-8")
-    assert "# Wildcard DNS root" in saved_text
-
-    reloaded = Registry.load(path)
-    resolved = reloaded.resolve("demo", "newinst")
-    assert resolved.branch == "release-1"
-    assert resolved.post_deploy == ["echo project-default"]
-
-
-def test_add_project_and_save_round_trip(fleet_home, sample_registry_text):
-    path = _write(fleet_home / "fleet.yml", sample_registry_text)
-    registry = Registry.load(path)
-
-    registry.add_project("newproj", "git@example.test:org/newproj.git", ["echo hi"])
-    registry.save()
-
-    reloaded = Registry.load(path)
-    assert reloaded.has_project("newproj") is True
-    assert reloaded.git_url("newproj") == "git@example.test:org/newproj.git"
-
-
-def test_add_project_duplicate_raises(fleet_home, sample_registry_text):
+def test_resolve_unknown_template_raises(fleet_home, sample_registry_text):
     path = _write(fleet_home / "fleet.yml", sample_registry_text)
     registry = Registry.load(path)
 
     with pytest.raises(RegistryError):
-        registry.add_project("demo", "git@example.test:org/demo.git")
+        registry.resolve("demo", "nonexistent", "main")
+
+
+def test_resolve_missing_branch_raises(fleet_home, sample_registry_text):
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    with pytest.raises(RegistryError):
+        registry.resolve("demo", "default", "")
 
 
 def test_resolve_with_no_post_deploy_returns_empty_list(fleet_home):
-    """When neither project nor instance defines post_deploy, resolve returns empty list."""
+    """When the resolved template defines no post_deploy, resolve returns an
+    empty list."""
     registry_text = """\
 fleet:
   domain: fleet.example.test
-  assets_path: {assets_path}
-  instances_path: {instances_path}
 
 projects:
   testproj:
     git: git@example.test:org/testproj.git
-    instances:
-      no-deploy:
-        branch: main
+    templates:
+      no-deploy: {}
 """
-    registry_text = registry_text.format(
-        assets_path=str(fleet_home / "assets"),
-        instances_path=str(fleet_home / "instances"),
-    )
     path = _write(fleet_home / "fleet.yml", registry_text)
     registry = Registry.load(path)
 
-    resolved = registry.resolve("testproj", "no-deploy")
+    resolved = registry.resolve("testproj", "no-deploy", "main")
 
     assert resolved.post_deploy == []
-
-
-def test_register_instance_invalid_name_raises_registry_error(fleet_home, sample_registry_text):
-    """register_instance with invalid instance name raises RegistryError, not ValidationError."""
-    path = _write(fleet_home / "fleet.yml", sample_registry_text)
-    registry = Registry.load(path)
-
-    with pytest.raises(RegistryError) as exc_info:
-        registry.register_instance("demo", "Bad Name", "main")
-    assert "invalid instance name" in str(exc_info.value)
-
-
-def test_add_project_invalid_key_raises_registry_error(fleet_home, sample_registry_text):
-    """add_project with invalid key raises RegistryError, not ValidationError."""
-    path = _write(fleet_home / "fleet.yml", sample_registry_text)
-    registry = Registry.load(path)
-
-    with pytest.raises(RegistryError) as exc_info:
-        registry.add_project("Bad_Key", "git@example.test:org/bad.git")
-    assert "invalid project key" in str(exc_info.value)
 
 
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):

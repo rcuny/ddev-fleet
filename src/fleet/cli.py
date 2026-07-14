@@ -52,8 +52,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     deploy_parser = subparsers.add_parser("deploy")
     deploy_parser.add_argument("project")
-    deploy_parser.add_argument("instance")
+    deploy_parser.add_argument("template", nargs="?", default=None)
     deploy_parser.add_argument("--branch", default=None)
+    deploy_parser.add_argument("--label", default=None)
     deploy_parser.add_argument("--fresh", action="store_true")
     deploy_parser.add_argument("--force", action="store_true")
 
@@ -67,13 +68,6 @@ def _build_parser() -> argparse.ArgumentParser:
     stop_parser.add_argument("instance_id")
 
     subparsers.add_parser("list")
-
-    project_parser = subparsers.add_parser("project")
-    project_subparsers = project_parser.add_subparsers(dest="project_command", required=True)
-    project_add_parser = project_subparsers.add_parser("add")
-    project_add_parser.add_argument("key")
-    project_add_parser.add_argument("--git", required=True)
-    project_add_parser.add_argument("--post-deploy", action="append", default=None)
 
     subparsers.add_parser("ssh-key")
 
@@ -89,6 +83,8 @@ def _build_parser() -> argparse.ArgumentParser:
     snapshot_parser.add_argument("--dest-rel", default="dumps/db.sql.gz")
 
     subparsers.add_parser("refresh-claude-token")
+
+    subparsers.add_parser("refresh-config")
 
     return parser
 
@@ -111,8 +107,6 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_stop(fleet_home, args)
         elif args.command == "list":
             _cmd_list(fleet_home, args)
-        elif args.command == "project":
-            _cmd_project(fleet_home, args)
         elif args.command == "ssh-key":
             _cmd_ssh_key(fleet_home, args)
         elif args.command == "assets":
@@ -121,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_snapshot(fleet_home, args)
         elif args.command == "refresh-claude-token":
             return _cmd_refresh_claude_token(fleet_home, args)
+        elif args.command == "refresh-config":
+            _cmd_refresh_config(fleet_home, runner=run_streamed)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
@@ -129,24 +125,23 @@ def main(argv: list[str] | None = None) -> int:
 
 
 def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
-    fleet_home.mkdir(parents=True, exist_ok=True)
-    (fleet_home / "assets").mkdir(exist_ok=True)
-    (fleet_home / "instances").mkdir(exist_ok=True)
-    (fleet_home / "locks").mkdir(exist_ok=True)
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.assets.mkdir(parents=True, exist_ok=True)
+    paths.instances.mkdir(exist_ok=True)
+    paths.locks.mkdir(exist_ok=True)
 
     domain = args.domain
     if not domain:
         domain = input("Fleet domain: ").strip()
 
-    registry_path = fleet_home / "fleet.yml"
+    registry_path = paths.registry
     if registry_path.exists():
         print(f"{registry_path} already exists — skipping", file=sys.stderr)
     else:
         skeleton = {
             "fleet": {
                 "domain": domain,
-                "assets_path": str(fleet_home / "assets"),
-                "instances_path": str(fleet_home / "instances"),
             },
             "projects": {},
         }
@@ -172,8 +167,9 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> None:
         paths,
         registry,
         args.project,
-        args.instance,
+        args.template,
         branch=args.branch,
+        label=args.label,
         fresh=args.fresh,
         force=args.force,
     )
@@ -212,14 +208,6 @@ def _cmd_list(fleet_home: Path, args: argparse.Namespace) -> None:
         )
 
 
-def _cmd_project(fleet_home: Path, args: argparse.Namespace) -> None:
-    paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
-    if args.project_command == "add":
-        registry.add_project(args.key, args.git, args.post_deploy)
-        registry.save()
-
-
 def _cmd_ssh_key(fleet_home: Path, args: argparse.Namespace) -> None:
     key_path = fleet_home / "fleet-deploy-key.pub"
     if not key_path.exists():
@@ -231,7 +219,9 @@ def _cmd_assets(fleet_home: Path, args: argparse.Namespace) -> None:
     if args.assets_command == "push":
         paths = instances_mod.FleetPaths.from_home(fleet_home)
         registry = Registry.load(paths.registry)
-        assets_dir = registry.assets_path / args.project
+        if not registry.has_project(args.project):
+            raise FleetError(f"unknown project {args.project!r}")
+        assets_dir = paths.assets / args.project
         dest = assets_mod.push(assets_dir, Path(args.src), args.dest_rel)
         print(dest)
 
@@ -251,7 +241,7 @@ def _cmd_refresh_claude_token(fleet_home: Path, args: argparse.Namespace) -> int
 
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    instances_root = registry.instances_path
+    instances_root = paths.instances
 
     try:
         running_ids = {
@@ -285,6 +275,16 @@ def _cmd_refresh_claude_token(fleet_home: Path, args: argparse.Namespace) -> int
                 failed.append(entry.name)
 
     return 1 if failed else 0
+
+
+def _cmd_refresh_config(fleet_home: Path, *, runner=run_streamed) -> None:
+    cfg = fleet_home / "config"
+    if (cfg / ".git").is_dir():
+        runner(["git", "-C", str(cfg), "fetch", "--quiet"])
+        runner(["git", "-C", str(cfg), "pull", "--ff-only"])
+        print(f"refreshed {cfg} (git pull)")
+    else:
+        print(f"{cfg} is not a git checkout — edit in place; nothing to pull")
 
 
 if __name__ == "__main__":

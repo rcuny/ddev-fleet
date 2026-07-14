@@ -30,6 +30,21 @@ def test_write_fleet_config_without_token(tmp_path):
     )
 
 
+def test_write_fleet_config_with_additional_fqdns(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        None,
+        additional_fqdns=["albania.oak--develop.fleet.example.test"],
+    )
+
+    content = path.read_text(encoding="utf-8")
+    assert "additional_fqdns:" in content
+    assert "albania.oak--develop.fleet.example.test" in content
+
+
 def test_write_web_build(tmp_path):
     instance_dir = tmp_path / "instance"
     path = write_web_build(instance_dir)
@@ -100,11 +115,17 @@ def test_write_settings_local_writes_trusted_host(tmp_path):
         "// are set for the current fleet host (services.fleet.yml is appended last, so it\n"
         "// overrides the project's / DDEV's services container yamls).\n"
         "$settings['container_yamls'][] = $app_root . '/' . $site_path . '/services.fleet.yml';\n"
+        "// fleet-managed: load the project's own (fleet-agnostic) overrides if present.\n"
+        "if (file_exists(__DIR__ . '/settings.project.php')) {\n"
+        "    include __DIR__ . '/settings.project.php';\n"
+        "}\n"
     )
+    assert "if (file_exists(__DIR__ . '/settings.project.php'))" in result[0].read_text(
+        encoding="utf-8"
+    )
+    assert "include __DIR__ . '/settings.project.php';" in result[0].read_text(encoding="utf-8")
     assert result[1].read_text(encoding="utf-8") == (
-        "parameters:\n"
-        "  session.storage.options:\n"
-        "    cookie_domain: ''\n"
+        "parameters:\n" "  session.storage.options:\n" "    cookie_domain: ''\n"
     )
 
 
