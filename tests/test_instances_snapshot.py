@@ -8,22 +8,22 @@ from tests.conftest import FakeRunner
 
 
 def _registry(fleet_home):
-    path = fleet_home / "fleet.yml"
-    path.write_text(
-        f"""\
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
 fleet:
   domain: fleet.example.test
-  assets_path: {fleet_home / "assets"}
-  instances_path: {fleet_home / "instances"}
 
 projects:
   demo:
     git: git@example.test:org/demo.git
-    instances: {{}}
+    templates:
+      default: {}
 """,
         encoding="utf-8",
     )
-    return Registry.load(path)
+    return Registry.load(paths.registry)
 
 
 def test_snapshot_missing_instance_dir_raises(fleet_home):
@@ -36,7 +36,7 @@ def test_snapshot_missing_instance_dir_raises(fleet_home):
 def test_snapshot_runs_ddev_export_db_under_lock_and_derives_project(fleet_home):
     registry = _registry(fleet_home)
     paths = instances.FleetPaths.from_home(fleet_home)
-    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir = paths.instances / "demo--develop"
     fleet_dir = instance_dir / ".fleet"
     fleet_dir.mkdir(parents=True)
     (fleet_dir / "instance.yml").write_text(
@@ -48,7 +48,7 @@ def test_snapshot_runs_ddev_export_db_under_lock_and_derives_project(fleet_home)
 
     dest = instances.snapshot(paths, registry, "demo--develop", runner=fake)
 
-    expected_dest = fleet_home / "assets" / "demo" / "dumps" / "db.sql.gz"
+    expected_dest = paths.assets / "demo" / "dumps" / "db.sql.gz"
     assert dest == expected_dest
     assert fake.calls[0]["cmd"] == ["ddev", "export-db", f"--file={expected_dest}"]
     assert fake.calls[0]["cwd"] == instance_dir
@@ -60,18 +60,18 @@ def test_snapshot_runs_ddev_export_db_under_lock_and_derives_project(fleet_home)
 def test_snapshot_falls_back_to_id_split_without_instance_yml(fleet_home):
     registry = _registry(fleet_home)
     paths = instances.FleetPaths.from_home(fleet_home)
-    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    (paths.instances / "demo--develop").mkdir(parents=True)
     fake = FakeRunner()
 
     dest = instances.snapshot(paths, registry, "demo--develop", runner=fake)
 
-    assert dest == fleet_home / "assets" / "demo" / "dumps" / "db.sql.gz"
+    assert dest == paths.assets / "demo" / "dumps" / "db.sql.gz"
 
 
 def test_snapshot_raises_on_nonzero_export_db(fleet_home):
     registry = _registry(fleet_home)
     paths = instances.FleetPaths.from_home(fleet_home)
-    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    (paths.instances / "demo--develop").mkdir(parents=True)
     fake = FakeRunner(default=RunResult(returncode=1, lines=["boom"]))
 
     with pytest.raises(FleetError):
@@ -81,11 +81,11 @@ def test_snapshot_raises_on_nonzero_export_db(fleet_home):
 def test_snapshot_accepts_custom_dest_rel(fleet_home):
     registry = _registry(fleet_home)
     paths = instances.FleetPaths.from_home(fleet_home)
-    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    (paths.instances / "demo--develop").mkdir(parents=True)
     fake = FakeRunner()
 
     dest = instances.snapshot(
         paths, registry, "demo--develop", dest_rel="custom/dump.sql.gz", runner=fake
     )
 
-    assert dest == fleet_home / "assets" / "demo" / "custom" / "dump.sql.gz"
+    assert dest == paths.assets / "demo" / "custom" / "dump.sql.gz"

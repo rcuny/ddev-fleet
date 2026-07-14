@@ -5,6 +5,7 @@ import re
 from fleet.core.errors import ValidationError
 
 _PART_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
+_SLUGIFY_RE = re.compile(r"[^a-z0-9]+")
 _MAX_INSTANCE_ID_LENGTH = 63
 
 
@@ -29,11 +30,24 @@ def validate_part(value: str) -> None:
         )
 
 
-def instance_id(project: str, instance: str) -> str:
-    """Validate both parts and compose the instance id ``<project>--<instance>``."""
+def slugify(value: str) -> str:
+    """Lowercase ``value``, collapse every run of characters outside
+    ``[a-z0-9]`` into a single ``-``, and strip leading/trailing ``-``.
+
+    Raises ``ValidationError`` if the result is empty (e.g. input was empty
+    or consisted entirely of characters that get stripped).
+    """
+    slug = _SLUGIFY_RE.sub("-", value.lower()).strip("-")
+    if not slug:
+        raise ValidationError(f"cannot slugify {value!r}: result is empty")
+    return slug
+
+
+def instance_id(project: str, label: str) -> str:
+    """Validate both parts and compose the instance id ``<project>--<label>``."""
     validate_part(project)
-    validate_part(instance)
-    composed = f"{project}--{instance}"
+    validate_part(label)
+    composed = f"{project}--{label}"
     if len(composed) > _MAX_INSTANCE_ID_LENGTH:
         raise ValidationError(
             f"instance id {composed!r} is {len(composed)} characters, exceeds "

@@ -7,17 +7,20 @@ from fleet.jobs import Job
 
 
 def _setup_fleet_home(fleet_home):
-    (fleet_home / "fleet.yml").write_text(
-        f"""\
+    from fleet.core.instances import FleetPaths
+
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
 fleet:
   domain: fleet.example.test
-  assets_path: {fleet_home / "assets"}
-  instances_path: {fleet_home / "instances"}
 
 projects:
   demo:
     git: git@example.test:org/demo.git
-    instances: {{}}
+    templates:
+      default: {}
 """,
         encoding="utf-8",
     )

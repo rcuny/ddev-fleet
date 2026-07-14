@@ -81,7 +81,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     @app.get("/api/tls-authorize")
     def tls_authorize(domain: str = Query(...)):
-        registry = Registry.load(fleet_home / "fleet.yml")
+        paths, registry = _paths_and_registry()
         suffix = f".{registry.domain}"
         if not domain.endswith(suffix):
             return JSONResponse(status_code=404, content={"authorized": False})
@@ -90,7 +90,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         if "." in label:
             return JSONResponse(status_code=404, content={"authorized": False})
 
-        instances_path = registry.instances_path
+        instances_path = paths.instances
         if not instances_path.exists():
             return JSONResponse(status_code=404, content={"authorized": False})
 
@@ -124,8 +124,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             await websocket.close(code=1008)
             return
 
-        registry = Registry.load(fleet_home / "fleet.yml")
-        log_path = registry.instances_path / instance_id / ".fleet" / "deploy.log"
+        paths, _ = _paths_and_registry()
+        log_path = paths.instances / instance_id / ".fleet" / "deploy.log"
 
         try:
             if log_path.exists():
@@ -164,10 +164,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     async def index(request: Request):
         paths, registry = _paths_and_registry()
         statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
+        project_templates = {p: registry.template_keys(p) for p in registry.project_keys()}
         return templates.TemplateResponse(
             request,
             "instances.html",
-            {"statuses": statuses, "project_keys": registry.project_keys()},
+            {"statuses": statuses, "project_templates": project_templates},
         )
 
     @app.post("/ui/instances/{instance_id}/start")
@@ -205,17 +206,36 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     async def ui_deploy(
         request: Request,
         project: str = Form(...),
-        instance: str = Form(...),
+        template: str = Form(...),
         branch: str = Form(""),
+        label: str = Form(""),
         fresh: str = Form(""),
     ):
+        naming.validate_part(project)
         paths, registry = _paths_and_registry()
-        inst_id = naming.instance_id(project, instance)
-        log_path = str(registry.instances_path / inst_id / ".fleet" / "deploy.log")
+        default_template, default_branch = registry.project_defaults(project)
+        resolved_template = template or default_template
+        resolved_branch = branch or default_branch
+        if not resolved_template or not resolved_branch:
+            raise FleetError(
+                f"template and branch are required to deploy project {project!r} "
+                "(no defaults configured)"
+            )
+        resolved = registry.resolve(
+            project, resolved_template, resolved_branch, label=label or None
+        )
+        inst_id = resolved.instance_id
+        log_path = str(paths.instances / inst_id / ".fleet" / "deploy.log")
 
         def run_deploy():
             return instances_mod.deploy(
-                paths, registry, project, instance, branch=branch or None, fresh=bool(fresh)
+                paths,
+                registry,
+                project,
+                template or None,
+                branch=branch or None,
+                label=label or None,
+                fresh=bool(fresh),
             )
 
         job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
