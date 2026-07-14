@@ -194,6 +194,32 @@ projects:
     assert resolved.post_deploy == []
 
 
+def test_git_bot_defaults_from_domain(fleet_home, sample_registry_text):
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    assert registry.git_bot() == ("ddev-fleet bot", "bot@fleet.example.test")
+
+
+def test_git_bot_uses_explicit_name_and_email(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  git_bot_name: Custom Bot
+  git_bot_email: custom@bot.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    registry = Registry.load(path)
+
+    assert registry.git_bot() == ("Custom Bot", "custom@bot.example.test")
+
+
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):
     """A nonexistent fleet.yml must raise RegistryError with guidance,
     not a raw FileNotFoundError traceback in the CLI."""

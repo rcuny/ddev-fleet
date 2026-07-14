@@ -15,6 +15,7 @@ def write_fleet_config(
     domain: str,
     claude_token: str | None,
     additional_fqdns: list[str] | None = None,
+    git_bot: tuple[str, str] | None = None,
 ) -> Path:
     ddev_dir = instance_dir / ".ddev"
     ddev_dir.mkdir(parents=True, exist_ok=True)
@@ -23,6 +24,17 @@ def write_fleet_config(
     data: dict = {"name": instance_id, "project_tld": domain}
     if claude_token:
         data["web_environment"] = [f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}"]
+    if git_bot:
+        bot_name, bot_email = git_bot
+        web_environment = data.setdefault("web_environment", [])
+        web_environment.extend(
+            [
+                f"GIT_AUTHOR_NAME={bot_name}",
+                f"GIT_AUTHOR_EMAIL={bot_email}",
+                f"GIT_COMMITTER_NAME={bot_name}",
+                f"GIT_COMMITTER_EMAIL={bot_email}",
+            ]
+        )
     if additional_fqdns:
         data["additional_fqdns"] = list(additional_fqdns)
 

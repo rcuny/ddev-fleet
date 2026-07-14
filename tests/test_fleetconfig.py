@@ -45,6 +45,55 @@ def test_write_fleet_config_with_additional_fqdns(tmp_path):
     assert "albania.oak--develop.fleet.example.test" in content
 
 
+def test_write_fleet_config_with_token_and_git_bot(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        "sk-ant-oat01-xyz",
+        git_bot=("ddev-fleet bot", "bot@x"),
+    )
+
+    content = path.read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz" in content
+    assert "GIT_AUTHOR_NAME=ddev-fleet bot" in content
+    assert "GIT_AUTHOR_EMAIL=bot@x" in content
+    assert "GIT_COMMITTER_NAME=ddev-fleet bot" in content
+    assert "GIT_COMMITTER_EMAIL=bot@x" in content
+    assert path.read_text(encoding="utf-8") == (
+        "name: oak--develop\n"
+        "project_tld: fleet.example.test\n"
+        "web_environment:\n"
+        "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
+        "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
+        "  - GIT_AUTHOR_EMAIL=bot@x\n"
+        "  - GIT_COMMITTER_NAME=ddev-fleet bot\n"
+        "  - GIT_COMMITTER_EMAIL=bot@x\n"
+    )
+
+
+def test_write_fleet_config_without_token_with_git_bot_creates_web_environment(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        None,
+        git_bot=("ddev-fleet bot", "bot@x"),
+    )
+
+    assert path.read_text(encoding="utf-8") == (
+        "name: oak--develop\n"
+        "project_tld: fleet.example.test\n"
+        "web_environment:\n"
+        "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
+        "  - GIT_AUTHOR_EMAIL=bot@x\n"
+        "  - GIT_COMMITTER_NAME=ddev-fleet bot\n"
+        "  - GIT_COMMITTER_EMAIL=bot@x\n"
+    )
+
+
 def test_write_web_build(tmp_path):
     instance_dir = tmp_path / "instance"
     path = write_web_build(instance_dir)

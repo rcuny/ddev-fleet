@@ -84,6 +84,12 @@ class Registry:
     def domain(self) -> str:
         return str(self._data["fleet"]["domain"])
 
+    def git_bot(self) -> tuple[str, str]:
+        fb = self._data["fleet"]
+        name = fb.get("git_bot_name") or "ddev-fleet bot"
+        email = fb.get("git_bot_email") or f"bot@{self.domain}"
+        return (str(name), str(email))
+
     def project_keys(self) -> list[str]:
         return list((self._data.get("projects") or {}).keys())
 

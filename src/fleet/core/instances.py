@@ -172,7 +172,12 @@ def deploy(
             )
         fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
         write_fleet_config(
-            instance_dir, inst_id, registry.domain, claude_token, additional_fqdns=fqdns
+            instance_dir,
+            inst_id,
+            registry.domain,
+            claude_token,
+            additional_fqdns=fqdns,
+            git_bot=registry.git_bot(),
         )
         write_web_build(instance_dir)
         excludes = [

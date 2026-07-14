@@ -235,6 +235,26 @@ def test_deploy_git_excludes_asset_injected_files(fleet_home, git_repo):
     assert ".env" in exclude_content
 
 
+def test_deploy_writes_git_bot_identity_into_web_environment(fleet_home, git_repo):
+    """The deployed instance's config.fleet.yaml must carry the fleet's bot
+    git identity (GIT_AUTHOR_*/GIT_COMMITTER_*) in web_environment, derived
+    from the registry's fleet.domain when no explicit git_bot_name/email is
+    configured."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
+    content = config_path.read_text(encoding="utf-8")
+    assert "GIT_AUTHOR_NAME=ddev-fleet bot" in content
+    assert "GIT_AUTHOR_EMAIL=bot@fleet.example.test" in content
+    assert "GIT_COMMITTER_NAME=ddev-fleet bot" in content
+    assert "GIT_COMMITTER_EMAIL=bot@fleet.example.test" in content
+
+
 def test_deploy_writes_additional_fqdns_from_project_hostnames(fleet_home, git_repo):
     """A project declaring `additional_hostnames` must have those hostnames
     resolved to full per-instance FQDNs and written into the instance's
