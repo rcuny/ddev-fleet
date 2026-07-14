@@ -1,0 +1,12 @@
+# Example fleet registry. Copy to your private config repo as fleet.yml and edit.
+fleet:
+  domain: fleet.example.com
+projects:
+  example:
+    git: git@example.com:you/example.git
+    default_branch: main
+    default_template: default
+    # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
+    templates:
+      default:
+        post_deploy: [ddev start]

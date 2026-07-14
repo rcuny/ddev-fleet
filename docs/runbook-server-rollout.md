@@ -88,7 +88,7 @@ cat /srv/fleet/fleet-deploy-key.pub
 ```
 
 Add it as a **read-only** deploy key on Bitbucket (and GitHub, if used)
-for every project registered in `fleet.yml`.
+for every project registered in `/srv/fleet/config/fleet.yml`.
 
 ## 5. `fleet init` — mint the Claude Code token
 
@@ -191,11 +191,11 @@ sudo systemctl status fleet.service
 
 ## 8. First deploy
 
-Pick a project already registered in `/srv/fleet/fleet.yml` (or register
+Pick a project already registered in `/srv/fleet/config/fleet.yml` (or register
 one with `fleet project add`) and run, as the `fleet` user:
 
 ```bash
-fleet deploy <project> <instance> --branch=<ref>
+fleet deploy <project> <template> --branch <x>
 ```
 
 then browse to the printed instance URL.
