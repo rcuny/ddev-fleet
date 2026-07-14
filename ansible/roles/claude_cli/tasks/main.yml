@@ -1,0 +1,22 @@
+---
+# Installs the Claude Code CLI on the host so `claude setup-token` can mint the
+# long-lived CLAUDE_CODE_OAUTH_TOKEN (spec: token minted once on the server,
+# stored in {{ fleet_srv_dir }}/.secrets, injected into every instance). The
+# fleet CLI runs `claude` as the fleet user, so it must be on the system PATH.
+- name: Install Node.js and npm (runtime for the Claude Code CLI)
+  ansible.builtin.apt:
+    name:
+      - nodejs
+      - npm
+    state: present
+
+- name: Check whether the Claude Code CLI is already installed
+  ansible.builtin.shell: command -v claude
+  register: _claude_installed
+  changed_when: false
+  failed_when: false
+
+- name: Install the Claude Code CLI globally via npm
+  ansible.builtin.command:
+    cmd: npm install -g @anthropic-ai/claude-code
+  when: _claude_installed.rc != 0

@@ -11,9 +11,14 @@ from ruamel.yaml import YAML
 from fleet.core import assets as assets_mod
 from fleet.core import ddev, gitops
 from fleet.core.errors import DeployError, FleetError
-from fleet.core.fleetconfig import ensure_git_exclude, write_fleet_config
+from fleet.core.fleetconfig import (
+    ensure_git_exclude,
+    write_fleet_config,
+    write_settings_local,
+    write_web_build,
+)
 from fleet.core.locks import instance_lock
-from fleet.core.registry import Registry
+from fleet.core.registry import Registry, ResolvedInstance
 from fleet.core.runner import run_streamed
 from fleet.core.secrets import read_secrets
 from fleet.core.tokens import build_context, env_vars
@@ -26,16 +31,23 @@ _yaml.default_flow_style = False
 class FleetPaths:
     home: Path
     registry: Path
+    assets: Path
+    instances: Path
     secrets: Path
     locks: Path
+    push_key_dir: Path
 
     @classmethod
     def from_home(cls, home: Path) -> "FleetPaths":
+        config_dir = home / "config"
         return cls(
             home=home,
-            registry=home / "fleet.yml",
+            registry=config_dir / "fleet.yml",
+            assets=config_dir / "assets",
+            instances=home / "instances",
             secrets=home / ".secrets",
             locks=home / "locks",
+            push_key_dir=home / ".push-key",
         )
 
 
@@ -71,46 +83,59 @@ def _write_instance_yaml(instance_dir: Path, project: str, instance: str, branch
         _yaml.dump(data, fh)
 
 
+def resolve_target(
+    registry: Registry,
+    project: str,
+    template: str | None = None,
+    branch: str | None = None,
+    label: str | None = None,
+) -> ResolvedInstance:
+    """Apply project defaults to `template`/`branch`, then resolve the full
+    deploy target. Single source of truth for default-resolution, shared by
+    `deploy()` and the `ui_deploy` daemon route so they can never drift.
+
+    Raises DeployError if `project` is unknown, or if `template`/`branch`
+    are still unset after applying project defaults.
+    """
+    if not registry.has_project(project):
+        raise DeployError(f"unknown project {project!r}")
+
+    default_template, default_branch = registry.project_defaults(project)
+    resolved_template = template or default_template
+    resolved_branch = branch or default_branch
+    if not resolved_template:
+        raise DeployError(
+            f"template is required to deploy project {project!r} "
+            "(no default_template configured)"
+        )
+    if not resolved_branch:
+        raise DeployError(
+            f"branch is required to deploy project {project!r} (no default_branch configured)"
+        )
+
+    return registry.resolve(project, resolved_template, resolved_branch, label=label)
+
+
 def deploy(
     paths: FleetPaths,
     registry: Registry,
     project: str,
-    instance: str,
+    template: str | None = None,
     *,
     branch: str | None = None,
+    label: str | None = None,
     fresh: bool = False,
     force: bool = False,
     runner=run_streamed,
 ) -> str:
-    if not registry.has_project(project):
-        raise DeployError(f"unknown project {project!r}")
-
-    if not registry.has_instance(project, instance):
-        if not branch:
-            raise DeployError(
-                f"instance {instance!r} is not registered for project {project!r}; "
-                "--branch is required to auto-register it"
-            )
-        # Registry-wide lock: concurrent auto-registers each reload->modify->save
-        # atomically, so independent snapshots can no longer clobber each other.
-        # "registry" cannot collide with instance locks (their names always
-        # contain "--"). Refresh the caller's registry object in place (rather
-        # than rebinding to a new one) so callers holding onto `registry`
-        # across multiple deploy() calls keep seeing an up-to-date view.
-        with instance_lock(paths.locks, "registry"):
-            registry.reload()
-            if not registry.has_instance(project, instance):
-                registry.register_instance(project, instance, branch)
-                registry.save()
-
-    resolved = registry.resolve(project, instance)
+    resolved = resolve_target(registry, project, template, branch, label)
     inst_id = resolved.instance_id
-    instance_dir = registry.instances_path / inst_id
+    instance_dir = paths.instances / inst_id
     deploy_log = instance_dir / ".fleet" / "deploy.log"
 
     with instance_lock(paths.locks, inst_id):
         if fresh and instance_dir.exists():
-            _destroy_locked(registry, inst_id, runner=runner)
+            _destroy_locked(paths, inst_id, runner=runner)
 
         clone_result = None
         if instance_dir.exists():
@@ -131,7 +156,8 @@ def deploy(
 
         _append_log(
             deploy_log,
-            f"deploy start: project={project} instance={instance} branch={resolved.branch}",
+            f"deploy start: project={project} template={resolved.template} "
+            f"label={resolved.label} branch={resolved.branch}",
         )
         if clone_result is not None:
             for line in clone_result.lines:
@@ -144,14 +170,34 @@ def deploy(
                 f"CLAUDE_CODE_OAUTH_TOKEN not found in {paths.secrets}; "
                 "run 'fleet init' or set it before deploying"
             )
-        write_fleet_config(instance_dir, inst_id, registry.domain, claude_token)
-        ensure_git_exclude(instance_dir, [".ddev/config.fleet.yaml", ".fleet/"])
-
-        context = build_context(project, instance, resolved.branch, registry.domain)
-        copied = assets_mod.inject(
-            registry.assets_path / project, instance_dir, context, runner=runner
+        fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
+        write_fleet_config(
+            instance_dir,
+            inst_id,
+            registry.domain,
+            claude_token,
+            additional_fqdns=fqdns,
+            git_bot=registry.git_bot(),
         )
+        write_web_build(instance_dir)
+        excludes = [
+            ".ddev/config.fleet.yaml",
+            ".ddev/web-build/Dockerfile.fleet-claude",
+            ".fleet/",
+        ]
+        for injected in write_settings_local(instance_dir, registry.domain):
+            excludes.append(str(injected.relative_to(instance_dir)))
+        ensure_git_exclude(instance_dir, excludes)
+
+        context = build_context(project, resolved.label, resolved.branch, registry.domain)
+        copied = assets_mod.inject(paths.assets / project, instance_dir, context, runner=runner)
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
+
+        runner(
+            ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)],
+            cwd=instance_dir,
+            log_path=deploy_log,
+        )
 
         start_result = ddev.start(instance_dir, log_path=deploy_log, runner=runner)
         if start_result.returncode != 0:
@@ -172,17 +218,17 @@ def deploy(
                     f"post_deploy command {command!r} failed with exit code {result.returncode}"
                 )
 
-        _write_instance_yaml(instance_dir, project, instance, resolved.branch)
+        _write_instance_yaml(instance_dir, project, resolved.label, resolved.branch)
         _append_log(deploy_log, "deploy complete")
 
     return f"https://{inst_id}.{registry.domain}"
 
 
-def _destroy_locked(registry: Registry, instance_id: str, *, runner=run_streamed) -> None:
+def _destroy_locked(paths: FleetPaths, instance_id: str, *, runner=run_streamed) -> None:
     """Destroy an instance's containers and directory. Assumes the caller
     already holds the instance lock (used by deploy()'s --fresh path to
     avoid re-entering instance_lock, which would deadlock/raise)."""
-    instance_dir = registry.instances_path / instance_id
+    instance_dir = paths.instances / instance_id
     if instance_dir.exists():
         try:
             ddev.delete(instance_dir, runner=runner)
@@ -194,11 +240,11 @@ def _destroy_locked(registry: Registry, instance_id: str, *, runner=run_streamed
 def destroy(
     paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed
 ) -> None:
-    instance_dir = registry.instances_path / instance_id
+    instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"unknown instance {instance_id!r}: {instance_dir} does not exist")
     with instance_lock(paths.locks, instance_id):
-        _destroy_locked(registry, instance_id, runner=runner)
+        _destroy_locked(paths, instance_id, runner=runner)
 
     lock_path = paths.locks / f"{instance_id}.lock"
     if lock_path.exists():
@@ -206,7 +252,7 @@ def destroy(
 
 
 def start(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed) -> None:
-    instance_dir = registry.instances_path / instance_id
+    instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"instance directory not found for {instance_id!r}")
     with instance_lock(paths.locks, instance_id):
@@ -218,7 +264,7 @@ def start(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run
 
 
 def stop(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed) -> None:
-    instance_dir = registry.instances_path / instance_id
+    instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"instance directory not found for {instance_id!r}")
     with instance_lock(paths.locks, instance_id):
@@ -237,7 +283,7 @@ def snapshot(
     dest_rel: str = "dumps/db.sql.gz",
     runner=run_streamed,
 ) -> Path:
-    instance_dir = registry.instances_path / instance_id
+    instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"instance directory not found for {instance_id!r}")
 
@@ -249,7 +295,7 @@ def snapshot(
     else:
         project = instance_id.split("--", 1)[0]
 
-    dest = registry.assets_path / project / dest_rel
+    dest = paths.assets / project / dest_rel
     dest.parent.mkdir(parents=True, exist_ok=True)
 
     with instance_lock(paths.locks, instance_id):
@@ -276,7 +322,7 @@ class InstanceStatus:
 def list_instances(
     paths: FleetPaths, registry: Registry, *, runner=run_streamed
 ) -> list[InstanceStatus]:
-    instances_root = registry.instances_path
+    instances_root = paths.instances
     if not instances_root.exists():
         return []
 

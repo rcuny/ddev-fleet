@@ -1,4 +1,11 @@
-"""Load/validate/resolve/save fleet.yml (spec §4)."""
+"""Load/validate/resolve the fleet.yml project→templates registry (spec §4).
+
+The registry is declarative and read-only at runtime: `fleet.yml` is
+authored/edited by hand (or by provisioning tooling), never mutated by the
+fleet CLI/daemon. A project lists reusable deploy `templates` (post_deploy
+commands, etc.); `branch` and the instance `label` are resolved per-deploy,
+never stored in the registry.
+"""
 
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,7 +13,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core.errors import RegistryError, ValidationError
-from fleet.core.naming import instance_id, validate_part
+from fleet.core.naming import instance_id, slugify, validate_part
 
 _yaml = YAML()
 _yaml.preserve_quotes = True
@@ -16,8 +23,9 @@ _yaml.width = 4096
 @dataclass
 class ResolvedInstance:
     project: str
-    instance: str
+    template: str
     branch: str
+    label: str
     post_deploy: list[str]
     instance_id: str
 
@@ -43,10 +51,9 @@ class Registry:
         data = self._data
         if "fleet" not in data:
             raise RegistryError("missing top-level key 'fleet'")
-        fleet_block = data["fleet"]
-        for key in ("domain", "assets_path", "instances_path"):
-            if key not in fleet_block:
-                raise RegistryError(f"missing key 'fleet.{key}'")
+        fleet_block = data["fleet"] or {}
+        if "domain" not in fleet_block:
+            raise RegistryError("missing key 'fleet.domain'")
 
         projects = data.get("projects") or {}
         for project_key, project_block in projects.items():
@@ -54,33 +61,34 @@ class Registry:
                 validate_part(project_key)
             except ValidationError as exc:
                 raise RegistryError(f"projects.{project_key}: {exc.message}") from exc
+
+            project_block = project_block or {}
             if "git" not in project_block:
                 raise RegistryError(f"projects.{project_key}.git: missing")
 
-            instances = project_block.get("instances") or {}
-            for instance_name, instance_block in instances.items():
+            templates = project_block.get("templates") or {}
+            for template_key, template_block in templates.items():
                 try:
-                    instance_id(project_key, instance_name)
+                    validate_part(template_key)
                 except ValidationError as exc:
                     raise RegistryError(
-                        f"projects.{project_key}.instances.{instance_name}: {exc.message}"
+                        f"projects.{project_key}.templates.{template_key}: {exc.message}"
                     ) from exc
-                if "branch" not in instance_block:
+                if template_block and "branch" in template_block:
                     raise RegistryError(
-                        f"projects.{project_key}.instances.{instance_name}.branch: missing"
+                        f"projects.{project_key}.templates.{template_key}.branch: not "
+                        "allowed — branch is resolved per-deploy, never stored in a template"
                     )
 
     @property
     def domain(self) -> str:
         return str(self._data["fleet"]["domain"])
 
-    @property
-    def assets_path(self) -> Path:
-        return Path(str(self._data["fleet"]["assets_path"]))
-
-    @property
-    def instances_path(self) -> Path:
-        return Path(str(self._data["fleet"]["instances_path"]))
+    def git_bot(self) -> tuple[str, str]:
+        fb = self._data["fleet"]
+        name = fb.get("git_bot_name") or "ddev-fleet bot"
+        email = fb.get("git_bot_email") or f"bot@{self.domain}"
+        return (str(name), str(email))
 
     def project_keys(self) -> list[str]:
         return list((self._data.get("projects") or {}).keys())
@@ -88,79 +96,59 @@ class Registry:
     def has_project(self, key: str) -> bool:
         return key in (self._data.get("projects") or {})
 
-    def has_instance(self, project: str, instance: str) -> bool:
-        if not self.has_project(project):
-            return False
-        instances = self._data["projects"][project].get("instances") or {}
-        return instance in instances
-
-    def resolve(self, project: str, instance: str) -> ResolvedInstance:
+    def _project_block(self, project: str) -> dict:
         if not self.has_project(project):
             raise RegistryError(f"unknown project {project!r}")
-        project_block = self._data["projects"][project]
-        instances = project_block.get("instances") or {}
-        if instance not in instances:
-            raise RegistryError(f"unknown instance {instance!r} for project {project!r}")
+        return self._data["projects"][project] or {}
 
-        instance_block = instances[instance]
-        branch = str(instance_block["branch"])
-        if "post_deploy" in instance_block:
-            post_deploy = [str(c) for c in instance_block["post_deploy"]]
-        else:
-            post_deploy = [str(c) for c in (project_block.get("post_deploy") or [])]
+    def template_keys(self, project: str) -> list[str]:
+        block = self._project_block(project)
+        return list((block.get("templates") or {}).keys())
+
+    def git_url(self, project: str) -> str:
+        return str(self._project_block(project)["git"])
+
+    def project_defaults(self, project: str) -> tuple[str | None, str | None]:
+        """Return ``(default_template, default_branch)`` for a project, each
+        ``None`` when not configured."""
+        block = self._project_block(project)
+        default_template = block.get("default_template")
+        default_branch = block.get("default_branch")
+        return (
+            str(default_template) if default_template is not None else None,
+            str(default_branch) if default_branch is not None else None,
+        )
+
+    def additional_hostnames(self, project: str) -> list[str]:
+        block = self._project_block(project)
+        return [str(h) for h in (block.get("additional_hostnames") or [])]
+
+    def resolve(
+        self, project: str, template: str, branch: str, label: str | None = None
+    ) -> ResolvedInstance:
+        block = self._project_block(project)
+        templates = block.get("templates") or {}
+        if template not in templates:
+            raise RegistryError(f"unknown template {template!r} for project {project!r}")
+        if not branch:
+            raise RegistryError(f"branch is required to resolve project {project!r}")
+
+        template_block = templates[template] or {}
+        post_deploy = [str(c) for c in (template_block.get("post_deploy") or [])]
+
+        try:
+            resolved_label = label if label else slugify(branch)
+            inst_id = instance_id(project, resolved_label)
+        except ValidationError as exc:
+            raise RegistryError(
+                f"cannot resolve project {project!r} branch {branch!r}: {exc.message}"
+            ) from exc
 
         return ResolvedInstance(
             project=project,
-            instance=instance,
+            template=template,
             branch=branch,
+            label=resolved_label,
             post_deploy=post_deploy,
-            instance_id=instance_id(project, instance),
+            instance_id=inst_id,
         )
-
-    def register_instance(self, project: str, instance: str, branch: str) -> None:
-        if not self.has_project(project):
-            raise RegistryError(f"unknown project {project!r}")
-        try:
-            instance_id(project, instance)
-        except ValidationError as exc:
-            raise RegistryError(
-                f"invalid instance name for projects.{project}.instances.{instance}: {exc.message}"
-            ) from exc
-
-        project_block = self._data["projects"][project]
-        if project_block.get("instances") is None:
-            project_block["instances"] = {}
-        project_block["instances"][instance] = {"branch": branch}
-
-    def add_project(self, key: str, git_url: str, post_deploy: list[str] | None = None) -> None:
-        try:
-            validate_part(key)
-        except ValidationError as exc:
-            raise RegistryError(f"invalid project key {key!r}: {exc.message}") from exc
-        if self._data.get("projects") is None:
-            self._data["projects"] = {}
-        if key in self._data["projects"]:
-            raise RegistryError(f"project {key!r} already exists")
-
-        block: dict = {"git": git_url, "instances": {}}
-        if post_deploy:
-            block["post_deploy"] = list(post_deploy)
-        self._data["projects"][key] = block
-
-    def git_url(self, project: str) -> str:
-        if not self.has_project(project):
-            raise RegistryError(f"unknown project {project!r}")
-        return str(self._data["projects"][project]["git"])
-
-    def reload(self) -> None:
-        """Re-read the registry file into this object in place.
-
-        Used under the registry lock so concurrent auto-registers merge
-        into the latest on-disk state instead of clobbering each other,
-        while callers holding this object keep an up-to-date view.
-        """
-        self._data = Registry.load(self._path)._data
-
-    def save(self) -> None:
-        with open(self._path, "w", encoding="utf-8") as fh:
-            _yaml.dump(self._data, fh)

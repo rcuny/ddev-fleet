@@ -22,22 +22,22 @@ def _write_instance(instances_root, instance_id, project, instance, branch):
 
 
 def _registry(fleet_home):
-    path = fleet_home / "fleet.yml"
-    path.write_text(
-        f"""\
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
 fleet:
   domain: fleet.example.test
-  assets_path: {fleet_home / "assets"}
-  instances_path: {fleet_home / "instances"}
 
 projects:
   demo:
     git: git@example.test:org/demo.git
-    instances: {{}}
+    templates:
+      default: {}
 """,
         encoding="utf-8",
     )
-    return Registry.load(path)
+    return Registry.load(paths.registry)
 
 
 def test_list_instances_reports_running_and_deployed_with_ram(fleet_home):
@@ -117,24 +117,18 @@ def test_list_instances_fallback_for_dir_without_instance_yml(fleet_home):
 
 
 def test_list_instances_missing_instances_dir_returns_empty_early(fleet_home):
+    registry = _registry(fleet_home)
+    base_paths = instances.FleetPaths.from_home(fleet_home)
     nonexistent = fleet_home / "does-not-exist"
-    path = fleet_home / "fleet.yml"
-    path.write_text(
-        f"""\
-fleet:
-  domain: fleet.example.test
-  assets_path: {fleet_home / "assets"}
-  instances_path: {nonexistent}
-
-projects:
-  demo:
-    git: git@example.test:org/demo.git
-    instances: {{}}
-""",
-        encoding="utf-8",
+    paths = instances.FleetPaths(
+        home=base_paths.home,
+        registry=base_paths.registry,
+        assets=base_paths.assets,
+        instances=nonexistent,
+        secrets=base_paths.secrets,
+        locks=base_paths.locks,
+        push_key_dir=base_paths.push_key_dir,
     )
-    registry = Registry.load(path)
-    paths = instances.FleetPaths.from_home(fleet_home)
 
     assert not nonexistent.exists()
     assert instances.list_instances(paths, registry, runner=FakeRunner()) == []

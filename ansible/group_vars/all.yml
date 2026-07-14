@@ -7,12 +7,15 @@
 # a real server rollout — see docs/runbook-server-rollout.md.
 
 # --- OS assumption ----------------------------------------------------------
-# Roles use ansible.builtin.apt and assume a Debian-family host running
-# Debian 13 (trixie). On Ubuntu, ansible_distribution_release still
-# resolves correctly for the docker/ddev/caddy apt repos (they publish
-# Ubuntu codename lines too), but this combination has NOT been tested —
-# treat this as a documented assumption, not a guarantee.
-os_family_assumption: "Debian 13 (trixie)"
+# Roles use ansible.builtin.apt and target a Debian-family host. Verified
+# live on Ubuntu 26.04 LTS (codename "resolute") on 2026-07-13:
+#   - docker-ce publishes a resolute dist, but ONLY under the /ubuntu vendor
+#     path — /debian/dists/resolute is 404. docker_apt_repo below therefore
+#     derives the vendor segment from `ansible_distribution` (debian|ubuntu)
+#     so the same role works on Debian 13 and Ubuntu without edits.
+#   - caddy uses the codename-independent `any-version` dist (OS-agnostic).
+#   - ddev uses a wildcard-suite flat repo (OS-agnostic).
+os_family_assumption: "Debian-family (verified: Ubuntu 26.04 / resolute)"
 
 # --- fleet user & filesystem (spec §2, §3.3) --------------------------------
 fleet_user: fleet
@@ -48,9 +51,17 @@ fleet_admin_bcrypt_hash: "$2b$14$uENGKN0eNjTf0VTAIpyZmOFSr2HzXOldKWVn61SImgrIV1G
 # --- Product repo (spec §3.1, §17) — AWAITS CONFIRMATION --------------------
 fleet_repo_url: https://bitbucket.org/personal_maintainer/ddev-fleet.git
 fleet_repo_version: main
+# When true, the code is delivered out-of-band (e.g. rsync/tar of a clean
+# checkout to fleet_opt_dir) and BOTH fetch points — bootstrap.sh and the
+# fleet_service git task — are skipped, so no server-side git auth is needed
+# for a private repo. bootstrap.sh sets this via `-e fleet_skip_fetch=true`
+# when it is run with FLEET_SKIP_FETCH=1.
+fleet_skip_fetch: false
 
 # --- Package repos (pinned upstream URLs; package versions float to latest
 # stable at apply time, per spec §3 — no version pinning requirement) ------
-docker_apt_repo: "https://download.docker.com/linux/debian"
+# Vendor segment derived from the running distro (debian|ubuntu) — docker-ce
+# publishes per-vendor paths and a codename only exists under its own vendor.
+docker_apt_repo: "https://download.docker.com/linux/{{ ansible_distribution | lower }}"
 ddev_apt_repo: "https://pkg.ddev.com/apt/"
 caddy_apt_repo: "https://dl.cloudsmith.io/public/caddy/stable/deb/debian"

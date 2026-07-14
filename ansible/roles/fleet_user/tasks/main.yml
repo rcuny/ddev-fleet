@@ -20,6 +20,7 @@
     - "{{ fleet_srv_dir }}/assets"
     - "{{ fleet_srv_dir }}/instances"
     - "{{ fleet_srv_dir }}/locks"
+    - "{{ fleet_srv_dir }}/config"
 
 - name: Ensure .secrets exists with correct permissions (never overwrite content)
   ansible.builtin.file:
@@ -83,6 +84,48 @@
     owner: "{{ fleet_user }}"
     group: "{{ fleet_group }}"
     mode: "0644"
+
+- name: Ensure /srv/fleet/.push-key exists
+  ansible.builtin.file:
+    path: "{{ fleet_srv_dir }}/.push-key"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0700"
+
+- name: Generate the fleet push SSH key (never regenerate an existing key)
+  # Kept OUT of {{ fleet_home_dir }}/.ssh on purpose: a read-write PUSH key
+  # must never be picked up by ssh's default identity search (which would
+  # let it shadow the read-only deploy key generated above). It is only
+  # ever used explicitly, via GIT_SSH_COMMAND/core.sshCommand -i pointing
+  # at this exact path.
+  community.crypto.openssh_keypair:
+    path: "{{ fleet_srv_dir }}/.push-key/id_ed25519"
+    type: ed25519
+    force: false
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0600"
+
+- name: Read the generated push public key
+  ansible.builtin.slurp:
+    src: "{{ fleet_srv_dir }}/.push-key/id_ed25519.pub"
+  register: fleet_user_push_pubkey_raw
+
+- name: Copy the push public key to /srv/fleet/fleet-push-key.pub
+  ansible.builtin.copy:
+    dest: "{{ fleet_srv_dir }}/fleet-push-key.pub"
+    content: "{{ fleet_user_push_pubkey_raw.content | b64decode }}"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0644"
+
+- name: Print the fleet push public key
+  ansible.builtin.debug:
+    msg: >-
+      Fleet PUSH key — register as a READ-WRITE access key on every project
+      repo Claude will push to (oak, another-drupal-site, …):
+      {{ fleet_user_push_pubkey_raw.content | b64decode }}
 
 - name: Check which forge host keys are already in known_hosts
   # First half of the TOFU pair below: probe before we ever call ssh-keyscan,

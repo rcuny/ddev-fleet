@@ -13,19 +13,17 @@ from fleet.core.runner import RunResult
 SAMPLE_REGISTRY_YAML = """\
 fleet:
   domain: fleet.example.test   # Wildcard DNS root
-  assets_path: {assets_path}
-  instances_path: {instances_path}
 
 projects:
   demo:
     git: git@example.test:org/demo.git
-    post_deploy:
-      - echo project-default
-    instances:
-      develop:
-        branch: main
+    default_template: default
+    default_branch: main
+    templates:
+      default:
+        post_deploy:
+          - echo project-default
       custom:
-        branch: feature-x
         post_deploy:
           - echo instance-override
 """
@@ -34,18 +32,15 @@ projects:
 @pytest.fixture
 def fleet_home(tmp_path):
     home = tmp_path / "fleet-home"
-    (home / "assets").mkdir(parents=True)
+    (home / "config" / "assets").mkdir(parents=True)
     (home / "instances").mkdir(parents=True)
     (home / "locks").mkdir(parents=True)
     return home
 
 
 @pytest.fixture
-def sample_registry_text(fleet_home):
-    return SAMPLE_REGISTRY_YAML.format(
-        assets_path=str(fleet_home / "assets"),
-        instances_path=str(fleet_home / "instances"),
-    )
+def sample_registry_text():
+    return SAMPLE_REGISTRY_YAML
 
 
 class FakeRunner:

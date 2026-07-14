@@ -8,17 +8,22 @@ from fleet.jobs import Job
 
 
 def _setup_fleet_home(fleet_home):
-    (fleet_home / "fleet.yml").write_text(
-        f"""\
+    from fleet.core.instances import FleetPaths
+
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
 fleet:
   domain: fleet.example.test
-  assets_path: {fleet_home / "assets"}
-  instances_path: {fleet_home / "instances"}
 
 projects:
   demo:
     git: git@example.test:org/demo.git
-    instances: {{}}
+    default_template: default
+    default_branch: main
+    templates:
+      default: {}
 """,
         encoding="utf-8",
     )
@@ -97,7 +102,16 @@ def test_ui_deploy_job_progresses_to_succeeded(fleet_home, monkeypatch):
     from fleet import daemon as daemon_mod
 
     def fake_deploy(
-        paths, registry, project, instance, *, branch=None, fresh=False, force=False, runner=None
+        paths,
+        registry,
+        project,
+        template,
+        *,
+        branch=None,
+        label=None,
+        fresh=False,
+        force=False,
+        runner=None,
     ):
         return "https://demo--develop.fleet.example.test"
 
@@ -105,7 +119,8 @@ def test_ui_deploy_job_progresses_to_succeeded(fleet_home, monkeypatch):
 
     client = TestClient(create_app(fleet_home))
     response = client.post(
-        "/ui/deploy", data={"project": "demo", "instance": "develop", "branch": "main"}
+        "/ui/deploy",
+        data={"project": "demo", "template": "default", "branch": "main", "label": "develop"},
     )
     assert response.status_code == 200
     job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
@@ -148,7 +163,8 @@ def test_ui_deploy_invalid_project_name_returns_400(fleet_home):
     client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
 
     response = client.post(
-        "/ui/deploy", data={"project": "Bad_Name!", "instance": "develop", "branch": "main"}
+        "/ui/deploy",
+        data={"project": "Bad_Name!", "template": "default", "branch": "main"},
     )
 
     assert response.status_code == 400

@@ -1,23 +1,23 @@
 from fleet import cli
 from fleet.core.errors import DeployError
-from fleet.core.instances import InstanceStatus
+from fleet.core.instances import FleetPaths, InstanceStatus
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult
 
 
 def _write_minimal_registry(fleet_home):
-    path = fleet_home / "fleet.yml"
-    path.write_text(
-        f"""\
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
 fleet:
   domain: fleet.example.test
-  assets_path: {fleet_home / "assets"}
-  instances_path: {fleet_home / "instances"}
 
 projects:
   demo:
     git: git@example.test:org/demo.git
-    instances: {{}}
+    templates:
+      default: {}
 """,
         encoding="utf-8",
     )
@@ -27,14 +27,23 @@ def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
 
     def fake_deploy(
-        paths, registry, project, instance, *, branch=None, fresh=False, force=False, runner=None
+        paths,
+        registry,
+        project,
+        template,
+        *,
+        branch=None,
+        label=None,
+        fresh=False,
+        force=False,
+        runner=None,
     ):
         return "https://demo--develop.fleet.example.test"
 
     monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
 
     exit_code = cli.main(
-        ["--fleet-home", str(fleet_home), "deploy", "demo", "develop", "--branch=main"]
+        ["--fleet-home", str(fleet_home), "deploy", "demo", "default", "--branch=main"]
     )
 
     assert exit_code == 0
@@ -49,7 +58,7 @@ def test_deploy_fleet_error_exits_1_and_prints_to_stderr(fleet_home, monkeypatch
 
     monkeypatch.setattr(cli.instances_mod, "deploy", failing_deploy)
 
-    exit_code = cli.main(["--fleet-home", str(fleet_home), "deploy", "demo", "develop"])
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "deploy", "demo", "default"])
 
     assert exit_code == 1
     assert "something specific went wrong" in capsys.readouterr().err
@@ -82,26 +91,6 @@ def test_list_renders_table(fleet_home, monkeypatch, capsys):
     assert "https://demo--develop.fleet.example.test" in out
 
 
-def test_project_add_writes_registry(fleet_home):
-    _write_minimal_registry(fleet_home)
-
-    exit_code = cli.main(
-        [
-            "--fleet-home",
-            str(fleet_home),
-            "project",
-            "add",
-            "newproj",
-            "--git=git@example.test:org/newproj.git",
-        ]
-    )
-
-    assert exit_code == 0
-    reloaded = Registry.load(fleet_home / "fleet.yml")
-    assert reloaded.has_project("newproj") is True
-    assert reloaded.git_url("newproj") == "git@example.test:org/newproj.git"
-
-
 def test_ssh_key_missing_exits_1(fleet_home, capsys):
     exit_code = cli.main(["--fleet-home", str(fleet_home), "ssh-key"])
     assert exit_code == 1
@@ -123,10 +112,10 @@ def test_init_skip_claude_creates_skeleton_non_interactively(tmp_path):
     )
 
     assert exit_code == 0
-    assert (fleet_home / "assets").is_dir()
+    assert (fleet_home / "config" / "assets").is_dir()
     assert (fleet_home / "instances").is_dir()
     assert (fleet_home / "locks").is_dir()
-    registry = Registry.load(fleet_home / "fleet.yml")
+    registry = Registry.load(fleet_home / "config" / "fleet.yml")
     assert registry.domain == "fleet.example.test"
     assert registry.project_keys() == []
     assert not (fleet_home / ".secrets").exists()
@@ -189,19 +178,18 @@ def test_fleet_home_flag_overrides_env(fleet_home, monkeypatch):
     env_home = fleet_home / "from-env"
     flag_home = fleet_home / "from-flag"
     (flag_home / "instances").mkdir(parents=True)
-    (flag_home / "assets").mkdir(parents=True)
+    (flag_home / "config" / "assets").mkdir(parents=True)
     (flag_home / "locks").mkdir(parents=True)
-    (flag_home / "fleet.yml").write_text(
-        f"""\
+    (flag_home / "config" / "fleet.yml").write_text(
+        """\
 fleet:
   domain: fleet.example.test
-  assets_path: {flag_home / "assets"}
-  instances_path: {flag_home / "instances"}
 
 projects:
   demo:
     git: git@example.test:org/demo.git
-    instances: {{}}
+    templates:
+      default: {}
 """,
         encoding="utf-8",
     )
@@ -221,7 +209,7 @@ projects:
     assert exit_code == 0
     assert len(received_paths) == 1
     assert received_paths[0].home == flag_home
-    assert received_paths[0].registry == flag_home / "fleet.yml"
+    assert received_paths[0].registry == flag_home / "config" / "fleet.yml"
 
 
 def test_usage_error_exits_2(fleet_home):
@@ -233,29 +221,6 @@ def test_usage_error_exits_2(fleet_home):
         cli.main(["--fleet-home", str(fleet_home), "definitely-not-a-command"])
 
     assert exc.value.code == 2
-
-
-def test_project_add_post_deploy_round_trip(fleet_home):
-    _write_minimal_registry(fleet_home)
-
-    exit_code = cli.main(
-        [
-            "--fleet-home",
-            str(fleet_home),
-            "project",
-            "add",
-            "newproj",
-            "--git=git@example.test:org/newproj.git",
-            "--post-deploy=composer install",
-            "--post-deploy=drush deploy",
-        ]
-    )
-
-    assert exit_code == 0
-    reloaded = Registry.load(fleet_home / "fleet.yml")
-    assert reloaded.has_project("newproj") is True
-    project_block = reloaded._data["projects"]["newproj"]
-    assert project_block["post_deploy"] == ["composer install", "drush deploy"]
 
 
 def test_assets_push_dispatch(fleet_home, monkeypatch, capsys, tmp_path):
@@ -276,7 +241,7 @@ def test_assets_push_dispatch(fleet_home, monkeypatch, capsys, tmp_path):
     )
 
     assert exit_code == 0
-    assert recorder == [(fleet_home / "assets" / "demo", src, "dumps/db.sql.gz")]
+    assert recorder == [(fleet_home / "config" / "assets" / "demo", src, "dumps/db.sql.gz")]
     assert "dumps/db.sql.gz" in capsys.readouterr().out
 
 
@@ -286,7 +251,7 @@ def test_snapshot_dispatch(fleet_home, monkeypatch, capsys):
 
     def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
         recorder.append((instance_id, dest_rel))
-        return fleet_home / "assets" / "demo" / dest_rel
+        return fleet_home / "config" / "assets" / "demo" / dest_rel
 
     monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
 
@@ -302,7 +267,7 @@ def test_snapshot_dispatch_custom_dest_rel(fleet_home, monkeypatch):
 
     def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
         recorder.append((instance_id, dest_rel))
-        return fleet_home / "assets" / "demo" / dest_rel
+        return fleet_home / "config" / "assets" / "demo" / dest_rel
 
     monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
 
@@ -467,3 +432,43 @@ def test_refresh_claude_token_raises_when_minting_fails(fleet_home, monkeypatch,
 
     assert exit_code == 1
     assert "did not produce a token" in capsys.readouterr().err
+
+
+def test_refresh_config_pulls_when_git_checkout(fleet_home, monkeypatch, capsys):
+    cfg = fleet_home / "config"
+    (cfg / ".git").mkdir(parents=True, exist_ok=True)
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-config"])
+
+    assert exit_code == 0
+    assert ["git", "-C", str(cfg), "pull", "--ff-only"] in calls
+    assert f"refreshed {cfg} (git pull)" in capsys.readouterr().out
+
+
+def test_refresh_config_non_git_checkout_prints_message_without_runner_calls(
+    fleet_home, monkeypatch, capsys
+):
+    cfg = fleet_home / "config"
+    assert not (cfg / ".git").exists()
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-config"])
+
+    assert exit_code == 0
+    assert calls == []
+    assert f"{cfg} is not a git checkout" in capsys.readouterr().out
