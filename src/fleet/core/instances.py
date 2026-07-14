@@ -18,7 +18,7 @@ from fleet.core.fleetconfig import (
     write_web_build,
 )
 from fleet.core.locks import instance_lock
-from fleet.core.registry import Registry
+from fleet.core.registry import Registry, ResolvedInstance
 from fleet.core.runner import run_streamed
 from fleet.core.secrets import read_secrets
 from fleet.core.tokens import build_context, env_vars
@@ -83,18 +83,20 @@ def _write_instance_yaml(instance_dir: Path, project: str, instance: str, branch
         _yaml.dump(data, fh)
 
 
-def deploy(
-    paths: FleetPaths,
+def resolve_target(
     registry: Registry,
     project: str,
     template: str | None = None,
-    *,
     branch: str | None = None,
     label: str | None = None,
-    fresh: bool = False,
-    force: bool = False,
-    runner=run_streamed,
-) -> str:
+) -> ResolvedInstance:
+    """Apply project defaults to `template`/`branch`, then resolve the full
+    deploy target. Single source of truth for default-resolution, shared by
+    `deploy()` and the `ui_deploy` daemon route so they can never drift.
+
+    Raises DeployError if `project` is unknown, or if `template`/`branch`
+    are still unset after applying project defaults.
+    """
     if not registry.has_project(project):
         raise DeployError(f"unknown project {project!r}")
 
@@ -111,7 +113,22 @@ def deploy(
             f"branch is required to deploy project {project!r} (no default_branch configured)"
         )
 
-    resolved = registry.resolve(project, resolved_template, resolved_branch, label=label)
+    return registry.resolve(project, resolved_template, resolved_branch, label=label)
+
+
+def deploy(
+    paths: FleetPaths,
+    registry: Registry,
+    project: str,
+    template: str | None = None,
+    *,
+    branch: str | None = None,
+    label: str | None = None,
+    fresh: bool = False,
+    force: bool = False,
+    runner=run_streamed,
+) -> str:
+    resolved = resolve_target(registry, project, template, branch, label)
     inst_id = resolved.instance_id
     instance_dir = paths.instances / inst_id
     deploy_log = instance_dir / ".fleet" / "deploy.log"
@@ -139,7 +156,7 @@ def deploy(
 
         _append_log(
             deploy_log,
-            f"deploy start: project={project} template={resolved_template} "
+            f"deploy start: project={project} template={resolved.template} "
             f"label={resolved.label} branch={resolved.branch}",
         )
         if clone_result is not None:

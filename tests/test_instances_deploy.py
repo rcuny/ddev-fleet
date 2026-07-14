@@ -103,8 +103,39 @@ def test_deploy_label_defaults_to_slugified_branch(fleet_home, git_repo):
     assert (paths.instances / "demo--main").exists()
 
 
-def test_deploy_missing_template_and_branch_without_defaults_raises(fleet_home, git_repo):
+def test_deploy_missing_branch_without_default_raises(fleet_home, git_repo):
+    """`demo` in _registry_text() sets default_template but no default_branch,
+    so omitting branch (with template explicitly given) must exercise the
+    missing-branch path specifically."""
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    with pytest.raises(DeployError):
+        instances.deploy(paths, registry, "demo", "default", runner=runner)
+
+
+def test_deploy_missing_template_without_default_raises(fleet_home, git_repo):
+    """A project with a default_branch but no default_template must raise
+    DeployError when no template is given — this is the path the old combined
+    test never exercised, since its fixture always set default_template."""
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_branch: main
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
     runner = HybridRunner()
 
     with pytest.raises(DeployError):

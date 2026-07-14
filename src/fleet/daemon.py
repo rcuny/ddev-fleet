@@ -213,16 +213,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     ):
         naming.validate_part(project)
         paths, registry = _paths_and_registry()
-        default_template, default_branch = registry.project_defaults(project)
-        resolved_template = template or default_template
-        resolved_branch = branch or default_branch
-        if not resolved_template or not resolved_branch:
-            raise FleetError(
-                f"template and branch are required to deploy project {project!r} "
-                "(no defaults configured)"
-            )
-        resolved = registry.resolve(
-            project, resolved_template, resolved_branch, label=label or None
+        resolved = instances_mod.resolve_target(
+            registry, project, template or None, branch or None, label or None
         )
         inst_id = resolved.instance_id
         log_path = str(paths.instances / inst_id / ".fleet" / "deploy.log")
