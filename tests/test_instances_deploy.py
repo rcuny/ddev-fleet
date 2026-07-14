@@ -235,6 +235,42 @@ def test_deploy_git_excludes_asset_injected_files(fleet_home, git_repo):
     assert ".env" in exclude_content
 
 
+def test_deploy_writes_additional_fqdns_from_project_hostnames(fleet_home, git_repo):
+    """A project declaring `additional_hostnames` must have those hostnames
+    resolved to full per-instance FQDNs and written into the instance's
+    config.fleet.yaml as `additional_fqdns`."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    additional_hostnames:
+      - albania
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
+    content = config_path.read_text(encoding="utf-8")
+    assert "additional_fqdns:" in content
+    assert "albania.demo--develop.fleet.example.test" in content
+
+
 def test_deploy_independent_labels_do_not_clobber_each_other(fleet_home, git_repo):
     """Two deploys for different labels of the same project must both end up
     on disk as independent instances."""

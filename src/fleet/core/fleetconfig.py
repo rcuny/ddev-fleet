@@ -10,7 +10,11 @@ _yaml.indent(mapping=2, sequence=4, offset=2)
 
 
 def write_fleet_config(
-    instance_dir: Path, instance_id: str, domain: str, claude_token: str | None
+    instance_dir: Path,
+    instance_id: str,
+    domain: str,
+    claude_token: str | None,
+    additional_fqdns: list[str] | None = None,
 ) -> Path:
     ddev_dir = instance_dir / ".ddev"
     ddev_dir.mkdir(parents=True, exist_ok=True)
@@ -19,6 +23,8 @@ def write_fleet_config(
     data: dict = {"name": instance_id, "project_tld": domain}
     if claude_token:
         data["web_environment"] = [f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}"]
+    if additional_fqdns:
+        data["additional_fqdns"] = list(additional_fqdns)
 
     with open(config_path, "w", encoding="utf-8") as fh:
         _yaml.dump(data, fh)
@@ -74,12 +80,12 @@ def write_settings_local(instance_dir: Path, domain: str) -> list[Path]:
         "// are set for the current fleet host (services.fleet.yml is appended last, so it\n"
         "// overrides the project's / DDEV's services container yamls).\n"
         "$settings['container_yamls'][] = $app_root . '/' . $site_path . '/services.fleet.yml';\n"
+        "// fleet-managed: load the project's own (fleet-agnostic) overrides if present.\n"
+        "if (file_exists(__DIR__ . '/settings.project.php')) {\n"
+        "    include __DIR__ . '/settings.project.php';\n"
+        "}\n"
     )
-    services_content = (
-        "parameters:\n"
-        "  session.storage.options:\n"
-        "    cookie_domain: ''\n"
-    )
+    services_content = "parameters:\n" "  session.storage.options:\n" "    cookie_domain: ''\n"
     settings_local_path = sites_default / "settings.local.php"
     services_fleet_path = sites_default / "services.fleet.yml"
     settings_local_path.write_text(settings_content, encoding="utf-8")

@@ -170,7 +170,10 @@ def deploy(
                 f"CLAUDE_CODE_OAUTH_TOKEN not found in {paths.secrets}; "
                 "run 'fleet init' or set it before deploying"
             )
-        write_fleet_config(instance_dir, inst_id, registry.domain, claude_token)
+        fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
+        write_fleet_config(
+            instance_dir, inst_id, registry.domain, claude_token, additional_fqdns=fqdns
+        )
         write_web_build(instance_dir)
         excludes = [
             ".ddev/config.fleet.yaml",
