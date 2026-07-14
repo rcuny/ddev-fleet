@@ -432,3 +432,43 @@ def test_refresh_claude_token_raises_when_minting_fails(fleet_home, monkeypatch,
 
     assert exit_code == 1
     assert "did not produce a token" in capsys.readouterr().err
+
+
+def test_refresh_config_pulls_when_git_checkout(fleet_home, monkeypatch, capsys):
+    cfg = fleet_home / "config"
+    (cfg / ".git").mkdir(parents=True, exist_ok=True)
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-config"])
+
+    assert exit_code == 0
+    assert ["git", "-C", str(cfg), "pull", "--ff-only"] in calls
+    assert f"refreshed {cfg} (git pull)" in capsys.readouterr().out
+
+
+def test_refresh_config_non_git_checkout_prints_message_without_runner_calls(
+    fleet_home, monkeypatch, capsys
+):
+    cfg = fleet_home / "config"
+    assert not (cfg / ".git").exists()
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-config"])
+
+    assert exit_code == 0
+    assert calls == []
+    assert f"{cfg} is not a git checkout" in capsys.readouterr().out

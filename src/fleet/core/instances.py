@@ -185,6 +185,12 @@ def deploy(
         copied = assets_mod.inject(paths.assets / project, instance_dir, context, runner=runner)
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
 
+        runner(
+            ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)],
+            cwd=instance_dir,
+            log_path=deploy_log,
+        )
+
         start_result = ddev.start(instance_dir, log_path=deploy_log, runner=runner)
         if start_result.returncode != 0:
             raise DeployError(

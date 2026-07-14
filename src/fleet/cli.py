@@ -84,6 +84,8 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("refresh-claude-token")
 
+    subparsers.add_parser("refresh-config")
+
     return parser
 
 
@@ -113,6 +115,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_snapshot(fleet_home, args)
         elif args.command == "refresh-claude-token":
             return _cmd_refresh_claude_token(fleet_home, args)
+        elif args.command == "refresh-config":
+            _cmd_refresh_config(fleet_home, runner=run_streamed)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
@@ -271,6 +275,16 @@ def _cmd_refresh_claude_token(fleet_home: Path, args: argparse.Namespace) -> int
                 failed.append(entry.name)
 
     return 1 if failed else 0
+
+
+def _cmd_refresh_config(fleet_home: Path, *, runner=run_streamed) -> None:
+    cfg = fleet_home / "config"
+    if (cfg / ".git").is_dir():
+        runner(["git", "-C", str(cfg), "fetch", "--quiet"])
+        runner(["git", "-C", str(cfg), "pull", "--ff-only"])
+        print(f"refreshed {cfg} (git pull)")
+    else:
+        print(f"{cfg} is not a git checkout — edit in place; nothing to pull")
 
 
 if __name__ == "__main__":
