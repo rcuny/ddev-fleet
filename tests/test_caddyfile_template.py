@@ -2,19 +2,11 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader
 
-TEMPLATE_DIR = (
-    Path(__file__).resolve().parents[1]
-    / "ansible"
-    / "roles"
-    / "caddy"
-    / "templates"
-)
+TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "ansible" / "roles" / "caddy" / "templates"
 
 
 def _render() -> str:
-    env = Environment(
-        loader=FileSystemLoader(str(TEMPLATE_DIR)), keep_trailing_newline=True
-    )
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), keep_trailing_newline=True)
     return env.get_template("Caddyfile.j2").render(
         acme_email="contact@personal.example",
         fleet_domain="fleet.personal.example",
