@@ -60,17 +60,23 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     assert (instance_dir / "README.md").exists()
 
     command_names = [call["cmd"][0] for call in runner.calls]
-    assert command_names == ["git", "ddev", "ddev", "bash"]
+    assert command_names == ["git", "ddev", "ddev", "ddev", "bash"]
     assert runner.calls[0]["cmd"][:2] == ["git", "clone"]
-    assert runner.calls[1]["cmd"] == ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
-    assert runner.calls[2]["cmd"] == ["ddev", "start"]
-    assert runner.calls[3]["cmd"] == ["bash", "-c", "echo hi"]
-    assert runner.calls[3]["env"]["FLEET_INSTANCE_ID"] == "demo--develop"
+    assert runner.calls[1]["cmd"] == ["ddev", "start"]
+    assert runner.calls[2]["cmd"] == ["ddev", "exec", "ssh-add", "-D"]
+    assert runner.calls[3]["cmd"] == ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
+    assert runner.calls[4]["cmd"] == ["bash", "-c", "echo hi"]
+    assert runner.calls[4]["env"]["FLEET_INSTANCE_ID"] == "demo--develop"
 
+    # Push-key setup runs AFTER ddev start and clears the shared agent
+    # (ssh-add -D) before loading ONLY the push key, so a lingering read-only
+    # deploy key can't shadow the write key on an in-container push.
     all_cmds = [call["cmd"] for call in runner.calls]
+    ssh_add_clear = ["ddev", "exec", "ssh-add", "-D"]
     auth_ssh_cmd = ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
-    assert auth_ssh_cmd in all_cmds
-    assert all_cmds.index(auth_ssh_cmd) < all_cmds.index(["ddev", "start"])
+    assert all_cmds.index(["ddev", "start"]) < all_cmds.index(ssh_add_clear)
+    assert all_cmds.index(ssh_add_clear) < all_cmds.index(auth_ssh_cmd)
+    assert all_cmds.index(auth_ssh_cmd) < all_cmds.index(["bash", "-c", "echo hi"])
 
     config_path = instance_dir / ".ddev" / "config.fleet.yaml"
     assert config_path.exists()
