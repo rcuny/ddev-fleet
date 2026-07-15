@@ -30,6 +30,7 @@ fleet_daemon_port: 8765
 # --- DDEV router (spec §9.2) -------------------------------------------------
 ddev_router_http_port: 8080
 ddev_router_https_port: 8443
+ddev_typesense_http_port: 8108
 
 # --- Domain & TLS (spec §9) — AWAITS CONFIRMATION ---------------------------
 # fleet_domain already includes the "fleet." label (it matches fleet.yml's

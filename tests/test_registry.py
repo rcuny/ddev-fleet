@@ -109,6 +109,34 @@ projects:
     assert registry.additional_hostnames("demo") == ["www", "api"]
 
 
+def test_typesense_enabled(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+  plain:
+    git: git@example.test:org/plain.git
+    default_template: default
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    path = _write(fleet_home / "fleet.yml", text)
+    registry = Registry.load(path)
+    assert registry.typesense_enabled("demo") is True
+    assert registry.typesense_enabled("plain") is False
+
+
 def test_load_missing_git_key_names_the_key(fleet_home, sample_registry_text):
     broken = sample_registry_text.replace("    git: git@example.test:org/demo.git\n", "")
     path = _write(fleet_home / "fleet.yml", broken)

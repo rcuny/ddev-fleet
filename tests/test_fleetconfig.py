@@ -94,6 +94,36 @@ def test_write_fleet_config_without_token_with_git_bot_creates_web_environment(t
     )
 
 
+def test_write_fleet_config_with_typesense(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        "sk-ant-oat01-xyz",
+        typesense=True,
+    )
+
+    assert path.read_text(encoding="utf-8") == (
+        "name: oak--develop\n"
+        "project_tld: fleet.example.test\n"
+        "web_environment:\n"
+        "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
+        "  - FLEET_TYPESENSE_HOST=oak--develop.fleet.example.test\n"
+        "  - FLEET_TYPESENSE_PORT=443\n"
+        "  - FLEET_TYPESENSE_PATH=/_typesense\n"
+    )
+
+
+def test_write_fleet_config_without_typesense_omits_vars(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir, "oak--develop", "fleet.example.test", "sk-ant-oat01-xyz"
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "FLEET_TYPESENSE_HOST" not in content
+
+
 def test_write_web_build(tmp_path):
     instance_dir = tmp_path / "instance"
     path = write_web_build(instance_dir)

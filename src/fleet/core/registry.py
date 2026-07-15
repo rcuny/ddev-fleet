@@ -123,6 +123,10 @@ class Registry:
         block = self._project_block(project)
         return [str(h) for h in (block.get("additional_hostnames") or [])]
 
+    def typesense_enabled(self, project: str) -> bool:
+        block = self._project_block(project)
+        return bool(block.get("typesense"))
+
     def resolve(
         self, project: str, template: str, branch: str, label: str | None = None
     ) -> ResolvedInstance:

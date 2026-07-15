@@ -163,6 +163,25 @@ Additional live checks, not in spec §16 but load-bearing for this plan:
   Expected: `router_http_port: 8080` and `router_https_port: 8443` appear
   in the output.
 
+- **Typesense edge exposure** (only relevant for instances of a project with
+  `typesense: true`) — confirm the shared ddev-router publishes the
+  Typesense HTTP entrypoint on loopback, then confirm the same-origin route
+  end-to-end:
+
+  ```bash
+  # Typesense edge exposure (only relevant for instances of a project with `typesense: true`):
+  # confirm the shared ddev-router publishes the Typesense HTTP entrypoint on loopback,
+  ss -tlnp | grep -E ':8108\b'
+  # Expected: a 127.0.0.1:8108 listener once at least one typesense-enabled instance is up.
+  # Then confirm the same-origin route end-to-end (replace the host with a real instance):
+  curl -s -o /dev/null -w '%{http_code}\n' https://<project>--<label>.fleet.personal.example/_typesense/health
+  # Expected: 200 (Typesense health via the Caddy /_typesense route).
+  ```
+
+  Per the design spec's "Key assumption to verify": if `:8108` is NOT bound
+  on loopback (DDEV binds a per-project ephemeral port instead), the static
+  Caddy target is wrong and the edge design must be revisited.
+
 - **`known_hosts` has entries for both git forges** — confirm the
   ed25519-only keyscan seeded a usable entry for each:
 

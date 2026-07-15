@@ -297,6 +297,41 @@ projects:
     assert "albania.demo--develop.fleet.example.test" in content
 
 
+def test_deploy_writes_typesense_env_when_enabled(fleet_home, git_repo):
+    """A project with `typesense: true` gets FLEET_TYPESENSE_* injected into
+    its instance config.fleet.yaml web_environment."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
+    content = config_path.read_text(encoding="utf-8")
+    assert "FLEET_TYPESENSE_HOST=demo--develop.fleet.example.test" in content
+    assert "FLEET_TYPESENSE_PORT=443" in content
+    assert "FLEET_TYPESENSE_PATH=/_typesense" in content
+
+
 def test_deploy_independent_labels_do_not_clobber_each_other(fleet_home, git_repo):
     """Two deploys for different labels of the same project must both end up
     on disk as independent instances."""
