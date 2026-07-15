@@ -6,6 +6,8 @@ projects:
     git: git@example.com:you/example.git
     default_branch: main
     default_template: default
+    # typesense: true                       # expose Typesense to the browser at /_typesense (optional)
+    # NOTE: browser-exposed TYPESENSE_API_KEY must be a SEARCH-ONLY key, never the admin key.
     # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
     templates:
       default:

@@ -178,6 +178,7 @@ def deploy(
             claude_token,
             additional_fqdns=fqdns,
             git_bot=registry.git_bot(),
+            typesense=registry.typesense_enabled(project),
         )
         write_web_build(instance_dir)
         excludes = [
@@ -193,16 +194,27 @@ def deploy(
         copied = assets_mod.inject(paths.assets / project, instance_dir, context, runner=runner)
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
 
-        runner(
-            ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)],
-            cwd=instance_dir,
-            log_path=deploy_log,
-        )
-
         start_result = ddev.start(instance_dir, log_path=deploy_log, runner=runner)
         if start_result.returncode != 0:
             raise DeployError(
                 f"ddev start failed in {instance_dir} with exit code {start_result.returncode}"
+            )
+
+        # Push-key setup runs AFTER `ddev start` (it needs the web container for
+        # `ddev exec`). Clear the SHARED ddev ssh-agent first, then load ONLY the
+        # read-write push key — otherwise a read-only deploy key lingering in the
+        # shared agent is offered first and Bitbucket denies the in-container push.
+        runner(["ddev", "exec", "ssh-add", "-D"], cwd=instance_dir, log_path=deploy_log)
+        auth_result = runner(
+            ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)],
+            cwd=instance_dir,
+            log_path=deploy_log,
+        )
+        if auth_result.returncode != 0:
+            _append_log(
+                deploy_log,
+                f"WARNING: ddev auth ssh returned {auth_result.returncode}; "
+                "in-container git push may fail",
             )
 
         env = env_vars(context)

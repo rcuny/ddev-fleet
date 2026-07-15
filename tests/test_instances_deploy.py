@@ -60,17 +60,23 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     assert (instance_dir / "README.md").exists()
 
     command_names = [call["cmd"][0] for call in runner.calls]
-    assert command_names == ["git", "ddev", "ddev", "bash"]
+    assert command_names == ["git", "ddev", "ddev", "ddev", "bash"]
     assert runner.calls[0]["cmd"][:2] == ["git", "clone"]
-    assert runner.calls[1]["cmd"] == ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
-    assert runner.calls[2]["cmd"] == ["ddev", "start"]
-    assert runner.calls[3]["cmd"] == ["bash", "-c", "echo hi"]
-    assert runner.calls[3]["env"]["FLEET_INSTANCE_ID"] == "demo--develop"
+    assert runner.calls[1]["cmd"] == ["ddev", "start"]
+    assert runner.calls[2]["cmd"] == ["ddev", "exec", "ssh-add", "-D"]
+    assert runner.calls[3]["cmd"] == ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
+    assert runner.calls[4]["cmd"] == ["bash", "-c", "echo hi"]
+    assert runner.calls[4]["env"]["FLEET_INSTANCE_ID"] == "demo--develop"
 
+    # Push-key setup runs AFTER ddev start and clears the shared agent
+    # (ssh-add -D) before loading ONLY the push key, so a lingering read-only
+    # deploy key can't shadow the write key on an in-container push.
     all_cmds = [call["cmd"] for call in runner.calls]
+    ssh_add_clear = ["ddev", "exec", "ssh-add", "-D"]
     auth_ssh_cmd = ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
-    assert auth_ssh_cmd in all_cmds
-    assert all_cmds.index(auth_ssh_cmd) < all_cmds.index(["ddev", "start"])
+    assert all_cmds.index(["ddev", "start"]) < all_cmds.index(ssh_add_clear)
+    assert all_cmds.index(ssh_add_clear) < all_cmds.index(auth_ssh_cmd)
+    assert all_cmds.index(auth_ssh_cmd) < all_cmds.index(["bash", "-c", "echo hi"])
 
     config_path = instance_dir / ".ddev" / "config.fleet.yaml"
     assert config_path.exists()
@@ -289,6 +295,41 @@ projects:
     content = config_path.read_text(encoding="utf-8")
     assert "additional_fqdns:" in content
     assert "albania.demo--develop.fleet.example.test" in content
+
+
+def test_deploy_writes_typesense_env_when_enabled(fleet_home, git_repo):
+    """A project with `typesense: true` gets FLEET_TYPESENSE_* injected into
+    its instance config.fleet.yaml web_environment."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
+    content = config_path.read_text(encoding="utf-8")
+    assert "FLEET_TYPESENSE_HOST=demo--develop.fleet.example.test" in content
+    assert "FLEET_TYPESENSE_PORT=443" in content
+    assert "FLEET_TYPESENSE_PATH=/_typesense" in content
 
 
 def test_deploy_independent_labels_do_not_clobber_each_other(fleet_home, git_repo):

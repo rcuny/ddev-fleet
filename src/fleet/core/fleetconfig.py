@@ -16,6 +16,7 @@ def write_fleet_config(
     claude_token: str | None,
     additional_fqdns: list[str] | None = None,
     git_bot: tuple[str, str] | None = None,
+    typesense: bool = False,
 ) -> Path:
     ddev_dir = instance_dir / ".ddev"
     ddev_dir.mkdir(parents=True, exist_ok=True)
@@ -33,6 +34,15 @@ def write_fleet_config(
                 f"GIT_AUTHOR_EMAIL={bot_email}",
                 f"GIT_COMMITTER_NAME={bot_name}",
                 f"GIT_COMMITTER_EMAIL={bot_email}",
+            ]
+        )
+    if typesense:
+        web_environment = data.setdefault("web_environment", [])
+        web_environment.extend(
+            [
+                f"FLEET_TYPESENSE_HOST={instance_id}.{domain}",
+                "FLEET_TYPESENSE_PORT=443",
+                "FLEET_TYPESENSE_PATH=/_typesense",
             ]
         )
     if additional_fqdns:
