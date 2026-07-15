@@ -31,3 +31,10 @@ def test_caddyfile_keeps_web_catchall():
     assert "reverse_proxy 127.0.0.1:8080" in out
     # fleet UI vhost unchanged
     assert "reverse_proxy 127.0.0.1:8765" in out
+
+
+def test_caddyfile_typesense_handle_precedes_catchall():
+    out = _render()
+    ts = out.index("handle /_typesense/* {")
+    web = out.index("reverse_proxy 127.0.0.1:8080")
+    assert ts < web, "the /_typesense handle must be matched before the web catch-all"
