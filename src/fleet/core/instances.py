@@ -178,6 +178,7 @@ def deploy(
             claude_token,
             additional_fqdns=fqdns,
             git_bot=registry.git_bot(),
+            typesense=registry.typesense_enabled(project),
         )
         write_web_build(instance_dir)
         excludes = [
