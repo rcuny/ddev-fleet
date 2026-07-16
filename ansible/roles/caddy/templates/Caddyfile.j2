@@ -13,7 +13,16 @@
     # short-lived, instance-scoped token in the query string.
     @protected not path /ws/*
     basic_auth @protected {
-        {{ fleet_admin_user }} {{ fleet_admin_bcrypt_hash }}
+        # Fleet-owned and rotatable WITHOUT Ansible (fleet.core.caddyauth +
+        # `fleet set-admin-password` / `fleet rotate-admin-password`) — this
+        # imports a single LITERAL file, not a glob. Caddy treats a missing
+        # literal import path as a hard error, but a glob matching zero
+        # files as a silent no-op (verified against the Caddy docs); using a
+        # literal path here means Ansible's one-time seed task
+        # (roles/caddy/tasks/main.yml) is what guarantees the file always
+        # exists, and rotation after that never needs a re-render of this
+        # Caddyfile.
+        import {{ fleet_caddy_snippet_dir }}/admin-auth.conf
     }
     reverse_proxy 127.0.0.1:{{ fleet_daemon_port }}
 }

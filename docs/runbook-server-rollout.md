@@ -63,10 +63,13 @@ Alternative delivery methods (only if not using the tar pipe above):
 # (d) public-repo one-liner: curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
 ```
 
-The first run uses the placeholder `fleet_admin_bcrypt_hash` in
-`ansible/group_vars/all.yml` — basic auth will not yet accept a real
-password. Continue to step 3, then re-run bootstrap (or just re-run the
-playbook, step 3 below).
+The first run seeds the dashboard `basic_auth` snippet with the
+distribution-default credentials (`admin` / `ddev-admin` — see README.md
+"Default credentials") by hashing `fleet_admin_default_password` live on
+the host with `caddy hash-password`. No placeholder step and no second
+Ansible run are needed for auth to work. Rotate the default after rollout
+with `fleet rotate-admin-password` (step 3, below) — that command never
+touches Ansible.
 
 ## 2a. Updating an already-deployed server (code update)
 
@@ -146,18 +149,23 @@ or provisioning change.
 > the fleet user, so `fleet secret set …`, `fleet list`, etc. can be run from
 > any admin account without `sudo -u fleet` or the venv path.
 
-## 3. Generate the admin password hash
+## 3. Rotate the admin password
+
+The host is already up with the distribution-default dashboard credentials
+(`admin` / `ddev-admin` — step 2 seeded them). Rotate now, as the `fleet`
+user — this hashes the password, writes the fleet-owned Caddy snippet at
+`/etc/caddy/fleet/admin-auth.conf`, validates the Caddyfile, and reloads
+Caddy directly. **No Ansible run, no Caddyfile redeploy.**
 
 ```bash
-caddy hash-password
+sudo -u fleet /usr/local/bin/fleet rotate-admin-password
+# prints the new password ONCE — save it now, it is not stored anywhere in the clear
 ```
 
-Paste the output into `fleet_admin_bcrypt_hash` in
-`/opt/ddev-fleet/ansible/group_vars/all.yml`, then redeploy the Caddyfile:
-
-```bash
-ansible-playbook -c local /opt/ddev-fleet/ansible/site.yml
-```
+(Or `fleet set-admin-password <password>` to choose your own instead of a
+generated one.) See `fleet.core.caddyauth` and README.md "Default
+credentials" for how this works — it never re-renders the Caddyfile and
+never touches `ansible/group_vars/all.yml`.
 
 ## 4. Add the deploy key to each forge
 
@@ -270,12 +278,15 @@ Additional live checks, not in spec §16 but load-bearing for this plan:
 
   Expected: both commands exit `0`.
 
-- **`fleet_admin_bcrypt_hash` is your own password, not the shipped
-  placeholder** — the shipped value in `ansible/group_vars/all.yml` is a
-  syntactically valid bcrypt hash of a discarded random secret, so it
-  fails closed (no password will match it), but it is NOT your password.
-  Confirm it was replaced with your own `caddy hash-password` output
-  (step 3, above) before exposing `fleet.<domain>` publicly.
+- **The dashboard admin password has been rotated off the shipped
+  default** (`admin` / `ddev-admin`, seeded by step 2 — see README.md
+  "Default credentials") — confirm you ran `fleet rotate-admin-password`
+  or `fleet set-admin-password` (step 3, above) before exposing
+  `fleet.<domain>` publicly. Check the live snippet directly if unsure:
+
+  ```bash
+  sudo cat /etc/caddy/fleet/admin-auth.conf   # "admin $2..." — a real hash, not obviously the default
+  ```
 
 ## 7. Start the fleet daemon
 

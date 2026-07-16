@@ -36,3 +36,8 @@ class DeployError(FleetError):
 
 class TypesenseError(FleetError):
     """A Typesense admin-API call (key generation/registration) failed."""
+
+
+class CaddyAuthError(FleetError):
+    """Hashing/writing/validating/reloading the Caddy dashboard admin-auth
+    snippet failed (fleet.core.caddyauth)."""

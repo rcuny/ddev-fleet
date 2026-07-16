@@ -42,6 +42,7 @@ shell's own (unrelated) DDEV setup.
 | `core/tokens.py` | The `[[token]]` substitution engine (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, secret tokens, …) and `FLEET_*` env var derivation for `post_deploy` commands |
 | `core/secrets.py` | Read/write `KEY=VALUE` files (0600) — both the fleet-wide `.secrets` and per-project `secrets/<project>.env` |
 | `core/typesense.py` | Generates/persists per-project Typesense admin+search-only keys, registers the search-only key against a running instance's Typesense admin API |
+| `core/caddyauth.py` | Rotates the Caddy dashboard `basic_auth` password WITHOUT Ansible: hashes via `caddy hash-password`, atomically rewrites the fleet-owned snippet `/etc/caddy/fleet/admin-auth.conf` (imported by `Caddyfile.j2`, seeded once by the `caddy` Ansible role), `caddy validate`s, then reloads Caddy via a narrow `sudo systemctl reload caddy` sudoers grant. Backs `fleet set-admin-password` / `fleet rotate-admin-password` |
 | `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race |
 | `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe) |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
@@ -97,7 +98,10 @@ Full details: `docs/runbook-server-rollout.md` §2a. Summary:
   `git pull` that Option B depends on. When only the Caddy config needs
   reapplying (e.g. after touching `Caddyfile.j2` or
   `fleet_typesense_public_port`), apply the `caddy` role alone via a scoped
-  one-off playbook, not the full `site.yml`.
+  one-off playbook, not the full `site.yml`. **Rotating the dashboard admin
+  password is NOT one of these cases** — `fleet rotate-admin-password` /
+  `fleet set-admin-password` (`core/caddyauth.py`) never touches Ansible at
+  all; see README.md "Default credentials".
 
 ## Per-project secrets model
 
