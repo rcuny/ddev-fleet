@@ -125,7 +125,14 @@ def _build_parser() -> argparse.ArgumentParser:
 
     snapshot_parser = subparsers.add_parser("snapshot")
     snapshot_parser.add_argument("instance_id")
-    snapshot_parser.add_argument("--dest-rel", default="dumps/db.sql.gz")
+    snapshot_parser.add_argument(
+        "--dest-rel",
+        default=None,
+        help=(
+            "asset-relative dump path (default: dumps/default-<instance_id>.sql, "
+            "computed from the instance id if omitted)"
+        ),
+    )
 
     subparsers.add_parser("refresh-claude-token")
 

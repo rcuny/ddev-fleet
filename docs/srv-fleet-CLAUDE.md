@@ -52,7 +52,7 @@ registry load with an actionable message naming the bad key.
 | `fleet list` | — | Table: id, project, branch, state, URL, RAM |
 | `fleet ssh-key` | — | Prints the fleet deploy public key |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
-| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/db.sql.gz]` | `ddev export-db` into the project's asset tree |
+| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | `ddev export-db --gzip=false` into the project's asset tree |
 | `fleet refresh-claude-token` | — | Rotates `CLAUDE_CODE_OAUTH_TOKEN` fleet-wide, rewrites every instance's `config.fleet.yaml`, restarts running instances |
 | `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value: hashes it (`caddy hash-password`), atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same way, and prints it once |
@@ -62,6 +62,15 @@ Projects and templates are declared by hand in `fleet.yml` — there is no
 `fleet project add` and no auto-registration of unknown projects on deploy.
 To onboard a new project, add a `projects.<key>` block (and its `templates`)
 to the registry, then deploy.
+
+`fleet snapshot` writes plain, uncompressed SQL (`--gzip=false`) — each
+project's own `.ddev/commands/web/install-site-from-db` import script reads
+`dumps/<SITE>.sql` straight into `drush sql:connect`, with no gunzip step.
+The default dest, `dumps/default-<instance-id>.sql`, deliberately avoids
+`dumps/default.sql`: that name is the project's **shared** dump, hard-linked
+into every instance of the project (`core/assets.py:_link_shared_dir`), and
+`fleet snapshot` refuses to write there (`FleetError`, even with an explicit
+`--dest-rel`) so a snapshot can never corrupt it for every other instance.
 
 ## Common workflows
 

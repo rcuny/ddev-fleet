@@ -155,11 +155,22 @@ these without `sudo -u fleet` or the venv path.
 | `fleet ssh-key` | — | Prints the fleet deploy (read-only) public key |
 | `fleet secret set <project> <key> <value>` | — | Writes `KEY=VALUE` into `/srv/fleet/secrets/<project>.env` (0600); values are available to deploy as `[[key-with-dashes]]` tokens |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
-| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/db.sql.gz]` | Runs `ddev export-db` into the project's asset tree |
+| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | Runs `ddev export-db --gzip=false` into the project's asset tree |
 | `fleet refresh-claude-token` | — | Rotates the Claude Code OAuth token fleet-wide, rewrites every instance's `config.fleet.yaml`, restarts running instances |
 | `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value; hashes, writes, validates, and reloads Caddy — no Ansible run |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (the `fleet.yml` registry + assets checkout) |
+
+`fleet snapshot` writes plain, uncompressed SQL (`--gzip=false`) because
+that's what each project's own `.ddev/commands/web/install-site-from-db`
+import script expects (`dumps/<SITE>.sql`, piped straight into
+`drush sql:connect`, no gunzip). The default dest is
+`dumps/default-<instance-id>.sql` — never `dumps/default.sql`, which is the
+project's **shared** dump that every instance of that project hard-links and
+imports from by default (`core/assets.py:_link_shared_dir`); `fleet
+snapshot` refuses to write there (even via an explicit `--dest-rel`) so a
+snapshot can never corrupt it. To promote a snapshot to the shared default,
+copy it explicitly (e.g. `fleet assets push`) once you've verified it.
 
 ## Web UI
 

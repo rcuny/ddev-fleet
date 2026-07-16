@@ -468,12 +468,20 @@ def stop(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_
             )
 
 
+# The shared project dump every instance hard-links and imports from
+# (`.ddev/commands/web/install-site-from-db` reads `dumps/<SITE>.sql`, and
+# `default` is the DDEV default site). snapshot() must never write here in
+# place — see the module docstring in core/assets.py:_link_shared_dir for why
+# writing through a hard-linked inode corrupts every instance sharing it.
+_SHARED_DUMP_BASENAME = "default.sql"
+
+
 def snapshot(
     paths: FleetPaths,
     registry: Registry,
     instance_id: str,
     *,
-    dest_rel: str = "dumps/db.sql.gz",
+    dest_rel: str | None = None,
     runner=run_streamed,
 ) -> Path:
     instance_dir = paths.instances / instance_id
@@ -488,11 +496,37 @@ def snapshot(
     else:
         project = instance_id.split("--", 1)[0]
 
+    if dest_rel is None:
+        # Per-instance dump name (never the shared `default.sql`), importable
+        # via `ddev install-site-from-db default-<instance_id>` per the
+        # project's own `.ddev/commands/web/install-site-from-db` convention
+        # (`dumps/${SITE}.sql`, plain uncompressed SQL — see --gzip=false below).
+        dest_rel = f"dumps/default-{instance_id}.sql"
+
     dest = paths.assets / project / dest_rel
+
+    if dest.name == _SHARED_DUMP_BASENAME:
+        raise FleetError(
+            f"refusing to snapshot to {dest_rel!r}: {_SHARED_DUMP_BASENAME!r} is the "
+            "shared project dump that every instance hard-links and imports from "
+            "(see core/assets.py:_link_shared_dir) — writing to it in place would "
+            "corrupt it for every instance and the config repo's source file. "
+            "Use the default per-instance name (omit --dest-rel) or another "
+            "explicit --dest-rel."
+        )
+
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() or dest.is_symlink():
+        # dest may be a hard link sharing an inode with a file mirrored into
+        # other instances (or the config repo's own copy) by
+        # core/assets.py:_link_shared_dir. Writing into it in place would
+        # write through that shared inode. Unlinking first guarantees
+        # `ddev export-db` creates a fresh, unshared inode at this path,
+        # regardless of the existing file's current link count.
+        dest.unlink()
 
     with instance_lock(paths.locks, instance_id):
-        result = runner(["ddev", "export-db", f"--file={dest}"], cwd=instance_dir)
+        result = runner(["ddev", "export-db", f"--file={dest}", "--gzip=false"], cwd=instance_dir)
         if result.returncode != 0:
             raise FleetError(
                 f"ddev export-db failed for {instance_id!r} with exit code {result.returncode}"

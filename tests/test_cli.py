@@ -311,25 +311,29 @@ def test_snapshot_dispatch(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
     recorder = []
 
-    def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
+    def fake_snapshot(paths, registry, instance_id, *, dest_rel=None, runner=None):
         recorder.append((instance_id, dest_rel))
-        return fleet_home / "config" / "assets" / "demo" / dest_rel
+        computed = dest_rel or f"dumps/default-{instance_id}.sql"
+        return fleet_home / "config" / "assets" / "demo" / computed
 
     monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "snapshot", "demo--develop"])
 
     assert exit_code == 0
-    assert recorder == [("demo--develop", "dumps/db.sql.gz")]
+    # CLI passes None through when --dest-rel is omitted; instances.snapshot
+    # is the one that computes the per-instance default (see its own tests).
+    assert recorder == [("demo--develop", None)]
 
 
 def test_snapshot_dispatch_custom_dest_rel(fleet_home, monkeypatch):
     _write_minimal_registry(fleet_home)
     recorder = []
 
-    def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
+    def fake_snapshot(paths, registry, instance_id, *, dest_rel=None, runner=None):
         recorder.append((instance_id, dest_rel))
-        return fleet_home / "config" / "assets" / "demo" / dest_rel
+        computed = dest_rel or f"dumps/default-{instance_id}.sql"
+        return fleet_home / "config" / "assets" / "demo" / computed
 
     monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
 
