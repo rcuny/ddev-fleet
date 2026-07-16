@@ -126,6 +126,7 @@ def test_list_instances_missing_instances_dir_returns_empty_early(fleet_home):
         assets=base_paths.assets,
         instances=nonexistent,
         secrets=base_paths.secrets,
+        project_secrets=base_paths.project_secrets,
         locks=base_paths.locks,
         push_key_dir=base_paths.push_key_dir,
     )

@@ -24,3 +24,8 @@ def write_secret(path: Path, key: str, value: str) -> None:
     lines = [f"{k}={v}" for k, v in existing.items()]
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     os.chmod(path, 0o600)
+
+
+def secret_tokens(secrets: dict[str, str]) -> dict[str, str]:
+    """Map secret KEY=VALUE entries to [[token]] names: SLACK_BOT_TOKEN -> slack-bot-token."""
+    return {key.lower().replace("_", "-"): value for key, value in secrets.items()}
