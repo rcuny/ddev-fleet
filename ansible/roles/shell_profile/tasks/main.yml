@@ -1,0 +1,35 @@
+---
+# Interactive shell prompt/aliases/exports for root and the fleet user.
+#
+# One system-wide, colour-aware-by-uid file (see the template header) rather
+# than two per-user .bashrc edits: it stays in sync automatically and avoids
+# blindly appending to a package-owned ~/.bashrc, which is fragile to
+# reprovision idempotently and easy to double-append.
+#
+# Delivered as /etc/profile.d/10-fleet-shell.sh (covers interactive LOGIN
+# shells for every account, via /etc/profile) PLUS an idempotent
+# blockinfile hook in /etc/bash.bashrc (covers interactive NON-login shells
+# — `su fleet`, `su root`, a plain `bash`, `ddev exec bash` — which never
+# read /etc/profile.d on Debian).
+- name: Deploy the shared interactive shell profile (prompt, aliases, exports)
+  ansible.builtin.template:
+    src: fleet-shell.sh.j2
+    dest: /etc/profile.d/10-fleet-shell.sh
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Source the shell profile for interactive non-login shells too
+  # /etc/profile.d/*.sh is only read via /etc/profile, which login shells
+  # process. Non-login interactive shells (su fleet / su root without -l,
+  # bare `bash`, `ddev exec bash`) skip /etc/profile entirely; on Debian
+  # bash instead reads /etc/bash.bashrc for those, so the profile.d script
+  # above would silently never run for them without this hook.
+  ansible.builtin.blockinfile:
+    path: /etc/bash.bashrc
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet shell profile"
+    insertafter: EOF
+    block: |
+      if [ -f /etc/profile.d/10-fleet-shell.sh ]; then
+          . /etc/profile.d/10-fleet-shell.sh
+      fi
