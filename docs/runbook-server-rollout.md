@@ -110,38 +110,36 @@ Rollback:
 ssh "$SRV" 'sudo rm -rf /opt/ddev-fleet/src && sudo mv /opt/ddev-fleet.src.bak /opt/ddev-fleet/src && sudo systemctl restart fleet'
 ```
 
-### Option B — `git pull` update (preferred, requires one-time setup — NOT yet enabled)
+### Option B — `git pull` update (enabled 2026-07-16)
 
-To update with a simple `git pull` on `main`, `/opt/ddev-fleet` must be a git
-checkout of `ddev-fleet.git` with server-side read access. One-time setup:
-
-1. Grant the server git read access to the private product repo — add the
-   server's SSH public key as a **read-only access/deploy key** on the
-   `ddev-fleet.git` Bitbucket repo. The `ddev-fleet-config.git` repo is
-   already wired this exact way (it pulls fine as the `fleet` user), so reuse
-   that key or mint a new one.
-2. Convert `/opt/ddev-fleet` into a checkout once, preserving the venv:
-
-   ```bash
-   ssh "$SRV" 'sudo mv /opt/ddev-fleet /opt/ddev-fleet.pretar && \
-     sudo git clone git@bitbucket.org:personal_maintainer/ddev-fleet.git /opt/ddev-fleet && \
-     sudo cp -a /opt/ddev-fleet.pretar/venv /opt/ddev-fleet/venv'
-   ```
-
-   The editable `.pth` keeps pointing at `/opt/ddev-fleet/src`, so no reinstall
-   is needed.
-
-Thereafter every update is just:
+`/opt/ddev-fleet` is a git checkout of `ddev-fleet.git`, owned by `fleet` (the
+`fleet.service` user), tracking `origin/main`. The `fleet` user holds the
+read-only deploy key registered on the Bitbucket repo (same pattern as
+`ddev-fleet-config.git`). Ongoing updates:
 
 ```bash
-ssh "$SRV" 'sudo git -C /opt/ddev-fleet pull --ff-only && \
+SRV=debian@ddev.personal.example
+ssh "$SRV" '
+  sudo -u fleet git -C /opt/ddev-fleet pull --ff-only && \
   sudo -u fleet git -C /srv/fleet/config pull --ff-only && \
-  sudo systemctl restart fleet'
+  sudo systemctl restart fleet && sleep 2 && systemctl is-active fleet'
 ```
 
-> **Status 2026-07-16:** Option B is **not** enabled — there is no product-repo
-> git credential on the server and `/opt/ddev-fleet` is not a checkout. Use
-> Option A until the access key is added and the checkout is created.
+The package is installed editable, so the restart alone picks up new source —
+no reinstall. Run `bootstrap.sh` / the Ansible playbook only when dependencies
+or provisioning change.
+
+> **How the checkout was created (in place, 2026-07-16):**
+> `sudo systemctl stop fleet`; `sudo chown -R fleet:fleet /opt/ddev-fleet`;
+> then as `fleet`: `git init -b main`, `git remote add origin <url>`,
+> `git fetch origin`, `git reset --hard origin/main` (this rewrites only
+> git-tracked files; the untracked, gitignored `venv/` is preserved);
+> `sudo systemctl start fleet`.
+>
+> **Ownership caveat:** `/opt/ddev-fleet` is now `fleet:fleet`. The clean-server
+> `bootstrap.sh` chowns it back to `root:root`, which would break `fleet`'s
+> `git pull`. On a live host prefer Option A/B over a full bootstrap re-run; if
+> you must re-run bootstrap, re-chown to `fleet:fleet` afterward.
 
 ## 3. Generate the admin password hash
 
