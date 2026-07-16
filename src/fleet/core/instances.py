@@ -9,10 +9,11 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import ddev, gitops
-from fleet.core.errors import DeployError, FleetError
+from fleet.core import ddev, gitops, typesense
+from fleet.core.errors import DeployError, FleetError, TypesenseError
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
+    write_ddev_env,
     write_fleet_config,
     write_settings_local,
     write_web_build,
@@ -25,6 +26,18 @@ from fleet.core.tokens import build_context, env_vars
 
 _yaml = YAML()
 _yaml.default_flow_style = False
+
+# Public port Caddy exposes each instance's Typesense on (spec: typesense
+# edge exposure). MUST match `fleet_typesense_public_port` in
+# ansible/group_vars/all.yml / the Caddyfile template — the two are
+# independently configured (this side has no Ansible dependency) but must
+# stay numerically in sync for the browser-facing URL to work.
+TYPESENSE_PUBLIC_PORT = 9108
+
+# Shared ddev-router HTTP entrypoint that all instances' Typesense containers
+# sit behind (routed by Host header). Must match `ddev_typesense_http_port`
+# in ansible/group_vars/all.yml.
+TYPESENSE_ROUTER_HTTP_PORT = 8108
 
 
 @dataclass
@@ -173,6 +186,15 @@ def deploy(
                 "run 'fleet init' or set it before deploying"
             )
         fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
+
+        typesense_enabled = registry.typesense_enabled(project)
+        typesense_admin_key = None
+        typesense_search_key = None
+        if typesense_enabled:
+            typesense_admin_key, typesense_search_key = typesense.ensure_project_keys(
+                paths.project_secrets / f"{project}.env"
+            )
+
         write_fleet_config(
             instance_dir,
             inst_id,
@@ -180,7 +202,10 @@ def deploy(
             claude_token,
             additional_fqdns=fqdns,
             git_bot=registry.git_bot(),
-            typesense=registry.typesense_enabled(project),
+            typesense=typesense_enabled,
+            typesense_port=TYPESENSE_PUBLIC_PORT,
+            typesense_admin_key=typesense_admin_key,
+            typesense_search_key=typesense_search_key,
         )
         write_web_build(instance_dir)
         excludes = [
@@ -188,6 +213,9 @@ def deploy(
             ".ddev/web-build/Dockerfile.fleet-claude",
             ".fleet/",
         ]
+        if typesense_enabled:
+            write_ddev_env(instance_dir, {"TYPESENSE_API_KEY": typesense_admin_key})
+            excludes.append(".ddev/.env")
         for injected in write_settings_local(instance_dir, registry.domain):
             excludes.append(str(injected.relative_to(instance_dir)))
         ensure_git_exclude(instance_dir, excludes)
@@ -203,6 +231,21 @@ def deploy(
             raise DeployError(
                 f"ddev start failed in {instance_dir} with exit code {start_result.returncode}"
             )
+
+        if typesense_enabled:
+            try:
+                typesense.register_search_key(
+                    http_port=TYPESENSE_ROUTER_HTTP_PORT,
+                    host=f"{inst_id}.{registry.domain}",
+                    admin_key=typesense_admin_key,
+                    search_key=typesense_search_key,
+                )
+            except TypesenseError as exc:
+                _append_log(
+                    deploy_log,
+                    f"WARNING: Typesense search-key registration failed: {exc}; "
+                    "search may not work until it is re-registered",
+                )
 
         # Push-key setup runs AFTER `ddev start` (it needs the web container for
         # `ddev exec`). Clear the SHARED ddev ssh-agent first, then load ONLY the

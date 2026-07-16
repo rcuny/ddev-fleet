@@ -1,5 +1,6 @@
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
+    write_ddev_env,
     write_fleet_config,
     write_settings_local,
     write_web_build,
@@ -110,8 +111,7 @@ def test_write_fleet_config_with_typesense(tmp_path):
         "web_environment:\n"
         "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
         "  - FLEET_TYPESENSE_HOST=oak--develop.fleet.example.test\n"
-        "  - FLEET_TYPESENSE_PORT=443\n"
-        "  - FLEET_TYPESENSE_PATH=/_typesense\n"
+        "  - FLEET_TYPESENSE_PORT=9108\n"
     )
 
 
@@ -122,6 +122,91 @@ def test_write_fleet_config_without_typesense_omits_vars(tmp_path):
     )
     content = path.read_text(encoding="utf-8")
     assert "FLEET_TYPESENSE_HOST" not in content
+
+
+def test_write_fleet_config_typesense_custom_port(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        None,
+        typesense=True,
+        typesense_port=9999,
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "FLEET_TYPESENSE_PORT=9999" in content
+
+
+def test_write_fleet_config_typesense_with_keys(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        None,
+        typesense=True,
+        typesense_admin_key="admin-key-abc",
+        typesense_search_key="search-key-def",
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "TYPESENSE_API_KEY=admin-key-abc" in content
+    assert "FLEET_TYPESENSE_SEARCH_KEY=search-key-def" in content
+
+
+def test_write_fleet_config_typesense_without_keys_omits_key_vars(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        None,
+        typesense=True,
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "TYPESENSE_API_KEY" not in content
+    assert "FLEET_TYPESENSE_SEARCH_KEY" not in content
+
+
+def test_write_fleet_config_no_longer_writes_typesense_path(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        None,
+        typesense=True,
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "FLEET_TYPESENSE_PATH" not in content
+
+
+def test_write_ddev_env_creates_file(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_ddev_env(instance_dir, {"TYPESENSE_API_KEY": "abc123"})
+
+    assert path == instance_dir / ".ddev" / ".env"
+    assert path.read_text(encoding="utf-8") == "TYPESENSE_API_KEY=abc123\n"
+
+
+def test_write_ddev_env_upserts_and_preserves_existing_keys(tmp_path):
+    instance_dir = tmp_path / "instance"
+    write_ddev_env(instance_dir, {"FOO": "bar"})
+    path = write_ddev_env(instance_dir, {"TYPESENSE_API_KEY": "abc123"})
+
+    content = path.read_text(encoding="utf-8")
+    assert "FOO=bar" in content
+    assert "TYPESENSE_API_KEY=abc123" in content
+
+
+def test_write_ddev_env_upsert_overwrites_same_key(tmp_path):
+    instance_dir = tmp_path / "instance"
+    write_ddev_env(instance_dir, {"FOO": "bar"})
+    path = write_ddev_env(instance_dir, {"FOO": "baz"})
+
+    lines = path.read_text(encoding="utf-8").splitlines()
+    assert lines.count("FOO=baz") == 1
+    assert "FOO=bar" not in lines
 
 
 def test_write_web_build(tmp_path):

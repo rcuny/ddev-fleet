@@ -26,18 +26,18 @@
     # entrypoint routes correctly by Host header. Caddy sets
     # X-Forwarded-Proto=https so Drupal still sees the request as secure; the
     # 127.0.0.1 hop is plaintext-safe (never leaves the host).
-    #
-    # /_typesense/* is same-origin browser access to the instance's Typesense
-    # service: strip the prefix and proxy to the shared ddev-router Typesense
-    # HTTP entrypoint. The Host header is preserved, so Traefik routes to the
-    # correct instance's Typesense. (Only reached if a client calls it.)
-    handle /_typesense/* {
-        uri strip_prefix /_typesense
-        reverse_proxy 127.0.0.1:{{ ddev_typesense_http_port }}
+    reverse_proxy 127.0.0.1:{{ ddev_router_http_port }}
+    tls {
+        on_demand
     }
-    handle {
-        reverse_proxy 127.0.0.1:{{ ddev_router_http_port }}
-    }
+}
+
+# Typesense browser endpoint: same instance hostname, dedicated TLS port.
+# Caddy terminates TLS (on-demand cert, reused from the :443 site) and proxies
+# to the shared ddev-router HTTP entrypoint, which routes to the correct
+# instance's Typesense by Host header. The browser search key is search-only.
+*.{{ fleet_domain }}:{{ fleet_typesense_public_port }} {
+    reverse_proxy 127.0.0.1:{{ ddev_typesense_http_port }}
     tls {
         on_demand
     }

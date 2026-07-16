@@ -31,6 +31,10 @@ fleet_daemon_port: 8765
 ddev_router_http_port: 8080
 ddev_router_https_port: 8443
 ddev_typesense_http_port: 8108
+# Public port Caddy exposes each instance's Typesense on for direct browser
+# access (spec: typesense edge exposure). MUST match
+# fleet.core.instances.TYPESENSE_PUBLIC_PORT in the Python codebase.
+fleet_typesense_public_port: 9108
 
 # --- Domain & TLS (spec §9) — AWAITS CONFIRMATION ---------------------------
 # fleet_domain already includes the "fleet." label (it matches fleet.yml's

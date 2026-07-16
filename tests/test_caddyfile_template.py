@@ -16,14 +16,14 @@ def _render() -> str:
         ddev_router_http_port=8080,
         ddev_router_https_port=8443,
         ddev_typesense_http_port=8108,
+        fleet_typesense_public_port=9108,
     )
 
 
-def test_caddyfile_exposes_typesense_path_route():
+def test_caddyfile_no_longer_exposes_typesense_path_route():
     out = _render()
-    assert "handle /_typesense/* {" in out
-    assert "uri strip_prefix /_typesense" in out
-    assert "reverse_proxy 127.0.0.1:8108" in out
+    assert "/_typesense" not in out
+    assert "handle /_typesense/* {" not in out
 
 
 def test_caddyfile_keeps_web_catchall():
@@ -33,8 +33,15 @@ def test_caddyfile_keeps_web_catchall():
     assert "reverse_proxy 127.0.0.1:8765" in out
 
 
-def test_caddyfile_typesense_handle_precedes_catchall():
+def test_caddyfile_exposes_dedicated_typesense_public_port_site():
     out = _render()
-    ts = out.index("handle /_typesense/* {")
-    web = out.index("reverse_proxy 127.0.0.1:8080")
-    assert ts < web, "the /_typesense handle must be matched before the web catch-all"
+    assert "*.fleet.personal.example:9108 {" in out
+    assert "reverse_proxy 127.0.0.1:8108" in out
+
+
+def test_caddyfile_typesense_site_has_on_demand_tls():
+    out = _render()
+    ts_site_start = out.index("*.fleet.personal.example:9108 {")
+    ts_site_end = out.index("\n}", ts_site_start)
+    ts_site_block = out[ts_site_start:ts_site_end]
+    assert "on_demand" in ts_site_block

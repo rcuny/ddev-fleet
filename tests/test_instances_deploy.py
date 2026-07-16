@@ -4,7 +4,7 @@ from fleet.core import instances
 from fleet.core.errors import DeployError, TokenError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult, run_streamed
-from fleet.core.secrets import write_secret
+from fleet.core.secrets import read_secrets, write_secret
 
 
 class HybridRunner:
@@ -328,8 +328,144 @@ projects:
     config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
     content = config_path.read_text(encoding="utf-8")
     assert "FLEET_TYPESENSE_HOST=demo--develop.fleet.example.test" in content
-    assert "FLEET_TYPESENSE_PORT=443" in content
-    assert "FLEET_TYPESENSE_PATH=/_typesense" in content
+    assert "FLEET_TYPESENSE_PORT=9108" in content
+    assert "FLEET_TYPESENSE_PATH" not in content
+
+
+def test_deploy_generates_and_registers_typesense_keys_when_enabled(
+    monkeypatch, fleet_home, git_repo
+):
+    """A project with `typesense: true` must get admin/search keys generated
+    and persisted to the per-project secrets file, `.ddev/.env` written with
+    the admin key (for the Typesense container), and the search-only key
+    registered against the running instance's Typesense after `ddev start`."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    register_calls = []
+
+    def fake_register_search_key(*, http_port, host, admin_key, search_key, opener=None):
+        register_calls.append(
+            {
+                "http_port": http_port,
+                "host": host,
+                "admin_key": admin_key,
+                "search_key": search_key,
+            }
+        )
+
+    monkeypatch.setattr(instances.typesense, "register_search_key", fake_register_search_key)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    instance_dir = paths.instances / "demo--develop"
+
+    project_secrets = read_secrets(paths.project_secrets / "demo.env")
+    admin_key = project_secrets["TYPESENSE_API_KEY"]
+    search_key = project_secrets["FLEET_TYPESENSE_SEARCH_KEY"]
+    assert admin_key
+    assert search_key
+    assert admin_key != search_key
+
+    ddev_env_path = instance_dir / ".ddev" / ".env"
+    assert ddev_env_path.exists()
+    assert f"TYPESENSE_API_KEY={admin_key}" in ddev_env_path.read_text(encoding="utf-8")
+
+    exclude_content = (instance_dir / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+    assert ".ddev/.env" in exclude_content
+
+    assert len(register_calls) == 1
+    assert register_calls[0]["host"] == "demo--develop.fleet.example.test"
+    assert register_calls[0]["admin_key"] == admin_key
+    assert register_calls[0]["search_key"] == search_key
+
+    config_path = instance_dir / ".ddev" / "config.fleet.yaml"
+    content = config_path.read_text(encoding="utf-8")
+    assert f"TYPESENSE_API_KEY={admin_key}" in content
+    assert f"FLEET_TYPESENSE_SEARCH_KEY={search_key}" in content
+
+
+def test_deploy_without_typesense_does_not_generate_keys_or_register(
+    monkeypatch, fleet_home, git_repo
+):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    register_calls = []
+    monkeypatch.setattr(
+        instances.typesense,
+        "register_search_key",
+        lambda **kwargs: register_calls.append(kwargs),
+    )
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    instance_dir = paths.instances / "demo--develop"
+    assert not (instance_dir / ".ddev" / ".env").exists()
+    assert not (paths.project_secrets / "demo.env").exists()
+    assert register_calls == []
+
+
+def test_deploy_tolerates_register_search_key_failure(monkeypatch, fleet_home, git_repo):
+    """If Typesense isn't reachable yet, key registration failing must not
+    fail the whole deploy — it logs a warning instead."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    from fleet.core.errors import TypesenseError
+
+    def failing_register(**kwargs):
+        raise TypesenseError("not reachable yet")
+
+    monkeypatch.setattr(instances.typesense, "register_search_key", failing_register)
+
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    assert url == "https://demo--develop.fleet.example.test"
+    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    assert "WARNING" in deploy_log.read_text(encoding="utf-8")
 
 
 def test_deploy_independent_labels_do_not_clobber_each_other(fleet_home, git_repo):
