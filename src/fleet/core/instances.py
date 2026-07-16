@@ -152,6 +152,16 @@ def deploy(
         if fresh and instance_dir.exists():
             _destroy_locked(paths, inst_id, runner=runner)
 
+        recovered_stub = False
+        if instance_dir.exists() and not (instance_dir / ".git").is_dir():
+            # A dir with no .git is a partial/failed-destroy stub (e.g. a
+            # bare .ddev/ left behind because a prior destroy couldn't fully
+            # remove it) — remove it so we fall through to a fresh clone
+            # below, instead of handing it to gitops.update() which would
+            # fail with a cryptic "fatal: not a git repository".
+            _remove_instance_dir(instance_dir)
+            recovered_stub = True
+
         clone_result = None
         if instance_dir.exists():
             gitops.update(
@@ -177,6 +187,11 @@ def deploy(
         if clone_result is not None:
             for line in clone_result.lines:
                 _append_log(deploy_log, line)
+        if recovered_stub:
+            _append_log(
+                deploy_log,
+                "recovered from a partial instance directory left by a prior destroy",
+            )
 
         secrets = read_secrets(paths.secrets)
         claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -283,6 +298,26 @@ def deploy(
     return f"https://{inst_id}.{registry.domain}"
 
 
+def _remove_instance_dir(instance_dir: Path) -> None:
+    """Remove an instance directory, failing LOUDLY if it cannot be fully
+    removed — never leave a partial stub (which would break the next deploy)."""
+    if not instance_dir.exists():
+        return
+    last_exc: Exception | None = None
+    for _ in range(3):
+        try:
+            shutil.rmtree(instance_dir)
+        except OSError as exc:
+            last_exc = exc
+        if not instance_dir.exists():
+            return
+    detail = f": {last_exc}" if last_exc is not None else ""
+    raise FleetError(
+        f"could not fully remove instance directory {instance_dir}{detail} — "
+        "something may still be holding files (mounts/containers); resolve it and retry"
+    )
+
+
 def _destroy_locked(paths: FleetPaths, instance_id: str, *, runner=run_streamed) -> None:
     """Destroy an instance's containers and directory. Assumes the caller
     already holds the instance lock (used by deploy()'s --fresh path to
@@ -293,7 +328,7 @@ def _destroy_locked(paths: FleetPaths, instance_id: str, *, runner=run_streamed)
             ddev.delete(instance_dir, runner=runner)
         except Exception:
             pass  # tolerate failure if containers are already gone
-        shutil.rmtree(instance_dir, ignore_errors=True)
+        _remove_instance_dir(instance_dir)
 
 
 def destroy(

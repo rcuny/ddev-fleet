@@ -507,6 +507,49 @@ def test_deploy_excludes_token_config_before_asset_injection_fails(fleet_home, g
     assert ".ddev/config.fleet.yaml" in exclude_path.read_text(encoding="utf-8")
 
 
+def test_deploy_recovers_from_partial_stub_left_by_prior_destroy(fleet_home, git_repo, monkeypatch):
+    """If `instance_dir` exists but isn't a git checkout (a partial stub left
+    behind by a prior destroy that couldn't fully remove it — e.g. a bare
+    `.ddev/` dir with no `.git`), deploy must clean it up and clone fresh
+    instead of handing it to gitops.update() (which would fail with a
+    cryptic 'fatal: not a git repository')."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instance_dir = paths.instances / "demo--develop"
+    stub_ddev_dir = instance_dir / ".ddev"
+    stub_ddev_dir.mkdir(parents=True)
+    (stub_ddev_dir / "config.yaml").write_text("name: stub\n", encoding="utf-8")
+
+    real_clone = instances.gitops.clone
+    real_update = instances.gitops.update
+    clone_calls = []
+    update_calls = []
+
+    def spy_clone(*args, **kwargs):
+        clone_calls.append((args, kwargs))
+        return real_clone(*args, **kwargs)
+
+    def spy_update(*args, **kwargs):
+        update_calls.append((args, kwargs))
+        return real_update(*args, **kwargs)
+
+    monkeypatch.setattr(instances.gitops, "clone", spy_clone)
+    monkeypatch.setattr(instances.gitops, "update", spy_update)
+
+    runner = HybridRunner()
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    assert len(clone_calls) == 1
+    assert update_calls == []
+    assert (instance_dir / "README.md").exists()
+    assert not (instance_dir / ".ddev" / "config.yaml").exists()
+
+    deploy_log = instance_dir / ".fleet" / "deploy.log"
+    assert "recovered from a partial instance directory" in deploy_log.read_text(encoding="utf-8")
+
+
 def test_deploy_substitutes_project_secret_token_into_asset(fleet_home, git_repo):
     """A per-project secret file (<home>/secrets/<project>.env) must be
     exposed as a [[token]] during asset injection, without touching the
