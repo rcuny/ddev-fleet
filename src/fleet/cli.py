@@ -316,10 +316,6 @@ def _propagate_claude_token(fleet_home: Path, token: str, *, runner) -> int:
         for entry in sorted(instances_root.iterdir()):
             if not entry.is_dir():
                 continue
-            info_path = entry / ".fleet" / "instance.yml"
-            if not info_path.exists():
-                print(f"{entry.name}: no .fleet/instance.yml — skipping", file=sys.stderr)
-                continue
             try:
                 updated = fleetconfig.set_web_env_var(entry, "CLAUDE_CODE_OAUTH_TOKEN", token)
                 if not updated:

@@ -392,7 +392,7 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
     assert "sk-ant-oat01-newtoken" in secrets
 
 
-def test_refresh_claude_token_skips_dirs_without_instance_yml(fleet_home, monkeypatch, capsys):
+def test_refresh_claude_token_skips_dirs_without_fleet_config(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
     (fleet_home / "instances" / "demo--legacy").mkdir(parents=True)
 
@@ -403,8 +403,75 @@ def test_refresh_claude_token_skips_dirs_without_instance_yml(fleet_home, monkey
     exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
 
     assert exit_code == 0
-    assert "no .fleet/instance.yml" in capsys.readouterr().err
+    assert "no config.fleet.yaml" in capsys.readouterr().err
     assert not (fleet_home / "instances" / "demo--legacy" / ".ddev").exists()
+
+
+def test_refresh_claude_token_updates_instance_missing_instance_yml_marker(fleet_home, monkeypatch):
+    """An instance whose deploy didn't finish its final step has
+    `.ddev/config.fleet.yaml` + `.fleet/deploy.log` but no `.fleet/instance.yml`.
+    It's still a real, running instance and must get the rotated token too —
+    the propagation gate must key off config.fleet.yaml, not instance.yml."""
+    _write_minimal_registry(fleet_home)
+
+    complete_dir = fleet_home / "instances" / "demo--develop"
+    (complete_dir / ".fleet").mkdir(parents=True)
+    (complete_dir / ".fleet" / "instance.yml").write_text(
+        "project: demo\ninstance: develop\nbranch: main\n"
+        "created-at: '2026-07-01T00:00:00Z'\nlast-deployed-at: '2026-07-01T00:00:00Z'\n",
+        encoding="utf-8",
+    )
+    (complete_dir / ".ddev").mkdir(parents=True)
+    (complete_dir / ".ddev" / "config.fleet.yaml").write_text(
+        "name: demo--develop\n"
+        "project_tld: fleet.example.test\n"
+        "web_environment:\n"
+        "  - CLAUDE_CODE_OAUTH_TOKEN=old-token\n",
+        encoding="utf-8",
+    )
+
+    partial_dir = fleet_home / "instances" / "demo--search-cards"
+    (partial_dir / ".fleet").mkdir(parents=True)
+    (partial_dir / ".fleet" / "deploy.log").write_text("deploy started\n", encoding="utf-8")
+    (partial_dir / ".ddev").mkdir(parents=True)
+    (partial_dir / ".ddev" / "config.fleet.yaml").write_text(
+        "name: demo--search-cards\n"
+        "project_tld: fleet.example.test\n"
+        "web_environment:\n"
+        "  - CLAUDE_CODE_OAUTH_TOKEN=old-token\n",
+        encoding="utf-8",
+    )
+    assert not (partial_dir / ".fleet" / "instance.yml").exists()
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        if cmd == ["ddev", "list", "--json-output"]:
+            return RunResult(
+                returncode=0,
+                lines=[
+                    '{"raw": [{"name": "demo--develop", "status": "running"}, '
+                    '{"name": "demo--search-cards", "status": "running"}]}'
+                ],
+            )
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
+    monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+
+    assert exit_code == 0
+
+    for inst_dir in (complete_dir, partial_dir):
+        config = (inst_dir / ".ddev" / "config.fleet.yaml").read_text(encoding="utf-8")
+        assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-newtoken" in config
+        assert "CLAUDE_CODE_OAUTH_TOKEN=old-token" not in config
+
+    restart_calls = [c for c in calls if c == ["ddev", "restart"]]
+    assert len(restart_calls) == 2
 
 
 def test_refresh_claude_token_nonzero_exit_on_restart_failure(fleet_home, monkeypatch, capsys):
