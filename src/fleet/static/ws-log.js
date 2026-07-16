@@ -26,8 +26,14 @@
     };
   }
 
-  document.body.addEventListener("htmx:afterSettle", function (evt) {
-    evt.target.querySelectorAll("[data-ws-url]").forEach(attach);
+  // Listen on `document`, not `document.body`: htmx events bubble, and body is
+  // still null if this script is ever loaded from <head> without `defer`.
+  document.addEventListener("htmx:afterSettle", function (evt) {
+    var root = evt.target;
+    // querySelectorAll only matches descendants, so an outerHTML swap that puts
+    // data-ws-url on the swapped node itself would otherwise be missed.
+    if (root.matches && root.matches("[data-ws-url]")) attach(root);
+    root.querySelectorAll("[data-ws-url]").forEach(attach);
   });
   document.addEventListener("DOMContentLoaded", function () {
     document.querySelectorAll("[data-ws-url]").forEach(attach);
