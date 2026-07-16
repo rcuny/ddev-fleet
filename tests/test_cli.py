@@ -38,6 +38,8 @@ def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
         label=None,
         fresh=False,
         force=False,
+        auth_enabled=True,
+        auth_password="fleet",
         runner=None,
     ):
         return "https://demo--develop.fleet.example.test"
@@ -688,3 +690,178 @@ def test_secret_set_writes_per_project_secret_file(fleet_home):
     assert secret_path.read_text(encoding="utf-8") == "SLACK_BOT_TOKEN=xoxb-abc\n"
     mode = stat.S_IMODE(secret_path.stat().st_mode)
     assert mode == 0o600
+
+
+def _make_instance_dir(fleet_home, instance_id):
+    paths = FleetPaths.from_home(fleet_home)
+    (paths.instances / instance_id).mkdir(parents=True, exist_ok=True)
+    return paths
+
+
+def test_shell_list_prints_instance_ids(fleet_home, capsys):
+    _make_instance_dir(fleet_home, "alpha--main")
+    _make_instance_dir(fleet_home, "zeta--main")
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "shell", "--list"])
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == "alpha--main\nzeta--main\n"
+
+
+def test_shell_no_instance_execs_bash_in_fleet_home(fleet_home, monkeypatch):
+    recorder = []
+    monkeypatch.setattr(
+        cli.shell_mod, "exec_in_dir", lambda argv, cwd: recorder.append((argv, cwd))
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "shell"])
+
+    assert exit_code == 0
+    assert recorder == [(["bash"], fleet_home)]
+
+
+def test_shell_with_instance_execs_bash_in_instance_dir(fleet_home, monkeypatch):
+    paths = _make_instance_dir(fleet_home, "demo--develop")
+    recorder = []
+    monkeypatch.setattr(
+        cli.shell_mod, "exec_in_dir", lambda argv, cwd: recorder.append((argv, cwd))
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "shell", "demo--develop"])
+
+    assert exit_code == 0
+    assert recorder == [(["bash"], paths.instances / "demo--develop")]
+
+
+def test_shell_unknown_instance_exits_1(fleet_home, monkeypatch, capsys):
+    monkeypatch.setattr(cli.shell_mod, "exec_in_dir", lambda argv, cwd: None)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "shell", "demo--nonexistent"])
+
+    assert exit_code == 1
+    assert "demo--nonexistent" in capsys.readouterr().err
+
+
+def test_ddev_dispatch_passes_through_trailing_args(fleet_home, monkeypatch):
+    paths = _make_instance_dir(fleet_home, "demo--develop")
+    recorder = []
+    monkeypatch.setattr(
+        cli.shell_mod, "exec_in_dir", lambda argv, cwd: recorder.append((argv, cwd))
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "ddev", "demo--develop", "drush", "uli"])
+
+    assert exit_code == 0
+    assert recorder == [(["ddev", "drush", "uli"], paths.instances / "demo--develop")]
+
+
+def test_ddev_dispatch_defaults_to_ssh(fleet_home, monkeypatch):
+    paths = _make_instance_dir(fleet_home, "demo--develop")
+    recorder = []
+    monkeypatch.setattr(
+        cli.shell_mod, "exec_in_dir", lambda argv, cwd: recorder.append((argv, cwd))
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "ddev", "demo--develop"])
+
+    assert exit_code == 0
+    assert recorder == [(["ddev", "ssh"], paths.instances / "demo--develop")]
+
+
+def test_ddev_missing_instance_prompts_and_execs_selection(fleet_home, monkeypatch):
+    paths = _make_instance_dir(fleet_home, "demo--develop")
+    recorder = []
+    monkeypatch.setattr(
+        cli.shell_mod, "exec_in_dir", lambda argv, cwd: recorder.append((argv, cwd))
+    )
+    monkeypatch.setattr(cli.shell_mod, "prompt_for_instance", lambda paths: "demo--develop")
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "ddev"])
+
+    assert exit_code == 0
+    assert recorder == [(["ddev", "ssh"], paths.instances / "demo--develop")]
+
+
+def test_ddev_unknown_instance_exits_1(fleet_home, monkeypatch, capsys):
+    monkeypatch.setattr(cli.shell_mod, "exec_in_dir", lambda argv, cwd: None)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "ddev", "demo--nonexistent"])
+
+    assert exit_code == 1
+    assert "demo--nonexistent" in capsys.readouterr().err
+
+
+def _stub_caddyauth_rotate(monkeypatch, recorder):
+    def fake_rotate(username, password, *, runner=None):
+        recorder.append((username, password))
+
+    monkeypatch.setattr(cli.caddyauth, "rotate", fake_rotate)
+
+
+def test_set_admin_password_calls_rotate_with_given_password(fleet_home, monkeypatch, capsys):
+    recorder = []
+    _stub_caddyauth_rotate(monkeypatch, recorder)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "set-admin-password", "correct-horse-battery"]
+    )
+
+    assert exit_code == 0
+    assert recorder == [("admin", "correct-horse-battery")]
+    assert "updated" in capsys.readouterr().out
+
+
+def test_set_admin_password_propagates_caddy_auth_error(fleet_home, monkeypatch, capsys):
+    from fleet.core.errors import CaddyAuthError
+
+    def raising_rotate(username, password, *, runner=None):
+        raise CaddyAuthError("caddy validate failed")
+
+    monkeypatch.setattr(cli.caddyauth, "rotate", raising_rotate)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "set-admin-password", "whatever"])
+
+    assert exit_code == 1
+    assert "caddy validate failed" in capsys.readouterr().err
+
+
+def test_rotate_admin_password_generates_and_prints_password_once(fleet_home, monkeypatch, capsys):
+    recorder = []
+    _stub_caddyauth_rotate(monkeypatch, recorder)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "rotate-admin-password"])
+
+    assert exit_code == 0
+    assert len(recorder) == 1
+    username, generated_password = recorder[0]
+    assert username == "admin"
+    assert len(generated_password) >= 20  # secrets.token_urlsafe(18) -> 24 chars
+
+    out = capsys.readouterr().out
+    assert generated_password in out
+    assert out.count(generated_password) == 1  # printed exactly once
+    assert "will not be shown again" in out
+
+
+def test_rotate_admin_password_generates_different_password_each_call(fleet_home, monkeypatch):
+    recorder = []
+    _stub_caddyauth_rotate(monkeypatch, recorder)
+
+    cli.main(["--fleet-home", str(fleet_home), "rotate-admin-password"])
+    cli.main(["--fleet-home", str(fleet_home), "rotate-admin-password"])
+
+    assert recorder[0][1] != recorder[1][1]
+
+
+def test_rotate_admin_password_propagates_caddy_auth_error(fleet_home, monkeypatch, capsys):
+    from fleet.core.errors import CaddyAuthError
+
+    def raising_rotate(username, password, *, runner=None):
+        raise CaddyAuthError("sudo systemctl reload caddy failed")
+
+    monkeypatch.setattr(cli.caddyauth, "rotate", raising_rotate)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "rotate-admin-password"])
+
+    assert exit_code == 1
+    assert "reload caddy failed" in capsys.readouterr().err

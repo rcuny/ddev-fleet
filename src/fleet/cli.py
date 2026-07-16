@@ -3,14 +3,16 @@
 import argparse
 import os
 import re
+import secrets as _stdlib_secrets
 import sys
 from pathlib import Path
 
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import ddev, fleetconfig
+from fleet.core import caddyauth, ddev, fleetconfig
 from fleet.core import instances as instances_mod
+from fleet.core import shell as shell_mod
 from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.core.runner import run_interactive, run_streamed
@@ -78,6 +80,18 @@ def _build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("--label", default=None)
     deploy_parser.add_argument("--fresh", action="store_true")
     deploy_parser.add_argument("--force", action="store_true")
+    deploy_parser.add_argument(
+        "--no-auth",
+        dest="auth",
+        action="store_false",
+        default=True,
+        help="disable basic auth for this instance (default: enabled)",
+    )
+    deploy_parser.add_argument(
+        "--auth-password",
+        default=caddyauth.DEFAULT_INSTANCE_PASSWORD,
+        help=f"basic auth password for this instance (default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})",
+    )
 
     destroy_parser = subparsers.add_parser("destroy")
     destroy_parser.add_argument("instance_id")
@@ -115,7 +129,20 @@ def _build_parser() -> argparse.ArgumentParser:
     set_claude_token_parser = subparsers.add_parser("set-claude-token")
     set_claude_token_parser.add_argument("token")
 
+    set_admin_password_parser = subparsers.add_parser("set-admin-password")
+    set_admin_password_parser.add_argument("password")
+
+    subparsers.add_parser("rotate-admin-password")
+
     subparsers.add_parser("refresh-config")
+
+    shell_parser = subparsers.add_parser("shell")
+    shell_parser.add_argument("instance_id", nargs="?", default=None)
+    shell_parser.add_argument("-l", "--list", action="store_true", dest="list_instances")
+
+    ddev_parser = subparsers.add_parser("ddev")
+    ddev_parser.add_argument("instance_id", nargs="?", default=None)
+    ddev_parser.add_argument("ddev_args", nargs=argparse.REMAINDER)
 
     return parser
 
@@ -150,8 +177,16 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_refresh_claude_token(fleet_home, args)
         elif args.command == "set-claude-token":
             return _cmd_set_claude_token(fleet_home, args)
+        elif args.command == "set-admin-password":
+            _cmd_set_admin_password(fleet_home, args, runner=run_streamed)
+        elif args.command == "rotate-admin-password":
+            _cmd_rotate_admin_password(fleet_home, args, runner=run_streamed)
         elif args.command == "refresh-config":
             _cmd_refresh_config(fleet_home, runner=run_streamed)
+        elif args.command == "shell":
+            _cmd_shell(fleet_home, args)
+        elif args.command == "ddev":
+            _cmd_ddev(fleet_home, args)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
@@ -208,6 +243,8 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> None:
         label=args.label,
         fresh=args.fresh,
         force=args.force,
+        auth_enabled=args.auth,
+        auth_password=args.auth_password,
     )
     print(url)
 
@@ -336,6 +373,53 @@ def _propagate_claude_token(fleet_home: Path, token: str, *, runner) -> int:
                 failed.append(entry.name)
 
     return 1 if failed else 0
+
+
+def _cmd_set_admin_password(
+    fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed
+) -> None:
+    """Set an explicit dashboard admin password: hash it, write the
+    fleet-owned Caddy snippet, validate, and reload — no Ansible run."""
+    caddyauth.rotate(caddyauth.DEFAULT_ADMIN_USERNAME, args.password, runner=runner)
+    print("Dashboard admin password updated; Caddy reloaded.")
+
+
+def _cmd_rotate_admin_password(
+    fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed
+) -> None:
+    """Generate a strong random dashboard admin password, apply it, and
+    print it exactly once — it is never stored in the clear anywhere."""
+    password = _stdlib_secrets.token_urlsafe(18)
+    caddyauth.rotate(caddyauth.DEFAULT_ADMIN_USERNAME, password, runner=runner)
+    print("Dashboard admin password rotated; Caddy reloaded.")
+    print(f"New password: {password}")
+    print("Save this now — it will not be shown again.")
+
+
+def _cmd_shell(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+
+    if args.list_instances:
+        for instance_id in shell_mod.list_instance_ids(paths):
+            print(instance_id)
+        return
+
+    argv, cwd = shell_mod.shell_argv(paths, args.instance_id)
+    target = f"instance {args.instance_id!r}" if args.instance_id else "the fleet home"
+    print(f"Dropping into a shell in {target} ({cwd})")
+    print("hint: ddev describe | ddev ssh | ddev drush uli")
+    shell_mod.exec_in_dir(argv, cwd)
+
+
+def _cmd_ddev(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+
+    instance_id = args.instance_id
+    if instance_id is None:
+        instance_id = shell_mod.prompt_for_instance(paths)
+
+    argv, cwd = shell_mod.ddev_argv(paths, instance_id, args.ddev_args or [])
+    shell_mod.exec_in_dir(argv, cwd)
 
 
 def _cmd_refresh_config(fleet_home: Path, *, runner=run_streamed) -> None:

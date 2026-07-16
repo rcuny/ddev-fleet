@@ -86,6 +86,34 @@ update to an already-live host (git-pull based, no full playbook re-run).
 └── .push-key/              # fleet's read-write git push key (kept out of default SSH search path)
 ```
 
+## Default credentials — rotate before going public
+
+`bootstrap.sh`/Ansible seed working default credentials on first
+provisioning so the fleet is usable immediately. **These are published
+defaults, not secrets — anyone with this repo knows them.** A host left on
+defaults and reachable from the public internet is unprotected.
+
+| What | User | Password |
+|---|---|---|
+| Dashboard (`https://fleet.<domain>`, Caddy `basic_auth`) | `admin` | `ddev-admin` |
+| Per-instance basic auth (`https://<instance>.<domain>`) | `fleet` | `fleet` |
+
+Rotate the dashboard password immediately after rollout — and any time
+after — with no Ansible run required:
+
+```bash
+fleet rotate-admin-password   # generates a strong random password, applies it,
+                               # prints it ONCE (not stored anywhere in the clear)
+fleet set-admin-password <password>   # or set an explicit password yourself
+```
+
+Both commands hash the password (`caddy hash-password`), atomically rewrite
+the fleet-owned Caddy snippet at `/etc/caddy/fleet/admin-auth.conf`,
+validate the resulting Caddyfile, and reload Caddy — see
+`fleet.core.caddyauth`. Re-running the `caddy` Ansible role afterwards will
+**not** revert a rotated password; the seed step only ever runs once, on a
+host where the snippet doesn't exist yet.
+
 ## Operator CLI
 
 Projects and their deploy `templates` (post_deploy recipes) are declared by
@@ -108,6 +136,8 @@ these without `sudo -u fleet` or the venv path.
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
 | `fleet snapshot <instance-id>` | `[--dest-rel=dumps/db.sql.gz]` | Runs `ddev export-db` into the project's asset tree |
 | `fleet refresh-claude-token` | — | Rotates the Claude Code OAuth token fleet-wide, rewrites every instance's `config.fleet.yaml`, restarts running instances |
+| `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value; hashes, writes, validates, and reloads Caddy — no Ansible run |
+| `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (the `fleet.yml` registry + assets checkout) |
 
 ## Web UI
