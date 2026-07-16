@@ -25,12 +25,23 @@ def write_fleet_config(
     ddev_dir.mkdir(parents=True, exist_ok=True)
     config_path = ddev_dir / "config.fleet.yaml"
 
-    data: dict = {"name": instance_id, "project_tld": domain}
+    # performance_mode: none — this fleet only ever runs on native Linux
+    # Docker hosts, where Mutagen is pure overhead. A project's own
+    # config.yaml may commit performance_mode: mutagen (e.g. for macOS
+    # devs); config.fleet.yaml merges after config.yaml (DDEV loads
+    # config.yaml first, then config.*.yaml overrides), so this scalar
+    # reliably wins over the project's setting.
+    data: dict = {"name": instance_id, "project_tld": domain, "performance_mode": "none"}
+    # DRUSH_OPTIONS_URI — always inject so `drush uli`/status report the
+    # instance's real fleet hostname instead of a project-hardcoded URI
+    # from a committed settings/config.local.yaml. Reuses the same
+    # instance_id + domain FQDN pattern as FLEET_TYPESENSE_HOST below /
+    # tokens.py's [[instance-fqdn]] token.
+    web_environment: list[str] = [f"DRUSH_OPTIONS_URI=https://{instance_id}.{domain}"]
     if claude_token:
-        data["web_environment"] = [f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}"]
+        web_environment.append(f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}")
     if git_bot:
         bot_name, bot_email = git_bot
-        web_environment = data.setdefault("web_environment", [])
         web_environment.extend(
             [
                 f"GIT_AUTHOR_NAME={bot_name}",
@@ -40,7 +51,6 @@ def write_fleet_config(
             ]
         )
     if typesense:
-        web_environment = data.setdefault("web_environment", [])
         web_environment.extend(
             [
                 f"FLEET_TYPESENSE_HOST={instance_id}.{domain}",
@@ -51,6 +61,7 @@ def write_fleet_config(
             web_environment.append(f"TYPESENSE_API_KEY={typesense_admin_key}")
         if typesense_search_key:
             web_environment.append(f"FLEET_TYPESENSE_SEARCH_KEY={typesense_search_key}")
+    data["web_environment"] = web_environment
     if additional_fqdns:
         data["additional_fqdns"] = list(additional_fqdns)
 

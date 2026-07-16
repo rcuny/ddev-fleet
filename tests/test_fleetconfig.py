@@ -18,7 +18,9 @@ def test_write_fleet_config_with_token(tmp_path):
     assert path.read_text(encoding="utf-8") == (
         "name: oak--develop\n"
         "project_tld: fleet.example.test\n"
+        "performance_mode: none\n"
         "web_environment:\n"
+        "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
         "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
     )
 
@@ -28,8 +30,35 @@ def test_write_fleet_config_without_token(tmp_path):
     path = write_fleet_config(instance_dir, "oak--develop", "fleet.example.test", None)
 
     assert path.read_text(encoding="utf-8") == (
-        "name: oak--develop\n" "project_tld: fleet.example.test\n"
+        "name: oak--develop\n"
+        "project_tld: fleet.example.test\n"
+        "performance_mode: none\n"
+        "web_environment:\n"
+        "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
     )
+
+
+def test_write_fleet_config_sets_performance_mode_none(tmp_path):
+    """Bug fix: fleet-owned config must force performance_mode: none on
+    every instance, so it overrides a project's own committed config.yaml
+    (e.g. oak ships performance_mode: mutagen for macOS devs) — Mutagen is
+    pure overhead on this Linux fleet host."""
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(instance_dir, "oak--develop", "fleet.example.test", None)
+
+    content = path.read_text(encoding="utf-8")
+    assert "performance_mode: none" in content
+
+
+def test_write_fleet_config_sets_drush_options_uri_to_instance_fqdn(tmp_path):
+    """Bug fix: DRUSH_OPTIONS_URI must reflect the instance's real fleet
+    FQDN (instance_id.domain), not a stale project-hardcoded URI, so
+    `drush uli`/status emit correct URLs."""
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(instance_dir, "oak--develop", "fleet.example.test", None)
+
+    content = path.read_text(encoding="utf-8")
+    assert "DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test" in content
 
 
 def test_write_fleet_config_with_additional_fqdns(tmp_path):
@@ -66,7 +95,9 @@ def test_write_fleet_config_with_token_and_git_bot(tmp_path):
     assert path.read_text(encoding="utf-8") == (
         "name: oak--develop\n"
         "project_tld: fleet.example.test\n"
+        "performance_mode: none\n"
         "web_environment:\n"
+        "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
         "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
         "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
         "  - GIT_AUTHOR_EMAIL=bot@x\n"
@@ -88,7 +119,9 @@ def test_write_fleet_config_without_token_with_git_bot_creates_web_environment(t
     assert path.read_text(encoding="utf-8") == (
         "name: oak--develop\n"
         "project_tld: fleet.example.test\n"
+        "performance_mode: none\n"
         "web_environment:\n"
+        "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
         "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
         "  - GIT_AUTHOR_EMAIL=bot@x\n"
         "  - GIT_COMMITTER_NAME=ddev-fleet bot\n"
@@ -109,7 +142,9 @@ def test_write_fleet_config_with_typesense(tmp_path):
     assert path.read_text(encoding="utf-8") == (
         "name: oak--develop\n"
         "project_tld: fleet.example.test\n"
+        "performance_mode: none\n"
         "web_environment:\n"
+        "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
         "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
         "  - FLEET_TYPESENSE_HOST=oak--develop.fleet.example.test\n"
         "  - FLEET_TYPESENSE_PORT=9108\n"

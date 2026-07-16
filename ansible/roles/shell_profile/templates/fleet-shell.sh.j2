@@ -1,0 +1,40 @@
+{{ ansible_managed | default('Ansible managed') }}
+# Interactive shell prompt/aliases/exports shared by root and the fleet
+# service account. One file, colour-aware by uid, so both accounts stay in
+# sync automatically instead of drifting in two per-user copies.
+#
+# Sourced from BOTH:
+#   - /etc/profile.d/10-fleet-shell.sh (interactive LOGIN shells, via /etc/profile)
+#   - /etc/bash.bashrc (interactive NON-login shells, Debian-patched bash reads
+#     this before ~/.bashrc)
+# Plain `bash` / `su fleet` (no `-l`) only goes through the second path, so
+# relying on /etc/profile.d alone would silently miss those sessions.
+
+# Never touch non-interactive shells (scp, rsync -e ssh, `ssh host cmd`,
+# cron) — same guard Debian's own ~/.bashrc uses.
+case $- in
+    *i*) ;;
+      *) return ;;
+esac
+
+if [ "$(id -u)" -eq 0 ]; then
+    _fleet_prompt_user_color='31'   # red — root
+else
+    _fleet_prompt_user_color='35'   # magenta — everyone else (fleet, …)
+fi
+
+# Bold cyan host, " - ", bold user-colour "<user> $", ": ", bold blue cwd, " > ".
+# \[ \] bracket every colour escape so bash excludes it from the prompt's
+# printable-width count — without this, line-wrapping/history-search redraw
+# breaks as soon as the prompt scrolls or gets edited in place.
+PS1='\[\e[1;36m\]\h\[\e[0m\] - \[\e[1;'"${_fleet_prompt_user_color}"'m\]\u $\[\e[0m\]: \[\e[1;34m\]\w\[\e[0m\] > '
+unset _fleet_prompt_user_color
+
+# CLICOLOR is the BSD/macOS `ls` colour toggle and is a no-op on GNU
+# coreutils (Debian's `ls`); kept for parity with the source config, but the
+# `ls` alias below is what actually colours listings here.
+export CLICOLOR=1
+export EDITOR=nano
+
+alias l='ls -lah'
+alias ls='ls --color=auto'
