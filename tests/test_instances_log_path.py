@@ -25,7 +25,7 @@ def test_deploy_threads_deploy_log_path_to_git_and_ddev_calls(fleet_home, git_re
     paths.registry.write_text(_registry_text(fleet_home, str(git_repo["origin"])), encoding="utf-8")
     write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
     registry = Registry.load(paths.registry)
-    expected_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    expected_log = paths.logs / "demo--develop" / "deploy.log"
 
     # Fresh deploy: the clone itself must NOT stream into the deploy log
     # (creating .fleet/ inside the clone target would break `git clone`);

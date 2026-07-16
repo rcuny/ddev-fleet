@@ -111,7 +111,7 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     assert "created-at" in content
     assert "last-deployed-at" in content
 
-    deploy_log = instance_dir / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert deploy_log.exists()
     assert deploy_log.stat().st_size > 0
 
@@ -475,7 +475,7 @@ projects:
     )
 
     assert url == "https://demo--develop.fleet.example.test"
-    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "WARNING" in deploy_log.read_text(encoding="utf-8")
 
 
@@ -557,7 +557,7 @@ def test_deploy_recovers_from_partial_stub_left_by_prior_destroy(fleet_home, git
     assert (instance_dir / "README.md").exists()
     assert not (instance_dir / ".ddev" / "config.yaml").exists()
 
-    deploy_log = instance_dir / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "recovered from a partial instance directory" in deploy_log.read_text(encoding="utf-8")
 
 
@@ -589,6 +589,62 @@ def test_deploy_substitutes_project_secret_token_into_asset(fleet_home, git_repo
     assert "[[slack-bot-token]]" not in content
 
 
+def test_deploy_shares_dump_via_hard_link_not_copy(fleet_home, git_repo):
+    """The multi-GB DB dump in a project's asset tree must never be
+    duplicated per instance — deploy() should leave it hard-linked (same
+    inode as the shared project-level file), and still injects/substitutes
+    every other asset normally."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    assets_dir = paths.assets / "demo"
+    (assets_dir / "dumps").mkdir(parents=True, exist_ok=True)
+    dump_src = assets_dir / "dumps" / "default.sql"
+    dump_src.write_text("-- shared dump\n", encoding="utf-8")
+    (assets_dir / ".env").write_text("PROJECT=[[project]]\n", encoding="utf-8")
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    instance_dir = paths.instances / "demo--develop"
+    dump_dest = instance_dir / "dumps" / "default.sql"
+    assert dump_dest.read_text(encoding="utf-8") == "-- shared dump\n"
+    assert dump_dest.stat().st_ino == dump_src.stat().st_ino
+    assert (instance_dir / ".env").read_text(encoding="utf-8") == "PROJECT=demo\n"
+
+    exclude_content = (instance_dir / ".git" / "info" / "exclude").read_text(encoding="utf-8")
+    assert "dumps/default.sql" in exclude_content
+
+    # rsync must never be asked to transfer the dumps tree.
+    rsync_calls = [c for c in runner.calls if c["cmd"][0] == "rsync"]
+    assert rsync_calls
+    assert "--exclude=/dumps/" in rsync_calls[0]["cmd"]
+
+
+def test_deploy_without_any_dump_still_succeeds(fleet_home, git_repo):
+    """A project with no dumps/ in its asset tree at all (e.g.
+    another-drupal-site, which installs via `drush si` in post_deploy
+    instead of importing a dump) must still deploy cleanly."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    assets_dir = paths.assets / "demo"
+    assets_dir.mkdir(parents=True, exist_ok=True)
+    (assets_dir / ".env").write_text("PROJECT=[[project]]\n", encoding="utf-8")
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    assert url == "https://demo--develop.fleet.example.test"
+    instance_dir = paths.instances / "demo--develop"
+    assert not (instance_dir / "dumps").exists()
+    assert (instance_dir / ".env").read_text(encoding="utf-8") == "PROJECT=demo\n"
+
+
 # --- per-instance Caddy basic auth (default ON) ---
 
 
@@ -609,7 +665,7 @@ def test_deploy_writes_instance_auth_snippet_by_default(fleet_home, git_repo):
     assert "basic_auth @auth-demo--develop {" in content
     assert "fleet " in content  # default username
 
-    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "basic auth enabled" in deploy_log.read_text(encoding="utf-8")
 
 
@@ -630,7 +686,7 @@ def test_deploy_with_auth_disabled_writes_no_snippet(fleet_home, git_repo):
     snippet_path = caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR / "demo--develop.conf"
     assert not snippet_path.exists()
 
-    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "basic auth disabled" in deploy_log.read_text(encoding="utf-8")
 
 

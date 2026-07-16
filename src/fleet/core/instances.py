@@ -46,6 +46,7 @@ class FleetPaths:
     registry: Path
     assets: Path
     instances: Path
+    logs: Path
     secrets: Path
     project_secrets: Path
     locks: Path
@@ -59,6 +60,11 @@ class FleetPaths:
             registry=config_dir / "fleet.yml",
             assets=config_dir / "assets",
             instances=home / "instances",
+            # Deliberately OUTSIDE instances/ — deploy logs must survive
+            # `fleet destroy`, which removes the whole instance directory
+            # (see _destroy_locked -> _remove_instance_dir). One growing
+            # file per instance under a central, destroy-proof location.
+            logs=home / "logs",
             secrets=home / ".secrets",
             project_secrets=home / "secrets",
             locks=home / "locks",
@@ -156,15 +162,14 @@ def deploy(
         auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
     )
     caddyfile_path = (
-        auth_caddyfile_path
-        if auth_caddyfile_path is not None
-        else caddyauth.DEFAULT_CADDYFILE_PATH
+        auth_caddyfile_path if auth_caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
 
     resolved = resolve_target(registry, project, template, branch, label)
     inst_id = resolved.instance_id
     instance_dir = paths.instances / inst_id
-    deploy_log = instance_dir / ".fleet" / "deploy.log"
+    # Central, destroy-proof location — see FleetPaths.logs docstring above.
+    deploy_log = paths.logs / inst_id / "deploy.log"
 
     with instance_lock(paths.locks, inst_id):
         if fresh and instance_dir.exists():
@@ -393,9 +398,7 @@ def _destroy_locked(
         auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
     )
     caddyfile_path = (
-        auth_caddyfile_path
-        if auth_caddyfile_path is not None
-        else caddyauth.DEFAULT_CADDYFILE_PATH
+        auth_caddyfile_path if auth_caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
 
     instance_dir = paths.instances / instance_id
@@ -465,12 +468,20 @@ def stop(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_
             )
 
 
+# The shared project dump every instance hard-links and imports from
+# (`.ddev/commands/web/install-site-from-db` reads `dumps/<SITE>.sql`, and
+# `default` is the DDEV default site). snapshot() must never write here in
+# place — see the module docstring in core/assets.py:_link_shared_dir for why
+# writing through a hard-linked inode corrupts every instance sharing it.
+_SHARED_DUMP_BASENAME = "default.sql"
+
+
 def snapshot(
     paths: FleetPaths,
     registry: Registry,
     instance_id: str,
     *,
-    dest_rel: str = "dumps/db.sql.gz",
+    dest_rel: str | None = None,
     runner=run_streamed,
 ) -> Path:
     instance_dir = paths.instances / instance_id
@@ -485,11 +496,37 @@ def snapshot(
     else:
         project = instance_id.split("--", 1)[0]
 
+    if dest_rel is None:
+        # Per-instance dump name (never the shared `default.sql`), importable
+        # via `ddev install-site-from-db default-<instance_id>` per the
+        # project's own `.ddev/commands/web/install-site-from-db` convention
+        # (`dumps/${SITE}.sql`, plain uncompressed SQL — see --gzip=false below).
+        dest_rel = f"dumps/default-{instance_id}.sql"
+
     dest = paths.assets / project / dest_rel
+
+    if dest.name == _SHARED_DUMP_BASENAME:
+        raise FleetError(
+            f"refusing to snapshot to {dest_rel!r}: {_SHARED_DUMP_BASENAME!r} is the "
+            "shared project dump that every instance hard-links and imports from "
+            "(see core/assets.py:_link_shared_dir) — writing to it in place would "
+            "corrupt it for every instance and the config repo's source file. "
+            "Use the default per-instance name (omit --dest-rel) or another "
+            "explicit --dest-rel."
+        )
+
     dest.parent.mkdir(parents=True, exist_ok=True)
+    if dest.exists() or dest.is_symlink():
+        # dest may be a hard link sharing an inode with a file mirrored into
+        # other instances (or the config repo's own copy) by
+        # core/assets.py:_link_shared_dir. Writing into it in place would
+        # write through that shared inode. Unlinking first guarantees
+        # `ddev export-db` creates a fresh, unshared inode at this path,
+        # regardless of the existing file's current link count.
+        dest.unlink()
 
     with instance_lock(paths.locks, instance_id):
-        result = runner(["ddev", "export-db", f"--file={dest}"], cwd=instance_dir)
+        result = runner(["ddev", "export-db", f"--file={dest}", "--gzip=false"], cwd=instance_dir)
         if result.returncode != 0:
             raise FleetError(
                 f"ddev export-db failed for {instance_id!r} with exit code {result.returncode}"

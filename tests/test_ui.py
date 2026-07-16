@@ -50,6 +50,10 @@ def test_index_page_renders_instance_list_and_deploy_form(fleet_home):
     assert 'hx-post="/ui/deploy"' in body
     assert "unpkg.com" not in body
     assert "cdn." not in body
+    # Basic auth checkbox defaults CHECKED (auth ON by default) and the
+    # password field defaults to the documented distribution default.
+    assert '<input type="checkbox" name="auth" value="true" checked>' in body
+    assert 'name="auth_password" value="fleet"' in body
 
 
 def test_static_htmx_is_served(fleet_home):
@@ -136,6 +140,107 @@ def test_ui_deploy_job_progresses_to_succeeded(fleet_home, monkeypatch):
         time.sleep(0.05)
 
     assert final_state == "succeeded"
+
+
+def test_ui_deploy_checkbox_checked_enables_auth_with_given_password(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    captured = {}
+
+    def fake_deploy(paths, registry, project, template, *, auth_enabled, auth_password, **kw):
+        captured["auth_enabled"] = auth_enabled
+        captured["auth_password"] = auth_password
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "deploy", fake_deploy)
+
+    client = TestClient(create_app(fleet_home))
+    client.post(
+        "/ui/deploy",
+        data={
+            "project": "demo",
+            "template": "default",
+            "branch": "main",
+            "label": "develop",
+            "auth": "true",
+            "auth_password": "s3cret",
+        },
+    )
+    for _ in range(50):
+        if "auth_enabled" in captured:
+            break
+        time.sleep(0.02)
+
+    assert captured == {"auth_enabled": True, "auth_password": "s3cret"}
+
+
+def test_ui_deploy_unchecked_auth_checkbox_disables_auth_not_default_on(fleet_home, monkeypatch):
+    """HTML checkboxes submit NOTHING when unchecked, so the `auth` field is
+    simply absent from the form body in that case (simulated here by
+    omitting it entirely, exactly like a real unchecked-checkbox submit).
+    This must resolve to auth OFF — not silently fall back to the
+    default-ON behavior, which is the classic checkbox-handling bug."""
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    captured = {}
+
+    def fake_deploy(paths, registry, project, template, *, auth_enabled, auth_password, **kw):
+        captured["auth_enabled"] = auth_enabled
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "deploy", fake_deploy)
+
+    client = TestClient(create_app(fleet_home))
+    client.post(
+        "/ui/deploy",
+        data={
+            "project": "demo",
+            "template": "default",
+            "branch": "main",
+            "label": "develop",
+            # no "auth" key at all — mirrors an unchecked HTML checkbox
+        },
+    )
+    for _ in range(50):
+        if "auth_enabled" in captured:
+            break
+        time.sleep(0.02)
+
+    assert captured["auth_enabled"] is False
+
+
+def test_ui_deploy_empty_password_field_falls_back_to_default(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    captured = {}
+
+    def fake_deploy(paths, registry, project, template, *, auth_enabled, auth_password, **kw):
+        captured["auth_password"] = auth_password
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "deploy", fake_deploy)
+
+    client = TestClient(create_app(fleet_home))
+    client.post(
+        "/ui/deploy",
+        data={
+            "project": "demo",
+            "template": "default",
+            "branch": "main",
+            "label": "develop",
+            "auth": "true",
+            "auth_password": "",
+        },
+    )
+    for _ in range(50):
+        if "auth_password" in captured:
+            break
+        time.sleep(0.02)
+
+    assert captured["auth_password"] == "fleet"
 
 
 def test_ui_job_panel_unknown_job_returns_404(fleet_home):

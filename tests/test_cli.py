@@ -54,6 +54,64 @@ def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
     assert "https://demo--develop.fleet.example.test" in capsys.readouterr().out
 
 
+def test_deploy_defaults_to_auth_enabled_with_fleet_password(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    captured = {}
+
+    def fake_deploy(paths, registry, project, template, *, auth_enabled, auth_password, **kw):
+        captured["auth_enabled"] = auth_enabled
+        captured["auth_password"] = auth_password
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
+
+    cli.main(["--fleet-home", str(fleet_home), "deploy", "demo", "default", "--branch=main"])
+
+    assert captured == {"auth_enabled": True, "auth_password": "fleet"}
+
+
+def test_deploy_no_auth_flag_disables_auth(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    captured = {}
+
+    def fake_deploy(paths, registry, project, template, *, auth_enabled, auth_password, **kw):
+        captured["auth_enabled"] = auth_enabled
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
+
+    cli.main(
+        ["--fleet-home", str(fleet_home), "deploy", "demo", "default", "--branch=main", "--no-auth"]
+    )
+
+    assert captured["auth_enabled"] is False
+
+
+def test_deploy_auth_password_flag_overrides_default(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    captured = {}
+
+    def fake_deploy(paths, registry, project, template, *, auth_enabled, auth_password, **kw):
+        captured["auth_password"] = auth_password
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
+
+    cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "deploy",
+            "demo",
+            "default",
+            "--branch=main",
+            "--auth-password=s3cret",
+        ]
+    )
+
+    assert captured["auth_password"] == "s3cret"
+
+
 def test_deploy_fleet_error_exits_1_and_prints_to_stderr(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
 
@@ -253,25 +311,29 @@ def test_snapshot_dispatch(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
     recorder = []
 
-    def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
+    def fake_snapshot(paths, registry, instance_id, *, dest_rel=None, runner=None):
         recorder.append((instance_id, dest_rel))
-        return fleet_home / "config" / "assets" / "demo" / dest_rel
+        computed = dest_rel or f"dumps/default-{instance_id}.sql"
+        return fleet_home / "config" / "assets" / "demo" / computed
 
     monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "snapshot", "demo--develop"])
 
     assert exit_code == 0
-    assert recorder == [("demo--develop", "dumps/db.sql.gz")]
+    # CLI passes None through when --dest-rel is omitted; instances.snapshot
+    # is the one that computes the per-instance default (see its own tests).
+    assert recorder == [("demo--develop", None)]
 
 
 def test_snapshot_dispatch_custom_dest_rel(fleet_home, monkeypatch):
     _write_minimal_registry(fleet_home)
     recorder = []
 
-    def fake_snapshot(paths, registry, instance_id, *, dest_rel="dumps/db.sql.gz", runner=None):
+    def fake_snapshot(paths, registry, instance_id, *, dest_rel=None, runner=None):
         recorder.append((instance_id, dest_rel))
-        return fleet_home / "config" / "assets" / "demo" / dest_rel
+        computed = dest_rel or f"dumps/default-{instance_id}.sql"
+        return fleet_home / "config" / "assets" / "demo" / computed
 
     monkeypatch.setattr(cli.instances_mod, "snapshot", fake_snapshot)
 
