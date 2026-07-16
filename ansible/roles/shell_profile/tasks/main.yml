@@ -33,3 +33,31 @@
       if [ -f /etc/profile.d/10-fleet-shell.sh ]; then
           . /etc/profile.d/10-fleet-shell.sh
       fi
+
+# THE TWO HOOKS ABOVE ARE NOT ENOUGH ON THEIR OWN, and it fails silently.
+# Both /etc/profile.d/* and /etc/bash.bashrc are processed BEFORE the user's
+# own ~/.bashrc, and Debian's stock ~/.bashrc then sets PS1 unconditionally —
+# clobbering our prompt while leaving the aliases/exports intact, so the role
+# looks like it worked. (Observed live on 2026-07-16: PS1 was still Debian's
+# default '\u@\h:\w\$' with /etc/profile.d/10-fleet-shell.sh correctly in
+# place.) Re-sourcing from the END of each user's ~/.bashrc is what actually
+# makes the prompt stick, for both login shells (~/.profile sources ~/.bashrc)
+# and non-login interactive ones. Do not "simplify" this away.
+- name: Re-source the shell profile at the end of each user's ~/.bashrc
+  ansible.builtin.blockinfile:
+    path: "{{ item }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet shell profile"
+    insertafter: EOF
+    create: true
+    owner: "{{ 'root' if item == '/root' else fleet_user }}"
+    group: "{{ 'root' if item == '/root' else fleet_user }}"
+    mode: "0644"
+    block: |
+      # Last word on PS1: Debian's default ~/.bashrc sets it above, so the
+      # fleet prompt must be (re-)applied after it to take effect.
+      if [ -f /etc/profile.d/10-fleet-shell.sh ]; then
+          . /etc/profile.d/10-fleet-shell.sh
+      fi
+  loop:
+    - /root
+    - "{{ fleet_home_dir }}"
