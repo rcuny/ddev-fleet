@@ -45,7 +45,7 @@ registry load with an actionable message naming the bad key.
 | Command | Arguments | Behavior |
 |---|---|---|
 | `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, `claude setup-token`, writes `.secrets` |
-| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force` |
+| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force] [--no-auth] [--auth-password=<pw>]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password |
 | `fleet destroy <instance-id>` | — | Tears down containers, removes instance dir + lock file |
 | `fleet start <instance-id>` | — | `ddev start` on an existing, stopped instance |
 | `fleet stop <instance-id>` | — | `ddev stop` — frees RAM, keeps disk |

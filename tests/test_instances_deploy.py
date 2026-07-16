@@ -111,7 +111,7 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     assert "created-at" in content
     assert "last-deployed-at" in content
 
-    deploy_log = instance_dir / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert deploy_log.exists()
     assert deploy_log.stat().st_size > 0
 
@@ -475,7 +475,7 @@ projects:
     )
 
     assert url == "https://demo--develop.fleet.example.test"
-    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "WARNING" in deploy_log.read_text(encoding="utf-8")
 
 
@@ -557,7 +557,7 @@ def test_deploy_recovers_from_partial_stub_left_by_prior_destroy(fleet_home, git
     assert (instance_dir / "README.md").exists()
     assert not (instance_dir / ".ddev" / "config.yaml").exists()
 
-    deploy_log = instance_dir / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "recovered from a partial instance directory" in deploy_log.read_text(encoding="utf-8")
 
 
@@ -609,7 +609,7 @@ def test_deploy_writes_instance_auth_snippet_by_default(fleet_home, git_repo):
     assert "basic_auth @auth-demo--develop {" in content
     assert "fleet " in content  # default username
 
-    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "basic auth enabled" in deploy_log.read_text(encoding="utf-8")
 
 
@@ -630,7 +630,7 @@ def test_deploy_with_auth_disabled_writes_no_snippet(fleet_home, git_repo):
     snippet_path = caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR / "demo--develop.conf"
     assert not snippet_path.exists()
 
-    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
     assert "basic auth disabled" in deploy_log.read_text(encoding="utf-8")
 
 

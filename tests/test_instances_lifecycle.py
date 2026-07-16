@@ -112,6 +112,28 @@ def test_destroy_removes_instance_dir_and_lock_file(fleet_home, git_repo):
     assert not lock_path.exists()
 
 
+def test_destroy_does_not_delete_the_central_deploy_log(fleet_home, git_repo):
+    """The whole point of moving deploy logs to `paths.logs/` (outside
+    `instances/`) is that `destroy()` — which `shutil.rmtree`s the entire
+    instance directory via `_remove_instance_dir` — must not take the log
+    down with it."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    assert deploy_log.exists()
+    logged_content = deploy_log.read_text(encoding="utf-8")
+    assert "deploy complete" in logged_content
+
+    instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+    assert not (paths.instances / "demo--develop").exists()
+    assert deploy_log.exists()
+    assert deploy_log.read_text(encoding="utf-8") == logged_content
+
+
 def test_destroy_tolerates_ddev_delete_failure(fleet_home, git_repo):
 
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))

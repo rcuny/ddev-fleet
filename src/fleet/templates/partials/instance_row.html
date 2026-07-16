@@ -6,6 +6,7 @@
   <td><a href="{{ status.url }}">{{ status.url }}</a></td>
   <td>{{ status.ram_mib if status.ram_mib is not none else "-" }}</td>
   <td>
+    <a href="/ui/instances/{{ status.instance_id }}/log" target="_blank">Log</a>
     <button hx-post="/ui/instances/{{ status.instance_id }}/start"
             hx-target="#row-{{ status.instance_id }}" hx-swap="outerHTML">Start</button>
     <button hx-post="/ui/instances/{{ status.instance_id }}/stop"

@@ -90,7 +90,10 @@ def _build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument(
         "--auth-password",
         default=caddyauth.DEFAULT_INSTANCE_PASSWORD,
-        help=f"basic auth password for this instance (default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})",
+        help=(
+            "basic auth password for this instance "
+            f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
+        ),
     )
 
     destroy_parser = subparsers.add_parser("destroy")
@@ -199,6 +202,7 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
     paths.registry.parent.mkdir(parents=True, exist_ok=True)
     paths.assets.mkdir(parents=True, exist_ok=True)
     paths.instances.mkdir(exist_ok=True)
+    paths.logs.mkdir(exist_ok=True)
     paths.locks.mkdir(exist_ok=True)
     paths.project_secrets.mkdir(mode=0o700, exist_ok=True)
 

@@ -46,6 +46,7 @@ class FleetPaths:
     registry: Path
     assets: Path
     instances: Path
+    logs: Path
     secrets: Path
     project_secrets: Path
     locks: Path
@@ -59,6 +60,11 @@ class FleetPaths:
             registry=config_dir / "fleet.yml",
             assets=config_dir / "assets",
             instances=home / "instances",
+            # Deliberately OUTSIDE instances/ — deploy logs must survive
+            # `fleet destroy`, which removes the whole instance directory
+            # (see _destroy_locked -> _remove_instance_dir). One growing
+            # file per instance under a central, destroy-proof location.
+            logs=home / "logs",
             secrets=home / ".secrets",
             project_secrets=home / "secrets",
             locks=home / "locks",
@@ -156,15 +162,14 @@ def deploy(
         auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
     )
     caddyfile_path = (
-        auth_caddyfile_path
-        if auth_caddyfile_path is not None
-        else caddyauth.DEFAULT_CADDYFILE_PATH
+        auth_caddyfile_path if auth_caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
 
     resolved = resolve_target(registry, project, template, branch, label)
     inst_id = resolved.instance_id
     instance_dir = paths.instances / inst_id
-    deploy_log = instance_dir / ".fleet" / "deploy.log"
+    # Central, destroy-proof location — see FleetPaths.logs docstring above.
+    deploy_log = paths.logs / inst_id / "deploy.log"
 
     with instance_lock(paths.locks, inst_id):
         if fresh and instance_dir.exists():
@@ -393,9 +398,7 @@ def _destroy_locked(
         auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
     )
     caddyfile_path = (
-        auth_caddyfile_path
-        if auth_caddyfile_path is not None
-        else caddyauth.DEFAULT_CADDYFILE_PATH
+        auth_caddyfile_path if auth_caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
 
     instance_dir = paths.instances / instance_id

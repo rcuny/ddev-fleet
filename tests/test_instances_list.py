@@ -125,6 +125,7 @@ def test_list_instances_missing_instances_dir_returns_empty_early(fleet_home):
         registry=base_paths.registry,
         assets=base_paths.assets,
         instances=nonexistent,
+        logs=base_paths.logs,
         secrets=base_paths.secrets,
         project_secrets=base_paths.project_secrets,
         locks=base_paths.locks,

@@ -36,7 +36,7 @@ Kimsufi host (bare metal)
 │       directly by the CLI too, so the CLI never depends on the daemon
 ├── Caddy (systemd) — public TLS, the only externally reachable process
 │   ├── fleet.<domain>            → basic_auth → reverse_proxy 127.0.0.1:8765 (web UI)
-│   ├── *.<domain>                → on-demand TLS → reverse_proxy 127.0.0.1:8080 (ddev-router HTTP)
+│   ├── *.<domain>                → on-demand TLS → optional per-instance basic_auth → reverse_proxy 127.0.0.1:8080 (ddev-router HTTP)
 │   └── *.<domain>:9108           → on-demand TLS → reverse_proxy 127.0.0.1:8108 (ddev-router, Typesense)
 └── Docker (DDEV)
     ├── ddev-router (shared Traefik) — HTTP/HTTPS entrypoints, loopback-only
@@ -96,7 +96,7 @@ defaults and reachable from the public internet is unprotected.
 | What | User | Password |
 |---|---|---|
 | Dashboard (`https://fleet.<domain>`, Caddy `basic_auth`) | `admin` | `ddev-admin` |
-| Per-instance basic auth (`https://<instance>.<domain>`) | `fleet` | `fleet` |
+| Per-instance basic auth (`https://<instance>.<domain>`) | `fleet` | `fleet` (per-deploy override, see below) |
 
 Rotate the dashboard password immediately after rollout — and any time
 after — with no Ansible run required:
@@ -114,6 +114,27 @@ validate the resulting Caddyfile, and reload Caddy — see
 **not** revert a rotated password; the seed step only ever runs once, on a
 host where the snippet doesn't exist yet.
 
+**Per-instance basic auth** protects every deployed instance's own URL
+(`https://<instance>.<domain>`) — not just the dashboard. It is **on by
+default** on every `fleet deploy` (user `fleet`, password `fleet` unless
+overridden) and reconciled on every re-deploy:
+
+```bash
+fleet deploy <project> --auth-password <password>   # deploy with a non-default password
+fleet deploy <project> --no-auth                    # deploy this instance with auth OFF
+```
+
+The web UI's deploy form mirrors this: a "Basic auth" checkbox (checked by
+default) and an "Auth password" field (defaulting to `fleet`) — unchecking
+the box deploys that instance with auth disabled. Each instance gets its own
+fleet-owned Caddy snippet at `/etc/caddy/fleet/instances/<instance-id>.conf`
+(hash → write → `caddy validate` → reload, same pipeline as the dashboard
+password above), imported by the `*.<domain>` site via a **glob**
+(`import .../instances/*.conf`) so an empty/no-instances-with-auth directory
+is a silent no-op rather than a hard Caddyfile error. `fleet destroy` always
+removes an instance's snippet (and reloads Caddy) so a torn-down instance
+never leaves a stale auth rule behind.
+
 ## Operator CLI
 
 Projects and their deploy `templates` (post_deploy recipes) are declared by
@@ -126,7 +147,7 @@ these without `sudo -u fleet` or the venv path.
 | Command | Arguments | Behavior |
 |---|---|---|
 | `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, `claude setup-token`, writes `.secrets` |
-| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted |
+| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force] [--no-auth] [--auth-password=<pw>]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password |
 | `fleet destroy <instance-id>` | — | Tears down containers, removes instance dir + lock file |
 | `fleet start <instance-id>` | — | `ddev start` on an existing, stopped instance |
 | `fleet stop <instance-id>` | — | `ddev stop` — frees RAM, keeps disk |
@@ -145,11 +166,13 @@ these without `sudo -u fleet` or the venv path.
 Once `fleet.service` is running (see `docs/runbook-server-rollout.md`),
 browse to `https://fleet.<domain>` for the web UI: an instance list (id,
 project, branch, state, URL, RAM) with per-row Start/Stop/Destroy actions,
-a deploy form (project/template/branch/label/fresh), and a live deploy log
-streamed over WebSocket while a deploy job runs. The UI has no login of
-its own — Caddy's `basic_auth` in front of `fleet.<domain>` is the single
-auth layer; the daemon itself binds `127.0.0.1:8765` only and is
-unreachable except through Caddy.
+a deploy form (project/template/branch/label/fresh/basic-auth
+toggle/auth-password), and a live deploy log streamed over WebSocket while
+a deploy job runs. The UI has no login of its own for the dashboard itself
+— Caddy's `basic_auth` in front of `fleet.<domain>` is the single auth
+layer there; the daemon itself binds `127.0.0.1:8765` only and is
+unreachable except through Caddy. Each *deployed instance*'s own auth is
+separate — see "Default credentials" above.
 
 ## Repository layout
 

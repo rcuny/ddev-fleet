@@ -188,10 +188,18 @@ def test_write_instance_auth_snippet_scopes_to_the_right_fqdn_only(tmp_path):
     leak onto (or block) another sharing the `*.<domain>` site block."""
     snippet_dir = tmp_path / "instances"
     caddyauth.write_instance_auth_snippet(
-        "demo--one", "demo--one.fleet.example.test", "fleet", "$2a$14$hash1", snippet_dir=snippet_dir
+        "demo--one",
+        "demo--one.fleet.example.test",
+        "fleet",
+        "$2a$14$hash1",
+        snippet_dir=snippet_dir,
     )
     caddyauth.write_instance_auth_snippet(
-        "demo--two", "demo--two.fleet.example.test", "fleet", "$2a$14$hash2", snippet_dir=snippet_dir
+        "demo--two",
+        "demo--two.fleet.example.test",
+        "fleet",
+        "$2a$14$hash2",
+        snippet_dir=snippet_dir,
     )
     one = (snippet_dir / "demo--one.conf").read_text(encoding="utf-8")
     two = (snippet_dir / "demo--two.conf").read_text(encoding="utf-8")
@@ -204,7 +212,11 @@ def test_write_instance_auth_snippet_scopes_to_the_right_fqdn_only(tmp_path):
 def test_remove_instance_auth_snippet_returns_true_when_removed(tmp_path):
     snippet_dir = tmp_path / "instances"
     caddyauth.write_instance_auth_snippet(
-        "demo--one", "demo--one.fleet.example.test", "fleet", "$2a$14$hash1", snippet_dir=snippet_dir
+        "demo--one",
+        "demo--one.fleet.example.test",
+        "fleet",
+        "$2a$14$hash1",
+        snippet_dir=snippet_dir,
     )
     assert caddyauth.remove_instance_auth_snippet("demo--one", snippet_dir=snippet_dir) is True
     assert not (snippet_dir / "demo--one.conf").exists()

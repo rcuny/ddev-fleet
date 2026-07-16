@@ -29,6 +29,7 @@ def _isolate_caddy_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(caddyauth, "DEFAULT_INSTANCE_SNIPPET_DIR", tmp_path / "caddy-instances")
     monkeypatch.setattr(caddyauth, "DEFAULT_CADDYFILE_PATH", tmp_path / "Caddyfile")
 
+
 SAMPLE_REGISTRY_YAML = """\
 fleet:
   domain: fleet.example.test   # Wildcard DNS root
@@ -53,6 +54,7 @@ def fleet_home(tmp_path):
     home = tmp_path / "fleet-home"
     (home / "config" / "assets").mkdir(parents=True)
     (home / "instances").mkdir(parents=True)
+    (home / "logs").mkdir(parents=True)
     (home / "locks").mkdir(parents=True)
     return home
 
