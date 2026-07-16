@@ -60,3 +60,29 @@ def run_streamed(
 
     process.wait()
     return RunResult(returncode=process.returncode, lines=lines)
+
+
+def run_interactive(
+    cmd: list[str],
+    *,
+    cwd: Path | None = None,
+    env: dict[str, str] | None = None,
+) -> int:
+    """Run `cmd` with inherited stdin/stdout/stderr (no pipes), so an
+    interactive child (e.g. `claude setup-token`) can print its auth URL and
+    read input directly from the real terminal. Returns the exit code."""
+    full_env = os.environ.copy()
+    if env:
+        full_env.update(env)
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=str(cwd) if cwd else None,
+            env=full_env,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        raise FleetError(f"command not found: {cmd[0]}") from exc
+
+    return result.returncode

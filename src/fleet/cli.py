@@ -13,7 +13,7 @@ from fleet.core import ddev, fleetconfig
 from fleet.core import instances as instances_mod
 from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
-from fleet.core.runner import run_streamed
+from fleet.core.runner import run_interactive, run_streamed
 from fleet.core.secrets import write_secret
 
 DEFAULT_FLEET_HOME = "/srv/fleet"
@@ -22,9 +22,18 @@ _yaml = YAML()
 _yaml.default_flow_style = False
 
 _CLAUDE_TOKEN_RE = re.compile(r"sk-ant-oat01-[A-Za-z0-9_-]+")
+_VALID_CLAUDE_TOKEN_RE = re.compile(r"^sk-ant-oat01-[A-Za-z0-9_-]+$")
+
+
+def _is_valid_claude_token(token: str) -> bool:
+    return bool(_VALID_CLAUDE_TOKEN_RE.match(token))
 
 
 def _mint_claude_token(runner=run_streamed) -> str | None:
+    """Legacy piped/non-interactive mint. Kept only because some historic
+    tests exercise it directly; init/refresh use
+    `_mint_claude_token_interactive` (below) since `claude setup-token`
+    needs a real terminal to show its auth URL."""
     result = runner(["claude", "setup-token"], echo=False)
     if result.returncode != 0:
         return None
@@ -33,6 +42,18 @@ def _mint_claude_token(runner=run_streamed) -> str | None:
         if match:
             return match.group(0)
     return None
+
+
+def _mint_claude_token_interactive(*, runner=run_interactive, reader=input) -> str | None:
+    """Run `claude setup-token` with inherited stdio so its auth URL and the
+    minted token are actually visible in the terminal, then ask the operator
+    to paste the printed `sk-ant-oat01-...` token back. Returns None if the
+    command failed or the pasted value isn't a valid token."""
+    returncode = runner(["claude", "setup-token"])
+    if returncode != 0:
+        return None
+    token = reader("\nPaste the sk-ant-oat01-… token shown above: ").strip()
+    return token if _is_valid_claude_token(token) else None
 
 
 def _fleet_home(args: argparse.Namespace) -> Path:
@@ -91,6 +112,9 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("refresh-claude-token")
 
+    set_claude_token_parser = subparsers.add_parser("set-claude-token")
+    set_claude_token_parser.add_argument("token")
+
     subparsers.add_parser("refresh-config")
 
     return parser
@@ -124,6 +148,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_snapshot(fleet_home, args)
         elif args.command == "refresh-claude-token":
             return _cmd_refresh_claude_token(fleet_home, args)
+        elif args.command == "set-claude-token":
+            return _cmd_set_claude_token(fleet_home, args)
         elif args.command == "refresh-config":
             _cmd_refresh_config(fleet_home, runner=run_streamed)
     except FleetError as exc:
@@ -159,7 +185,7 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
             _yaml.dump(skeleton, fh)
 
     if not args.skip_claude:
-        token = _mint_claude_token(run_streamed)
+        token = _mint_claude_token_interactive(runner=run_interactive, reader=input)
         if token:
             write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", token)
         else:
@@ -250,19 +276,36 @@ def _cmd_snapshot(fleet_home: Path, args: argparse.Namespace) -> None:
 
 
 def _cmd_refresh_claude_token(fleet_home: Path, args: argparse.Namespace) -> int:
-    token = _mint_claude_token(run_streamed)
+    token = _mint_claude_token_interactive(runner=run_interactive, reader=input)
     if not token:
         raise FleetError("'claude setup-token' did not produce a token; refresh aborted")
     write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", token)
+    return _propagate_claude_token(fleet_home, token, runner=run_streamed)
 
+
+def _cmd_set_claude_token(fleet_home: Path, args: argparse.Namespace) -> int:
+    if not _is_valid_claude_token(args.token):
+        raise FleetError(
+            "CLAUDE_CODE_OAUTH_TOKEN must be a Claude Code setup token of the form "
+            "'sk-ant-oat01-…'"
+        )
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", args.token)
+    return _propagate_claude_token(fleet_home, args.token, runner=run_streamed)
+
+
+def _propagate_claude_token(fleet_home: Path, token: str, *, runner) -> int:
+    """Push a freshly minted/set CLAUDE_CODE_OAUTH_TOKEN out to every
+    deployed instance's `.ddev/config.fleet.yaml` (non-destructively — see
+    `fleetconfig.set_web_env_var`) and restart any instance that's currently
+    running so it picks up the new value. Returns 1 if any instance failed,
+    else 0."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
     instances_root = paths.instances
 
     try:
         running_ids = {
             p.get("name")
-            for p in ddev.list_projects(runner=run_streamed)
+            for p in ddev.list_projects(runner=runner)
             if str(p.get("status", "")).lower() == "running"
         }
     except Exception:
@@ -273,19 +316,21 @@ def _cmd_refresh_claude_token(fleet_home: Path, args: argparse.Namespace) -> int
         for entry in sorted(instances_root.iterdir()):
             if not entry.is_dir():
                 continue
-            info_path = entry / ".fleet" / "instance.yml"
-            if not info_path.exists():
-                print(f"{entry.name}: no .fleet/instance.yml — skipping", file=sys.stderr)
-                continue
             try:
-                fleetconfig.write_fleet_config(entry, entry.name, registry.domain, token)
+                updated = fleetconfig.set_web_env_var(entry, "CLAUDE_CODE_OAUTH_TOKEN", token)
+                if not updated:
+                    print(f"{entry.name}: no config.fleet.yaml — skipping", file=sys.stderr)
+                    continue
                 if entry.name in running_ids:
-                    result = ddev.restart(entry, runner=run_streamed)
+                    result = ddev.restart(entry, runner=runner)
                     if result.returncode != 0:
                         raise FleetError(
                             f"ddev restart failed for {entry.name!r} with exit code "
                             f"{result.returncode}"
                         )
+                    print(f"{entry.name}: updated and restarted")
+                else:
+                    print(f"{entry.name}: updated")
             except FleetError as exc:
                 print(f"{entry.name}: {exc.message}", file=sys.stderr)
                 failed.append(entry.name)
