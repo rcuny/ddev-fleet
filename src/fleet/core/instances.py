@@ -9,10 +9,11 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import ddev, gitops
-from fleet.core.errors import DeployError, FleetError
+from fleet.core import ddev, gitops, typesense
+from fleet.core.errors import DeployError, FleetError, TypesenseError
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
+    write_ddev_env,
     write_fleet_config,
     write_settings_local,
     write_web_build,
@@ -25,6 +26,18 @@ from fleet.core.tokens import build_context, env_vars
 
 _yaml = YAML()
 _yaml.default_flow_style = False
+
+# Public port Caddy exposes each instance's Typesense on (spec: typesense
+# edge exposure). MUST match `fleet_typesense_public_port` in
+# ansible/group_vars/all.yml / the Caddyfile template — the two are
+# independently configured (this side has no Ansible dependency) but must
+# stay numerically in sync for the browser-facing URL to work.
+TYPESENSE_PUBLIC_PORT = 9108
+
+# Shared ddev-router HTTP entrypoint that all instances' Typesense containers
+# sit behind (routed by Host header). Must match `ddev_typesense_http_port`
+# in ansible/group_vars/all.yml.
+TYPESENSE_ROUTER_HTTP_PORT = 8108
 
 
 @dataclass
@@ -139,6 +152,16 @@ def deploy(
         if fresh and instance_dir.exists():
             _destroy_locked(paths, inst_id, runner=runner)
 
+        recovered_stub = False
+        if instance_dir.exists() and not (instance_dir / ".git").is_dir():
+            # A dir with no .git is a partial/failed-destroy stub (e.g. a
+            # bare .ddev/ left behind because a prior destroy couldn't fully
+            # remove it) — remove it so we fall through to a fresh clone
+            # below, instead of handing it to gitops.update() which would
+            # fail with a cryptic "fatal: not a git repository".
+            _remove_instance_dir(instance_dir)
+            recovered_stub = True
+
         clone_result = None
         if instance_dir.exists():
             gitops.update(
@@ -164,6 +187,11 @@ def deploy(
         if clone_result is not None:
             for line in clone_result.lines:
                 _append_log(deploy_log, line)
+        if recovered_stub:
+            _append_log(
+                deploy_log,
+                "recovered from a partial instance directory left by a prior destroy",
+            )
 
         secrets = read_secrets(paths.secrets)
         claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -173,6 +201,15 @@ def deploy(
                 "run 'fleet init' or set it before deploying"
             )
         fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
+
+        typesense_enabled = registry.typesense_enabled(project)
+        typesense_admin_key = None
+        typesense_search_key = None
+        if typesense_enabled:
+            typesense_admin_key, typesense_search_key = typesense.ensure_project_keys(
+                paths.project_secrets / f"{project}.env"
+            )
+
         write_fleet_config(
             instance_dir,
             inst_id,
@@ -180,7 +217,10 @@ def deploy(
             claude_token,
             additional_fqdns=fqdns,
             git_bot=registry.git_bot(),
-            typesense=registry.typesense_enabled(project),
+            typesense=typesense_enabled,
+            typesense_port=TYPESENSE_PUBLIC_PORT,
+            typesense_admin_key=typesense_admin_key,
+            typesense_search_key=typesense_search_key,
         )
         write_web_build(instance_dir)
         excludes = [
@@ -188,6 +228,9 @@ def deploy(
             ".ddev/web-build/Dockerfile.fleet-claude",
             ".fleet/",
         ]
+        if typesense_enabled:
+            write_ddev_env(instance_dir, {"TYPESENSE_API_KEY": typesense_admin_key})
+            excludes.append(".ddev/.env")
         for injected in write_settings_local(instance_dir, registry.domain):
             excludes.append(str(injected.relative_to(instance_dir)))
         ensure_git_exclude(instance_dir, excludes)
@@ -203,6 +246,21 @@ def deploy(
             raise DeployError(
                 f"ddev start failed in {instance_dir} with exit code {start_result.returncode}"
             )
+
+        if typesense_enabled:
+            try:
+                typesense.register_search_key(
+                    http_port=TYPESENSE_ROUTER_HTTP_PORT,
+                    host=f"{inst_id}.{registry.domain}",
+                    admin_key=typesense_admin_key,
+                    search_key=typesense_search_key,
+                )
+            except TypesenseError as exc:
+                _append_log(
+                    deploy_log,
+                    f"WARNING: Typesense search-key registration failed: {exc}; "
+                    "search may not work until it is re-registered",
+                )
 
         # Push-key setup runs AFTER `ddev start` (it needs the web container for
         # `ddev exec`). Clear the SHARED ddev ssh-agent first, then load ONLY the
@@ -240,6 +298,26 @@ def deploy(
     return f"https://{inst_id}.{registry.domain}"
 
 
+def _remove_instance_dir(instance_dir: Path) -> None:
+    """Remove an instance directory, failing LOUDLY if it cannot be fully
+    removed — never leave a partial stub (which would break the next deploy)."""
+    if not instance_dir.exists():
+        return
+    last_exc: Exception | None = None
+    for _ in range(3):
+        try:
+            shutil.rmtree(instance_dir)
+        except OSError as exc:
+            last_exc = exc
+        if not instance_dir.exists():
+            return
+    detail = f": {last_exc}" if last_exc is not None else ""
+    raise FleetError(
+        f"could not fully remove instance directory {instance_dir}{detail} — "
+        "something may still be holding files (mounts/containers); resolve it and retry"
+    )
+
+
 def _destroy_locked(paths: FleetPaths, instance_id: str, *, runner=run_streamed) -> None:
     """Destroy an instance's containers and directory. Assumes the caller
     already holds the instance lock (used by deploy()'s --fresh path to
@@ -250,7 +328,7 @@ def _destroy_locked(paths: FleetPaths, instance_id: str, *, runner=run_streamed)
             ddev.delete(instance_dir, runner=runner)
         except Exception:
             pass  # tolerate failure if containers are already gone
-        shutil.rmtree(instance_dir, ignore_errors=True)
+        _remove_instance_dir(instance_dir)
 
 
 def destroy(

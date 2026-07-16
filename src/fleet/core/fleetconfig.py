@@ -17,6 +17,9 @@ def write_fleet_config(
     additional_fqdns: list[str] | None = None,
     git_bot: tuple[str, str] | None = None,
     typesense: bool = False,
+    typesense_port: int = 9108,
+    typesense_admin_key: str | None = None,
+    typesense_search_key: str | None = None,
 ) -> Path:
     ddev_dir = instance_dir / ".ddev"
     ddev_dir.mkdir(parents=True, exist_ok=True)
@@ -41,10 +44,13 @@ def write_fleet_config(
         web_environment.extend(
             [
                 f"FLEET_TYPESENSE_HOST={instance_id}.{domain}",
-                "FLEET_TYPESENSE_PORT=443",
-                "FLEET_TYPESENSE_PATH=/_typesense",
+                f"FLEET_TYPESENSE_PORT={typesense_port}",
             ]
         )
+        if typesense_admin_key:
+            web_environment.append(f"TYPESENSE_API_KEY={typesense_admin_key}")
+        if typesense_search_key:
+            web_environment.append(f"FLEET_TYPESENSE_SEARCH_KEY={typesense_search_key}")
     if additional_fqdns:
         data["additional_fqdns"] = list(additional_fqdns)
 
@@ -113,6 +119,31 @@ def write_settings_local(instance_dir: Path, domain: str) -> list[Path]:
     settings_local_path.write_text(settings_content, encoding="utf-8")
     services_fleet_path.write_text(services_content, encoding="utf-8")
     return [settings_local_path, services_fleet_path]
+
+
+def write_ddev_env(instance_dir: Path, values: dict[str, str]) -> Path:
+    """Upsert KEY=VALUE lines into `.ddev/.env`, preserving any existing keys
+    not present in `values`. DDEV interpolates `.ddev/.env` into the
+    project's docker-compose, so this is how a service container (e.g.
+    Typesense) receives fleet-managed secrets like `TYPESENSE_API_KEY`."""
+    ddev_dir = instance_dir / ".ddev"
+    ddev_dir.mkdir(parents=True, exist_ok=True)
+    env_path = ddev_dir / ".env"
+
+    existing: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            existing[key.strip()] = value.strip()
+
+    existing.update(values)
+
+    lines = [f"{key}={value}" for key, value in existing.items()]
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return env_path
 
 
 def ensure_git_exclude(instance_dir: Path, patterns: list[str]) -> None:

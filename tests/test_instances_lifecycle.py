@@ -137,6 +137,44 @@ def test_destroy_unknown_instance_raises(fleet_home, git_repo):
         instances.destroy(paths, registry, "demo--nonexistent", runner=HybridRunner())
 
 
+def test_remove_instance_dir_removes_populated_dir(tmp_path):
+    instance_dir = tmp_path / "instance"
+    (instance_dir / "sub").mkdir(parents=True)
+    (instance_dir / "file.txt").write_text("x\n", encoding="utf-8")
+    (instance_dir / "sub" / "nested.txt").write_text("y\n", encoding="utf-8")
+
+    instances._remove_instance_dir(instance_dir)
+
+    assert not instance_dir.exists()
+
+
+def test_remove_instance_dir_raises_fleet_error_when_removal_fails(tmp_path, monkeypatch):
+    instance_dir = tmp_path / "instance"
+    instance_dir.mkdir()
+    (instance_dir / "file.txt").write_text("x\n", encoding="utf-8")
+
+    monkeypatch.setattr(instances.shutil, "rmtree", lambda *args, **kwargs: None)
+
+    with pytest.raises(FleetError) as excinfo:
+        instances._remove_instance_dir(instance_dir)
+
+    assert str(instance_dir) in str(excinfo.value)
+
+
+def test_destroy_raises_when_directory_removal_fails(fleet_home, git_repo, monkeypatch):
+    """A destroy that cannot fully remove the instance directory must fail
+    loudly (FleetError), never silently leave a partial stub on disk."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    monkeypatch.setattr(instances.shutil, "rmtree", lambda *args, **kwargs: None)
+
+    with pytest.raises(FleetError):
+        instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+
 def test_start_and_stop_compose_correct_argv(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     instances.deploy(

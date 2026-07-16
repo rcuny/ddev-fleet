@@ -9,3 +9,6 @@ __pycache__/
 /assets/
 /instances/
 /fleet.yml
+# Superpowers/SDD scratch must never live in the product repo — belongs in the
+# companion's .claude/user/tmp/ (see its rules/34-superpowers-state-location.md).
+.superpowers/
