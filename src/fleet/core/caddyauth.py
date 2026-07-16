@@ -10,8 +10,10 @@ distribution-default credentials, and never touches it again if it already
 exists — so a rotated password survives a `site.yml` re-run. Everything
 *after* that first seed is owned by this module: hash a new password with
 `caddy hash-password`, write the snippet atomically, validate the resulting
-Caddyfile, then reload Caddy via a narrow sudoers grant
-(`fleet ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy`).
+Caddyfile, then reload Caddy via `caddy reload` — which talks to the local
+Caddy admin API (127.0.0.1:2019, unauthenticated by default) and needs no
+privilege escalation at all (no sudo, no setuid), so it works unchanged
+under `fleet.service`'s `NoNewPrivileges=yes` sandbox.
 
 Caddy import-error note (verified against the Caddy docs, 2026-07-16): a
 *glob* pattern that matches zero files is NOT an error — Caddy silently
@@ -204,20 +206,25 @@ def validate_caddyfile(
         )
 
 
-def reload_caddy(*, runner=run_streamed) -> None:
-    """Reload Caddy via the narrow sudoers grant installed by the caddy
-    Ansible role (`fleet ALL=(root) NOPASSWD: /usr/bin/systemctl reload
-    caddy` — nothing broader). Raises CaddyAuthError if the reload command
+def reload_caddy(*, caddyfile_path: Path = DEFAULT_CADDYFILE_PATH, runner=run_streamed) -> None:
+    """Reload Caddy via `caddy reload`, which talks to the local Caddy admin
+    API (127.0.0.1:2019, unauthenticated by default) to adapt-and-apply the
+    Caddyfile in place. Requires NO privilege escalation — no sudo, no
+    setuid — so it works unchanged under the `fleet.service` sandbox's
+    `NoNewPrivileges=yes`. Raises CaddyAuthError if the reload command
     itself fails; at that point the snippet is written but not yet live —
-    the operator should check `journalctl -u caddy` and reload by hand.
+    the operator should check `journalctl -u caddy` (is the admin API up on
+    127.0.0.1:2019?) and reload by hand.
     """
-    result = runner(["sudo", "systemctl", "reload", "caddy"], echo=False)
+    result = runner(["caddy", "reload", "--config", str(caddyfile_path)], echo=False)
     if result.returncode != 0:
         detail = "\n".join(result.lines)
         raise CaddyAuthError(
             "the admin-auth snippet was written and validated, but "
-            "'sudo systemctl reload caddy' failed, so the new password may not be "
-            f"live yet. Check 'journalctl -u caddy' and reload manually:\n{detail}"
+            "'caddy reload' failed, so the new password may not be live yet. This "
+            "usually means the Caddy admin API (127.0.0.1:2019) is unreachable or "
+            "'caddy' is not on PATH. Check 'journalctl -u caddy' and reload "
+            f"manually:\n{detail}"
         )
 
 
@@ -237,7 +244,7 @@ def rotate(
     bcrypt_hash = hash_password(password, runner=runner)
     write_admin_auth_snippet(username, bcrypt_hash, snippet_path=snippet_path)
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
-    reload_caddy(runner=runner)
+    reload_caddy(caddyfile_path=caddyfile_path, runner=runner)
 
 
 def enable_instance_auth(
@@ -260,7 +267,7 @@ def enable_instance_auth(
     bcrypt_hash = hash_password(password, runner=runner)
     write_instance_auth_snippet(instance_id, fqdn, username, bcrypt_hash, snippet_dir=snippet_dir)
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
-    reload_caddy(runner=runner)
+    reload_caddy(caddyfile_path=caddyfile_path, runner=runner)
 
 
 def disable_instance_auth(
@@ -282,4 +289,4 @@ def disable_instance_auth(
     if not removed:
         return
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
-    reload_caddy(runner=runner)
+    reload_caddy(caddyfile_path=caddyfile_path, runner=runner)

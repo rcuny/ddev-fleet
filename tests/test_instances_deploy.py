@@ -66,13 +66,14 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
 
     command_names = [call["cmd"][0] for call in runner.calls]
     # git clone, then the default-on instance auth pipeline (caddy
-    # hash-password, caddy validate, sudo systemctl reload caddy), then the
-    # rest of the deploy pipeline unchanged.
-    assert command_names == ["git", "caddy", "caddy", "sudo", "ddev", "ddev", "ddev", "bash"]
+    # hash-password, caddy validate, caddy reload — the latter talks to the
+    # local Caddy admin API, no sudo involved), then the rest of the deploy
+    # pipeline unchanged.
+    assert command_names == ["git", "caddy", "caddy", "caddy", "ddev", "ddev", "ddev", "bash"]
     assert runner.calls[0]["cmd"][:2] == ["git", "clone"]
     assert runner.calls[1]["cmd"][:2] == ["caddy", "hash-password"]
     assert runner.calls[2]["cmd"][:2] == ["caddy", "validate"]
-    assert runner.calls[3]["cmd"] == ["sudo", "systemctl", "reload", "caddy"]
+    assert runner.calls[3]["cmd"][:2] == ["caddy", "reload"]
     assert runner.calls[4]["cmd"] == ["ddev", "start"]
     assert runner.calls[5]["cmd"] == ["ddev", "exec", "ssh-add", "-D"]
     assert runner.calls[6]["cmd"] == ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
@@ -737,5 +738,7 @@ def test_deploy_raises_deploy_error_when_caddy_validate_fails(fleet_home, git_re
 
     # Caddy was never reloaded, so nothing was pushed live with this broken
     # config — and the pipeline never got to ddev start.
-    reload_or_ddev_calls = [c for c in runner.calls if c["cmd"][:1] in (["sudo"], ["ddev"])]
+    reload_or_ddev_calls = [
+        c for c in runner.calls if c["cmd"][:2] == ["caddy", "reload"] or c["cmd"][:1] == ["ddev"]
+    ]
     assert reload_or_ddev_calls == []

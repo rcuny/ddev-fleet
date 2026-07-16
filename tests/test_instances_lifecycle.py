@@ -266,7 +266,7 @@ def test_destroy_of_instance_with_auth_disabled_does_not_reload_caddy(fleet_home
     runner = HybridRunner()
     instances.destroy(paths, registry, "demo--develop", runner=runner)
 
-    reload_calls = [c for c in runner.calls if c["cmd"][:1] == ["sudo"]]
+    reload_calls = [c for c in runner.calls if c["cmd"][:2] == ["caddy", "reload"]]
     assert reload_calls == []
 
 
@@ -281,9 +281,9 @@ def test_destroy_raises_fleet_error_when_auth_snippet_reload_fails(fleet_home, g
 
     class FailingReloadRunner(HybridRunner):
         def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
-            if cmd == ["sudo", "systemctl", "reload", "caddy"]:
+            if cmd[:2] == ["caddy", "reload"]:
                 self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
-                return RunResult(returncode=1, lines=["permission denied"])
+                return RunResult(returncode=1, lines=["admin API unreachable"])
             return super().__call__(cmd, cwd=cwd, env=env, log_path=log_path, echo=echo)
 
     with pytest.raises(FleetError, match="basic-auth"):

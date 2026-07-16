@@ -919,11 +919,11 @@ def test_rotate_admin_password_propagates_caddy_auth_error(fleet_home, monkeypat
     from fleet.core.errors import CaddyAuthError
 
     def raising_rotate(username, password, *, runner=None):
-        raise CaddyAuthError("sudo systemctl reload caddy failed")
+        raise CaddyAuthError("caddy reload failed")
 
     monkeypatch.setattr(cli.caddyauth, "rotate", raising_rotate)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "rotate-admin-password"])
 
     assert exit_code == 1
-    assert "reload caddy failed" in capsys.readouterr().err
+    assert "reload failed" in capsys.readouterr().err
