@@ -68,6 +68,81 @@ The first run uses the placeholder `fleet_admin_bcrypt_hash` in
 password. Continue to step 3, then re-run bootstrap (or just re-run the
 playbook, step 3 below).
 
+## 2a. Updating an already-deployed server (code update)
+
+Sections 2–5 are first-provisioning only. Once a host is live, ship a new
+engine version with the lightweight path below. A full `bootstrap.sh` re-run
+(which runs the whole Ansible playbook) is **only** needed when system
+packages, the venv/dependencies, systemd units, or the Caddyfile change. For
+a pure Python code change the package is installed **editable**
+(`pip install -e`, `__editable__.ddev_fleet-*.pth` in the venv), so replacing
+the source under `/opt/ddev-fleet/src` and restarting `fleet.service` is
+enough — the running daemon picks up the new code on restart.
+
+### Option A — tar-over-ssh update (works today)
+
+Current mechanism: the server has **no git credential for the private
+`ddev-fleet.git`**, and `/opt/ddev-fleet` is a plain extracted tree (not a
+git checkout). Ship from a machine that has the repo and SSH access:
+
+```bash
+SRV=debian@ddev.personal.example
+# 1. (recommended) back up the current source for rollback
+ssh "$SRV" 'sudo rm -rf /opt/ddev-fleet.src.bak && sudo cp -a /opt/ddev-fleet/src /opt/ddev-fleet.src.bak'
+# 2. ship the committed HEAD tree (does not touch the venv — venv is gitignored)
+git -C /path/to/ddev-fleet archive --format=tar HEAD \
+  | ssh "$SRV" 'sudo tar -C /opt/ddev-fleet -xf - && sudo chown -R root:root /opt/ddev-fleet'
+# 3. refresh the config/registry checkout (brings new assets + fleet.yml)
+ssh "$SRV" 'sudo -u fleet git -C /srv/fleet/config pull --ff-only'
+# 4. restart the daemon
+ssh "$SRV" 'sudo systemctl restart fleet && sleep 2 && systemctl is-active fleet'
+# 5. verify
+ssh "$SRV" 'curl -s -o /dev/null -w "daemon:%{http_code}\n" http://127.0.0.1:8765/'
+```
+
+Run `sudo env FLEET_SKIP_FETCH=1 bash /opt/ddev-fleet/bootstrap.sh` between
+steps 2 and 4 **only** when dependencies or provisioning changed (not for a
+plain code change).
+
+Rollback:
+
+```bash
+ssh "$SRV" 'sudo rm -rf /opt/ddev-fleet/src && sudo mv /opt/ddev-fleet.src.bak /opt/ddev-fleet/src && sudo systemctl restart fleet'
+```
+
+### Option B — `git pull` update (preferred, requires one-time setup — NOT yet enabled)
+
+To update with a simple `git pull` on `main`, `/opt/ddev-fleet` must be a git
+checkout of `ddev-fleet.git` with server-side read access. One-time setup:
+
+1. Grant the server git read access to the private product repo — add the
+   server's SSH public key as a **read-only access/deploy key** on the
+   `ddev-fleet.git` Bitbucket repo. The `ddev-fleet-config.git` repo is
+   already wired this exact way (it pulls fine as the `fleet` user), so reuse
+   that key or mint a new one.
+2. Convert `/opt/ddev-fleet` into a checkout once, preserving the venv:
+
+   ```bash
+   ssh "$SRV" 'sudo mv /opt/ddev-fleet /opt/ddev-fleet.pretar && \
+     sudo git clone git@bitbucket.org:personal_maintainer/ddev-fleet.git /opt/ddev-fleet && \
+     sudo cp -a /opt/ddev-fleet.pretar/venv /opt/ddev-fleet/venv'
+   ```
+
+   The editable `.pth` keeps pointing at `/opt/ddev-fleet/src`, so no reinstall
+   is needed.
+
+Thereafter every update is just:
+
+```bash
+ssh "$SRV" 'sudo git -C /opt/ddev-fleet pull --ff-only && \
+  sudo -u fleet git -C /srv/fleet/config pull --ff-only && \
+  sudo systemctl restart fleet'
+```
+
+> **Status 2026-07-16:** Option B is **not** enabled — there is no product-repo
+> git credential on the server and `/opt/ddev-fleet` is not a checkout. Use
+> Option A until the access key is added and the checkout is created.
+
 ## 3. Generate the admin password hash
 
 ```bash
