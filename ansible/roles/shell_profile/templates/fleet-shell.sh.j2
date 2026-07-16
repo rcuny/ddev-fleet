@@ -1,4 +1,10 @@
-{{ ansible_managed | default('Ansible managed') }}
+# {{ ansible_managed | default('Ansible managed') }}
+#
+# NOTE the leading '#'. This file is SOURCED, not executed, so an uncommented
+# ansible_managed line renders as a bare `Ansible managed` command and bash
+# reports "Ansible: command not found" on every login — twice, since the file
+# is sourced once via /etc/profile.d and again from the ~/.bashrc hook.
+#
 # Interactive shell prompt/aliases/exports shared by root and the fleet
 # service account. One file, colour-aware by uid, so both accounts stay in
 # sync automatically instead of drifting in two per-user copies.
