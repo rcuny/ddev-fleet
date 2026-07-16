@@ -24,6 +24,32 @@ run.
 Never log or print `bcrypt_hash` or a plaintext password from this module
 — the one deliberate exception (printing a freshly rotated plaintext
 password once) lives in the CLI layer (cli.py), not here.
+
+Per-instance auth (added 2026-07-16, see `enable_instance_auth`/
+`disable_instance_auth` below): each deployed instance that opts in gets its
+OWN snippet, `{{ fleet_caddy_snippet_dir }}/instances/<instance-id>.conf`,
+imported by the `*.{{ fleet_domain }}` site in Caddyfile.j2 via a GLOB
+(`import .../instances/*.conf`) — deliberately NOT a literal path like the
+admin-auth import above. A glob matching zero files (e.g. no instances have
+auth enabled yet, or the dir is empty right after provisioning) is a
+verified silent no-op in Caddy; only a *literal* missing path is a hard
+validate/reload error. Since the set of instances with auth enabled is
+dynamic (grows/shrinks as instances deploy/destroy), a literal import here
+would require Ansible to keep re-rendering the Caddyfile on every
+deploy/destroy — the whole point of the fleet-owned-snippet design is to
+avoid that. Verified directly with `caddy validate` (v2.8.4, 2026-07-16):
+both an empty `instances/` dir and a missing `instances/` dir adapt cleanly
+with only a `No files matching import glob pattern` warning.
+
+Each snippet defines its own named matcher, `@auth-<instance-id>`, scoped
+with a `host` matcher to that instance's FQDN — verified that a matcher name
+containing the instance-id separator `--` (e.g. `@auth-oak--slacktest`)
+parses without error; Caddyfile matcher-name tokens accept any bareword of
+letters/digits/hyphens, there is no hyphen-doubling restriction. The
+`auth-` prefix is still kept (not just the raw instance id) so the matcher
+name can never begin with a digit, even though `fleet.core.naming` already
+guarantees instance ids never contain `--` except as the project/label
+separator.
 """
 
 import os
@@ -36,6 +62,10 @@ from fleet.core.runner import run_streamed
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_SNIPPET_PATH = Path("/etc/caddy/fleet/admin-auth.conf")
 DEFAULT_CADDYFILE_PATH = Path("/etc/caddy/Caddyfile")
+
+DEFAULT_INSTANCE_USERNAME = "fleet"
+DEFAULT_INSTANCE_PASSWORD = "fleet"
+DEFAULT_INSTANCE_SNIPPET_DIR = Path("/etc/caddy/fleet/instances")
 
 
 def hash_password(password: str, *, runner=run_streamed) -> str:
@@ -62,37 +92,92 @@ def hash_password(password: str, *, runner=run_streamed) -> str:
     raise CaddyAuthError("'caddy hash-password' produced no output")
 
 
-def write_admin_auth_snippet(
-    username: str,
-    bcrypt_hash: str,
-    *,
-    snippet_path: Path = DEFAULT_SNIPPET_PATH,
-) -> None:
-    """Atomically write the admin-auth snippet the Caddyfile imports.
+def _atomic_write(path: Path, content: str, *, prefix: str, mode: int = 0o640) -> None:
+    """Shared primitive behind every fleet-owned Caddy snippet write (both
+    the single admin-auth snippet and per-instance auth snippets).
 
     Writes to a temp file in the same directory, then `os.replace`s it into
     place — `os.replace` is an atomic rename on POSIX, so a crash mid-write
     can never leave Caddy importing a truncated/corrupt snippet (which
-    would otherwise fail `caddy validate`/reload and take the dashboard's
+    would otherwise fail `caddy validate`/reload and take that snippet's
     auth down with it).
     """
-    snippet_path.parent.mkdir(parents=True, exist_ok=True)
-    content = f"{username} {bcrypt_hash}\n"
+    path.parent.mkdir(parents=True, exist_ok=True)
 
-    fd, tmp_name = tempfile.mkstemp(
-        dir=str(snippet_path.parent), prefix=".admin-auth-", suffix=".tmp"
-    )
+    fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=prefix, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as fh:
             fh.write(content)
-        os.chmod(tmp_name, 0o640)
-        os.replace(tmp_name, snippet_path)
+        os.chmod(tmp_name, mode)
+        os.replace(tmp_name, path)
     except BaseException:
         try:
             os.unlink(tmp_name)
         except OSError:
             pass
         raise
+
+
+def write_admin_auth_snippet(
+    username: str,
+    bcrypt_hash: str,
+    *,
+    snippet_path: Path = DEFAULT_SNIPPET_PATH,
+) -> None:
+    """Atomically write the admin-auth snippet the Caddyfile imports."""
+    _atomic_write(snippet_path, f"{username} {bcrypt_hash}\n", prefix=".admin-auth-")
+
+
+def instance_matcher_name(instance_id: str) -> str:
+    """Compose the Caddy named-matcher token (without the leading `@`) for
+    `instance_id`. See the module docstring for the verification note on
+    why a `--`-containing name is safe to use unmodified here."""
+    return f"auth-{instance_id}"
+
+
+def instance_snippet_path(
+    instance_id: str, *, snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR
+) -> Path:
+    return snippet_dir / f"{instance_id}.conf"
+
+
+def write_instance_auth_snippet(
+    instance_id: str,
+    fqdn: str,
+    username: str,
+    bcrypt_hash: str,
+    *,
+    snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
+) -> Path:
+    """Atomically write `instance_id`'s own auth snippet: a named matcher
+    scoped to `fqdn` via `host`, plus a `basic_auth` block guarded by that
+    matcher. Returns the path written. Imported by the `*.{{ fleet_domain }}`
+    site in Caddyfile.j2 via a glob — see the module docstring."""
+    snippet_path = instance_snippet_path(instance_id, snippet_dir=snippet_dir)
+    matcher = instance_matcher_name(instance_id)
+    content = (
+        f"@{matcher} host {fqdn}\n"
+        f"basic_auth @{matcher} {{\n"
+        f"    {username} {bcrypt_hash}\n"
+        f"}}\n"
+    )
+    _atomic_write(snippet_path, content, prefix=f".{instance_id}-auth-")
+    return snippet_path
+
+
+def remove_instance_auth_snippet(
+    instance_id: str, *, snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR
+) -> bool:
+    """Remove `instance_id`'s auth snippet if present. Returns True if a
+    file was actually removed, False if there was nothing to remove — lets
+    callers (e.g. `disable_instance_auth`) skip a pointless validate/reload
+    when auth was never enabled for this instance in the first place."""
+    snippet_path = instance_snippet_path(instance_id, snippet_dir=snippet_dir)
+    try:
+        snippet_path.unlink()
+        return True
+    except FileNotFoundError:
+        return False
 
 
 def validate_caddyfile(
@@ -151,5 +236,50 @@ def rotate(
     still has the OLD credentials (it does, in both failure cases here)."""
     bcrypt_hash = hash_password(password, runner=runner)
     write_admin_auth_snippet(username, bcrypt_hash, snippet_path=snippet_path)
+    validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
+    reload_caddy(runner=runner)
+
+
+def enable_instance_auth(
+    instance_id: str,
+    fqdn: str,
+    password: str,
+    *,
+    username: str = DEFAULT_INSTANCE_USERNAME,
+    snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
+    caddyfile_path: Path = DEFAULT_CADDYFILE_PATH,
+    runner=run_streamed,
+) -> None:
+    """Full per-instance enable pipeline: hash `password`, write
+    `instance_id`'s snippet atomically, validate the Caddyfile, then reload
+    Caddy. Called by `fleet.core.instances.deploy()`. Raises CaddyAuthError
+    (a FleetError) on any failure — same never-half-applied-undetectably
+    contract as `rotate()`: if validation or reload fails, the snippet is
+    already on disk but Caddy has NOT been reloaded, so it is not yet
+    protecting anything live."""
+    bcrypt_hash = hash_password(password, runner=runner)
+    write_instance_auth_snippet(instance_id, fqdn, username, bcrypt_hash, snippet_dir=snippet_dir)
+    validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
+    reload_caddy(runner=runner)
+
+
+def disable_instance_auth(
+    instance_id: str,
+    *,
+    snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
+    caddyfile_path: Path = DEFAULT_CADDYFILE_PATH,
+    runner=run_streamed,
+) -> None:
+    """Remove `instance_id`'s auth snippet (if any), then validate + reload
+    Caddy so the removal takes effect immediately. Called by both
+    `fleet.core.instances.deploy()` (when auth is explicitly disabled for a
+    deploy) and `destroy()` (so a destroyed instance never leaves a stale
+    matcher behind — re-deploying the same id later would otherwise race a
+    leftover snippet). A no-op (no validate/reload) when there was nothing
+    to remove, so destroying an instance that never had auth enabled doesn't
+    trigger a pointless Caddy reload."""
+    removed = remove_instance_auth_snippet(instance_id, snippet_dir=snippet_dir)
+    if not removed:
+        return
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
     reload_caddy(runner=runner)

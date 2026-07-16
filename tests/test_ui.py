@@ -111,6 +111,8 @@ def test_ui_deploy_job_progresses_to_succeeded(fleet_home, monkeypatch):
         label=None,
         fresh=False,
         force=False,
+        auth_enabled=True,
+        auth_password="fleet",
         runner=None,
     ):
         return "https://demo--develop.fleet.example.test"

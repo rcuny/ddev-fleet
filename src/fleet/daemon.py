@@ -17,8 +17,8 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from fleet.core import caddyauth, naming
 from fleet.core import instances as instances_mod
-from fleet.core import naming
 from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.jobs import JobManager
@@ -210,6 +210,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         branch: str = Form(""),
         label: str = Form(""),
         fresh: str = Form(""),
+        auth: str = Form(""),
+        auth_password: str = Form(""),
     ):
         naming.validate_part(project)
         paths, registry = _paths_and_registry()
@@ -228,6 +230,15 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 branch=branch or None,
                 label=label or None,
                 fresh=bool(fresh),
+                # HTML checkboxes submit NOTHING when unchecked — `auth`
+                # arrives as "" (Form default) in that case, and bool("") is
+                # False, so an unchecked box means auth OFF, not a silent
+                # fall-through to the default-ON behavior. Deliberately NOT
+                # `auth_enabled=True if not auth else bool(auth)` — that
+                # would make "unchecked" indistinguishable from "field never
+                # sent" and always resolve to ON, which is the classic bug.
+                auth_enabled=bool(auth),
+                auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
             )
 
         job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)

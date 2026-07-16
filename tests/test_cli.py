@@ -38,6 +38,8 @@ def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
         label=None,
         fresh=False,
         force=False,
+        auth_enabled=True,
+        auth_password="fleet",
         runner=None,
     ):
         return "https://demo--develop.fleet.example.test"

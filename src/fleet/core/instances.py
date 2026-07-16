@@ -9,8 +9,8 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import ddev, gitops, typesense
-from fleet.core.errors import DeployError, FleetError, TypesenseError
+from fleet.core import caddyauth, ddev, gitops, typesense
+from fleet.core.errors import CaddyAuthError, DeployError, FleetError, TypesenseError
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
     write_ddev_env,
@@ -141,8 +141,26 @@ def deploy(
     label: str | None = None,
     fresh: bool = False,
     force: bool = False,
+    auth_enabled: bool = True,
+    auth_password: str = caddyauth.DEFAULT_INSTANCE_PASSWORD,
+    auth_snippet_dir: Path | None = None,
+    auth_caddyfile_path: Path | None = None,
     runner=run_streamed,
 ) -> str:
+    # Resolved at call time (not baked into the parameter default) so tests
+    # can redirect every real deploy()/destroy() call away from the real
+    # /etc/caddy paths via a single monkeypatch of the caddyauth module
+    # constants, without threading tmp_path overrides through every call
+    # site — see tests/conftest.py's `_isolate_caddy_paths` fixture.
+    snippet_dir = (
+        auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
+    )
+    caddyfile_path = (
+        auth_caddyfile_path
+        if auth_caddyfile_path is not None
+        else caddyauth.DEFAULT_CADDYFILE_PATH
+    )
+
     resolved = resolve_target(registry, project, template, branch, label)
     inst_id = resolved.instance_id
     instance_dir = paths.instances / inst_id
@@ -150,7 +168,13 @@ def deploy(
 
     with instance_lock(paths.locks, inst_id):
         if fresh and instance_dir.exists():
-            _destroy_locked(paths, inst_id, runner=runner)
+            _destroy_locked(
+                paths,
+                inst_id,
+                auth_snippet_dir=snippet_dir,
+                auth_caddyfile_path=caddyfile_path,
+                runner=runner,
+            )
 
         recovered_stub = False
         if instance_dir.exists() and not (instance_dir / ".git").is_dir():
@@ -201,6 +225,35 @@ def deploy(
                 "run 'fleet init' or set it before deploying"
             )
         fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
+
+        # Reconcile this instance's Caddy basic-auth state to what THIS
+        # deploy call asked for (default: enabled, password "fleet"). Runs
+        # after the fresh-destroy above (which already tore down any prior
+        # snippet via _destroy_locked) and before ddev start, so an instance
+        # is never briefly live without the auth state its operator asked
+        # for. A failure here must not leave a half-configured instance
+        # silently public — raise an actionable DeployError rather than
+        # continuing the pipeline.
+        try:
+            if auth_enabled:
+                caddyauth.enable_instance_auth(
+                    inst_id,
+                    f"{inst_id}.{registry.domain}",
+                    auth_password,
+                    snippet_dir=snippet_dir,
+                    caddyfile_path=caddyfile_path,
+                    runner=runner,
+                )
+                _append_log(deploy_log, f"basic auth enabled for {inst_id}.{registry.domain}")
+            else:
+                caddyauth.disable_instance_auth(
+                    inst_id, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=runner
+                )
+                _append_log(deploy_log, f"basic auth disabled for {inst_id}.{registry.domain}")
+        except CaddyAuthError as exc:
+            raise DeployError(
+                f"failed to configure basic auth for instance {inst_id!r}: {exc.message}"
+            ) from exc
 
         typesense_enabled = registry.typesense_enabled(project)
         typesense_admin_key = None
@@ -318,10 +371,33 @@ def _remove_instance_dir(instance_dir: Path) -> None:
     )
 
 
-def _destroy_locked(paths: FleetPaths, instance_id: str, *, runner=run_streamed) -> None:
-    """Destroy an instance's containers and directory. Assumes the caller
-    already holds the instance lock (used by deploy()'s --fresh path to
-    avoid re-entering instance_lock, which would deadlock/raise)."""
+def _destroy_locked(
+    paths: FleetPaths,
+    instance_id: str,
+    *,
+    auth_snippet_dir: Path | None = None,
+    auth_caddyfile_path: Path | None = None,
+    runner=run_streamed,
+) -> None:
+    """Destroy an instance's containers, directory, and Caddy auth snippet.
+    Assumes the caller already holds the instance lock (used by deploy()'s
+    --fresh path to avoid re-entering instance_lock, which would
+    deadlock/raise).
+
+    The auth-snippet removal always runs, even if the instance never had
+    auth enabled (disable_instance_auth() is a no-op in that case) — this is
+    what keeps a destroyed instance from leaving a stale `@auth-<id>`
+    matcher behind, which would otherwise either linger unused or collide
+    with a later re-deploy of the same instance id."""
+    snippet_dir = (
+        auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
+    )
+    caddyfile_path = (
+        auth_caddyfile_path
+        if auth_caddyfile_path is not None
+        else caddyauth.DEFAULT_CADDYFILE_PATH
+    )
+
     instance_dir = paths.instances / instance_id
     if instance_dir.exists():
         try:
@@ -329,16 +405,36 @@ def _destroy_locked(paths: FleetPaths, instance_id: str, *, runner=run_streamed)
         except Exception:
             pass  # tolerate failure if containers are already gone
         _remove_instance_dir(instance_dir)
+    try:
+        caddyauth.disable_instance_auth(
+            instance_id, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=runner
+        )
+    except CaddyAuthError as exc:
+        raise FleetError(
+            f"failed to remove basic-auth snippet for instance {instance_id!r}: {exc.message}"
+        ) from exc
 
 
 def destroy(
-    paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed
+    paths: FleetPaths,
+    registry: Registry,
+    instance_id: str,
+    *,
+    auth_snippet_dir: Path | None = None,
+    auth_caddyfile_path: Path | None = None,
+    runner=run_streamed,
 ) -> None:
     instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"unknown instance {instance_id!r}: {instance_dir} does not exist")
     with instance_lock(paths.locks, instance_id):
-        _destroy_locked(paths, instance_id, runner=runner)
+        _destroy_locked(
+            paths,
+            instance_id,
+            auth_snippet_dir=auth_snippet_dir,
+            auth_caddyfile_path=auth_caddyfile_path,
+            runner=runner,
+        )
 
     lock_path = paths.locks / f"{instance_id}.lock"
     if lock_path.exists():

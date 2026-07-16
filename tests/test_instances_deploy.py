@@ -1,6 +1,6 @@
 import pytest
 
-from fleet.core import instances
+from fleet.core import caddyauth, instances
 from fleet.core.errors import DeployError, TokenError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult, run_streamed
@@ -18,6 +18,11 @@ class HybridRunner:
         self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
         if cmd[0] in ("git", "rsync"):
             return run_streamed(cmd, cwd=cwd, env=env, log_path=log_path, echo=False)
+        if cmd[:2] == ["caddy", "hash-password"]:
+            # Fakes `caddy hash-password` for deploy()'s default-on instance
+            # auth step (fleet.core.caddyauth) — never shells out to a real
+            # caddy binary in tests.
+            return RunResult(returncode=0, lines=["$2a$14$testhashtesthashtesthashtesthashtestha"])
         return RunResult(returncode=0, lines=[])
 
 
@@ -60,13 +65,19 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     assert (instance_dir / "README.md").exists()
 
     command_names = [call["cmd"][0] for call in runner.calls]
-    assert command_names == ["git", "ddev", "ddev", "ddev", "bash"]
+    # git clone, then the default-on instance auth pipeline (caddy
+    # hash-password, caddy validate, sudo systemctl reload caddy), then the
+    # rest of the deploy pipeline unchanged.
+    assert command_names == ["git", "caddy", "caddy", "sudo", "ddev", "ddev", "ddev", "bash"]
     assert runner.calls[0]["cmd"][:2] == ["git", "clone"]
-    assert runner.calls[1]["cmd"] == ["ddev", "start"]
-    assert runner.calls[2]["cmd"] == ["ddev", "exec", "ssh-add", "-D"]
-    assert runner.calls[3]["cmd"] == ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
-    assert runner.calls[4]["cmd"] == ["bash", "-c", "echo hi"]
-    assert runner.calls[4]["env"]["FLEET_INSTANCE_ID"] == "demo--develop"
+    assert runner.calls[1]["cmd"][:2] == ["caddy", "hash-password"]
+    assert runner.calls[2]["cmd"][:2] == ["caddy", "validate"]
+    assert runner.calls[3]["cmd"] == ["sudo", "systemctl", "reload", "caddy"]
+    assert runner.calls[4]["cmd"] == ["ddev", "start"]
+    assert runner.calls[5]["cmd"] == ["ddev", "exec", "ssh-add", "-D"]
+    assert runner.calls[6]["cmd"] == ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
+    assert runner.calls[7]["cmd"] == ["bash", "-c", "echo hi"]
+    assert runner.calls[7]["env"]["FLEET_INSTANCE_ID"] == "demo--develop"
 
     # Push-key setup runs AFTER ddev start and clears the shared agent
     # (ssh-add -D) before loading ONLY the push key, so a lingering read-only
@@ -576,3 +587,99 @@ def test_deploy_substitutes_project_secret_token_into_asset(fleet_home, git_repo
     content = injected.read_text(encoding="utf-8")
     assert "xoxb-test123" in content
     assert "[[slack-bot-token]]" not in content
+
+
+# --- per-instance Caddy basic auth (default ON) ---
+
+
+def test_deploy_writes_instance_auth_snippet_by_default(fleet_home, git_repo):
+    """Basic auth is ON by default (password 'fleet') — a fresh deploy must
+    write the instance's own Caddy snippet, scoped to its FQDN, without any
+    explicit auth_enabled=True from the caller."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    snippet_path = caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR / "demo--develop.conf"
+    assert snippet_path.exists()
+    content = snippet_path.read_text(encoding="utf-8")
+    assert "@auth-demo--develop host demo--develop.fleet.example.test" in content
+    assert "basic_auth @auth-demo--develop {" in content
+    assert "fleet " in content  # default username
+
+    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    assert "basic auth enabled" in deploy_log.read_text(encoding="utf-8")
+
+
+def test_deploy_with_auth_disabled_writes_no_snippet(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        auth_enabled=False,
+        runner=HybridRunner(),
+    )
+
+    snippet_path = caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR / "demo--develop.conf"
+    assert not snippet_path.exists()
+
+    deploy_log = paths.instances / "demo--develop" / ".fleet" / "deploy.log"
+    assert "basic auth disabled" in deploy_log.read_text(encoding="utf-8")
+
+
+def test_deploy_uses_custom_auth_password(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        auth_password="s3cret",
+        runner=runner,
+    )
+
+    hash_calls = [c for c in runner.calls if c["cmd"][:2] == ["caddy", "hash-password"]]
+    assert hash_calls == [
+        {
+            "cmd": ["caddy", "hash-password", "--plaintext", "s3cret"],
+            "cwd": None,
+            "env": None,
+            "log_path": None,
+        }
+    ]
+
+
+def test_deploy_raises_deploy_error_when_caddy_validate_fails(fleet_home, git_repo):
+    """If the auth-snippet's Caddyfile validation fails, deploy() must fail
+    loudly with an actionable DeployError — never continue on to ddev start
+    and leave an instance running with an unknown/half-applied auth state."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    class FailingValidateRunner(HybridRunner):
+        def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
+            if cmd[:2] == ["caddy", "validate"]:
+                self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
+                return RunResult(returncode=1, lines=["Caddyfile:5: broken"])
+            return super().__call__(cmd, cwd=cwd, env=env, log_path=log_path, echo=echo)
+
+    runner = FailingValidateRunner()
+    with pytest.raises(DeployError, match="basic auth"):
+        instances.deploy(
+            paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+        )
+
+    # Caddy was never reloaded, so nothing was pushed live with this broken
+    # config — and the pipeline never got to ddev start.
+    reload_or_ddev_calls = [c for c in runner.calls if c["cmd"][:1] in (["sudo"], ["ddev"])]
+    assert reload_or_ddev_calls == []

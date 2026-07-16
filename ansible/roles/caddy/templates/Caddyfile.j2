@@ -35,6 +35,19 @@
     # entrypoint routes correctly by Host header. Caddy sets
     # X-Forwarded-Proto=https so Drupal still sees the request as secure; the
     # 127.0.0.1 hop is plaintext-safe (never leaves the host).
+    #
+    # Per-instance basic auth: each instance opting in (default: on) gets its
+    # own fleet-owned snippet at {{ fleet_caddy_snippet_dir }}/instances/<id>.conf
+    # — written/rotated/removed at deploy/destroy time by fleet.core.caddyauth,
+    # never by Ansible. This is a GLOB import, unlike the dashboard's literal
+    # admin-auth import above: the instances/ directory legitimately can be
+    # empty (no instances with auth yet), and a glob matching zero files is a
+    # silent Caddy no-op, whereas a literal missing path is a hard
+    # validate/reload error (verified against Caddy v2.8.4, 2026-07-16). Each
+    # snippet defines its own `@auth-<id>` matcher scoped with `host` to that
+    # instance's FQDN, so instances are never affected by each other's auth
+    # state.
+    import {{ fleet_caddy_snippet_dir }}/instances/*.conf
     reverse_proxy 127.0.0.1:{{ ddev_router_http_port }}
     tls {
         on_demand

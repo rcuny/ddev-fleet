@@ -67,3 +67,24 @@ def test_caddyfile_admin_auth_import_is_inside_protected_basic_auth_block():
 def test_caddyfile_keeps_websocket_exemption_for_basic_auth():
     out = _render()
     assert "@protected not path /ws/*" in out
+
+
+def test_caddyfile_instances_site_imports_per_instance_auth_snippets_via_glob():
+    """Unlike the dashboard's literal admin-auth import, the per-instance
+    import MUST be a glob — the instances/ dir can legitimately be empty
+    (zero instances with auth enabled), and only a glob matching zero files
+    is a silent Caddy no-op; a literal missing path is a hard error."""
+    out = _render()
+    site_start = out.index("*.fleet.personal.example {")
+    site_end = out.index("\n}", site_start)
+    site_block = out[site_start:site_end]
+    assert "import /etc/caddy/fleet/instances/*.conf" in site_block
+
+
+def test_caddyfile_instances_import_uses_wildcard_not_a_single_literal_file():
+    """A literal single-file import (like the dashboard's admin-auth.conf)
+    would be a hard error if no instance has auth enabled yet; the `*.conf`
+    glob is required so an empty/missing instances/ dir is a no-op."""
+    out = _render()
+    assert "*.conf" in out
+    assert "import /etc/caddy/fleet/instances/admin-auth.conf" not in out

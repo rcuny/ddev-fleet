@@ -80,6 +80,18 @@ def _build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("--label", default=None)
     deploy_parser.add_argument("--fresh", action="store_true")
     deploy_parser.add_argument("--force", action="store_true")
+    deploy_parser.add_argument(
+        "--no-auth",
+        dest="auth",
+        action="store_false",
+        default=True,
+        help="disable basic auth for this instance (default: enabled)",
+    )
+    deploy_parser.add_argument(
+        "--auth-password",
+        default=caddyauth.DEFAULT_INSTANCE_PASSWORD,
+        help=f"basic auth password for this instance (default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})",
+    )
 
     destroy_parser = subparsers.add_parser("destroy")
     destroy_parser.add_argument("instance_id")
@@ -231,6 +243,8 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> None:
         label=args.label,
         fresh=args.fresh,
         force=args.force,
+        auth_enabled=args.auth,
+        auth_password=args.auth_password,
     )
     print(url)
 
