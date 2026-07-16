@@ -251,9 +251,9 @@ Additional live checks, not in spec §16 but load-bearing for this plan:
   # confirm the shared ddev-router publishes the Typesense HTTP entrypoint on loopback,
   ss -tlnp | grep -E ':8108\b'
   # Expected: a 127.0.0.1:8108 listener once at least one typesense-enabled instance is up.
-  # Then confirm the same-origin route end-to-end (replace the host with a real instance):
-  curl -s -o /dev/null -w '%{http_code}\n' https://<project>--<label>.fleet.personal.example/_typesense/health
-  # Expected: 200 (Typesense health via the Caddy /_typesense route).
+  # Then confirm the port-based public endpoint end-to-end (replace the host with a real instance):
+  curl -s -o /dev/null -w '%{http_code}\n' https://<project>--<label>.fleet.personal.example:9108/health
+  # Expected: 200 (Typesense health via the Caddy :9108 listener). See docs/README-typesense.md.
   ```
 
   Per the design spec's "Key assumption to verify": if `:8108` is NOT bound
