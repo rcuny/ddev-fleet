@@ -59,6 +59,36 @@ def write_fleet_config(
     return config_path
 
 
+def set_web_env_var(instance_dir: Path, key: str, value: str) -> bool:
+    """Upsert a single `KEY=VALUE` entry into an existing instance's
+    `.ddev/config.fleet.yaml` `web_environment` list, in place, preserving
+    every other entry and top-level key (name, project_tld, additional_fqdns,
+    ...). Unlike `write_fleet_config`, this never rewrites the whole file —
+    it's the safe way to rotate a single secret (e.g. the Claude token)
+    without dropping the git-bot / Typesense env vars a full rewrite would
+    need but not have. Returns False if the config file doesn't exist yet
+    (nothing to update)."""
+    config_path = instance_dir / ".ddev" / "config.fleet.yaml"
+    if not config_path.exists():
+        return False
+
+    with open(config_path, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh) or {}
+
+    web_environment = data.setdefault("web_environment", [])
+    prefix = f"{key}="
+    for index, entry in enumerate(web_environment):
+        if entry == key or str(entry).startswith(prefix):
+            web_environment[index] = f"{key}={value}"
+            break
+    else:
+        web_environment.append(f"{key}={value}")
+
+    with open(config_path, "w", encoding="utf-8") as fh:
+        _yaml.dump(data, fh)
+    return True
+
+
 _CLAUDE_WEB_BUILD = "RUN npm install -g @anthropic-ai/claude-code\n"
 
 

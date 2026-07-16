@@ -305,10 +305,7 @@ def test_mint_claude_token_returns_none_when_no_match():
 def test_init_warns_when_claude_token_minting_fails(tmp_path, monkeypatch, capsys):
     fleet_home = tmp_path / "new-fleet-home"
 
-    def failing_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
-        return RunResult(returncode=1, lines=[])
-
-    monkeypatch.setattr(cli, "run_streamed", failing_runner)
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 1)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test"])
 
@@ -340,13 +337,24 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
             "created-at: '2026-07-01T00:00:00Z'\nlast-deployed-at: '2026-07-01T00:00:00Z'\n",
             encoding="utf-8",
         )
+        ddev_dir = inst_dir / ".ddev"
+        ddev_dir.mkdir(parents=True)
+        (ddev_dir / "config.fleet.yaml").write_text(
+            f"name: {name}\n"
+            "project_tld: fleet.example.test\n"
+            "web_environment:\n"
+            "  - CLAUDE_CODE_OAUTH_TOKEN=old-token\n"
+            "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
+            "  - GIT_AUTHOR_EMAIL=bot@x\n"
+            "  - FLEET_TYPESENSE_HOST=x\n"
+            "  - FLEET_TYPESENSE_SEARCH_KEY=k\n",
+            encoding="utf-8",
+        )
 
     calls = []
 
     def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
         calls.append(list(cmd))
-        if cmd == ["claude", "setup-token"]:
-            return RunResult(returncode=0, lines=["sk-ant-oat01-newtoken"])
         if cmd == ["ddev", "list", "--json-output"]:
             return RunResult(
                 returncode=0,
@@ -358,6 +366,8 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
         return RunResult(returncode=0, lines=[])
 
     monkeypatch.setattr(cli, "run_streamed", fake_runner)
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
+    monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
 
@@ -369,7 +379,14 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
         config = (fleet_home / "instances" / name / ".ddev" / "config.fleet.yaml").read_text(
             encoding="utf-8"
         )
-        assert "sk-ant-oat01-newtoken" in config
+        assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-newtoken" in config
+        assert "CLAUDE_CODE_OAUTH_TOKEN=old-token" not in config
+        # Non-Claude web_environment entries (git bot, Typesense) must survive
+        # the refresh — this is the bug the rewrite-based approach caused.
+        assert "GIT_AUTHOR_NAME=ddev-fleet bot" in config
+        assert "GIT_AUTHOR_EMAIL=bot@x" in config
+        assert "FLEET_TYPESENSE_HOST=x" in config
+        assert "FLEET_TYPESENSE_SEARCH_KEY=k" in config
 
     secrets = (fleet_home / ".secrets").read_text(encoding="utf-8")
     assert "sk-ant-oat01-newtoken" in secrets
@@ -379,12 +396,9 @@ def test_refresh_claude_token_skips_dirs_without_instance_yml(fleet_home, monkey
     _write_minimal_registry(fleet_home)
     (fleet_home / "instances" / "demo--legacy").mkdir(parents=True)
 
-    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
-        if cmd == ["claude", "setup-token"]:
-            return RunResult(returncode=0, lines=["sk-ant-oat01-newtoken"])
-        return RunResult(returncode=0, lines=[])
-
-    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+    monkeypatch.setattr(cli, "run_streamed", lambda cmd, **kw: RunResult(returncode=0, lines=[]))
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
+    monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
 
@@ -402,10 +416,17 @@ def test_refresh_claude_token_nonzero_exit_on_restart_failure(fleet_home, monkey
         "created-at: '2026-07-01T00:00:00Z'\nlast-deployed-at: '2026-07-01T00:00:00Z'\n",
         encoding="utf-8",
     )
+    ddev_dir = inst_dir / ".ddev"
+    ddev_dir.mkdir(parents=True)
+    (ddev_dir / "config.fleet.yaml").write_text(
+        "name: demo--develop\n"
+        "project_tld: fleet.example.test\n"
+        "web_environment:\n"
+        "  - CLAUDE_CODE_OAUTH_TOKEN=old-token\n",
+        encoding="utf-8",
+    )
 
     def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
-        if cmd == ["claude", "setup-token"]:
-            return RunResult(returncode=0, lines=["sk-ant-oat01-newtoken"])
         if cmd == ["ddev", "list", "--json-output"]:
             return RunResult(
                 returncode=0, lines=['{"raw": [{"name": "demo--develop", "status": "running"}]}']
@@ -415,6 +436,8 @@ def test_refresh_claude_token_nonzero_exit_on_restart_failure(fleet_home, monkey
         return RunResult(returncode=0, lines=[])
 
     monkeypatch.setattr(cli, "run_streamed", fake_runner)
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
+    monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
 
@@ -425,15 +448,126 @@ def test_refresh_claude_token_nonzero_exit_on_restart_failure(fleet_home, monkey
 def test_refresh_claude_token_raises_when_minting_fails(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
 
-    def failing_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
-        return RunResult(returncode=1, lines=[])
-
-    monkeypatch.setattr(cli, "run_streamed", failing_runner)
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 1)
 
     exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
 
     assert exit_code == 1
     assert "did not produce a token" in capsys.readouterr().err
+
+
+def test_refresh_claude_token_raises_when_pasted_token_invalid(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
+    monkeypatch.setattr(cli, "input", lambda prompt: "not-a-valid-token", raising=False)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+
+    assert exit_code == 1
+    assert "did not produce a token" in capsys.readouterr().err
+
+
+def test_mint_claude_token_interactive_returns_pasted_token_when_valid():
+    def fake_runner(cmd, *, cwd=None, env=None):
+        return 0
+
+    def fake_reader(prompt):
+        return "sk-ant-oat01-pasted"
+
+    token = cli._mint_claude_token_interactive(runner=fake_runner, reader=fake_reader)
+    assert token == "sk-ant-oat01-pasted"
+
+
+def test_mint_claude_token_interactive_returns_none_when_pasted_token_invalid():
+    def fake_runner(cmd, *, cwd=None, env=None):
+        return 0
+
+    def fake_reader(prompt):
+        return "not-a-token"
+
+    assert cli._mint_claude_token_interactive(runner=fake_runner, reader=fake_reader) is None
+
+
+def test_mint_claude_token_interactive_returns_none_when_setup_token_exits_nonzero():
+    def fake_runner(cmd, *, cwd=None, env=None):
+        return 1
+
+    def fake_reader(prompt):
+        raise AssertionError("reader must not be called when setup-token failed")
+
+    assert cli._mint_claude_token_interactive(runner=fake_runner, reader=fake_reader) is None
+
+
+def test_set_claude_token_rejects_invalid_token(fleet_home, capsys):
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "set-claude-token", "not-a-valid-token"])
+
+    assert exit_code == 1
+    assert "sk-ant-oat01-" in capsys.readouterr().err
+    assert not (fleet_home / ".secrets").exists()
+
+
+def test_set_claude_token_accepts_valid_token_writes_secret_and_propagates(fleet_home, monkeypatch):
+    for name in ("demo--develop", "demo--piano"):
+        inst_dir = fleet_home / "instances" / name
+        (inst_dir / ".fleet").mkdir(parents=True)
+        (inst_dir / ".fleet" / "instance.yml").write_text(
+            f"project: demo\ninstance: {name.split('--')[1]}\nbranch: main\n"
+            "created-at: '2026-07-01T00:00:00Z'\nlast-deployed-at: '2026-07-01T00:00:00Z'\n",
+            encoding="utf-8",
+        )
+        ddev_dir = inst_dir / ".ddev"
+        ddev_dir.mkdir(parents=True)
+        (ddev_dir / "config.fleet.yaml").write_text(
+            f"name: {name}\n"
+            "project_tld: fleet.example.test\n"
+            "web_environment:\n"
+            "  - CLAUDE_CODE_OAUTH_TOKEN=old-token\n"
+            "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
+            "  - GIT_AUTHOR_EMAIL=bot@x\n"
+            "  - FLEET_TYPESENSE_HOST=x\n"
+            "  - FLEET_TYPESENSE_SEARCH_KEY=k\n",
+            encoding="utf-8",
+        )
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        if cmd == ["ddev", "list", "--json-output"]:
+            return RunResult(
+                returncode=0,
+                lines=[
+                    '{"raw": [{"name": "demo--develop", "status": "running"}, '
+                    '{"name": "demo--piano", "status": "stopped"}]}'
+                ],
+            )
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "set-claude-token", "sk-ant-oat01-newtoken"]
+    )
+
+    assert exit_code == 0
+
+    secrets = (fleet_home / ".secrets").read_text(encoding="utf-8")
+    assert "sk-ant-oat01-newtoken" in secrets
+
+    restart_calls = [c for c in calls if c == ["ddev", "restart"]]
+    assert len(restart_calls) == 1
+
+    for name in ("demo--develop", "demo--piano"):
+        content = (fleet_home / "instances" / name / ".ddev" / "config.fleet.yaml").read_text(
+            encoding="utf-8"
+        )
+        assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-newtoken" in content
+        assert "CLAUDE_CODE_OAUTH_TOKEN=old-token" not in content
+        assert "GIT_AUTHOR_NAME=ddev-fleet bot" in content
+        assert "GIT_AUTHOR_EMAIL=bot@x" in content
+        assert "FLEET_TYPESENSE_HOST=x" in content
+        assert "FLEET_TYPESENSE_SEARCH_KEY=k" in content
 
 
 def test_refresh_config_pulls_when_git_checkout(fleet_home, monkeypatch, capsys):

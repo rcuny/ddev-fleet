@@ -1,5 +1,6 @@
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
+    set_web_env_var,
     write_ddev_env,
     write_fleet_config,
     write_settings_local,
@@ -318,3 +319,72 @@ def test_write_settings_local_non_drupal_returns_none(tmp_path):
 
     assert result == []
     assert not (instance_dir / "sites").exists()
+
+
+def test_set_web_env_var_updates_only_target_key_preserves_others(tmp_path):
+    instance_dir = tmp_path / "instance"
+    ddev_dir = instance_dir / ".ddev"
+    ddev_dir.mkdir(parents=True)
+    config_path = ddev_dir / "config.fleet.yaml"
+    config_path.write_text(
+        "name: oak--develop\n"
+        "project_tld: fleet.example.test\n"
+        "web_environment:\n"
+        "  - CLAUDE_CODE_OAUTH_TOKEN=old\n"
+        "  - GIT_AUTHOR_NAME=bot\n"
+        "  - FLEET_TYPESENSE_HOST=x\n"
+        "  - FLEET_TYPESENSE_SEARCH_KEY=k\n",
+        encoding="utf-8",
+    )
+
+    result = set_web_env_var(instance_dir, "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-new")
+
+    assert result is True
+    content = config_path.read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-new" in content
+    assert "CLAUDE_CODE_OAUTH_TOKEN=old" not in content
+    assert "GIT_AUTHOR_NAME=bot" in content
+    assert "FLEET_TYPESENSE_HOST=x" in content
+    assert "FLEET_TYPESENSE_SEARCH_KEY=k" in content
+    assert "name: oak--develop" in content
+    assert "project_tld: fleet.example.test" in content
+
+
+def test_set_web_env_var_missing_config_file_returns_false(tmp_path):
+    instance_dir = tmp_path / "instance"
+
+    result = set_web_env_var(instance_dir, "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-new")
+
+    assert result is False
+
+
+def test_set_web_env_var_appends_missing_key(tmp_path):
+    instance_dir = tmp_path / "instance"
+    ddev_dir = instance_dir / ".ddev"
+    ddev_dir.mkdir(parents=True)
+    config_path = ddev_dir / "config.fleet.yaml"
+    config_path.write_text(
+        "name: oak--develop\nproject_tld: fleet.example.test\n",
+        encoding="utf-8",
+    )
+
+    result = set_web_env_var(instance_dir, "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-new")
+
+    assert result is True
+    content = config_path.read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-new" in content
+
+
+def test_set_web_env_var_appends_when_no_web_environment_key_at_all(tmp_path):
+    instance_dir = tmp_path / "instance"
+    ddev_dir = instance_dir / ".ddev"
+    ddev_dir.mkdir(parents=True)
+    config_path = ddev_dir / "config.fleet.yaml"
+    config_path.write_text("name: oak--develop\n", encoding="utf-8")
+
+    result = set_web_env_var(instance_dir, "FOO", "bar")
+
+    assert result is True
+    content = config_path.read_text(encoding="utf-8")
+    assert "name: oak--develop" in content
+    assert "FOO=bar" in content

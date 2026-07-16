@@ -1,7 +1,7 @@
 import pytest
 
 from fleet.core.errors import FleetError
-from fleet.core.runner import run_streamed
+from fleet.core.runner import run_interactive, run_streamed
 
 
 def test_run_streamed_captures_stdout_lines(capsys):
@@ -68,3 +68,22 @@ def test_run_streamed_creates_missing_log_parent_dir(tmp_path):
     assert not log_path.parent.exists()
     run_streamed(["echo", "hello"], log_path=log_path, echo=False)
     assert log_path.read_text(encoding="utf-8") == "hello\n"
+
+
+def test_run_interactive_returns_child_exit_code():
+    assert run_interactive(["true"]) == 0
+    assert run_interactive(["false"]) == 1
+
+
+def test_run_interactive_raises_fleet_error_on_missing_binary():
+    with pytest.raises(FleetError) as exc_info:
+        run_interactive(["definitely-not-a-real-binary-xyz"])
+    assert "definitely-not-a-real-binary-xyz" in str(exc_info.value)
+
+
+def test_run_interactive_merges_env_into_os_environ(tmp_path):
+    log_path = tmp_path / "out.txt"
+    script = f"import os; open({str(log_path)!r}, 'w').write(os.environ.get('FOO', ''))"
+    returncode = run_interactive(["python3", "-c", script], env={"FOO": "bar"})
+    assert returncode == 0
+    assert log_path.read_text(encoding="utf-8") == "bar"
