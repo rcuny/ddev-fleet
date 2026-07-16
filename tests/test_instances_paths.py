@@ -11,5 +11,6 @@ def test_from_home_derives_srv_fleet_config_layout():
     assert paths.assets == Path("/srv/fleet/config/assets")
     assert paths.instances == Path("/srv/fleet/instances")
     assert paths.secrets == Path("/srv/fleet/.secrets")
+    assert paths.project_secrets == Path("/srv/fleet/secrets")
     assert paths.locks == Path("/srv/fleet/locks")
     assert paths.push_key_dir == Path("/srv/fleet/.push-key")

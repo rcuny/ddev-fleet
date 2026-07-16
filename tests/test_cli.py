@@ -1,3 +1,5 @@
+import stat
+
 from fleet import cli
 from fleet.core.errors import DeployError
 from fleet.core.instances import FleetPaths, InstanceStatus
@@ -472,3 +474,16 @@ def test_refresh_config_non_git_checkout_prints_message_without_runner_calls(
     assert exit_code == 0
     assert calls == []
     assert f"{cfg} is not a git checkout" in capsys.readouterr().out
+
+
+def test_secret_set_writes_per_project_secret_file(fleet_home):
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "secret", "set", "oak", "SLACK_BOT_TOKEN", "xoxb-abc"]
+    )
+
+    assert exit_code == 0
+    secret_path = fleet_home / "secrets" / "oak.env"
+    assert secret_path.exists()
+    assert secret_path.read_text(encoding="utf-8") == "SLACK_BOT_TOKEN=xoxb-abc\n"
+    mode = stat.S_IMODE(secret_path.stat().st_mode)
+    assert mode == 0o600

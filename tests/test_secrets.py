@@ -1,6 +1,6 @@
 import stat
 
-from fleet.core.secrets import read_secrets, write_secret
+from fleet.core.secrets import read_secrets, secret_tokens, write_secret
 
 
 def test_read_secrets_missing_file_returns_empty_dict(tmp_path):
@@ -46,3 +46,24 @@ def test_write_secret_upsert_keeps_mode_0600(tmp_path):
     write_secret(path, "A", "2")  # upsert
     assert oct(path.stat().st_mode & 0o777) == "0o600"
     assert read_secrets(path) == {"A": "2"}
+
+
+def test_secret_tokens_maps_key_to_dashed_lowercase_token():
+    assert secret_tokens({"SLACK_BOT_TOKEN": "xoxb-1"}) == {"slack-bot-token": "xoxb-1"}
+
+
+def test_secret_tokens_empty_dict_returns_empty_dict():
+    assert secret_tokens({}) == {}
+
+
+def test_secret_tokens_maps_multiple_keys_with_multi_word_underscores():
+    secrets = {
+        "SLACK_BOT_TOKEN": "xoxb-1",
+        "SLACK_APP_TOKEN": "xapp-2",
+        "SLACK_ASK_TIMEOUT_SECONDS": "600",
+    }
+    assert secret_tokens(secrets) == {
+        "slack-bot-token": "xoxb-1",
+        "slack-app-token": "xapp-2",
+        "slack-ask-timeout-seconds": "600",
+    }

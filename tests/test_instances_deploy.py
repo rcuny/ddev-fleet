@@ -369,3 +369,31 @@ def test_deploy_excludes_token_config_before_asset_injection_fails(fleet_home, g
     instance_dir = paths.instances / "demo--develop"
     exclude_path = instance_dir / ".git" / "info" / "exclude"
     assert ".ddev/config.fleet.yaml" in exclude_path.read_text(encoding="utf-8")
+
+
+def test_deploy_substitutes_project_secret_token_into_asset(fleet_home, git_repo):
+    """A per-project secret file (<home>/secrets/<project>.env) must be
+    exposed as a [[token]] during asset injection, without touching the
+    global .secrets (Claude token) file."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    assets_dir = paths.assets / "demo"
+    slack_dir = assets_dir / ".ddev" / "slack"
+    slack_dir.mkdir(parents=True, exist_ok=True)
+    (slack_dir / ".env").write_text("SLACK_BOT_TOKEN=[[slack-bot-token]]\n", encoding="utf-8")
+
+    project_secrets_path = paths.project_secrets / "demo.env"
+    project_secrets_path.parent.mkdir(parents=True, exist_ok=True)
+    project_secrets_path.write_text("SLACK_BOT_TOKEN=xoxb-test123\n", encoding="utf-8")
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    instance_dir = paths.instances / "demo--develop"
+    injected = instance_dir / ".ddev" / "slack" / ".env"
+    content = injected.read_text(encoding="utf-8")
+    assert "xoxb-test123" in content
+    assert "[[slack-bot-token]]" not in content

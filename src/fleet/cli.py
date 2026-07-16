@@ -78,6 +78,13 @@ def _build_parser() -> argparse.ArgumentParser:
     assets_push_parser.add_argument("src")
     assets_push_parser.add_argument("dest_rel")
 
+    secret_parser = subparsers.add_parser("secret")
+    secret_subparsers = secret_parser.add_subparsers(dest="secret_command", required=True)
+    secret_set_parser = secret_subparsers.add_parser("set")
+    secret_set_parser.add_argument("project")
+    secret_set_parser.add_argument("key")
+    secret_set_parser.add_argument("value")
+
     snapshot_parser = subparsers.add_parser("snapshot")
     snapshot_parser.add_argument("instance_id")
     snapshot_parser.add_argument("--dest-rel", default="dumps/db.sql.gz")
@@ -111,6 +118,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_ssh_key(fleet_home, args)
         elif args.command == "assets":
             _cmd_assets(fleet_home, args)
+        elif args.command == "secret":
+            _cmd_secret(fleet_home, args)
         elif args.command == "snapshot":
             _cmd_snapshot(fleet_home, args)
         elif args.command == "refresh-claude-token":
@@ -130,6 +139,7 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
     paths.assets.mkdir(parents=True, exist_ok=True)
     paths.instances.mkdir(exist_ok=True)
     paths.locks.mkdir(exist_ok=True)
+    paths.project_secrets.mkdir(mode=0o700, exist_ok=True)
 
     domain = args.domain
     if not domain:
@@ -224,6 +234,12 @@ def _cmd_assets(fleet_home: Path, args: argparse.Namespace) -> None:
         assets_dir = paths.assets / args.project
         dest = assets_mod.push(assets_dir, Path(args.src), args.dest_rel)
         print(dest)
+
+
+def _cmd_secret(fleet_home: Path, args: argparse.Namespace) -> None:
+    if args.secret_command == "set":
+        paths = instances_mod.FleetPaths.from_home(fleet_home)
+        write_secret(paths.project_secrets / f"{args.project}.env", args.key, args.value)
 
 
 def _cmd_snapshot(fleet_home: Path, args: argparse.Namespace) -> None:

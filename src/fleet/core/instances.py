@@ -20,7 +20,7 @@ from fleet.core.fleetconfig import (
 from fleet.core.locks import instance_lock
 from fleet.core.registry import Registry, ResolvedInstance
 from fleet.core.runner import run_streamed
-from fleet.core.secrets import read_secrets
+from fleet.core.secrets import read_secrets, secret_tokens
 from fleet.core.tokens import build_context, env_vars
 
 _yaml = YAML()
@@ -34,6 +34,7 @@ class FleetPaths:
     assets: Path
     instances: Path
     secrets: Path
+    project_secrets: Path
     locks: Path
     push_key_dir: Path
 
@@ -46,6 +47,7 @@ class FleetPaths:
             assets=config_dir / "assets",
             instances=home / "instances",
             secrets=home / ".secrets",
+            project_secrets=home / "secrets",
             locks=home / "locks",
             push_key_dir=home / ".push-key",
         )
@@ -191,6 +193,8 @@ def deploy(
         ensure_git_exclude(instance_dir, excludes)
 
         context = build_context(project, resolved.label, resolved.branch, registry.domain)
+        project_secrets = read_secrets(paths.project_secrets / f"{project}.env")
+        context.update(secret_tokens(project_secrets))
         copied = assets_mod.inject(paths.assets / project, instance_dir, context, runner=runner)
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
 
