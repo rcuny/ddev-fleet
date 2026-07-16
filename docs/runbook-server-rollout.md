@@ -68,6 +68,84 @@ The first run uses the placeholder `fleet_admin_bcrypt_hash` in
 password. Continue to step 3, then re-run bootstrap (or just re-run the
 playbook, step 3 below).
 
+## 2a. Updating an already-deployed server (code update)
+
+Sections 2–5 are first-provisioning only. Once a host is live, ship a new
+engine version with the lightweight path below. A full `bootstrap.sh` re-run
+(which runs the whole Ansible playbook) is **only** needed when system
+packages, the venv/dependencies, systemd units, or the Caddyfile change. For
+a pure Python code change the package is installed **editable**
+(`pip install -e`, `__editable__.ddev_fleet-*.pth` in the venv), so replacing
+the source under `/opt/ddev-fleet/src` and restarting `fleet.service` is
+enough — the running daemon picks up the new code on restart.
+
+### Option A — tar-over-ssh update (works today)
+
+Current mechanism: the server has **no git credential for the private
+`ddev-fleet.git`**, and `/opt/ddev-fleet` is a plain extracted tree (not a
+git checkout). Ship from a machine that has the repo and SSH access:
+
+```bash
+SRV=debian@ddev.personal.example
+# 1. (recommended) back up the current source for rollback
+ssh "$SRV" 'sudo rm -rf /opt/ddev-fleet.src.bak && sudo cp -a /opt/ddev-fleet/src /opt/ddev-fleet.src.bak'
+# 2. ship the committed HEAD tree (does not touch the venv — venv is gitignored)
+git -C /path/to/ddev-fleet archive --format=tar HEAD \
+  | ssh "$SRV" 'sudo tar -C /opt/ddev-fleet -xf - && sudo chown -R root:root /opt/ddev-fleet'
+# 3. refresh the config/registry checkout (brings new assets + fleet.yml)
+ssh "$SRV" 'sudo -u fleet git -C /srv/fleet/config pull --ff-only'
+# 4. restart the daemon
+ssh "$SRV" 'sudo systemctl restart fleet && sleep 2 && systemctl is-active fleet'
+# 5. verify
+ssh "$SRV" 'curl -s -o /dev/null -w "daemon:%{http_code}\n" http://127.0.0.1:8765/'
+```
+
+Run `sudo env FLEET_SKIP_FETCH=1 bash /opt/ddev-fleet/bootstrap.sh` between
+steps 2 and 4 **only** when dependencies or provisioning changed (not for a
+plain code change).
+
+Rollback:
+
+```bash
+ssh "$SRV" 'sudo rm -rf /opt/ddev-fleet/src && sudo mv /opt/ddev-fleet.src.bak /opt/ddev-fleet/src && sudo systemctl restart fleet'
+```
+
+### Option B — `git pull` update (enabled 2026-07-16)
+
+`/opt/ddev-fleet` is a git checkout of `ddev-fleet.git`, owned by `fleet` (the
+`fleet.service` user), tracking `origin/main`. The `fleet` user holds the
+read-only deploy key registered on the Bitbucket repo (same pattern as
+`ddev-fleet-config.git`). Ongoing updates:
+
+```bash
+SRV=debian@ddev.personal.example
+ssh "$SRV" '
+  sudo -u fleet git -C /opt/ddev-fleet pull --ff-only && \
+  sudo -u fleet git -C /srv/fleet/config pull --ff-only && \
+  sudo systemctl restart fleet && sleep 2 && systemctl is-active fleet'
+```
+
+The package is installed editable, so the restart alone picks up new source —
+no reinstall. Run `bootstrap.sh` / the Ansible playbook only when dependencies
+or provisioning change.
+
+> **How the checkout was created (in place, 2026-07-16):**
+> `sudo systemctl stop fleet`; `sudo chown -R fleet:fleet /opt/ddev-fleet`;
+> then as `fleet`: `git init -b main`, `git remote add origin <url>`,
+> `git fetch origin`, `git reset --hard origin/main` (this rewrites only
+> git-tracked files; the untracked, gitignored `venv/` is preserved);
+> `sudo systemctl start fleet`.
+>
+> **Ownership:** `/opt/ddev-fleet` is `fleet:fleet` — exactly the state the
+> `fleet_service` Ansible role enforces (its first task recursively chowns the
+> checkout to the fleet user, and the clone/pip tasks run as that user), so
+> re-running `bootstrap.sh` *preserves* fleet ownership and does not break
+> `git pull`. This in-place conversion simply brings the host to the state the
+> role already expects: a fleet-owned git checkout. A host operator's CLI
+> wrapper `/usr/local/bin/fleet` (installed by the role) execs the venv CLI as
+> the fleet user, so `fleet secret set …`, `fleet list`, etc. can be run from
+> any admin account without `sudo -u fleet` or the venv path.
+
 ## 3. Generate the admin password hash
 
 ```bash

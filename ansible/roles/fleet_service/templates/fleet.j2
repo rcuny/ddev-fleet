@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# fleet — run the ddev-fleet CLI as the '{{ fleet_user }}' user (owner of
+# {{ fleet_srv_dir }}). Installed by the ddev-fleet Ansible provisioning
+# (fleet_service role). Any operator can call `fleet …`; it always runs under
+# the {{ fleet_user }} identity so files under {{ fleet_srv_dir }} keep the
+# right ownership and permissions.
+set -euo pipefail
+FLEET_BIN={{ fleet_opt_dir }}/venv/bin/fleet
+if [ "$(id -un)" = "{{ fleet_user }}" ]; then
+  exec "$FLEET_BIN" "$@"
+else
+  exec sudo -u {{ fleet_user }} "$FLEET_BIN" "$@"
+fi
