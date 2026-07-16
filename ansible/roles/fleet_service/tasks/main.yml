@@ -85,3 +85,15 @@
     owner: root
     group: root
     mode: "0755"
+
+- name: Install the fleet CLI wrapper on PATH
+  # `fleet …` for host operators: execs the venv CLI as the fleet user so
+  # commands (e.g. `fleet secret set`) always run under the identity that owns
+  # /srv/fleet. See the script header for usage. `fleet-shell` (above) is the
+  # separate helper for an interactive ddev shell as the fleet user.
+  ansible.builtin.template:
+    src: fleet.j2
+    dest: /usr/local/bin/fleet
+    owner: root
+    group: root
+    mode: "0755"

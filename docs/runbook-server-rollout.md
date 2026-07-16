@@ -136,10 +136,15 @@ or provisioning change.
 > git-tracked files; the untracked, gitignored `venv/` is preserved);
 > `sudo systemctl start fleet`.
 >
-> **Ownership caveat:** `/opt/ddev-fleet` is now `fleet:fleet`. The clean-server
-> `bootstrap.sh` chowns it back to `root:root`, which would break `fleet`'s
-> `git pull`. On a live host prefer Option A/B over a full bootstrap re-run; if
-> you must re-run bootstrap, re-chown to `fleet:fleet` afterward.
+> **Ownership:** `/opt/ddev-fleet` is `fleet:fleet` — exactly the state the
+> `fleet_service` Ansible role enforces (its first task recursively chowns the
+> checkout to the fleet user, and the clone/pip tasks run as that user), so
+> re-running `bootstrap.sh` *preserves* fleet ownership and does not break
+> `git pull`. This in-place conversion simply brings the host to the state the
+> role already expects: a fleet-owned git checkout. A host operator's CLI
+> wrapper `/usr/local/bin/fleet` (installed by the role) execs the venv CLI as
+> the fleet user, so `fleet secret set …`, `fleet list`, etc. can be run from
+> any admin account without `sudo -u fleet` or the venv path.
 
 ## 3. Generate the admin password hash
 
