@@ -70,6 +70,12 @@ def run(
             statuses = _statuses()
             last_status = time.monotonic()
         _render(console, paths, window, statuses)
-        if once or not tmux.session_exists():
+        if once:
+            return
+        try:
+            alive = tmux.session_exists()
+        except Exception:  # noqa: BLE001 - tmux gone -> exit the sidebar cleanly
+            return
+        if not alive:
             return
         time.sleep(list_interval)

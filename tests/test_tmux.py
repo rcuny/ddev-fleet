@@ -69,6 +69,7 @@ def test_ensure_instance_window_creates_window_split_and_focus():
     assert new_window in joined
     assert "tmux split-window -h -t %5 -c " + str(dir_) in joined
     assert "tmux set-window-option -t fleet:oak--click-3 automatic-rename off" in joined
+    assert "tmux set-option -w -t fleet:oak--click-3 @fleet_managed 1" in joined
     assert "tmux select-pane -t %5" in joined
 
 
@@ -187,6 +188,9 @@ def test_reconcile_adds_sorted_and_prunes_stale():
             "tmux list-windows -t fleet -F #{window_name}": RunResult(
                 0, ["general", "old--gone", "oak--click-3"]
             ),
+            "tmux list-windows -t fleet -F #{window_name}\t#{@fleet_managed}": RunResult(
+                0, ["general\t", "old--gone\t1", "oak--click-3\t1"]
+            ),
             "tmux list-panes -t fleet:general -F #{@fleet_role}": RunResult(0, ["sidebar"]),
             "tmux list-panes -t fleet:oak--click-3 -F #{@fleet_role}": RunResult(0, ["sidebar"]),
             "tmux list-panes -t fleet:old--gone -F #{@fleet_role}": RunResult(0, ["sidebar"]),
@@ -194,9 +198,37 @@ def test_reconcile_adds_sorted_and_prunes_stale():
     )
     tmux.reconcile(P, ["oak--click-3"], runner=fake)
     joined = [" ".join(str(c) for c in c2["cmd"]) for c2 in fake.calls]
-    # prunes the stale "--" window, keeps general
+    # prunes the stale managed window, keeps general (unmanaged, never pruned)
     assert "tmux kill-window -t fleet:old--gone" in joined
     assert "tmux kill-window -t fleet:general" not in joined
+
+
+def test_reconcile_does_not_kill_unmanaged_window_with_dashes():
+    """A human-renamed window containing '--' (e.g. notes--scratch) must
+    survive reconcile as long as it was never tagged @fleet_managed."""
+    paths_instances = Path("/srv/fleet/instances")
+
+    class P:  # minimal FleetPaths stand-in
+        home = Path("/srv/fleet")
+        instances = paths_instances
+
+    fake = FakeRunner(
+        default=RunResult(0, []),
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(
+                0, ["general", "notes--scratch"]
+            ),
+            "tmux list-windows -t fleet -F #{window_name}\t#{@fleet_managed}": RunResult(
+                0, ["general\t", "notes--scratch\t"]
+            ),
+            "tmux list-panes -t fleet:general -F #{@fleet_role}": RunResult(0, ["sidebar"]),
+            "tmux list-panes -t fleet:notes--scratch -F #{@fleet_role}": RunResult(0, ["sidebar"]),
+        },
+    )
+    tmux.reconcile(P, [], runner=fake)
+    joined = [" ".join(str(c) for c in c2["cmd"]) for c2 in fake.calls]
+    assert "tmux kill-window -t fleet:notes--scratch" not in joined
 
 
 def test_attach_execs_tmux(monkeypatch):

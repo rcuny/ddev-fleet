@@ -19,6 +19,7 @@ GENERAL_WINDOW = "general"
 SIDEBAR_WIDTH = 24
 SIDEBAR_ROLE_OPT = "@fleet_role"
 SIDEBAR_ROLE = "sidebar"
+MANAGED_OPT = "@fleet_managed"
 
 _UNSAFE = set(" \t\n:./")
 
@@ -43,6 +44,24 @@ def list_window_names(*, runner=run_streamed) -> list[str]:
 
 def window_exists(instance_id: str, *, runner=run_streamed) -> bool:
     return instance_id in list_window_names(runner=runner)
+
+
+def managed_window_names(*, runner=run_streamed) -> list[str]:
+    """Names of windows tagged as fleet-managed (i.e. created by
+    `ensure_instance_window`), as opposed to `general` or any window a human
+    created/renamed by hand — those must never be pruned by `reconcile`."""
+    result = _run(
+        runner,
+        ["list-windows", "-t", SESSION, "-F", f"#{{window_name}}\t#{{{MANAGED_OPT}}}"],
+    )
+    names = []
+    for line in result.lines:
+        if not line.strip():
+            continue
+        name, _, managed = line.partition("\t")
+        if managed == "1":
+            names.append(name)
+    return names
 
 
 def ensure_instance_window(instance_id: str, instance_dir: Path, *, runner=run_streamed) -> None:
@@ -72,6 +91,7 @@ def ensure_instance_window(instance_id: str, instance_dir: Path, *, runner=run_s
         runner,
         ["set-window-option", "-t", f"{SESSION}:{instance_id}", "automatic-rename", "off"],
     )
+    _run(runner, ["set-option", "-w", "-t", f"{SESSION}:{instance_id}", MANAGED_OPT, "1"])
     ensure_sidebar(instance_id, runner=runner)
     _run(runner, ["select-pane", "-t", main_pane])
 
@@ -135,8 +155,8 @@ def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
         ensure_instance_window(instance_id, paths.instances / instance_id, runner=runner)
     for window in list_window_names(runner=runner):
         ensure_sidebar(window, runner=runner)  # self-heal
-    for window in list_window_names(runner=runner):
-        if "--" in window and window not in instance_ids:
+    for window in managed_window_names(runner=runner):
+        if window not in instance_ids:
             kill_instance_window(window, runner=runner)
 
 
