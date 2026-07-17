@@ -3,10 +3,57 @@
 from pathlib import Path
 
 from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 _yaml = YAML()
 _yaml.default_flow_style = False
 _yaml.indent(mapping=2, sequence=4, offset=2)
+
+# Seeds the container's ~/.claude.json past Claude Code's first-run
+# onboarding wizard (spec: .claude/user/docs/specs/
+# 2026-07-17-claude-onboarding-and-fleet-remote-design.md, Part B step 3).
+# CLAUDE_CODE_OAUTH_TOKEN authenticates API calls but does NOT mark
+# onboarding complete — the interactive TUI still shows the theme picker /
+# trust dialog unless hasCompletedOnboarding is set. This must MERGE, not
+# overwrite: ~/.claude.json also holds runtime keys (userID, machineID,
+# firstStartTime, per-project history) written by Claude Code itself, which
+# must survive. Runs as a `post-start` DDEV hook (not baked into the image
+# via homeadditions/) because DDEV creates the container user — and thus
+# /home/<user> — at runtime from the host uid, and re-copies homeadditions
+# on every start, which would clobber those runtime keys each time.
+#
+# ORDERING (load-bearing, verified on ddev v1.25.3): DDEV merges `hooks` from
+# config.yaml and every config.*.yaml ADDITIVELY, in filename order — it does
+# not replace them, so this cannot clobber a project's own hooks. That order
+# matters: a project may relink ~/.claude.json into its own tree (oak's
+# config.claude-code.yaml does exactly this, seeding it with `{}`), and this
+# seed must run AFTER that relink or it writes to a file that is about to be
+# replaced. "config.fleet.yaml" sorts after "config.claude-code.yaml", so it
+# does. A project shipping a later-sorting config.*.yaml that relinks
+# ~/.claude.json would defeat this.
+#
+# Writing through such a symlink is intentional: it lands the seed in the
+# project tree, where it persists across restarts.
+#
+# No single quotes inside the JS itself, so it can be wrapped in a
+# single-quoted `node -e '...'` shell argument without escaping.
+_CLAUDE_ONBOARDING_SEED_SCRIPT = (
+    'const fs = require("fs");\n'
+    'const path = (process.env.HOME || "/home/fleet") + "/.claude.json";\n'
+    "let data = {};\n"
+    'try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch (e) {}\n'
+    "data.hasCompletedOnboarding = true;\n"
+    'if (data.theme === undefined) { data.theme = "dark"; }\n'
+    "data.projects = data.projects || {};\n"
+    'const proj = data.projects["/var/www/html"] || {};\n'
+    "proj.hasTrustDialogAccepted = true;\n"
+    'data.projects["/var/www/html"] = proj;\n'
+    "fs.writeFileSync(path, JSON.stringify(data, null, 2));\n"
+)
+
+_CLAUDE_ONBOARDING_HOOK_EXEC = LiteralScalarString(
+    "node -e '\n" + _CLAUDE_ONBOARDING_SEED_SCRIPT + "'\n"
+)
 
 
 def write_fleet_config(
@@ -64,6 +111,10 @@ def write_fleet_config(
     data["web_environment"] = web_environment
     if additional_fqdns:
         data["additional_fqdns"] = list(additional_fqdns)
+    # Unconditional — write_web_build() below bakes Claude Code into every
+    # instance's web image regardless of claude_token, so every instance
+    # needs the onboarding wizard seeded past, not just ones with a token.
+    data["hooks"] = {"post-start": [{"exec": _CLAUDE_ONBOARDING_HOOK_EXEC}]}
 
     with open(config_path, "w", encoding="utf-8") as fh:
         _yaml.dump(data, fh)

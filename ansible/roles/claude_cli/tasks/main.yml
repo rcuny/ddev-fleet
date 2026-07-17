@@ -20,3 +20,64 @@
   ansible.builtin.command:
     cmd: npm install -g @anthropic-ai/claude-code
   when: _claude_installed.rc != 0
+
+# --- Seed onboarding state in ~/.claude.json (design spec: task-04-improvements-2,
+# 2026-07-17 "login screen" fix) ---------------------------------------------
+#
+# Root cause (confirmed by live reproduction on ddev.personal.example):
+# CLAUDE_CODE_OAUTH_TOKEN authenticates `claude -p` fine (it skips onboarding),
+# but the interactive TUI additionally gates on ~/.claude.json's
+# hasCompletedOnboarding/theme/projects[<cwd>].hasTrustDialogAccepted keys —
+# hence the "login screen" that looked like an auth failure but wasn't.
+#
+# On the live host ~/.claude.json ALREADY EXISTS with real runtime keys
+# (userID, machineID, firstStartTime, cachedGrowthBookFeatures,
+# seenNotifications, migrationVersion, ...) written by Claude Code itself.
+# This MUST be a merge, never an overwrite/template — clobbering it resets a
+# live identity and any interactive trust decisions made since. Ansible has
+# no native JSON-merge module, hence slurp + from_json + combine(recursive)
+# + copy(content: ... | to_nice_json), the standard idiom for this.
+#
+# Two trust paths are seeded, per the design spec: {{ fleet_srv_dir }} itself
+# (an interactive `claude` run from `fleet shell`, whose cwd is
+# {{ fleet_srv_dir }}) and {{ fleet_srv_dir }}/instances (parent of every
+# deployed instance's git worktree). NOTE: Claude Code's trust dialog keys on
+# the exact cwd, so trusting the instances/ parent does NOT automatically
+# cascade into each instances/<id>/ subdirectory it contains — this seeds
+# only the two paths the design spec names, not a guarantee that every
+# instance directory is pre-trusted.
+- name: Check whether ~/.claude.json already exists
+  ansible.builtin.stat:
+    path: "{{ fleet_home_dir }}/.claude.json"
+  register: _claude_json_file
+
+- name: Read the current ~/.claude.json, if any
+  ansible.builtin.slurp:
+    src: "{{ fleet_home_dir }}/.claude.json"
+  register: _claude_json_raw
+  when: _claude_json_file.stat.exists
+
+- name: Compute the current onboarding state (empty dict if the file is absent)
+  ansible.builtin.set_fact:
+    _claude_json_current: "{{ (_claude_json_raw.content | b64decode | from_json) if _claude_json_file.stat.exists else {} }}"
+
+- name: Merge in the onboarding-complete keys (preserves existing runtime keys)
+  ansible.builtin.set_fact:
+    _claude_json_merged: >-
+      {{ _claude_json_current | combine({
+           'hasCompletedOnboarding': true,
+           'theme': 'dark',
+           'projects': {
+             fleet_srv_dir: {'hasTrustDialogAccepted': true},
+             fleet_srv_dir + '/instances': {'hasTrustDialogAccepted': true}
+           }
+         }, recursive=True) }}
+
+- name: Write the merged ~/.claude.json (no-op once the keys are already correct)
+  ansible.builtin.copy:
+    dest: "{{ fleet_home_dir }}/.claude.json"
+    content: "{{ _claude_json_merged | to_nice_json }}\n"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0600"
+  when: _claude_json_merged != _claude_json_current

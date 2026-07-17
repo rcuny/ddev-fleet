@@ -75,3 +75,38 @@
   loop_control:
     label: "{{ item.item }}"
   when: item.stat.exists
+
+# --- fleet-only: export CLAUDE_CODE_OAUTH_TOKEN for interactive `claude` ----
+#
+# Must land in ~/.bashrc, NOT /etc/profile.d: /usr/local/bin/fleet wraps the
+# CLI in `sudo -u fleet "$FLEET_BIN" "$@"` — a NON-login shell, which sources
+# ~/.bashrc only. profile.d fires for login shells and would never run here.
+#
+# fleet only (not looped over shell_profile_home_dirs): .secrets is 0600
+# fleet:fleet, so sourcing it as root/debian would be a no-op at best.
+#
+# The one-liner form of this export exists unmarked on hosts provisioned
+# before 2026-07-17; the lineinfile below adopts it into the managed block.
+# The block is deliberately multi-line so that regexp cannot match what
+# blockinfile writes — otherwise the two tasks strip and re-add each other's
+# work on every run (verified: changed=2 forever).
+- name: Adopt any pre-existing unmanaged .secrets export line
+  ansible.builtin.lineinfile:
+    path: "{{ fleet_home_dir }}/.bashrc"
+    regexp: '^set -a; \. {{ fleet_srv_dir }}/\.secrets 2>/dev/null; set \+a'
+    state: absent
+
+- name: Export CLAUDE_CODE_OAUTH_TOKEN for interactive fleet shells
+  ansible.builtin.blockinfile:
+    path: "{{ fleet_home_dir }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet secrets env"
+    insertafter: EOF
+    create: true
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0644"
+    block: |
+      # export CLAUDE_CODE_OAUTH_TOKEN for interactive claude
+      set -a
+      . {{ fleet_srv_dir }}/.secrets 2>/dev/null
+      set +a
