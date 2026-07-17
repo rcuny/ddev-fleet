@@ -389,10 +389,7 @@ def test_init_skips_when_registry_already_exists(fleet_home, capsys):
     assert "already exists — skipping" in capsys.readouterr().err
 
 
-def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
-    fleet_home, monkeypatch
-):
-    _write_minimal_registry(fleet_home)
+def _write_two_demo_instances_with_old_token(fleet_home):
     for name in ("demo--develop", "demo--piano"):
         inst_dir = fleet_home / "instances" / name
         (inst_dir / ".fleet").mkdir(parents=True)
@@ -415,8 +412,8 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
             encoding="utf-8",
         )
 
-    calls = []
 
+def _fake_runner_with_one_running_one_stopped(calls):
     def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
         calls.append(list(cmd))
         if cmd == ["ddev", "list", "--json-output"]:
@@ -429,7 +426,21 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
             )
         return RunResult(returncode=0, lines=[])
 
-    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+    return fake_runner
+
+
+def test_refresh_claude_token_default_does_not_restart_and_updates_config(
+    fleet_home, monkeypatch, capsys
+):
+    """Default behaviour (no --restart): .secrets and every instance's
+    config.fleet.yaml are updated unconditionally, but no `ddev restart` is
+    issued — restarting 10+ live instances just to rotate a token is slow,
+    so that's left to the user."""
+    _write_minimal_registry(fleet_home)
+    _write_two_demo_instances_with_old_token(fleet_home)
+
+    calls = []
+    monkeypatch.setattr(cli, "run_streamed", _fake_runner_with_one_running_one_stopped(calls))
     monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
     monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
 
@@ -437,7 +448,7 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
 
     assert exit_code == 0
     restart_calls = [c for c in calls if c == ["ddev", "restart"]]
-    assert len(restart_calls) == 1
+    assert restart_calls == []
 
     for name in ("demo--develop", "demo--piano"):
         config = (fleet_home / "instances" / name / ".ddev" / "config.fleet.yaml").read_text(
@@ -454,6 +465,54 @@ def test_refresh_claude_token_rewrites_config_and_restarts_running_instance(
 
     secrets = (fleet_home / ".secrets").read_text(encoding="utf-8")
     assert "sk-ant-oat01-newtoken" in secrets
+
+
+def test_refresh_claude_token_default_prints_needs_restart_hint_for_running_only(
+    fleet_home, monkeypatch, capsys
+):
+    """The 'needs restart' hint must name the running instance (demo--develop)
+    with the exact command to restart it, and must NOT name the stopped one
+    (demo--piano) — it's not carrying a stale in-memory token."""
+    _write_minimal_registry(fleet_home)
+    _write_two_demo_instances_with_old_token(fleet_home)
+
+    calls = []
+    monkeypatch.setattr(cli, "run_streamed", _fake_runner_with_one_running_one_stopped(calls))
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
+    monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "demo--develop" in out
+    develop_dir = fleet_home / "instances" / "demo--develop"
+    assert f"cd {develop_dir} && ddev restart" in out
+    piano_dir = fleet_home / "instances" / "demo--piano"
+    assert f"cd {piano_dir} && ddev restart" not in out
+
+
+def test_refresh_claude_token_restart_flag_restarts_only_running_instances(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    _write_two_demo_instances_with_old_token(fleet_home)
+
+    calls = []
+    monkeypatch.setattr(cli, "run_streamed", _fake_runner_with_one_running_one_stopped(calls))
+    monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
+    monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token", "--restart"])
+
+    assert exit_code == 0
+    restart_calls = [c for c in calls if c == ["ddev", "restart"]]
+    assert len(restart_calls) == 1
+
+    for name in ("demo--develop", "demo--piano"):
+        config = (fleet_home / "instances" / name / ".ddev" / "config.fleet.yaml").read_text(
+            encoding="utf-8"
+        )
+        assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-newtoken" in config
+        assert "CLAUDE_CODE_OAUTH_TOKEN=old-token" not in config
 
 
 def test_refresh_claude_token_skips_dirs_without_fleet_config(fleet_home, monkeypatch, capsys):
@@ -525,7 +584,10 @@ def test_refresh_claude_token_updates_instance_missing_instance_yml_marker(fleet
     monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
     monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
 
-    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+    # --restart: this test's focus is instance discovery (config.fleet.yaml
+    # as the gate, not instance.yml), which only exercises the restart path
+    # when --restart is passed.
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token", "--restart"])
 
     assert exit_code == 0
 
@@ -570,7 +632,8 @@ def test_refresh_claude_token_nonzero_exit_on_restart_failure(fleet_home, monkey
     monkeypatch.setattr(cli, "run_interactive", lambda cmd, **kw: 0)
     monkeypatch.setattr(cli, "input", lambda prompt: "sk-ant-oat01-newtoken", raising=False)
 
-    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token"])
+    # A restart failure can only occur when a restart is actually attempted.
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-claude-token", "--restart"])
 
     assert exit_code == 1
     assert "demo--develop" in capsys.readouterr().err
@@ -638,44 +701,15 @@ def test_set_claude_token_rejects_invalid_token(fleet_home, capsys):
     assert not (fleet_home / ".secrets").exists()
 
 
-def test_set_claude_token_accepts_valid_token_writes_secret_and_propagates(fleet_home, monkeypatch):
-    for name in ("demo--develop", "demo--piano"):
-        inst_dir = fleet_home / "instances" / name
-        (inst_dir / ".fleet").mkdir(parents=True)
-        (inst_dir / ".fleet" / "instance.yml").write_text(
-            f"project: demo\ninstance: {name.split('--')[1]}\nbranch: main\n"
-            "created-at: '2026-07-01T00:00:00Z'\nlast-deployed-at: '2026-07-01T00:00:00Z'\n",
-            encoding="utf-8",
-        )
-        ddev_dir = inst_dir / ".ddev"
-        ddev_dir.mkdir(parents=True)
-        (ddev_dir / "config.fleet.yaml").write_text(
-            f"name: {name}\n"
-            "project_tld: fleet.example.test\n"
-            "web_environment:\n"
-            "  - CLAUDE_CODE_OAUTH_TOKEN=old-token\n"
-            "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
-            "  - GIT_AUTHOR_EMAIL=bot@x\n"
-            "  - FLEET_TYPESENSE_HOST=x\n"
-            "  - FLEET_TYPESENSE_SEARCH_KEY=k\n",
-            encoding="utf-8",
-        )
+def test_set_claude_token_default_does_not_restart_and_updates_config(fleet_home, monkeypatch):
+    """Default behaviour (no --restart): .secrets and every instance's
+    config.fleet.yaml are updated unconditionally, but no `ddev restart` is
+    issued — restarting 10+ live instances just to set a token is slow, so
+    that's left to the user."""
+    _write_two_demo_instances_with_old_token(fleet_home)
 
     calls = []
-
-    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
-        calls.append(list(cmd))
-        if cmd == ["ddev", "list", "--json-output"]:
-            return RunResult(
-                returncode=0,
-                lines=[
-                    '{"raw": [{"name": "demo--develop", "status": "running"}, '
-                    '{"name": "demo--piano", "status": "stopped"}]}'
-                ],
-            )
-        return RunResult(returncode=0, lines=[])
-
-    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+    monkeypatch.setattr(cli, "run_streamed", _fake_runner_with_one_running_one_stopped(calls))
 
     exit_code = cli.main(
         ["--fleet-home", str(fleet_home), "set-claude-token", "sk-ant-oat01-newtoken"]
@@ -687,7 +721,7 @@ def test_set_claude_token_accepts_valid_token_writes_secret_and_propagates(fleet
     assert "sk-ant-oat01-newtoken" in secrets
 
     restart_calls = [c for c in calls if c == ["ddev", "restart"]]
-    assert len(restart_calls) == 1
+    assert restart_calls == []
 
     for name in ("demo--develop", "demo--piano"):
         content = (fleet_home / "instances" / name / ".ddev" / "config.fleet.yaml").read_text(
@@ -699,6 +733,56 @@ def test_set_claude_token_accepts_valid_token_writes_secret_and_propagates(fleet
         assert "GIT_AUTHOR_EMAIL=bot@x" in content
         assert "FLEET_TYPESENSE_HOST=x" in content
         assert "FLEET_TYPESENSE_SEARCH_KEY=k" in content
+
+
+def test_set_claude_token_default_prints_needs_restart_hint_for_running_only(
+    fleet_home, monkeypatch, capsys
+):
+    _write_two_demo_instances_with_old_token(fleet_home)
+
+    calls = []
+    monkeypatch.setattr(cli, "run_streamed", _fake_runner_with_one_running_one_stopped(calls))
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "set-claude-token", "sk-ant-oat01-newtoken"]
+    )
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "demo--develop" in out
+    develop_dir = fleet_home / "instances" / "demo--develop"
+    assert f"cd {develop_dir} && ddev restart" in out
+    piano_dir = fleet_home / "instances" / "demo--piano"
+    assert f"cd {piano_dir} && ddev restart" not in out
+
+
+def test_set_claude_token_restart_flag_restarts_only_running_instances(fleet_home, monkeypatch):
+    _write_two_demo_instances_with_old_token(fleet_home)
+
+    calls = []
+    monkeypatch.setattr(cli, "run_streamed", _fake_runner_with_one_running_one_stopped(calls))
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "set-claude-token",
+            "sk-ant-oat01-newtoken",
+            "--restart",
+        ]
+    )
+
+    assert exit_code == 0
+
+    restart_calls = [c for c in calls if c == ["ddev", "restart"]]
+    assert len(restart_calls) == 1
+
+    for name in ("demo--develop", "demo--piano"):
+        content = (fleet_home / "instances" / name / ".ddev" / "config.fleet.yaml").read_text(
+            encoding="utf-8"
+        )
+        assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-newtoken" in content
+        assert "CLAUDE_CODE_OAUTH_TOKEN=old-token" not in content
 
 
 def test_refresh_config_pulls_when_git_checkout(fleet_home, monkeypatch, capsys):
@@ -927,3 +1011,100 @@ def test_rotate_admin_password_propagates_caddy_auth_error(fleet_home, monkeypat
 
     assert exit_code == 1
     assert "reload failed" in capsys.readouterr().err
+
+
+# --- refresh-instance-config dispatch ---
+
+
+def test_refresh_instance_config_dispatch_default_does_not_restart(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    recorder = []
+
+    def fake_refresh(paths, registry, instance_id, *, restart=False, runner=None):
+        recorder.append((instance_id, restart))
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", fake_refresh)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "refresh-instance-config", "demo--develop"]
+    )
+
+    assert exit_code == 0
+    assert recorder == [("demo--develop", False)]
+
+
+def test_refresh_instance_config_dispatch_restart_flag(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    recorder = []
+
+    def fake_refresh(paths, registry, instance_id, *, restart=False, runner=None):
+        recorder.append((instance_id, restart))
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", fake_refresh)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "refresh-instance-config",
+            "demo--develop",
+            "--restart",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorder == [("demo--develop", True)]
+
+
+def test_refresh_instance_config_prints_restart_hint_when_not_restarting(
+    fleet_home, monkeypatch, capsys
+):
+    _write_minimal_registry(fleet_home)
+    inst_dir = fleet_home / "instances" / "demo--develop"
+    inst_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", lambda *a, **kw: None)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "refresh-instance-config", "demo--develop"]
+    )
+
+    assert exit_code == 0
+    assert f"cd {inst_dir} && ddev restart" in capsys.readouterr().out
+
+
+def test_refresh_instance_config_no_restart_hint_when_restart_flag_passed(
+    fleet_home, monkeypatch, capsys
+):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", lambda *a, **kw: None)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "refresh-instance-config",
+            "demo--develop",
+            "--restart",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "ddev restart" not in capsys.readouterr().out
+
+
+def test_refresh_instance_config_unknown_instance_exits_1(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "refresh-instance-config", "demo--nonexistent"]
+    )
+
+    assert exit_code == 1
+    assert "demo--nonexistent" in capsys.readouterr().err

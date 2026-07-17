@@ -444,6 +444,84 @@ def destroy(
         lock_path.unlink()
 
 
+def refresh_instance_config(
+    paths: FleetPaths,
+    registry: Registry,
+    instance_id: str,
+    *,
+    restart: bool = False,
+    runner=run_streamed,
+) -> None:
+    """Regenerate an instance's fleet-owned DDEV config
+    (`.ddev/config.fleet.yaml`, incl. the Claude onboarding `post-start`
+    hook, and `.ddev/web-build/Dockerfile.fleet-claude`) WITHOUT a full
+    deploy — no clone/git-update/`ddev start`. This is the primitive that
+    lets an already-deployed instance pick up config changes (e.g. a new
+    hook) without redeploying.
+
+    `write_fleet_config()` does a FULL rewrite of config.fleet.yaml, so
+    every arg it takes is rebuilt here exactly as `deploy()` builds it —
+    dropping one would silently drop that env var / hook from every
+    refreshed instance.
+
+    Per the "cheap authoritative write always; expensive propagation
+    opt-in" rule (see feedback-no-forced-bulk-operations memory): the
+    config rewrite always happens; restarting the instance's containers so
+    the new config takes effect is opt-in via `restart=True`."""
+    instance_dir = paths.instances / instance_id
+    if not instance_dir.exists():
+        raise FleetError(f"instance directory not found for {instance_id!r}")
+
+    with instance_lock(paths.locks, instance_id):
+        info_path = instance_dir / ".fleet" / "instance.yml"
+        if info_path.exists():
+            with open(info_path, "r", encoding="utf-8") as fh:
+                data = _yaml.load(fh) or {}
+            project = str(data.get("project") or instance_id.split("--", 1)[0])
+        else:
+            project = instance_id.split("--", 1)[0]
+
+        secrets = read_secrets(paths.secrets)
+        claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
+        if not claude_token:
+            raise DeployError(
+                f"CLAUDE_CODE_OAUTH_TOKEN not found in {paths.secrets}; "
+                "run 'fleet init' or set it before deploying"
+            )
+        fqdns = [
+            f"{h}.{instance_id}.{registry.domain}" for h in registry.additional_hostnames(project)
+        ]
+
+        typesense_enabled = registry.typesense_enabled(project)
+        typesense_admin_key = None
+        typesense_search_key = None
+        if typesense_enabled:
+            typesense_admin_key, typesense_search_key = typesense.ensure_project_keys(
+                paths.project_secrets / f"{project}.env"
+            )
+
+        write_fleet_config(
+            instance_dir,
+            instance_id,
+            registry.domain,
+            claude_token,
+            additional_fqdns=fqdns,
+            git_bot=registry.git_bot(),
+            typesense=typesense_enabled,
+            typesense_port=TYPESENSE_PUBLIC_PORT,
+            typesense_admin_key=typesense_admin_key,
+            typesense_search_key=typesense_search_key,
+        )
+        write_web_build(instance_dir)
+
+        if restart:
+            result = ddev.restart(instance_dir, runner=runner)
+            if result.returncode != 0:
+                raise FleetError(
+                    f"ddev restart failed for {instance_id!r} with exit code {result.returncode}"
+                )
+
+
 def start(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed) -> None:
     instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
