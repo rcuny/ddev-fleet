@@ -1,6 +1,7 @@
 """Orchestrates deploy/destroy/start/stop/list using the other core modules
 (spec §5, §6, §11)."""
 
+import logging
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -9,7 +10,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import caddyauth, ddev, gitops, typesense
+from fleet.core import caddyauth, ddev, gitops, tmux, typesense
 from fleet.core.errors import CaddyAuthError, DeployError, FleetError, TypesenseError
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
@@ -23,6 +24,8 @@ from fleet.core.registry import Registry, ResolvedInstance
 from fleet.core.runner import run_streamed
 from fleet.core.secrets import read_secrets, secret_tokens
 from fleet.core.tokens import build_context, env_vars
+
+logger = logging.getLogger(__name__)
 
 _yaml = YAML()
 _yaml.default_flow_style = False
@@ -353,6 +356,12 @@ def deploy(
         _write_instance_yaml(instance_dir, project, resolved.label, resolved.branch)
         _append_log(deploy_log, "deploy complete")
 
+    try:
+        if tmux.session_exists(runner=runner):
+            tmux.ensure_instance_window(inst_id, instance_dir, runner=runner)
+    except Exception as exc:  # noqa: BLE001 - tmux tab is best-effort
+        _append_log(deploy_log, f"WARNING: tmux tab update failed: {exc}")
+
     return f"https://{inst_id}.{registry.domain}"
 
 
@@ -394,6 +403,11 @@ def _destroy_locked(
     what keeps a destroyed instance from leaving a stale `@auth-<id>`
     matcher behind, which would otherwise either linger unused or collide
     with a later re-deploy of the same instance id."""
+    try:
+        tmux.kill_instance_window(instance_id, runner=runner)
+    except Exception as exc:  # noqa: BLE001 - tmux teardown is best-effort
+        logger.warning("tmux kill-window failed for %s: %s", instance_id, exc)
+
     snippet_dir = (
         auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
     )
