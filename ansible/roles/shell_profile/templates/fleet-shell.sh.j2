@@ -1,4 +1,10 @@
-{{ ansible_managed | default('Ansible managed') }}
+# {{ ansible_managed | default('Ansible managed') }}
+#
+# NOTE the leading '#'. This file is SOURCED, not executed, so an uncommented
+# ansible_managed line renders as a bare `Ansible managed` command and bash
+# reports "Ansible: command not found" on every login — twice, since the file
+# is sourced once via /etc/profile.d and again from the ~/.bashrc hook.
+#
 # Interactive shell prompt/aliases/exports shared by root and the fleet
 # service account. One file, colour-aware by uid, so both accounts stay in
 # sync automatically instead of drifting in two per-user copies.
@@ -17,18 +23,17 @@ case $- in
       *) return ;;
 esac
 
-if [ "$(id -u)" -eq 0 ]; then
-    _fleet_prompt_user_color='31'   # red — root
-else
-    _fleet_prompt_user_color='35'   # magenta — everyone else (fleet, …)
-fi
-
-# Bold cyan host, " - ", bold user-colour "<user> $", ": ", bold blue cwd, " > ".
+# Red username for EVERY account on this host (root, fleet, debian) — the point
+# is to make "I am on the fleet server" unmistakable at a glance, not to tell the
+# accounts apart (\u already spells out which one you are). Previously this
+# branched on uid to give root its own colour; that distinction was dropped
+# deliberately, so don't reintroduce a per-uid branch without asking.
+#
+# Bold cyan host, " - ", bold red "<user> $", ": ", bold blue cwd, " > ".
 # \[ \] bracket every colour escape so bash excludes it from the prompt's
 # printable-width count — without this, line-wrapping/history-search redraw
 # breaks as soon as the prompt scrolls or gets edited in place.
-PS1='\[\e[1;36m\]\h\[\e[0m\] - \[\e[1;'"${_fleet_prompt_user_color}"'m\]\u $\[\e[0m\]: \[\e[1;34m\]\w\[\e[0m\] > '
-unset _fleet_prompt_user_color
+PS1='\[\e[1;36m\]\h\[\e[0m\] - \[\e[1;31m\]\u $\[\e[0m\]: \[\e[1;34m\]\w\[\e[0m\] > '
 
 # CLICOLOR is the BSD/macOS `ls` colour toggle and is a no-op on GNU
 # coreutils (Debian's `ls`); kept for parity with the source config, but the

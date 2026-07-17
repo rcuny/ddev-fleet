@@ -83,18 +83,16 @@
     content: "{{ fleet_admin_user }} {{ caddy_admin_default_hash.stdout }}\n"
   when: not caddy_admin_auth_snippet_stat.stat.exists
 
-- name: Install a narrow sudoers rule so fleet can reload Caddy without a password
-  # Scoped to exactly one command — nothing broader. This is what lets
-  # fleet.core.caddyauth.reload_caddy() apply a rotated password without
-  # ever running Ansible or needing interactive sudo.
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/fleet-caddy-reload
-    owner: root
-    group: root
-    mode: "0440"
-    content: |
-      {{ fleet_user }} ALL=(root) NOPASSWD: /usr/bin/systemctl reload caddy
-    validate: "visudo -cf %s"
+- name: Remove the now-unnecessary fleet-caddy-reload sudoers grant
+  # Superseded: fleet.core.caddyauth.reload_caddy() now reloads via
+  # `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019,
+  # unauthenticated by default), which needs no privilege escalation at
+  # all — so this sudoers rule is no longer required. Actively remove it
+  # (not just stop installing it) so already-provisioned hosts have the
+  # stale privilege grant cleaned up on the next site.yml run.
+  ansible.builtin.file:
+    path: /etc/sudoers.d/fleet-caddy-reload
+    state: absent
 
 - name: Deploy the Caddyfile (spec §9.3)
   ansible.builtin.template:

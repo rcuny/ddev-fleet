@@ -80,16 +80,21 @@ def test_validate_caddyfile_raises_caddy_auth_error_on_failure(tmp_path):
         caddyauth.validate_caddyfile(caddyfile_path=tmp_path / "Caddyfile", runner=fake)
 
 
-def test_reload_caddy_uses_sudo_systemctl_reload():
+def test_reload_caddy_uses_caddy_reload_with_no_sudo(tmp_path):
     fake = FakeRunner(default=RunResult(returncode=0, lines=[]))
-    caddyauth.reload_caddy(runner=fake)
-    assert fake.calls[0]["cmd"] == ["sudo", "systemctl", "reload", "caddy"]
+    caddyfile_path = tmp_path / "Caddyfile"
+    caddyauth.reload_caddy(caddyfile_path=caddyfile_path, runner=fake)
+    assert fake.calls[0]["cmd"] == ["caddy", "reload", "--config", str(caddyfile_path)]
 
 
-def test_reload_caddy_raises_caddy_auth_error_on_failure():
-    fake = FakeRunner(default=RunResult(returncode=1, lines=["permission denied"]))
+def test_reload_caddy_raises_caddy_auth_error_on_failure(tmp_path):
+    fake = FakeRunner(
+        default=RunResult(
+            returncode=1, lines=["dial tcp 127.0.0.1:2019: connect: connection refused"]
+        )
+    )
     with pytest.raises(CaddyAuthError, match="reload manually"):
-        caddyauth.reload_caddy(runner=fake)
+        caddyauth.reload_caddy(caddyfile_path=tmp_path / "Caddyfile", runner=fake)
 
 
 def test_rotate_runs_full_pipeline_in_order(tmp_path):
@@ -102,7 +107,7 @@ def test_rotate_runs_full_pipeline_in_order(tmp_path):
         f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
             returncode=0, lines=[]
         ),
-        "sudo systemctl reload caddy": RunResult(returncode=0, lines=[]),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
     }
     fake = FakeRunner(scripted=scripted)
 
@@ -118,7 +123,7 @@ def test_rotate_runs_full_pipeline_in_order(tmp_path):
     assert [c["cmd"][0:2] for c in fake.calls] == [
         ["caddy", "hash-password"],
         ["caddy", "validate"],
-        ["sudo", "systemctl"],
+        ["caddy", "reload"],
     ]
 
 
@@ -147,7 +152,7 @@ def test_rotate_does_not_reload_when_validate_fails(tmp_path):
     # the snippet WAS written (that's expected — see module docstring), but
     # reload was never attempted
     assert snippet_path.exists()
-    reload_calls = [c for c in fake.calls if c["cmd"][:2] == ["sudo", "systemctl"]]
+    reload_calls = [c for c in fake.calls if c["cmd"][:2] == ["caddy", "reload"]]
     assert reload_calls == []
 
 
@@ -237,7 +242,7 @@ def test_enable_instance_auth_runs_full_pipeline_in_order(tmp_path):
         f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
             returncode=0, lines=[]
         ),
-        "sudo systemctl reload caddy": RunResult(returncode=0, lines=[]),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
     }
     fake = FakeRunner(scripted=scripted)
 
@@ -255,7 +260,7 @@ def test_enable_instance_auth_runs_full_pipeline_in_order(tmp_path):
     assert [c["cmd"][0:2] for c in fake.calls] == [
         ["caddy", "hash-password"],
         ["caddy", "validate"],
-        ["sudo", "systemctl"],
+        ["caddy", "reload"],
     ]
 
 
@@ -285,7 +290,7 @@ def test_enable_instance_auth_raises_and_does_not_reload_on_validate_failure(tmp
     # snippet was written (matches rotate()'s documented never-silently-
     # public-but-undetected contract) but reload was never attempted
     assert (snippet_dir / "oak--slacktest.conf").exists()
-    reload_calls = [c for c in fake.calls if c["cmd"][:2] == ["sudo", "systemctl"]]
+    reload_calls = [c for c in fake.calls if c["cmd"][:2] == ["caddy", "reload"]]
     assert reload_calls == []
 
 
@@ -303,7 +308,7 @@ def test_disable_instance_auth_removes_snippet_and_reloads(tmp_path):
         f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
             returncode=0, lines=[]
         ),
-        "sudo systemctl reload caddy": RunResult(returncode=0, lines=[]),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
     }
     fake = FakeRunner(scripted=scripted)
 
@@ -312,7 +317,7 @@ def test_disable_instance_auth_removes_snippet_and_reloads(tmp_path):
     )
 
     assert not (snippet_dir / "oak--slacktest.conf").exists()
-    assert [c["cmd"][0:2] for c in fake.calls] == [["caddy", "validate"], ["sudo", "systemctl"]]
+    assert [c["cmd"][0:2] for c in fake.calls] == [["caddy", "validate"], ["caddy", "reload"]]
 
 
 def test_disable_instance_auth_is_a_noop_when_nothing_to_remove(tmp_path):
