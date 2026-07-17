@@ -1011,3 +1011,100 @@ def test_rotate_admin_password_propagates_caddy_auth_error(fleet_home, monkeypat
 
     assert exit_code == 1
     assert "reload failed" in capsys.readouterr().err
+
+
+# --- refresh-instance-config dispatch ---
+
+
+def test_refresh_instance_config_dispatch_default_does_not_restart(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    recorder = []
+
+    def fake_refresh(paths, registry, instance_id, *, restart=False, runner=None):
+        recorder.append((instance_id, restart))
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", fake_refresh)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "refresh-instance-config", "demo--develop"]
+    )
+
+    assert exit_code == 0
+    assert recorder == [("demo--develop", False)]
+
+
+def test_refresh_instance_config_dispatch_restart_flag(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    recorder = []
+
+    def fake_refresh(paths, registry, instance_id, *, restart=False, runner=None):
+        recorder.append((instance_id, restart))
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", fake_refresh)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "refresh-instance-config",
+            "demo--develop",
+            "--restart",
+        ]
+    )
+
+    assert exit_code == 0
+    assert recorder == [("demo--develop", True)]
+
+
+def test_refresh_instance_config_prints_restart_hint_when_not_restarting(
+    fleet_home, monkeypatch, capsys
+):
+    _write_minimal_registry(fleet_home)
+    inst_dir = fleet_home / "instances" / "demo--develop"
+    inst_dir.mkdir(parents=True)
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", lambda *a, **kw: None)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "refresh-instance-config", "demo--develop"]
+    )
+
+    assert exit_code == 0
+    assert f"cd {inst_dir} && ddev restart" in capsys.readouterr().out
+
+
+def test_refresh_instance_config_no_restart_hint_when_restart_flag_passed(
+    fleet_home, monkeypatch, capsys
+):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    monkeypatch.setattr(cli.instances_mod, "refresh_instance_config", lambda *a, **kw: None)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "refresh-instance-config",
+            "demo--develop",
+            "--restart",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "ddev restart" not in capsys.readouterr().out
+
+
+def test_refresh_instance_config_unknown_instance_exits_1(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "refresh-instance-config", "demo--nonexistent"]
+    )
+
+    assert exit_code == 1
+    assert "demo--nonexistent" in capsys.readouterr().err

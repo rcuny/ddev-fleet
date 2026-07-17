@@ -164,6 +164,17 @@ def _build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("refresh-config")
 
+    refresh_instance_config_parser = subparsers.add_parser("refresh-instance-config")
+    refresh_instance_config_parser.add_argument("instance_id")
+    refresh_instance_config_parser.add_argument(
+        "--restart",
+        action="store_true",
+        help=(
+            "restart this instance immediately so it picks up the new config "
+            "(default: leave the restart to the operator)"
+        ),
+    )
+
     shell_parser = subparsers.add_parser("shell")
     shell_parser.add_argument("instance_id", nargs="?", default=None)
     shell_parser.add_argument("-l", "--list", action="store_true", dest="list_instances")
@@ -211,6 +222,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_rotate_admin_password(fleet_home, args, runner=run_streamed)
         elif args.command == "refresh-config":
             _cmd_refresh_config(fleet_home, runner=run_streamed)
+        elif args.command == "refresh-instance-config":
+            _cmd_refresh_instance_config(fleet_home, args)
         elif args.command == "shell":
             _cmd_shell(fleet_home, args)
         elif args.command == "ddev":
@@ -483,6 +496,25 @@ def _cmd_refresh_config(fleet_home: Path, *, runner=run_streamed) -> None:
         print(f"refreshed {cfg} (git pull)")
     else:
         print(f"{cfg} is not a git checkout — edit in place; nothing to pull")
+
+
+def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> None:
+    """Regenerate one instance's `.ddev/config.fleet.yaml` (incl. the Claude
+    onboarding hook) without a full deploy. Always does the cheap config
+    rewrite; a `ddev restart` to apply it is opt-in via `--restart` (same
+    "cheap authoritative write always; expensive propagation opt-in" shape
+    as `set-claude-token`/`refresh-claude-token` — see
+    `_propagate_claude_token`)."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = Registry.load(paths.registry)
+    instances_mod.refresh_instance_config(paths, registry, args.instance_id, restart=args.restart)
+
+    if args.restart:
+        print(f"{args.instance_id}: config refreshed and restarted")
+    else:
+        instance_dir = paths.instances / args.instance_id
+        print(f"{args.instance_id}: config refreshed (not restarted)")
+        print(f"  cd {instance_dir} && ddev restart")
 
 
 if __name__ == "__main__":
