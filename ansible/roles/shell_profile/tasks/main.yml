@@ -43,14 +43,27 @@
 # place.) Re-sourcing from the END of each user's ~/.bashrc is what actually
 # makes the prompt stick, for both login shells (~/.profile sources ~/.bashrc)
 # and non-login interactive ones. Do not "simplify" this away.
+# Only hook home dirs that actually exist. `debian` is the OVH/Kimsufi default
+# sudo account and is not created by this playbook, so it may legitimately be
+# absent on another host — and blockinfile's `create: true` would otherwise
+# happily write a .bashrc for a user that does not exist.
+- name: Check which target home directories exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _shell_profile_homes
+  loop: "{{ shell_profile_home_dirs }}"
+
 - name: Re-source the shell profile at the end of each user's ~/.bashrc
   ansible.builtin.blockinfile:
-    path: "{{ item }}/.bashrc"
+    path: "{{ item.item }}/.bashrc"
     marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet shell profile"
     insertafter: EOF
     create: true
-    owner: "{{ 'root' if item == '/root' else fleet_user }}"
-    group: "{{ 'root' if item == '/root' else fleet_user }}"
+    # Home-dir basename == username for every account here (/root is the one
+    # exception). Deriving it per-item, rather than assuming fleet_user, is what
+    # lets /home/debian be owned by debian instead of by fleet.
+    owner: "{{ 'root' if item.item == '/root' else (item.item | basename) }}"
+    group: "{{ 'root' if item.item == '/root' else (item.item | basename) }}"
     mode: "0644"
     block: |
       # Last word on PS1: Debian's default ~/.bashrc sets it above, so the
@@ -58,6 +71,7 @@
       if [ -f /etc/profile.d/10-fleet-shell.sh ]; then
           . /etc/profile.d/10-fleet-shell.sh
       fi
-  loop:
-    - /root
-    - "{{ fleet_home_dir }}"
+  loop: "{{ _shell_profile_homes.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists

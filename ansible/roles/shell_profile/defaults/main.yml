@@ -1,0 +1,14 @@
+---
+# Home dirs that get the fleet prompt/aliases hooked into their ~/.bashrc.
+#
+# /etc/profile.d/10-fleet-shell.sh alone is NOT enough: Debian's stock ~/.bashrc
+# runs later and overwrites PS1, so each account needs the re-source hook at the
+# end of its own ~/.bashrc (see tasks/main.yml).
+#
+# Basename must equal the username (/root excepted) — the tasks derive file
+# ownership from it. Non-existent dirs are skipped, so listing `debian` is safe
+# on hosts that lack that account.
+shell_profile_home_dirs:
+  - /root
+  - "{{ fleet_home_dir }}"
+  - /home/debian
