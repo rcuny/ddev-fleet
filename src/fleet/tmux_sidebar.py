@@ -17,6 +17,16 @@ from fleet.core.instances import FleetPaths
 STATUS_GLYPH = {"running": "●", "stopped": "○", "deployed": "•", "error": "!"}
 STATUS_STYLE = {"running": "green", "stopped": "grey50", "deployed": "cyan", "error": "red"}
 
+# Operator cheat-sheet shown at the bottom of every sidebar. "^b" is the tmux
+# prefix (Ctrl-b). `detach` returns you to your normal shell WITHOUT stopping
+# anything — reattach later with `fleet tmux`.
+KEY_HINTS = [
+    "^b w   switch tab",
+    "^b d   detach → shell",
+    "^b ←→  move pane",
+    "^b z   zoom pane (toggle)",
+]
+
 
 def _statuses() -> dict[str, str]:
     try:
@@ -50,6 +60,10 @@ def _render(console: Console, paths: FleetPaths, window: str, statuses: dict[str
     body.append("FLEET\n\n", style="bold")
     for text, style in build_rows(ids, statuses, window):
         body.append(text + "\n", style=("reverse bold" if style == "current" else style))
+    body.append("\nkeys · ^b = Ctrl-b\n", style="bold grey50")
+    for hint in KEY_HINTS:
+        body.append(hint + "\n", style="grey50")
+    body.append("\nreattach: fleet tmux\n", style="grey50")
     console.clear()
     console.print(body)
 

@@ -45,3 +45,10 @@ def test_build_rows_marks_current_row_style():
 def test_build_rows_status_glyphs():
     rows = tmux_sidebar.build_rows(["a--b"], {"a--b": "running"}, current="general")
     assert any(tmux_sidebar.STATUS_GLYPH["running"] in t for t, _ in rows)
+
+
+def test_key_hints_cover_switch_and_detach():
+    joined = " ".join(tmux_sidebar.KEY_HINTS).lower()
+    assert "switch tab" in joined
+    assert "detach" in joined
+    assert all("^b" in h for h in tmux_sidebar.KEY_HINTS)
