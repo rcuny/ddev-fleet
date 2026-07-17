@@ -57,6 +57,7 @@ registry load with an actionable message naming the bad key.
 | `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value: hashes it (`caddy hash-password`), atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same way, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull) so the registry and assets checkout track their remote; a no-op message if `config/` isn't a git checkout |
+| `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach |
 
 Projects and templates are declared by hand in `fleet.yml` — there is no
 `fleet project add` and no auto-registration of unknown projects on deploy.
