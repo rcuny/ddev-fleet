@@ -134,10 +134,28 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
-    subparsers.add_parser("refresh-claude-token")
+    refresh_claude_token_parser = subparsers.add_parser("refresh-claude-token")
+    refresh_claude_token_parser.add_argument(
+        "--restart",
+        action="store_true",
+        help=(
+            "restart every running instance immediately so it picks up the new "
+            "token (default: leave restarts to the operator — slow with many "
+            "instances)"
+        ),
+    )
 
     set_claude_token_parser = subparsers.add_parser("set-claude-token")
     set_claude_token_parser.add_argument("token")
+    set_claude_token_parser.add_argument(
+        "--restart",
+        action="store_true",
+        help=(
+            "restart every running instance immediately so it picks up the new "
+            "token (default: leave restarts to the operator — slow with many "
+            "instances)"
+        ),
+    )
 
     set_admin_password_parser = subparsers.add_parser("set-admin-password")
     set_admin_password_parser.add_argument("password")
@@ -328,7 +346,7 @@ def _cmd_refresh_claude_token(fleet_home: Path, args: argparse.Namespace) -> int
     if not token:
         raise FleetError("'claude setup-token' did not produce a token; refresh aborted")
     write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", token)
-    return _propagate_claude_token(fleet_home, token, runner=run_streamed)
+    return _propagate_claude_token(fleet_home, token, runner=run_streamed, restart=args.restart)
 
 
 def _cmd_set_claude_token(fleet_home: Path, args: argparse.Namespace) -> int:
@@ -338,15 +356,25 @@ def _cmd_set_claude_token(fleet_home: Path, args: argparse.Namespace) -> int:
             "'sk-ant-oat01-…'"
         )
     write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", args.token)
-    return _propagate_claude_token(fleet_home, args.token, runner=run_streamed)
+    return _propagate_claude_token(
+        fleet_home, args.token, runner=run_streamed, restart=args.restart
+    )
 
 
-def _propagate_claude_token(fleet_home: Path, token: str, *, runner) -> int:
-    """Push a freshly minted/set CLAUDE_CODE_OAUTH_TOKEN out to every
-    deployed instance's `.ddev/config.fleet.yaml` (non-destructively — see
-    `fleetconfig.set_web_env_var`) and restart any instance that's currently
-    running so it picks up the new value. Returns 1 if any instance failed,
-    else 0."""
+def _propagate_claude_token(fleet_home: Path, token: str, *, runner, restart: bool = False) -> int:
+    """Write a freshly minted/set CLAUDE_CODE_OAUTH_TOKEN into every deployed
+    instance's `.ddev/config.fleet.yaml` (non-destructively — see
+    `fleetconfig.set_web_env_var`). This config write always happens, so the
+    new token is in place whenever an instance next starts.
+
+    By default this does NOT restart any running instance — with 10+ live
+    instances, restarting all of them just to rotate a token is slow, so
+    that's left to the operator. Instead, every running instance still
+    carrying the old token in its live environment is reported, along with
+    the exact command to restart it. Pass `restart=True` to restore the old
+    restart-everything-immediately behaviour.
+
+    Returns 1 if any instance failed, else 0."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     instances_root = paths.instances
 
@@ -360,6 +388,7 @@ def _propagate_claude_token(fleet_home: Path, token: str, *, runner) -> int:
         running_ids = set()
 
     failed: list[str] = []
+    needs_restart: list[str] = []
     if instances_root.exists():
         for entry in sorted(instances_root.iterdir()):
             if not entry.is_dir():
@@ -369,7 +398,10 @@ def _propagate_claude_token(fleet_home: Path, token: str, *, runner) -> int:
                 if not updated:
                     print(f"{entry.name}: no config.fleet.yaml — skipping", file=sys.stderr)
                     continue
-                if entry.name in running_ids:
+                if entry.name not in running_ids:
+                    print(f"{entry.name}: updated")
+                    continue
+                if restart:
                     result = ddev.restart(entry, runner=runner)
                     if result.returncode != 0:
                         raise FleetError(
@@ -378,10 +410,20 @@ def _propagate_claude_token(fleet_home: Path, token: str, *, runner) -> int:
                         )
                     print(f"{entry.name}: updated and restarted")
                 else:
-                    print(f"{entry.name}: updated")
+                    needs_restart.append(entry.name)
+                    print(f"{entry.name}: updated (running — needs a restart to apply)")
             except FleetError as exc:
                 print(f"{entry.name}: {exc.message}", file=sys.stderr)
                 failed.append(entry.name)
+
+    if needs_restart:
+        print()
+        print(
+            f"{len(needs_restart)} running instance(s) still have the previous token "
+            "loaded — restart each to apply the new one:"
+        )
+        for name in needs_restart:
+            print(f"  cd {instances_root / name} && ddev restart")
 
     return 1 if failed else 0
 
