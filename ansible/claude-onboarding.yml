@@ -1,0 +1,33 @@
+---
+# Scoped playbook: the fleet user's shell profile + Claude CLI onboarding state.
+#
+# Use this instead of site.yml to apply Claude/shell changes to a live host.
+# site.yml's fleet_service role rewrites /opt/ddev-fleet's git remote to https,
+# which breaks the SSH-key `git pull` the whole rollout flow depends on — so it
+# must never be run against the live server. This playbook touches only the two
+# roles that own ~/.claude.json and fleet's interactive shell.
+#
+# It must live beside site.yml: group_vars/ resolves relative to the playbook's
+# directory, so a copy in /tmp silently runs with fleet_home_dir undefined.
+#
+#   cd /opt/ddev-fleet/ansible
+#   sudo ansible-playbook claude-onboarding.yml --check --diff   # preview
+#   sudo ansible-playbook claude-onboarding.yml
+#
+# pre_tasks mirror site.yml so /etc/ddev-fleet/local-vars.yml still overrides
+# the committed group_vars.
+- name: Configure fleet shell profile and Claude onboarding state
+  hosts: localhost
+  become: true
+  force_handlers: true
+  pre_tasks:
+    - name: Check for host-local variable overrides
+      ansible.builtin.stat:
+        path: /etc/ddev-fleet/local-vars.yml
+      register: _fleet_local_vars
+    - name: Load host-local variable overrides if present
+      ansible.builtin.include_vars: /etc/ddev-fleet/local-vars.yml
+      when: _fleet_local_vars.stat.exists
+  roles:
+    - shell_profile
+    - claude_cli
