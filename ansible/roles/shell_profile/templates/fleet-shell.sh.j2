@@ -26,7 +26,9 @@ esac
 if [ "$(id -u)" -eq 0 ]; then
     _fleet_prompt_user_color='31'   # red — root
 else
-    _fleet_prompt_user_color='35'   # magenta — everyone else (fleet, …)
+    _fleet_prompt_user_color='32'   # green — everyone else (fleet, …). Green so a
+                                    # fleet-server shell is instantly distinguishable
+                                    # from a local one at a glance.
 fi
 
 # Bold cyan host, " - ", bold user-colour "<user> $", ": ", bold blue cwd, " > ".
