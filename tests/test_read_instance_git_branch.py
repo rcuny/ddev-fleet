@@ -9,6 +9,15 @@ def _key(d: Path, *rest: str) -> str:
     return " ".join(["git", "-C", str(d), *rest])
 
 
+def test_returns_current_branch_against_real_git(git_repo):
+    """Regression test for the DEFAULT runner (real run_streamed subprocess),
+    not FakeRunner. Exercises read_instance_git_branch() against an actual git
+    checkout produced by the git_repo fixture, which creates its working tree
+    on branch "main"."""
+    work = git_repo["work"]
+    assert read_instance_git_branch(work) == "main"
+
+
 def test_returns_current_branch(tmp_path):
     d = tmp_path / "oak--dev-1"
     fake = FakeRunner(

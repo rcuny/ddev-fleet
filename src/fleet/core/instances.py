@@ -628,9 +628,13 @@ def snapshot(
 
 
 def read_instance_branch(instance_dir: Path) -> str:
-    """Return the branch stored in <instance_dir>/.fleet/instance.yml, or "" if
-    the file is absent/unreadable. Deliberately does NOT call list_instances()
-    (no ddev/docker) so the tmux sidebar can call it on a fast refresh loop."""
+    """Return the DEPLOY-TIME branch recorded in <instance_dir>/.fleet/instance.yml,
+    or "" if the file is absent/unreadable. Deliberately does NOT call
+    list_instances() (no ddev/docker), so it's cheap to call on a fast refresh
+    loop. Currently unused/reserved: the tmux sidebar and web UI now read the
+    LIVE branch via read_instance_git_branch() instead, since a checkout can be
+    switched to a different branch after deploy without this recorded value
+    changing."""
     info_path = instance_dir / ".fleet" / "instance.yml"
     if not info_path.exists():
         return ""
