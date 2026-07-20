@@ -1108,3 +1108,36 @@ def test_refresh_instance_config_unknown_instance_exits_1(fleet_home, capsys):
 
     assert exit_code == 1
     assert "demo--nonexistent" in capsys.readouterr().err
+
+
+def test_tmux_dispatch_reconciles_and_attaches(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    seen = {}
+    monkeypatch.setattr(
+        cli.tmux_mod, "reconcile", lambda paths, ids, **kw: seen.setdefault("ids", sorted(ids))
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    assert seen["ids"] == ["demo--develop"]
+    assert seen["attached"] is True
+
+
+def test_tmux_sidebar_dispatch(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    seen = {}
+    monkeypatch.setattr(
+        cli.tmux_sidebar,
+        "run",
+        lambda paths, window, **kw: seen.update(window=window, once=kw.get("once")),
+    )
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "tmux-sidebar", "--window", "general", "--once"]
+    )
+
+    assert exit_code == 0
+    assert seen == {"window": "general", "once": True}

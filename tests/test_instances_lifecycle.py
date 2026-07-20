@@ -90,7 +90,10 @@ def test_deploy_fresh_destroys_and_reclones(fleet_home, git_repo):
     )
 
     command_names = [call["cmd"][0] for call in runner.calls]
-    assert command_names[0] == "ddev"  # ddev delete, from the fresh destroy, runs first
+    # The fresh destroy's tmux teardown (best-effort `tmux has-session`
+    # check, no session in tests) runs first, then `ddev delete`.
+    assert command_names[0] == "tmux"
+    assert command_names[1] == "ddev"
     assert not (instance_dir / "stray-file.txt").exists()
     assert (instance_dir / "README.md").exists()
 

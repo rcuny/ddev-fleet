@@ -23,6 +23,11 @@ class HybridRunner:
             # auth step (fleet.core.caddyauth) — never shells out to a real
             # caddy binary in tests.
             return RunResult(returncode=0, lines=["$2a$14$testhashtesthashtesthashtesthashtestha"])
+        if cmd[0] == "tmux":
+            # No tmux session in tests (mirrors the real environment: `fleet
+            # tmux` was never run) — deploy()'s best-effort tmux tab hook
+            # checks `tmux has-session` and must see it as absent.
+            return RunResult(returncode=1, lines=[])
         return RunResult(returncode=0, lines=[])
 
 
@@ -68,8 +73,20 @@ def test_deploy_fresh_instance_runs_full_pipeline(fleet_home, git_repo):
     # git clone, then the default-on instance auth pipeline (caddy
     # hash-password, caddy validate, caddy reload — the latter talks to the
     # local Caddy admin API, no sudo involved), then the rest of the deploy
-    # pipeline unchanged.
-    assert command_names == ["git", "caddy", "caddy", "caddy", "ddev", "ddev", "ddev", "bash"]
+    # pipeline unchanged. The trailing "tmux" call is the best-effort
+    # `tmux.session_exists()` check at the end of deploy() (no session in
+    # tests, so no window is created).
+    assert command_names == [
+        "git",
+        "caddy",
+        "caddy",
+        "caddy",
+        "ddev",
+        "ddev",
+        "ddev",
+        "bash",
+        "tmux",
+    ]
     assert runner.calls[0]["cmd"][:2] == ["git", "clone"]
     assert runner.calls[1]["cmd"][:2] == ["caddy", "hash-password"]
     assert runner.calls[2]["cmd"][:2] == ["caddy", "validate"]

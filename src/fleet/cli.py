@@ -9,10 +9,12 @@ from pathlib import Path
 
 from ruamel.yaml import YAML
 
+from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
 from fleet.core import caddyauth, ddev, fleetconfig
 from fleet.core import instances as instances_mod
 from fleet.core import shell as shell_mod
+from fleet.core import tmux as tmux_mod
 from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.core.runner import run_interactive, run_streamed
@@ -183,6 +185,15 @@ def _build_parser() -> argparse.ArgumentParser:
     ddev_parser.add_argument("instance_id", nargs="?", default=None)
     ddev_parser.add_argument("ddev_args", nargs=argparse.REMAINDER)
 
+    subparsers.add_parser("tmux")
+
+    tmux_sidebar_parser = subparsers.add_parser("tmux-sidebar")
+    tmux_sidebar_parser.add_argument("--window", required=True)
+    tmux_sidebar_parser.add_argument("--once", action="store_true")
+
+    tmux_reset_parser = subparsers.add_parser("tmux-reset")
+    tmux_reset_parser.add_argument("window", nargs="?")
+
     return parser
 
 
@@ -228,6 +239,12 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_shell(fleet_home, args)
         elif args.command == "ddev":
             _cmd_ddev(fleet_home, args)
+        elif args.command == "tmux":
+            _cmd_tmux(fleet_home, args)
+        elif args.command == "tmux-sidebar":
+            _cmd_tmux_sidebar(fleet_home, args)
+        elif args.command == "tmux-reset":
+            _cmd_tmux_reset(fleet_home, args)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
@@ -515,6 +532,24 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
         instance_dir = paths.instances / args.instance_id
         print(f"{args.instance_id}: config refreshed (not restarted)")
         print(f"  cd {instance_dir} && ddev restart")
+
+
+def _cmd_tmux(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    ids = shell_mod.list_instance_ids(paths)
+    tmux_mod.reconcile(paths, ids)
+    tmux_mod.attach()
+
+
+def _cmd_tmux_sidebar(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    tmux_sidebar.run(paths, args.window, once=args.once)
+
+
+def _cmd_tmux_reset(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    window = args.window or tmux_mod.current_window()
+    tmux_mod.reset_window(paths, window)
 
 
 if __name__ == "__main__":
