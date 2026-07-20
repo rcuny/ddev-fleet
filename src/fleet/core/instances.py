@@ -627,6 +627,21 @@ def snapshot(
     return dest
 
 
+def read_instance_branch(instance_dir: Path) -> str:
+    """Return the branch stored in <instance_dir>/.fleet/instance.yml, or "" if
+    the file is absent/unreadable. Deliberately does NOT call list_instances()
+    (no ddev/docker) so the tmux sidebar can call it on a fast refresh loop."""
+    info_path = instance_dir / ".fleet" / "instance.yml"
+    if not info_path.exists():
+        return ""
+    try:
+        with open(info_path, "r", encoding="utf-8") as fh:
+            data = _yaml.load(fh) or {}
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        return ""
+    return str(data.get("branch", ""))
+
+
 @dataclass
 class InstanceStatus:
     instance_id: str
