@@ -236,3 +236,34 @@ def test_attach_execs_tmux(monkeypatch):
     monkeypatch.setattr(tmux.os, "execvp", lambda f, a: called.setdefault("a", (f, a)))
     tmux.attach()
     assert called["a"] == ("tmux", ["tmux", "attach", "-t", "fleet"])
+
+
+# --- Task 2: apply_settings ---------------------------------------------
+
+
+def test_apply_settings_sets_mouse_clipboard_status_and_reset_bind():
+    import sys as _sys
+
+    fake = FakeRunner()
+    tmux.apply_settings(runner=fake)
+    joined = _joined(fake)
+    assert "tmux set-option -t fleet mouse on" in joined
+    assert "tmux set-option -t fleet set-clipboard on" in joined
+    assert "tmux set-option -t fleet status on" in joined
+    # reset binding: prefix R -> run-shell invoking `fleet tmux-reset <window_name>`
+    bind = next(c for c in joined if c.startswith("tmux bind-key R "))
+    assert "tmux-reset" in bind
+    assert _sys.executable in bind
+    assert "#{window_name}" in bind
+
+
+def test_ensure_session_applies_settings():
+    fake = FakeRunner(
+        # default provides a pane id for ensure_sidebar's unscripted split-window
+        # call (the new-session path creates a sidebar before applying settings)
+        default=RunResult(0, ["%9"]),
+        scripted={"tmux has-session -t fleet": RunResult(1, [])},
+    )
+    tmux.ensure_session(Path("/srv/fleet"), runner=fake)
+    joined = _joined(fake)
+    assert any(c == "tmux set-option -t fleet mouse on" for c in joined)

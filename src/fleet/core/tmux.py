@@ -138,8 +138,33 @@ def ensure_sidebar(window: str, *, runner=run_streamed) -> None:
     _run(runner, ["set-option", "-p", "-t", pane, SIDEBAR_ROLE_OPT, SIDEBAR_ROLE])
 
 
+def _reset_bind_command() -> str:
+    # run in the fleet venv python; #{window_name} is expanded by tmux at press
+    return f'{sys.executable} -m fleet.cli tmux-reset "#{{window_name}}"'
+
+
+def apply_settings(*, runner=run_streamed) -> None:
+    """Apply operator-facing tmux options + key bindings to the fleet session.
+    Idempotent: every call is a set-option/bind-key overwrite, so it is safe to
+    re-run on each attach (including for sessions made by an older build)."""
+    opts = [
+        ["set-option", "-t", SESSION, "mouse", "on"],
+        ["set-option", "-t", SESSION, "set-clipboard", "on"],
+        ["set-option", "-t", SESSION, "mode-keys", "emacs"],
+        ["set-option", "-t", SESSION, "status", "on"],
+        ["set-option", "-t", SESSION, "status-position", "bottom"],
+        ["set-option", "-t", SESSION, "window-status-format", " #I:#W "],
+        ["set-option", "-t", SESSION, "window-status-current-format", " #I:#W "],
+        ["set-option", "-t", SESSION, "window-status-current-style", "reverse,bold"],
+    ]
+    for args in opts:
+        _run(runner, args)
+    _run(runner, ["bind-key", "R", "run-shell", _reset_bind_command()])
+
+
 def ensure_session(home: Path, *, runner=run_streamed) -> None:
     if session_exists(runner=runner):
+        apply_settings(runner=runner)  # re-apply for already-existing sessions
         return
     _run(runner, ["new-session", "-d", "-s", SESSION, "-n", GENERAL_WINDOW, "-c", str(home)])
     _run(
@@ -147,6 +172,7 @@ def ensure_session(home: Path, *, runner=run_streamed) -> None:
         ["set-window-option", "-t", f"{SESSION}:{GENERAL_WINDOW}", "automatic-rename", "off"],
     )
     ensure_sidebar(GENERAL_WINDOW, runner=runner)
+    apply_settings(runner=runner)  # new session
 
 
 def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
