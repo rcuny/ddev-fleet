@@ -644,6 +644,36 @@ def read_instance_branch(instance_dir: Path) -> str:
     return str(data.get("branch", ""))
 
 
+def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
+    """Return the ACTUAL current git branch of the instance checkout, or "" if
+    it can't be determined. Uses `git rev-parse` (works for both git worktrees
+    and full clones). On a detached HEAD, returns the short commit SHA rather
+    than the literal "HEAD". Best-effort: any git error/exception yields "" so a
+    bad checkout never crashes the sidebar refresh loop."""
+    try:
+        result = runner(
+            ["git", "-C", str(instance_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+            echo=False,
+        )
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        return ""
+    if result.returncode != 0:
+        return ""
+    branch = "\n".join(result.lines).strip()
+    if branch != "HEAD":
+        return branch
+    try:
+        sha = runner(
+            ["git", "-C", str(instance_dir), "rev-parse", "--short", "HEAD"],
+            echo=False,
+        )
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        return ""
+    if sha.returncode != 0:
+        return ""
+    return "\n".join(sha.lines).strip()
+
+
 @dataclass
 class InstanceStatus:
     instance_id: str
