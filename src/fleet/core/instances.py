@@ -723,6 +723,10 @@ def list_instances(
             instance = parts[1] if len(parts) > 1 else ""
             branch = ""
 
+        live_branch = read_instance_git_branch(entry, runner=runner)
+        if live_branch:
+            branch = live_branch
+
         state = "running" if current_id in running_ids else "deployed"
         statuses.append(
             InstanceStatus(

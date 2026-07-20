@@ -116,6 +116,33 @@ def test_list_instances_fallback_for_dir_without_instance_yml(fleet_home):
     assert statuses[0].ram_mib is None
 
 
+def test_list_instances_prefers_live_git_branch_with_fallback(fleet_home):
+    registry = _registry(fleet_home)
+    paths = instances.FleetPaths.from_home(fleet_home)
+    inst_root = fleet_home / "instances"
+    _write_instance(inst_root, "demo--develop", "demo", "develop", "main")  # recorded=main
+    _write_instance(inst_root, "demo--piano", "demo", "piano", "feature-x")  # recorded=feature-x
+
+    list_json = json.dumps({"raw": []})
+    git_key = " ".join(
+        ["git", "-C", str(inst_root / "demo--develop"), "rev-parse", "--abbrev-ref", "HEAD"]
+    )
+    fake = FakeRunner(
+        scripted={
+            "ddev list --json-output": RunResult(returncode=0, lines=[list_json]),
+            "docker stats --no-stream --format {{json .}}": RunResult(returncode=0, lines=[]),
+            git_key: RunResult(returncode=0, lines=["hotfix-9"]),  # live != recorded
+        }
+        # demo--piano's git call is unscripted -> default RunResult(0, []) -> live "" -> fallback
+    )
+
+    statuses = instances.list_instances(paths, registry, runner=fake)
+    by_id = {s.instance_id: s for s in statuses}
+
+    assert by_id["demo--develop"].branch == "hotfix-9"  # live wins over recorded "main"
+    assert by_id["demo--piano"].branch == "feature-x"  # falls back to recorded
+
+
 def test_list_instances_missing_instances_dir_returns_empty_early(fleet_home):
     registry = _registry(fleet_home)
     base_paths = instances.FleetPaths.from_home(fleet_home)
