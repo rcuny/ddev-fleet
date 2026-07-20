@@ -1,3 +1,4 @@
+from dataclasses import dataclass
 from pathlib import Path
 
 import pytest
@@ -10,6 +11,12 @@ from tests.conftest import FakeRunner
 
 def _joined(fake):
     return [" ".join(str(c) for c in call["cmd"]) for call in fake.calls]
+
+
+@dataclass
+class _FakePaths:
+    home: Path
+    instances: Path
 
 
 def test_assert_target_safe_rejects_bad_names():
@@ -267,3 +274,51 @@ def test_ensure_session_applies_settings():
     tmux.ensure_session(Path("/srv/fleet"), runner=fake)
     joined = _joined(fake)
     assert any(c == "tmux set-option -t fleet mouse on" for c in joined)
+
+
+# --- Task 4: reset_window -------------------------------------------------
+
+
+def test_reset_window_instance_respawns_and_rebuilds_two_bash_panes():
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "oak--click-3"
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general", win]),
+            # window currently has only sidebar + ONE bash pane (a bash pane was deleted)
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%10\t", "%11\tsidebar"]
+            ),
+            # ensure_sidebar's self-heal check: sidebar already present, so it
+            # must not try to create a second one
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["sidebar"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    joined = _joined(fake)
+    # respawns the surviving bash pane at the instance dir
+    assert any(
+        c.startswith("tmux respawn-pane -k -t %10 -c /srv/fleet/instances/oak--click-3")
+        for c in joined
+    )
+    # adds the second bash pane
+    assert any(
+        c.startswith("tmux split-window -h -t %10 -c /srv/fleet/instances/oak--click-3")
+        for c in joined
+    )
+    # restores sidebar width
+    assert any(c.startswith("tmux resize-pane -t %11 -x 30") for c in joined)
+
+
+def test_reset_window_absent_window_is_noop():
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general"]),
+        },
+    )
+    tmux.reset_window(paths, "oak--gone", runner=fake)
+    joined = _joined(fake)
+    assert not any("respawn-pane" in c for c in joined)

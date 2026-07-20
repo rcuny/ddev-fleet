@@ -186,5 +186,78 @@ def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
             kill_instance_window(window, runner=runner)
 
 
+def _list_panes_with_roles(window: str, *, runner=run_streamed) -> list[tuple[str, str]]:
+    result = _run(
+        runner,
+        ["list-panes", "-t", f"{SESSION}:{window}", "-F", f"#{{pane_id}}\t#{{{SIDEBAR_ROLE_OPT}}}"],
+    )
+    panes: list[tuple[str, str]] = []
+    for line in result.lines:
+        if not line.strip():
+            continue
+        pane_id, _, role = line.partition("\t")
+        panes.append((pane_id.strip(), role.strip()))
+    return panes
+
+
+def _sidebar_pane_id(window: str, *, runner=run_streamed) -> str | None:
+    for pane_id, role in _list_panes_with_roles(window, runner=runner):
+        if role == SIDEBAR_ROLE:
+            return pane_id
+    return None
+
+
+def reset_window(paths, window: str, *, runner=run_streamed) -> None:
+    """Rebuild the standard pane layout for `window` in place (no kill-window,
+    so the tab keeps its index). general -> 1 bash + sidebar; instance -> 2 bash
+    + sidebar. Best-effort: no-ops if the session/window is gone."""
+    _assert_target_safe(window)
+    if not session_exists(runner=runner):
+        return
+    if window not in list_window_names(runner=runner):
+        return
+
+    if window == GENERAL_WINDOW:
+        cwd = paths.home
+        want_bash = 1
+    else:
+        cwd = paths.instances / window
+        want_bash = 2
+
+    panes = _list_panes_with_roles(window, runner=runner)
+    non_sidebar = [pid for pid, role in panes if role != SIDEBAR_ROLE]
+
+    if non_sidebar:
+        base = non_sidebar[0]
+        _run(runner, ["respawn-pane", "-k", "-t", base, "-c", str(cwd)])
+        for extra in non_sidebar[1:]:
+            _run(runner, ["kill-pane", "-t", extra])
+    else:
+        created = _run(
+            runner,
+            [
+                "split-window",
+                "-h",
+                "-t",
+                f"{SESSION}:{window}",
+                "-c",
+                str(cwd),
+                "-P",
+                "-F",
+                "#{pane_id}",
+            ],
+        )
+        base = created.lines[0].strip()
+
+    if want_bash == 2:
+        _run(runner, ["split-window", "-h", "-t", base, "-c", str(cwd)])
+
+    ensure_sidebar(window, runner=runner)
+    sidebar = _sidebar_pane_id(window, runner=runner)
+    if sidebar:
+        _run(runner, ["resize-pane", "-t", sidebar, "-x", str(SIDEBAR_WIDTH)])
+    _run(runner, ["select-pane", "-t", base])
+
+
 def attach() -> None:
     os.execvp("tmux", ["tmux", "attach", "-t", SESSION])

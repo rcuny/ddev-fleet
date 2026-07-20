@@ -191,6 +191,9 @@ def _build_parser() -> argparse.ArgumentParser:
     tmux_sidebar_parser.add_argument("--window", required=True)
     tmux_sidebar_parser.add_argument("--once", action="store_true")
 
+    tmux_reset_parser = subparsers.add_parser("tmux-reset")
+    tmux_reset_parser.add_argument("window")
+
     return parser
 
 
@@ -240,6 +243,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_tmux(fleet_home, args)
         elif args.command == "tmux-sidebar":
             _cmd_tmux_sidebar(fleet_home, args)
+        elif args.command == "tmux-reset":
+            _cmd_tmux_reset(fleet_home, args)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
@@ -539,6 +544,11 @@ def _cmd_tmux(fleet_home: Path, args: argparse.Namespace) -> None:
 def _cmd_tmux_sidebar(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     tmux_sidebar.run(paths, args.window, once=args.once)
+
+
+def _cmd_tmux_reset(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    tmux_mod.reset_window(paths, args.window)
 
 
 if __name__ == "__main__":
