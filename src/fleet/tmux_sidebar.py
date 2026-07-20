@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.text import Text
 
 from fleet.core import ddev, shell, tmux
-from fleet.core.instances import FleetPaths, read_instance_branch
+from fleet.core.instances import FleetPaths, read_instance_git_branch
 
 STATUS_GLYPH = {"running": "●", "stopped": "○", "deployed": "•", "error": "!"}
 STATUS_STYLE = {"running": "green", "stopped": "grey50", "deployed": "cyan", "error": "red"}
@@ -56,13 +56,13 @@ def build_rows(instance_ids, statuses, current, branches=None) -> list[tuple[str
         branch = branches.get(instance_id)
         if branch:
             avail = tmux.SIDEBAR_WIDTH - 4
-            shown = branch if len(branch) <= avail else branch[: avail - 1] + "…"
-            rows.append((f"    {shown}", "grey50"))
+            for start in range(0, len(branch), avail):
+                rows.append((f"    {branch[start:start + avail]}", "grey50"))
     return rows
 
 
 def _branches(paths: FleetPaths, ids: list[str]) -> dict[str, str]:
-    return {i: read_instance_branch(paths.instances / i) for i in ids}
+    return {i: read_instance_git_branch(paths.instances / i) for i in ids}
 
 
 def _render(
@@ -91,18 +91,23 @@ def run(
     once: bool = False,
     list_interval: float = 2.0,
     status_interval: float = 10.0,
+    branch_interval: float = 300.0,
 ) -> None:
     console = Console()
     statuses = _statuses()
     ids = shell.list_instance_ids(paths)
     branches = _branches(paths, ids)
     last_status = time.monotonic()
+    last_branch = last_status
     while True:
-        if time.monotonic() - last_status >= status_interval:
+        now = time.monotonic()
+        if now - last_status >= status_interval:
             statuses = _statuses()
             ids = shell.list_instance_ids(paths)
+            last_status = now
+        if now - last_branch >= branch_interval:
             branches = _branches(paths, ids)
-            last_status = time.monotonic()
+            last_branch = now
         _render(console, window, ids, statuses, branches)
         if once:
             return

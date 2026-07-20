@@ -628,9 +628,13 @@ def snapshot(
 
 
 def read_instance_branch(instance_dir: Path) -> str:
-    """Return the branch stored in <instance_dir>/.fleet/instance.yml, or "" if
-    the file is absent/unreadable. Deliberately does NOT call list_instances()
-    (no ddev/docker) so the tmux sidebar can call it on a fast refresh loop."""
+    """Return the DEPLOY-TIME branch recorded in <instance_dir>/.fleet/instance.yml,
+    or "" if the file is absent/unreadable. Deliberately does NOT call
+    list_instances() (no ddev/docker), so it's cheap to call on a fast refresh
+    loop. Currently unused/reserved: the tmux sidebar and web UI now read the
+    LIVE branch via read_instance_git_branch() instead, since a checkout can be
+    switched to a different branch after deploy without this recorded value
+    changing."""
     info_path = instance_dir / ".fleet" / "instance.yml"
     if not info_path.exists():
         return ""
@@ -642,6 +646,36 @@ def read_instance_branch(instance_dir: Path) -> str:
     if not isinstance(data, dict):
         return ""
     return str(data.get("branch", ""))
+
+
+def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
+    """Return the ACTUAL current git branch of the instance checkout, or "" if
+    it can't be determined. Uses `git rev-parse` (works for both git worktrees
+    and full clones). On a detached HEAD, returns the short commit SHA rather
+    than the literal "HEAD". Best-effort: any git error/exception yields "" so a
+    bad checkout never crashes the sidebar refresh loop."""
+    try:
+        result = runner(
+            ["git", "-C", str(instance_dir), "rev-parse", "--abbrev-ref", "HEAD"],
+            echo=False,
+        )
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        return ""
+    if result.returncode != 0:
+        return ""
+    branch = "\n".join(result.lines).strip()
+    if branch != "HEAD":
+        return branch
+    try:
+        sha = runner(
+            ["git", "-C", str(instance_dir), "rev-parse", "--short", "HEAD"],
+            echo=False,
+        )
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        return ""
+    if sha.returncode != 0:
+        return ""
+    return "\n".join(sha.lines).strip()
 
 
 @dataclass
@@ -692,6 +726,10 @@ def list_instances(
             project = parts[0] if parts else current_id
             instance = parts[1] if len(parts) > 1 else ""
             branch = ""
+
+        live_branch = read_instance_git_branch(entry, runner=runner)
+        if live_branch:
+            branch = live_branch
 
         state = "running" if current_id in running_ids else "deployed"
         statuses.append(
