@@ -57,7 +57,8 @@ registry load with an actionable message naming the bad key.
 | `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value: hashes it (`caddy hash-password`), atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same way, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull) so the registry and assets checkout track their remote; a no-op message if `config/` isn't a git checkout |
-| `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach |
+| `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach; applies mouse/clipboard/status-bar settings on every attach |
+| `fleet tmux-reset <window>` | — | Rebuild a tab's standard pane layout in place (general = 1 bash + sidebar; instance = 2 bash + sidebar), without killing the window; bound to `^b R` inside the workspace |
 
 Projects and templates are declared by hand in `fleet.yml` — there is no
 `fleet project add` and no auto-registration of unknown projects on deploy.
@@ -85,3 +86,22 @@ into every instance of the project (`core/assets.py:_link_shared_dir`), and
 - **Rotate the dashboard admin password:** `fleet rotate-admin-password` (generated) or `fleet set-admin-password <password>` (explicit) — never requires an Ansible run.
 - **Pull the latest registry/assets after someone else edits `fleet.yml`:** `fleet refresh-config`.
 - **Recovery when the daemon/web UI is down:** every command above works from the CLI directly against `fleet.core` — the daemon is not a dependency of the CLI (spec §11).
+
+## `fleet tmux` operator notes
+
+- **Mouse is on.** Click a pane to focus it; scroll stays inside that pane
+  (no more `^b [` copy-mode dance); drag with the mouse to select text —
+  the selection is confined to a single pane and copies straight to the Mac
+  clipboard.
+- **One-time iTerm 2 setting** for that clipboard copy to work:
+  *Preferences → General → Selection → "Applications in terminal may access
+  clipboard"*.
+- **Full-width selection across panes:** hold **⌥ Option while dragging**
+  for iTerm 2's native selection instead of tmux's per-pane one — useful
+  when you want to grab text that spans a pane boundary.
+- **Bottom status bar:** click a tab to switch to it directly, no need to
+  cycle with `^b n`/`^b p`.
+- **`^b R`** resets the current tab's layout (`fleet tmux-reset <window>`
+  under the hood) — rebuilds the standard bash+sidebar panes in place if one
+  got closed or mangled, without losing the tab's position in the window
+  list.
