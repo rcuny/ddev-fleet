@@ -70,7 +70,7 @@ def test_build_rows_adds_dim_branch_line_under_instance():
     assert branch_row[1] == "grey50"
 
 
-def test_build_rows_truncates_long_branch_with_ellipsis():
+def test_build_rows_wraps_long_branch_in_full():
     long_branch = "feature/OAKS-1753-search-cards-rebased-PR-really-long"
     rows = tmux_sidebar.build_rows(
         ["oak--dev-1"],
@@ -78,9 +78,25 @@ def test_build_rows_truncates_long_branch_with_ellipsis():
         current="general",
         branches={"oak--dev-1": long_branch},
     )
-    branch_text = next(t for t, _ in rows if t.strip().startswith("feature/"))
-    assert branch_text.endswith("…")
-    assert len(branch_text) <= tmux.SIDEBAR_WIDTH  # includes the 4-space indent
+    branch_rows = [t for t, style in rows if style == "grey50"]
+    # Full name preserved across wrapped lines, nothing cut:
+    assert "".join(t.strip() for t in branch_rows) == long_branch
+    assert "…" not in "".join(branch_rows)
+    # Each wrapped line fits inside the sidebar (4-space indent + chunk):
+    assert all(len(t) <= tmux.SIDEBAR_WIDTH for t in branch_rows)
+    # A long branch must wrap onto more than one line:
+    assert len(branch_rows) >= 2
+
+
+def test_build_rows_short_branch_single_row():
+    rows = tmux_sidebar.build_rows(
+        ["oak--dev-1"],
+        {"oak--dev-1": "running"},
+        current="general",
+        branches={"oak--dev-1": "main"},
+    )
+    branch_rows = [t for t, style in rows if style == "grey50"]
+    assert branch_rows == ["    main"]
 
 
 def test_build_rows_no_branch_line_when_unknown():

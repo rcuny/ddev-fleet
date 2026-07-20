@@ -56,8 +56,8 @@ def build_rows(instance_ids, statuses, current, branches=None) -> list[tuple[str
         branch = branches.get(instance_id)
         if branch:
             avail = tmux.SIDEBAR_WIDTH - 4
-            shown = branch if len(branch) <= avail else branch[: avail - 1] + "…"
-            rows.append((f"    {shown}", "grey50"))
+            for start in range(0, len(branch), avail):
+                rows.append((f"    {branch[start:start + avail]}", "grey50"))
     return rows
 
 
