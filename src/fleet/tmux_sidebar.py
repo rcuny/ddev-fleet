@@ -61,11 +61,17 @@ def build_rows(instance_ids, statuses, current, branches=None) -> list[tuple[str
     return rows
 
 
-def _branches(paths: FleetPaths, ids) -> dict[str, str]:
+def _branches(paths: FleetPaths, ids: list[str]) -> dict[str, str]:
     return {i: read_instance_branch(paths.instances / i) for i in ids}
 
 
-def _render(console, window, ids, statuses, branches) -> None:
+def _render(
+    console: Console,
+    window: str,
+    ids: list[str],
+    statuses: dict[str, str],
+    branches: dict[str, str],
+) -> None:
     body = Text()
     body.append("FLEET\n\n", style="bold")
     for text, style in build_rows(ids, statuses, window, branches):

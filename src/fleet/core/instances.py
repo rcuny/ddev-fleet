@@ -639,6 +639,8 @@ def read_instance_branch(instance_dir: Path) -> str:
             data = _yaml.load(fh) or {}
     except Exception:  # noqa: BLE001 - best-effort display helper
         return ""
+    if not isinstance(data, dict):
+        return ""
     return str(data.get("branch", ""))
 
 

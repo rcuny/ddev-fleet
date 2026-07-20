@@ -138,9 +138,20 @@ def ensure_sidebar(window: str, *, runner=run_streamed) -> None:
     _run(runner, ["set-option", "-p", "-t", pane, SIDEBAR_ROLE_OPT, SIDEBAR_ROLE])
 
 
+def current_window(*, runner=run_streamed) -> str:
+    result = _run(runner, ["display-message", "-p", "#{window_name}"])
+    return result.lines[0].strip() if result.lines else ""
+
+
 def _reset_bind_command() -> str:
-    # run in the fleet venv python; #{window_name} is expanded by tmux at press
-    return f'{sys.executable} -m fleet.cli tmux-reset "#{{window_name}}"'
+    # Run in the fleet venv python. Deliberately does NOT interpolate
+    # #{window_name} into this shell string — tmux would expand it before
+    # run-shell executes, so a window renamed with quotes/backticks could
+    # inject arbitrary shell. Instead `tmux-reset` is invoked with no window
+    # argument and resolves the current window itself via `current_window()`
+    # (see cli.py:_cmd_tmux_reset), which reads it through a safe argv, not
+    # shell interpolation.
+    return f"{sys.executable} -m fleet.cli tmux-reset"
 
 
 def apply_settings(*, runner=run_streamed) -> None:
@@ -150,7 +161,6 @@ def apply_settings(*, runner=run_streamed) -> None:
     opts = [
         ["set-option", "-t", SESSION, "mouse", "on"],
         ["set-option", "-t", SESSION, "set-clipboard", "on"],
-        ["set-option", "-t", SESSION, "mode-keys", "emacs"],
         ["set-option", "-t", SESSION, "status", "on"],
         ["set-option", "-t", SESSION, "status-position", "bottom"],
         ["set-option", "-t", SESSION, "window-status-format", " #I:#W "],

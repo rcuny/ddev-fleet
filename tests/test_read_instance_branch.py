@@ -24,3 +24,13 @@ def test_read_instance_branch_missing_file_returns_empty(tmp_path):
 def test_read_instance_branch_no_branch_key_returns_empty(tmp_path):
     d = _write_yaml(tmp_path, "project: oak\n")
     assert read_instance_branch(d) == ""
+
+
+def test_read_instance_branch_bare_scalar_returns_empty(tmp_path):
+    d = _write_yaml(tmp_path, "just a string\n")
+    assert read_instance_branch(d) == ""
+
+
+def test_read_instance_branch_list_returns_empty(tmp_path):
+    d = _write_yaml(tmp_path, "- one\n- two\n")
+    assert read_instance_branch(d) == ""

@@ -192,7 +192,7 @@ def _build_parser() -> argparse.ArgumentParser:
     tmux_sidebar_parser.add_argument("--once", action="store_true")
 
     tmux_reset_parser = subparsers.add_parser("tmux-reset")
-    tmux_reset_parser.add_argument("window")
+    tmux_reset_parser.add_argument("window", nargs="?")
 
     return parser
 
@@ -548,7 +548,8 @@ def _cmd_tmux_sidebar(fleet_home: Path, args: argparse.Namespace) -> None:
 
 def _cmd_tmux_reset(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    tmux_mod.reset_window(paths, args.window)
+    window = args.window or tmux_mod.current_window()
+    tmux_mod.reset_window(paths, window)
 
 
 if __name__ == "__main__":
