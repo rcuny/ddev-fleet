@@ -109,3 +109,62 @@ def test_build_rows_no_branch_line_when_unknown():
     assert all("feature/" not in t for t, _ in rows)
     # exactly one row for the instance (plus the general row)
     assert sum(1 for t, _ in rows if "oak--dev-1" in t) == 1
+
+
+class _DummyPaths:
+    def __init__(self, instances):
+        self.instances = instances
+
+
+def test_run_uses_live_branch_on_first_render(monkeypatch, tmp_path):
+    seen = {}
+    monkeypatch.setattr(tmux_sidebar, "read_instance_git_branch", lambda d: "feature/live")
+    monkeypatch.setattr(tmux_sidebar.shell, "list_instance_ids", lambda paths: ["oak--dev-1"])
+    monkeypatch.setattr(tmux_sidebar, "_statuses", lambda: {"oak--dev-1": "running"})
+    monkeypatch.setattr(
+        tmux_sidebar,
+        "_render",
+        lambda console, window, ids, statuses, branches: seen.update(branches),
+    )
+
+    tmux_sidebar.run(_DummyPaths(tmp_path), "general", once=True)
+    assert seen == {"oak--dev-1": "feature/live"}
+
+
+def test_run_branch_tick_is_independent_of_status_tick(monkeypatch, tmp_path):
+    branch_calls = {"n": 0}
+    status_calls = {"n": 0}
+
+    def fake_branch(d):
+        branch_calls["n"] += 1
+        return "b"
+
+    def fake_statuses():
+        status_calls["n"] += 1
+        return {}
+
+    monkeypatch.setattr(tmux_sidebar, "read_instance_git_branch", fake_branch)
+    monkeypatch.setattr(tmux_sidebar, "_statuses", fake_statuses)
+    monkeypatch.setattr(tmux_sidebar.shell, "list_instance_ids", lambda paths: ["oak--dev-1"])
+    monkeypatch.setattr(tmux_sidebar, "_render", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_sidebar.time, "sleep", lambda *_: None)
+
+    # monotonic() is called once before the loop, then once per iteration:
+    clock = iter([0, 5, 15, 400])
+    monkeypatch.setattr(tmux_sidebar.time, "monotonic", lambda: next(clock))
+    # session alive for two iterations, then gone -> loop exits on the 3rd:
+    alive = iter([True, True, False])
+    monkeypatch.setattr(tmux_sidebar.tmux, "session_exists", lambda: next(alive))
+
+    tmux_sidebar.run(
+        _DummyPaths(tmp_path),
+        "general",
+        list_interval=0,
+        status_interval=10,
+        branch_interval=300,
+    )
+
+    # branches: once up front (t=0) + once when 300s elapsed (t=400) = 2
+    assert branch_calls["n"] == 2
+    # statuses initial + refresh at t=15 and t=400 -> re-read more often than branches
+    assert status_calls["n"] >= 3
