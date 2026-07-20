@@ -309,6 +309,10 @@ def test_reset_window_instance_respawns_and_rebuilds_two_bash_panes():
         c.startswith("tmux split-window -h -t %10 -c /srv/fleet/instances/oak--click-3")
         for c in joined
     )
+    # refreshes the surviving sidebar in place (reruns its tmux-sidebar command)
+    assert "tmux respawn-pane -k -t %11" in joined
+    # ...and does NOT recreate it via ensure_sidebar's split-window -hbf path
+    assert not any("split-window -hbf" in c for c in joined)
     # restores sidebar width
     assert any(c.startswith("tmux resize-pane -t %11 -x 30") for c in joined)
 
@@ -340,8 +344,49 @@ def test_reset_window_instance_only_sidebar_creates_base_and_second_pane():
     assert create_base in joined
     # second bash pane split off the newly created base pane
     assert any(c.startswith(f"tmux split-window -h -t %21 -c {cwd}") for c in joined)
+    # refreshes the surviving sidebar in place rather than recreating it
+    assert "tmux respawn-pane -k -t %20" in joined
+    assert not any("split-window -hbf" in c for c in joined)
     # restores sidebar width against the pre-existing sidebar pane
     assert any(c.startswith("tmux resize-pane -t %20 -x 30") for c in joined)
+
+
+def test_reset_window_sidebar_missing_recreates_via_ensure_sidebar():
+    """When list-panes shows only bash panes (no sidebar role at all), reset_window
+    must take the `else` branch: call ensure_sidebar to recreate it (split-window
+    -hbf ... tmux-sidebar), NOT respawn-pane on a nonexistent sidebar."""
+    import sys as _sys
+
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "oak--click-3"
+    cwd = "/srv/fleet/instances/oak--click-3"
+    sidebar_split = (
+        f"tmux split-window -hbf -l 30 -t fleet:{win} -d -P -F #{{pane_id}} -- "
+        + _sys.executable
+        + f" -m fleet.cli tmux-sidebar --window {win}"
+    )
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general", win]),
+            # window currently has only the one surviving bash pane, no sidebar role
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%10\t"]
+            ),
+            # ensure_sidebar's has_sidebar check: no sidebar role present -> must create
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, [""]),
+            sidebar_split: RunResult(0, ["%30"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    joined = _joined(fake)
+    # adds the second bash pane off the surviving base
+    assert any(c.startswith(f"tmux split-window -h -t %10 -c {cwd}") for c in joined)
+    # takes the else branch: recreates the sidebar via ensure_sidebar
+    assert sidebar_split in joined
+    # never respawns a sidebar pane that doesn't exist
+    assert "tmux respawn-pane -k -t %30" not in joined
+    assert not any(c.startswith("tmux respawn-pane -k -t %11") for c in joined)
 
 
 def test_current_window_reads_display_message():

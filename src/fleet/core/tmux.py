@@ -262,8 +262,15 @@ def reset_window(paths, window: str, *, runner=run_streamed) -> None:
     if want_bash == 2:
         _run(runner, ["split-window", "-h", "-t", base, "-c", str(cwd)])
 
-    ensure_sidebar(window, runner=runner)
+    # Refresh the sidebar so it always reruns current code (branch line, width).
+    # respawn-pane -k reruns the pane's original tmux-sidebar command; if the
+    # sidebar pane was the one that got deleted, recreate it instead.
     sidebar = _sidebar_pane_id(window, runner=runner)
+    if sidebar:
+        _run(runner, ["respawn-pane", "-k", "-t", sidebar])
+    else:
+        ensure_sidebar(window, runner=runner)
+        sidebar = _sidebar_pane_id(window, runner=runner)
     if sidebar:
         _run(runner, ["resize-pane", "-t", sidebar, "-x", str(SIDEBAR_WIDTH)])
     _run(runner, ["select-pane", "-t", base])
