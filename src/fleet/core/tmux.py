@@ -16,7 +16,7 @@ from fleet.core.runner import RunResult, run_streamed
 
 SESSION = "fleet"
 GENERAL_WINDOW = "general"
-SIDEBAR_WIDTH = 24
+SIDEBAR_WIDTH = 30
 SIDEBAR_ROLE_OPT = "@fleet_role"
 SIDEBAR_ROLE = "sidebar"
 MANAGED_OPT = "@fleet_managed"

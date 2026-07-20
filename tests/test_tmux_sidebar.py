@@ -1,4 +1,5 @@
 from fleet import tmux_sidebar
+from fleet.core import tmux
 
 
 def test_run_exits_cleanly_when_session_exists_check_raises(monkeypatch):
@@ -52,3 +53,43 @@ def test_key_hints_cover_switch_and_detach():
     assert "switch tab" in joined
     assert "detach" in joined
     assert all("^b" in h for h in tmux_sidebar.KEY_HINTS)
+
+
+def test_build_rows_adds_dim_branch_line_under_instance():
+    rows = tmux_sidebar.build_rows(
+        ["oak--click-3"],
+        {"oak--click-3": "running"},
+        current="oak--click-3",
+        branches={"oak--click-3": "feature/OAKS-1762"},
+    )
+    labels = [text for text, _ in rows]
+    assert any(t.strip() == "feature/OAKS-1762" for t in labels)
+    # the branch row is indented and dim
+    branch_row = next((t, s) for t, s in rows if "feature/OAKS-1762" in t)
+    assert branch_row[0].startswith("    ")
+    assert branch_row[1] == "grey50"
+
+
+def test_build_rows_truncates_long_branch_with_ellipsis():
+    long_branch = "feature/OAKS-1753-search-cards-rebased-PR-really-long"
+    rows = tmux_sidebar.build_rows(
+        ["oak--dev-1"],
+        {"oak--dev-1": "running"},
+        current="general",
+        branches={"oak--dev-1": long_branch},
+    )
+    branch_text = next(t for t, _ in rows if t.strip().startswith("feature/"))
+    assert branch_text.endswith("…")
+    assert len(branch_text) <= tmux.SIDEBAR_WIDTH  # includes the 4-space indent
+
+
+def test_build_rows_no_branch_line_when_unknown():
+    rows = tmux_sidebar.build_rows(
+        ["oak--dev-1"],
+        {"oak--dev-1": "running"},
+        current="general",
+        branches={"oak--dev-1": ""},
+    )
+    assert all("feature/" not in t for t, _ in rows)
+    # exactly one row for the instance (plus the general row)
+    assert sum(1 for t, _ in rows if "oak--dev-1" in t) == 1

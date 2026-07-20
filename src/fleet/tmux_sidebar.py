@@ -12,7 +12,7 @@ from rich.console import Console
 from rich.text import Text
 
 from fleet.core import ddev, shell, tmux
-from fleet.core.instances import FleetPaths
+from fleet.core.instances import FleetPaths, read_instance_branch
 
 STATUS_GLYPH = {"running": "●", "stopped": "○", "deployed": "•", "error": "!"}
 STATUS_STYLE = {"running": "green", "stopped": "grey50", "deployed": "cyan", "error": "red"}
@@ -22,6 +22,7 @@ STATUS_STYLE = {"running": "green", "stopped": "grey50", "deployed": "cyan", "er
 # anything — reattach later with `fleet tmux`.
 KEY_HINTS = [
     "^b w   switch tab",
+    "^b R   reset tab",
     "^b d   detach → shell",
     "^b ←→  move pane",
     "^b z   zoom pane (toggle)",
@@ -41,7 +42,8 @@ def _statuses() -> dict[str, str]:
     return out
 
 
-def build_rows(instance_ids, statuses, current) -> list[tuple[str, str]]:
+def build_rows(instance_ids, statuses, current, branches=None) -> list[tuple[str, str]]:
+    branches = branches or {}
     rows: list[tuple[str, str]] = []
     general_style = "current" if current == tmux.GENERAL_WINDOW else "dim"
     rows.append(("  general", general_style))
@@ -51,14 +53,22 @@ def build_rows(instance_ids, statuses, current) -> list[tuple[str, str]]:
         text = f"{glyph} {instance_id}"
         style = "current" if instance_id == current else STATUS_STYLE.get(status, "white")
         rows.append((text, style))
+        branch = branches.get(instance_id)
+        if branch:
+            avail = tmux.SIDEBAR_WIDTH - 4
+            shown = branch if len(branch) <= avail else branch[: avail - 1] + "…"
+            rows.append((f"    {shown}", "grey50"))
     return rows
 
 
-def _render(console: Console, paths: FleetPaths, window: str, statuses: dict[str, str]) -> None:
-    ids = shell.list_instance_ids(paths)
+def _branches(paths: FleetPaths, ids) -> dict[str, str]:
+    return {i: read_instance_branch(paths.instances / i) for i in ids}
+
+
+def _render(console, window, ids, statuses, branches) -> None:
     body = Text()
     body.append("FLEET\n\n", style="bold")
-    for text, style in build_rows(ids, statuses, window):
+    for text, style in build_rows(ids, statuses, window, branches):
         body.append(text + "\n", style=("reverse bold" if style == "current" else style))
     body.append("\nkeys · ^b = Ctrl-b\n", style="bold grey50")
     for hint in KEY_HINTS:
@@ -78,12 +88,16 @@ def run(
 ) -> None:
     console = Console()
     statuses = _statuses()
+    ids = shell.list_instance_ids(paths)
+    branches = _branches(paths, ids)
     last_status = time.monotonic()
     while True:
         if time.monotonic() - last_status >= status_interval:
             statuses = _statuses()
+            ids = shell.list_instance_ids(paths)
+            branches = _branches(paths, ids)
             last_status = time.monotonic()
-        _render(console, paths, window, statuses)
+        _render(console, window, ids, statuses, branches)
         if once:
             return
         try:

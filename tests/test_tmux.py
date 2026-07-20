@@ -47,7 +47,7 @@ def test_ensure_instance_window_creates_window_split_and_focus():
 
     dir_ = Path("/srv/fleet/instances/oak--click-3")
     sidebar_split = (
-        "tmux split-window -hbf -l 24 -t fleet:oak--click-3 -d -P -F #{pane_id} -- "
+        "tmux split-window -hbf -l 30 -t fleet:oak--click-3 -d -P -F #{pane_id} -- "
         + _sys.executable
         + " -m fleet.cli tmux-sidebar --window oak--click-3"
     )
@@ -126,7 +126,7 @@ def test_ensure_sidebar_splits_and_tags_when_absent():
     import sys as _sys
 
     split = (
-        "tmux split-window -hbf -l 24 -t fleet:general -d -P -F #{pane_id} -- "
+        "tmux split-window -hbf -l 30 -t fleet:general -d -P -F #{pane_id} -- "
         + _sys.executable
         + " -m fleet.cli tmux-sidebar --window general"
     )
@@ -156,7 +156,7 @@ def test_ensure_session_creates_when_absent():
     import sys as _sys
 
     sidebar_split = (
-        "tmux split-window -hbf -l 24 -t fleet:general -d -P -F #{pane_id} -- "
+        "tmux split-window -hbf -l 30 -t fleet:general -d -P -F #{pane_id} -- "
         + _sys.executable
         + " -m fleet.cli tmux-sidebar --window general"
     )
