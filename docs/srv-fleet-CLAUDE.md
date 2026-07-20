@@ -105,3 +105,10 @@ into every instance of the project (`core/assets.py:_link_shared_dir`), and
   under the hood) — rebuilds the standard bash+sidebar panes in place if one
   got closed or mangled, without losing the tab's position in the window
   list.
+- The sidebar branch line and the web UI now show each instance's **actual
+  currently checked-out git branch** (via `git rev-parse`), not the branch
+  recorded at deploy time. The sidebar re-reads it about every 5 minutes; the
+  web UI reads it fresh on every page load. If you `git checkout` a different
+  branch inside an instance, the overview catches up within ~5 min (or press
+  `^b R` to refresh that tab's sidebar immediately). `.fleet/instance.yml` still
+  records the deploy-time branch and is not modified.
