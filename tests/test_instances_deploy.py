@@ -290,6 +290,81 @@ def test_deploy_writes_git_bot_identity_into_web_environment(fleet_home, git_rep
     assert "GIT_COMMITTER_EMAIL=bot@fleet.example.test" in content
 
 
+def test_deploy_uses_project_git_bot_override_in_web_environment(fleet_home, git_repo):
+    """A project-level `git_bot` override must place that identity (not the
+    fleet default bot) into the instance's config.fleet.yaml web_environment."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    git_bot:
+      name: Sample Developer
+      email: sample@dev.example.test
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    content = (paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "GIT_AUTHOR_NAME=Sample Developer" in content
+    assert "GIT_AUTHOR_EMAIL=sample@dev.example.test" in content
+    assert "GIT_COMMITTER_EMAIL=sample@dev.example.test" in content
+    assert "bot@fleet.example.test" not in content
+
+
+def test_deploy_omits_git_bot_env_when_project_opts_out(fleet_home, git_repo):
+    """A project with `git_bot: false` must get NO GIT_AUTHOR_*/GIT_COMMITTER_*
+    injected, so the project's own git config (e.g. from a post-start hook)
+    resolves the commit identity instead."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    git_bot: false
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    content = (paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml").read_text(
+        encoding="utf-8"
+    )
+    assert "GIT_AUTHOR_NAME" not in content
+    assert "GIT_COMMITTER_EMAIL" not in content
+
+
 def test_deploy_writes_additional_fqdns_from_project_hostnames(fleet_home, git_repo):
     """A project declaring `additional_hostnames` must have those hostnames
     resolved to full per-instance FQDNs and written into the instance's

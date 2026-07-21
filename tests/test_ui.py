@@ -56,6 +56,19 @@ def test_index_page_renders_instance_list_and_deploy_form(fleet_home):
     assert 'name="auth_password" value="fleet"' in body
 
 
+def test_index_footer_shows_server_memory_and_disk(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert 'class="sys-stats"' in body
+    assert "RAM free" in body
+    assert "disk free" in body
+    # disk is always reportable via shutil.disk_usage on the instances mount
+    assert re.search(r"disk free.*(GiB|TiB|MiB|KiB|B)", body)
+
+
 def test_static_htmx_is_served(fleet_home):
     _setup_fleet_home(fleet_home)
     client = TestClient(create_app(fleet_home))

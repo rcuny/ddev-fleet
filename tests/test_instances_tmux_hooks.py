@@ -129,7 +129,7 @@ def _fake_registry():
         def typesense_enabled(self, project):
             return False
 
-        def git_bot(self):
+        def git_bot(self, project=None):
             return None
 
     return _Registry()
