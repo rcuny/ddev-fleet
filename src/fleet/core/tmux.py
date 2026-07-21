@@ -17,6 +17,7 @@ from fleet.core.runner import RunResult, run_streamed
 SESSION = "fleet"
 GENERAL_WINDOW = "general"
 SIDEBAR_WIDTH = 30
+MIN_BASH_WIDTH = 10
 SIDEBAR_ROLE_OPT = "@fleet_role"
 SIDEBAR_ROLE = "sidebar"
 MANAGED_OPT = "@fleet_managed"
@@ -225,7 +226,10 @@ def apply_pane_layout(window: str, *, runner=run_streamed) -> None:
     non-sidebar width moves the border *between the bash panes* (not the sidebar
     border), so the other bash pane takes the equal remainder and the sidebar
     stays fixed. Best-effort: a missing sidebar or an unparseable window width
-    simply skips that step, never raises."""
+    simply skips that step, never raises. The sidebar always stays fixed; the
+    bash-even step itself is skipped on very narrow windows (below
+    MIN_BASH_WIDTH) to avoid tmux clamping the resize and stealing a column
+    from the sidebar."""
     sidebar: str | None = None
     non_sidebar: list[str] = []
     for pane_id, role in _list_panes_with_roles(window, runner=runner):
@@ -247,10 +251,10 @@ def apply_pane_layout(window: str, *, runner=run_streamed) -> None:
             width = int(raw)
         except ValueError:
             return
-        _run(
-            runner,
-            ["resize-pane", "-t", non_sidebar[0], "-x", str((width - SIDEBAR_WIDTH) // 2)],
-        )
+        half = (width - SIDEBAR_WIDTH) // 2
+        if half < MIN_BASH_WIDTH:
+            return
+        _run(runner, ["resize-pane", "-t", non_sidebar[0], "-x", str(half)])
 
 
 def reset_window(paths, window: str, *, runner=run_streamed) -> None:

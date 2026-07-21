@@ -464,6 +464,22 @@ def test_apply_pane_layout_skips_bash_even_on_bad_width():
     assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no bad bash resize
 
 
+def test_apply_pane_layout_skips_bash_even_on_narrow_window():
+    win = "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\t", "%3\tsidebar"]
+            ),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, ["34"]),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %3 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar still fixed
+    assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no tiny bash resize
+
+
 # --- Task 2: wire apply_pane_layout into creation + reset ------------------
 
 
@@ -514,3 +530,26 @@ def test_reset_window_applies_pane_layout(monkeypatch):
     )
     tmux.reset_window(paths, win, runner=fake)
     assert recorded == [win]
+
+
+def test_reset_window_evens_bash_panes_end_to_end():
+    """reset_window's call to the *real* apply_pane_layout (not monkeypatched)
+    must resize both the sidebar and the two bash panes when the window
+    already has two bash panes + a sidebar."""
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "oak--click-3"
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general", win]),
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%20\t", "%21\t", "%22\tsidebar"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["sidebar"]),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, ["100"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %22 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar fixed
+    assert "tmux resize-pane -t %20 -x 35" in joined  # bash-even, (100-30)//2=35
