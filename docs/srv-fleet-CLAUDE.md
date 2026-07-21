@@ -11,6 +11,9 @@ user on the server has grounded context without reading the whole spec.
 ```yaml
 fleet:
   domain: <string>                  # wildcard DNS root, e.g. fleet.example.com
+  git_bot_name: <string>            # OPTIONAL — default commit identity name  (default "ddev-fleet bot")
+  git_bot_email: <string>           # OPTIONAL — default commit identity email (default bot@<domain>)
+  # git_bot: false                  # OPTIONAL — disable git identity injection fleet-wide
 
 projects:
   <project-key>:
@@ -18,10 +21,23 @@ projects:
     default_template: <string>        # OPTIONAL — template used when `fleet deploy` omits one
     default_branch: <string>          # OPTIONAL — branch used when `fleet deploy` omits --branch
     additional_hostnames: [<string>, ...]  # OPTIONAL — extra FQDNs routed to the instance
+    git_bot:                          # OPTIONAL — per-project commit identity override:
+      name: <string>                  #   {name, email} overrides for this project only
+      email: <string>                 #   (omit either to inherit the fleet default)
+    # git_bot: false                  #   ...or `false` to inject NO git identity (project's own
+    #                                 #   `git config` / config.claude-code.local.yaml hook wins)
     templates:
       <template-name>:
         post_deploy: [<string>, ...]  # OPTIONAL — commands run after deploy for this template
 ```
+
+**git identity injection.** The fleet injects `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
+into each instance's `config.fleet.yaml` `web_environment` so commits made
+inside a container are attributed to a known identity. **Those env vars override
+`git config user.*`** — so a project's own `git config` (e.g. a
+`config.claude-code.local.yaml` post-start hook) can only take effect if the
+project sets `git_bot: false` (opt-out). To attribute commits to a real person
+instead, set `git_bot: {name, email}` on the project (this is what `oak` does).
 
 The registry is declarative and read-only at runtime — `fleet.yml` lives in
 `/srv/fleet/config` (a git checkout kept in sync with `fleet refresh-config`,

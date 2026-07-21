@@ -31,9 +31,9 @@ shell's own (unrelated) DDEV setup.
 | File | Responsibility |
 |---|---|
 | `cli.py` | Thin argparse CLI (`fleet …`); calls straight into `fleet.core`, never depends on the daemon |
-| `daemon.py` | FastAPI app: `/api/tls-authorize` (Caddy on-demand TLS callback), `/api/jobs/{id}`, `/ws/instances/{id}/log` (HMAC-token-gated WebSocket), `/` + `/ui/*` HTMX routes for the web UI |
+| `daemon.py` | FastAPI app: `/api/tls-authorize` (Caddy on-demand TLS callback), `/api/jobs/{id}`, `/ws/instances/{id}/log` (HMAC-token-gated WebSocket), `/` + `/ui/*` HTMX routes for the web UI. The `/` index also renders a footer of host stats via `core/sysinfo` |
 | `jobs.py` | In-memory `JobManager` backing the web UI's async deploy jobs (not a system of record — `.fleet/deploy.log` on disk is) |
-| `core/registry.py` | Loads/validates `fleet.yml` (`Registry`), resolves `(project, template, branch, label)` → `ResolvedInstance`; registry is declarative and read-only at runtime |
+| `core/registry.py` | Loads/validates `fleet.yml` (`Registry`), resolves `(project, template, branch, label)` → `ResolvedInstance`; registry is declarative and read-only at runtime. `git_bot(project)` resolves the per-instance commit identity — per-project `git_bot: {name,email}` override or `false` opt-out, over fleet-level defaults |
 | `core/instances.py` | Orchestrates `deploy`/`destroy`/`start`/`stop`/`list_instances`/`snapshot` — the core engine; `FleetPaths` maps `FLEET_HOME` to all on-disk paths |
 | `core/fleetconfig.py` | Writes the one fleet-owned file per instance, `.ddev/config.fleet.yaml` (name, project_tld, `web_environment` incl. Claude token, git bot identity, Typesense vars), plus `.ddev/.env`, `settings.local.php`/`services.fleet.yml`, and `.git/info/exclude` bookkeeping |
 | `core/gitops.py` | `clone`/`update` of an instance's git worktree |
@@ -45,6 +45,7 @@ shell's own (unrelated) DDEV setup.
 | `core/caddyauth.py` | Rotates the Caddy dashboard `basic_auth` password WITHOUT Ansible: hashes via `caddy hash-password`, atomically rewrites the fleet-owned snippet `/etc/caddy/fleet/admin-auth.conf` (imported by `Caddyfile.j2`, seeded once by the `caddy` Ansible role), `caddy validate`s, then reloads Caddy via `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019 — no sudo, no privilege escalation, works under `fleet.service`'s `NoNewPrivileges=yes` sandbox). Backs `fleet set-admin-password` / `fleet rotate-admin-password` |
 | `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race |
 | `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe) |
+| `core/sysinfo.py` | Host stats for the web UI footer: `SystemStats.gather` (free/total RAM from `/proc/meminfo`, free/total disk from `shutil.disk_usage` on the instances mount) + `fmt_bytes`; memory → `n/a` if `/proc/meminfo` is unreadable |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
 
 ## Testing
