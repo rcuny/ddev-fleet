@@ -93,6 +93,7 @@ def ensure_instance_window(instance_id: str, instance_dir: Path, *, runner=run_s
     )
     _run(runner, ["set-option", "-w", "-t", f"{SESSION}:{instance_id}", MANAGED_OPT, "1"])
     ensure_sidebar(instance_id, runner=runner)
+    apply_pane_layout(instance_id, runner=runner)
     _run(runner, ["select-pane", "-t", main_pane])
 
 
@@ -305,9 +306,7 @@ def reset_window(paths, window: str, *, runner=run_streamed) -> None:
         _run(runner, ["respawn-pane", "-k", "-t", sidebar])
     else:
         ensure_sidebar(window, runner=runner)
-        sidebar = _sidebar_pane_id(window, runner=runner)
-    if sidebar:
-        _run(runner, ["resize-pane", "-t", sidebar, "-x", str(SIDEBAR_WIDTH)])
+    apply_pane_layout(window, runner=runner)
     _run(runner, ["select-pane", "-t", base])
 
 

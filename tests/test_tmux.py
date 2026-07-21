@@ -462,3 +462,55 @@ def test_apply_pane_layout_skips_bash_even_on_bad_width():
     joined = _joined(fake)
     assert f"tmux resize-pane -t %3 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar still fixed
     assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no bad bash resize
+
+
+# --- Task 2: wire apply_pane_layout into creation + reset ------------------
+
+
+def test_ensure_instance_window_applies_pane_layout(monkeypatch):
+    import sys as _sys
+
+    win = "oak--dev-1"
+    dir_ = Path("/srv/fleet/instances/oak--dev-1")
+    recorded = []
+    monkeypatch.setattr(
+        tmux, "apply_pane_layout", lambda window, *, runner=None: recorded.append(window)
+    )
+    sidebar_split = (
+        "tmux split-window -hbf -l 30 -t fleet:oak--dev-1 -d -P -F #{pane_id} -- "
+        + _sys.executable
+        + " -m fleet.cli tmux-sidebar --window oak--dev-1"
+    )
+    fake = FakeRunner(
+        scripted={
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general"]),
+            "tmux new-window -t fleet -n oak--dev-1 -c "
+            + str(dir_)
+            + " -P -F #{pane_id}": RunResult(0, ["%5"]),
+            "tmux list-panes -t fleet:oak--dev-1 -F #{@fleet_role}": RunResult(0, ["", ""]),
+            sidebar_split: RunResult(0, ["%9"]),
+        }
+    )
+    tmux.ensure_instance_window(win, dir_, runner=fake)
+    assert recorded == [win]
+
+
+def test_reset_window_applies_pane_layout(monkeypatch):
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "oak--click-3"
+    recorded = []
+    monkeypatch.setattr(
+        tmux, "apply_pane_layout", lambda window, *, runner=None: recorded.append(window)
+    )
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general", win]),
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%10\t", "%11\tsidebar"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["sidebar"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    assert recorded == [win]
