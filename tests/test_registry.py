@@ -248,6 +248,120 @@ projects:
     assert registry.git_bot() == ("Custom Bot", "custom@bot.example.test")
 
 
+def test_git_bot_project_override_returns_project_identity(fleet_home):
+    """A project-level `git_bot: {name, email}` overrides the fleet default
+    for that project only; other projects keep the fleet identity."""
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    git_bot:
+      name: Sample Developer
+      email: sample@dev.example.test
+    templates:
+      default: {}
+  other:
+    git: git@example.test:org/other.git
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+    assert registry.git_bot("oak") == ("Sample Developer", "sample@dev.example.test")
+    assert registry.git_bot("other") == ("ddev-fleet bot", "bot@fleet.example.test")
+    assert registry.git_bot() == ("ddev-fleet bot", "bot@fleet.example.test")
+
+
+def test_git_bot_project_partial_override_falls_back_to_default(fleet_home):
+    """A project `git_bot` mapping that sets only one of name/email inherits
+    the fleet default for the missing field."""
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  git_bot_name: Base Bot
+  git_bot_email: base@bot.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    git_bot:
+      email: sample@dev.example.test
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+    assert registry.git_bot("oak") == ("Base Bot", "sample@dev.example.test")
+
+
+def test_git_bot_project_opt_out_returns_none(fleet_home):
+    """A project-level `git_bot: false` disables env injection for that
+    project (option 1) so the project's own git config can take effect."""
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    git_bot: false
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+    assert registry.git_bot("oak") is None
+
+
+def test_git_bot_fleet_global_opt_out_returns_none(fleet_home):
+    """`fleet.git_bot: false` disables env injection fleet-wide, but a project
+    override still wins."""
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  git_bot: false
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    git_bot:
+      name: Sample Developer
+      email: sample@dev.example.test
+    templates:
+      default: {}
+  other:
+    git: git@example.test:org/other.git
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+    assert registry.git_bot() is None
+    assert registry.git_bot("other") is None
+    assert registry.git_bot("oak") == ("Sample Developer", "sample@dev.example.test")
+
+
+def test_git_bot_invalid_shape_raises_registry_error(fleet_home):
+    """A project `git_bot` that is neither a mapping nor `false` is a config
+    error caught at load time with an actionable message."""
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    git_bot: "sample"
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match="projects.oak.git_bot"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):
     """A nonexistent fleet.yml must raise RegistryError with guidance,
     not a raw FileNotFoundError traceback in the CLI."""

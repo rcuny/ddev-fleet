@@ -66,6 +66,15 @@ class Registry:
             if "git" not in project_block:
                 raise RegistryError(f"projects.{project_key}.git: missing")
 
+            if "git_bot" in project_block:
+                gb = project_block["git_bot"]
+                if gb is not False and not isinstance(gb, dict):
+                    raise RegistryError(
+                        f"projects.{project_key}.git_bot: must be a mapping "
+                        "(name/email) to override the identity, or false to "
+                        "disable git identity injection for this project"
+                    )
+
             templates = project_block.get("templates") or {}
             for template_key, template_block in templates.items():
                 try:
@@ -84,11 +93,45 @@ class Registry:
     def domain(self) -> str:
         return str(self._data["fleet"]["domain"])
 
-    def git_bot(self) -> tuple[str, str]:
+    def git_bot(self, project: str | None = None) -> tuple[str, str] | None:
+        """Resolve the git commit identity injected into an instance's
+        ``web_environment`` as ``GIT_AUTHOR_*``/``GIT_COMMITTER_*``.
+
+        Precedence (highest first):
+          1. A project-level ``git_bot`` — a mapping ``{name, email}`` overrides
+             the identity for that project (missing keys fall back to the fleet
+             default); ``false`` disables injection for that project entirely
+             (returns ``None``), letting the project's own git config decide.
+          2. The fleet-level default: ``fleet.git_bot_name``/``git_bot_email``
+             (or ``ddev-fleet bot`` / ``bot@<domain>``); ``fleet.git_bot: false``
+             disables injection fleet-wide.
+
+        Returning ``None`` means "inject no GIT_* env vars" — the mechanism that
+        lets a project's committed identity (e.g. a post-start ``git config``
+        hook) win, since those env vars otherwise override git config.
+        """
         fb = self._data["fleet"]
-        name = fb.get("git_bot_name") or "ddev-fleet bot"
-        email = fb.get("git_bot_email") or f"bot@{self.domain}"
-        return (str(name), str(email))
+        default_name = str(fb.get("git_bot_name") or "ddev-fleet bot")
+        default_email = str(fb.get("git_bot_email") or f"bot@{self.domain}")
+        fleet_default: tuple[str, str] | None = (
+            None if fb.get("git_bot") is False else (default_name, default_email)
+        )
+
+        if project is None or not self.has_project(project):
+            return fleet_default
+
+        block = self._project_block(project)
+        if "git_bot" not in block:
+            return fleet_default
+        override = block["git_bot"]
+        if override is False:
+            return None
+        # dict override: fall back to the base identity strings (not the
+        # possibly-None fleet_default) for any field the project omits.
+        return (
+            str(override.get("name") or default_name),
+            str(override.get("email") or default_email),
+        )
 
     def project_keys(self) -> list[str]:
         return list((self._data.get("projects") or {}).keys())
