@@ -217,6 +217,41 @@ def _sidebar_pane_id(window: str, *, runner=run_streamed) -> str | None:
     return None
 
 
+def apply_pane_layout(window: str, *, runner=run_streamed) -> None:
+    """Re-assert the standard pane widths for `window`: the sidebar fixed at
+    SIDEBAR_WIDTH, and — on instance tabs with two bash panes — the two bash
+    panes made equal. Resizing one of the two adjacent bash panes to half the
+    non-sidebar width moves the border *between the bash panes* (not the sidebar
+    border), so the other bash pane takes the equal remainder and the sidebar
+    stays fixed. Best-effort: a missing sidebar or an unparseable window width
+    simply skips that step, never raises."""
+    sidebar: str | None = None
+    non_sidebar: list[str] = []
+    for pane_id, role in _list_panes_with_roles(window, runner=runner):
+        if role == SIDEBAR_ROLE:
+            sidebar = pane_id
+        else:
+            non_sidebar.append(pane_id)
+
+    if sidebar:
+        _run(runner, ["resize-pane", "-t", sidebar, "-x", str(SIDEBAR_WIDTH)])
+
+    if len(non_sidebar) >= 2:
+        result = _run(
+            runner,
+            ["display-message", "-p", "-t", f"{SESSION}:{window}", "#{window_width}"],
+        )
+        raw = result.lines[0].strip() if result.lines else ""
+        try:
+            width = int(raw)
+        except ValueError:
+            return
+        _run(
+            runner,
+            ["resize-pane", "-t", non_sidebar[0], "-x", str((width - SIDEBAR_WIDTH) // 2)],
+        )
+
+
 def reset_window(paths, window: str, *, runner=run_streamed) -> None:
     """Rebuild the standard pane layout for `window` in place (no kill-window,
     so the tab keeps its index). general -> 1 bash + sidebar; instance -> 2 bash

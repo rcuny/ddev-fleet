@@ -414,3 +414,51 @@ def test_reset_window_absent_window_is_noop():
     tmux.reset_window(paths, "oak--gone", runner=fake)
     joined = _joined(fake)
     assert not any("respawn-pane" in c for c in joined)
+
+
+def test_apply_pane_layout_instance_evens_bash_panes():
+    win = "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\t", "%3\tsidebar"]
+            ),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, ["100"]),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %3 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar fixed
+    assert "tmux resize-pane -t %1 -x 35" in joined  # (100-30)//2 on the first bash pane
+
+
+def test_apply_pane_layout_general_only_fixes_sidebar():
+    win = "general"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\tsidebar"]
+            ),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %2 -x {tmux.SIDEBAR_WIDTH}" in joined
+    assert not any("window_width" in c for c in joined)  # single bash -> no width query
+    assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no bash-even
+
+
+def test_apply_pane_layout_skips_bash_even_on_bad_width():
+    win = "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\t", "%3\tsidebar"]
+            ),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, [""]),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %3 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar still fixed
+    assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no bad bash resize
