@@ -17,7 +17,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from fleet.core import caddyauth, naming
+from fleet.core import caddyauth, naming, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
@@ -188,10 +188,15 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         paths, registry = _paths_and_registry()
         statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
         project_templates = {p: registry.template_keys(p) for p in registry.project_keys()}
+        sys_stats = await asyncio.to_thread(sysinfo.SystemStats.gather, paths.instances)
         return templates.TemplateResponse(
             request,
             "instances.html",
-            {"statuses": statuses, "project_templates": project_templates},
+            {
+                "statuses": statuses,
+                "project_templates": project_templates,
+                "sys_stats": sys_stats.display(),
+            },
         )
 
     @app.post("/ui/instances/{instance_id}/start")

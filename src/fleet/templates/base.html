@@ -16,10 +16,22 @@
       height: 12rem; overflow-y: auto; white-space: pre-wrap;
     }
     button.destroy { color: #b00; }
+    footer.sys-stats {
+      margin-top: 2rem; padding-top: 0.8rem; border-top: 1px solid #ddd;
+      color: #666; font-size: 0.85rem;
+    }
+    footer.sys-stats .mount { color: #999; }
   </style>
 </head>
 <body>
   <h1>ddev-fleet</h1>
   {% block content %}{% endblock %}
+  {% if sys_stats %}
+  <footer class="sys-stats">
+    Server: {{ sys_stats.mem_free }} RAM free / {{ sys_stats.mem_total }} total
+    &middot; {{ sys_stats.disk_free }} disk free / {{ sys_stats.disk_total }} total
+    <span class="mount">on {{ sys_stats.mount }}</span>
+  </footer>
+  {% endif %}
 </body>
 </html>
