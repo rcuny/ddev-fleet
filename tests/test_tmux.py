@@ -54,9 +54,8 @@ def test_ensure_instance_window_creates_window_split_and_focus():
 
     dir_ = Path("/srv/fleet/instances/oak--click-3")
     sidebar_split = (
-        "tmux split-window -hbf -l 30 -t fleet:oak--click-3 -d -P -F #{pane_id} -- "
-        + _sys.executable
-        + " -m fleet.cli tmux-sidebar --window oak--click-3"
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:oak--click-3 -d -P -F "
+        "#{pane_id} -- " + _sys.executable + " -m fleet.cli tmux-sidebar --window oak--click-3"
     )
     fake = FakeRunner(
         scripted={
@@ -133,7 +132,7 @@ def test_ensure_sidebar_splits_and_tags_when_absent():
     import sys as _sys
 
     split = (
-        "tmux split-window -hbf -l 30 -t fleet:general -d -P -F #{pane_id} -- "
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:general -d -P -F #{{pane_id}} -- "
         + _sys.executable
         + " -m fleet.cli tmux-sidebar --window general"
     )
@@ -163,7 +162,7 @@ def test_ensure_session_creates_when_absent():
     import sys as _sys
 
     sidebar_split = (
-        "tmux split-window -hbf -l 30 -t fleet:general -d -P -F #{pane_id} -- "
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:general -d -P -F #{{pane_id}} -- "
         + _sys.executable
         + " -m fleet.cli tmux-sidebar --window general"
     )
@@ -314,7 +313,7 @@ def test_reset_window_instance_respawns_and_rebuilds_two_bash_panes():
     # ...and does NOT recreate it via ensure_sidebar's split-window -hbf path
     assert not any("split-window -hbf" in c for c in joined)
     # restores sidebar width
-    assert any(c.startswith("tmux resize-pane -t %11 -x 30") for c in joined)
+    assert any(c.startswith(f"tmux resize-pane -t %11 -x {tmux.SIDEBAR_WIDTH}") for c in joined)
 
 
 def test_reset_window_instance_only_sidebar_creates_base_and_second_pane():
@@ -348,7 +347,7 @@ def test_reset_window_instance_only_sidebar_creates_base_and_second_pane():
     assert "tmux respawn-pane -k -t %20" in joined
     assert not any("split-window -hbf" in c for c in joined)
     # restores sidebar width against the pre-existing sidebar pane
-    assert any(c.startswith("tmux resize-pane -t %20 -x 30") for c in joined)
+    assert any(c.startswith(f"tmux resize-pane -t %20 -x {tmux.SIDEBAR_WIDTH}") for c in joined)
 
 
 def test_reset_window_sidebar_missing_recreates_via_ensure_sidebar():
@@ -361,7 +360,7 @@ def test_reset_window_sidebar_missing_recreates_via_ensure_sidebar():
     win = "oak--click-3"
     cwd = "/srv/fleet/instances/oak--click-3"
     sidebar_split = (
-        f"tmux split-window -hbf -l 30 -t fleet:{win} -d -P -F #{{pane_id}} -- "
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:{win} -d -P -F #{{pane_id}} -- "
         + _sys.executable
         + f" -m fleet.cli tmux-sidebar --window {win}"
     )
@@ -414,3 +413,141 @@ def test_reset_window_absent_window_is_noop():
     tmux.reset_window(paths, "oak--gone", runner=fake)
     joined = _joined(fake)
     assert not any("respawn-pane" in c for c in joined)
+
+
+def test_apply_pane_layout_instance_evens_bash_panes():
+    win = "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\t", "%3\tsidebar"]
+            ),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, ["100"]),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %3 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar fixed
+    assert "tmux resize-pane -t %1 -x 25" in joined  # (100-50)//2 on the first bash pane
+
+
+def test_apply_pane_layout_general_only_fixes_sidebar():
+    win = "general"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\tsidebar"]
+            ),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %2 -x {tmux.SIDEBAR_WIDTH}" in joined
+    assert not any("window_width" in c for c in joined)  # single bash -> no width query
+    assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no bash-even
+
+
+def test_apply_pane_layout_skips_bash_even_on_bad_width():
+    win = "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\t", "%3\tsidebar"]
+            ),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, [""]),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %3 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar still fixed
+    assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no bad bash resize
+
+
+def test_apply_pane_layout_skips_bash_even_on_narrow_window():
+    win = "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%1\t", "%2\t", "%3\tsidebar"]
+            ),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, ["34"]),
+        }
+    )
+    tmux.apply_pane_layout(win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %3 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar still fixed
+    assert not any(c.startswith("tmux resize-pane -t %1") for c in joined)  # no tiny bash resize
+
+
+# --- Task 2: wire apply_pane_layout into creation + reset ------------------
+
+
+def test_ensure_instance_window_applies_pane_layout(monkeypatch):
+    import sys as _sys
+
+    win = "oak--dev-1"
+    dir_ = Path("/srv/fleet/instances/oak--dev-1")
+    recorded = []
+    monkeypatch.setattr(
+        tmux, "apply_pane_layout", lambda window, *, runner=None: recorded.append(window)
+    )
+    sidebar_split = (
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:oak--dev-1 -d -P -F "
+        "#{pane_id} -- " + _sys.executable + " -m fleet.cli tmux-sidebar --window oak--dev-1"
+    )
+    fake = FakeRunner(
+        scripted={
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general"]),
+            "tmux new-window -t fleet -n oak--dev-1 -c "
+            + str(dir_)
+            + " -P -F #{pane_id}": RunResult(0, ["%5"]),
+            "tmux list-panes -t fleet:oak--dev-1 -F #{@fleet_role}": RunResult(0, ["", ""]),
+            sidebar_split: RunResult(0, ["%9"]),
+        }
+    )
+    tmux.ensure_instance_window(win, dir_, runner=fake)
+    assert recorded == [win]
+
+
+def test_reset_window_applies_pane_layout(monkeypatch):
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "oak--click-3"
+    recorded = []
+    monkeypatch.setattr(
+        tmux, "apply_pane_layout", lambda window, *, runner=None: recorded.append(window)
+    )
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general", win]),
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%10\t", "%11\tsidebar"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["sidebar"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    assert recorded == [win]
+
+
+def test_reset_window_evens_bash_panes_end_to_end():
+    """reset_window's call to the *real* apply_pane_layout (not monkeypatched)
+    must resize both the sidebar and the two bash panes when the window
+    already has two bash panes + a sidebar."""
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "oak--click-3"
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general", win]),
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%20\t", "%21\t", "%22\tsidebar"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["sidebar"]),
+            f"tmux display-message -p -t fleet:{win} #{{window_width}}": RunResult(0, ["100"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    joined = _joined(fake)
+    assert f"tmux resize-pane -t %22 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar fixed
+    assert "tmux resize-pane -t %20 -x 25" in joined  # bash-even, (100-50)//2=25

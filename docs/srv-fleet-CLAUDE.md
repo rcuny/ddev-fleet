@@ -105,6 +105,10 @@ into every instance of the project (`core/assets.py:_link_shared_dir`), and
   under the hood) — rebuilds the standard bash+sidebar panes in place if one
   got closed or mangled, without losing the tab's position in the window
   list.
+- Every tab uses the same layout: a fixed **30-column** left sidebar, and (on
+  instance tabs) two **equal** bash panes. If a pane border drifts — or a tab
+  looks lopsided — press `^b R` to re-even it (the reset re-asserts the sidebar
+  width and makes the two bash panes equal again).
 - The sidebar branch line and the web UI now show each instance's **actual
   currently checked-out git branch** (via `git rev-parse`), not the branch
   recorded at deploy time. The sidebar re-reads it about every 5 minutes; the
