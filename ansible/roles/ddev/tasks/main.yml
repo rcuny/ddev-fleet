@@ -57,6 +57,13 @@
   # load-bearing for the Caddy/DDEV port split (spec §9). Idempotence is
   # pinned to the literal port lines already present in global_config.yaml
   # rather than trusting `ddev config global`'s own change reporting.
+  # NOTE: DDEV serialises these ports as QUOTED strings (`router_http_port:
+  # "8080"`), so the guard must match the quoted form — an unquoted match
+  # (`router_http_port: 8080`) never hits and the task re-runs every apply.
+  # The quoted form also can't collide with DDEV's own commented-out default
+  # lines (`# router_http_port: "80"`). If a future DDEV ever emits these
+  # unquoted, the guard simply degrades to always-run — harmless, since the
+  # command re-sets the same correct values.
   ansible.builtin.command:
     cmd: >-
       ddev config global
@@ -76,8 +83,8 @@
     HOME: "{{ fleet_home_dir }}"
   changed_when: true
   when: >-
-    ('router_http_port: ' + (ddev_router_http_port | string)) not in ddev_global_config_text
-    or ('router_https_port: ' + (ddev_router_https_port | string)) not in ddev_global_config_text
+    ('router_http_port: "' + (ddev_router_http_port | string) + '"') not in ddev_global_config_text
+    or ('router_https_port: "' + (ddev_router_https_port | string) + '"') not in ddev_global_config_text
 
 - name: Check whether the fleet user's mkcert local CA already exists and is readable
   # mkcert's default CAROOT on Linux is $HOME/.local/share/mkcert; the file DDEV
