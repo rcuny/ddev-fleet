@@ -10,11 +10,15 @@
   force_handlers: true
   pre_tasks:
     # Host-local variable overrides live OUTSIDE /opt/ddev-fleet, so a code
-    # re-delivery (rsync/tar of a clean checkout) never reverts them. Use this
-    # for secrets like fleet_admin_bcrypt_hash: set the real hash in
-    # /etc/ddev-fleet/local-vars.yml on the host and the committed group_vars
-    # placeholder (fail-closed) is overridden. include_vars (precedence #18)
-    # outranks group_vars/all (#4), so the file's values win.
+    # re-delivery (rsync/tar of a clean checkout) never reverts them. Use
+    # this for any secret that shouldn't sit in the committed group_vars
+    # (e.g. fleet_repo_url with embedded credentials): set the real value in
+    # /etc/ddev-fleet/local-vars.yml on the host, and it overrides the
+    # committed default. include_vars (precedence #18) outranks
+    # group_vars/all (#4), so the file's values win. NOTE: the dashboard
+    # admin password is NOT one of these anymore — it's fleet-owned and
+    # rotated via `fleet rotate-admin-password` / `fleet set-admin-password`
+    # (fleet.core.caddyauth), never via group_vars or this override file.
     - name: Check for host-local variable overrides
       ansible.builtin.stat:
         path: /etc/ddev-fleet/local-vars.yml
@@ -26,6 +30,7 @@
     - base
     - docker
     - fleet_user
+    - shell_profile
     - ddev
     - claude_cli
     - caddy

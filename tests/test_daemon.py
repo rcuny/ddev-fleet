@@ -2,13 +2,12 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
+from fleet.core.instances import FleetPaths
 from fleet.daemon import create_app, mint_ws_token, verify_ws_token
 from fleet.jobs import Job
 
 
 def _setup_fleet_home(fleet_home):
-    from fleet.core.instances import FleetPaths
-
     paths = FleetPaths.from_home(fleet_home)
     paths.registry.parent.mkdir(parents=True, exist_ok=True)
     paths.registry.write_text(
@@ -168,8 +167,7 @@ def test_get_job_returns_state(fleet_home):
 
 def test_ws_log_sends_existing_content_then_appended_content(fleet_home):
     _setup_fleet_home(fleet_home)
-    instance_dir = fleet_home / "instances" / "demo--develop"
-    log_path = instance_dir / ".fleet" / "deploy.log"
+    log_path = FleetPaths.from_home(fleet_home).logs / "demo--develop" / "deploy.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text("line one\n", encoding="utf-8")
 
@@ -188,8 +186,7 @@ def test_ws_log_sends_existing_content_then_appended_content(fleet_home):
 
 def test_ws_log_waits_when_log_file_missing_then_streams_once_created(fleet_home):
     _setup_fleet_home(fleet_home)
-    instance_dir = fleet_home / "instances" / "demo--develop"
-    log_path = instance_dir / ".fleet" / "deploy.log"
+    log_path = FleetPaths.from_home(fleet_home).logs / "demo--develop" / "deploy.log"
 
     app = create_app(fleet_home)
     client = TestClient(app)
@@ -277,8 +274,7 @@ def test_ui_stop_invalid_instance_id_returns_400(fleet_home):
 
 def test_ws_log_heartbeat_sends_empty_frame_when_idle(fleet_home):
     _setup_fleet_home(fleet_home)
-    instance_dir = fleet_home / "instances" / "demo--develop"
-    log_path = instance_dir / ".fleet" / "deploy.log"
+    log_path = FleetPaths.from_home(fleet_home).logs / "demo--develop" / "deploy.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     log_path.write_text("line one\n", encoding="utf-8")
 
@@ -292,3 +288,54 @@ def test_ws_log_heartbeat_sends_empty_frame_when_idle(fleet_home):
 
         heartbeat = ws.receive_text()
         assert heartbeat == ""
+
+
+def test_instance_log_route_serves_central_log_as_plain_text(fleet_home):
+    _setup_fleet_home(fleet_home)
+    log_path = FleetPaths.from_home(fleet_home).logs / "demo--develop" / "deploy.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("[2026-07-16T00:00:00Z] deploy start\n", encoding="utf-8")
+
+    client = TestClient(create_app(fleet_home))
+    response = client.get("/ui/instances/demo--develop/log")
+
+    assert response.status_code == 200
+    assert response.text == "[2026-07-16T00:00:00Z] deploy start\n"
+    assert response.headers["content-type"].startswith("text/plain")
+
+
+def test_instance_log_route_returns_404_when_no_log_yet(fleet_home):
+    _setup_fleet_home(fleet_home)
+    # A syntactically valid instance id with nothing ever logged for it.
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get("/ui/instances/demo--develop/log")
+
+    assert response.status_code == 404
+
+
+def test_instance_log_route_rejects_invalid_instance_id_without_touching_disk(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get("/ui/instances/Bad_Id/log")
+
+    assert response.status_code == 404
+
+
+def test_instance_log_route_rejects_path_traversal_attempt(fleet_home):
+    """A malicious instance_id must never be able to escape `paths.logs` and
+    read an arbitrary file off disk. Starlette's default path converter for
+    `{instance_id}` already refuses to route a segment containing `/` (or
+    its `%2F` escape) to this endpoint at all — belt-and-braces with the
+    explicit `_INSTANCE_ID_RE` check for any single-segment id that isn't a
+    plain lowercase/alnum/hyphen instance id."""
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    for attempt in (
+        "/ui/instances/../../etc/passwd/log",
+        "/ui/instances/..%2F..%2Fetc%2Fpasswd/log",
+    ):
+        response = client.get(attempt)
+        assert response.status_code == 404

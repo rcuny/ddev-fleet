@@ -57,6 +57,13 @@
   # load-bearing for the Caddy/DDEV port split (spec §9). Idempotence is
   # pinned to the literal port lines already present in global_config.yaml
   # rather than trusting `ddev config global`'s own change reporting.
+  # NOTE: DDEV serialises these ports as QUOTED strings (`router_http_port:
+  # "8080"`), so the guard must match the quoted form — an unquoted match
+  # (`router_http_port: 8080`) never hits and the task re-runs every apply.
+  # The quoted form also can't collide with DDEV's own commented-out default
+  # lines (`# router_http_port: "80"`). If a future DDEV ever emits these
+  # unquoted, the guard simply degrades to always-run — harmless, since the
+  # command re-sets the same correct values.
   ansible.builtin.command:
     cmd: >-
       ddev config global
@@ -76,5 +83,44 @@
     HOME: "{{ fleet_home_dir }}"
   changed_when: true
   when: >-
-    ('router_http_port: ' + (ddev_router_http_port | string)) not in ddev_global_config_text
-    or ('router_https_port: ' + (ddev_router_https_port | string)) not in ddev_global_config_text
+    ('router_http_port: "' + (ddev_router_http_port | string) + '"') not in ddev_global_config_text
+    or ('router_https_port: "' + (ddev_router_https_port | string) + '"') not in ddev_global_config_text
+
+- name: Check whether the fleet user's mkcert local CA already exists and is readable
+  # mkcert's default CAROOT on Linux is $HOME/.local/share/mkcert; the file DDEV
+  # looks for is rootCA.pem there. We stat it AS the fleet user so `readable`
+  # reflects the fleet user's own access — catching both the "absent" and the
+  # "present but root-owned/unreadable" cases (the latter is the sudo-HOME=/root
+  # footgun noted below), either of which triggers (re)install.
+  ansible.builtin.stat:
+    path: "{{ fleet_home_dir }}/.local/share/mkcert/rootCA.pem"
+  become: true
+  become_user: "{{ fleet_user }}"
+  register: ddev_mkcert_ca
+
+- name: Install the mkcert local CA for the fleet user (silences DDEV's per-start warning)
+  # DDEV checks `mkcert -CAROOT` on every `ddev start`/`restart` and warns when
+  # the fleet user has no locally-trusted CA. That warning is cosmetic in this
+  # architecture — Caddy terminates public Let's Encrypt TLS and reverse-proxies
+  # to DDEV's *HTTP* router port (roles/caddy/templates/Caddyfile.j2), so DDEV's
+  # mkcert-signed HTTPS router cert (port 8443) is never presented to a client —
+  # but we create the CA anyway to keep instance start/restart output clean.
+  ansible.builtin.command:
+    cmd: mkcert -install
+  become: true
+  become_user: "{{ fleet_user }}"
+  environment:
+    # HOME override for the same reason as the router-config task above: sudo
+    # leaves HOME=/root, so without this mkcert writes its CAROOT under
+    # /root/.local/share and the fleet-run `ddev` would still find none.
+    HOME: "{{ fleet_home_dir }}"
+    # Restrict mkcert to the NSS/Firefox trust store (absent on this headless
+    # host, so silently skipped). This deliberately EXCLUDES the "system" store:
+    # that path shells out to `sudo` to write /usr/local/share/ca-certificates,
+    # which would hang or fail for the unprivileged fleet user. mkcert still
+    # creates the CAROOT files first regardless of the store list — and the CA
+    # does not need to be system-trusted here (nothing verifies DDEV's cert).
+    TRUST_STORES: nss
+  register: ddev_mkcert_install
+  changed_when: ddev_mkcert_install.rc == 0
+  when: not (ddev_mkcert_ca.stat.exists and ddev_mkcert_ca.stat.readable)

@@ -12,13 +12,13 @@ import time
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Query, WebSocket, WebSocketDisconnect
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from fleet.core import caddyauth, naming, sysinfo
 from fleet.core import instances as instances_mod
-from fleet.core import naming
 from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.jobs import JobManager
@@ -125,7 +125,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             return
 
         paths, _ = _paths_and_registry()
-        log_path = paths.instances / instance_id / ".fleet" / "deploy.log"
+        log_path = paths.logs / instance_id / "deploy.log"
 
         try:
             if log_path.exists():
@@ -160,15 +160,43 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         except WebSocketDisconnect:
             return
 
+    @app.get("/ui/instances/{instance_id}/log")
+    async def instance_log(instance_id: str):
+        # Same reject-before-touching-the-filesystem pattern as
+        # ws_instance_log above: instance_id is user-supplied (comes
+        # straight off the URL path), so it MUST be validated against
+        # _INSTANCE_ID_RE before it is ever joined onto paths.logs — that
+        # regex only allows lowercase alnum/hyphen, which rules out `..`,
+        # `/`, and other traversal characters. A 404 here (rather than a
+        # 400/FleetError) is deliberate: it doesn't distinguish "malformed
+        # id" from "no such log" to a caller, which is the least
+        # information to leak for what is otherwise a route requiring no
+        # separate auth token (it sits behind the dashboard's Caddy
+        # basic_auth, same as every other /ui/* route — see
+        # ansible/roles/caddy/templates/Caddyfile.j2's `@protected not path
+        # /ws/*` matcher).
+        if not _INSTANCE_ID_RE.match(instance_id):
+            return PlainTextResponse("not found\n", status_code=404)
+        paths, _ = _paths_and_registry()
+        log_path = paths.logs / instance_id / "deploy.log"
+        if not log_path.exists():
+            return PlainTextResponse("no deploy log yet\n", status_code=404)
+        return PlainTextResponse(log_path.read_text(encoding="utf-8"))
+
     @app.get("/")
     async def index(request: Request):
         paths, registry = _paths_and_registry()
         statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
         project_templates = {p: registry.template_keys(p) for p in registry.project_keys()}
+        sys_stats = await asyncio.to_thread(sysinfo.SystemStats.gather, paths.instances)
         return templates.TemplateResponse(
             request,
             "instances.html",
-            {"statuses": statuses, "project_templates": project_templates},
+            {
+                "statuses": statuses,
+                "project_templates": project_templates,
+                "sys_stats": sys_stats.display(),
+            },
         )
 
     @app.post("/ui/instances/{instance_id}/start")
@@ -210,6 +238,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         branch: str = Form(""),
         label: str = Form(""),
         fresh: str = Form(""),
+        auth: str = Form(""),
+        auth_password: str = Form(""),
     ):
         naming.validate_part(project)
         paths, registry = _paths_and_registry()
@@ -217,7 +247,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             registry, project, template or None, branch or None, label or None
         )
         inst_id = resolved.instance_id
-        log_path = str(paths.instances / inst_id / ".fleet" / "deploy.log")
+        log_path = str(paths.logs / inst_id / "deploy.log")
 
         def run_deploy():
             return instances_mod.deploy(
@@ -228,6 +258,15 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 branch=branch or None,
                 label=label or None,
                 fresh=bool(fresh),
+                # HTML checkboxes submit NOTHING when unchecked — `auth`
+                # arrives as "" (Form default) in that case, and bool("") is
+                # False, so an unchecked box means auth OFF, not a silent
+                # fall-through to the default-ON behavior. Deliberately NOT
+                # `auth_enabled=True if not auth else bool(auth)` — that
+                # would make "unchecked" indistinguishable from "field never
+                # sent" and always resolve to ON, which is the classic bug.
+                auth_enabled=bool(auth),
+                auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
             )
 
         job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)

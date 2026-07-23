@@ -27,6 +27,73 @@
     name: caddy
     state: present
 
+- name: Ensure the fleet-owned Caddy credential snippet directory exists
+  ansible.builtin.file:
+    path: "{{ fleet_caddy_snippet_dir }}"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: caddy
+    mode: "0750"
+
+- name: Ensure the fleet-owned per-instance Caddy auth snippet directory exists
+  # Per-instance basic-auth snippets (fleet.core.caddyauth, written/removed
+  # at deploy/destroy time — never by Ansible) live here. Pre-creating it
+  # with the same ownership as the parent snippet dir means the
+  # *.{{ fleet_domain }} site's glob import (Caddyfile.j2) never depends on
+  # Python-side mkdir() guessing at group ownership when a fresh instance
+  # is the very first to enable auth.
+  ansible.builtin.file:
+    path: "{{ fleet_caddy_snippet_dir }}/instances"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: caddy
+    mode: "0750"
+
+- name: Check whether the admin-auth snippet already exists
+  # Guards the seed below — this MUST run before we ever hash the default
+  # password or write the snippet, so a re-run of this role never clobbers
+  # a password rotated out-of-band by `fleet set-admin-password` /
+  # `fleet rotate-admin-password` (fleet.core.caddyauth).
+  ansible.builtin.stat:
+    path: "{{ fleet_caddy_snippet_dir }}/admin-auth.conf"
+  register: caddy_admin_auth_snippet_stat
+
+- name: Hash the distribution-default admin password (first provisioning only)
+  ansible.builtin.command:
+    argv:
+      - caddy
+      - hash-password
+      - --plaintext
+      - "{{ fleet_admin_default_password }}"
+  register: caddy_admin_default_hash
+  changed_when: false
+  when: not caddy_admin_auth_snippet_stat.stat.exists
+
+- name: Seed the admin-auth snippet with the default credentials
+  # Only runs when the file did not already exist (see the stat task above)
+  # — never overwrites a rotated password. The snippet is non-empty (Caddy
+  # only warns, never errors, on an empty *existing* file — but a real,
+  # working default is what "seed" means here and what README.md documents
+  # as the distribution default).
+  ansible.builtin.copy:
+    dest: "{{ fleet_caddy_snippet_dir }}/admin-auth.conf"
+    owner: "{{ fleet_user }}"
+    group: caddy
+    mode: "0640"
+    content: "{{ fleet_admin_user }} {{ caddy_admin_default_hash.stdout }}\n"
+  when: not caddy_admin_auth_snippet_stat.stat.exists
+
+- name: Remove the now-unnecessary fleet-caddy-reload sudoers grant
+  # Superseded: fleet.core.caddyauth.reload_caddy() now reloads via
+  # `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019,
+  # unauthenticated by default), which needs no privilege escalation at
+  # all — so this sudoers rule is no longer required. Actively remove it
+  # (not just stop installing it) so already-provisioned hosts have the
+  # stale privilege grant cleaned up on the next site.yml run.
+  ansible.builtin.file:
+    path: /etc/sudoers.d/fleet-caddy-reload
+    state: absent
+
 - name: Deploy the Caddyfile (spec §9.3)
   ansible.builtin.template:
     src: Caddyfile.j2

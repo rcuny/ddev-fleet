@@ -1,0 +1,112 @@
+---
+# Interactive shell prompt/aliases/exports for root and the fleet user.
+#
+# One system-wide, colour-aware-by-uid file (see the template header) rather
+# than two per-user .bashrc edits: it stays in sync automatically and avoids
+# blindly appending to a package-owned ~/.bashrc, which is fragile to
+# reprovision idempotently and easy to double-append.
+#
+# Delivered as /etc/profile.d/10-fleet-shell.sh (covers interactive LOGIN
+# shells for every account, via /etc/profile) PLUS an idempotent
+# blockinfile hook in /etc/bash.bashrc (covers interactive NON-login shells
+# — `su fleet`, `su root`, a plain `bash`, `ddev exec bash` — which never
+# read /etc/profile.d on Debian).
+- name: Deploy the shared interactive shell profile (prompt, aliases, exports)
+  ansible.builtin.template:
+    src: fleet-shell.sh.j2
+    dest: /etc/profile.d/10-fleet-shell.sh
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Source the shell profile for interactive non-login shells too
+  # /etc/profile.d/*.sh is only read via /etc/profile, which login shells
+  # process. Non-login interactive shells (su fleet / su root without -l,
+  # bare `bash`, `ddev exec bash`) skip /etc/profile entirely; on Debian
+  # bash instead reads /etc/bash.bashrc for those, so the profile.d script
+  # above would silently never run for them without this hook.
+  ansible.builtin.blockinfile:
+    path: /etc/bash.bashrc
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet shell profile"
+    insertafter: EOF
+    block: |
+      if [ -f /etc/profile.d/10-fleet-shell.sh ]; then
+          . /etc/profile.d/10-fleet-shell.sh
+      fi
+
+# THE TWO HOOKS ABOVE ARE NOT ENOUGH ON THEIR OWN, and it fails silently.
+# Both /etc/profile.d/* and /etc/bash.bashrc are processed BEFORE the user's
+# own ~/.bashrc, and Debian's stock ~/.bashrc then sets PS1 unconditionally —
+# clobbering our prompt while leaving the aliases/exports intact, so the role
+# looks like it worked. (Observed live on 2026-07-16: PS1 was still Debian's
+# default '\u@\h:\w\$' with /etc/profile.d/10-fleet-shell.sh correctly in
+# place.) Re-sourcing from the END of each user's ~/.bashrc is what actually
+# makes the prompt stick, for both login shells (~/.profile sources ~/.bashrc)
+# and non-login interactive ones. Do not "simplify" this away.
+# Only hook home dirs that actually exist. `debian` is the OVH/Kimsufi default
+# sudo account and is not created by this playbook, so it may legitimately be
+# absent on another host — and blockinfile's `create: true` would otherwise
+# happily write a .bashrc for a user that does not exist.
+- name: Check which target home directories exist
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  register: _shell_profile_homes
+  loop: "{{ shell_profile_home_dirs }}"
+
+- name: Re-source the shell profile at the end of each user's ~/.bashrc
+  ansible.builtin.blockinfile:
+    path: "{{ item.item }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet shell profile"
+    insertafter: EOF
+    create: true
+    # Home-dir basename == username for every account here (/root is the one
+    # exception). Deriving it per-item, rather than assuming fleet_user, is what
+    # lets /home/debian be owned by debian instead of by fleet.
+    owner: "{{ 'root' if item.item == '/root' else (item.item | basename) }}"
+    group: "{{ 'root' if item.item == '/root' else (item.item | basename) }}"
+    mode: "0644"
+    block: |
+      # Last word on PS1: Debian's default ~/.bashrc sets it above, so the
+      # fleet prompt must be (re-)applied after it to take effect.
+      if [ -f /etc/profile.d/10-fleet-shell.sh ]; then
+          . /etc/profile.d/10-fleet-shell.sh
+      fi
+  loop: "{{ _shell_profile_homes.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: item.stat.exists
+
+# --- fleet-only: export CLAUDE_CODE_OAUTH_TOKEN for interactive `claude` ----
+#
+# Must land in ~/.bashrc, NOT /etc/profile.d: /usr/local/bin/fleet wraps the
+# CLI in `sudo -u fleet "$FLEET_BIN" "$@"` — a NON-login shell, which sources
+# ~/.bashrc only. profile.d fires for login shells and would never run here.
+#
+# fleet only (not looped over shell_profile_home_dirs): .secrets is 0600
+# fleet:fleet, so sourcing it as root/debian would be a no-op at best.
+#
+# The one-liner form of this export exists unmarked on hosts provisioned
+# before 2026-07-17; the lineinfile below adopts it into the managed block.
+# The block is deliberately multi-line so that regexp cannot match what
+# blockinfile writes — otherwise the two tasks strip and re-add each other's
+# work on every run (verified: changed=2 forever).
+- name: Adopt any pre-existing unmanaged .secrets export line
+  ansible.builtin.lineinfile:
+    path: "{{ fleet_home_dir }}/.bashrc"
+    regexp: '^set -a; \. {{ fleet_srv_dir }}/\.secrets 2>/dev/null; set \+a'
+    state: absent
+
+- name: Export CLAUDE_CODE_OAUTH_TOKEN for interactive fleet shells
+  ansible.builtin.blockinfile:
+    path: "{{ fleet_home_dir }}/.bashrc"
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet secrets env"
+    insertafter: EOF
+    create: true
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0644"
+    block: |
+      # export CLAUDE_CODE_OAUTH_TOKEN for interactive claude
+      set -a
+      . {{ fleet_srv_dir }}/.secrets 2>/dev/null
+      set +a

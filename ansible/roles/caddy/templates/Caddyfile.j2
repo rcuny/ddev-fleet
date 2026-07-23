@@ -13,7 +13,16 @@
     # short-lived, instance-scoped token in the query string.
     @protected not path /ws/*
     basic_auth @protected {
-        {{ fleet_admin_user }} {{ fleet_admin_bcrypt_hash }}
+        # Fleet-owned and rotatable WITHOUT Ansible (fleet.core.caddyauth +
+        # `fleet set-admin-password` / `fleet rotate-admin-password`) — this
+        # imports a single LITERAL file, not a glob. Caddy treats a missing
+        # literal import path as a hard error, but a glob matching zero
+        # files as a silent no-op (verified against the Caddy docs); using a
+        # literal path here means Ansible's one-time seed task
+        # (roles/caddy/tasks/main.yml) is what guarantees the file always
+        # exists, and rotation after that never needs a re-render of this
+        # Caddyfile.
+        import {{ fleet_caddy_snippet_dir }}/admin-auth.conf
     }
     reverse_proxy 127.0.0.1:{{ fleet_daemon_port }}
 }
@@ -27,17 +36,30 @@
     # X-Forwarded-Proto=https so Drupal still sees the request as secure; the
     # 127.0.0.1 hop is plaintext-safe (never leaves the host).
     #
-    # /_typesense/* is same-origin browser access to the instance's Typesense
-    # service: strip the prefix and proxy to the shared ddev-router Typesense
-    # HTTP entrypoint. The Host header is preserved, so Traefik routes to the
-    # correct instance's Typesense. (Only reached if a client calls it.)
-    handle /_typesense/* {
-        uri strip_prefix /_typesense
-        reverse_proxy 127.0.0.1:{{ ddev_typesense_http_port }}
+    # Per-instance basic auth: each instance opting in (default: on) gets its
+    # own fleet-owned snippet at {{ fleet_caddy_snippet_dir }}/instances/<id>.conf
+    # — written/rotated/removed at deploy/destroy time by fleet.core.caddyauth,
+    # never by Ansible. This is a GLOB import, unlike the dashboard's literal
+    # admin-auth import above: the instances/ directory legitimately can be
+    # empty (no instances with auth yet), and a glob matching zero files is a
+    # silent Caddy no-op, whereas a literal missing path is a hard
+    # validate/reload error (verified against Caddy v2.8.4, 2026-07-16). Each
+    # snippet defines its own `@auth-<id>` matcher scoped with `host` to that
+    # instance's FQDN, so instances are never affected by each other's auth
+    # state.
+    import {{ fleet_caddy_snippet_dir }}/instances/*.conf
+    reverse_proxy 127.0.0.1:{{ ddev_router_http_port }}
+    tls {
+        on_demand
     }
-    handle {
-        reverse_proxy 127.0.0.1:{{ ddev_router_http_port }}
-    }
+}
+
+# Typesense browser endpoint: same instance hostname, dedicated TLS port.
+# Caddy terminates TLS (on-demand cert, reused from the :443 site) and proxies
+# to the shared ddev-router HTTP entrypoint, which routes to the correct
+# instance's Typesense by Host header. The browser search key is search-only.
+*.{{ fleet_domain }}:{{ fleet_typesense_public_port }} {
+    reverse_proxy 127.0.0.1:{{ ddev_typesense_http_port }}
     tls {
         on_demand
     }

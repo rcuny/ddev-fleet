@@ -63,8 +63,7 @@ fi
 echo
 echo "Next steps (see docs/runbook-server-rollout.md for the full checklist):"
 echo "  1. Add the deploy key above as a READ-ONLY deploy key on each git forge."
-echo "  2. Generate the admin password hash: caddy hash-password"
-echo "     then set fleet_admin_bcrypt_hash in ${FLEET_OPT_DIR}/ansible/group_vars/all.yml"
-echo "     and re-run this script."
+echo "  2. Rotate the dashboard admin password off the shipped default (admin/ddev-admin):"
+echo "     sudo -u fleet fleet rotate-admin-password   # no re-run of this script needed"
 echo "  3. Point DNS: fleet.<domain> and *.fleet.<domain> at this server's IP."
 echo "  4. Run 'fleet init' as the fleet user to mint the Claude Code OAuth token."

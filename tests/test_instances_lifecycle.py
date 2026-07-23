@@ -2,9 +2,10 @@ import subprocess
 
 import pytest
 
-from fleet.core import instances
+from fleet.core import caddyauth, instances
 from fleet.core.errors import DirtyWorktreeError, FleetError
 from fleet.core.registry import Registry
+from fleet.core.runner import RunResult
 from fleet.core.secrets import write_secret
 from tests.test_instances_deploy import HybridRunner, _registry_text
 
@@ -89,7 +90,10 @@ def test_deploy_fresh_destroys_and_reclones(fleet_home, git_repo):
     )
 
     command_names = [call["cmd"][0] for call in runner.calls]
-    assert command_names[0] == "ddev"  # ddev delete, from the fresh destroy, runs first
+    # The fresh destroy's tmux teardown (best-effort `tmux has-session`
+    # check, no session in tests) runs first, then `ddev delete`.
+    assert command_names[0] == "tmux"
+    assert command_names[1] == "ddev"
     assert not (instance_dir / "stray-file.txt").exists()
     assert (instance_dir / "README.md").exists()
 
@@ -109,6 +113,28 @@ def test_destroy_removes_instance_dir_and_lock_file(fleet_home, git_repo):
 
     assert not instance_dir.exists()
     assert not lock_path.exists()
+
+
+def test_destroy_does_not_delete_the_central_deploy_log(fleet_home, git_repo):
+    """The whole point of moving deploy logs to `paths.logs/` (outside
+    `instances/`) is that `destroy()` — which `shutil.rmtree`s the entire
+    instance directory via `_remove_instance_dir` — must not take the log
+    down with it."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    assert deploy_log.exists()
+    logged_content = deploy_log.read_text(encoding="utf-8")
+    assert "deploy complete" in logged_content
+
+    instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+    assert not (paths.instances / "demo--develop").exists()
+    assert deploy_log.exists()
+    assert deploy_log.read_text(encoding="utf-8") == logged_content
 
 
 def test_destroy_tolerates_ddev_delete_failure(fleet_home, git_repo):
@@ -135,6 +161,44 @@ def test_destroy_unknown_instance_raises(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     with pytest.raises(FleetError):
         instances.destroy(paths, registry, "demo--nonexistent", runner=HybridRunner())
+
+
+def test_remove_instance_dir_removes_populated_dir(tmp_path):
+    instance_dir = tmp_path / "instance"
+    (instance_dir / "sub").mkdir(parents=True)
+    (instance_dir / "file.txt").write_text("x\n", encoding="utf-8")
+    (instance_dir / "sub" / "nested.txt").write_text("y\n", encoding="utf-8")
+
+    instances._remove_instance_dir(instance_dir)
+
+    assert not instance_dir.exists()
+
+
+def test_remove_instance_dir_raises_fleet_error_when_removal_fails(tmp_path, monkeypatch):
+    instance_dir = tmp_path / "instance"
+    instance_dir.mkdir()
+    (instance_dir / "file.txt").write_text("x\n", encoding="utf-8")
+
+    monkeypatch.setattr(instances.shutil, "rmtree", lambda *args, **kwargs: None)
+
+    with pytest.raises(FleetError) as excinfo:
+        instances._remove_instance_dir(instance_dir)
+
+    assert str(instance_dir) in str(excinfo.value)
+
+
+def test_destroy_raises_when_directory_removal_fails(fleet_home, git_repo, monkeypatch):
+    """A destroy that cannot fully remove the instance directory must fail
+    loudly (FleetError), never silently leave a partial stub on disk."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    monkeypatch.setattr(instances.shutil, "rmtree", lambda *args, **kwargs: None)
+
+    with pytest.raises(FleetError):
+        instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
 
 
 def test_start_and_stop_compose_correct_argv(fleet_home, git_repo):
@@ -166,3 +230,64 @@ def test_stop_missing_instance_dir_raises(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     with pytest.raises(FleetError):
         instances.stop(paths, registry, "demo--nonexistent", runner=HybridRunner())
+
+
+# --- destroy() cleans up the per-instance Caddy auth snippet ---
+
+
+def test_destroy_removes_instance_auth_snippet(fleet_home, git_repo):
+    """A destroyed instance must never leave a stale `@auth-<id>` matcher
+    behind — it would either linger unused or collide with a later
+    re-deploy of the same instance id."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+    snippet_path = caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR / "demo--develop.conf"
+    assert snippet_path.exists()
+
+    instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+    assert not snippet_path.exists()
+
+
+def test_destroy_of_instance_with_auth_disabled_does_not_reload_caddy(fleet_home, git_repo):
+    """No snippet ever existed for this instance, so destroy's removal step
+    must be a no-op — no pointless validate/reload."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        auth_enabled=False,
+        runner=HybridRunner(),
+    )
+
+    runner = HybridRunner()
+    instances.destroy(paths, registry, "demo--develop", runner=runner)
+
+    reload_calls = [c for c in runner.calls if c["cmd"][:2] == ["caddy", "reload"]]
+    assert reload_calls == []
+
+
+def test_destroy_raises_fleet_error_when_auth_snippet_reload_fails(fleet_home, git_repo):
+    """If removing the auth snippet can't be made live (Caddy reload fails),
+    destroy() must fail loudly with a FleetError rather than silently
+    leaving Caddy running an unknown config."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    class FailingReloadRunner(HybridRunner):
+        def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
+            if cmd[:2] == ["caddy", "reload"]:
+                self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
+                return RunResult(returncode=1, lines=["admin API unreachable"])
+            return super().__call__(cmd, cwd=cwd, env=env, log_path=log_path, echo=echo)
+
+    with pytest.raises(FleetError, match="basic-auth"):
+        instances.destroy(paths, registry, "demo--develop", runner=FailingReloadRunner())

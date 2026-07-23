@@ -15,6 +15,7 @@
       - python3
       - python3-venv
       - unattended-upgrades
+      - tmux
     state: present
 
 - name: Enable unattended-upgrades periodic checks

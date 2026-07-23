@@ -13,7 +13,7 @@ Restart=always
 # Hardening — MUST NOT constrain container mounts managed by DDEV/Docker.
 NoNewPrivileges=yes
 ProtectSystem=full
-ReadWritePaths={{ fleet_srv_dir }}
+ReadWritePaths={{ fleet_srv_dir }} {{ fleet_caddy_snippet_dir }}
 
 [Install]
 WantedBy=multi-user.target

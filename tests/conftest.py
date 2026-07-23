@@ -8,7 +8,27 @@ import subprocess
 
 import pytest
 
+from fleet.core import caddyauth
 from fleet.core.runner import RunResult
+
+
+@pytest.fixture(autouse=True)
+def _isolate_caddy_paths(monkeypatch, tmp_path):
+    """Redirect the default per-instance Caddy auth paths away from the real
+    `/etc/caddy` for every test, fleet-suite-wide.
+
+    `fleet.core.instances.deploy()`/`destroy()` resolve their
+    `auth_snippet_dir`/`auth_caddyfile_path` at CALL time from
+    `caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR`/`DEFAULT_CADDYFILE_PATH` when
+    the caller doesn't pass an explicit override (see the None-sentinel
+    resolution in instances.py) — precisely so this one fixture can isolate
+    every real (non-monkeypatched) deploy()/destroy() call in the suite
+    without threading tmp_path overrides through ~30 individual call sites.
+    Harmless for tests that don't touch instances.deploy()/destroy() at all.
+    """
+    monkeypatch.setattr(caddyauth, "DEFAULT_INSTANCE_SNIPPET_DIR", tmp_path / "caddy-instances")
+    monkeypatch.setattr(caddyauth, "DEFAULT_CADDYFILE_PATH", tmp_path / "Caddyfile")
+
 
 SAMPLE_REGISTRY_YAML = """\
 fleet:
@@ -34,6 +54,7 @@ def fleet_home(tmp_path):
     home = tmp_path / "fleet-home"
     (home / "config" / "assets").mkdir(parents=True)
     (home / "instances").mkdir(parents=True)
+    (home / "logs").mkdir(parents=True)
     (home / "locks").mkdir(parents=True)
     return home
 

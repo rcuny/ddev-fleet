@@ -63,23 +63,109 @@ Alternative delivery methods (only if not using the tar pipe above):
 # (d) public-repo one-liner: curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
 ```
 
-The first run uses the placeholder `fleet_admin_bcrypt_hash` in
-`ansible/group_vars/all.yml` — basic auth will not yet accept a real
-password. Continue to step 3, then re-run bootstrap (or just re-run the
-playbook, step 3 below).
+The first run seeds the dashboard `basic_auth` snippet with the
+distribution-default credentials (`admin` / `ddev-admin` — see README.md
+"Default credentials") by hashing `fleet_admin_default_password` live on
+the host with `caddy hash-password`. No placeholder step and no second
+Ansible run are needed for auth to work. Rotate the default after rollout
+with `fleet rotate-admin-password` (step 3, below) — that command never
+touches Ansible.
 
-## 3. Generate the admin password hash
+## 2a. Updating an already-deployed server (code update)
+
+Sections 2–5 are first-provisioning only. Once a host is live, ship a new
+engine version with the lightweight path below. A full `bootstrap.sh` re-run
+(which runs the whole Ansible playbook) is **only** needed when system
+packages, the venv/dependencies, systemd units, or the Caddyfile change. For
+a pure Python code change the package is installed **editable**
+(`pip install -e`, `__editable__.ddev_fleet-*.pth` in the venv), so replacing
+the source under `/opt/ddev-fleet/src` and restarting `fleet.service` is
+enough — the running daemon picks up the new code on restart.
+
+### Option A — tar-over-ssh update (works today)
+
+Current mechanism: the server has **no git credential for the private
+`ddev-fleet.git`**, and `/opt/ddev-fleet` is a plain extracted tree (not a
+git checkout). Ship from a machine that has the repo and SSH access:
 
 ```bash
-caddy hash-password
+SRV=debian@ddev.personal.example
+# 1. (recommended) back up the current source for rollback
+ssh "$SRV" 'sudo rm -rf /opt/ddev-fleet.src.bak && sudo cp -a /opt/ddev-fleet/src /opt/ddev-fleet.src.bak'
+# 2. ship the committed HEAD tree (does not touch the venv — venv is gitignored)
+git -C /path/to/ddev-fleet archive --format=tar HEAD \
+  | ssh "$SRV" 'sudo tar -C /opt/ddev-fleet -xf - && sudo chown -R root:root /opt/ddev-fleet'
+# 3. refresh the config/registry checkout (brings new assets + fleet.yml)
+ssh "$SRV" 'sudo -u fleet git -C /srv/fleet/config pull --ff-only'
+# 4. restart the daemon
+ssh "$SRV" 'sudo systemctl restart fleet && sleep 2 && systemctl is-active fleet'
+# 5. verify
+ssh "$SRV" 'curl -s -o /dev/null -w "daemon:%{http_code}\n" http://127.0.0.1:8765/'
 ```
 
-Paste the output into `fleet_admin_bcrypt_hash` in
-`/opt/ddev-fleet/ansible/group_vars/all.yml`, then redeploy the Caddyfile:
+Run `sudo env FLEET_SKIP_FETCH=1 bash /opt/ddev-fleet/bootstrap.sh` between
+steps 2 and 4 **only** when dependencies or provisioning changed (not for a
+plain code change).
+
+Rollback:
 
 ```bash
-ansible-playbook -c local /opt/ddev-fleet/ansible/site.yml
+ssh "$SRV" 'sudo rm -rf /opt/ddev-fleet/src && sudo mv /opt/ddev-fleet.src.bak /opt/ddev-fleet/src && sudo systemctl restart fleet'
 ```
+
+### Option B — `git pull` update (enabled 2026-07-16)
+
+`/opt/ddev-fleet` is a git checkout of `ddev-fleet.git`, owned by `fleet` (the
+`fleet.service` user), tracking `origin/main`. The `fleet` user holds the
+read-only deploy key registered on the Bitbucket repo (same pattern as
+`ddev-fleet-config.git`). Ongoing updates:
+
+```bash
+SRV=debian@ddev.personal.example
+ssh "$SRV" '
+  sudo -u fleet git -C /opt/ddev-fleet pull --ff-only && \
+  sudo -u fleet git -C /srv/fleet/config pull --ff-only && \
+  sudo systemctl restart fleet && sleep 2 && systemctl is-active fleet'
+```
+
+The package is installed editable, so the restart alone picks up new source —
+no reinstall. Run `bootstrap.sh` / the Ansible playbook only when dependencies
+or provisioning change.
+
+> **How the checkout was created (in place, 2026-07-16):**
+> `sudo systemctl stop fleet`; `sudo chown -R fleet:fleet /opt/ddev-fleet`;
+> then as `fleet`: `git init -b main`, `git remote add origin <url>`,
+> `git fetch origin`, `git reset --hard origin/main` (this rewrites only
+> git-tracked files; the untracked, gitignored `venv/` is preserved);
+> `sudo systemctl start fleet`.
+>
+> **Ownership:** `/opt/ddev-fleet` is `fleet:fleet` — exactly the state the
+> `fleet_service` Ansible role enforces (its first task recursively chowns the
+> checkout to the fleet user, and the clone/pip tasks run as that user), so
+> re-running `bootstrap.sh` *preserves* fleet ownership and does not break
+> `git pull`. This in-place conversion simply brings the host to the state the
+> role already expects: a fleet-owned git checkout. A host operator's CLI
+> wrapper `/usr/local/bin/fleet` (installed by the role) execs the venv CLI as
+> the fleet user, so `fleet secret set …`, `fleet list`, etc. can be run from
+> any admin account without `sudo -u fleet` or the venv path.
+
+## 3. Rotate the admin password
+
+The host is already up with the distribution-default dashboard credentials
+(`admin` / `ddev-admin` — step 2 seeded them). Rotate now, as the `fleet`
+user — this hashes the password, writes the fleet-owned Caddy snippet at
+`/etc/caddy/fleet/admin-auth.conf`, validates the Caddyfile, and reloads
+Caddy directly. **No Ansible run, no Caddyfile redeploy.**
+
+```bash
+sudo -u fleet /usr/local/bin/fleet rotate-admin-password
+# prints the new password ONCE — save it now, it is not stored anywhere in the clear
+```
+
+(Or `fleet set-admin-password <password>` to choose your own instead of a
+generated one.) See `fleet.core.caddyauth` and README.md "Default
+credentials" for how this works — it never re-renders the Caddyfile and
+never touches `ansible/group_vars/all.yml`.
 
 ## 4. Add the deploy key to each forge
 
@@ -173,9 +259,9 @@ Additional live checks, not in spec §16 but load-bearing for this plan:
   # confirm the shared ddev-router publishes the Typesense HTTP entrypoint on loopback,
   ss -tlnp | grep -E ':8108\b'
   # Expected: a 127.0.0.1:8108 listener once at least one typesense-enabled instance is up.
-  # Then confirm the same-origin route end-to-end (replace the host with a real instance):
-  curl -s -o /dev/null -w '%{http_code}\n' https://<project>--<label>.fleet.personal.example/_typesense/health
-  # Expected: 200 (Typesense health via the Caddy /_typesense route).
+  # Then confirm the port-based public endpoint end-to-end (replace the host with a real instance):
+  curl -s -o /dev/null -w '%{http_code}\n' https://<project>--<label>.fleet.personal.example:9108/health
+  # Expected: 200 (Typesense health via the Caddy :9108 listener). See docs/README-typesense.md.
   ```
 
   Per the design spec's "Key assumption to verify": if `:8108` is NOT bound
@@ -192,12 +278,15 @@ Additional live checks, not in spec §16 but load-bearing for this plan:
 
   Expected: both commands exit `0`.
 
-- **`fleet_admin_bcrypt_hash` is your own password, not the shipped
-  placeholder** — the shipped value in `ansible/group_vars/all.yml` is a
-  syntactically valid bcrypt hash of a discarded random secret, so it
-  fails closed (no password will match it), but it is NOT your password.
-  Confirm it was replaced with your own `caddy hash-password` output
-  (step 3, above) before exposing `fleet.<domain>` publicly.
+- **The dashboard admin password has been rotated off the shipped
+  default** (`admin` / `ddev-admin`, seeded by step 2 — see README.md
+  "Default credentials") — confirm you ran `fleet rotate-admin-password`
+  or `fleet set-admin-password` (step 3, above) before exposing
+  `fleet.<domain>` publicly. Check the live snippet directly if unsure:
+
+  ```bash
+  sudo cat /etc/caddy/fleet/admin-auth.conf   # "admin $2..." — a real hash, not obviously the default
+  ```
 
 ## 7. Start the fleet daemon
 

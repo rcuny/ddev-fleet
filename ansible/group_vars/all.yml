@@ -31,6 +31,10 @@ fleet_daemon_port: 8765
 ddev_router_http_port: 8080
 ddev_router_https_port: 8443
 ddev_typesense_http_port: 8108
+# Public port Caddy exposes each instance's Typesense on for direct browser
+# access (spec: typesense edge exposure). MUST match
+# fleet.core.instances.TYPESENSE_PUBLIC_PORT in the Python codebase.
+fleet_typesense_public_port: 9108
 
 # --- Domain & TLS (spec §9) — AWAITS CONFIRMATION ---------------------------
 # fleet_domain already includes the "fleet." label (it matches fleet.yml's
@@ -42,12 +46,19 @@ ddev_typesense_http_port: 8108
 fleet_domain: fleet.personal.example
 acme_email: contact@personal.example
 
-# --- Caddy admin auth (spec §9.3) — AWAITS CONFIRMATION ---------------------
-# Placeholder hash — syntactically valid bcrypt of a discarded random secret
-# — auth FAILS CLOSED for every password until you replace it via
-# `caddy hash-password` (runbook step 3).
+# --- Caddy admin auth (spec §9.3) -------------------------------------------
+# The admin-auth Caddyfile snippet is fleet-owned and rotatable WITHOUT
+# Ansible: fleet.core.caddyauth + `fleet set-admin-password` / `fleet
+# rotate-admin-password` hash, write, validate, and reload Caddy directly
+# (see ansible/roles/caddy/tasks/main.yml + templates/Caddyfile.j2). Ansible's
+# only job is to SEED {{ fleet_caddy_snippet_dir }}/admin-auth.conf with the
+# distribution-default credentials on first provisioning — the seed task is
+# guarded so a re-run NEVER clobbers a snippet that's already there
+# (including one rotated in the meantime). Rotate the default immediately
+# after rollout — see README.md "Default credentials".
 fleet_admin_user: admin
-fleet_admin_bcrypt_hash: "$2b$14$uENGKN0eNjTf0VTAIpyZmOFSr2HzXOldKWVn61SImgrIV1GnbcHx."
+fleet_admin_default_password: ddev-admin
+fleet_caddy_snippet_dir: /etc/caddy/fleet
 
 # --- Product repo (spec §3.1, §17) — AWAITS CONFIRMATION --------------------
 fleet_repo_url: https://bitbucket.org/personal_maintainer/ddev-fleet.git

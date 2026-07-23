@@ -3,10 +3,57 @@
 from pathlib import Path
 
 from ruamel.yaml import YAML
+from ruamel.yaml.scalarstring import LiteralScalarString
 
 _yaml = YAML()
 _yaml.default_flow_style = False
 _yaml.indent(mapping=2, sequence=4, offset=2)
+
+# Seeds the container's ~/.claude.json past Claude Code's first-run
+# onboarding wizard (spec: .claude/user/docs/specs/
+# 2026-07-17-claude-onboarding-and-fleet-remote-design.md, Part B step 3).
+# CLAUDE_CODE_OAUTH_TOKEN authenticates API calls but does NOT mark
+# onboarding complete — the interactive TUI still shows the theme picker /
+# trust dialog unless hasCompletedOnboarding is set. This must MERGE, not
+# overwrite: ~/.claude.json also holds runtime keys (userID, machineID,
+# firstStartTime, per-project history) written by Claude Code itself, which
+# must survive. Runs as a `post-start` DDEV hook (not baked into the image
+# via homeadditions/) because DDEV creates the container user — and thus
+# /home/<user> — at runtime from the host uid, and re-copies homeadditions
+# on every start, which would clobber those runtime keys each time.
+#
+# ORDERING (load-bearing, verified on ddev v1.25.3): DDEV merges `hooks` from
+# config.yaml and every config.*.yaml ADDITIVELY, in filename order — it does
+# not replace them, so this cannot clobber a project's own hooks. That order
+# matters: a project may relink ~/.claude.json into its own tree (oak's
+# config.claude-code.yaml does exactly this, seeding it with `{}`), and this
+# seed must run AFTER that relink or it writes to a file that is about to be
+# replaced. "config.fleet.yaml" sorts after "config.claude-code.yaml", so it
+# does. A project shipping a later-sorting config.*.yaml that relinks
+# ~/.claude.json would defeat this.
+#
+# Writing through such a symlink is intentional: it lands the seed in the
+# project tree, where it persists across restarts.
+#
+# No single quotes inside the JS itself, so it can be wrapped in a
+# single-quoted `node -e '...'` shell argument without escaping.
+_CLAUDE_ONBOARDING_SEED_SCRIPT = (
+    'const fs = require("fs");\n'
+    'const path = (process.env.HOME || "/home/fleet") + "/.claude.json";\n'
+    "let data = {};\n"
+    'try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch (e) {}\n'
+    "data.hasCompletedOnboarding = true;\n"
+    'if (data.theme === undefined) { data.theme = "dark"; }\n'
+    "data.projects = data.projects || {};\n"
+    'const proj = data.projects["/var/www/html"] || {};\n'
+    "proj.hasTrustDialogAccepted = true;\n"
+    'data.projects["/var/www/html"] = proj;\n'
+    "fs.writeFileSync(path, JSON.stringify(data, null, 2));\n"
+)
+
+_CLAUDE_ONBOARDING_HOOK_EXEC = LiteralScalarString(
+    "node -e '\n" + _CLAUDE_ONBOARDING_SEED_SCRIPT + "'\n"
+)
 
 
 def write_fleet_config(
@@ -17,17 +64,31 @@ def write_fleet_config(
     additional_fqdns: list[str] | None = None,
     git_bot: tuple[str, str] | None = None,
     typesense: bool = False,
+    typesense_port: int = 9108,
+    typesense_admin_key: str | None = None,
+    typesense_search_key: str | None = None,
 ) -> Path:
     ddev_dir = instance_dir / ".ddev"
     ddev_dir.mkdir(parents=True, exist_ok=True)
     config_path = ddev_dir / "config.fleet.yaml"
 
-    data: dict = {"name": instance_id, "project_tld": domain}
+    # performance_mode: none — this fleet only ever runs on native Linux
+    # Docker hosts, where Mutagen is pure overhead. A project's own
+    # config.yaml may commit performance_mode: mutagen (e.g. for macOS
+    # devs); config.fleet.yaml merges after config.yaml (DDEV loads
+    # config.yaml first, then config.*.yaml overrides), so this scalar
+    # reliably wins over the project's setting.
+    data: dict = {"name": instance_id, "project_tld": domain, "performance_mode": "none"}
+    # DRUSH_OPTIONS_URI — always inject so `drush uli`/status report the
+    # instance's real fleet hostname instead of a project-hardcoded URI
+    # from a committed settings/config.local.yaml. Reuses the same
+    # instance_id + domain FQDN pattern as FLEET_TYPESENSE_HOST below /
+    # tokens.py's [[instance-fqdn]] token.
+    web_environment: list[str] = [f"DRUSH_OPTIONS_URI=https://{instance_id}.{domain}"]
     if claude_token:
-        data["web_environment"] = [f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}"]
+        web_environment.append(f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}")
     if git_bot:
         bot_name, bot_email = git_bot
-        web_environment = data.setdefault("web_environment", [])
         web_environment.extend(
             [
                 f"GIT_AUTHOR_NAME={bot_name}",
@@ -37,20 +98,57 @@ def write_fleet_config(
             ]
         )
     if typesense:
-        web_environment = data.setdefault("web_environment", [])
         web_environment.extend(
             [
                 f"FLEET_TYPESENSE_HOST={instance_id}.{domain}",
-                "FLEET_TYPESENSE_PORT=443",
-                "FLEET_TYPESENSE_PATH=/_typesense",
+                f"FLEET_TYPESENSE_PORT={typesense_port}",
             ]
         )
+        if typesense_admin_key:
+            web_environment.append(f"TYPESENSE_API_KEY={typesense_admin_key}")
+        if typesense_search_key:
+            web_environment.append(f"FLEET_TYPESENSE_SEARCH_KEY={typesense_search_key}")
+    data["web_environment"] = web_environment
     if additional_fqdns:
         data["additional_fqdns"] = list(additional_fqdns)
+    # Unconditional — write_web_build() below bakes Claude Code into every
+    # instance's web image regardless of claude_token, so every instance
+    # needs the onboarding wizard seeded past, not just ones with a token.
+    data["hooks"] = {"post-start": [{"exec": _CLAUDE_ONBOARDING_HOOK_EXEC}]}
 
     with open(config_path, "w", encoding="utf-8") as fh:
         _yaml.dump(data, fh)
     return config_path
+
+
+def set_web_env_var(instance_dir: Path, key: str, value: str) -> bool:
+    """Upsert a single `KEY=VALUE` entry into an existing instance's
+    `.ddev/config.fleet.yaml` `web_environment` list, in place, preserving
+    every other entry and top-level key (name, project_tld, additional_fqdns,
+    ...). Unlike `write_fleet_config`, this never rewrites the whole file —
+    it's the safe way to rotate a single secret (e.g. the Claude token)
+    without dropping the git-bot / Typesense env vars a full rewrite would
+    need but not have. Returns False if the config file doesn't exist yet
+    (nothing to update)."""
+    config_path = instance_dir / ".ddev" / "config.fleet.yaml"
+    if not config_path.exists():
+        return False
+
+    with open(config_path, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh) or {}
+
+    web_environment = data.setdefault("web_environment", [])
+    prefix = f"{key}="
+    for index, entry in enumerate(web_environment):
+        if entry == key or str(entry).startswith(prefix):
+            web_environment[index] = f"{key}={value}"
+            break
+    else:
+        web_environment.append(f"{key}={value}")
+
+    with open(config_path, "w", encoding="utf-8") as fh:
+        _yaml.dump(data, fh)
+    return True
 
 
 _CLAUDE_WEB_BUILD = "RUN npm install -g @anthropic-ai/claude-code\n"
@@ -113,6 +211,31 @@ def write_settings_local(instance_dir: Path, domain: str) -> list[Path]:
     settings_local_path.write_text(settings_content, encoding="utf-8")
     services_fleet_path.write_text(services_content, encoding="utf-8")
     return [settings_local_path, services_fleet_path]
+
+
+def write_ddev_env(instance_dir: Path, values: dict[str, str]) -> Path:
+    """Upsert KEY=VALUE lines into `.ddev/.env`, preserving any existing keys
+    not present in `values`. DDEV interpolates `.ddev/.env` into the
+    project's docker-compose, so this is how a service container (e.g.
+    Typesense) receives fleet-managed secrets like `TYPESENSE_API_KEY`."""
+    ddev_dir = instance_dir / ".ddev"
+    ddev_dir.mkdir(parents=True, exist_ok=True)
+    env_path = ddev_dir / ".env"
+
+    existing: dict[str, str] = {}
+    if env_path.exists():
+        for line in env_path.read_text(encoding="utf-8").splitlines():
+            stripped = line.strip()
+            if not stripped or stripped.startswith("#") or "=" not in stripped:
+                continue
+            key, _, value = stripped.partition("=")
+            existing[key.strip()] = value.strip()
+
+    existing.update(values)
+
+    lines = [f"{key}={value}" for key, value in existing.items()]
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return env_path
 
 
 def ensure_git_exclude(instance_dir: Path, patterns: list[str]) -> None:

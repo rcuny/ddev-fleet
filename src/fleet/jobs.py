@@ -1,8 +1,9 @@
 """In-memory job registry for long-running deploy operations (spec §13).
 
 No database — job state lives only for the daemon process's lifetime.
-`.fleet/deploy.log` on disk remains the durable record; this is a UI
-convenience layered on top, not a system of record.
+The central per-instance `<FLEET_HOME>/logs/<instance>/deploy.log` on disk
+(outside `instances/`, so it survives `fleet destroy`) remains the durable
+record; this is a UI convenience layered on top, not a system of record.
 """
 
 import asyncio

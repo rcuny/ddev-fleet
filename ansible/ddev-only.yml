@@ -1,0 +1,38 @@
+---
+# Scoped playbook: the DDEV role only (apt package + loopback router config +
+# fleet-user mkcert local CA).
+#
+# Use this instead of site.yml to (re)apply DDEV host config to a live host.
+# site.yml's fleet_service role rewrites /opt/ddev-fleet's git remote to https,
+# which breaks the SSH-key `git pull` the whole rollout flow depends on — so it
+# must never be run against the live server. This playbook touches only the
+# `ddev` role.
+#
+# It must live beside site.yml: group_vars/ resolves relative to the playbook's
+# directory, so a copy in /tmp silently runs with fleet_home_dir undefined.
+#
+#   cd /opt/ddev-fleet/ansible
+#   sudo ansible-playbook ddev-only.yml --check --diff   # preview
+#   sudo ansible-playbook ddev-only.yml
+#
+# Note: the mkcert -install task uses the `command` module, which ansible skips
+# under --check — so the dry run validates connectivity/vars but reports that
+# task as skipped; the real run performs it (idempotent: gated on a fleet-user
+# stat of the CAROOT rootCA.pem).
+#
+# pre_tasks mirror site.yml so /etc/ddev-fleet/local-vars.yml still overrides
+# the committed group_vars.
+- name: Apply DDEV host configuration (package, router ports, mkcert CA)
+  hosts: localhost
+  become: true
+  force_handlers: true
+  pre_tasks:
+    - name: Check for host-local variable overrides
+      ansible.builtin.stat:
+        path: /etc/ddev-fleet/local-vars.yml
+      register: _fleet_local_vars
+    - name: Load host-local variable overrides if present
+      ansible.builtin.include_vars: /etc/ddev-fleet/local-vars.yml
+      when: _fleet_local_vars.stat.exists
+  roles:
+    - ddev
