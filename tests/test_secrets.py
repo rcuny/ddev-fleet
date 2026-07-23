@@ -40,6 +40,32 @@ def test_read_secrets_ignores_blank_lines_and_comments(tmp_path):
     assert read_secrets(path) == {"FOO": "bar"}
 
 
+def test_read_secrets_strips_surrounding_double_quotes(tmp_path):
+    # A quoted value would otherwise land inside the asset's own quotes as
+    # TOKEN=""abc"" and reach the API with a stray quote attached.
+    path = tmp_path / ".secrets"
+    path.write_text('JIRA_CLAUDE_TOKEN="abc123"\n', encoding="utf-8")
+    assert read_secrets(path) == {"JIRA_CLAUDE_TOKEN": "abc123"}
+
+
+def test_read_secrets_strips_surrounding_single_quotes(tmp_path):
+    path = tmp_path / ".secrets"
+    path.write_text("FOO='bar'\n", encoding="utf-8")
+    assert read_secrets(path) == {"FOO": "bar"}
+
+
+def test_read_secrets_leaves_bare_and_inner_quotes_untouched(tmp_path):
+    path = tmp_path / ".secrets"
+    path.write_text('A=bar\nB=ab"cd\nC="unbalanced\n', encoding="utf-8")
+    assert read_secrets(path) == {"A": "bar", "B": 'ab"cd', "C": '"unbalanced'}
+
+
+def test_read_secrets_strips_only_one_quote_pair(tmp_path):
+    path = tmp_path / ".secrets"
+    path.write_text('A=""abc""\n', encoding="utf-8")
+    assert read_secrets(path) == {"A": '"abc"'}
+
+
 def test_write_secret_upsert_keeps_mode_0600(tmp_path):
     path = tmp_path / ".secrets"
     write_secret(path, "A", "1")

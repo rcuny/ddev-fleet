@@ -13,8 +13,23 @@ def read_secrets(path: Path) -> dict[str, str]:
         if not stripped or stripped.startswith("#") or "=" not in stripped:
             continue
         key, _, value = stripped.partition("=")
-        result[key.strip()] = value.strip()
+        result[key.strip()] = _unquote(value.strip())
     return result
+
+
+def _unquote(value: str) -> str:
+    """Strip one matching pair of surrounding quotes from a secret value.
+
+    Secret values are substituted into asset files that usually quote the
+    placeholder themselves (e.g. `TOKEN="[[some-token]]"`). A value stored
+    as `"abc"` would then land as `""abc""`, which consumers that strip only
+    one quote pair pass through to the API with a stray quote still attached
+    — silently, since the file looks correct at a glance. Normalising on
+    read makes a quoted secret file behave like a bare one.
+    """
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        return value[1:-1]
+    return value
 
 
 def write_secret(path: Path, key: str, value: str) -> None:
