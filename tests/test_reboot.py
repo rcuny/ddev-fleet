@@ -134,3 +134,148 @@ def test_send_email_returns_false_on_nonzero_exit(tmp_path):
         runner=fake,
     )
     assert sent is False
+
+
+def _fake(rc=0):
+    return FakeRunner(default=RunResult(returncode=rc, lines=[]))
+
+
+def test_reboot_notify_not_pending_no_state_is_noop(tmp_path):
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=tmp_path / "msmtprc",
+        state_path=tmp_path / "state.json",
+        marker=tmp_path / "reboot-required",
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=1000.0,
+        runner=_fake(),
+    )
+    assert sent is False
+    assert not (tmp_path / "state.json").exists()
+
+
+def test_reboot_notify_not_pending_clears_stale_state(tmp_path):
+    state_path = tmp_path / "state.json"
+    reboot._write_state(state_path, reboot.NotifyState(first_seen=1.0, last_notified=1.0))
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=tmp_path / "msmtprc",
+        state_path=state_path,
+        marker=tmp_path / "reboot-required",
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=1000.0,
+        runner=_fake(),
+    )
+    assert sent is False
+    assert not state_path.exists()
+
+
+def test_reboot_notify_no_msmtprc_is_noop_even_when_pending(tmp_path):
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=tmp_path / "nope",
+        state_path=tmp_path / "state.json",
+        marker=marker,
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=1000.0,
+        runner=_fake(),
+    )
+    assert sent is False
+    assert not (tmp_path / "state.json").exists()
+
+
+def test_reboot_notify_first_transition_sends_and_writes_state(tmp_path):
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    fake = _fake()
+
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        state_path=state_path,
+        marker=marker,
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=1000.0,
+        runner=fake,
+    )
+    assert sent is True
+    state = reboot._read_state(state_path)
+    assert state == reboot.NotifyState(first_seen=1000.0, last_notified=1000.0)
+
+
+def test_reboot_notify_within_cadence_does_not_resend(tmp_path):
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    reboot._write_state(state_path, reboot.NotifyState(first_seen=1000.0, last_notified=1000.0))
+    fake = _fake()
+
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        state_path=state_path,
+        marker=marker,
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=1000.0 + 3600,
+        interval_hours=24,
+        runner=fake,
+    )
+    assert sent is False
+    assert fake.calls == []
+    assert reboot._read_state(state_path) == reboot.NotifyState(1000.0, 1000.0)
+
+
+def test_reboot_notify_past_cadence_resends_and_updates_last_notified(tmp_path):
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    reboot._write_state(state_path, reboot.NotifyState(first_seen=1000.0, last_notified=1000.0))
+    fake = _fake()
+
+    now = 1000.0 + 25 * 3600
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        state_path=state_path,
+        marker=marker,
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=now,
+        interval_hours=24,
+        runner=fake,
+    )
+    assert sent is True
+    assert reboot._read_state(state_path) == reboot.NotifyState(1000.0, now)
+
+
+def test_reboot_notify_test_mode_bypasses_pending_and_cadence(tmp_path):
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    fake = _fake()
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        state_path=tmp_path / "state.json",
+        marker=tmp_path / "no-marker",
+        pkgs_file=tmp_path / "no.pkgs",
+        now=1000.0,
+        test=True,
+        runner=fake,
+    )
+    assert sent is True
+    assert not (tmp_path / "state.json").exists()  # test send never touches cadence state

@@ -11,6 +11,7 @@ Three consumers, one reader: `tmux_sidebar.py` (sidebar banner),
 from __future__ import annotations
 
 import json
+import socket
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -140,3 +141,68 @@ def send_email(
         echo=False,
     )
     return result.returncode == 0
+
+
+def reboot_notify(
+    *,
+    to_addr: str,
+    from_addr: str,
+    hostname: str | None = None,
+    msmtprc_path: Path = DEFAULT_MSMTPRC_PATH,
+    state_path: Path = DEFAULT_STATE_PATH,
+    marker: Path = MARKER_PATH,
+    pkgs_file: Path = PKGS_PATH,
+    interval_hours: float = 24.0,
+    now: float | None = None,
+    test: bool = False,
+    runner=run_streamed,
+) -> bool:
+    """Core of `fleet reboot-notify [--test]`. Returns True iff an email
+    was actually sent. Never raises: a bad relay must never turn a
+    oneshot systemd timer into a failed unit that pages nobody."""
+    now = now if now is not None else time.time()
+    resolved_hostname = hostname or socket.gethostname()
+
+    if test:
+        status = RebootStatus(pending=True, since=now, packages=["(test send)"])
+        subject, body = compose_email(status, hostname=resolved_hostname, now=now)
+        return send_email(
+            subject,
+            body,
+            to_addr=to_addr,
+            from_addr=from_addr,
+            msmtprc_path=msmtprc_path,
+            runner=runner,
+        )
+
+    status = read_reboot_status(marker, pkgs_file)
+    state = _read_state(state_path)
+
+    if not status.pending:
+        # Clear stale cadence state regardless of whether the email channel
+        # is configured — state tracks the *reboot*, not the send attempt.
+        if state is not None:
+            _clear_state(state_path)
+        return False
+
+    if not msmtprc_path.exists():
+        # Email channel not configured — sidebar/web-UI channels are
+        # unaffected either way; no state tracking for a channel that's off.
+        return False
+
+    due = state is None or (now - state.last_notified) >= interval_hours * 3600
+    if not due:
+        return False
+
+    subject, body = compose_email(status, hostname=resolved_hostname, now=now)
+    sent = send_email(
+        subject,
+        body,
+        to_addr=to_addr,
+        from_addr=from_addr,
+        msmtprc_path=msmtprc_path,
+        runner=runner,
+    )
+    first_seen = state.first_seen if state is not None else now
+    _write_state(state_path, NotifyState(first_seen=first_seen, last_notified=now))
+    return sent
