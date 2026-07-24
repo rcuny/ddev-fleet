@@ -19,6 +19,11 @@ _yaml = YAML()
 _yaml.preserve_quotes = True
 _yaml.width = 4096
 
+_RESERVED_PORTS = frozenset({22, 80, 443, 8765})
+_ROUTER_RESERVED_PORTS = frozenset({8080, 8443})
+_MIN_PORT = 1
+_MAX_PORT = 65535
+
 
 @dataclass
 class ResolvedInstance:
@@ -57,6 +62,57 @@ class Registry:
         registry._validate()
         return registry
 
+    def _validate_fleet_ports(self, fleet_block: dict) -> dict:
+        """Validate `fleet.ports` (spec §3.1) and return the raw mapping
+        `{name: {"public": int, "router": int}}` for Task 3's per-project
+        `ports:` unknown-reference check. `{}` if `fleet.ports` is absent —
+        a legacy-only registry (just `typesense: true`) stays valid."""
+        fleet_ports = fleet_block.get("ports") or {}
+        seen_public: dict[int, str] = {}
+        seen_router: dict[int, str] = {}
+        for name, entry in fleet_ports.items():
+            path = f"fleet.ports.{name}"
+            try:
+                validate_part(name)
+            except ValidationError as exc:
+                raise RegistryError(f"{path}: {exc.message}") from exc
+
+            if not isinstance(entry, dict) or set(entry.keys()) != {"public", "router"}:
+                raise RegistryError(
+                    f"{path}: must be a mapping with exactly the keys 'public' and 'router'"
+                )
+            public, router = entry["public"], entry["router"]
+            for field_name, value in (("public", public), ("router", router)):
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise RegistryError(f"{path}.{field_name}: must be an int, got {value!r}")
+                if not (_MIN_PORT <= value <= _MAX_PORT):
+                    raise RegistryError(
+                        f"{path}.{field_name}: {value} is out of range "
+                        f"[{_MIN_PORT}, {_MAX_PORT}]"
+                    )
+                if value in _RESERVED_PORTS:
+                    raise RegistryError(
+                        f"{path}.{field_name}: {value} is reserved (22/80/443/8765)"
+                    )
+            if router in _ROUTER_RESERVED_PORTS:
+                raise RegistryError(
+                    f"{path}.router: {router} collides with the reserved ddev-router "
+                    "ports (8080/8443)"
+                )
+            if public == router:
+                raise RegistryError(f"{path}: public and router must differ (both {public})")
+            if public in seen_public:
+                raise RegistryError(
+                    f"{path}.public: {public} is already used by fleet.ports.{seen_public[public]}"
+                )
+            seen_public[public] = name
+            if router in seen_router:
+                raise RegistryError(
+                    f"{path}.router: {router} is already used by fleet.ports.{seen_router[router]}"
+                )
+            seen_router[router] = name
+        return fleet_ports
+
     def _validate(self) -> None:
         data = self._data
         if "fleet" not in data:
@@ -64,6 +120,8 @@ class Registry:
         fleet_block = data["fleet"] or {}
         if "domain" not in fleet_block:
             raise RegistryError("missing key 'fleet.domain'")
+
+        self._validate_fleet_ports(fleet_block)
 
         projects = data.get("projects") or {}
         for project_key, project_block in projects.items():

@@ -415,6 +415,144 @@ def test_port_profile_unknown_name_raises(fleet_home, sample_registry_text):
         registry.port_profile("bogus")
 
 
+def test_fleet_ports_invalid_name_format_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    Bad_Name: { public: 9200, router: 8200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.Bad_Name"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_wrong_shape_missing_router_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    ts-dashboard: { public: 9111 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.ts-dashboard"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_wrong_shape_extra_key_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 8200, proto: udp }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.bad"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_out_of_range_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    toohigh: { public: 70000, router: 8200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.toohigh.public"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+@pytest.mark.parametrize("reserved", [22, 80, 443, 8765])
+def test_fleet_ports_reserved_public_port_raises(fleet_home, reserved):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: {{ public: {reserved}, router: 8200 }}
+
+projects: {{}}
+"""
+    with pytest.raises(RegistryError, match="reserved"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_router_collides_with_ddev_router_http_port_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 8080 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="8080"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_router_collides_with_ddev_router_https_port_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 8443 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="8443"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_self_collision_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 9200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="must differ"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_duplicate_public_ports_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    one: { public: 9200, router: 8200 }
+    two: { public: 9200, router: 8201 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="already used by fleet.ports.one"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_duplicate_router_ports_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    one: { public: 9200, router: 8200 }
+    two: { public: 9201, router: 8200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="already used by fleet.ports.one"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_absent_is_valid(fleet_home, sample_registry_text):
+    """A registry with no `fleet.ports` key at all (legacy-only) must stay valid."""
+    Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+
+
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):
     """A nonexistent fleet.yml must raise RegistryError with guidance,
     not a raw FileNotFoundError traceback in the CLI."""
