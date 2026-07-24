@@ -90,6 +90,18 @@
       COMMIT
   notify: Reload ufw
 
+- name: Flush handlers so a changed DOCKER-USER guard reloads ufw within this role
+  # Handlers otherwise flush at end-of-play (site.yml sets force_handlers:
+  # true), so on a re-run where only the guard content changed and UFW is
+  # already enabled, the new guard wouldn't take effect until the whole
+  # playbook finished. Flushing here is safe for the lockout ordering
+  # (spec §5): the SSH allow rule was staged in an earlier task (unaffected
+  # by `ufw reload`, which only re-reads already-staged rules) and UFW
+  # itself is not enabled by this flush — 'ufw reload' is a no-op when UFW
+  # is inactive, which is the case on a first run. The pre-enable check and
+  # 'enable' task both still run AFTER this flush.
+  ansible.builtin.meta: flush_handlers
+
 - name: Verify the SSH allow rule is staged before enabling UFW (spec §5)
   ansible.builtin.command:
     cmd: ufw show added
@@ -97,13 +109,20 @@
   changed_when: false
 
 - name: Assert the SSH port is present in the staged rules
+  # Word/line-boundary match, NOT substring: a plain `in nh_ufw_added.stdout`
+  # check would false-positive when fleet_ufw_ssh_port is a substring of
+  # another allowed port (SSH on 22 with 8022 also allowed; SSH on 80 with
+  # 8080 also allowed). regex_findall('[0-9]+', ...) tokenises each staged
+  # rule line into whole numbers, so "22" only matches a rule whose port is
+  # exactly 22, never one that merely contains "22".
   ansible.builtin.assert:
     that:
-      - (fleet_ufw_ssh_port | string) in nh_ufw_added.stdout
+      - (fleet_ufw_ssh_port | string) in (nh_ufw_added.stdout_lines | map('regex_findall', '[0-9]+') | sum(start=[]))
     fail_msg: >-
-      SSH port {{ fleet_ufw_ssh_port }} was not found in 'ufw show added' —
-      refusing to enable UFW. Any reordering that puts 'enable' before the
-      SSH allow rule is a blocking defect (spec §5).
+      SSH port {{ fleet_ufw_ssh_port }} was not found as an exact (whole
+      number) port in 'ufw show added' — refusing to enable UFW. Any
+      reordering that puts 'enable' before the SSH allow rule is a
+      blocking defect (spec §5).
 
 - name: Enable UFW (last — every allow rule above must already be staged)
   community.general.ufw:

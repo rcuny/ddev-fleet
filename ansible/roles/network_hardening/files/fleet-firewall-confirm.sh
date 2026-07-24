@@ -7,7 +7,13 @@ set -euo pipefail
 
 MARKER=/etc/ddev-fleet/ufw-deadman-confirmed
 
-systemctl stop fleet-ufw-deadman.timer 2>/dev/null || true
+# Marker FIRST, then stop the timer. If the timer fires in the window
+# between these two operations, the fire script (fleet-ufw-deadman-fire.sh)
+# only ever checks the marker's presence to decide whether to disable UFW —
+# marker-first means a fire in that window sees the marker and keeps UFW
+# enabled (safe). Writing the marker AFTER stopping the timer would instead
+# leave a window where a fire sees no marker and disables UFW.
 mkdir -p "$(dirname "$MARKER")"
 touch "$MARKER"
-echo "fleet-firewall-confirm: dead-man's-switch timer stopped; marker written at $MARKER"
+systemctl stop fleet-ufw-deadman.timer 2>/dev/null || true
+echo "fleet-firewall-confirm: marker written at $MARKER; dead-man's-switch timer stopped"
