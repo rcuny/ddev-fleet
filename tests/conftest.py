@@ -81,9 +81,17 @@ class FakeRunner:
         self._scripted = scripted or {}
         self._default = default if default is not None else RunResult(returncode=0, lines=[])
 
-    def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
+    def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True, input_text=None):
         key = " ".join(str(c) for c in cmd)
-        self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
+        self.calls.append(
+            {
+                "cmd": list(cmd),
+                "cwd": cwd,
+                "env": env,
+                "log_path": log_path,
+                "input_text": input_text,
+            }
+        )
         return self._scripted.get(key, self._default)
 
 

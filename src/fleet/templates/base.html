@@ -29,6 +29,11 @@
   {% block content %}{% endblock %}
   {% if sys_stats %}
   <footer class="sys-stats">
+    {% if sys_stats.reboot_pending %}
+    <div class="reboot-badge" title="{{ sys_stats.reboot_packages }}" style="display: inline-block; background: #b00020; color: #fff; padding: 0.2rem 0.6rem; border-radius: 3px; font-weight: 600; margin-bottom: 0.4rem;">
+      Reboot required &middot; pending {{ sys_stats.reboot_since_human }}
+    </div>
+    {% endif %}
     Server: {{ sys_stats.mem_free }} RAM free / {{ sys_stats.mem_total }} total
     &middot; {{ sys_stats.disk_free }} disk free / {{ sys_stats.disk_total }} total
     <span class="mount">on {{ sys_stats.mount }}</span>

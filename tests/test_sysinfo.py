@@ -116,3 +116,62 @@ def test_check_disk_headroom_custom_threshold_override(tmp_path, monkeypatch):
     with pytest.raises(DiskSpaceError):
         check_disk_headroom(instances, min_free_percent=30.0)
     check_disk_headroom(instances, min_free_percent=20.0)  # must not raise
+
+
+def test_gather_reads_reboot_status_when_pending(tmp_path):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    pkgs = tmp_path / "reboot-required.pkgs"
+    pkgs.write_text("libc6\n", encoding="utf-8")
+
+    stats = SystemStats.gather(
+        instances, meminfo_path=tmp_path / "nope", reboot_marker=marker, reboot_pkgs=pkgs
+    )
+    assert stats.reboot_required.pending is True
+    assert stats.reboot_required.packages == ["libc6"]
+
+
+def test_gather_reboot_not_pending_by_default(tmp_path):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    stats = SystemStats.gather(
+        instances,
+        meminfo_path=tmp_path / "nope",
+        reboot_marker=tmp_path / "no-marker",
+        reboot_pkgs=tmp_path / "no.pkgs",
+    )
+    assert stats.reboot_required.pending is False
+
+
+def test_display_reboot_fields_absent_when_not_pending(tmp_path):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    stats = SystemStats.gather(
+        instances,
+        meminfo_path=tmp_path / "nope",
+        reboot_marker=tmp_path / "no-marker",
+        reboot_pkgs=tmp_path / "no.pkgs",
+    )
+    display = stats.display()
+    assert display["reboot_pending"] is False
+    assert display["reboot_since_human"] == ""
+    assert display["reboot_packages"] == ""
+
+
+def test_display_reboot_fields_populated_when_pending(tmp_path):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    pkgs = tmp_path / "reboot-required.pkgs"
+    pkgs.write_text("libc6\nopenssl\n", encoding="utf-8")
+
+    stats = SystemStats.gather(
+        instances, meminfo_path=tmp_path / "nope", reboot_marker=marker, reboot_pkgs=pkgs
+    )
+    display = stats.display()
+    assert display["reboot_pending"] is True
+    assert "libc6" in display["reboot_packages"]
+    assert display["reboot_since_human"] != ""

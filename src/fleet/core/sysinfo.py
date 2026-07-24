@@ -12,6 +12,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from fleet.core.errors import DiskSpaceError
+from fleet.core.reboot import (
+    MARKER_PATH,
+    PKGS_PATH,
+    RebootStatus,
+    format_duration_since,
+    read_reboot_status,
+)
 
 _MEMINFO = Path("/proc/meminfo")
 
@@ -42,9 +49,17 @@ class SystemStats:
     disk_free_bytes: int
     disk_total_bytes: int
     mount: str
+    reboot_required: RebootStatus | None = None
 
     @classmethod
-    def gather(cls, instances_dir: Path, *, meminfo_path: Path = _MEMINFO) -> "SystemStats":
+    def gather(
+        cls,
+        instances_dir: Path,
+        *,
+        meminfo_path: Path = _MEMINFO,
+        reboot_marker: Path = MARKER_PATH,
+        reboot_pkgs: Path = PKGS_PATH,
+    ) -> "SystemStats":
         """Free memory (host-wide) plus free/total disk on the filesystem that
         contains ``instances_dir`` — the mount where instances live."""
         avail, total = _read_meminfo(meminfo_path)
@@ -55,16 +70,30 @@ class SystemStats:
             disk_free_bytes=usage.free,
             disk_total_bytes=usage.total,
             mount=str(instances_dir),
+            reboot_required=read_reboot_status(reboot_marker, reboot_pkgs),
         )
 
     def display(self) -> dict[str, str]:
         """Pre-formatted, template-ready strings."""
+        status = self.reboot_required
+        pending = bool(status and status.pending)
+        since_human = ""
+        packages_str = ""
+        if pending:
+            since_human = format_duration_since(status.since) if status.since else ""
+            shown = status.packages[:5]
+            packages_str = ", ".join(shown)
+            if len(status.packages) > 5:
+                packages_str += f" (+{len(status.packages) - 5} more)"
         return {
             "mem_free": fmt_bytes(self.mem_available_bytes),
             "mem_total": fmt_bytes(self.mem_total_bytes),
             "disk_free": fmt_bytes(self.disk_free_bytes),
             "disk_total": fmt_bytes(self.disk_total_bytes),
             "mount": self.mount,
+            "reboot_pending": pending,
+            "reboot_since_human": since_human,
+            "reboot_packages": packages_str,
         }
 
 

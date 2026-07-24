@@ -21,6 +21,7 @@ def run_streamed(
     env: dict[str, str] | None = None,
     log_path: Path | None = None,
     echo: bool = True,
+    input_text: str | None = None,
 ) -> RunResult:
     full_env = os.environ.copy()
     if env:
@@ -31,6 +32,7 @@ def run_streamed(
             cmd,
             cwd=str(cwd) if cwd else None,
             env=full_env,
+            stdin=subprocess.PIPE if input_text is not None else None,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -38,6 +40,11 @@ def run_streamed(
         )
     except FileNotFoundError as exc:
         raise FleetError(f"command not found: {cmd[0]}") from exc
+
+    if input_text is not None:
+        assert process.stdin is not None
+        process.stdin.write(input_text)
+        process.stdin.close()
 
     lines: list[str] = []
     log_fh = None

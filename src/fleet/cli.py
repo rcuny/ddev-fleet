@@ -14,6 +14,7 @@ from fleet.core import assets as assets_mod
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, ddev, fleetconfig
 from fleet.core import instances as instances_mod
+from fleet.core import reboot as reboot_mod
 from fleet.core import shell as shell_mod
 from fleet.core import tmux as tmux_mod
 from fleet.core.errors import FleetError
@@ -209,6 +210,9 @@ def _build_parser() -> argparse.ArgumentParser:
     tmux_reset_parser = subparsers.add_parser("tmux-reset")
     tmux_reset_parser.add_argument("window", nargs="?")
 
+    reboot_notify_parser = subparsers.add_parser("reboot-notify")
+    reboot_notify_parser.add_argument("--test", action="store_true")
+
     return parser
 
 
@@ -262,6 +266,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_tmux_sidebar(fleet_home, args)
         elif args.command == "tmux-reset":
             _cmd_tmux_reset(fleet_home, args)
+        elif args.command == "reboot-notify":
+            return _cmd_reboot_notify(fleet_home, args)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
@@ -745,6 +751,32 @@ def _cmd_tmux_reset(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     window = args.window or tmux_mod.current_window()
     tmux_mod.reset_window(paths, window)
+
+
+def _cmd_reboot_notify(fleet_home: Path, args: argparse.Namespace) -> int:
+    from fleet.core.secrets import read_secrets
+
+    env = read_secrets(fleet_home / "reboot-notify.env")
+    to_addr = env.get("MSMTP_TO", "")
+    from_addr = env.get("MSMTP_FROM", "")
+
+    sent = reboot_mod.reboot_notify(
+        to_addr=to_addr,
+        from_addr=from_addr,
+        msmtprc_path=fleet_home / "msmtprc",
+        state_path=fleet_home / "reboot-notify-state.json",
+        test=args.test,
+    )
+    if args.test:
+        print("test email sent" if sent else "test email FAILED to send (check msmtprc/relay)")
+        return 0 if sent else 1
+    print(
+        "reboot-notify: notification sent"
+        if sent
+        else "reboot-notify: no notification sent (not pending, "
+        "already notified recently, or email disabled)"
+    )
+    return 0
 
 
 if __name__ == "__main__":

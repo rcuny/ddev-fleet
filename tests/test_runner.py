@@ -87,3 +87,9 @@ def test_run_interactive_merges_env_into_os_environ(tmp_path):
     returncode = run_interactive(["python3", "-c", script], env={"FOO": "bar"})
     assert returncode == 0
     assert log_path.read_text(encoding="utf-8") == "bar"
+
+
+def test_run_streamed_pipes_input_text_to_stdin():
+    result = run_streamed(["cat"], input_text="hello stdin\n", echo=False)
+    assert result.returncode == 0
+    assert result.lines == ["hello stdin"]
