@@ -3,3 +3,8 @@
   ansible.builtin.systemd:
     name: docker
     state: restarted
+
+- name: Reload sshd
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded

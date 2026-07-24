@@ -33,3 +33,21 @@
     group: root
     mode: "0644"
   notify: Restart docker
+
+- name: Deploy the SSH hardening drop-in
+  # Validated against Ansible's staged temp copy via `validate:` (sshd -t -f
+  # %s) BEFORE the file is moved into place — not via a separate `sshd -t`
+  # task after the template task, because site.yml sets
+  # `force_handlers: true` play-wide, which would fire the already-notified
+  # "Reload sshd" handler even if a later syntax-check task failed (spec
+  # §6.2 task 5 / deviation note). `validate:` rejects a bad drop-in before
+  # it ever reaches /etc/ssh/sshd_config.d/, so the handler is never
+  # notified for an invalid config, independent of force_handlers.
+  ansible.builtin.template:
+    src: 52fleet-sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "sshd -t -f %s"
+  notify: Reload sshd
