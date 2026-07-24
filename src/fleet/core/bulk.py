@@ -11,7 +11,11 @@ from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from typing import Callable
 
-from fleet.core.errors import FleetError
+from fleet.core import instances as instances_mod
+from fleet.core import naming, sysinfo
+from fleet.core.caddyauth import DEFAULT_INSTANCE_PASSWORD
+from fleet.core.errors import DiskSpaceError, FleetError, ValidationError
+from fleet.core.locks import instance_lock
 from fleet.core.runner import run_streamed
 
 # Matches JobManager's own concurrency=2 (fleet/jobs.py) — a shared constant
@@ -125,3 +129,80 @@ def run_concurrent(
     order = {instance_id: i for i, instance_id in enumerate(instance_ids)}
     results.sort(key=lambda r: order[r.instance_id])
     return BulkOutcome(kind=kind, results=results)
+
+
+_MULTIDEPLOY_LOCK_ID = "_multideploy"
+
+
+def multi_deploy(
+    paths,
+    registry,
+    project: str,
+    template: str | None = None,
+    *,
+    branch: str | None = None,
+    label: str | None = None,
+    count: int = 1,
+    fresh: bool = False,
+    force: bool = False,
+    auth_enabled: bool = True,
+    auth_password: str = DEFAULT_INSTANCE_PASSWORD,
+    skip_disk_check: bool = False,
+    on_progress: Callable[[dict], None] | None = None,
+    runner=run_streamed,
+) -> BulkOutcome:
+    """Allocate `count` free instance ids for `project`/`template`/`branch`
+    (base label = `label`, or the branch slug if omitted — see
+    resolve_target) and deploy each one sequentially (spec §5). Validates
+    `count`, gates on disk headroom, then holds the fleet-wide
+    `_multideploy` advisory lock for the whole allocate-then-deploy loop so
+    a concurrent multi-deploy can't allocate overlapping ids."""
+    if not (0 <= count <= 20):
+        raise ValidationError(f"--count must be between 0 and 20 (got {count})")
+    if count == 0:
+        return BulkOutcome(kind="deploy", results=[])
+
+    if not skip_disk_check:
+        try:
+            sysinfo.check_disk_headroom(paths.instances)
+        except DiskSpaceError as exc:
+            raise DiskSpaceError(f"refusing to deploy {count} instances: {exc.message}") from exc
+
+    resolved = instances_mod.resolve_target(registry, project, template, branch, label)
+    resolved_template = resolved.template
+    resolved_branch = resolved.branch
+    base_label = resolved.label
+
+    def _deploy_op(paths, registry, instance_id: str, *, runner=run_streamed):
+        instance_dir = paths.instances / instance_id
+        if instance_dir.exists():
+            raise FleetError(
+                f"{instance_id}: collided since allocation — an instance directory "
+                "already exists at this id; refusing to treat it as an update"
+            )
+        inst_label = instance_id.split("--", 1)[1]
+        instances_mod.deploy(
+            paths,
+            registry,
+            project,
+            resolved_template,
+            branch=resolved_branch,
+            label=inst_label,
+            fresh=fresh,
+            force=force,
+            auth_enabled=auth_enabled,
+            auth_password=auth_password,
+            runner=runner,
+        )
+
+    with instance_lock(paths.locks, _MULTIDEPLOY_LOCK_ID):
+        existing_ids = (
+            {p.name for p in paths.instances.iterdir() if p.is_dir()}
+            if paths.instances.exists()
+            else set()
+        )
+        labels = naming.allocate_multi_deploy_labels(existing_ids, project, base_label, count)
+        instance_ids = [f"{project}--{lbl}" for lbl in labels]
+        return run_sequential(
+            paths, registry, instance_ids, _deploy_op, kind="deploy", on_progress=on_progress
+        )
