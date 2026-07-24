@@ -9,7 +9,13 @@ def test_start_composes_correct_argv(tmp_path):
     fake = FakeRunner()
     ddev.start(tmp_path, runner=fake)
     assert fake.calls == [
-        {"cmd": ["ddev", "start"], "cwd": tmp_path, "env": None, "log_path": None}
+        {
+            "cmd": ["ddev", "start"],
+            "cwd": tmp_path,
+            "env": None,
+            "log_path": None,
+            "input_text": None,
+        }
     ]
 
 
@@ -94,5 +100,11 @@ def test_restart_composes_correct_argv(tmp_path):
     fake = FakeRunner()
     ddev.restart(tmp_path, runner=fake)
     assert fake.calls == [
-        {"cmd": ["ddev", "restart"], "cwd": tmp_path, "env": None, "log_path": None}
+        {
+            "cmd": ["ddev", "restart"],
+            "cwd": tmp_path,
+            "env": None,
+            "log_path": None,
+            "input_text": None,
+        }
     ]
