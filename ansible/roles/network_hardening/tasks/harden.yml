@@ -184,3 +184,20 @@
     nh_ufw_enable.changed
     and fleet_ufw_deadman_switch_enabled
     and not nh_deadman_confirmed_marker.stat.exists
+
+- name: Deploy fleet-ufw-sync
+  ansible.builtin.template:
+    src: fleet-ufw-sync.sh.j2
+    dest: /usr/local/sbin/fleet-ufw-sync
+    owner: root
+    group: "{{ fleet_group }}"
+    mode: "0750"
+
+- name: Install the fleet-ufw-sync sudoers drop-in
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/fleet-ufw-sync
+    content: "{{ fleet_user }} ALL=(root) NOPASSWD: /usr/local/sbin/fleet-ufw-sync\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
