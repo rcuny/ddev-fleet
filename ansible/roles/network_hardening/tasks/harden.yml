@@ -158,3 +158,29 @@
     name: fleet-ufw-deadman-bootcheck.service
     enabled: true
     daemon_reload: true
+
+- name: Check whether the dead-man's-switch confirmation marker already exists
+  ansible.builtin.stat:
+    path: /etc/ddev-fleet/ufw-deadman-confirmed
+  register: nh_deadman_confirmed_marker
+
+- name: Arm the UFW dead-man's switch
+  ansible.builtin.systemd:
+    name: fleet-ufw-deadman.timer
+    state: started
+  when: >-
+    nh_ufw_enable.changed
+    and fleet_ufw_deadman_switch_enabled
+    and not nh_deadman_confirmed_marker.stat.exists
+
+- name: Print the dead-man's-switch operator message (spec §3.3)
+  ansible.builtin.debug:
+    msg: >-
+      UFW dead-man's switch ARMED. Automatic disable in
+      {{ fleet_ufw_deadman_grace_minutes }} minutes unless confirmed.
+      From a SECOND, INDEPENDENT SSH session, run:
+      sudo /usr/local/sbin/fleet-firewall-confirm
+  when: >-
+    nh_ufw_enable.changed
+    and fleet_ufw_deadman_switch_enabled
+    and not nh_deadman_confirmed_marker.stat.exists
