@@ -30,6 +30,16 @@ class ResolvedInstance:
     instance_id: str
 
 
+@dataclass(frozen=True)
+class PortProfile:
+    name: str
+    public: int
+    router: int
+
+
+_TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
+
+
 class Registry:
     def __init__(self, data, path: Path) -> None:
         self._data = data
@@ -169,6 +179,19 @@ class Registry:
     def typesense_enabled(self, project: str) -> bool:
         block = self._project_block(project)
         return bool(block.get("typesense"))
+
+    def port_profile(self, name: str) -> PortProfile:
+        """Look up one `fleet.ports` entry by name. `'typesense'` falls back
+        to the built-in legacy default (spec §3.2) when `fleet.ports` has
+        no explicit entry for it — so `typesense: true`-only registries need
+        zero edits. Any other unknown name raises RegistryError."""
+        fleet_ports = self._data["fleet"].get("ports") or {}
+        if name in fleet_ports:
+            entry = fleet_ports[name]
+            return PortProfile(name=name, public=int(entry["public"]), router=int(entry["router"]))
+        if name == "typesense":
+            return _TYPESENSE_LEGACY_DEFAULT
+        raise RegistryError(f"unknown port name {name!r} (not defined in fleet.ports)")
 
     def resolve(
         self, project: str, template: str, branch: str, label: str | None = None

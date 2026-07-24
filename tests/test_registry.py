@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fleet.core.errors import RegistryError
-from fleet.core.registry import Registry
+from fleet.core.registry import PortProfile, Registry
 
 
 def _write(path: Path, text: str) -> Path:
@@ -360,6 +360,59 @@ projects:
 """
     with pytest.raises(RegistryError, match="projects.oak.git_bot"):
         Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_port_profile_returns_explicit_entry(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert registry.port_profile("playwright") == PortProfile(
+        name="playwright", public=9324, router=8323
+    )
+
+
+def test_port_profile_typesense_falls_back_to_legacy_default_when_undefined(
+    fleet_home, sample_registry_text
+):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    assert registry.port_profile("typesense") == PortProfile(
+        name="typesense", public=9108, router=8108
+    )
+
+
+def test_port_profile_explicit_typesense_entry_overrides_legacy_default(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    typesense: { public: 9200, router: 8200 }
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert registry.port_profile("typesense") == PortProfile(
+        name="typesense", public=9200, router=8200
+    )
+
+
+def test_port_profile_unknown_name_raises(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    with pytest.raises(RegistryError, match="unknown port name 'bogus'"):
+        registry.port_profile("bogus")
 
 
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):
