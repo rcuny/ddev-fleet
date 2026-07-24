@@ -627,3 +627,90 @@ def test_bulk_job_panel_omits_hx_preserve_and_uses_current_instance_ws_url(fleet
     assert response.status_code == 200
     assert 'hx-preserve="true"' not in response.text
     assert "/ws/instances/demo--other/log" in response.text
+
+
+def _extract_ws_token(body: str) -> str:
+    match = re.search(r"token=([^\"&]+)", body)
+    assert match, f"no ws token found in panel body: {body!r}"
+    return match.group(1)
+
+
+def test_bulk_job_panel_ws_token_verifies_for_current_instance(fleet_home):
+    # Regression for the multi-deploy live-log bug: bulk/multi-deploy jobs
+    # are submitted with instance_id="" (the real ids live in
+    # job.instance_ids / job.detail's "current"), so minting the panel's
+    # WS token from job.instance_id signs a token for "" — it can never
+    # verify against the instance the socket URL actually points at
+    # (progress.current), and the live log silently never connects.
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["bulk1"] = Job(
+        id="bulk1",
+        kind="bulk-start",
+        instance_id="",
+        state="running",
+        instance_ids=["demo--develop", "demo--other"],
+        detail=json.dumps(
+            {
+                "total": 2,
+                "done": 1,
+                "failed": 0,
+                "current": "demo--other",
+                "results": [{"instance_id": "demo--develop", "ok": True, "error": None}],
+            }
+        ),
+    )
+
+    response = client.get("/ui/jobs/bulk1/panel")
+    assert response.status_code == 200
+
+    token = _extract_ws_token(response.text)
+    assert verify_ws_token(app.state.ws_secret, token, "demo--other") is True
+
+
+def test_single_deploy_job_panel_ws_token_still_verifies_for_own_instance_id(fleet_home):
+    # Regression guard: a single-instance job must keep minting its token
+    # for job.instance_id exactly as before — only bulk/multi-deploy jobs
+    # should switch to progress.current.
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["solo1"] = Job(
+        id="solo1", kind="deploy", instance_id="demo--develop", state="running"
+    )
+
+    response = client.get("/ui/jobs/solo1/panel")
+    assert response.status_code == 200
+
+    token = _extract_ws_token(response.text)
+    assert verify_ws_token(app.state.ws_secret, token, "demo--develop") is True
+
+
+def test_bulk_job_panel_with_no_current_instance_omits_log_element(fleet_home):
+    # Boundary: between bulk-job steps (or right after submit, before the
+    # background thread's first on_progress call), progress.current can be
+    # empty/None. The panel must not render a log element pointing at an
+    # empty instance id (which would mint/verify against "" and never
+    # connect) — job_panel.html's `{% if progress.current %}` guard already
+    # skips the log div in that case; the 2s poll will pick it up once
+    # progress.current is set.
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["bulk2"] = Job(
+        id="bulk2",
+        kind="multi-deploy",
+        instance_id="",
+        state="running",
+        instance_ids=["demo--develop", "demo--other"],
+        detail=None,
+    )
+
+    response = client.get("/ui/jobs/bulk2/panel")
+    assert response.status_code == 200
+    assert "job-log" not in response.text
+    assert "/ws/instances//log" not in response.text

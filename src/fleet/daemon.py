@@ -101,6 +101,38 @@ def _parse_bulk_progress(detail: str | None) -> dict | None:
         return None
 
 
+def _is_bulk_kind(kind: str) -> bool:
+    # Mirrors job_panel.html's `is_bulk` Jinja test — kept in sync so the
+    # WS token subject and the socket URL the template renders always agree.
+    return kind.startswith("bulk-") or kind == "multi-deploy"
+
+
+def _job_ws_token(secret: bytes, job) -> str | None:
+    """Mint the live-log WS token for a job panel.
+
+    Bulk/multi-deploy jobs are submitted with `instance_id=""` (the real
+    instance ids live in `job.instance_ids`, and the one currently being
+    worked on is `progress.current`, parsed from `job.detail`) — minting
+    from `job.instance_id` would sign a token for "" that can never verify
+    against the instance job_panel.html actually points the socket at.
+    Single-instance jobs are unaffected and keep minting for
+    `job.instance_id` as before.
+
+    Returns None when a bulk job has no current instance yet (e.g. right
+    after submit, or momentarily between steps) rather than minting a
+    token bound to "" — job_panel.html's `{% if progress.current %}` guard
+    means no log element is rendered in that case anyway, and the panel's
+    2s poll will remint once `progress.current` is set.
+    """
+    if _is_bulk_kind(job.kind):
+        progress = _parse_bulk_progress(job.detail)
+        current = progress.get("current") if progress else None
+        if not current:
+            return None
+        return mint_ws_token(secret, current)
+    return mint_ws_token(secret, job.instance_id)
+
+
 def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -> FastAPI:
     def _paths_and_registry():
         paths = instances_mod.FleetPaths.from_home(fleet_home)
@@ -350,7 +382,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 )
 
             job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
-            ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+            ws_token = _job_ws_token(app.state.ws_secret, job)
             return templates.TemplateResponse(
                 request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
             )
@@ -392,7 +424,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
         job = await app.state.jobs.submit("multi-deploy", "", run_multi_deploy)
         job_holder["job"] = job
-        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        ws_token = _job_ws_token(app.state.ws_secret, job)
         return templates.TemplateResponse(
             request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
         )
@@ -415,7 +447,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
         job = await app.state.jobs.submit(kind, "", run_bulk, instance_ids=instance_ids)
         job_holder["job"] = job
-        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        ws_token = _job_ws_token(app.state.ws_secret, job)
         return templates.TemplateResponse(
             request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
         )
@@ -465,7 +497,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
         job = await app.state.jobs.submit("bulk-destroy", "", run_bulk, instance_ids=instance_id)
         job_holder["job"] = job
-        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        ws_token = _job_ws_token(app.state.ws_secret, job)
         return templates.TemplateResponse(
             request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
         )
@@ -475,7 +507,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         job = app.state.jobs.get(job_id)
         if job is None:
             return JSONResponse(status_code=404, content={"detail": "unknown job"})
-        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        ws_token = _job_ws_token(app.state.ws_secret, job)
         return templates.TemplateResponse(
             request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
         )
