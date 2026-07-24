@@ -89,3 +89,23 @@
       -A DOCKER-USER -j RETURN
       COMMIT
   notify: Reload ufw
+
+- name: Verify the SSH allow rule is staged before enabling UFW (spec §5)
+  ansible.builtin.command:
+    cmd: ufw show added
+  register: nh_ufw_added
+  changed_when: false
+
+- name: Assert the SSH port is present in the staged rules
+  ansible.builtin.assert:
+    that:
+      - (fleet_ufw_ssh_port | string) in nh_ufw_added.stdout
+    fail_msg: >-
+      SSH port {{ fleet_ufw_ssh_port }} was not found in 'ufw show added' —
+      refusing to enable UFW. Any reordering that puts 'enable' before the
+      SSH allow rule is a blocking defect (spec §5).
+
+- name: Enable UFW (last — every allow rule above must already be staged)
+  community.general.ufw:
+    state: enabled
+  register: nh_ufw_enable
