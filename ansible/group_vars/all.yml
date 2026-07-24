@@ -1,10 +1,12 @@
 ---
 # ddev-fleet Ansible variables (spec §3.2, §16).
 #
-# Every variable below is a single-change knob. Items flagged "AWAITS
-# CONFIRMATION" are provisional defaults carried over from the design
-# spec's worked example and MUST be confirmed (or overridden here) before
-# a real server rollout — see docs/runbook-server-rollout.md.
+# Every variable below is a single-change knob. `fleet_domain`, `acme_email`,
+# and `fleet_admin_default_password` have no public-safe default and MUST be
+# supplied via /etc/ddev-fleet/local-vars.yml (written by bootstrap.sh's
+# value-collection phase) before a real server rollout — see
+# docs/runbook-server-rollout.md (repointed to docs/installation.md later
+# this plan, once that file exists).
 
 # --- OS assumption ----------------------------------------------------------
 # Roles use ansible.builtin.apt and target a Debian-family host. Verified
@@ -37,15 +39,22 @@ ddev_router_https_port: 8443
 # Registry.port_profile()'s legacy fallback, core/registry.py), reconciled
 # into Caddy by fleet.core.caddyports — see docs/networking.md.
 
-# --- Domain & TLS (spec §9) — AWAITS CONFIRMATION ---------------------------
+# --- Domain & TLS (spec §9) --------------------------------------------------
 # fleet_domain already includes the "fleet." label (it matches fleet.yml's
 # own `fleet.domain` field and the worked example FQDNs, e.g.
-# oak--develop.fleet.personal.example — spec §4.2/§7.3). The caddy role's
+# oak--develop.fleet.example.com — spec §4.2/§7.3). The caddy role's
 # Caddyfile template therefore vhosts on `{{ fleet_domain }}` and
 # `*.{{ fleet_domain }}` directly, NOT `fleet.{{ fleet_domain }}` — see
 # this plan's "Judgment call flagged up front" note.
-fleet_domain: fleet.personal.example
-acme_email: contact@personal.example
+#
+# fleet_domain keeps a harmless placeholder default so a bare
+# `ansible-playbook site.yml` (e.g. the companion's in-container
+# syntax-check gate) never errors on an undefined var. acme_email gets NO
+# default — Let's Encrypt needs a real reachable address, and a placeholder
+# would silently produce a useless one — it is REQUIRED, supplied via
+# bootstrap.sh's value-collection phase into /etc/ddev-fleet/local-vars.yml.
+fleet_domain: fleet.example.com
+acme_email: "{{ undef(hint='acme_email is required — set it via bootstrap.sh or /etc/ddev-fleet/local-vars.yml') }}"
 
 # --- Caddy admin auth (spec §9.3) -------------------------------------------
 # The admin-auth Caddyfile snippet is fleet-owned and rotatable WITHOUT
@@ -58,11 +67,16 @@ acme_email: contact@personal.example
 # (including one rotated in the meantime). Rotate the default immediately
 # after rollout — see README.md "Default credentials".
 fleet_admin_user: admin
-fleet_admin_default_password: ddev-admin
+# NO PUBLIC-SAFE DEFAULT: fleet_admin_default_password must come from
+# /etc/ddev-fleet/local-vars.yml (bootstrap.sh's value-collection phase
+# generates a random one, or an operator sets FLEET_ADMIN_PASSWORD /
+# answers the prompt). The caddy role's seed task fails fast with an
+# actionable message if it's still unset when the snippet doesn't exist yet
+# (see ansible/roles/caddy/tasks/main.yml).
 fleet_caddy_snippet_dir: /etc/caddy/fleet
 
-# --- Product repo (spec §3.1, §17) — AWAITS CONFIRMATION --------------------
-fleet_repo_url: https://bitbucket.org/personal_maintainer/ddev-fleet.git
+# --- Product repo (spec §3.1, §17) -------------------------------------------
+fleet_repo_url: https://github.com/rcuny/ddev-fleet.git
 fleet_repo_version: main
 # When true, the code is delivered out-of-band (e.g. rsync/tar of a clean
 # checkout to fleet_opt_dir) and BOTH fetch points — bootstrap.sh and the
