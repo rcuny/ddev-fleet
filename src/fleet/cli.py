@@ -549,7 +549,9 @@ def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
 
-    result = caddyports.sync(registry, runner=runner)
+    result = caddyports.sync(
+        registry, snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR, runner=runner
+    )
     if result.written or result.removed:
         for name in result.written:
             print(f"caddy: wrote port snippet {name!r}")

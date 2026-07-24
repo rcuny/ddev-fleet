@@ -953,6 +953,40 @@ def test_refresh_ports_ufw_sync_failure_exits_1(fleet_home, monkeypatch, capsys,
     assert "permission denied" in capsys.readouterr().err
 
 
+def test_refresh_ports_real_sync_honours_isolated_snippet_dir(fleet_home, monkeypatch):
+    """Regression: `_cmd_refresh_ports` must pass `snippet_dir=` explicitly to
+    `caddyports.sync()`, not rely on `sync()`'s bound default.
+
+    Every other test in this module mocks `cli.caddyports.sync` wholesale, so
+    none of them would notice if the call site regressed to the bare
+    `caddyports.sync(registry, runner=runner)` form — `sync()`'s own
+    `snippet_dir=DEFAULT_PORTS_SNIPPET_DIR` default parameter is bound at
+    caddyports.py's import time, so conftest's autouse monkeypatch of the
+    *module attribute* `caddyports.DEFAULT_PORTS_SNIPPET_DIR` would silently
+    stop applying, and the real (unmocked) `sync()` would `mkdir()` the real
+    `/etc/caddy/fleet/ports` on the host. This test lets the REAL `sync()` run
+    (no mock) and asserts it landed in the isolated tmp_path directory, not
+    the real default.
+    """
+    _write_minimal_registry(fleet_home)
+    real_default = Path("/etc/caddy/fleet/ports")
+    assert not real_default.exists(), "precondition: real Caddy dir must not pre-exist"
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    # sync() unconditionally does `snippet_dir.mkdir(parents=True,
+    # exist_ok=True)` before comparing wanted/existing snippets, so if the
+    # isolated dir (patched by conftest's autouse `_isolate_caddy_paths`
+    # fixture) was actually used, it now exists on disk.
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.exists()
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.is_relative_to(fleet_home.parent)
+    # And the real system default must remain untouched — this is the part
+    # that fails if the call site reverts to the bare `caddyports.sync(...)`
+    # default.
+    assert not real_default.exists()
+
+
 def _make_instance_dir(fleet_home, instance_id):
     paths = FleetPaths.from_home(fleet_home)
     (paths.instances / instance_id).mkdir(parents=True, exist_ok=True)

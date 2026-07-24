@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
@@ -373,3 +375,48 @@ def test_startup_port_sync_failure_does_not_crash_app(fleet_home, monkeypatch):
             "/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"}
         )
     assert response.status_code == 200
+
+
+def test_startup_port_sync_survives_non_caddyports_error(fleet_home, monkeypatch):
+    """IMPORTANT regression: `sync()` does `snippet_dir.mkdir()`/`.glob()`
+    before its own internal try/except (core/caddyports.py), so a bare
+    `OSError`/`PermissionError` (or anything else unanticipated) can escape
+    `CaddyPortsError`'s wrapping. The startup lifespan hook must never let
+    ANY exception from the port sync stop the app from booting — a fleet
+    manager that refuses to start over one bad port snippet is worse than
+    one that boots and reports the problem."""
+    _setup_fleet_home(fleet_home)
+
+    def failing_sync(registry, **kwargs):
+        raise OSError("permission denied: /etc/caddy/fleet/ports")
+
+    monkeypatch.setattr(daemon.caddyports, "sync", failing_sync)
+
+    with TestClient(create_app(fleet_home)) as client:
+        response = client.get(
+            "/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"}
+        )
+    assert response.status_code == 200
+
+
+def test_startup_real_sync_honours_isolated_snippet_dir(fleet_home):
+    """CRITICAL regression: the lifespan hook must pass `snippet_dir=` to
+    `caddyports.sync()` explicitly, not rely on `sync()`'s bound default.
+    Every other startup test in this module mocks `daemon.caddyports.sync`
+    wholesale, so none would notice a regression to the bare
+    `caddyports.sync(registry)` call — `sync()`'s own
+    `snippet_dir=DEFAULT_PORTS_SNIPPET_DIR` default is bound at import time,
+    so conftest's autouse monkeypatch of the module attribute would silently
+    stop applying and the real (unmocked) `sync()` would `mkdir()` the real
+    `/etc/caddy/fleet/ports` on the host. This test lets the REAL `sync()`
+    run (no mock) and asserts it landed in the isolated tmp_path directory."""
+    _setup_fleet_home(fleet_home)
+    real_default = Path("/etc/caddy/fleet/ports")
+    assert not real_default.exists(), "precondition: real Caddy dir must not pre-exist"
+
+    with TestClient(create_app(fleet_home)) as _client:
+        pass
+
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.exists()
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.is_relative_to(fleet_home.parent)
+    assert not real_default.exists()

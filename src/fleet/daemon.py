@@ -87,9 +87,24 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             logger.warning("startup port sync skipped: registry error: %s", exc.message)
         else:
             try:
-                await asyncio.to_thread(caddyports.sync, registry)
+                await asyncio.to_thread(
+                    caddyports.sync,
+                    registry,
+                    snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR,
+                )
             except CaddyPortsError as exc:
                 logger.warning("startup port sync failed: %s", exc.message)
+            except Exception:
+                # `sync()` performs `snippet_dir.mkdir()`/`.glob()` before its
+                # own try/except wrapping (core/caddyports.py), so a bare
+                # PermissionError/OSError (or anything else unanticipated)
+                # can escape uncaught. Startup must NEVER be blocked by a
+                # broken port sync — a fleet manager that refuses to boot
+                # over one bad port snippet is worse than one that boots and
+                # reports the problem. Logged with a full traceback (not just
+                # `.message`) precisely because this branch catches failures
+                # `CaddyPortsError` was never designed to describe.
+                logger.exception("startup port sync failed with an unexpected error")
         yield
 
     app = FastAPI(lifespan=lifespan)
