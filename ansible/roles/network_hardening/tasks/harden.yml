@@ -32,3 +32,33 @@
       loopback-only. Refusing to enable network_hardening. Set
       fleet_ufw_assert_loopback_router: false to override at your own risk.
   when: fleet_ufw_assert_loopback_router
+
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Set UFW default policies (incoming deny, outgoing allow)
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+  loop_control:
+    label: "{{ item.direction }}={{ item.policy }}"
+
+- name: Allow SSH (unconditional, must precede ufw enable — spec §5)
+  community.general.ufw:
+    rule: allow
+    port: "{{ fleet_ufw_ssh_port | string }}"
+    proto: tcp
+
+- name: Allow HTTP/HTTPS for Caddy
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "80"
+    - "443"
