@@ -145,10 +145,19 @@ if [ -n "${FLEET_SKIP_FETCH}" ]; then
   fi
 elif [ -d "${FLEET_OPT_DIR}/.git" ]; then
   echo "==> ${FLEET_OPT_DIR} already exists — pulling latest"
-  git -C "${FLEET_OPT_DIR}" pull --ff-only
+  git -C "${FLEET_OPT_DIR}" fetch --tags
+  if [ "${FLEET_REPO_VERSION}" = "main" ]; then
+    git -C "${FLEET_OPT_DIR}" pull --ff-only
+  else
+    git -C "${FLEET_OPT_DIR}" checkout "${FLEET_REPO_VERSION}"
+  fi
 else
   echo "==> Cloning ${FLEET_REPO_URL} into ${FLEET_OPT_DIR}"
   git clone "${FLEET_REPO_URL}" "${FLEET_OPT_DIR}"
+  if [ "${FLEET_REPO_VERSION}" != "main" ]; then
+    git -C "${FLEET_OPT_DIR}" fetch --tags
+    git -C "${FLEET_OPT_DIR}" checkout "${FLEET_REPO_VERSION}"
+  fi
 fi
 
 # --- 6. Persist collected values (never overwrite an existing key) ---------
@@ -201,9 +210,21 @@ else
   echo "Fleet deploy public key not found yet at /srv/fleet/fleet-deploy-key.pub"
 fi
 echo
-echo "Next steps (see docs/runbook-server-rollout.md for the full checklist):"
+if [ "${_admin_password_generated}" -eq 1 ]; then
+  echo "Dashboard admin password (generated, printed ONCE — save it now):"
+  echo "  ${FLEET_ADMIN_PASSWORD}"
+  echo "Rotate later with: sudo -u fleet fleet rotate-admin-password"
+  echo
+fi
+if [ "${FLEET_NETWORK_HARDENING}" = "1" ]; then
+  echo "==> Network hardening is ENABLED. A UFW dead-man's switch has been armed:"
+  echo "    if you lose SSH access, the firewall reverts automatically before the"
+  echo "    deadline printed in the security-hardening role's own output above."
+  echo "    See docs/operations.md for the confirm command."
+  echo
+fi
+echo "Next steps (see docs/installation.md for the full checklist):"
 echo "  1. Add the deploy key above as a READ-ONLY deploy key on each git forge."
-echo "  2. If you need to change the dashboard admin password later:"
-echo "     sudo -u fleet fleet rotate-admin-password   # no re-run of this script needed"
-echo "  3. Point DNS: fleet.<domain> and *.fleet.<domain> at this server's IP."
-echo "  4. Run 'fleet init' as the fleet user to mint the Claude Code OAuth token."
+echo "  2. Point DNS: <domain> and *.<domain> at this server's IP (if not already)."
+echo "  3. Run 'fleet init' as the fleet user to mint the Claude Code OAuth token"
+echo "     and create the fleet.yml registry."
