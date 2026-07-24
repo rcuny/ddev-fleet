@@ -49,6 +49,20 @@
     group: caddy
     mode: "0750"
 
+- name: Ensure the fleet-owned Caddy named-port snippet directory exists
+  # Per-port-name exposure snippets (fleet.core.caddyports, written/removed
+  # by deploy()/destroy()/`fleet refresh-ports`/daemon startup — never by
+  # Ansible past this one-time seed) live here. Pre-creating it with the
+  # same ownership as the parent snippet dir means the *.{{ fleet_domain }}
+  # Caddyfile's glob import (Caddyfile.j2) never depends on Python-side
+  # mkdir() guessing at group ownership when the first port is subscribed.
+  ansible.builtin.file:
+    path: "{{ fleet_caddy_snippet_dir }}/ports"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: caddy
+    mode: "0750"
+
 - name: Check whether the admin-auth snippet already exists
   # Guards the seed below — this MUST run before we ever hash the default
   # password or write the snippet, so a re-run of this role never clobbers
