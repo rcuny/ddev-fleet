@@ -37,7 +37,7 @@ Kimsufi host (bare metal)
 ├── Caddy (systemd) — public TLS, the only externally reachable process
 │   ├── fleet.<domain>            → basic_auth → reverse_proxy 127.0.0.1:8765 (web UI)
 │   ├── *.<domain>                → on-demand TLS → optional per-instance basic_auth → reverse_proxy 127.0.0.1:8080 (ddev-router HTTP)
-│   └── *.<domain>:9108           → on-demand TLS → reverse_proxy 127.0.0.1:8108 (ddev-router, Typesense)
+│   └── *.<domain>:<port>         → on-demand TLS → reverse_proxy 127.0.0.1:<router-port>, one per fleet.yml-registered named port (Typesense, Playwright reports, ...) — see docs/networking.md
 └── Docker (DDEV)
     ├── ddev-router (shared Traefik) — HTTP/HTTPS entrypoints, loopback-only
     ├── project1--main    (PHP · MariaDB · … containers)
@@ -185,6 +185,20 @@ layer there; the daemon itself binds `127.0.0.1:8765` only and is
 unreachable except through Caddy. Each *deployed instance*'s own auth is
 separate — see "Default credentials" above.
 
+## Network exposure
+
+Public traffic reaches every instance through Caddy, the only
+Internet-facing process: it terminates TLS (on-demand certs) and proxies
+to a shared, loopback-only DDEV router, which routes by Host header to
+the right instance's containers — this happens automatically for every
+instance's main site, no configuration needed. Extra per-project ports
+(Typesense, a Playwright report port, a search dashboard, ...) are
+opt-in: declare them once in `fleet.yml`'s `fleet.ports` catalogue and
+list the names a project subscribes to in its own `ports:` key, then run
+`fleet refresh-ports` to apply — no Ansible re-run, no redeploy. See
+`docs/networking.md` for the full topology, every port in one table, and
+the exact steps to add a new one.
+
 ## Repository layout
 
 - `src/fleet/` — the Python package: `core/` (deploy engine — registry,
@@ -202,6 +216,8 @@ separate — see "Default credentials" above.
     server for `claude -p "..."` sessions run there
   - `docs/README-typesense.md` — the Typesense browser-search exposure
     (port-based topology, keys, env injection)
+  - `docs/networking.md` — full network topology, every port in one
+    table, and the runbook for exposing a new one
 - `fleet.yml.dist` — example registry (project/template skeleton); the live
   registry is edited directly at `/srv/fleet/config/fleet.yml` on the
   server, not committed to this repo
@@ -215,3 +231,5 @@ separate — see "Default credentials" above.
   `docs/runbook-server-rollout.md`.
 - Typesense browser-search exposure (port-based topology, admin vs.
   search-only keys, env injection): `docs/README-typesense.md`.
+- Full network topology, every port in one table, and how to expose a
+  new one: `docs/networking.md`.
