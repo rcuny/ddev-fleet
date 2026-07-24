@@ -47,6 +47,79 @@ case "${ID:-unknown}" in
     ;;
 esac
 
+# --- 3. Value collection (env var -> /dev/tty prompt -> generate/default) ---
+# The curl|bash stdin trap: when piped, stdin IS the script body, so a bare
+# `read` here would consume leftover script text. Every prompt reads from
+# /dev/tty explicitly; if that's not openable (no tty — CI, cloud-init, a
+# fully piped non-interactive session), required values fail with an
+# actionable error instead of hanging or silently accepting an empty string.
+_prompt_required() {
+  # $1=varname (for the error message) $2=prompt text -> prints the answer
+  local prompt="$2" answer=""
+  if [ -r /dev/tty ]; then
+    read -r -p "${prompt}" answer < /dev/tty || answer=""
+  fi
+  if [ -z "${answer}" ]; then
+    echo "ERROR: $1 is required and no value was supplied." >&2
+    echo "       Set it as an env var, e.g.: sudo $1=<value> bash bootstrap.sh" >&2
+    exit 1
+  fi
+  printf '%s' "${answer}"
+}
+
+_prompt_yes_default() {
+  # $1=prompt text -> prints "1" (yes) or "0" (no); defaults to yes on a
+  # bare Enter, an unreadable /dev/tty, or any answer other than n/N/no/NO.
+  local prompt="$1" answer=""
+  if [ -r /dev/tty ]; then
+    read -r -p "${prompt}" answer < /dev/tty || answer=""
+  fi
+  case "${answer}" in
+    n|N|no|NO) printf '0' ;;
+    *) printf '1' ;;
+  esac
+}
+
+FLEET_DOMAIN="${FLEET_DOMAIN:-}"
+if [ -z "${FLEET_DOMAIN}" ]; then
+  FLEET_DOMAIN="$(_prompt_required FLEET_DOMAIN 'Fleet domain (e.g. fleet.example.com): ')"
+fi
+
+FLEET_ACME_EMAIL="${FLEET_ACME_EMAIL:-}"
+if [ -z "${FLEET_ACME_EMAIL}" ]; then
+  FLEET_ACME_EMAIL="$(_prompt_required FLEET_ACME_EMAIL "Let's Encrypt contact email: ")"
+fi
+
+FLEET_ADMIN_PASSWORD="${FLEET_ADMIN_PASSWORD:-}"
+_admin_password_generated=0
+if [ -z "${FLEET_ADMIN_PASSWORD}" ]; then
+  # Never ship a fixed default: generate from /dev/urandom (always
+  # present; `openssl` isn't guaranteed until phase 4 installs
+  # dependencies). 24+ alphanumeric chars is strong given it's
+  # machine-generated and immediately bcrypt-hashed.
+  FLEET_ADMIN_PASSWORD="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)"
+  _admin_password_generated=1
+fi
+
+FLEET_REPO_VERSION="${FLEET_REPO_VERSION:-main}"
+
+FLEET_NETWORK_HARDENING="${FLEET_NETWORK_HARDENING:-}"
+case "${FLEET_NETWORK_HARDENING}" in
+  0|1) ;;
+  *) FLEET_NETWORK_HARDENING="$(_prompt_yes_default 'Enable network hardening (UFW + Docker DOCKER-USER guard)? [Y/n] ')" ;;
+esac
+
+FLEET_SECURITY_HARDENING="${FLEET_SECURITY_HARDENING:-}"
+case "${FLEET_SECURITY_HARDENING}" in
+  0|1) ;;
+  *) FLEET_SECURITY_HARDENING="$(_prompt_yes_default 'Enable security hardening (auto-updates, SSH lockdown, fail2ban, Docker robustness)? [Y/n] ')" ;;
+esac
+# NOTE: the sibling security-hardening plan
+# (2026-07-24-fleet-security-hardening-design.md §7) extends this same
+# phase with conditional msmtp email-relay prompts, asked only when
+# FLEET_SECURITY_HARDENING resolves to 1 — not implemented here; that is
+# the security-hardening plan's own task, not this plan's.
+
 # NOTE: HTTPS default — at bootstrap time no SSH deploy key exists yet.
 # Ways to get the code onto the box:
 #   - Public/authenticated git: leave FLEET_REPO_URL default or export an
@@ -76,6 +149,35 @@ elif [ -d "${FLEET_OPT_DIR}/.git" ]; then
 else
   echo "==> Cloning ${FLEET_REPO_URL} into ${FLEET_OPT_DIR}"
   git clone "${FLEET_REPO_URL}" "${FLEET_OPT_DIR}"
+fi
+
+# --- 6. Persist collected values (never overwrite an existing key) ---------
+FLEET_LOCAL_VARS=/etc/ddev-fleet/local-vars.yml
+mkdir -p "$(dirname "${FLEET_LOCAL_VARS}")"
+touch "${FLEET_LOCAL_VARS}"
+# Secrets (admin password, future SMTP creds) land in this file — lock it
+# down to root-only regardless of the umask that created it.
+chmod 0600 "${FLEET_LOCAL_VARS}"
+
+_persist_if_absent() {
+  # $1=yaml key $2=value (already yaml-safe: quoted string or bare bool)
+  if grep -q "^$1:" "${FLEET_LOCAL_VARS}" 2>/dev/null; then
+    echo "==> $1 already set in ${FLEET_LOCAL_VARS} — using existing value, not re-prompting"
+  else
+    echo "$1: $2" >> "${FLEET_LOCAL_VARS}"
+  fi
+}
+
+_persist_if_absent fleet_domain "\"${FLEET_DOMAIN}\""
+_persist_if_absent acme_email "\"${FLEET_ACME_EMAIL}\""
+_persist_if_absent fleet_network_hardening_enabled "$([ "${FLEET_NETWORK_HARDENING}" = "1" ] && echo true || echo false)"
+_persist_if_absent fleet_security_hardening_enabled "$([ "${FLEET_SECURITY_HARDENING}" = "1" ] && echo true || echo false)"
+
+if grep -q '^fleet_admin_default_password:' "${FLEET_LOCAL_VARS}" 2>/dev/null; then
+  echo "==> fleet_admin_default_password already set in ${FLEET_LOCAL_VARS} — leaving it unchanged"
+  _admin_password_generated=0
+else
+  echo "fleet_admin_default_password: \"${FLEET_ADMIN_PASSWORD}\"" >> "${FLEET_LOCAL_VARS}"
 fi
 
 echo "==> Installing Ansible Galaxy collections"
