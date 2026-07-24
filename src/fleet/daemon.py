@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import json
 import logging
 import os
 import re
@@ -19,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, naming, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core.errors import CaddyPortsError, FleetError
@@ -67,6 +69,38 @@ def verify_ws_token(secret: bytes, token: str | None, instance_id: str) -> bool:
     return hmac.compare_digest(expected, got)
 
 
+def _bulk_progress_payload(outcome) -> dict:
+    total = len(outcome.results)
+    failed = len(outcome.failed)
+    partial = failed > 0 and len(outcome.succeeded) > 0
+    return {
+        "total": total,
+        "done": total,
+        "failed": failed,
+        "current": None,
+        "partial": partial,
+        "results": [
+            {"instance_id": r.instance_id, "ok": r.ok, "error": r.error} for r in outcome.results
+        ],
+    }
+
+
+class _BulkJobFailed(Exception):
+    """Raised by a bulk job's `fn` to force JobManager to mark the job
+    'failed' while `str(exc)` still carries the full JSON progress blob
+    as `job.detail` — see JobManager._run's except branch, which sets
+    `job.detail = str(exc)`."""
+
+
+def _parse_bulk_progress(detail: str | None) -> dict | None:
+    if not detail:
+        return None
+    try:
+        return json.loads(detail)
+    except (TypeError, ValueError):
+        return None
+
+
 def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -> FastAPI:
     def _paths_and_registry():
         paths = instances_mod.FleetPaths.from_home(fleet_home)
@@ -113,6 +147,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
+    templates.env.filters["bulk_progress"] = _parse_bulk_progress
 
     @app.exception_handler(FleetError)
     async def fleet_error_handler(request: Request, exc: FleetError):
@@ -276,39 +311,160 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         template: str = Form(...),
         branch: str = Form(""),
         label: str = Form(""),
+        count: int = Form(1),
         fresh: str = Form(""),
         auth: str = Form(""),
         auth_password: str = Form(""),
+        skip_disk_check: str = Form(""),
     ):
         naming.validate_part(project)
+        if not (0 <= count <= 20):
+            raise FleetError(f"--count must be between 0 and 20 (got {count})")
         paths, registry = _paths_and_registry()
-        resolved = instances_mod.resolve_target(
-            registry, project, template or None, branch or None, label or None
-        )
-        inst_id = resolved.instance_id
-        log_path = str(paths.logs / inst_id / "deploy.log")
 
-        def run_deploy():
-            return instances_mod.deploy(
+        if count == 1:
+            resolved = instances_mod.resolve_target(
+                registry, project, template or None, branch or None, label or None
+            )
+            inst_id = resolved.instance_id
+            log_path = str(paths.logs / inst_id / "deploy.log")
+
+            def run_deploy():
+                return instances_mod.deploy(
+                    paths,
+                    registry,
+                    project,
+                    template or None,
+                    branch=branch or None,
+                    label=label or None,
+                    fresh=bool(fresh),
+                    # HTML checkboxes submit NOTHING when unchecked — `auth`
+                    # arrives as "" (Form default) in that case, and bool("") is
+                    # False, so an unchecked box means auth OFF, not a silent
+                    # fall-through to the default-ON behavior. Deliberately NOT
+                    # `auth_enabled=True if not auth else bool(auth)` — that
+                    # would make "unchecked" indistinguishable from "field never
+                    # sent" and always resolve to ON, which is the classic bug.
+                    auth_enabled=bool(auth),
+                    auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
+                )
+
+            job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
+            ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+            return templates.TemplateResponse(
+                request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
+            )
+
+        if count == 0:
+            return HTMLResponse("<p>nothing to deploy (--count=0)</p>")
+
+        # Pre-flight validation done SYNCHRONOUSLY, before any job is
+        # created, so a tripped disk gate surfaces as an immediate 400
+        # (spec §9: pre-flight failures abort before the loop begins) —
+        # same pattern as naming.validate_part(project) above.
+        if not bool(skip_disk_check):
+            sysinfo.check_disk_headroom(paths.instances)
+
+        job_holder: dict[str, object] = {}
+
+        def on_progress(progress: dict) -> None:
+            job_holder["job"].detail = json.dumps(progress)
+
+        def run_multi_deploy():
+            outcome = bulk_mod.multi_deploy(
                 paths,
                 registry,
                 project,
                 template or None,
                 branch=branch or None,
                 label=label or None,
+                count=count,
                 fresh=bool(fresh),
-                # HTML checkboxes submit NOTHING when unchecked — `auth`
-                # arrives as "" (Form default) in that case, and bool("") is
-                # False, so an unchecked box means auth OFF, not a silent
-                # fall-through to the default-ON behavior. Deliberately NOT
-                # `auth_enabled=True if not auth else bool(auth)` — that
-                # would make "unchecked" indistinguishable from "field never
-                # sent" and always resolve to ON, which is the classic bug.
                 auth_enabled=bool(auth),
                 auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
+                skip_disk_check=True,  # already checked synchronously above
+                on_progress=on_progress,
             )
+            final = _bulk_progress_payload(outcome)
+            if not outcome.all_ok:
+                raise _BulkJobFailed(json.dumps(final))
+            return json.dumps(final)
 
-        job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
+        job = await app.state.jobs.submit("multi-deploy", "", run_multi_deploy)
+        job_holder["job"] = job
+        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        return templates.TemplateResponse(
+            request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
+        )
+
+    async def _ui_bulk_start_stop(request: Request, instance_ids: list[str], *, kind: str, op):
+        paths, registry = _paths_and_registry()
+        job_holder: dict[str, object] = {}
+
+        def on_progress(progress: dict) -> None:
+            job_holder["job"].detail = json.dumps(progress)
+
+        def run_bulk():
+            outcome = bulk_mod.run_concurrent(
+                paths, registry, instance_ids, op, kind=kind, on_progress=on_progress
+            )
+            final = _bulk_progress_payload(outcome)
+            if not outcome.all_ok:
+                raise _BulkJobFailed(json.dumps(final))
+            return json.dumps(final)
+
+        job = await app.state.jobs.submit(kind, "", run_bulk, instance_ids=instance_ids)
+        job_holder["job"] = job
+        ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
+        return templates.TemplateResponse(
+            request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
+        )
+
+    @app.post("/ui/bulk/start")
+    async def ui_bulk_start(request: Request, instance_id: list[str] = Form(...)):
+        return await _ui_bulk_start_stop(
+            request, instance_id, kind="bulk-start", op=instances_mod.start
+        )
+
+    @app.post("/ui/bulk/stop")
+    async def ui_bulk_stop(request: Request, instance_id: list[str] = Form(...)):
+        return await _ui_bulk_start_stop(
+            request, instance_id, kind="bulk-stop", op=instances_mod.stop
+        )
+
+    @app.post("/ui/bulk/destroy")
+    async def ui_bulk_destroy(
+        request: Request,
+        instance_id: list[str] = Form(...),
+        confirm_count: int = Form(...),
+    ):
+        if confirm_count != len(instance_id):
+            raise FleetError(
+                f"confirmation count {confirm_count} does not match "
+                f"{len(instance_id)} selected instance(s); nothing destroyed"
+            )
+        paths, registry = _paths_and_registry()
+        job_holder: dict[str, object] = {}
+
+        def on_progress(progress: dict) -> None:
+            job_holder["job"].detail = json.dumps(progress)
+
+        def run_bulk():
+            outcome = bulk_mod.run_sequential(
+                paths,
+                registry,
+                instance_id,
+                instances_mod.destroy,
+                kind="bulk-destroy",
+                on_progress=on_progress,
+            )
+            final = _bulk_progress_payload(outcome)
+            if not outcome.all_ok:
+                raise _BulkJobFailed(json.dumps(final))
+            return json.dumps(final)
+
+        job = await app.state.jobs.submit("bulk-destroy", "", run_bulk, instance_ids=instance_id)
+        job_holder["job"] = job
         ws_token = mint_ws_token(app.state.ws_secret, job.instance_id)
         return templates.TemplateResponse(
             request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}

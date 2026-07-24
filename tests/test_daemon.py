@@ -1,3 +1,6 @@
+import json
+import re
+import time
 from pathlib import Path
 
 import pytest
@@ -420,3 +423,207 @@ def test_startup_real_sync_honours_isolated_snippet_dir(fleet_home):
     assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.exists()
     assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.is_relative_to(fleet_home.parent)
     assert not real_default.exists()
+
+
+def test_ui_bulk_start_returns_bulk_job_panel(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    (fleet_home / "instances" / "demo--other").mkdir(parents=True)
+    from fleet import daemon as daemon_mod
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "start", lambda paths, registry, iid, **kw: None)
+
+    # `with` (not a bare TestClient()) is required here: /ui/bulk/start's
+    # job body calls bulk_mod.run_concurrent, which spins up its own nested
+    # ThreadPoolExecutor. A bare TestClient() gives every single request its
+    # own throwaway anyio blocking portal/event loop (see
+    # starlette.testclient.TestClient._portal_factory) — the background
+    # asyncio.create_task from JobManager.submit() is scheduled on the POST
+    # request's portal loop, and once that portal closes (right after the
+    # response is sent) an in-flight asyncio.to_thread() future can no
+    # longer report its result back, orphaning the task forever regardless
+    # of how many follow-up GETs poll it. run_concurrent's extra thread-pool
+    # spin-up is reliably slower than that portal's lifetime, so this
+    # deadlocks 100% of the time on a bare TestClient(); a single `with`
+    # block keeps one portal/loop alive across the whole poll, matching
+    # test_startup_real_sync_honours_isolated_snippet_dir's pattern above.
+    with TestClient(create_app(fleet_home)) as client:
+        response = client.post(
+            "/ui/bulk/start", data={"instance_id": ["demo--develop", "demo--other"]}
+        )
+
+        assert response.status_code == 200
+        job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+        final = None
+        for _ in range(50):
+            panel = client.get(f"/ui/jobs/{job_id}/panel")
+            if "succeeded" in panel.text:
+                final = panel.text
+                break
+            time.sleep(0.02)
+
+    assert final is not None
+    assert "demo--develop" in final
+    assert "demo--other" in final
+
+
+def test_ui_bulk_destroy_confirm_count_mismatch_returns_400_and_destroys_nothing(
+    fleet_home, monkeypatch
+):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    calls = []
+    monkeypatch.setattr(daemon_mod.instances_mod, "destroy", lambda *a, **kw: calls.append(True))
+
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+    response = client.post(
+        "/ui/bulk/destroy", data={"instance_id": ["demo--develop"], "confirm_count": 2}
+    )
+
+    assert response.status_code == 400
+    assert calls == []
+
+
+def test_ui_bulk_destroy_confirm_count_match_dispatches_bulk_destroy(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    (fleet_home / "instances" / "demo--other").mkdir(parents=True)
+    from fleet import daemon as daemon_mod
+
+    calls = []
+    monkeypatch.setattr(
+        daemon_mod.instances_mod, "destroy", lambda paths, registry, iid, **kw: calls.append(iid)
+    )
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/bulk/destroy",
+        data={"instance_id": ["demo--develop", "demo--other"], "confirm_count": 2},
+    )
+
+    assert response.status_code == 200
+    job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+    for _ in range(50):
+        panel = client.get(f"/ui/jobs/{job_id}/panel")
+        if "succeeded" in panel.text:
+            break
+        time.sleep(0.02)
+
+    assert set(calls) == {"demo--develop", "demo--other"}
+
+
+def test_ui_deploy_count_greater_than_1_dispatches_multi_deploy(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    captured = {}
+
+    def fake_multi_deploy(paths, registry, project, template, *, count, **kw):
+        captured["count"] = count
+        return daemon_mod.bulk_mod.BulkOutcome(
+            kind="deploy",
+            results=[
+                daemon_mod.bulk_mod.BulkResult(
+                    instance_id=f"demo--generic-{n}", ok=True, error=None, duration_s=0.0
+                )
+                for n in range(1, count + 1)
+            ],
+        )
+
+    monkeypatch.setattr(daemon_mod.bulk_mod, "multi_deploy", fake_multi_deploy)
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/deploy",
+        data={
+            "project": "demo",
+            "template": "default",
+            "branch": "main",
+            "label": "generic",
+            "count": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+    for _ in range(50):
+        panel = client.get(f"/ui/jobs/{job_id}/panel")
+        if "succeeded" in panel.text:
+            break
+        time.sleep(0.02)
+
+    assert captured["count"] == 3
+
+
+def test_ui_deploy_disk_gate_tripped_returns_400(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+    from fleet.core.errors import DiskSpaceError
+
+    def failing_check(instances_dir, **kw):
+        raise DiskSpaceError("refusing to deploy 5 instances: only 2.0% free")
+
+    monkeypatch.setattr(daemon_mod.sysinfo, "check_disk_headroom", failing_check)
+
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+    response = client.post(
+        "/ui/deploy",
+        data={"project": "demo", "template": "default", "branch": "main", "count": 5},
+    )
+
+    assert response.status_code == 400
+    assert "refusing to deploy 5 instances" in response.text
+
+
+def test_ui_deploy_count_1_path_unchanged(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    def boom(*a, **kw):
+        raise AssertionError("multi_deploy must not run for count=1")
+
+    monkeypatch.setattr(daemon_mod.bulk_mod, "multi_deploy", boom)
+    monkeypatch.setattr(
+        daemon_mod.instances_mod,
+        "deploy",
+        lambda *a, **kw: "https://demo--develop.fleet.example.test",
+    )
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/deploy",
+        data={"project": "demo", "template": "default", "branch": "main", "label": "develop"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_bulk_job_panel_omits_hx_preserve_and_uses_current_instance_ws_url(fleet_home):
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["bulk1"] = Job(
+        id="bulk1",
+        kind="bulk-start",
+        instance_id="",
+        state="running",
+        instance_ids=["demo--develop", "demo--other"],
+        detail=json.dumps(
+            {
+                "total": 2,
+                "done": 1,
+                "failed": 0,
+                "current": "demo--other",
+                "results": [{"instance_id": "demo--develop", "ok": True, "error": None}],
+            }
+        ),
+    )
+
+    response = client.get("/ui/jobs/bulk1/panel")
+
+    assert response.status_code == 200
+    assert 'hx-preserve="true"' not in response.text
+    assert "/ws/instances/demo--other/log" in response.text
