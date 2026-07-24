@@ -33,6 +33,17 @@ def test_read_reboot_status_missing_pkgs_file_yields_empty_list(tmp_path):
     assert status.packages == []
 
 
+def test_read_reboot_status_corrupt_pkgs_file_yields_pending_with_empty_list(tmp_path):
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    pkgs = tmp_path / "reboot-required.pkgs"
+    pkgs.write_bytes(b"\xff\xfe\x00bad")
+    status = reboot.read_reboot_status(marker, pkgs)
+    assert status.pending is True
+    assert status.packages == []
+    assert status.since == marker.stat().st_mtime
+
+
 def test_format_duration_since_under_an_hour():
     assert reboot.format_duration_since(1000.0, now=1000.0 + 1800) == "<1h"
 

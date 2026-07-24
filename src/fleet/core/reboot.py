@@ -49,7 +49,7 @@ def read_reboot_status(
             for line in pkgs_file.read_text(encoding="utf-8").splitlines()
             if line.strip()
         ]
-    except OSError:
+    except (OSError, UnicodeDecodeError):
         packages = []
 
     return RebootStatus(pending=True, since=since, packages=packages)
