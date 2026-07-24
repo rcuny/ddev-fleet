@@ -39,6 +39,7 @@ shell's own (unrelated) DDEV setup.
 | `core/gitops.py` | `clone`/`update` of an instance's git worktree |
 | `core/ddev.py` | Subprocess wrappers: `start`/`stop`/`restart`/`delete`/`list_projects`/`ram_usage` |
 | `core/assets.py` | rsync-mirrors a project's asset tree into an instance, then runs the `[[token]]` substitution pass over copied files |
+| `core/bulk.py` | Bulk orchestration over the existing single-instance primitives in `core/instances.py` — `BulkResult`/`BulkOutcome`, `run_sequential`/`run_concurrent` (continue-on-error, no new locking), and `multi_deploy()` (multi-instance deploy: `core/naming.py:allocate_multi_deploy_labels` + `core/sysinfo.py:check_disk_headroom` disk gate + the `_multideploy` advisory lock via `core/locks.py:instance_lock`). Used by both `cli.py` (bulk `start`/`stop`/`destroy`, `deploy --count`) and `daemon.py` (`/ui/bulk/*`, `/ui/deploy` with `count>1`) |
 | `core/tokens.py` | The `[[token]]` substitution engine (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, secret tokens, …) and `FLEET_*` env var derivation for `post_deploy` commands |
 | `core/secrets.py` | Read/write `KEY=VALUE` files (0600) — both the fleet-wide `.secrets` and per-project `secrets/<project>.env` |
 | `core/typesense.py` | Generates/persists per-project Typesense admin+search-only keys, registers the search-only key against a running instance's Typesense admin API |

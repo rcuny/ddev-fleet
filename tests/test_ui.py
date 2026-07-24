@@ -347,3 +347,130 @@ def test_ui_start_vanished_instance_row_returns_400(fleet_home, monkeypatch):
     response = client.post("/ui/instances/demo--develop/start")
 
     assert response.status_code == 400
+
+
+def test_instances_table_has_checkbox_column_and_select_all(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert '<input type="checkbox" id="select-all">' in body
+    assert 'name="instance_id" value="demo--develop" class="row-select"' in body
+
+
+def test_bulk_action_bar_renders_below_the_table(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    table_pos = body.index('id="instances-table"')
+    actions_pos = body.index('id="bulk-actions"')
+    assert actions_pos > table_pos
+    assert 'hx-post="/ui/bulk/start"' in body
+    assert 'hx-post="/ui/bulk/stop"' in body
+
+
+def test_deploy_form_count_input_has_expected_bounds(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert '<input type="number" name="count" min="0" max="20" step="1" value="1" required>' in body
+
+
+def test_deploy_form_has_skip_disk_check_checkbox(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert 'name="skip_disk_check"' in body
+
+
+def test_bulk_js_is_served(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get("/static/bulk.js")
+
+    assert response.status_code == 200
+
+
+def test_bulk_js_closes_socket_on_before_cleanup_element(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/static/bulk.js").text
+
+    assert "htmx:beforeCleanupElement" in body
+    assert "_wsSocket" in body
+    assert ".close()" in body
+
+
+def test_bulk_js_wires_select_all_checkbox(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/static/bulk.js").text
+
+    assert "select-all" in body
+    assert "row-select" in body
+
+
+def test_ws_log_js_exposes_socket_reference_for_bulk_js_to_close(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/static/ws-log.js").text
+
+    assert "_wsSocket" in body
+
+
+def test_base_html_includes_bulk_js_script_tag(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert '<script src="/static/bulk.js" defer></script>' in body
+
+
+def test_bulk_js_wires_destroy_confirm_reveal(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/static/bulk.js").text
+
+    assert "bulk-destroy-trigger" in body
+    assert "bulk-destroy-confirm" in body
+    assert "bulk-destroy-confirm-count-field" in body
+    assert "bulk-destroy-confirm-input" in body
+    assert "bulk-destroy-confirm-btn" in body
+
+
+def test_bulk_js_guards_against_empty_selection_post(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/static/bulk.js").text
+
+    # A bulk button firing with nothing selected must be cancelled before
+    # the request is sent, not surfaced as a 422 from the daemon.
+    assert "htmx:beforeRequest" in body
+    assert "preventDefault" in body
+    assert "/ui/bulk/" in body
+
+
+def test_bulk_js_surfaces_bulk_route_error_response(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/static/bulk.js").text
+
+    # A rejected request (e.g. destroy confirm_count mismatch, 400) must be
+    # shown to the user, not silently dropped — htmx only swaps 2xx
+    # responses into hx-target by default.
+    assert "htmx:responseError" in body

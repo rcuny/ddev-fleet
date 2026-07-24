@@ -46,3 +46,7 @@ class CaddyAuthError(FleetError):
 class CaddyPortsError(FleetError):
     """Composing/writing/validating/reloading a fleet-owned Caddy named-port
     exposure snippet failed (fleet.core.caddyports)."""
+
+
+class DiskSpaceError(FleetError):
+    """Insufficient free disk space to proceed with a bulk deploy."""

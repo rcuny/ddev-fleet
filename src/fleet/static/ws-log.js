@@ -16,6 +16,7 @@
     attached.add(url);
     var proto = window.location.protocol === "https:" ? "wss:" : "ws:";
     var socket = new WebSocket(proto + "//" + window.location.host + url);
+    el._wsSocket = socket;
     socket.onmessage = function (event) {
       el.textContent += event.data;
       el.scrollTop = el.scrollHeight;

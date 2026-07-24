@@ -11,6 +11,7 @@ from ruamel.yaml import YAML
 
 from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
+from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, ddev, fleetconfig
 from fleet.core import instances as instances_mod
 from fleet.core import shell as shell_mod
@@ -68,6 +69,13 @@ def _fleet_home(args: argparse.Namespace) -> Path:
     return Path(os.environ.get("FLEET_HOME", DEFAULT_FLEET_HOME))
 
 
+def _add_bulk_target_args(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument("instance_id", nargs="*", default=[])
+    subparser.add_argument("--all", action="store_true")
+    subparser.add_argument("--project", default=None)
+    subparser.add_argument("--state", default=None, choices=["running", "deployed"])
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fleet")
     parser.add_argument("--fleet-home", default=None)
@@ -99,15 +107,18 @@ def _build_parser() -> argparse.ArgumentParser:
             f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
         ),
     )
+    deploy_parser.add_argument("--count", "-n", type=int, default=1)
+    deploy_parser.add_argument("--skip-disk-check", action="store_true")
 
     destroy_parser = subparsers.add_parser("destroy")
-    destroy_parser.add_argument("instance_id")
+    _add_bulk_target_args(destroy_parser)
+    destroy_parser.add_argument("--yes", action="store_true")
 
     start_parser = subparsers.add_parser("start")
-    start_parser.add_argument("instance_id")
+    _add_bulk_target_args(start_parser)
 
     stop_parser = subparsers.add_parser("stop")
-    stop_parser.add_argument("instance_id")
+    _add_bulk_target_args(stop_parser)
 
     subparsers.add_parser("list")
 
@@ -210,13 +221,13 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "init":
             _cmd_init(fleet_home, args)
         elif args.command == "deploy":
-            _cmd_deploy(fleet_home, args)
+            return _cmd_deploy(fleet_home, args)
         elif args.command == "destroy":
-            _cmd_destroy(fleet_home, args)
+            return _cmd_destroy(fleet_home, args)
         elif args.command == "start":
-            _cmd_start(fleet_home, args)
+            return _cmd_start(fleet_home, args)
         elif args.command == "stop":
-            _cmd_stop(fleet_home, args)
+            return _cmd_stop(fleet_home, args)
         elif args.command == "list":
             _cmd_list(fleet_home, args)
         elif args.command == "ssh-key":
@@ -296,40 +307,185 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
             )
 
 
-def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> None:
+def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    url = instances_mod.deploy(
+
+    if args.count == 1:
+        url = instances_mod.deploy(
+            paths,
+            registry,
+            args.project,
+            args.template,
+            branch=args.branch,
+            label=args.label,
+            fresh=args.fresh,
+            force=args.force,
+            auth_enabled=args.auth,
+            auth_password=args.auth_password,
+        )
+        print(url)
+        return 0
+
+    if args.count == 0:
+        print("nothing to deploy (--count=0)")
+        return 0
+
+    outcome = bulk_mod.multi_deploy(
         paths,
         registry,
         args.project,
         args.template,
         branch=args.branch,
         label=args.label,
+        count=args.count,
         fresh=args.fresh,
         force=args.force,
         auth_enabled=args.auth,
         auth_password=args.auth_password,
+        skip_disk_check=args.skip_disk_check,
     )
-    print(url)
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
-def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> None:
+def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    instances_mod.destroy(paths, registry, args.instance_id)
+    target_ids = _resolve_bulk_targets(paths, registry, args)
+
+    if not target_ids:
+        print("no instances matched the given selector", file=sys.stderr)
+        return 0
+
+    # A single *explicit* instance id bypasses confirmation entirely —
+    # today's exact behaviour, preserved for backward compatibility. A
+    # selector (--all/--project/--state) always requires confirmation, even
+    # when it happens to resolve to exactly one instance, because the user
+    # did not name what gets destroyed — the selector chose it. (Mirrors the
+    # explicit-vs-selector distinction in _cmd_bulk_start_stop.)
+    if len(args.instance_id) == 1:
+        instances_mod.destroy(paths, registry, target_ids[0])
+        return 0
+
+    if not args.yes:
+        print(f"About to destroy {len(target_ids)} instances:", file=sys.stderr)
+        for instance_id in target_ids:
+            print(f"  {instance_id}", file=sys.stderr)
+        if not sys.stdin.isatty():
+            raise FleetError(
+                f"refusing to destroy {len(target_ids)} instances without --yes: "
+                "not an interactive terminal"
+            )
+        answer = input(
+            f"Type {len(target_ids)} to confirm destroying {len(target_ids)} instances: "
+        )
+        if answer.strip() != str(len(target_ids)):
+            raise FleetError("confirmation did not match; aborted, nothing destroyed")
+
+    outcome = bulk_mod.run_sequential(
+        paths, registry, target_ids, instances_mod.destroy, kind="destroy"
+    )
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
-def _cmd_start(fleet_home: Path, args: argparse.Namespace) -> None:
+def _resolve_bulk_targets(
+    paths: instances_mod.FleetPaths, registry: Registry, args: argparse.Namespace
+) -> list[str]:
+    """Apply spec §1's precedence/combination rules and return the
+    resolved list of instance ids to act on. An empty list means
+    'selector matched nothing' — callers must treat that as a no-op
+    success (exit 0), not an error."""
+    ids = list(args.instance_id)
+    has_selector = args.all or args.project or args.state
+
+    if ids and has_selector:
+        raise FleetError("cannot combine explicit instance ids with --all/--project/--state")
+    if args.all and (args.project or args.state):
+        raise FleetError("--all cannot be combined with --project/--state")
+    if not ids and not has_selector:
+        raise FleetError(
+            "at least one instance id or a --all/--project/--state selector is required"
+        )
+
+    if ids:
+        return ids
+
+    statuses = instances_mod.list_instances(paths, registry)
+    if args.all:
+        return [s.instance_id for s in statuses]
+    matched = statuses
+    if args.project:
+        matched = [s for s in matched if s.project == args.project]
+    if args.state:
+        matched = [s for s in matched if s.state == args.state]
+    return [s.instance_id for s in matched]
+
+
+def _cmd_start(fleet_home: Path, args: argparse.Namespace) -> int:
+    return _cmd_bulk_start_stop(fleet_home, args, kind="start", op=instances_mod.start)
+
+
+def _cmd_stop(fleet_home: Path, args: argparse.Namespace) -> int:
+    return _cmd_bulk_start_stop(fleet_home, args, kind="stop", op=instances_mod.stop)
+
+
+def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: str, op) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    instances_mod.start(paths, registry, args.instance_id)
+    target_ids = _resolve_bulk_targets(paths, registry, args)
 
+    if not target_ids:
+        print("no instances matched the given selector", file=sys.stderr)
+        return 0
 
-def _cmd_stop(fleet_home: Path, args: argparse.Namespace) -> None:
-    paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
-    instances_mod.stop(paths, registry, args.instance_id)
+    # A single *explicit* instance id bypasses the bulk machinery entirely —
+    # today's exact behaviour, preserved for backward compatibility. A
+    # selector (--all/--project/--state) always goes through run_concurrent
+    # even when it happens to resolve to exactly one instance, so progress
+    # reporting/exit-code semantics stay consistent regardless of how many
+    # instances currently match.
+    if len(args.instance_id) == 1:
+        op(paths, registry, target_ids[0])
+        return 0
+
+    outcome = bulk_mod.run_concurrent(paths, registry, target_ids, op, kind=kind)
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
 def _cmd_list(fleet_home: Path, args: argparse.Namespace) -> None:
