@@ -270,6 +270,7 @@ def deploy(
             typesense_port=registry.port_profile("typesense").public,
             typesense_admin_key=typesense_admin_key,
             typesense_search_key=typesense_search_key,
+            ports=registry.project_ports(project),
         )
         write_web_build(instance_dir)
         excludes = [
@@ -513,6 +514,7 @@ def refresh_instance_config(
             typesense_port=registry.port_profile("typesense").public,
             typesense_admin_key=typesense_admin_key,
             typesense_search_key=typesense_search_key,
+            ports=registry.project_ports(project),
         )
         write_web_build(instance_dir)
 

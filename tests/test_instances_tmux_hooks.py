@@ -139,6 +139,9 @@ def _fake_registry():
                 return PortProfile(name="typesense", public=9108, router=8108)
             raise AssertionError(f"unexpected port_profile call: {name!r}")
 
+        def project_ports(self, project):
+            return []
+
     return _Registry()
 
 

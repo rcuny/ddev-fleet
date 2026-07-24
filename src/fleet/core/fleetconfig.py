@@ -5,6 +5,8 @@ from pathlib import Path
 from ruamel.yaml import YAML
 from ruamel.yaml.scalarstring import LiteralScalarString
 
+from fleet.core.registry import PortProfile
+
 _yaml = YAML()
 _yaml.default_flow_style = False
 _yaml.indent(mapping=2, sequence=4, offset=2)
@@ -67,6 +69,7 @@ def write_fleet_config(
     typesense_port: int = 9108,
     typesense_admin_key: str | None = None,
     typesense_search_key: str | None = None,
+    ports: list[PortProfile] | None = None,
 ) -> Path:
     ddev_dir = instance_dir / ".ddev"
     ddev_dir.mkdir(parents=True, exist_ok=True)
@@ -108,6 +111,12 @@ def write_fleet_config(
             web_environment.append(f"TYPESENSE_API_KEY={typesense_admin_key}")
         if typesense_search_key:
             web_environment.append(f"FLEET_TYPESENSE_SEARCH_KEY={typesense_search_key}")
+    if ports:
+        for profile in ports:
+            if profile.name == "typesense":
+                continue  # bespoke FLEET_TYPESENSE_* vars above already cover it
+            env_name = profile.name.upper().replace("-", "_")
+            web_environment.append(f"FLEET_PORT_{env_name}={profile.public}")
     data["web_environment"] = web_environment
     if additional_fqdns:
         data["additional_fqdns"] = list(additional_fqdns)
