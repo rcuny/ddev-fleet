@@ -467,6 +467,62 @@ projects: {}
         Registry.load(_write(fleet_home / "fleet.yml", text))
 
 
+@pytest.mark.parametrize("value", [0, 65536])
+def test_fleet_ports_public_range_boundary_raises(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: {{ public: {value}, router: 9200 }}
+
+projects: {{}}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.bad.public"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+@pytest.mark.parametrize("value", [0, 65536])
+def test_fleet_ports_router_range_boundary_raises(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: {{ public: 9200, router: {value} }}
+
+projects: {{}}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.bad.router"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+@pytest.mark.parametrize("value", [1, 65535])
+def test_fleet_ports_public_range_boundary_loads(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    ok: {{ public: {value}, router: 9200 }}
+
+projects: {{}}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.port_profile("ok") == PortProfile(name="ok", public=value, router=9200)
+
+
+@pytest.mark.parametrize("value", [1, 65535])
+def test_fleet_ports_router_range_boundary_loads(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    ok: {{ public: 9200, router: {value} }}
+
+projects: {{}}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.port_profile("ok") == PortProfile(name="ok", public=9200, router=value)
+
+
 @pytest.mark.parametrize("reserved", [22, 80, 443, 8765])
 def test_fleet_ports_reserved_public_port_raises(fleet_home, reserved):
     text = f"""\
