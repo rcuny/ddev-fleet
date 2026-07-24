@@ -6,8 +6,8 @@ set -euo pipefail
 # and run the provisioning playbook. Idempotent: re-running this script
 # after the first successful run is a safe upgrade (git pull + re-apply).
 #
-# Usage:
-#   curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
+# Usage (public one-liner):
+#   curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo bash
 
 # NOTE: HTTPS default — at bootstrap time no SSH deploy key exists yet.
 # Ways to get the code onto the box:
@@ -17,7 +17,7 @@ set -euo pipefail
 #     clean checkout out-of-band (e.g. rsync a `git archive` export to
 #     ${FLEET_OPT_DIR}) and run with FLEET_SKIP_FETCH=1 — the git step is
 #     then skipped entirely and the code already on disk is used as-is.
-FLEET_REPO_URL="${FLEET_REPO_URL:-https://bitbucket.org/personal_maintainer/ddev-fleet.git}"
+FLEET_REPO_URL="${FLEET_REPO_URL:-https://github.com/rcuny/ddev-fleet.git}"
 FLEET_OPT_DIR="${FLEET_OPT_DIR:-/opt/ddev-fleet}"
 FLEET_SKIP_FETCH="${FLEET_SKIP_FETCH:-}"
 
@@ -63,7 +63,7 @@ fi
 echo
 echo "Next steps (see docs/runbook-server-rollout.md for the full checklist):"
 echo "  1. Add the deploy key above as a READ-ONLY deploy key on each git forge."
-echo "  2. Rotate the dashboard admin password off the shipped default (admin/ddev-admin):"
+echo "  2. If you need to change the dashboard admin password later:"
 echo "     sudo -u fleet fleet rotate-admin-password   # no re-run of this script needed"
 echo "  3. Point DNS: fleet.<domain> and *.fleet.<domain> at this server's IP."
 echo "  4. Run 'fleet init' as the fleet user to mint the Claude Code OAuth token."
