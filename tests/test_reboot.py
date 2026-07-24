@@ -262,6 +262,58 @@ def test_reboot_notify_past_cadence_resends_and_updates_last_notified(tmp_path):
     assert reboot._read_state(state_path) == reboot.NotifyState(1000.0, now)
 
 
+def test_reboot_notify_one_second_before_interval_suppresses(tmp_path):
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    reboot._write_state(state_path, reboot.NotifyState(first_seen=1000.0, last_notified=1000.0))
+    fake = _fake()
+
+    now = 1000.0 + 24 * 3600 - 1
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        state_path=state_path,
+        marker=marker,
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=now,
+        interval_hours=24,
+        runner=fake,
+    )
+    assert sent is False
+    assert fake.calls == []
+    assert reboot._read_state(state_path) == reboot.NotifyState(1000.0, 1000.0)
+
+
+def test_reboot_notify_exactly_at_interval_sends(tmp_path):
+    marker = tmp_path / "reboot-required"
+    marker.write_text("", encoding="utf-8")
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    state_path = tmp_path / "state.json"
+    reboot._write_state(state_path, reboot.NotifyState(first_seen=1000.0, last_notified=1000.0))
+    fake = _fake()
+
+    now = 1000.0 + 24 * 3600
+    sent = reboot.reboot_notify(
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        state_path=state_path,
+        marker=marker,
+        pkgs_file=tmp_path / "reboot-required.pkgs",
+        now=now,
+        interval_hours=24,
+        runner=fake,
+    )
+    assert sent is True
+    assert len(fake.calls) == 1
+    assert reboot._read_state(state_path) == reboot.NotifyState(1000.0, now)
+
+
 def test_reboot_notify_test_mode_bypasses_pending_and_cadence(tmp_path):
     msmtprc = tmp_path / "msmtprc"
     msmtprc.write_text("account default\n", encoding="utf-8")
