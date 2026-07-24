@@ -1,0 +1,6 @@
+[Unit]
+Description=fleet UFW dead-man's-switch timer — fires once, {{ fleet_ufw_deadman_grace_minutes }} minutes after being started (spec §3.3)
+
+[Timer]
+OnActiveSec={{ fleet_ufw_deadman_grace_minutes }}min
+Unit=fleet-ufw-deadman.service

@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Installed by the network_hardening Ansible role. Invoked via
+# `sudo /usr/local/sbin/fleet-ufw-sync` by `fleet refresh-ports` (a sibling
+# plan's CLI command) — takes NO arguments (spec §4: an unprivileged
+# caller must never be able to inject ports into a command that runs
+# under sudo). Additive-only: only ever ADDS `ufw allow <port>/tcp`
+# rules, never removes one — a stale open port is a safer failure mode
+# than an SSH-revoking bad diff. Ports come SOLELY from
+# Registry.public_ports_in_use() (never a hand-rolled fleet.yml parse).
+set -euo pipefail
+
+PYTHON="{{ fleet_opt_dir }}/venv/bin/python3"
+FLEET_HOME="${FLEET_HOME:-/srv/fleet}"
+
+PORTS="$("$PYTHON" - "$FLEET_HOME" <<'PYEOF'
+import sys
+from pathlib import Path
+
+fleet_home = Path(sys.argv[1])
+from fleet.core.instances import FleetPaths
+from fleet.core.registry import Registry
+
+paths = FleetPaths.from_home(fleet_home)
+registry = Registry.load(paths.registry)
+try:
+    ports = registry.public_ports_in_use()
+except AttributeError:
+    # The sibling port-exposure feature hasn't shipped yet — nothing to
+    # sync, not an error (spec: "must not hard-depend on it").
+    print("__NOT_AVAILABLE__")
+else:
+    for port in ports:
+        print(port)
+PYEOF
+)"
+
+if [ "$PORTS" = "__NOT_AVAILABLE__" ]; then
+    echo "fleet-ufw-sync: Registry.public_ports_in_use() not available yet (port-exposure feature not installed) — nothing to sync"
+    exit 0
+fi
+
+for port in $PORTS; do
+    ufw allow "${port}/tcp"
+done
+echo "fleet-ufw-sync: synced $(echo "$PORTS" | wc -w) port(s)"

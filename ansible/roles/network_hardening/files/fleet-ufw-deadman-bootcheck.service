@@ -1,0 +1,10 @@
+[Unit]
+Description=fleet UFW dead-man's-switch boot-time reconfirmation check (spec §3.3)
+After=network.target ufw.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fleet-ufw-deadman-fire
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,239 @@
+---
+- name: Check whether a DDEV global config exists
+  ansible.builtin.stat:
+    path: "{{ fleet_home_dir }}/.ddev/global_config.yaml"
+  become: true
+  become_user: "{{ fleet_user }}"
+  register: nh_ddev_global_config_file
+
+- name: Read the DDEV global config
+  ansible.builtin.slurp:
+    src: "{{ fleet_home_dir }}/.ddev/global_config.yaml"
+  become: true
+  become_user: "{{ fleet_user }}"
+  register: nh_ddev_global_config_raw
+  when: nh_ddev_global_config_file.stat.exists
+
+- name: Parse the DDEV global config
+  ansible.builtin.set_fact:
+    nh_ddev_global_config: >-
+      {{ (nh_ddev_global_config_raw.content | b64decode | from_yaml)
+         if nh_ddev_global_config_file.stat.exists else {} }}
+
+- name: Assert DDEV's router is loopback-only (router_bind_all_interfaces == false)
+  # The DOCKER-USER guard's threat model (spec §3) rests entirely on this
+  # assumption. Fails the play (not a warning) when violated.
+  ansible.builtin.assert:
+    that:
+      - not (nh_ddev_global_config.router_bind_all_interfaces | default(false) | bool)
+    fail_msg: >-
+      DDEV's global_config.yaml has router_bind_all_interfaces: true —
+      the network_hardening role's threat model assumes ddev-router is
+      loopback-only. Refusing to enable network_hardening. Set
+      fleet_ufw_assert_loopback_router: false to override at your own risk.
+  when: fleet_ufw_assert_loopback_router
+
+- name: Install ufw
+  ansible.builtin.apt:
+    name: ufw
+    state: present
+
+- name: Set UFW default policies (incoming deny, outgoing allow)
+  community.general.ufw:
+    direction: "{{ item.direction }}"
+    policy: "{{ item.policy }}"
+  loop:
+    - { direction: incoming, policy: deny }
+    - { direction: outgoing, policy: allow }
+  loop_control:
+    label: "{{ item.direction }}={{ item.policy }}"
+
+- name: Allow SSH (unconditional, must precede ufw enable — spec §5)
+  community.general.ufw:
+    rule: allow
+    port: "{{ fleet_ufw_ssh_port | string }}"
+    proto: tcp
+
+- name: Allow HTTP/HTTPS for Caddy
+  community.general.ufw:
+    rule: allow
+    port: "{{ item }}"
+    proto: tcp
+  loop:
+    - "80"
+    - "443"
+
+- name: Allow each resolved extra port (spec §4 — seeded empty at provision time)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  loop: "{{ fleet_ufw_extra_ports }}"
+
+- name: Render the DOCKER-USER guard into /etc/ufw/after.rules
+  # Inserted as its OWN *filter/COMMIT stanza, textually BEFORE ufw's
+  # existing *filter block — iptables-restore applies multiple stanzas
+  # for the same table sequentially, so this appends into the
+  # already-Docker-created DOCKER-USER chain without disturbing ufw's
+  # own rules below it. Standard technique (see chaifeng/ufw-docker);
+  # verified against Debian 13's shipped after.rules layout.
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/after.rules
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet DOCKER-USER guard"
+    insertbefore: BOF
+    block: |
+      *filter
+      :DOCKER-USER - [0:0]
+      -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+      -A DOCKER-USER -i {{ fleet_ufw_docker_bridge }} -o {{ fleet_ufw_docker_bridge }} -j ACCEPT
+      -A DOCKER-USER -j RETURN
+      COMMIT
+  notify: Reload ufw
+
+- name: Flush handlers so a changed DOCKER-USER guard reloads ufw within this role
+  # Handlers otherwise flush at end-of-play (site.yml sets force_handlers:
+  # true), so on a re-run where only the guard content changed and UFW is
+  # already enabled, the new guard wouldn't take effect until the whole
+  # playbook finished. Flushing here is safe for the lockout ordering
+  # (spec §5): the SSH allow rule was staged in an earlier task (unaffected
+  # by `ufw reload`, which only re-reads already-staged rules) and UFW
+  # itself is not enabled by this flush — 'ufw reload' is a no-op when UFW
+  # is inactive, which is the case on a first run. The pre-enable check and
+  # 'enable' task both still run AFTER this flush.
+  ansible.builtin.meta: flush_handlers
+
+- name: Verify the SSH allow rule is staged before enabling UFW (spec §5)
+  ansible.builtin.command:
+    cmd: ufw show added
+  register: nh_ufw_added
+  changed_when: false
+
+- name: Assert the SSH port is present in the staged rules
+  # Word/line-boundary match, NOT substring: a plain `in nh_ufw_added.stdout`
+  # check would false-positive when fleet_ufw_ssh_port is a substring of
+  # another allowed port (SSH on 22 with 8022 also allowed; SSH on 80 with
+  # 8080 also allowed). regex_findall('[0-9]+', ...) tokenises each staged
+  # rule line into whole numbers, so "22" only matches a rule whose port is
+  # exactly 22, never one that merely contains "22".
+  ansible.builtin.assert:
+    that:
+      - (fleet_ufw_ssh_port | string) in (nh_ufw_added.stdout_lines | map('regex_findall', '[0-9]+') | sum(start=[]))
+    fail_msg: >-
+      SSH port {{ fleet_ufw_ssh_port }} was not found as an exact (whole
+      number) port in 'ufw show added' — refusing to enable UFW. Any
+      reordering that puts 'enable' before the SSH allow rule is a
+      blocking defect (spec §5).
+
+- name: Enable UFW (last — every allow rule above must already be staged)
+  community.general.ufw:
+    state: enabled
+  register: nh_ufw_enable
+
+- name: Deploy the shared dead-man's-switch fire script
+  ansible.builtin.copy:
+    src: fleet-ufw-deadman-fire.sh
+    dest: /usr/local/sbin/fleet-ufw-deadman-fire
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy fleet-firewall-confirm
+  ansible.builtin.copy:
+    src: fleet-firewall-confirm.sh
+    dest: /usr/local/sbin/fleet-firewall-confirm
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy the dead-man's-switch service unit
+  ansible.builtin.copy:
+    src: fleet-ufw-deadman.service
+    dest: /etc/systemd/system/fleet-ufw-deadman.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (network_hardening)
+
+- name: Deploy the dead-man's-switch boot-time bootcheck service
+  ansible.builtin.copy:
+    src: fleet-ufw-deadman-bootcheck.service
+    dest: /etc/systemd/system/fleet-ufw-deadman-bootcheck.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (network_hardening)
+
+- name: Deploy the dead-man's-switch timer unit (grace period templated)
+  ansible.builtin.template:
+    src: fleet-ufw-deadman.timer.j2
+    dest: /etc/systemd/system/fleet-ufw-deadman.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (network_hardening)
+
+- name: Check whether the dead-man's-switch confirmation marker already exists
+  ansible.builtin.stat:
+    path: /etc/ddev-fleet/ufw-deadman-confirmed
+  register: nh_deadman_confirmed_marker
+
+- name: Ensure the boot-time bootcheck service is enabled only when the switch is armed or confirmed
+  # MUST NOT be unconditionally enabled: the fire script it runs disables
+  # UFW fail-safe whenever the confirmation marker is absent, and it would
+  # run on EVERY boot. Enabling it in a state where no marker exists and
+  # none will ever be created would silently disable UFW on the very next
+  # reboot. Gate is the same "was the switch genuinely armed" test as the
+  # arm task below, PLUS the marker (a prior run's completed arm+confirm
+  # cycle) so a re-run doesn't undo a confirmed host's safe resting state:
+  #   - fleet_ufw_deadman_switch_enabled: false (opted out)            -> false
+  #   - nh_ufw_enable.changed (this run just armed it) is true          -> true
+  #   - nh_deadman_confirmed_marker exists (armed+confirmed previously) -> true
+  #   - UFW was already enabled before this play and never armed        -> false
+  #     (nh_ufw_enable.changed is false, no marker was ever created)
+  # `enabled:` is templated (not a static true) so a host that had the
+  # bootcheck enabled by a previous run but has since opted out gets it
+  # actively DISABLED here, not just left alone.
+  ansible.builtin.systemd:
+    name: fleet-ufw-deadman-bootcheck.service
+    enabled: >-
+      {{ fleet_ufw_deadman_switch_enabled
+         and (nh_deadman_confirmed_marker.stat.exists or nh_ufw_enable.changed) }}
+    daemon_reload: true
+
+- name: Arm the UFW dead-man's switch
+  ansible.builtin.systemd:
+    name: fleet-ufw-deadman.timer
+    state: started
+  when: >-
+    nh_ufw_enable.changed
+    and fleet_ufw_deadman_switch_enabled
+    and not nh_deadman_confirmed_marker.stat.exists
+
+- name: Print the dead-man's-switch operator message (spec §3.3)
+  ansible.builtin.debug:
+    msg: >-
+      UFW dead-man's switch ARMED. Automatic disable in
+      {{ fleet_ufw_deadman_grace_minutes }} minutes unless confirmed.
+      From a SECOND, INDEPENDENT SSH session, run:
+      sudo /usr/local/sbin/fleet-firewall-confirm
+  when: >-
+    nh_ufw_enable.changed
+    and fleet_ufw_deadman_switch_enabled
+    and not nh_deadman_confirmed_marker.stat.exists
+
+- name: Deploy fleet-ufw-sync
+  ansible.builtin.template:
+    src: fleet-ufw-sync.sh.j2
+    dest: /usr/local/sbin/fleet-ufw-sync
+    owner: root
+    group: "{{ fleet_group }}"
+    mode: "0750"
+
+- name: Install the fleet-ufw-sync sudoers drop-in
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/fleet-ufw-sync
+    content: "{{ fleet_user }} ALL=(root) NOPASSWD: /usr/local/sbin/fleet-ufw-sync\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
