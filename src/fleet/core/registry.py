@@ -121,7 +121,7 @@ class Registry:
         if "domain" not in fleet_block:
             raise RegistryError("missing key 'fleet.domain'")
 
-        self._validate_fleet_ports(fleet_block)
+        fleet_ports = self._validate_fleet_ports(fleet_block)
 
         projects = data.get("projects") or {}
         for project_key, project_block in projects.items():
@@ -155,6 +155,13 @@ class Registry:
                     raise RegistryError(
                         f"projects.{project_key}.templates.{template_key}.branch: not "
                         "allowed — branch is resolved per-deploy, never stored in a template"
+                    )
+
+            for port_name in project_block.get("ports") or []:
+                if port_name not in fleet_ports:
+                    raise RegistryError(
+                        f"projects.{project_key}.ports: unknown port name {port_name!r} "
+                        "(not defined in fleet.ports)"
                     )
 
     @property
@@ -250,6 +257,29 @@ class Registry:
         if name == "typesense":
             return _TYPESENSE_LEGACY_DEFAULT
         raise RegistryError(f"unknown port name {name!r} (not defined in fleet.ports)")
+
+    def project_ports(self, project: str) -> list[PortProfile]:
+        """`projects.<project>.ports` resolved by name, plus a synthetic
+        'typesense' entry when `typesense_enabled(project)` and 'typesense'
+        isn't already listed (dedupes the legacy/new overlap, spec §3.3)."""
+        block = self._project_block(project)
+        names = list(block.get("ports") or [])
+        if self.typesense_enabled(project) and "typesense" not in names:
+            names.append("typesense")
+        return [self.port_profile(name) for name in names]
+
+    def all_port_profiles(self) -> list[PortProfile]:
+        """Union of every PortProfile referenced by ANY project, one each,
+        sorted by name — the accessor the firewall spec's `fleet-ufw-sync`
+        and `core/caddyports.py` both consume."""
+        seen: dict[str, PortProfile] = {}
+        for project in self.project_keys():
+            for profile in self.project_ports(project):
+                seen[profile.name] = profile
+        return [seen[name] for name in sorted(seen)]
+
+    def public_ports_in_use(self) -> list[int]:
+        return sorted({p.public for p in self.all_port_profiles()})
 
     def resolve(
         self, project: str, template: str, branch: str, label: str | None = None

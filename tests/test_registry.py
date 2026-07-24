@@ -553,6 +553,156 @@ def test_fleet_ports_absent_is_valid(fleet_home, sample_registry_text):
     Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
 
 
+def test_project_ports_resolves_named_list(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+    ts-dashboard: { public: 9111, router: 8110 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    ports: [playwright, ts-dashboard]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.project_ports("oak") == [
+        PortProfile(name="playwright", public=9324, router=8323),
+        PortProfile(name="ts-dashboard", public=9111, router=8110),
+    ]
+
+
+def test_project_ports_dedupes_legacy_typesense_overlap(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    typesense: { public: 9108, router: 8108 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    ports: [typesense]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.project_ports("oak") == [
+        PortProfile(name="typesense", public=9108, router=8108)
+    ]
+
+
+def test_project_ports_adds_synthetic_typesense_when_enabled_and_not_listed(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.project_ports("oak") == [
+        PortProfile(name="typesense", public=9108, router=8108)
+    ]
+
+
+def test_project_ports_empty_when_unsubscribed(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    assert registry.project_ports("demo") == []
+
+
+def test_project_ports_unknown_reference_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    ports: [ghost]
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.ports.*ghost"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_project_ports_typesense_in_list_without_explicit_entry_is_unknown_reference(fleet_home):
+    """Listing 'typesense' explicitly in `ports:` is NOT the legacy boolean
+    — it must resolve against a real fleet.ports.typesense entry like any
+    other name (§3.1's unknown-reference rule draws no exception here)."""
+    text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    ports: [typesense]
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.ports.*typesense"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_all_port_profiles_unions_dedupes_and_sorts(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+    ts-dashboard: { public: 9111, router: 8110 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    ports: [playwright, ts-dashboard]
+    templates:
+      default: {}
+  other:
+    git: git@example.test:org/other.git
+    ports: [playwright]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert [p.name for p in registry.all_port_profiles()] == [
+        "playwright",
+        "ts-dashboard",
+        "typesense",
+    ]
+
+
+def test_public_ports_in_use_returns_sorted_dedup_public_ports(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+    ts-dashboard: { public: 9111, router: 8110 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    ports: [playwright, ts-dashboard]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.public_ports_in_use() == [9108, 9111, 9324]
+
+
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):
     """A nonexistent fleet.yml must raise RegistryError with guidance,
     not a raw FileNotFoundError traceback in the CLI."""
