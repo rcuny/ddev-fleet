@@ -1,0 +1,9 @@
+[Unit]
+Description=fleet reboot-required notification poll (hourly, spec §6.3)
+
+[Timer]
+OnCalendar=hourly
+Persistent=true
+
+[Install]
+WantedBy=timers.target

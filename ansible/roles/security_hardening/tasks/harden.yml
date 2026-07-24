@@ -246,3 +246,31 @@
          else 'FAILED (rc=' + (sh_msmtp_test_send.rc | string) + ') — check '
               + fleet_srv_dir + '/msmtprc and the relay settings' }}
   when: fleet_msmtp_enabled
+
+- name: Deploy the fleet-reboot-notify service unit
+  ansible.builtin.template:
+    src: fleet-reboot-notify.service.j2
+    dest: /etc/systemd/system/fleet-reboot-notify.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (security_hardening)
+  when: fleet_reboot_notify_enabled
+
+- name: Deploy the fleet-reboot-notify timer unit
+  ansible.builtin.copy:
+    src: fleet-reboot-notify.timer
+    dest: /etc/systemd/system/fleet-reboot-notify.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (security_hardening)
+  when: fleet_reboot_notify_enabled
+
+- name: Enable and start the fleet-reboot-notify timer
+  ansible.builtin.systemd:
+    name: fleet-reboot-notify.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: fleet_reboot_notify_enabled
