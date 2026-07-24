@@ -870,3 +870,104 @@ def test_deploy_raises_deploy_error_when_caddy_validate_fails(fleet_home, git_re
         c for c in runner.calls if c["cmd"][:2] == ["caddy", "reload"] or c["cmd"][:1] == ["ddev"]
     ]
     assert reload_or_ddev_calls == []
+
+
+def test_deploy_writes_caddy_port_snippet_for_project_ports(fleet_home, git_repo):
+    from fleet.core import caddyports
+
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: {{ public: 9324, router: 8323 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    ports: [playwright]
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    snippet_path = caddyports.DEFAULT_PORTS_SNIPPET_DIR / "playwright.conf"
+    assert snippet_path.exists()
+    assert "9324" in snippet_path.read_text(encoding="utf-8")
+
+
+def test_destroy_removes_caddy_port_snippet_when_registry_no_longer_declares_it(
+    fleet_home, git_repo
+):
+    # NOTE: `Registry` is declarative and read-only at runtime (core/registry.py) —
+    # `all_port_profiles()` reflects what `fleet.yml` *currently* declares for a
+    # project, not which instances of that project happen to exist on disk.
+    # `sync()` reconciles the snippet dir to that declaration. So "unsubscribing"
+    # a port is a registry edit (dropping it from a project's `ports:` list and
+    # reloading), not a side effect of destroying the last instance — a project
+    # with zero deployed instances but a live `ports:` entry still keeps its
+    # snippet, which is correct: the Caddy site block is fleet-wide and harmless
+    # to leave up, and another instance of the project may be deployed at any
+    # moment. Do not "fix" this back to an instance-count check.
+    from fleet.core import caddyports
+
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text_with_port = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: {{ public: 9324, router: 8323 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    ports: [playwright]
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text_with_port, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+    snippet_path = caddyports.DEFAULT_PORTS_SNIPPET_DIR / "playwright.conf"
+    assert snippet_path.exists()
+
+    # Operator un-subscribes project `demo` from the `playwright` port profile.
+    registry_text_without_port = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: {{ public: 9324, router: 8323 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text_without_port, encoding="utf-8")
+    registry = Registry.load(paths.registry)
+
+    instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+    assert not snippet_path.exists()

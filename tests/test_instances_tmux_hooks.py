@@ -14,11 +14,12 @@ def test_destroy_kills_tmux_window_first_and_swallows_errors(monkeypatch, tmp_pa
     monkeypatch.setattr(instances.ddev, "delete", lambda *a, **k: RunResult(0, []))
     monkeypatch.setattr(instances, "_remove_instance_dir", lambda *a, **k: None)
     monkeypatch.setattr(instances.caddyauth, "disable_instance_auth", lambda *a, **k: None)
+    monkeypatch.setattr(instances.caddyports, "sync", lambda *a, **k: None)
 
     (tmp_path / "instances" / "oak--x").mkdir(parents=True)
     paths = instances.FleetPaths.from_home(tmp_path)
 
-    instances._destroy_locked(paths, "oak--x")
+    instances._destroy_locked(paths, "oak--x", _fake_registry())
 
     assert calls == ["oak--x"]  # hook ran despite raising
 
@@ -42,11 +43,12 @@ def test_destroy_kills_tmux_window_before_ddev_delete(monkeypatch, tmp_path):
         "disable_instance_auth",
         lambda *a, **k: order.append("caddyauth"),
     )
+    monkeypatch.setattr(instances.caddyports, "sync", lambda *a, **k: None)
 
     (tmp_path / "instances" / "oak--x").mkdir(parents=True)
     paths = instances.FleetPaths.from_home(tmp_path)
 
-    instances._destroy_locked(paths, "oak--x")
+    instances._destroy_locked(paths, "oak--x", _fake_registry())
 
     assert order[0] == "tmux"
     assert order.index("tmux") < order.index("ddev")
@@ -142,6 +144,9 @@ def _fake_registry():
         def project_ports(self, project):
             return []
 
+        def all_port_profiles(self):
+            return []
+
     return _Registry()
 
 
@@ -163,6 +168,7 @@ def _stub_deploy_collaborators(monkeypatch, mod):
     monkeypatch.setattr(mod, "read_secrets", lambda *a, **k: {"CLAUDE_CODE_OAUTH_TOKEN": "tok"})
     monkeypatch.setattr(mod.caddyauth, "enable_instance_auth", lambda *a, **k: None)
     monkeypatch.setattr(mod.caddyauth, "disable_instance_auth", lambda *a, **k: None)
+    monkeypatch.setattr(mod.caddyports, "sync", lambda *a, **k: None)
     monkeypatch.setattr(mod, "write_fleet_config", lambda *a, **k: None)
     monkeypatch.setattr(mod, "write_web_build", lambda *a, **k: None)
     monkeypatch.setattr(mod, "write_ddev_env", lambda *a, **k: None)

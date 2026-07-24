@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from fleet.core import caddyauth
+from fleet.core import caddyauth, caddyports
 from fleet.core.runner import RunResult
 
 
@@ -25,9 +25,13 @@ def _isolate_caddy_paths(monkeypatch, tmp_path):
     every real (non-monkeypatched) deploy()/destroy() call in the suite
     without threading tmp_path overrides through ~30 individual call sites.
     Harmless for tests that don't touch instances.deploy()/destroy() at all.
+
+    Also redirects `caddyports.DEFAULT_PORTS_SNIPPET_DIR` for the same
+    reason — `deploy()`/`destroy()` now also call `caddyports.sync()`.
     """
     monkeypatch.setattr(caddyauth, "DEFAULT_INSTANCE_SNIPPET_DIR", tmp_path / "caddy-instances")
     monkeypatch.setattr(caddyauth, "DEFAULT_CADDYFILE_PATH", tmp_path / "Caddyfile")
+    monkeypatch.setattr(caddyports, "DEFAULT_PORTS_SNIPPET_DIR", tmp_path / "caddy-ports")
 
 
 SAMPLE_REGISTRY_YAML = """\

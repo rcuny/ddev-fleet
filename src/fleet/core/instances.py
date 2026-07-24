@@ -10,8 +10,14 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import caddyauth, ddev, gitops, tmux, typesense
-from fleet.core.errors import CaddyAuthError, DeployError, FleetError, TypesenseError
+from fleet.core import caddyauth, caddyports, ddev, gitops, tmux, typesense
+from fleet.core.errors import (
+    CaddyAuthError,
+    CaddyPortsError,
+    DeployError,
+    FleetError,
+    TypesenseError,
+)
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
     write_ddev_env,
@@ -167,6 +173,7 @@ def deploy(
             _destroy_locked(
                 paths,
                 inst_id,
+                registry,
                 auth_snippet_dir=snippet_dir,
                 auth_caddyfile_path=caddyfile_path,
                 runner=runner,
@@ -258,6 +265,25 @@ def deploy(
             typesense_admin_key, typesense_search_key = typesense.ensure_project_keys(
                 paths.project_secrets / f"{project}.env"
             )
+
+        # Reconcile the WHOLE registry's Caddy port snippets (not just this
+        # instance's) so a newly-subscribed port gets its snippet before
+        # `ddev start` brings the instance up. Runs after the fresh-destroy
+        # above and before write_fleet_config so a failure here still leaves
+        # this deploy call fully reported as a DeployError, not a
+        # half-configured instance.
+        try:
+            caddyports.sync(
+                registry,
+                snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR,
+                caddyfile_path=caddyfile_path,
+                runner=runner,
+            )
+        except CaddyPortsError as exc:
+            raise DeployError(
+                f"failed to reconcile Caddy port snippets for instance {inst_id!r}: "
+                f"{exc.message}"
+            ) from exc
 
         write_fleet_config(
             instance_dir,
@@ -377,6 +403,7 @@ def _remove_instance_dir(instance_dir: Path) -> None:
 def _destroy_locked(
     paths: FleetPaths,
     instance_id: str,
+    registry: Registry,
     *,
     auth_snippet_dir: Path | None = None,
     auth_caddyfile_path: Path | None = None,
@@ -420,6 +447,19 @@ def _destroy_locked(
             f"failed to remove basic-auth snippet for instance {instance_id!r}: {exc.message}"
         ) from exc
 
+    try:
+        caddyports.sync(
+            registry,
+            snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR,
+            caddyfile_path=caddyfile_path,
+            runner=runner,
+        )
+    except CaddyPortsError as exc:
+        raise FleetError(
+            f"failed to reconcile Caddy port snippets after destroying instance "
+            f"{instance_id!r}: {exc.message}"
+        ) from exc
+
 
 def destroy(
     paths: FleetPaths,
@@ -437,6 +477,7 @@ def destroy(
         _destroy_locked(
             paths,
             instance_id,
+            registry,
             auth_snippet_dir=auth_snippet_dir,
             auth_caddyfile_path=auth_caddyfile_path,
             runner=runner,
