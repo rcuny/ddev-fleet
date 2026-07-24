@@ -43,8 +43,9 @@
 # place.) Re-sourcing from the END of each user's ~/.bashrc is what actually
 # makes the prompt stick, for both login shells (~/.profile sources ~/.bashrc)
 # and non-login interactive ones. Do not "simplify" this away.
-# Only hook home dirs that actually exist. `debian` is the OVH/Kimsufi default
-# sudo account and is not created by this playbook, so it may legitimately be
+# Only hook home dirs that actually exist. `debian` is the default sudo
+# account on Debian cloud images (most providers ship this) and is not
+# created by this playbook, so it may legitimately be
 # absent on another host — and blockinfile's `create: true` would otherwise
 # happily write a .bashrc for a user that does not exist.
 - name: Check which target home directories exist
