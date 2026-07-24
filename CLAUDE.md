@@ -48,6 +48,7 @@ shell's own (unrelated) DDEV setup.
 | `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race |
 | `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe) |
 | `core/sysinfo.py` | Host stats for the web UI footer: `SystemStats.gather` (free/total RAM from `/proc/meminfo`, free/total disk from `shutil.disk_usage` on the instances mount) + `fmt_bytes`; memory → `n/a` if `/proc/meminfo` is unreadable |
+| `core/reboot.py` | Single shared reader for Debian's reboot-required marker (`/var/run/reboot-required` + `.pkgs`) — `RebootStatus`/`read_reboot_status()` — plus the anti-spam notification cadence and msmtp email send backing `fleet reboot-notify [--test]`. Consumed by `tmux_sidebar.py` (sidebar banner) and `core/sysinfo.py` (web UI footer badge) — one implementation, not three |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
 
 ## Testing
