@@ -38,6 +38,38 @@ def test_run_sequential_continues_past_failing_instance():
     assert outcome.results[2].ok is True
 
 
+def test_run_sequential_continues_past_bare_os_error():
+    """A bare OSError (e.g. destroy()'s filesystem cleanup hitting a
+    root-owned leftover file) must not abort the batch — it should be
+    caught and turned into a failed BulkResult just like a FleetError."""
+    op = _make_op({"b": OSError("[Errno 13] Permission denied: '/x'")})
+
+    outcome = bulk.run_sequential(None, None, ["a", "b", "c"], op, kind="destroy")
+
+    assert op.calls == ["a", "b", "c"]
+    assert [r.instance_id for r in outcome.results] == ["a", "b", "c"]
+    assert outcome.results[0].ok is True
+    assert outcome.results[1].ok is False
+    assert "Permission denied" in outcome.results[1].error
+    assert outcome.results[2].ok is True
+
+
+def test_run_concurrent_continues_past_bare_os_error():
+    """Same regression guard as above, but for the ThreadPoolExecutor path
+    — a bare OSError raised inside a worker must not propagate out of
+    executor.map() and discard the other instances' already-collected
+    results."""
+    op = _make_op({"b": OSError("[Errno 13] Permission denied: '/x'")})
+
+    outcome = bulk.run_concurrent(None, None, ["a", "b", "c"], op, kind="destroy", max_workers=2)
+
+    assert [r.instance_id for r in outcome.results] == ["a", "b", "c"]
+    assert outcome.results[0].ok is True
+    assert outcome.results[1].ok is False
+    assert "Permission denied" in outcome.results[1].error
+    assert outcome.results[2].ok is True
+
+
 def test_bulk_outcome_succeeded_failed_all_ok():
     from fleet.core.errors import FleetError
 

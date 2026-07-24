@@ -67,11 +67,12 @@ def _call_op(op: Callable, paths, registry, instance_id: str, runner) -> BulkRes
         return BulkResult(
             instance_id=instance_id, ok=True, error=None, duration_s=time.monotonic() - start
         )
-    except FleetError as exc:
+    except Exception as exc:
+        error = exc.message if isinstance(exc, FleetError) else str(exc)
         return BulkResult(
             instance_id=instance_id,
             ok=False,
-            error=exc.message,
+            error=error,
             duration_s=time.monotonic() - start,
         )
 
