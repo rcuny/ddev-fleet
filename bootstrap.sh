@@ -9,6 +9,44 @@ set -euo pipefail
 # Usage (public one-liner):
 #   curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo bash
 
+# --- 1. Root check -----------------------------------------------------------
+if [ "$(id -u)" -ne 0 ]; then
+  echo "ERROR: bootstrap.sh must run as root (it installs system packages and" >&2
+  echo "       systemd units). Re-run with sudo, e.g.:" >&2
+  echo "       curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo bash" >&2
+  exit 1
+fi
+
+# --- 2. OS detection (warn-and-continue, not hard-block) --------------------
+FLEET_FORCE_OS="${FLEET_FORCE_OS:-}"
+if [ -r /etc/os-release ]; then
+  # shellcheck disable=SC1091  # dynamic host file, nothing to statically follow
+  . /etc/os-release
+else
+  ID="unknown"
+fi
+case "${ID:-unknown}" in
+  debian|ubuntu) ;;
+  *)
+    echo "WARNING: this installer targets Debian 13 (Ubuntu 26.04 also" >&2
+    echo "         verified working). Detected ID=${ID:-unknown} — untested," >&2
+    echo "         may fail partway through apt/Ansible steps." >&2
+    if [ -n "${FLEET_FORCE_OS}" ]; then
+      echo "==> FLEET_FORCE_OS set — continuing anyway."
+    elif [ -r /dev/tty ]; then
+      read -r -p "Continue anyway? [y/N] " _os_confirm < /dev/tty || _os_confirm=""
+      case "${_os_confirm}" in
+        y|Y|yes|YES) ;;
+        *) echo "Aborting. Set FLEET_FORCE_OS=1 to skip this check." >&2; exit 1 ;;
+      esac
+    else
+      echo "ERROR: no controlling terminal to confirm, and FLEET_FORCE_OS is not" >&2
+      echo "       set. Re-run with FLEET_FORCE_OS=1 to proceed unattended." >&2
+      exit 1
+    fi
+    ;;
+esac
+
 # NOTE: HTTPS default — at bootstrap time no SSH deploy key exists yet.
 # Ways to get the code onto the box:
 #   - Public/authenticated git: leave FLEET_REPO_URL default or export an
