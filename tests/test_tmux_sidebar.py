@@ -1,5 +1,6 @@
 from fleet import tmux_sidebar
 from fleet.core import tmux
+from fleet.core.reboot import RebootStatus
 
 
 def test_run_exits_cleanly_when_session_exists_check_raises(monkeypatch):
@@ -124,7 +125,7 @@ def test_run_uses_live_branch_on_first_render(monkeypatch, tmp_path):
     monkeypatch.setattr(
         tmux_sidebar,
         "_render",
-        lambda console, window, ids, statuses, branches: seen.update(branches),
+        lambda console, window, ids, statuses, branches, *a, **k: seen.update(branches),
     )
 
     tmux_sidebar.run(_DummyPaths(tmp_path), "general", once=True)
@@ -168,3 +169,76 @@ def test_run_branch_tick_is_independent_of_status_tick(monkeypatch, tmp_path):
     assert branch_calls["n"] == 2
     # statuses initial + refresh at t=15 and t=400 -> re-read more often than branches
     assert status_calls["n"] >= 3
+
+
+def test_reboot_banner_lines_include_header_and_duration():
+    status = RebootStatus(pending=True, since=0.0, packages=["libc6"])
+    lines = tmux_sidebar._reboot_banner_lines(status)
+    assert lines[0] == "REBOOT REQUIRED"
+    assert any("libc6" in line for line in lines)
+
+
+def test_reboot_banner_lines_caps_package_list_with_more_suffix():
+    status = RebootStatus(pending=True, since=0.0, packages=["a", "b", "c", "d", "e"])
+    lines = tmux_sidebar._reboot_banner_lines(status)
+    joined = " ".join(lines)
+    assert "+2 more" in joined
+
+
+def test_render_includes_banner_when_pending():
+    from rich.console import Console
+
+    console = Console(record=True, width=60)
+    status = RebootStatus(pending=True, since=0.0, packages=["libc6"])
+    tmux_sidebar._render(console, "general", [], {}, {}, reboot_status=status)
+    text = console.export_text()
+    assert "REBOOT REQUIRED" in text
+
+
+def test_render_omits_banner_when_not_pending():
+    from rich.console import Console
+
+    console = Console(record=True, width=60)
+    status = RebootStatus(pending=False, since=None, packages=[])
+    tmux_sidebar._render(console, "general", [], {}, {}, reboot_status=status)
+    text = console.export_text()
+    assert "REBOOT REQUIRED" not in text
+
+
+def test_render_omits_banner_when_status_is_none():
+    from rich.console import Console
+
+    console = Console(record=True, width=60)
+    tmux_sidebar._render(console, "general", [], {}, {})
+    text = console.export_text()
+    assert "REBOOT REQUIRED" not in text
+
+
+def test_run_reboot_tick_is_independent_of_status_tick(monkeypatch, tmp_path):
+    reboot_calls = {"n": 0}
+
+    def fake_read_reboot_status():
+        reboot_calls["n"] += 1
+        return RebootStatus(pending=False, since=None, packages=[])
+
+    monkeypatch.setattr(tmux_sidebar, "read_reboot_status", fake_read_reboot_status)
+    monkeypatch.setattr(tmux_sidebar.shell, "list_instance_ids", lambda paths: [])
+    monkeypatch.setattr(tmux_sidebar, "_statuses", lambda: {})
+    monkeypatch.setattr(tmux_sidebar, "_render", lambda *a, **k: None)
+    monkeypatch.setattr(tmux_sidebar.time, "sleep", lambda *_: None)
+
+    clock = iter([0, 5, 15, 400])
+    monkeypatch.setattr(tmux_sidebar.time, "monotonic", lambda: next(clock))
+    alive = iter([True, True, False])
+    monkeypatch.setattr(tmux_sidebar.tmux, "session_exists", lambda: next(alive))
+
+    tmux_sidebar.run(
+        _DummyPaths(tmp_path),
+        "general",
+        list_interval=0,
+        status_interval=10,
+        branch_interval=300,
+        reboot_interval=10,
+    )
+    # initial read (t=0) + refresh at t=15 and t=400 -> matches status cadence
+    assert reboot_calls["n"] >= 3
