@@ -10,6 +10,7 @@ Three consumers, one reader: `tmux_sidebar.py` (sidebar banner),
 
 from __future__ import annotations
 
+import json
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -64,3 +65,37 @@ def format_duration_since(since: float, *, now: float | None = None) -> str:
     if days == 0:
         return f"{hours}h"
     return f"{days}d {hours}h"
+
+
+@dataclass(frozen=True)
+class NotifyState:
+    first_seen: float
+    last_notified: float
+
+
+def _read_state(path: Path) -> NotifyState | None:
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    try:
+        return NotifyState(
+            first_seen=float(raw["first_seen"]), last_notified=float(raw["last_notified"])
+        )
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
+def _write_state(path: Path, state: NotifyState) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps({"first_seen": state.first_seen, "last_notified": state.last_notified}),
+        encoding="utf-8",
+    )
+
+
+def _clear_state(path: Path) -> None:
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        pass
