@@ -109,3 +109,52 @@
   community.general.ufw:
     state: enabled
   register: nh_ufw_enable
+
+- name: Deploy the shared dead-man's-switch fire script
+  ansible.builtin.copy:
+    src: fleet-ufw-deadman-fire.sh
+    dest: /usr/local/sbin/fleet-ufw-deadman-fire
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy fleet-firewall-confirm
+  ansible.builtin.copy:
+    src: fleet-firewall-confirm.sh
+    dest: /usr/local/sbin/fleet-firewall-confirm
+    owner: root
+    group: root
+    mode: "0750"
+
+- name: Deploy the dead-man's-switch service unit
+  ansible.builtin.copy:
+    src: fleet-ufw-deadman.service
+    dest: /etc/systemd/system/fleet-ufw-deadman.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (network_hardening)
+
+- name: Deploy the dead-man's-switch boot-time bootcheck service
+  ansible.builtin.copy:
+    src: fleet-ufw-deadman-bootcheck.service
+    dest: /etc/systemd/system/fleet-ufw-deadman-bootcheck.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (network_hardening)
+
+- name: Deploy the dead-man's-switch timer unit (grace period templated)
+  ansible.builtin.template:
+    src: fleet-ufw-deadman.timer.j2
+    dest: /etc/systemd/system/fleet-ufw-deadman.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (network_hardening)
+
+- name: Ensure the boot-time bootcheck service is enabled
+  ansible.builtin.systemd:
+    name: fleet-ufw-deadman-bootcheck.service
+    enabled: true
+    daemon_reload: true

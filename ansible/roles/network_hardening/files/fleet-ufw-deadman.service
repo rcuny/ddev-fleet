@@ -1,0 +1,6 @@
+[Unit]
+Description=fleet UFW dead-man's-switch fire (spec §3.3)
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fleet-ufw-deadman-fire
