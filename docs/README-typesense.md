@@ -54,16 +54,22 @@ Caddy  — *.{{ fleet_domain }}:9108 site (ansible/roles/caddy/templates/Caddyfi
 Instance's Typesense (internal :8108)
 ```
 
-- `9108` is `fleet_typesense_public_port` in `ansible/group_vars/all.yml`
-  and **must** stay numerically in sync with `TYPESENSE_PUBLIC_PORT` in
-  `src/fleet/core/instances.py` — the two are configured independently
-  (Ansible vs. Python) with no shared source of truth, so a change to one
-  without the other silently breaks the browser URL.
-- `8108` is `ddev_typesense_http_port` in the same `group_vars/all.yml` and
-  must match `TYPESENSE_ROUTER_HTTP_PORT` in `instances.py` — this is the
-  shared `ddev-router` entrypoint that every Typesense-enabled instance's
-  container sits behind, Host-routed exactly like the main `:8080` HTTP
-  entrypoint DDEV instances already share.
+- `9108`/`8108` are no longer Python constants hand-synced against Ansible
+  vars — that footgun was eliminated 2026-07-24
+  (`2026-07-24-fleet-port-exposure-design.md`). They now come from
+  `Registry.port_profile("typesense")` (`core/registry.py`): an explicit
+  `fleet.ports.typesense: { public, router }` entry in `fleet.yml`, or —
+  if absent — a built-in legacy default of `public=9108`/`router=8108`
+  (`_TYPESENSE_LEGACY_DEFAULT`), so an existing `fleet.yml` with only
+  `typesense: true` needs zero edits.
+- `8108` (or whatever `router` resolves to) is the shared `ddev-router`
+  entrypoint that every Typesense-enabled instance's container sits
+  behind, Host-routed exactly like the main `:8080` HTTP entrypoint DDEV
+  instances already share. Caddy's `*.<domain>:<public>` site is written
+  and kept in sync by `core/caddyports.py`'s `sync()` — called from
+  `deploy()`/`destroy()`, `fleet refresh-ports`, and daemon startup — not
+  by Ansible past the one-time `ports/` directory seed. See
+  `docs/networking.md` for the generic mechanism.
 - Opt-in is per-project: set `typesense: true` on a project block in
   `fleet.yml` (see `fleet.yml.dist` for the commented example).
   `Registry.typesense_enabled(project)` gates all of the behavior below.

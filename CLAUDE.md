@@ -43,6 +43,7 @@ shell's own (unrelated) DDEV setup.
 | `core/secrets.py` | Read/write `KEY=VALUE` files (0600) — both the fleet-wide `.secrets` and per-project `secrets/<project>.env` |
 | `core/typesense.py` | Generates/persists per-project Typesense admin+search-only keys, registers the search-only key against a running instance's Typesense admin API |
 | `core/caddyauth.py` | Rotates the Caddy dashboard `basic_auth` password WITHOUT Ansible: hashes via `caddy hash-password`, atomically rewrites the fleet-owned snippet `/etc/caddy/fleet/admin-auth.conf` (imported by `Caddyfile.j2`, seeded once by the `caddy` Ansible role), `caddy validate`s, then reloads Caddy via `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019 — no sudo, no privilege escalation, works under `fleet.service`'s `NoNewPrivileges=yes` sandbox). Backs `fleet set-admin-password` / `fleet rotate-admin-password` |
+| `core/caddyports.py` | Reconciles fleet-owned Caddy named-port exposure snippets (`/etc/caddy/fleet/ports/<name>.conf`) to `Registry.all_port_profiles()` — one snippet per port NAME with ≥1 subscribing project (Typesense, Playwright reports, etc.), imported by `Caddyfile.j2` via a glob. Mirrors `caddyauth.py`'s write/validate/reload pattern (`sync()`: atomic write → `caddy validate` → `caddy reload`, one batch per call) but raises the sibling `CaddyPortsError`, not `CaddyAuthError`. Called from `core/instances.py`'s `deploy()`/`destroy()`, the `fleet refresh-ports` CLI command, and once at daemon startup as a safety net |
 | `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race |
 | `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe) |
 | `core/sysinfo.py` | Host stats for the web UI footer: `SystemStats.gather` (free/total RAM from `/proc/meminfo`, free/total disk from `shutil.disk_usage` on the instances mount) + `fmt_bytes`; memory → `n/a` if `/proc/meminfo` is unreadable |
@@ -124,15 +125,19 @@ Full details: `docs/runbook-server-rollout.md` §2a. Summary:
 
 ## Typesense port/key coupling
 
-Full human-readable design: `docs/README-typesense.md`. The load-bearing
-fact for anyone touching this code: **`fleet.core.instances.TYPESENSE_PUBLIC_PORT`
-(currently `9108`) MUST stay numerically in sync with
-`fleet_typesense_public_port` in `ansible/group_vars/all.yml`** (which feeds
-the `*.{{ fleet_domain }}:{{ fleet_typesense_public_port }}` site in
-`ansible/roles/caddy/templates/Caddyfile.j2`) — the two are independently
-configured with no code-level dependency, so a change to one without the
-other silently breaks the browser-facing Typesense URL. `TYPESENSE_ROUTER_HTTP_PORT`
-(`8108`) must likewise match `ddev_typesense_http_port`.
+Full human-readable design: `docs/README-typesense.md`; the generic
+mechanism it now rides on: `docs/networking.md` + `core/caddyports.py`.
+Typesense's public/router ports are no longer Python constants hand-synced
+against Ansible vars — that footgun was eliminated 2026-07-24
+(`2026-07-24-fleet-port-exposure-design.md`). They are now
+`Registry.port_profile("typesense")` (`core/registry.py`): an explicit
+`fleet.ports.typesense: { public, router }` entry in `fleet.yml`, or — if
+absent — a built-in legacy default of `public=9108`/`router=8108` (so an
+existing `fleet.yml` with only `typesense: true` needs zero edits). Any
+project opted in (via `typesense: true` or `ports: [typesense, ...]`) gets
+its Caddy exposure reconciled by `core/caddyports.py`'s `sync()`, called
+from `deploy()`/`destroy()`, `fleet refresh-ports`, and daemon startup —
+not by Ansible past the one-time `ports/` directory seed.
 
 Two keys are generated per opted-in project (`core/typesense.py`): a strong
 admin key (`TYPESENSE_API_KEY`, written to the instance's `.ddev/.env` for

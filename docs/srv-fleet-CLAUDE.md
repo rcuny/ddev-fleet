@@ -73,6 +73,7 @@ registry load with an actionable message naming the bad key.
 | `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value: hashes it (`caddy hash-password`), atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same way, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull) so the registry and assets checkout track their remote; a no-op message if `config/` isn't a git checkout |
+| `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
 | `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach; applies mouse/clipboard/status-bar settings on every attach |
 | `fleet tmux-reset <window>` | — | Rebuild a tab's standard pane layout in place (general = 1 bash + sidebar; instance = 2 bash + sidebar), without killing the window; bound to `^b R` inside the workspace |
 
@@ -101,6 +102,7 @@ into every instance of the project (`core/assets.py:_link_shared_dir`), and
 - **Rotate the Claude Code token fleet-wide (e.g. before the ~1 year expiry):** `fleet refresh-claude-token` — safe to re-run; only running instances are restarted.
 - **Rotate the dashboard admin password:** `fleet rotate-admin-password` (generated) or `fleet set-admin-password <password>` (explicit) — never requires an Ansible run.
 - **Pull the latest registry/assets after someone else edits `fleet.yml`:** `fleet refresh-config`.
+- **Expose a new port for a project (e.g. Typesense, a Playwright report port):** add it to `fleet.ports` and the project's `ports:` list in `fleet.yml`, then `fleet refresh-ports` — no Ansible run, no redeploy needed.
 - **Recovery when the daemon/web UI is down:** every command above works from the CLI directly against `fleet.core` — the daemon is not a dependency of the CLI (spec §11).
 
 ## `fleet tmux` operator notes

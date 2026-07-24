@@ -11,7 +11,7 @@ from ruamel.yaml import YAML
 
 from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
-from fleet.core import caddyauth, ddev, fleetconfig
+from fleet.core import caddyauth, caddyports, ddev, fleetconfig
 from fleet.core import instances as instances_mod
 from fleet.core import shell as shell_mod
 from fleet.core import tmux as tmux_mod
@@ -21,6 +21,8 @@ from fleet.core.runner import run_interactive, run_streamed
 from fleet.core.secrets import write_secret
 
 DEFAULT_FLEET_HOME = "/srv/fleet"
+
+_FLEET_UFW_SYNC_HELPER = Path("/usr/local/sbin/fleet-ufw-sync")
 
 _yaml = YAML()
 _yaml.default_flow_style = False
@@ -177,6 +179,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    subparsers.add_parser("refresh-ports")
+
     shell_parser = subparsers.add_parser("shell")
     shell_parser.add_argument("instance_id", nargs="?", default=None)
     shell_parser.add_argument("-l", "--list", action="store_true", dest="list_instances")
@@ -235,6 +239,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_refresh_config(fleet_home, runner=run_streamed)
         elif args.command == "refresh-instance-config":
             _cmd_refresh_instance_config(fleet_home, args)
+        elif args.command == "refresh-ports":
+            return _cmd_refresh_ports(fleet_home, args, runner=run_streamed)
         elif args.command == "shell":
             _cmd_shell(fleet_home, args)
         elif args.command == "ddev":
@@ -532,6 +538,39 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
         instance_dir = paths.instances / args.instance_id
         print(f"{args.instance_id}: config refreshed (not restarted)")
         print(f"  cd {instance_dir} && ddev restart")
+
+
+def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:
+    """Reconcile Caddy port-exposure snippets to `fleet.yml`'s current
+    `fleet.ports`/`ports:` state — the "apply my port edits now"
+    command (spec §5). Also runs the UFW half via the sudo helper when
+    the network_hardening role is installed; silently skipped when the
+    helper is absent (not an error)."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = Registry.load(paths.registry)
+
+    result = caddyports.sync(
+        registry, snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR, runner=runner
+    )
+    if result.written or result.removed:
+        for name in result.written:
+            print(f"caddy: wrote port snippet {name!r}")
+        for name in result.removed:
+            print(f"caddy: removed port snippet {name!r}")
+    else:
+        print("caddy: no changes")
+
+    if _FLEET_UFW_SYNC_HELPER.exists():
+        ufw_result = runner(["sudo", str(_FLEET_UFW_SYNC_HELPER)], echo=False)
+        if ufw_result.returncode != 0:
+            detail = "\n".join(ufw_result.lines)
+            raise FleetError(
+                f"'sudo {_FLEET_UFW_SYNC_HELPER}' failed (exit "
+                f"{ufw_result.returncode}):\n{detail}"
+            )
+        print("ufw: synced")
+
+    return 0
 
 
 def _cmd_tmux(fleet_home: Path, args: argparse.Namespace) -> None:

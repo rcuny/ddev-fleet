@@ -1,7 +1,9 @@
 import stat
+from pathlib import Path
 
 from fleet import cli
-from fleet.core.errors import DeployError
+from fleet.core import caddyports
+from fleet.core.errors import CaddyPortsError, DeployError
 from fleet.core.instances import FleetPaths, InstanceStatus
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult
@@ -836,6 +838,153 @@ def test_secret_set_writes_per_project_secret_file(fleet_home):
     assert secret_path.read_text(encoding="utf-8") == "SLACK_BOT_TOKEN=xoxb-abc\n"
     mode = stat.S_IMODE(secret_path.stat().st_mode)
     assert mode == 0o600
+
+
+def test_refresh_ports_prints_no_changes_when_sync_returns_empty(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    calls = []
+
+    def fake_sync(registry, **kwargs):
+        calls.append(registry.domain)
+        return caddyports.SyncResult(written=[], removed=[])
+
+    monkeypatch.setattr(cli.caddyports, "sync", fake_sync)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    assert calls == ["fleet.example.test"]
+    assert "caddy: no changes" in capsys.readouterr().out
+
+
+def test_refresh_ports_prints_written_and_removed_snippet_names(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.caddyports,
+        "sync",
+        lambda registry, **kw: caddyports.SyncResult(written=["typesense"], removed=["stale"]),
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "wrote port snippet 'typesense'" in out
+    assert "removed port snippet 'stale'" in out
+
+
+def test_refresh_ports_caddy_ports_error_exits_1_and_prints_to_stderr(
+    fleet_home, monkeypatch, capsys
+):
+    _write_minimal_registry(fleet_home)
+
+    def failing_sync(registry, **kw):
+        raise CaddyPortsError("caddy validate exploded")
+
+    monkeypatch.setattr(cli.caddyports, "sync", failing_sync)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 1
+    assert "caddy validate exploded" in capsys.readouterr().err
+
+
+def test_refresh_ports_skips_ufw_sync_when_helper_absent(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.caddyports, "sync", lambda registry, **kw: caddyports.SyncResult([], [])
+    )
+    monkeypatch.setattr(cli, "_FLEET_UFW_SYNC_HELPER", Path("/does/not/exist/fleet-ufw-sync"))
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    assert calls == []
+    assert "ufw:" not in capsys.readouterr().out
+
+
+def test_refresh_ports_runs_ufw_sync_when_helper_present(fleet_home, monkeypatch, capsys, tmp_path):
+    _write_minimal_registry(fleet_home)
+    helper = tmp_path / "fleet-ufw-sync"
+    helper.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cli, "_FLEET_UFW_SYNC_HELPER", helper)
+    monkeypatch.setattr(
+        cli.caddyports, "sync", lambda registry, **kw: caddyports.SyncResult([], [])
+    )
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    assert ["sudo", str(helper)] in calls
+    assert "ufw: synced" in capsys.readouterr().out
+
+
+def test_refresh_ports_ufw_sync_failure_exits_1(fleet_home, monkeypatch, capsys, tmp_path):
+    _write_minimal_registry(fleet_home)
+    helper = tmp_path / "fleet-ufw-sync"
+    helper.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cli, "_FLEET_UFW_SYNC_HELPER", helper)
+    monkeypatch.setattr(
+        cli.caddyports, "sync", lambda registry, **kw: caddyports.SyncResult([], [])
+    )
+    monkeypatch.setattr(
+        cli, "run_streamed", lambda cmd, **kw: RunResult(returncode=1, lines=["permission denied"])
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 1
+    assert "permission denied" in capsys.readouterr().err
+
+
+def test_refresh_ports_real_sync_honours_isolated_snippet_dir(fleet_home, monkeypatch):
+    """Regression: `_cmd_refresh_ports` must pass `snippet_dir=` explicitly to
+    `caddyports.sync()`, not rely on `sync()`'s bound default.
+
+    Every other test in this module mocks `cli.caddyports.sync` wholesale, so
+    none of them would notice if the call site regressed to the bare
+    `caddyports.sync(registry, runner=runner)` form — `sync()`'s own
+    `snippet_dir=DEFAULT_PORTS_SNIPPET_DIR` default parameter is bound at
+    caddyports.py's import time, so conftest's autouse monkeypatch of the
+    *module attribute* `caddyports.DEFAULT_PORTS_SNIPPET_DIR` would silently
+    stop applying, and the real (unmocked) `sync()` would `mkdir()` the real
+    `/etc/caddy/fleet/ports` on the host. This test lets the REAL `sync()` run
+    (no mock) and asserts it landed in the isolated tmp_path directory, not
+    the real default.
+    """
+    _write_minimal_registry(fleet_home)
+    real_default = Path("/etc/caddy/fleet/ports")
+    assert not real_default.exists(), "precondition: real Caddy dir must not pre-exist"
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    # sync() unconditionally does `snippet_dir.mkdir(parents=True,
+    # exist_ok=True)` before comparing wanted/existing snippets, so if the
+    # isolated dir (patched by conftest's autouse `_isolate_caddy_paths`
+    # fixture) was actually used, it now exists on disk.
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.exists()
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.is_relative_to(fleet_home.parent)
+    # And the real system default must remain untouched — this is the part
+    # that fails if the call site reverts to the bare `caddyports.sync(...)`
+    # default.
+    assert not real_default.exists()
 
 
 def _make_instance_dir(fleet_home, instance_id):

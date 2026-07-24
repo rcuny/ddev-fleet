@@ -1,6 +1,7 @@
 import pytest
 
 from fleet.core.errors import (
+    CaddyPortsError,
     DeployError,
     DirtyWorktreeError,
     FleetError,
@@ -13,7 +14,15 @@ from fleet.core.errors import (
 
 @pytest.mark.parametrize(
     "cls",
-    [ValidationError, TokenError, RegistryError, DirtyWorktreeError, LockHeldError, DeployError],
+    [
+        ValidationError,
+        TokenError,
+        RegistryError,
+        DirtyWorktreeError,
+        LockHeldError,
+        DeployError,
+        CaddyPortsError,
+    ],
 )
 def test_subclasses_carry_message(cls):
     exc = cls("something went wrong")
