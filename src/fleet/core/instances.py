@@ -30,18 +30,6 @@ logger = logging.getLogger(__name__)
 _yaml = YAML()
 _yaml.default_flow_style = False
 
-# Public port Caddy exposes each instance's Typesense on (spec: typesense
-# edge exposure). MUST match `fleet_typesense_public_port` in
-# ansible/group_vars/all.yml / the Caddyfile template — the two are
-# independently configured (this side has no Ansible dependency) but must
-# stay numerically in sync for the browser-facing URL to work.
-TYPESENSE_PUBLIC_PORT = 9108
-
-# Shared ddev-router HTTP entrypoint that all instances' Typesense containers
-# sit behind (routed by Host header). Must match `ddev_typesense_http_port`
-# in ansible/group_vars/all.yml.
-TYPESENSE_ROUTER_HTTP_PORT = 8108
-
 
 @dataclass
 class FleetPaths:
@@ -279,7 +267,7 @@ def deploy(
             additional_fqdns=fqdns,
             git_bot=registry.git_bot(project),
             typesense=typesense_enabled,
-            typesense_port=TYPESENSE_PUBLIC_PORT,
+            typesense_port=registry.port_profile("typesense").public,
             typesense_admin_key=typesense_admin_key,
             typesense_search_key=typesense_search_key,
         )
@@ -311,7 +299,7 @@ def deploy(
         if typesense_enabled:
             try:
                 typesense.register_search_key(
-                    http_port=TYPESENSE_ROUTER_HTTP_PORT,
+                    http_port=registry.port_profile("typesense").router,
                     host=f"{inst_id}.{registry.domain}",
                     admin_key=typesense_admin_key,
                     search_key=typesense_search_key,
@@ -522,7 +510,7 @@ def refresh_instance_config(
             additional_fqdns=fqdns,
             git_bot=registry.git_bot(project),
             typesense=typesense_enabled,
-            typesense_port=TYPESENSE_PUBLIC_PORT,
+            typesense_port=registry.port_profile("typesense").public,
             typesense_admin_key=typesense_admin_key,
             typesense_search_key=typesense_search_key,
         )

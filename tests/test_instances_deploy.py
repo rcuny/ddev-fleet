@@ -436,6 +436,42 @@ projects:
     assert "FLEET_TYPESENSE_PATH" not in content
 
 
+def test_deploy_uses_explicit_fleet_ports_typesense_override(fleet_home, git_repo):
+    """An explicit fleet.ports.typesense entry must override the built-in
+    9108/8108 legacy default — proves the port now comes from the
+    registry, not a hardcoded Python constant."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    typesense: {{ public: 9200, router: 8200 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
+    content = config_path.read_text(encoding="utf-8")
+    assert "FLEET_TYPESENSE_PORT=9200" in content
+
+
 def test_deploy_generates_and_registers_typesense_keys_when_enabled(
     monkeypatch, fleet_home, git_repo
 ):

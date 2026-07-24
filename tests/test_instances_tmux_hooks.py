@@ -132,6 +132,13 @@ def _fake_registry():
         def git_bot(self, project=None):
             return None
 
+        def port_profile(self, name):
+            from fleet.core.registry import PortProfile
+
+            if name == "typesense":
+                return PortProfile(name="typesense", public=9108, router=8108)
+            raise AssertionError(f"unexpected port_profile call: {name!r}")
+
     return _Registry()
 
 
