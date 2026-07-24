@@ -18,14 +18,17 @@ with `caddyauth` (spec Assumption 3); `validate`/`reload` are re-implemented
 here so failures surface as `CaddyPortsError`.
 """
 
+import logging
 from dataclasses import dataclass, field
 from pathlib import Path
 
 from fleet.core import caddyauth
-from fleet.core.errors import CaddyPortsError
+from fleet.core.errors import CaddyPortsError, FleetError
 from fleet.core.naming import validate_part
 from fleet.core.registry import PortProfile, Registry
 from fleet.core.runner import run_streamed
+
+logger = logging.getLogger(__name__)
 
 DEFAULT_PORTS_SNIPPET_DIR = Path("/etc/caddy/fleet/ports")
 
@@ -99,45 +102,108 @@ def sync(
     update a snippet for every port with ≥1 subscriber, remove any
     snippet no longer referenced. ONE validate+reload for the whole
     batch (not per port) — avoids N reloads and a confusing partial-
-    reload window when several ports change together. Raises
-    CaddyPortsError on validate/reload failure, following caddyauth's
-    contract: files are written but Caddy is not reloaded, and the
-    error says so explicitly."""
+    reload window when several ports change together.
+
+    Rollback contract: the prior on-disk content of every snippet this
+    call touches (write OR remove) is snapshotted before any mutation.
+    If `caddy validate` fails — either returns non-zero or raises (e.g.
+    the `caddy` binary is missing, see `runner()`'s wrapping below) — every
+    touched snippet is restored EXACTLY to its prior state (created →
+    deleted, modified → previous content, deleted → restored) before
+    CaddyPortsError is raised. This matters because the running Caddy
+    process is unaffected by a bad write (it keeps serving its in-memory
+    config), so leaving an invalid snippet on disk looks harmless — until
+    an out-of-band `systemctl restart caddy` (reboot, package upgrade,
+    unattended-upgrades) re-reads the Caddyfile from disk, hits the
+    invalid snippet, and fails to start, taking every instance's public
+    URL down. Reload failure does NOT roll back — validate already
+    passed, so the on-disk config is known-good, matching caddyauth's
+    existing contract (files are written but Caddy is not reloaded).
+
+    Both `runner()` call sites (validate, reload) wrap a bare FleetError
+    (raised by `run_streamed` when the `caddy` binary is missing/Popen
+    fails) in CaddyPortsError, so a caller doing `except CaddyPortsError`
+    to detect "ports out of sync" cannot silently miss that case.
+    """
     wanted = {p.name: p for p in registry.all_port_profiles()}
     snippet_dir.mkdir(parents=True, exist_ok=True)
     existing_names = {p.stem for p in snippet_dir.glob("*.conf")}
 
     written: list[str] = []
     removed: list[str] = []
+    prior_snapshot: dict[str, str | None] = {}
+
+    def _snapshot(name: str, path: Path) -> None:
+        if name not in prior_snapshot:
+            prior_snapshot[name] = path.read_text(encoding="utf-8") if path.exists() else None
+
+    def _rollback() -> None:
+        for name, prior_content in prior_snapshot.items():
+            path = port_snippet_path(name, snippet_dir=snippet_dir)
+            if prior_content is None:
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            else:
+                caddyauth._atomic_write(path, prior_content, prefix=f".{name}-port-rollback-")
 
     for name, profile in wanted.items():
         path = port_snippet_path(name, snippet_dir=snippet_dir)
         new_content = render_port_snippet(registry.domain, profile)
         if path.exists() and path.read_text(encoding="utf-8") == new_content:
             continue
+        _snapshot(name, path)
         write_port_snippet(registry.domain, profile, snippet_dir=snippet_dir)
         written.append(name)
 
     for name in existing_names - wanted.keys():
+        path = port_snippet_path(name, snippet_dir=snippet_dir)
+        _snapshot(name, path)
+        logger.warning(
+            "sync: removing port snippet %s — %r is no longer referenced by "
+            "any project in the registry",
+            path,
+            name,
+        )
         if remove_port_snippet(name, snippet_dir=snippet_dir):
             removed.append(name)
 
     if not written and not removed:
         return SyncResult(written=[], removed=[])
 
-    validate_result = runner(
-        ["caddy", "validate", "--config", str(caddyfile_path), "--adapter", "caddyfile"],
-        echo=False,
-    )
+    try:
+        validate_result = runner(
+            ["caddy", "validate", "--config", str(caddyfile_path), "--adapter", "caddyfile"],
+            echo=False,
+        )
+    except FleetError as exc:
+        _rollback()
+        raise CaddyPortsError(
+            "failed to run 'caddy validate' after writing port snippets — "
+            "the snippet changes were rolled back and Caddy was NOT "
+            f"reloaded. Is 'caddy' installed and on PATH? ({exc.message})"
+        ) from exc
+
     if validate_result.returncode != 0:
         detail = "\n".join(validate_result.lines)
+        _rollback()
         raise CaddyPortsError(
-            "caddy validate failed after writing port snippets — Caddy was "
-            "NOT reloaded, so the running config is unchanged. Fix the "
-            f"Caddyfile/snippet and retry:\n{detail}"
+            "caddy validate failed after writing port snippets — the "
+            "snippet changes were rolled back and Caddy was NOT reloaded, "
+            "so the running config is unchanged. Fix the Caddyfile/snippet "
+            f"and retry:\n{detail}"
         )
 
-    reload_result = runner(["caddy", "reload", "--config", str(caddyfile_path)], echo=False)
+    try:
+        reload_result = runner(["caddy", "reload", "--config", str(caddyfile_path)], echo=False)
+    except FleetError as exc:
+        raise CaddyPortsError(
+            "failed to run 'caddy reload' after writing and validating port "
+            "snippets — the new/removed ports may not be live yet. Check "
+            f"'journalctl -u caddy' and reload manually. ({exc.message})"
+        ) from exc
+
     if reload_result.returncode != 0:
         detail = "\n".join(reload_result.lines)
         raise CaddyPortsError(

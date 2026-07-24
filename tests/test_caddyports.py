@@ -1,7 +1,7 @@
 import pytest
 
 from fleet.core import caddyports
-from fleet.core.errors import CaddyPortsError, ValidationError
+from fleet.core.errors import CaddyPortsError, FleetError, ValidationError
 from fleet.core.registry import PortProfile
 from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
@@ -218,12 +218,166 @@ def test_sync_raises_caddy_ports_error_and_does_not_reload_on_validate_failure(t
             registry, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=fake
         )
 
-    # Rollback contract (spec §9): the snippet WAS written (atomic write
-    # already landed) — Caddy is simply never told to load it. This is
-    # not a file revert, matching caddyauth's documented behavior.
-    assert (snippet_dir / "playwright.conf").exists()
+    # Rollback contract: a snippet CREATED by this sync() call must be
+    # rolled back (deleted) on validate failure, not left on disk — an
+    # out-of-band `systemctl restart caddy` re-reads the Caddyfile from
+    # disk and would otherwise hit the invalid snippet, taking every
+    # instance's public URL down.
+    assert not (snippet_dir / "playwright.conf").exists()
     reload_calls = [c for c in fake.calls if c["cmd"][:2] == ["caddy", "reload"]]
     assert reload_calls == []
+
+
+def test_sync_rolls_back_modified_snippet_to_prior_content_on_validate_failure(tmp_path):
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    ok_runner = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    old_profile = PortProfile(name="playwright", public=9324, router=8323)
+    caddyports.sync(
+        _StubRegistry("fleet.example.test", [old_profile]),
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=ok_runner,
+    )
+    prior_content = (snippet_dir / "playwright.conf").read_text(encoding="utf-8")
+
+    renumbered = PortProfile(name="playwright", public=9325, router=8324)
+    failing_runner = FakeRunner(default=RunResult(returncode=1, lines=["broken config"]))
+    with pytest.raises(CaddyPortsError):
+        caddyports.sync(
+            _StubRegistry("fleet.example.test", [renumbered]),
+            snippet_dir=snippet_dir,
+            caddyfile_path=caddyfile_path,
+            runner=failing_runner,
+        )
+
+    assert (snippet_dir / "playwright.conf").read_text(encoding="utf-8") == prior_content
+
+
+def test_sync_restores_removed_snippet_on_validate_failure(tmp_path):
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    stale = PortProfile(name="stale", public=9200, router=8200)
+    caddyports.write_port_snippet("fleet.example.test", stale, snippet_dir=snippet_dir)
+    prior_content = (snippet_dir / "stale.conf").read_text(encoding="utf-8")
+
+    fake = FakeRunner(default=RunResult(returncode=1, lines=["broken config"]))
+    registry = _StubRegistry("fleet.example.test", [])  # stale lost its last subscriber
+
+    with pytest.raises(CaddyPortsError):
+        caddyports.sync(
+            registry, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=fake
+        )
+
+    assert (snippet_dir / "stale.conf").read_text(encoding="utf-8") == prior_content
+
+
+def test_sync_rollback_compound_case_restores_directory_byte_for_byte(tmp_path):
+    """Several snippets written/removed in one batch, validate fails: the
+    directory afterwards must be byte-for-byte identical to before the
+    call — covers created + modified + removed + untouched all at once."""
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    ok_runner = FakeRunner(default=RunResult(returncode=0, lines=[]))
+
+    kept = PortProfile(name="typesense", public=9108, router=8108)
+    to_be_removed = PortProfile(name="stale", public=9200, router=8200)
+    to_be_modified = PortProfile(name="playwright", public=9324, router=8323)
+    caddyports.sync(
+        _StubRegistry("fleet.example.test", [kept, to_be_removed, to_be_modified]),
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=ok_runner,
+    )
+
+    before = {p.name: p.read_text(encoding="utf-8") for p in snippet_dir.glob("*.conf")}
+
+    renumbered = PortProfile(name="playwright", public=9325, router=8324)
+    new_port = PortProfile(name="ts-dashboard", public=9111, router=8110)
+    failing_runner = FakeRunner(default=RunResult(returncode=1, lines=["broken config"]))
+    with pytest.raises(CaddyPortsError):
+        caddyports.sync(
+            _StubRegistry("fleet.example.test", [kept, renumbered, new_port]),
+            snippet_dir=snippet_dir,
+            caddyfile_path=caddyfile_path,
+            runner=failing_runner,
+        )
+
+    after = {p.name: p.read_text(encoding="utf-8") for p in snippet_dir.glob("*.conf")}
+    assert after == before
+
+
+def test_sync_wraps_missing_caddy_binary_in_caddy_ports_error_on_validate(tmp_path):
+    """`run_streamed` raises a bare FleetError when the `caddy` binary is
+    missing/Popen fails — sync() must wrap that in CaddyPortsError (so a
+    caller doing `except CaddyPortsError` doesn't silently miss it), and
+    still roll back the snippet it just created."""
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+
+    def _raising_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        raise FleetError("command not found: caddy")
+
+    registry = _StubRegistry(
+        "fleet.example.test", [PortProfile(name="playwright", public=9324, router=8323)]
+    )
+
+    with pytest.raises(CaddyPortsError) as excinfo:
+        caddyports.sync(
+            registry,
+            snippet_dir=snippet_dir,
+            caddyfile_path=caddyfile_path,
+            runner=_raising_runner,
+        )
+
+    assert isinstance(excinfo.value.__cause__, FleetError)
+    # validate never returned, so the newly-created snippet must not be
+    # left on disk.
+    assert not (snippet_dir / "playwright.conf").exists()
+
+
+def test_sync_wraps_missing_caddy_binary_in_caddy_ports_error_on_reload(tmp_path):
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+
+    def _runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        if cmd[:2] == ["caddy", "validate"]:
+            return RunResult(returncode=0, lines=[])
+        raise FleetError("command not found: caddy")
+
+    registry = _StubRegistry(
+        "fleet.example.test", [PortProfile(name="playwright", public=9324, router=8323)]
+    )
+
+    with pytest.raises(CaddyPortsError) as excinfo:
+        caddyports.sync(
+            registry, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=_runner
+        )
+
+    assert isinstance(excinfo.value.__cause__, FleetError)
+    # validate succeeded, so this is the existing (unchanged) reload-failure
+    # contract: no rollback, the snippet stays written.
+    assert (snippet_dir / "playwright.conf").exists()
+
+
+def test_sync_logs_when_removing_an_unrecognised_snippet(tmp_path, caplog):
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    caddyports.write_port_snippet(
+        "fleet.example.test",
+        PortProfile(name="stale", public=9200, router=8200),
+        snippet_dir=snippet_dir,
+    )
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    registry = _StubRegistry("fleet.example.test", [])
+
+    with caplog.at_level("WARNING", logger="fleet.core.caddyports"):
+        result = caddyports.sync(
+            registry, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=fake
+        )
+
+    assert result.removed == ["stale"]
+    assert any("stale" in record.message for record in caplog.records)
 
 
 def test_sync_raises_caddy_ports_error_on_reload_failure(tmp_path):
