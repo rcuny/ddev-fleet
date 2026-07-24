@@ -98,9 +98,9 @@ per named service, not per instance.
 3. Apply it: `fleet refresh-ports` — reconciles the Caddy snippet (and
    UFW, if the `network_hardening` role is installed) immediately; no
    Ansible re-run, no redeploy.
-4. **Confirm real external reachability.** OVH's edge network filters
-   ports independently of the host's own firewall (verified during the
-   `:9108` Typesense rollout). Test from a real external client, never
+4. **Confirm real external reachability.** Some hosting providers filter
+   non-standard ports at the network edge independently of the host's own
+   firewall — verify with your provider. Test from a real external client, never
    `WebFetch` (it runs from Anthropic's network, not the operator's, and
    gave a false positive for `:9324` once):
    ```bash
