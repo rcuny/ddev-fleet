@@ -41,7 +41,7 @@ anywhere (old specs, stray comments in `fleet.yml.dist`), it's stale.
 Browser
   │  HTTPS, dedicated port
   ▼
-https://<project>--<label>.fleet.personal.example:9108/multi_search
+https://<project>--<label>.fleet.example.com:9108/multi_search
   │
   ▼
 Caddy  — *.{{ fleet_domain }}:9108 site (ansible/roles/caddy/templates/Caddyfile.j2)
@@ -135,15 +135,13 @@ tracked while Typesense holds zero documents), the `oak` project's
 followed by `drush search-api:index` so a freshly deployed instance's
 Typesense index is actually populated, not just marked complete.
 
-## OVH edge firewall reachability caveat
+## Edge firewall reachability caveat
 
-`:9108` is a non-standard port opened on a Kimsufi/OVH host; OVH's edge
-network can filter ports outside an allowed range independently of the
-host's own `iptables`. This was flagged as an open risk during rollout
-(2026-07-16) — local `iptables` was confirmed open immediately, but
-external reachability from a real browser required separate confirmation.
-**Status: confirmed working** — the user verified `:9108` reachability and
-live browser search end-to-end on `oak--slacktest` after rollout.
+`:9108` is a non-standard port. Some hosting providers filter
+non-standard ports at the network edge regardless of host firewall
+rules — verify with your provider before relying on `:9108` being
+reachable from a real browser; a local `iptables`/`ufw` check alone is
+not sufficient proof of external reachability.
 
 ## Verifying live
 
@@ -153,7 +151,7 @@ ss -tlnp | grep -E ':8108\b'          # expect 127.0.0.1:8108
 
 # End-to-end from an external client (replace with a real typesense-enabled instance):
 curl -s -o /dev/null -w '%{http_code}\n' \
-  https://<project>--<label>.fleet.personal.example:9108/health
+  https://<project>--<label>.fleet.example.com:9108/health
 ```
 
 See also `docs/runbook-server-rollout.md` §6 for the fuller live-verification
