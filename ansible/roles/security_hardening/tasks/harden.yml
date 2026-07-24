@@ -229,3 +229,20 @@
     owner: "{{ fleet_user }}"
     group: "{{ fleet_group }}"
     mode: "0640"
+
+- name: Send an install-time test email (verification per spec §6.2 task 12 / §6.3)
+  ansible.builtin.command:
+    cmd: "{{ fleet_opt_dir }}/venv/bin/fleet reboot-notify --test"
+  register: sh_msmtp_test_send
+  changed_when: false
+  failed_when: false
+  when: fleet_msmtp_enabled
+
+- name: Report the test-send result
+  ansible.builtin.debug:
+    msg: >-
+      msmtp test-send
+      {{ 'SUCCEEDED' if sh_msmtp_test_send.rc == 0
+         else 'FAILED (rc=' + (sh_msmtp_test_send.rc | string) + ') — check '
+              + fleet_srv_dir + '/msmtprc and the relay settings' }}
+  when: fleet_msmtp_enabled
