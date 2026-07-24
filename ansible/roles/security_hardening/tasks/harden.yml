@@ -34,6 +34,26 @@
     mode: "0644"
   notify: Restart docker
 
+- name: Assert the current operator is present in fleet_ssh_allow_users
+  # Cheap pre-flight lockout guard, mirroring network_hardening's "assert
+  # the SSH port is staged before ufw enable" pattern. `validate: "sshd -t
+  # -f %s"` on the template task below only checks SYNTAX — an AllowUsers
+  # line that is syntactically valid but omits the connecting operator
+  # passes that check cleanly, and on the NEXT connection everyone is
+  # locked out of SSH. Only asserted when fleet_ssh_allow_users is
+  # non-empty: an empty list is not restricting who may log in by name, so
+  # there is nothing to guard against here (see 52fleet-sshd.conf.j2).
+  ansible.builtin.assert:
+    that:
+      - ansible_user_id in fleet_ssh_allow_users
+    fail_msg: >-
+      fleet_ssh_allow_users does not include the current user
+      ({{ ansible_user_id }}); applying this would lock you out of SSH.
+      Add {{ ansible_user_id }} to fleet_ssh_allow_users (or remove the
+      override to fall back to the safe default) before re-running this
+      role.
+  when: fleet_ssh_allow_users | length > 0
+
 - name: Deploy the SSH hardening drop-in
   # Validated against Ansible's staged temp copy via `validate:` (sshd -t -f
   # %s) BEFORE the file is moved into place — not via a separate `sshd -t`
