@@ -148,26 +148,63 @@ def sync(
             else:
                 caddyauth._atomic_write(path, prior_content, prefix=f".{name}-port-rollback-")
 
+    def _safe_rollback(primary_detail: str) -> None:
+        """Run `_rollback()`; if restoring state itself raises (disk full,
+        permission denied), that secondary failure must NOT destroy the
+        original failure that triggered the rollback attempt (CRITICAL 2) —
+        both are named in one CaddyPortsError, chained from the rollback
+        exception, since at that point the on-disk snippet directory may be
+        inconsistent and a human must inspect it before Caddy is next
+        restarted."""
+        try:
+            _rollback()
+        except Exception as rollback_exc:
+            raise CaddyPortsError(
+                "port snippet sync failed AND the automatic rollback also "
+                "failed — the on-disk snippet directory may now be "
+                "inconsistent and must be inspected by hand before Caddy is "
+                f"next restarted (do not restart it in the meantime).\n"
+                f"original failure: {primary_detail}\n"
+                f"rollback failure: {rollback_exc}"
+            ) from rollback_exc
+
     for name, profile in wanted.items():
         path = port_snippet_path(name, snippet_dir=snippet_dir)
         new_content = render_port_snippet(registry.domain, profile)
         if path.exists() and path.read_text(encoding="utf-8") == new_content:
             continue
         _snapshot(name, path)
-        write_port_snippet(registry.domain, profile, snippet_dir=snippet_dir)
+        try:
+            write_port_snippet(registry.domain, profile, snippet_dir=snippet_dir)
+        except Exception as exc:
+            _safe_rollback(f"failed to write port snippet {name!r}: {exc}")
+            raise CaddyPortsError(
+                f"failed to write port snippet {name!r} mid-batch — the "
+                "snippet changes made so far in this sync() call were "
+                f"rolled back and Caddy was NOT reloaded: {exc}"
+            ) from exc
         written.append(name)
 
     for name in existing_names - wanted.keys():
         path = port_snippet_path(name, snippet_dir=snippet_dir)
         _snapshot(name, path)
-        logger.warning(
-            "sync: removing port snippet %s — %r is no longer referenced by "
-            "any project in the registry",
-            path,
-            name,
-        )
-        if remove_port_snippet(name, snippet_dir=snippet_dir):
+        try:
+            actually_removed = remove_port_snippet(name, snippet_dir=snippet_dir)
+        except Exception as exc:
+            _safe_rollback(f"failed to remove port snippet {name!r}: {exc}")
+            raise CaddyPortsError(
+                f"failed to remove port snippet {name!r} mid-batch — the "
+                "snippet changes made so far in this sync() call were "
+                f"rolled back and Caddy was NOT reloaded: {exc}"
+            ) from exc
+        if actually_removed:
             removed.append(name)
+            logger.warning(
+                "sync: removed port snippet %s — %r is no longer referenced "
+                "by any project in the registry",
+                path,
+                name,
+            )
 
     if not written and not removed:
         return SyncResult(written=[], removed=[])
@@ -178,7 +215,7 @@ def sync(
             echo=False,
         )
     except FleetError as exc:
-        _rollback()
+        _safe_rollback(f"failed to run 'caddy validate': {exc.message}")
         raise CaddyPortsError(
             "failed to run 'caddy validate' after writing port snippets — "
             "the snippet changes were rolled back and Caddy was NOT "
@@ -187,7 +224,7 @@ def sync(
 
     if validate_result.returncode != 0:
         detail = "\n".join(validate_result.lines)
-        _rollback()
+        _safe_rollback(f"caddy validate failed: {detail}")
         raise CaddyPortsError(
             "caddy validate failed after writing port snippets — the "
             "snippet changes were rolled back and Caddy was NOT reloaded, "

@@ -1,6 +1,6 @@
 import pytest
 
-from fleet.core import caddyports
+from fleet.core import caddyauth, caddyports
 from fleet.core.errors import CaddyPortsError, FleetError, ValidationError
 from fleet.core.registry import PortProfile
 from fleet.core.runner import RunResult
@@ -400,3 +400,150 @@ def test_sync_raises_caddy_ports_error_on_reload_failure(tmp_path):
         caddyports.sync(
             registry, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=fake
         )
+
+
+def test_sync_rolls_back_and_raises_caddy_ports_error_when_write_loop_fails_partway(
+    tmp_path, monkeypatch
+):
+    """CRITICAL 1 (write side): the write loop has no try/except today, so a
+    raise partway through a multi-file batch (permission error, ENOSPC) skips
+    `_rollback()` entirely and the raw exception escapes unwrapped. Regression
+    test: write a 3-port batch where the 2nd actual write (the 1st, "typesense",
+    is unchanged and skipped) raises — earlier writes in the batch must be
+    rolled back and the error must surface as CaddyPortsError chaining the
+    original exception."""
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    ok_runner = FakeRunner(default=RunResult(returncode=0, lines=[]))
+
+    kept = PortProfile(name="typesense", public=9108, router=8108)
+    caddyports.sync(
+        _StubRegistry("fleet.example.test", [kept]),
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=ok_runner,
+    )
+    before = {p.name: p.read_text(encoding="utf-8") for p in snippet_dir.glob("*.conf")}
+
+    beta = PortProfile(name="beta", public=9200, router=8200)
+    gamma = PortProfile(name="gamma", public=9300, router=8300)
+    real_write = caddyports.write_port_snippet
+
+    def _flaky_write(domain, profile, *, snippet_dir):
+        if profile.name == "gamma":
+            raise OSError("ENOSPC: no space left on device")
+        return real_write(domain, profile, snippet_dir=snippet_dir)
+
+    monkeypatch.setattr(caddyports, "write_port_snippet", _flaky_write)
+
+    fake2 = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    with pytest.raises(CaddyPortsError) as excinfo:
+        caddyports.sync(
+            _StubRegistry("fleet.example.test", [kept, beta, gamma]),
+            snippet_dir=snippet_dir,
+            caddyfile_path=caddyfile_path,
+            runner=fake2,
+        )
+
+    assert isinstance(excinfo.value.__cause__, OSError)
+    after = {p.name: p.read_text(encoding="utf-8") for p in snippet_dir.glob("*.conf")}
+    assert after == before
+    # The exception must have been caught inside the write loop, before
+    # validate/reload were ever attempted.
+    assert fake2.calls == []
+
+
+def test_sync_rolls_back_and_raises_caddy_ports_error_when_remove_loop_fails_partway(
+    tmp_path, monkeypatch
+):
+    """CRITICAL 1 (remove side): same defect on the remove loop. Two orphaned
+    snippets are queued for removal; the removal that runs second (by actual
+    call order, not by name — `existing_names - wanted.keys()` is a set with
+    unspecified iteration order) raises. The first removal already mutated
+    disk before the exception, so this only reproduces if rollback restores
+    it too."""
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    ok_runner = FakeRunner(default=RunResult(returncode=0, lines=[]))
+
+    stale1 = PortProfile(name="stale1", public=9200, router=8200)
+    stale2 = PortProfile(name="stale2", public=9201, router=8201)
+    kept = PortProfile(name="typesense", public=9108, router=8108)
+    caddyports.sync(
+        _StubRegistry("fleet.example.test", [stale1, stale2, kept]),
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=ok_runner,
+    )
+    before = {p.name: p.read_text(encoding="utf-8") for p in snippet_dir.glob("*.conf")}
+
+    real_remove = caddyports.remove_port_snippet
+    call_count = []
+
+    def _flaky_remove(name, *, snippet_dir):
+        call_count.append(name)
+        if len(call_count) == 2:
+            raise PermissionError("EACCES: permission denied")
+        return real_remove(name, snippet_dir=snippet_dir)
+
+    monkeypatch.setattr(caddyports, "remove_port_snippet", _flaky_remove)
+
+    fake2 = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    with pytest.raises(CaddyPortsError) as excinfo:
+        caddyports.sync(
+            _StubRegistry("fleet.example.test", [kept]),  # both stale1 & stale2 now orphaned
+            snippet_dir=snippet_dir,
+            caddyfile_path=caddyfile_path,
+            runner=fake2,
+        )
+
+    assert isinstance(excinfo.value.__cause__, PermissionError)
+    after = {p.name: p.read_text(encoding="utf-8") for p in snippet_dir.glob("*.conf")}
+    assert after == before
+    assert fake2.calls == []
+
+
+def test_sync_raises_caddy_ports_error_naming_both_failures_when_rollback_itself_fails(
+    tmp_path, monkeypatch
+):
+    """CRITICAL 2: `_rollback()` is unwrapped at every call site today, so a
+    failing rollback (disk full, permission denied while restoring) destroys
+    the original validate-failure error. The resulting error must name BOTH
+    problems and chain the rollback failure (the exception actually raised
+    at the point of the final `raise`) via `from exc`."""
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    ok_runner = FakeRunner(default=RunResult(returncode=0, lines=[]))
+
+    old_profile = PortProfile(name="playwright", public=9324, router=8323)
+    caddyports.sync(
+        _StubRegistry("fleet.example.test", [old_profile]),
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=ok_runner,
+    )
+
+    real_atomic_write = caddyauth._atomic_write
+
+    def _flaky_atomic_write(path, content, *, prefix, mode=0o640):
+        if "rollback" in prefix:
+            raise OSError("ENOSPC: no space left on device")
+        return real_atomic_write(path, content, prefix=prefix, mode=mode)
+
+    monkeypatch.setattr(caddyauth, "_atomic_write", _flaky_atomic_write)
+
+    renumbered = PortProfile(name="playwright", public=9325, router=8324)
+    failing_runner = FakeRunner(default=RunResult(returncode=1, lines=["broken config"]))
+
+    with pytest.raises(CaddyPortsError) as excinfo:
+        caddyports.sync(
+            _StubRegistry("fleet.example.test", [renumbered]),
+            snippet_dir=snippet_dir,
+            caddyfile_path=caddyfile_path,
+            runner=failing_runner,
+        )
+
+    message = str(excinfo.value).lower()
+    assert "validat" in message
+    assert "rollback" in message
+    assert isinstance(excinfo.value.__cause__, OSError)
