@@ -51,3 +51,28 @@
     mode: "0644"
     validate: "sshd -t -f %s"
   notify: Reload sshd
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  when: fleet_fail2ban_enabled
+
+- name: Configure the sshd jail (log-noise reduction, not the boundary — spec §10)
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/fleet-sshd.conf
+    content: |
+      [sshd]
+      enabled = true
+    owner: root
+    group: root
+    mode: "0644"
+  when: fleet_fail2ban_enabled
+  notify: Restart fail2ban
+
+- name: Ensure fail2ban is enabled and started
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: true
+    state: started
+  when: fleet_fail2ban_enabled

@@ -8,3 +8,8 @@
   ansible.builtin.systemd:
     name: ssh
     state: reloaded
+
+- name: Restart fail2ban
+  ansible.builtin.systemd:
+    name: fail2ban
+    state: restarted
