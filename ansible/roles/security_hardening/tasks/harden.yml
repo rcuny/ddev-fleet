@@ -14,3 +14,11 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Deploy the needrestart non-interactive trap
+  ansible.builtin.copy:
+    src: 50fleet-autorestart.conf
+    dest: /etc/needrestart/conf.d/50fleet-autorestart.conf
+    owner: root
+    group: root
+    mode: "0644"
