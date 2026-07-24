@@ -69,6 +69,35 @@ def test_index_footer_shows_server_memory_and_disk(fleet_home):
     assert re.search(r"disk free.*(GiB|TiB|MiB|KiB|B)", body)
 
 
+def test_index_shows_reboot_badge_when_pending(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet.core import sysinfo
+
+    monkeypatch.setattr(
+        sysinfo,
+        "read_reboot_status",
+        lambda *a, **k: sysinfo.RebootStatus(pending=True, since=1000.0, packages=["libc6"]),
+    )
+    client = TestClient(create_app(fleet_home))
+    response = client.get("/")
+    assert "reboot-badge" in response.text
+    assert "libc6" in response.text
+
+
+def test_index_omits_reboot_badge_when_not_pending(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet.core import sysinfo
+
+    monkeypatch.setattr(
+        sysinfo,
+        "read_reboot_status",
+        lambda *a, **k: sysinfo.RebootStatus(pending=False, since=None, packages=[]),
+    )
+    client = TestClient(create_app(fleet_home))
+    response = client.get("/")
+    assert "reboot-badge" not in response.text
+
+
 def test_static_htmx_is_served(fleet_home):
     _setup_fleet_home(fleet_home)
     client = TestClient(create_app(fleet_home))
