@@ -109,7 +109,8 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     destroy_parser = subparsers.add_parser("destroy")
-    destroy_parser.add_argument("instance_id")
+    _add_bulk_target_args(destroy_parser)
+    destroy_parser.add_argument("--yes", action="store_true")
 
     start_parser = subparsers.add_parser("start")
     _add_bulk_target_args(start_parser)
@@ -220,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.command == "deploy":
             _cmd_deploy(fleet_home, args)
         elif args.command == "destroy":
-            _cmd_destroy(fleet_home, args)
+            return _cmd_destroy(fleet_home, args)
         elif args.command == "start":
             return _cmd_start(fleet_home, args)
         elif args.command == "stop":
@@ -322,10 +323,50 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> None:
     print(url)
 
 
-def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> None:
+def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    instances_mod.destroy(paths, registry, args.instance_id)
+    target_ids = _resolve_bulk_targets(paths, registry, args)
+
+    if not target_ids:
+        print("no instances matched the given selector", file=sys.stderr)
+        return 0
+
+    if len(target_ids) == 1:
+        instances_mod.destroy(paths, registry, target_ids[0])
+        return 0
+
+    if not args.yes:
+        print(f"About to destroy {len(target_ids)} instances:", file=sys.stderr)
+        for instance_id in target_ids:
+            print(f"  {instance_id}", file=sys.stderr)
+        if not sys.stdin.isatty():
+            raise FleetError(
+                f"refusing to destroy {len(target_ids)} instances without --yes: "
+                "not an interactive terminal"
+            )
+        answer = input(
+            f"Type {len(target_ids)} to confirm destroying {len(target_ids)} instances: "
+        )
+        if answer.strip() != str(len(target_ids)):
+            raise FleetError("confirmation did not match; aborted, nothing destroyed")
+
+    outcome = bulk_mod.run_sequential(
+        paths, registry, target_ids, instances_mod.destroy, kind="destroy"
+    )
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
 def _resolve_bulk_targets(

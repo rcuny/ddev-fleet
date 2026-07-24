@@ -262,3 +262,98 @@ def test_single_id_start_does_not_go_through_bulk_machinery(fleet_home, monkeypa
 
     assert exit_code == 0
     assert recorder == ["oak--a"]
+
+
+class _FakeStdin:
+    def __init__(self, is_tty):
+        self._is_tty = is_tty
+
+    def isatty(self):
+        return self._is_tty
+
+
+def test_destroy_single_id_still_confirmation_free(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    recorder = []
+    monkeypatch.setattr(
+        cli.instances_mod, "destroy", lambda paths, registry, iid, **kw: recorder.append(iid)
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "oak--a"])
+
+    assert exit_code == 0
+    assert recorder == ["oak--a"]
+
+
+def test_destroy_multi_without_yes_non_tty_refuses(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(is_tty=False))
+    boom_called = []
+    monkeypatch.setattr(cli.instances_mod, "destroy", lambda *a, **kw: boom_called.append(True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "oak--a", "oak--b"])
+
+    assert exit_code == 1
+    assert "refusing to destroy 2 instances without --yes" in capsys.readouterr().err
+    assert boom_called == []
+
+
+def test_destroy_multi_yes_flag_skips_prompt(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    recorder = []
+    monkeypatch.setattr(
+        cli.instances_mod, "destroy", lambda paths, registry, iid, **kw: recorder.append(iid)
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "oak--a", "oak--b", "--yes"])
+
+    assert exit_code == 0
+    assert recorder == ["oak--a", "oak--b"]
+
+
+def test_destroy_multi_typed_confirmation_match_proceeds(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(is_tty=True))
+    monkeypatch.setattr(cli, "input", lambda prompt: "2", raising=False)
+    recorder = []
+    monkeypatch.setattr(
+        cli.instances_mod, "destroy", lambda paths, registry, iid, **kw: recorder.append(iid)
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "oak--a", "oak--b"])
+
+    assert exit_code == 0
+    assert recorder == ["oak--a", "oak--b"]
+
+
+def test_destroy_multi_typed_confirmation_mismatch_aborts(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(is_tty=True))
+    monkeypatch.setattr(cli, "input", lambda prompt: "wrong", raising=False)
+    boom_called = []
+    monkeypatch.setattr(cli.instances_mod, "destroy", lambda *a, **kw: boom_called.append(True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "oak--a", "oak--b"])
+
+    assert exit_code == 1
+    assert "confirmation did not match; aborted, nothing destroyed" in capsys.readouterr().err
+    assert boom_called == []
+
+
+def test_destroy_bulk_partial_failure_exit_code_2(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+
+    def fake_destroy(paths, registry, iid, **kw):
+        if iid == "oak--b":
+            from fleet.core.errors import FleetError
+
+            raise FleetError("still running")
+
+    monkeypatch.setattr(cli.instances_mod, "destroy", fake_destroy)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "oak--a", "oak--b", "--yes"])
+
+    assert exit_code == 2
+    out, err = capsys.readouterr()
+    assert "oak--a: OK" in out
+    assert "oak--b: FAILED — still running" in err
