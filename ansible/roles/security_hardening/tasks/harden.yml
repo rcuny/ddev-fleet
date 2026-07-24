@@ -22,3 +22,14 @@
     owner: root
     group: root
     mode: "0644"
+
+- name: Deploy the fleet-owned Docker daemon.json (live-restore + log rotation)
+  # Fully fleet-owned (copy semantics via template, not a merge) —
+  # confirmed no other role in this codebase writes this file (spec §13).
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
