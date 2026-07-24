@@ -62,3 +62,30 @@
   loop:
     - "80"
     - "443"
+
+- name: Allow each resolved extra port (spec §4 — seeded empty at provision time)
+  community.general.ufw:
+    rule: allow
+    port: "{{ item | string }}"
+    proto: tcp
+  loop: "{{ fleet_ufw_extra_ports }}"
+
+- name: Render the DOCKER-USER guard into /etc/ufw/after.rules
+  # Inserted as its OWN *filter/COMMIT stanza, textually BEFORE ufw's
+  # existing *filter block — iptables-restore applies multiple stanzas
+  # for the same table sequentially, so this appends into the
+  # already-Docker-created DOCKER-USER chain without disturbing ufw's
+  # own rules below it. Standard technique (see chaifeng/ufw-docker);
+  # verified against Debian 13's shipped after.rules layout.
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/after.rules
+    marker: "# {mark} ANSIBLE MANAGED BLOCK - fleet DOCKER-USER guard"
+    insertbefore: BOF
+    block: |
+      *filter
+      :DOCKER-USER - [0:0]
+      -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+      -A DOCKER-USER -i {{ fleet_ufw_docker_bridge }} -o {{ fleet_ufw_docker_bridge }} -j ACCEPT
+      -A DOCKER-USER -j RETURN
+      COMMIT
+  notify: Reload ufw
