@@ -24,7 +24,7 @@
 # --- Seed onboarding state in ~/.claude.json (design spec: task-04-improvements-2,
 # 2026-07-17 "login screen" fix) ---------------------------------------------
 #
-# Root cause (confirmed by live reproduction on ddev.personal.example):
+# Root cause (confirmed by live reproduction on a production host):
 # CLAUDE_CODE_OAUTH_TOKEN authenticates `claude -p` fine (it skips onboarding),
 # but the interactive TUI additionally gates on ~/.claude.json's
 # hasCompletedOnboarding/theme/projects[<cwd>].hasTrustDialogAccepted keys —
