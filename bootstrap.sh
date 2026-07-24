@@ -18,6 +18,14 @@ if [ "$(id -u)" -ne 0 ]; then
 fi
 
 # --- 2. OS detection (warn-and-continue, not hard-block) --------------------
+_tty_openable() {
+  # `[ -r /dev/tty ]` only checks the device node's permission bits, not
+  # whether opening it will actually succeed — under a real headless run
+  # (no controlling terminal) it reads TRUE and the subsequent
+  # `read < /dev/tty` then fails with ENXIO. Actually try to open it.
+  { : < /dev/tty; } 2>/dev/null
+}
+
 FLEET_FORCE_OS="${FLEET_FORCE_OS:-}"
 if [ -r /etc/os-release ]; then
   # shellcheck disable=SC1091  # dynamic host file, nothing to statically follow
@@ -33,7 +41,7 @@ case "${ID:-unknown}" in
     echo "         may fail partway through apt/Ansible steps." >&2
     if [ -n "${FLEET_FORCE_OS}" ]; then
       echo "==> FLEET_FORCE_OS set — continuing anyway."
-    elif [ -r /dev/tty ]; then
+    elif _tty_openable; then
       read -r -p "Continue anyway? [y/N] " _os_confirm < /dev/tty || _os_confirm=""
       case "${_os_confirm}" in
         y|Y|yes|YES) ;;
@@ -56,7 +64,7 @@ esac
 _prompt_required() {
   # $1=varname (for the error message) $2=prompt text -> prints the answer
   local prompt="$2" answer=""
-  if [ -r /dev/tty ]; then
+  if _tty_openable; then
     read -r -p "${prompt}" answer < /dev/tty || answer=""
   fi
   if [ -z "${answer}" ]; then
@@ -71,7 +79,7 @@ _prompt_yes_default() {
   # $1=prompt text -> prints "1" (yes) or "0" (no); defaults to yes on a
   # bare Enter, an unreadable /dev/tty, or any answer other than n/N/no/NO.
   local prompt="$1" answer=""
-  if [ -r /dev/tty ]; then
+  if _tty_openable; then
     read -r -p "${prompt}" answer < /dev/tty || answer=""
   fi
   case "${answer}" in
@@ -80,15 +88,51 @@ _prompt_yes_default() {
   esac
 }
 
+# _persist_if_absent (below) embeds these two values unescaped into a
+# double-quoted YAML scalar in local-vars.yml; a literal `"` (or newline)
+# in either would corrupt that file. Minimal sanity check, not a full
+# RFC validator — just enough to keep the persisted YAML well-formed and
+# catch an obviously-wrong value early.
+_validate_domain() {
+  # $1=value
+  case "$1" in
+    *'"'*|*[![:alnum:].-]*)
+      echo "ERROR: FLEET_DOMAIN '$1' is not a valid domain (only letters," >&2
+      echo "       digits, '.' and '-' allowed; no quotes)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+_validate_email() {
+  # $1=value
+  case "$1" in
+    *'"'*|*[[:space:]]*|*\\*)
+      echo "ERROR: FLEET_ACME_EMAIL '$1' contains a quote, backslash, or" >&2
+      echo "       whitespace — not a valid email." >&2
+      exit 1
+      ;;
+  esac
+  case "$1" in
+    *@*) ;;
+    *)
+      echo "ERROR: FLEET_ACME_EMAIL '$1' is missing '@' — not a valid email." >&2
+      exit 1
+      ;;
+  esac
+}
+
 FLEET_DOMAIN="${FLEET_DOMAIN:-}"
 if [ -z "${FLEET_DOMAIN}" ]; then
   FLEET_DOMAIN="$(_prompt_required FLEET_DOMAIN 'Fleet domain (e.g. fleet.example.com): ')"
 fi
+_validate_domain "${FLEET_DOMAIN}"
 
 FLEET_ACME_EMAIL="${FLEET_ACME_EMAIL:-}"
 if [ -z "${FLEET_ACME_EMAIL}" ]; then
   FLEET_ACME_EMAIL="$(_prompt_required FLEET_ACME_EMAIL "Let's Encrypt contact email: ")"
 fi
+_validate_email "${FLEET_ACME_EMAIL}"
 
 FLEET_ADMIN_PASSWORD="${FLEET_ADMIN_PASSWORD:-}"
 _admin_password_generated=0
@@ -97,7 +141,14 @@ if [ -z "${FLEET_ADMIN_PASSWORD}" ]; then
   # present; `openssl` isn't guaranteed until phase 4 installs
   # dependencies). 24+ alphanumeric chars is strong given it's
   # machine-generated and immediately bcrypt-hashed.
-  FLEET_ADMIN_PASSWORD="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24)"
+  # `head -c 24` closes its end of the pipe as soon as it has enough bytes;
+  # `tr` then gets SIGPIPE writing into the closed pipe and exits 141. Under
+  # `set -euo pipefail` that 141 would abort the WHOLE script right here, on
+  # what is otherwise the default (most common) path. The trailing `; true`
+  # makes the command substitution's own exit status 0 without touching the
+  # captured output (command substitution strips the trailing newline
+  # regardless, and `; true` only affects $?, not stdout).
+  FLEET_ADMIN_PASSWORD="$(tr -dc 'A-Za-z0-9' < /dev/urandom | head -c 24; true)"
   _admin_password_generated=1
 fi
 
@@ -147,6 +198,12 @@ elif [ -d "${FLEET_OPT_DIR}/.git" ]; then
   echo "==> ${FLEET_OPT_DIR} already exists — pulling latest"
   git -C "${FLEET_OPT_DIR}" fetch --tags
   if [ "${FLEET_REPO_VERSION}" = "main" ]; then
+    # A previous run may have pinned FLEET_REPO_VERSION to a tag/sha,
+    # leaving this checkout on a detached HEAD. `git pull` has no upstream
+    # to pull from in that state and errors under `set -e`. Reattach to
+    # main first (a no-op if already on it) so the pull always has a
+    # branch to fast-forward.
+    git -C "${FLEET_OPT_DIR}" checkout main
     git -C "${FLEET_OPT_DIR}" pull --ff-only
   else
     git -C "${FLEET_OPT_DIR}" checkout "${FLEET_REPO_VERSION}"
