@@ -1,3 +1,4 @@
+import argparse
 import stat
 from pathlib import Path
 
@@ -1290,3 +1291,31 @@ def test_tmux_sidebar_dispatch(fleet_home, monkeypatch):
 
     assert exit_code == 0
     assert seen == {"window": "general", "once": True}
+
+
+def test_build_parser_accepts_reboot_notify_and_test_flag():
+    parser = cli._build_parser()
+    args = parser.parse_args(["reboot-notify", "--test"])
+    assert args.command == "reboot-notify"
+    assert args.test is True
+
+    args = parser.parse_args(["reboot-notify"])
+    assert args.test is False
+
+
+def test_cmd_reboot_notify_reads_to_from_env_file(tmp_path, monkeypatch):
+    (tmp_path / "reboot-notify.env").write_text(
+        "MSMTP_TO=ops@example.test\nMSMTP_FROM=fleet@example.test\n", encoding="utf-8"
+    )
+    captured = {}
+
+    def fake_reboot_notify(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(cli, "reboot_mod", type("M", (), {"reboot_notify": fake_reboot_notify}))
+    args = argparse.Namespace(test=False)
+    rc = cli._cmd_reboot_notify(tmp_path, args)
+    assert rc == 0
+    assert captured["to_addr"] == "ops@example.test"
+    assert captured["from_addr"] == "fleet@example.test"
