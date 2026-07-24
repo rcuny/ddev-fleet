@@ -21,7 +21,7 @@
   # live inside the companion dev container (no SSH access to the forge,
   # and no network egress assumed) — the in-container gate for this role
   # is syntax-check + lint only; the real run happens on the host via
-  # bootstrap.sh / docs/runbook-server-rollout.md.
+  # bootstrap.sh / docs/installation.md.
   ansible.builtin.git:
     repo: "{{ fleet_repo_url }}"
     dest: "{{ fleet_opt_dir }}"

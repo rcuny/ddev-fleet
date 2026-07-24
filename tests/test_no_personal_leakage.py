@@ -67,19 +67,6 @@ GRANDFATHERED: dict[str, set[str]] = {
         "fleet.personal.example",
         "Kimsufi",
     },
-    # Removed by: Phase B Task B8 "Repoint every reference to the old
-    # runbook, then delete it" in
-    # 2026-07-24-fleet-open-source-release-plan.md (`git rm
-    # docs/runbook-server-rollout.md`, after docs/installation.md and
-    # docs/operations.md exist). This file is the dated, host-specific
-    # rollout runbook and is deliberately not touched before Phase B.
-    "docs/runbook-server-rollout.md": {
-        "personal-maintainer",
-        "personal_maintainer",
-        "bitbucket.org/personal_maintainer",
-        "ddev.personal.example",
-        "fleet.personal.example",
-    },
 }
 
 

@@ -2,7 +2,7 @@
 
 This file is the server-side Claude Code context document (spec §10.2).
 The canonical copy lives in the product repo at `docs/srv-fleet-CLAUDE.md`;
-the runbook (`docs/runbook-server-rollout.md`, section 9) copies it to
+`docs/operations.md`'s Claude-context-refresh section copies it to
 `/srv/fleet/CLAUDE.md` so a `claude -p "..."` session run as the `fleet`
 user on the server has grounded context without reading the whole spec.
 

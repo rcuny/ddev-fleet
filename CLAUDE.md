@@ -71,7 +71,7 @@ dependency groups. `ruff` selects `E,F,I`, line length 100 (`black` matches).
 
 ## Deploy model — shipping a code change to the live host
 
-Full details: `docs/runbook-server-rollout.md` §2a. Summary:
+Full details: `docs/operations.md`. Summary:
 
 - **Option B (preferred, enabled 2026-07-16).** `/opt/ddev-fleet` is a
   `fleet`-owned git checkout tracking `origin/main`, with a read-only
@@ -162,10 +162,11 @@ actually implemented and deployed.
   onto the server at `/srv/fleet/CLAUDE.md` so a `claude -p "..."` session
   run there (as the `fleet` user) has grounded context without reading the
   full spec. Keep it in sync with this file's CLI-shape facts and re-copy it
-  after any change (`docs/runbook-server-rollout.md` §9).
-- `docs/runbook-server-rollout.md` — full provisioning/rollout checklist
-  (DNS, delivery, admin password, deploy keys, Claude token mint,
-  live-verification items) and the ongoing update procedure (§2a).
+  after any change (`docs/operations.md`'s Claude-context-refresh section).
+- `docs/installation.md` — full first-rollout checklist (DNS, delivery,
+  admin password, deploy keys, Claude token mint, live-verification items).
+- `docs/operations.md` — the ongoing code-update procedure, rollback, and
+  admin-password rotation.
 - `docs/README-typesense.md` — the Typesense browser-search exposure design
   in full (topology, keys, env vars, reindexing, reachability caveat).
 - `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing

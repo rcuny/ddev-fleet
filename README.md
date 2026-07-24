@@ -45,7 +45,7 @@ Bare-metal / VPS host
 
 Provisioning is Ansible (`ansible/site.yml`, roles `base`, `docker`,
 `fleet_user`, `ddev`, `claude_cli`, `caddy`, `fleet_service`) — see
-Quickstart below and `docs/runbook-server-rollout.md` for the full
+Quickstart below and `docs/installation.md` for the full
 first-rollout checklist.
 
 ## Quickstart (server provisioning)
@@ -61,9 +61,10 @@ key, `fleet init`) and `docs/operations.md` for ongoing updates.
 installs Docker, DDEV, Caddy, and the `fleet` system user and Python
 package (editable install into a venv at `/opt/ddev-fleet/venv`), and
 enables (but does not start) the `fleet.service` systemd unit. See
-`docs/runbook-server-rollout.md` for the full first-rollout checklist (DNS,
-admin password, deploy key, Claude token) and §2a for how to ship a code
-update to an already-live host (git-pull based, no full playbook re-run).
+`docs/installation.md` for the full first-rollout checklist (DNS,
+admin password, deploy key, Claude token) and `docs/operations.md` for how
+to ship a code update to an already-live host (git-pull based, no full
+playbook re-run).
 
 ## On-server layout
 
@@ -171,7 +172,7 @@ copy it explicitly (e.g. `fleet assets push`) once you've verified it.
 
 ## Web UI
 
-Once `fleet.service` is running (see `docs/runbook-server-rollout.md`),
+Once `fleet.service` is running (see `docs/operations.md`),
 browse to `https://fleet.<domain>` for the web UI: an instance list (id,
 project, branch, state, URL, RAM) with per-row Start/Stop/Destroy actions,
 a deploy form (project/template/branch/label/fresh/basic-auth
@@ -207,8 +208,10 @@ the exact steps to add a new one.
 - `bootstrap.sh` — one-shot installer entry point
 - `tests/` — pytest suite (unit + FastAPI `TestClient`/`httpx` tests)
 - `docs/` — operational runbooks and reference docs:
-  - `docs/runbook-server-rollout.md` — ordered first-rollout checklist and
-    the ongoing code-update procedure (§2a)
+  - `docs/installation.md` — ordered first-rollout checklist (DNS,
+    installer, deploy key, `fleet init`, first deploy)
+  - `docs/operations.md` — ongoing code-update procedure, rollback,
+    admin-password rotation, verification checklist
   - `docs/srv-fleet-CLAUDE.md` — the registry/CLI reference copied onto the
     server for `claude -p "..."` sessions run there
   - `docs/README-typesense.md` — the Typesense browser-search exposure
@@ -224,8 +227,8 @@ the exact steps to add a new one.
 
 ## Docs / pointers
 
-- Full first-rollout checklist and the ongoing code-update procedure:
-  `docs/runbook-server-rollout.md`.
+- Full first-rollout checklist: `docs/installation.md`.
+- The ongoing code-update procedure: `docs/operations.md`.
 - Typesense browser-search exposure (port-based topology, admin vs.
   search-only keys, env injection): `docs/README-typesense.md`.
 - Full network topology, every port in one table, and how to expose a
