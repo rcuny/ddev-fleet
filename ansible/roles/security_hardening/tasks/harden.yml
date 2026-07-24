@@ -1,0 +1,296 @@
+---
+- name: Install unattended-upgrades, needrestart, apt-listchanges
+  ansible.builtin.apt:
+    name:
+      - unattended-upgrades
+      - needrestart
+      - apt-listchanges
+    state: present
+
+- name: Deploy the fleet unattended-upgrades hardening drop-in
+  ansible.builtin.template:
+    src: 51fleet-hardening.conf.j2
+    dest: /etc/apt/apt.conf.d/51fleet-hardening
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy the needrestart non-interactive trap
+  ansible.builtin.copy:
+    src: 50fleet-autorestart.conf
+    dest: /etc/needrestart/conf.d/50fleet-autorestart.conf
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Deploy the fleet-owned Docker daemon.json (live-restore + log rotation)
+  # Fully fleet-owned (copy semantics via template, not a merge) —
+  # confirmed no other role in this codebase writes this file (spec §13).
+  ansible.builtin.template:
+    src: daemon.json.j2
+    dest: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Restart docker
+
+- name: Assert the current operator is present in fleet_ssh_allow_users
+  # Cheap pre-flight lockout guard, mirroring network_hardening's "assert
+  # the SSH port is staged before ufw enable" pattern. `validate: "sshd -t
+  # -f %s"` on the template task below only checks SYNTAX — an AllowUsers
+  # line that is syntactically valid but omits the connecting operator
+  # passes that check cleanly, and on the NEXT connection everyone is
+  # locked out of SSH. Only asserted when fleet_ssh_allow_users is
+  # non-empty: an empty list is not restricting who may log in by name, so
+  # there is nothing to guard against here (see 52fleet-sshd.conf.j2).
+  ansible.builtin.assert:
+    that:
+      - ansible_user_id in fleet_ssh_allow_users
+    fail_msg: >-
+      fleet_ssh_allow_users does not include the current user
+      ({{ ansible_user_id }}); applying this would lock you out of SSH.
+      Add {{ ansible_user_id }} to fleet_ssh_allow_users (or remove the
+      override to fall back to the safe default) before re-running this
+      role.
+  when: fleet_ssh_allow_users | length > 0
+
+- name: Deploy the SSH hardening drop-in
+  # Validated against Ansible's staged temp copy via `validate:` (sshd -t -f
+  # %s) BEFORE the file is moved into place — not via a separate `sshd -t`
+  # task after the template task, because site.yml sets
+  # `force_handlers: true` play-wide, which would fire the already-notified
+  # "Reload sshd" handler even if a later syntax-check task failed (spec
+  # §6.2 task 5 / deviation note). `validate:` rejects a bad drop-in before
+  # it ever reaches /etc/ssh/sshd_config.d/, so the handler is never
+  # notified for an invalid config, independent of force_handlers.
+  ansible.builtin.template:
+    src: 52fleet-sshd.conf.j2
+    dest: /etc/ssh/sshd_config.d/10-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+    validate: "sshd -t -f %s"
+  notify: Reload sshd
+
+- name: Install fail2ban
+  ansible.builtin.apt:
+    name: fail2ban
+    state: present
+  when: fleet_fail2ban_enabled
+
+- name: Configure the sshd jail (log-noise reduction, not the boundary — spec §10)
+  ansible.builtin.copy:
+    dest: /etc/fail2ban/jail.d/fleet-sshd.conf
+    content: |
+      [sshd]
+      enabled = true
+    owner: root
+    group: root
+    mode: "0644"
+  when: fleet_fail2ban_enabled
+  notify: Restart fail2ban
+
+- name: Ensure fail2ban is enabled and started
+  ansible.builtin.systemd:
+    name: fail2ban
+    enabled: true
+    state: started
+  when: fleet_fail2ban_enabled
+
+- name: Deploy the conservative sysctl drop-in
+  ansible.builtin.copy:
+    src: 53fleet-sysctl.conf
+    dest: /etc/sysctl.d/60-fleet-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl
+
+- name: Install auditd
+  ansible.builtin.apt:
+    name: auditd
+    state: present
+  when: fleet_auditd_enabled
+
+- name: Deploy scoped auditd watch rules
+  ansible.builtin.copy:
+    src: 54fleet-audit.rules
+    dest: /etc/audit/rules.d/50-fleet.rules
+    owner: root
+    group: root
+    mode: "0640"
+  when: fleet_auditd_enabled
+  notify: Reload auditd rules
+
+- name: Ensure auditd is enabled and started
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: true
+    state: started
+  when: fleet_auditd_enabled
+
+- name: Determine whether /tmp is already its own mount point
+  ansible.builtin.command:
+    cmd: findmnt -no TARGET /tmp
+  register: sh_tmp_target
+  changed_when: false
+  failed_when: false
+  when: fleet_tmp_hardening_enabled
+
+- name: Warn and skip /tmp hardening when the pre-check is inconclusive
+  # Only remount /tmp with noexec when it is ALREADY its own mount point
+  # (a systemd tmp.mount override refining existing options) — never
+  # when /tmp is just part of "/", since that would silently switch it
+  # to a brand-new tmpfs and risk breaking a Docker/DDEV build context
+  # that writes executables under /tmp (spec §6.2 task 9).
+  ansible.builtin.debug:
+    msg: >-
+      /tmp hardening requested (fleet_tmp_hardening_enabled) but /tmp is
+      not already its own mount point (findmnt reported
+      '{{ sh_tmp_target.stdout | default("n/a") }}') — skipping
+      nosuid,nodev,noexec rather than risking the build pipeline.
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) != '/tmp'
+
+- name: Ensure the tmp.mount override directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/tmp.mount.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) == '/tmp'
+
+- name: Harden /tmp mount options (nosuid,nodev,noexec)
+  ansible.builtin.copy:
+    src: tmp-mount-override.conf
+    dest: /etc/systemd/system/tmp.mount.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) == '/tmp'
+  notify: Reload systemd daemon (security_hardening)
+
+- name: Ensure tmp.mount is enabled
+  ansible.builtin.systemd:
+    name: tmp.mount
+    enabled: true
+    daemon_reload: true
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) == '/tmp'
+
+- name: Read MSMTP_USER from .secrets (no_log)
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; grep '^MSMTP_USER=' {{ fleet_srv_dir }}/.secrets | cut -d= -f2- || true"
+    executable: /bin/bash
+  register: sh_msmtp_user_raw
+  changed_when: false
+  no_log: true
+
+- name: Read MSMTP_PASSWORD from .secrets (no_log)
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; grep '^MSMTP_PASSWORD=' {{ fleet_srv_dir }}/.secrets | cut -d= -f2- || true"
+    executable: /bin/bash
+  register: sh_msmtp_password_raw
+  changed_when: false
+  no_log: true
+
+- name: Compute extracted msmtp credentials (no_log)
+  ansible.builtin.set_fact:
+    fleet_msmtp_user: "{{ sh_msmtp_user_raw.stdout | default('') }}"
+    fleet_msmtp_password: "{{ sh_msmtp_password_raw.stdout | default('') }}"
+  no_log: true
+
+- name: Determine whether the msmtp email channel is fully configured
+  ansible.builtin.set_fact:
+    fleet_msmtp_enabled: >-
+      {{ (fleet_msmtp_host | default('') | length > 0)
+         and (fleet_msmtp_from | default('') | length > 0)
+         and (fleet_msmtp_to | default('') | length > 0)
+         and (fleet_msmtp_user | length > 0)
+         and (fleet_msmtp_password | length > 0) }}
+
+- name: Install msmtp + msmtp-mta
+  ansible.builtin.apt:
+    name:
+      - msmtp
+      - msmtp-mta
+    state: present
+  when: fleet_msmtp_enabled
+
+- name: Log that the email channel is disabled (missing config)
+  ansible.builtin.debug:
+    msg: >-
+      msmtp email channel disabled — one or more of host/from/to/user/
+      password is not configured. Sidebar and web-UI reboot
+      notifications are unaffected (spec §6.2 task 10).
+  when: not fleet_msmtp_enabled
+
+- name: Render /srv/fleet/msmtprc (no_log — embeds credentials)
+  ansible.builtin.template:
+    src: msmtprc.j2
+    dest: "{{ fleet_srv_dir }}/msmtprc"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0600"
+  when: fleet_msmtp_enabled
+  no_log: true
+
+- name: Render /srv/fleet/reboot-notify.env (non-secret to/from for the CLI)
+  ansible.builtin.template:
+    src: reboot-notify.env.j2
+    dest: "{{ fleet_srv_dir }}/reboot-notify.env"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0640"
+
+- name: Send an install-time test email (verification per spec §6.2 task 12 / §6.3)
+  ansible.builtin.command:
+    cmd: "{{ fleet_opt_dir }}/venv/bin/fleet reboot-notify --test"
+  register: sh_msmtp_test_send
+  changed_when: false
+  failed_when: false
+  when: fleet_msmtp_enabled
+
+- name: Report the test-send result
+  ansible.builtin.debug:
+    msg: >-
+      msmtp test-send
+      {{ 'SUCCEEDED' if sh_msmtp_test_send.rc == 0
+         else 'FAILED (rc=' + (sh_msmtp_test_send.rc | string) + ') — check '
+              + fleet_srv_dir + '/msmtprc and the relay settings' }}
+  when: fleet_msmtp_enabled
+
+- name: Deploy the fleet-reboot-notify service unit
+  ansible.builtin.template:
+    src: fleet-reboot-notify.service.j2
+    dest: /etc/systemd/system/fleet-reboot-notify.service
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (security_hardening)
+  when: fleet_reboot_notify_enabled
+
+- name: Deploy the fleet-reboot-notify timer unit
+  ansible.builtin.copy:
+    src: fleet-reboot-notify.timer
+    dest: /etc/systemd/system/fleet-reboot-notify.timer
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload systemd daemon (security_hardening)
+  when: fleet_reboot_notify_enabled
+
+- name: Enable and start the fleet-reboot-notify timer
+  ansible.builtin.systemd:
+    name: fleet-reboot-notify.timer
+    enabled: true
+    state: started
+    daemon_reload: true
+  when: fleet_reboot_notify_enabled

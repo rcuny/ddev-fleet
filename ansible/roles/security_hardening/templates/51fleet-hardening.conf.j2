@@ -1,0 +1,10 @@
+// Managed by the security_hardening Ansible role. Automatic-Reboot is
+// HARDCODED false (spec §6.2/§6.3, decided 2026-07-24) — this host never
+// reboots itself; see docs/README-reboot-notifications.md.
+APT::Periodic::Unattended-Upgrade "1";
+Unattended-Upgrade::Origins-Pattern {
+{% for origin in fleet_unattended_upgrades_origins %}
+    "{{ origin }}";
+{% endfor %}
+};
+Unattended-Upgrade::Automatic-Reboot "false";
