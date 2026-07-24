@@ -15,6 +15,8 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
+from fleet.core.runner import run_streamed
+
 MARKER_PATH = Path("/var/run/reboot-required")
 PKGS_PATH = Path("/var/run/reboot-required.pkgs")
 DEFAULT_STATE_PATH = Path("/srv/fleet/reboot-notify-state.json")
@@ -99,3 +101,42 @@ def _clear_state(path: Path) -> None:
         path.unlink()
     except FileNotFoundError:
         pass
+
+
+def compose_email(status: RebootStatus, *, hostname: str, now: float) -> tuple[str, str]:
+    since_human = (
+        format_duration_since(status.since, now=now) if status.since is not None else "unknown"
+    )
+    subject = f"[ddev-fleet] reboot required on {hostname}"
+    pkg_list = "\n".join(f"  - {p}" for p in status.packages) or "  (package list unavailable)"
+    body = (
+        f"A reboot is required on {hostname}.\n\n"
+        f"Pending for: {since_human}\n"
+        f"Triggering packages:\n{pkg_list}\n\n"
+        "To reboot: sudo reboot\n"
+    )
+    return subject, body
+
+
+def send_email(
+    subject: str,
+    body: str,
+    *,
+    to_addr: str,
+    from_addr: str,
+    msmtprc_path: Path = DEFAULT_MSMTPRC_PATH,
+    runner=run_streamed,
+) -> bool:
+    """Send via msmtp using the fleet-owned msmtprc. Never raises — the
+    reboot-notify pipeline is best-effort; a bad relay must never crash
+    the caller. Returns False (no-op, not an error) if msmtprc or a
+    recipient is missing."""
+    if not msmtprc_path.exists() or not to_addr:
+        return False
+    message = f"Subject: {subject}\nFrom: {from_addr}\nTo: {to_addr}\n\n{body}"
+    result = runner(
+        ["msmtp", "--file", str(msmtprc_path), "-a", "default", to_addr],
+        input_text=message,
+        echo=False,
+    )
+    return result.returncode == 0

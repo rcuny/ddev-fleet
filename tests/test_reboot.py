@@ -1,4 +1,6 @@
 from fleet.core import reboot
+from fleet.core.runner import RunResult
+from tests.conftest import FakeRunner
 
 
 def test_read_reboot_status_absent_marker_is_not_pending(tmp_path):
@@ -68,3 +70,67 @@ def test_clear_state_removes_file(tmp_path):
 
 def test_clear_state_missing_file_is_a_noop(tmp_path):
     reboot._clear_state(tmp_path / "nope.json")  # must not raise
+
+
+def test_compose_email_includes_hostname_duration_and_packages():
+    status = reboot.RebootStatus(pending=True, since=0.0, packages=["libc6", "openssl"])
+    subject, body = reboot.compose_email(status, hostname="ddev2", now=3600.0)
+    assert "ddev2" in subject
+    assert "libc6" in body and "openssl" in body
+    assert "1h" in body
+
+
+def test_compose_email_handles_unknown_packages():
+    status = reboot.RebootStatus(pending=True, since=0.0, packages=[])
+    _, body = reboot.compose_email(status, hostname="ddev2", now=10.0)
+    assert "package list unavailable" in body
+
+
+def test_send_email_returns_false_when_msmtprc_absent(tmp_path):
+    sent = reboot.send_email(
+        "subj",
+        "body",
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=tmp_path / "nope",
+    )
+    assert sent is False
+
+
+def test_send_email_invokes_msmtp_with_recipient_and_pipes_message(tmp_path):
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    sent = reboot.send_email(
+        "subj",
+        "body text",
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        runner=fake,
+    )
+    assert sent is True
+    assert fake.calls[0]["cmd"] == [
+        "msmtp",
+        "--file",
+        str(msmtprc),
+        "-a",
+        "default",
+        "ops@example.test",
+    ]
+    assert "body text" in fake.calls[0]["input_text"]
+
+
+def test_send_email_returns_false_on_nonzero_exit(tmp_path):
+    msmtprc = tmp_path / "msmtprc"
+    msmtprc.write_text("account default\n", encoding="utf-8")
+    fake = FakeRunner(default=RunResult(returncode=1, lines=["relay refused"]))
+    sent = reboot.send_email(
+        "subj",
+        "body",
+        to_addr="ops@example.test",
+        from_addr="fleet@example.test",
+        msmtprc_path=msmtprc,
+        runner=fake,
+    )
+    assert sent is False
