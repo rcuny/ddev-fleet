@@ -85,3 +85,26 @@
     group: root
     mode: "0644"
   notify: Reload sysctl
+
+- name: Install auditd
+  ansible.builtin.apt:
+    name: auditd
+    state: present
+  when: fleet_auditd_enabled
+
+- name: Deploy scoped auditd watch rules
+  ansible.builtin.copy:
+    src: 54fleet-audit.rules
+    dest: /etc/audit/rules.d/50-fleet.rules
+    owner: root
+    group: root
+    mode: "0640"
+  when: fleet_auditd_enabled
+  notify: Reload auditd rules
+
+- name: Ensure auditd is enabled and started
+  ansible.builtin.systemd:
+    name: auditd
+    enabled: true
+    state: started
+  when: fleet_auditd_enabled
