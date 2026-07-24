@@ -54,3 +54,35 @@ def instance_id(project: str, label: str) -> str:
             f"the {_MAX_INSTANCE_ID_LENGTH}-character DNS label limit"
         )
     return composed
+
+
+def allocate_multi_deploy_labels(
+    existing_ids: set[str], project: str, base_label: str, count: int
+) -> list[str]:
+    """Return `count` free instance labels of the form f"{base_label}-{n}",
+    n starting at 1, skipping any n whose composed instance id
+    (f"{project}--{base_label}-{n}") is already in `existing_ids`. A fresh
+    `existing_ids` scan (a directory listing) already reflects any prior
+    batch's high-water mark, so this never needs to remember it across
+    calls.
+
+    Validates the WHOLE batch (all `count` candidates) via instance_id()
+    before returning — raises ValidationError if any candidate would exceed
+    the 63-char DNS label limit, so a too-long batch fails atomically
+    instead of partway through a later deploy loop."""
+    if count == 0:
+        return []
+
+    labels: list[str] = []
+    n = 1
+    while len(labels) < count:
+        candidate_label = f"{base_label}-{n}"
+        candidate_id = f"{project}--{candidate_label}"
+        if candidate_id not in existing_ids:
+            labels.append(candidate_label)
+        n += 1
+
+    for label in labels:
+        instance_id(project, label)  # raises ValidationError if too long
+
+    return labels
