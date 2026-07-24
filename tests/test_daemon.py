@@ -2,6 +2,9 @@ import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
+from fleet import daemon
+from fleet.core import caddyports
+from fleet.core.errors import CaddyPortsError
 from fleet.core.instances import FleetPaths
 from fleet.daemon import create_app, mint_ws_token, verify_ws_token
 from fleet.jobs import Job
@@ -339,3 +342,34 @@ def test_instance_log_route_rejects_path_traversal_attempt(fleet_home):
     ):
         response = client.get(attempt)
         assert response.status_code == 404
+
+
+def test_startup_syncs_caddy_ports(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    calls = []
+
+    def fake_sync(registry, **kwargs):
+        calls.append(registry.domain)
+        return caddyports.SyncResult(written=[], removed=[])
+
+    monkeypatch.setattr(daemon.caddyports, "sync", fake_sync)
+
+    with TestClient(create_app(fleet_home)) as _client:
+        pass
+
+    assert calls == ["fleet.example.test"]
+
+
+def test_startup_port_sync_failure_does_not_crash_app(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+
+    def failing_sync(registry, **kwargs):
+        raise CaddyPortsError("boom")
+
+    monkeypatch.setattr(daemon.caddyports, "sync", failing_sync)
+
+    with TestClient(create_app(fleet_home)) as client:
+        response = client.get(
+            "/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"}
+        )
+    assert response.status_code == 200

@@ -6,6 +6,7 @@ import asyncio
 import base64
 import hashlib
 import hmac
+import logging
 import os
 import re
 import time
@@ -17,9 +18,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
-from fleet.core import caddyauth, naming, sysinfo
+from fleet.core import caddyauth, caddyports, naming, sysinfo
 from fleet.core import instances as instances_mod
-from fleet.core.errors import FleetError
+from fleet.core.errors import CaddyPortsError, FleetError
 from fleet.core.registry import Registry
 from fleet.jobs import JobManager
 
@@ -29,6 +30,8 @@ _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
 _HEARTBEAT_EVERY = 15.0
+
+logger = logging.getLogger(__name__)
 
 
 def _validate_instance_id(instance_id: str) -> None:
@@ -68,6 +71,25 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     app.state.jobs = JobManager()
     app.state.ws_secret = os.urandom(32)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+
+    @app.on_event("startup")
+    async def _sync_caddy_ports_on_startup() -> None:
+        """Safety net for fleet.yml port edits made while the daemon was
+        down (spec §5) — reconciles Caddy port snippets to the registry's
+        current state. Never fails app startup: a broken registry/Caddy
+        at boot is logged, not fatal, so the daemon (and its own
+        dashboard — the only way to fix a broken registry) stays
+        reachable."""
+        try:
+            _, registry = _paths_and_registry()
+        except FleetError as exc:
+            logger.warning("startup port sync skipped: registry error: %s", exc.message)
+            return
+        try:
+            await asyncio.to_thread(caddyports.sync, registry)
+        except CaddyPortsError as exc:
+            logger.warning("startup port sync failed: %s", exc.message)
+
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
     @app.exception_handler(FleetError)
