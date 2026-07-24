@@ -172,16 +172,33 @@
     mode: "0644"
   notify: Reload systemd daemon (network_hardening)
 
-- name: Ensure the boot-time bootcheck service is enabled
-  ansible.builtin.systemd:
-    name: fleet-ufw-deadman-bootcheck.service
-    enabled: true
-    daemon_reload: true
-
 - name: Check whether the dead-man's-switch confirmation marker already exists
   ansible.builtin.stat:
     path: /etc/ddev-fleet/ufw-deadman-confirmed
   register: nh_deadman_confirmed_marker
+
+- name: Ensure the boot-time bootcheck service is enabled only when the switch is armed or confirmed
+  # MUST NOT be unconditionally enabled: the fire script it runs disables
+  # UFW fail-safe whenever the confirmation marker is absent, and it would
+  # run on EVERY boot. Enabling it in a state where no marker exists and
+  # none will ever be created would silently disable UFW on the very next
+  # reboot. Gate is the same "was the switch genuinely armed" test as the
+  # arm task below, PLUS the marker (a prior run's completed arm+confirm
+  # cycle) so a re-run doesn't undo a confirmed host's safe resting state:
+  #   - fleet_ufw_deadman_switch_enabled: false (opted out)            -> false
+  #   - nh_ufw_enable.changed (this run just armed it) is true          -> true
+  #   - nh_deadman_confirmed_marker exists (armed+confirmed previously) -> true
+  #   - UFW was already enabled before this play and never armed        -> false
+  #     (nh_ufw_enable.changed is false, no marker was ever created)
+  # `enabled:` is templated (not a static true) so a host that had the
+  # bootcheck enabled by a previous run but has since opted out gets it
+  # actively DISABLED here, not just left alone.
+  ansible.builtin.systemd:
+    name: fleet-ufw-deadman-bootcheck.service
+    enabled: >-
+      {{ fleet_ufw_deadman_switch_enabled
+         and (nh_deadman_confirmed_marker.stat.exists or nh_ufw_enable.changed) }}
+    daemon_reload: true
 
 - name: Arm the UFW dead-man's switch
   ansible.builtin.systemd:
