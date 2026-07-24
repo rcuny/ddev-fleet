@@ -1,0 +1,34 @@
+---
+- name: Check whether a DDEV global config exists
+  ansible.builtin.stat:
+    path: "{{ fleet_home_dir }}/.ddev/global_config.yaml"
+  become: true
+  become_user: "{{ fleet_user }}"
+  register: nh_ddev_global_config_file
+
+- name: Read the DDEV global config
+  ansible.builtin.slurp:
+    src: "{{ fleet_home_dir }}/.ddev/global_config.yaml"
+  become: true
+  become_user: "{{ fleet_user }}"
+  register: nh_ddev_global_config_raw
+  when: nh_ddev_global_config_file.stat.exists
+
+- name: Parse the DDEV global config
+  ansible.builtin.set_fact:
+    nh_ddev_global_config: >-
+      {{ (nh_ddev_global_config_raw.content | b64decode | from_yaml)
+         if nh_ddev_global_config_file.stat.exists else {} }}
+
+- name: Assert DDEV's router is loopback-only (router_bind_all_interfaces == false)
+  # The DOCKER-USER guard's threat model (spec §3) rests entirely on this
+  # assumption. Fails the play (not a warning) when violated.
+  ansible.builtin.assert:
+    that:
+      - not (nh_ddev_global_config.router_bind_all_interfaces | default(false) | bool)
+    fail_msg: >-
+      DDEV's global_config.yaml has router_bind_all_interfaces: true —
+      the network_hardening role's threat model assumes ddev-router is
+      loopback-only. Refusing to enable network_hardening. Set
+      fleet_ufw_assert_loopback_router: false to override at your own risk.
+  when: fleet_ufw_assert_loopback_router

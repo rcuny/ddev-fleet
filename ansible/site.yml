@@ -35,3 +35,4 @@
     - claude_cli
     - caddy
     - fleet_service
+    - network_hardening   # no-op unless fleet_network_hardening_enabled
