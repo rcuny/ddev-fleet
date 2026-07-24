@@ -347,3 +347,44 @@ def test_ui_start_vanished_instance_row_returns_400(fleet_home, monkeypatch):
     response = client.post("/ui/instances/demo--develop/start")
 
     assert response.status_code == 400
+
+
+def test_instances_table_has_checkbox_column_and_select_all(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert '<input type="checkbox" id="select-all">' in body
+    assert 'name="instance_id" value="demo--develop" class="row-select"' in body
+
+
+def test_bulk_action_bar_renders_below_the_table(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    table_pos = body.index('id="instances-table"')
+    actions_pos = body.index('id="bulk-actions"')
+    assert actions_pos > table_pos
+    assert 'hx-post="/ui/bulk/start"' in body
+    assert 'hx-post="/ui/bulk/stop"' in body
+
+
+def test_deploy_form_count_input_has_expected_bounds(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert '<input type="number" name="count" min="0" max="20" step="1" value="1" required>' in body
+
+
+def test_deploy_form_has_skip_disk_check_checkbox(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert 'name="skip_disk_check"' in body
