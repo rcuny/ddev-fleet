@@ -10,6 +10,7 @@ Three consumers, one reader: `tmux_sidebar.py` (sidebar banner),
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -48,3 +49,18 @@ def read_reboot_status(
         packages = []
 
     return RebootStatus(pending=True, since=since, packages=packages)
+
+
+def format_duration_since(since: float, *, now: float | None = None) -> str:
+    """Human-readable elapsed time, e.g. '3d 4h'; '<1h' under an hour.
+    The single shared formatter — both the tmux sidebar banner and the
+    web UI footer badge call this, so the two never drift."""
+    now = now if now is not None else time.time()
+    seconds = max(0.0, now - since)
+    days, rem = divmod(int(seconds), 86400)
+    hours, _ = divmod(rem, 3600)
+    if days == 0 and hours == 0:
+        return "<1h"
+    if days == 0:
+        return f"{hours}h"
+    return f"{days}d {hours}h"

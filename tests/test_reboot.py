@@ -29,3 +29,15 @@ def test_read_reboot_status_missing_pkgs_file_yields_empty_list(tmp_path):
     marker.write_text("", encoding="utf-8")
     status = reboot.read_reboot_status(marker, tmp_path / "does-not-exist.pkgs")
     assert status.packages == []
+
+
+def test_format_duration_since_under_an_hour():
+    assert reboot.format_duration_since(1000.0, now=1000.0 + 1800) == "<1h"
+
+
+def test_format_duration_since_hours_only():
+    assert reboot.format_duration_since(1000.0, now=1000.0 + 5 * 3600) == "5h"
+
+
+def test_format_duration_since_days_and_hours():
+    assert reboot.format_duration_since(0.0, now=3 * 86400 + 4 * 3600) == "3d 4h"
