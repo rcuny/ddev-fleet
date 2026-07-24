@@ -1,12 +1,16 @@
 # Example fleet registry. Copy to your private config repo as fleet.yml and edit.
 fleet:
   domain: fleet.example.com
+  # ports:                                  # fleet-wide named-port catalogue (optional, see docs/networking.md)
+  #   typesense:  { public: 9108, router: 8108 }  # explicit form of the built-in legacy default below
+  #   playwright: { public: 9324, router: 8323 }
 projects:
   example:
     git: git@example.com:you/example.git
     default_branch: main
     default_template: default
     # typesense: true                       # expose Typesense to the browser at /_typesense (optional)
+    # ports: [typesense]                    # generic equivalent, once fleet.ports.typesense is defined above
     # NOTE: browser-exposed TYPESENSE_API_KEY must be a SEARCH-ONLY key, never the admin key.
     # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
     templates:
