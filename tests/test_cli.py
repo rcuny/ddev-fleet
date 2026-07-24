@@ -182,8 +182,25 @@ def test_init_skip_claude_creates_skeleton_non_interactively(tmp_path):
     assert (fleet_home / "locks").is_dir()
     registry = Registry.load(fleet_home / "config" / "fleet.yml")
     assert registry.domain == "fleet.example.test"
-    assert registry.project_keys() == []
+    assert registry.project_keys() == ["example"]
     assert not (fleet_home / ".secrets").exists()
+
+
+def test_init_local_file_mode_copies_dist_verbatim_and_patches_domain(tmp_path):
+    fleet_home = tmp_path / "new-fleet-home"
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test", "--skip-claude"]
+    )
+
+    assert exit_code == 0
+    registry_text = (fleet_home / "config" / "fleet.yml").read_text(encoding="utf-8")
+    # Copied from the real fleet.yml.dist verbatim (comments included),
+    # not the old hand-built skeleton dict.
+    assert "Example fleet registry" in registry_text
+    assert "post_deploy: [ddev start]" in registry_text
+    registry = Registry.load(fleet_home / "config" / "fleet.yml")
+    assert registry.domain == "fleet.example.test"
 
 
 def test_destroy_dispatch(fleet_home, monkeypatch):

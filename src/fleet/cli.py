@@ -29,6 +29,8 @@ _FLEET_UFW_SYNC_HELPER = Path("/usr/local/sbin/fleet-ufw-sync")
 _yaml = YAML()
 _yaml.default_flow_style = False
 
+_DIST_REGISTRY_PATH = Path(__file__).resolve().parents[2] / "fleet.yml.dist"
+
 _CLAUDE_TOKEN_RE = re.compile(r"sk-ant-oat01-[A-Za-z0-9_-]+")
 _VALID_CLAUDE_TOKEN_RE = re.compile(r"^sk-ant-oat01-[A-Za-z0-9_-]+$")
 
@@ -275,6 +277,21 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
+def _init_local_file_mode(registry_path: Path, domain: str) -> None:
+    """Copy fleet.yml.dist verbatim (comments included), then patch only
+    the fleet.domain key — the public default per locked decision 3
+    (2026-07-24-fleet-open-source-release-design.md)."""
+    with open(_DIST_REGISTRY_PATH, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh)
+    data["fleet"]["domain"] = domain
+    with open(registry_path, "w", encoding="utf-8") as fh:
+        _yaml.dump(data, fh)
+
+
+def _init_config_repo_mode(paths: "instances_mod.FleetPaths", config_repo: str) -> None:
+    raise NotImplementedError("implemented in Task B5")
+
+
 def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     paths.registry.parent.mkdir(parents=True, exist_ok=True)
@@ -292,14 +309,11 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
     if registry_path.exists():
         print(f"{registry_path} already exists — skipping", file=sys.stderr)
     else:
-        skeleton = {
-            "fleet": {
-                "domain": domain,
-            },
-            "projects": {},
-        }
-        with open(registry_path, "w", encoding="utf-8") as fh:
-            _yaml.dump(skeleton, fh)
+        config_repo = os.environ.get("FLEET_CONFIG_REPO")
+        if config_repo:
+            _init_config_repo_mode(paths, config_repo)
+        else:
+            _init_local_file_mode(registry_path, domain)
 
     if not args.skip_claude:
         token = _mint_claude_token_interactive(runner=run_interactive, reader=input)
