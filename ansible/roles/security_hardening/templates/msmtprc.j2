@@ -1,0 +1,15 @@
+# Managed by the security_hardening Ansible role (spec §6.2 task 11).
+defaults
+tls             on
+tls_trust_file  /etc/ssl/certs/ca-certificates.crt
+
+account         default
+host            {{ fleet_msmtp_host }}
+port            {{ fleet_msmtp_port | default(587) }}
+tls             {{ 'on' if fleet_msmtp_tls | default(true) else 'off' }}
+auth            on
+user            {{ fleet_msmtp_user }}
+password        {{ fleet_msmtp_password }}
+from            {{ fleet_msmtp_from }}
+
+account default : default

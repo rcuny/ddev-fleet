@@ -164,3 +164,68 @@
   when: >-
     fleet_tmp_hardening_enabled
     and (sh_tmp_target.stdout | default('') | trim) == '/tmp'
+
+- name: Read MSMTP_USER from .secrets (no_log)
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; grep '^MSMTP_USER=' {{ fleet_srv_dir }}/.secrets | cut -d= -f2- || true"
+    executable: /bin/bash
+  register: sh_msmtp_user_raw
+  changed_when: false
+  no_log: true
+
+- name: Read MSMTP_PASSWORD from .secrets (no_log)
+  ansible.builtin.shell:
+    cmd: "set -o pipefail; grep '^MSMTP_PASSWORD=' {{ fleet_srv_dir }}/.secrets | cut -d= -f2- || true"
+    executable: /bin/bash
+  register: sh_msmtp_password_raw
+  changed_when: false
+  no_log: true
+
+- name: Compute extracted msmtp credentials (no_log)
+  ansible.builtin.set_fact:
+    fleet_msmtp_user: "{{ sh_msmtp_user_raw.stdout | default('') }}"
+    fleet_msmtp_password: "{{ sh_msmtp_password_raw.stdout | default('') }}"
+  no_log: true
+
+- name: Determine whether the msmtp email channel is fully configured
+  ansible.builtin.set_fact:
+    fleet_msmtp_enabled: >-
+      {{ (fleet_msmtp_host | default('') | length > 0)
+         and (fleet_msmtp_from | default('') | length > 0)
+         and (fleet_msmtp_to | default('') | length > 0)
+         and (fleet_msmtp_user | length > 0)
+         and (fleet_msmtp_password | length > 0) }}
+
+- name: Install msmtp + msmtp-mta
+  ansible.builtin.apt:
+    name:
+      - msmtp
+      - msmtp-mta
+    state: present
+  when: fleet_msmtp_enabled
+
+- name: Log that the email channel is disabled (missing config)
+  ansible.builtin.debug:
+    msg: >-
+      msmtp email channel disabled — one or more of host/from/to/user/
+      password is not configured. Sidebar and web-UI reboot
+      notifications are unaffected (spec §6.2 task 10).
+  when: not fleet_msmtp_enabled
+
+- name: Render /srv/fleet/msmtprc (no_log — embeds credentials)
+  ansible.builtin.template:
+    src: msmtprc.j2
+    dest: "{{ fleet_srv_dir }}/msmtprc"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0600"
+  when: fleet_msmtp_enabled
+  no_log: true
+
+- name: Render /srv/fleet/reboot-notify.env (non-secret to/from for the CLI)
+  ansible.builtin.template:
+    src: reboot-notify.env.j2
+    dest: "{{ fleet_srv_dir }}/reboot-notify.env"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0640"
