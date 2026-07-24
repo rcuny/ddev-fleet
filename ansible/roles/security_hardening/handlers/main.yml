@@ -23,3 +23,7 @@
   ansible.builtin.command:
     cmd: augenrules --load
   changed_when: false
+
+- name: Reload systemd daemon (security_hardening)
+  ansible.builtin.systemd:
+    daemon_reload: true

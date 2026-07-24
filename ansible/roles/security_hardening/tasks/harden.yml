@@ -108,3 +108,59 @@
     enabled: true
     state: started
   when: fleet_auditd_enabled
+
+- name: Determine whether /tmp is already its own mount point
+  ansible.builtin.command:
+    cmd: findmnt -no TARGET /tmp
+  register: sh_tmp_target
+  changed_when: false
+  failed_when: false
+  when: fleet_tmp_hardening_enabled
+
+- name: Warn and skip /tmp hardening when the pre-check is inconclusive
+  # Only remount /tmp with noexec when it is ALREADY its own mount point
+  # (a systemd tmp.mount override refining existing options) — never
+  # when /tmp is just part of "/", since that would silently switch it
+  # to a brand-new tmpfs and risk breaking a Docker/DDEV build context
+  # that writes executables under /tmp (spec §6.2 task 9).
+  ansible.builtin.debug:
+    msg: >-
+      /tmp hardening requested (fleet_tmp_hardening_enabled) but /tmp is
+      not already its own mount point (findmnt reported
+      '{{ sh_tmp_target.stdout | default("n/a") }}') — skipping
+      nosuid,nodev,noexec rather than risking the build pipeline.
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) != '/tmp'
+
+- name: Ensure the tmp.mount override directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/tmp.mount.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) == '/tmp'
+
+- name: Harden /tmp mount options (nosuid,nodev,noexec)
+  ansible.builtin.copy:
+    src: tmp-mount-override.conf
+    dest: /etc/systemd/system/tmp.mount.d/override.conf
+    owner: root
+    group: root
+    mode: "0644"
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) == '/tmp'
+  notify: Reload systemd daemon (security_hardening)
+
+- name: Ensure tmp.mount is enabled
+  ansible.builtin.systemd:
+    name: tmp.mount
+    enabled: true
+    daemon_reload: true
+  when: >-
+    fleet_tmp_hardening_enabled
+    and (sh_tmp_target.stdout | default('') | trim) == '/tmp'
