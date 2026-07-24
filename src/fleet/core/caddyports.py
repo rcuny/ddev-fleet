@@ -23,6 +23,7 @@ from pathlib import Path
 
 from fleet.core import caddyauth
 from fleet.core.errors import CaddyPortsError
+from fleet.core.naming import validate_part
 from fleet.core.registry import PortProfile, Registry
 from fleet.core.runner import run_streamed
 
@@ -30,12 +31,31 @@ DEFAULT_PORTS_SNIPPET_DIR = Path("/etc/caddy/fleet/ports")
 
 
 def port_snippet_path(port_name: str, *, snippet_dir: Path = DEFAULT_PORTS_SNIPPET_DIR) -> Path:
+    """Raises ``ValidationError`` (via ``naming.validate_part``) for any
+    name outside ``^[a-z0-9]([a-z0-9-]*[a-z0-9])?$``. `Registry` already
+    runs every `fleet.ports` key through this same check before it ever
+    reaches here, but the guard is repeated at this layer too — defence in
+    depth against a future caller that hands this function a raw string
+    (e.g. `../../etc/evil`), which would otherwise be an unguarded
+    path-traversal primitive."""
+    validate_part(port_name)
     return snippet_dir / f"{port_name}.conf"
 
 
 def render_port_snippet(domain: str, profile: PortProfile) -> str:
     """Pure, no I/O. Structurally identical to today's static Typesense
-    site block, generalized to any named port."""
+    site block, generalized to any named port.
+
+    CAVEAT: the `tls { on_demand }` block below is rendered on one line,
+    whereas the static block it replaces
+    (`ansible/roles/caddy/templates/Caddyfile.j2`) used a multi-line form.
+    These are believed equivalent under Caddy's tokenizer, but the `caddy`
+    binary is not installed in this dev container, so — unlike the
+    glob-import no-op behavior this module's docstring cites (verified
+    against `caddy validate` v2.8.4 in `caddyauth`'s context) — this
+    specific one-line `tls { on_demand }` syntax has NOT itself been
+    checked against a real `caddy validate`/`caddy fmt`. Confirm on a
+    real server before relying on it."""
     return (
         f"*.{domain}:{profile.public} {{\n"
         f"    reverse_proxy 127.0.0.1:{profile.router}\n"

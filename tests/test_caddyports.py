@@ -1,7 +1,7 @@
 import pytest
 
 from fleet.core import caddyports
-from fleet.core.errors import CaddyPortsError
+from fleet.core.errors import CaddyPortsError, ValidationError
 from fleet.core.registry import PortProfile
 from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
@@ -33,13 +33,38 @@ def test_write_port_snippet_is_atomic_leaves_no_tmp_file_behind(tmp_path):
 
 def test_write_port_snippet_creates_parent_directory(tmp_path):
     snippet_dir = tmp_path / "does" / "not" / "exist"
+    profile = PortProfile(name="playwright", public=9324, router=8323)
     path = caddyports.write_port_snippet(
         "fleet.example.test",
-        PortProfile(name="playwright", public=9324, router=8323),
+        profile,
         snippet_dir=snippet_dir,
     )
     assert path.exists()
     assert path == snippet_dir / "playwright.conf"
+    assert path.read_text(encoding="utf-8") == caddyports.render_port_snippet(
+        "fleet.example.test", profile
+    )
+
+
+def test_port_snippet_path_rejects_path_traversal_name(tmp_path):
+    with pytest.raises(ValidationError):
+        caddyports.port_snippet_path("../../etc/evil", snippet_dir=tmp_path)
+
+
+def test_write_port_snippet_rejects_path_traversal_name(tmp_path):
+    with pytest.raises(ValidationError):
+        caddyports.write_port_snippet(
+            "fleet.example.test",
+            PortProfile(name="../../etc/evil", public=9324, router=8323),
+            snippet_dir=tmp_path,
+        )
+    # nothing should have escaped the snippet directory
+    assert list(tmp_path.rglob("*")) == []
+
+
+def test_remove_port_snippet_rejects_path_traversal_name(tmp_path):
+    with pytest.raises(ValidationError):
+        caddyports.remove_port_snippet("../../etc/evil", snippet_dir=tmp_path)
 
 
 def test_remove_port_snippet_returns_false_when_nothing_to_remove(tmp_path):
