@@ -10,6 +10,7 @@ import logging
 import os
 import re
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Query, WebSocket, WebSocketDisconnect
@@ -67,13 +68,13 @@ def verify_ws_token(secret: bytes, token: str | None, instance_id: str) -> bool:
 
 
 def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -> FastAPI:
-    app = FastAPI()
-    app.state.jobs = JobManager()
-    app.state.ws_secret = os.urandom(32)
-    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
+    def _paths_and_registry():
+        paths = instances_mod.FleetPaths.from_home(fleet_home)
+        registry = Registry.load(paths.registry)
+        return paths, registry
 
-    @app.on_event("startup")
-    async def _sync_caddy_ports_on_startup() -> None:
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
         """Safety net for fleet.yml port edits made while the daemon was
         down (spec §5) — reconciles Caddy port snippets to the registry's
         current state. Never fails app startup: a broken registry/Caddy
@@ -84,22 +85,23 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             _, registry = _paths_and_registry()
         except FleetError as exc:
             logger.warning("startup port sync skipped: registry error: %s", exc.message)
-            return
-        try:
-            await asyncio.to_thread(caddyports.sync, registry)
-        except CaddyPortsError as exc:
-            logger.warning("startup port sync failed: %s", exc.message)
+        else:
+            try:
+                await asyncio.to_thread(caddyports.sync, registry)
+            except CaddyPortsError as exc:
+                logger.warning("startup port sync failed: %s", exc.message)
+        yield
+
+    app = FastAPI(lifespan=lifespan)
+    app.state.jobs = JobManager()
+    app.state.ws_secret = os.urandom(32)
+    app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
 
     @app.exception_handler(FleetError)
     async def fleet_error_handler(request: Request, exc: FleetError):
         return JSONResponse(status_code=400, content={"error": exc.message})
-
-    def _paths_and_registry():
-        paths = instances_mod.FleetPaths.from_home(fleet_home)
-        registry = Registry.load(paths.registry)
-        return paths, registry
 
     @app.get("/api/tls-authorize")
     def tls_authorize(domain: str = Query(...)):
