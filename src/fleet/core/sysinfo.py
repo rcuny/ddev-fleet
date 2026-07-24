@@ -11,6 +11,8 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from fleet.core.errors import DiskSpaceError
+
 _MEMINFO = Path("/proc/meminfo")
 
 
@@ -76,3 +78,25 @@ def fmt_bytes(n: int | None) -> str:
             return f"{int(value)} {unit}" if unit == "B" else f"{value:.1f} {unit}"
         value /= 1024
     return f"{value:.1f} PiB"  # pragma: no cover
+
+
+MIN_FREE_PERCENT_DEFAULT = 10.0
+
+
+def check_disk_headroom(
+    instances_dir: Path, *, min_free_percent: float = MIN_FREE_PERCENT_DEFAULT
+) -> None:
+    """Raise DiskSpaceError if less than `min_free_percent` free on the
+    filesystem holding `instances_dir`. Reuses SystemStats.gather — no new
+    disk-probing logic. Scoped to multi-deploy callers only (Task 4); an
+    ordinary single-instance `fleet deploy` never calls this."""
+    stats = SystemStats.gather(instances_dir)
+    if stats.disk_total_bytes == 0:
+        return
+    free_percent = 100.0 * stats.disk_free_bytes / stats.disk_total_bytes
+    if free_percent < min_free_percent:
+        raise DiskSpaceError(
+            f"only {free_percent:.1f}% free on {instances_dir} "
+            f"({fmt_bytes(stats.disk_free_bytes)} of {fmt_bytes(stats.disk_total_bytes)}) "
+            f"— need at least {min_free_percent:.0f}% free; pass --skip-disk-check to override"
+        )

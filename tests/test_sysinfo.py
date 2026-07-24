@@ -1,7 +1,10 @@
 import shutil
 
+import pytest
+
 from fleet.core import sysinfo
-from fleet.core.sysinfo import SystemStats
+from fleet.core.errors import DiskSpaceError
+from fleet.core.sysinfo import SystemStats, check_disk_headroom
 
 _SAMPLE_MEMINFO = """\
 MemTotal:       131923972 kB
@@ -71,3 +74,45 @@ def test_display_returns_formatted_strings(tmp_path):
     assert display["mem_total"].endswith("GiB")
     assert display["disk_free"].endswith(("GiB", "TiB", "MiB"))
     assert display["mount"] == str(instances)
+
+
+class _FakeUsage:
+    def __init__(self, total, free):
+        self.total = total
+        self.free = free
+        self.used = total - free
+
+
+def test_check_disk_headroom_raises_below_threshold(tmp_path, monkeypatch):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    monkeypatch.setattr(sysinfo.shutil, "disk_usage", lambda p: _FakeUsage(100, 5))
+
+    with pytest.raises(DiskSpaceError, match="only 5.0% free"):
+        check_disk_headroom(instances)
+
+
+def test_check_disk_headroom_passes_above_threshold(tmp_path, monkeypatch):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    monkeypatch.setattr(sysinfo.shutil, "disk_usage", lambda p: _FakeUsage(100, 50))
+
+    check_disk_headroom(instances)  # must not raise
+
+
+def test_check_disk_headroom_boundary_at_exactly_min_free_percent(tmp_path, monkeypatch):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    monkeypatch.setattr(sysinfo.shutil, "disk_usage", lambda p: _FakeUsage(100, 10))
+
+    check_disk_headroom(instances)  # exactly at threshold ("< ", not "<=") must NOT raise
+
+
+def test_check_disk_headroom_custom_threshold_override(tmp_path, monkeypatch):
+    instances = tmp_path / "instances"
+    instances.mkdir()
+    monkeypatch.setattr(sysinfo.shutil, "disk_usage", lambda p: _FakeUsage(100, 25))
+
+    with pytest.raises(DiskSpaceError):
+        check_disk_headroom(instances, min_free_percent=30.0)
+    check_disk_headroom(instances, min_free_percent=20.0)  # must not raise
