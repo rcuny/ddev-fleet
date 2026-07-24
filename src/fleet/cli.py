@@ -289,7 +289,20 @@ def _init_local_file_mode(registry_path: Path, domain: str) -> None:
 
 
 def _init_config_repo_mode(paths: "instances_mod.FleetPaths", config_repo: str) -> None:
-    raise NotImplementedError("implemented in Task B5")
+    """Advanced mode (locked decision 3's opt-in path): clone the private
+    config repo (real fleet.yml + per-project assets/) into
+    $FLEET_HOME/config, matching this author's own actual setup. Never
+    re-clones or pulls an existing checkout — that remote is the
+    operator's own to manage from here on."""
+    config_dir = paths.registry.parent
+    if (config_dir / ".git").exists():
+        print(f"{config_dir} already exists as a git checkout — skipping clone", file=sys.stderr)
+        return
+    result = run_streamed(["git", "clone", config_repo, str(config_dir)])
+    if result.returncode != 0:
+        raise FleetError(
+            f"git clone {config_repo} {config_dir} failed with exit code {result.returncode}"
+        )
 
 
 def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:

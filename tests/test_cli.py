@@ -203,6 +203,61 @@ def test_init_local_file_mode_copies_dist_verbatim_and_patches_domain(tmp_path):
     assert registry.domain == "fleet.example.test"
 
 
+def test_init_config_repo_mode_clones_when_not_already_a_checkout(tmp_path, monkeypatch):
+    fleet_home = tmp_path / "new-fleet-home"
+    recorder = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        recorder.append(cmd)
+        # Simulate a real clone by creating the destination + a fake .git
+        dest = Path(cmd[-1])
+        (dest / ".git").mkdir(parents=True)
+        (dest / "fleet.yml").write_text(
+            "fleet:\n  domain: fleet.example.test\nprojects: {}\n", encoding="utf-8"
+        )
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setenv("FLEET_CONFIG_REPO", "git@example.test:org/fleet-config.git")
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test", "--skip-claude"]
+    )
+
+    assert exit_code == 0
+    assert recorder == [
+        ["git", "clone", "git@example.test:org/fleet-config.git", str(fleet_home / "config")]
+    ]
+    registry = Registry.load(fleet_home / "config" / "fleet.yml")
+    assert registry.domain == "fleet.example.test"
+
+
+def test_init_config_repo_mode_never_re_clones_an_existing_checkout(tmp_path, monkeypatch, capsys):
+    fleet_home = tmp_path / "new-fleet-home"
+    config_dir = fleet_home / "config"
+    (config_dir / ".git").mkdir(parents=True)
+    (config_dir / "fleet.yml").write_text(
+        "fleet:\n  domain: fleet.example.test\nprojects: {}\n", encoding="utf-8"
+    )
+
+    recorder = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        recorder.append(cmd)
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setenv("FLEET_CONFIG_REPO", "git@example.test:org/fleet-config.git")
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test", "--skip-claude"]
+    )
+
+    assert exit_code == 0
+    assert recorder == []  # never re-cloned
+    assert "already exists" in capsys.readouterr().err
+
+
 def test_destroy_dispatch(fleet_home, monkeypatch):
     _write_minimal_registry(fleet_home)
     (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
