@@ -369,7 +369,13 @@ def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:
         print("no instances matched the given selector", file=sys.stderr)
         return 0
 
-    if len(target_ids) == 1:
+    # A single *explicit* instance id bypasses confirmation entirely —
+    # today's exact behaviour, preserved for backward compatibility. A
+    # selector (--all/--project/--state) always requires confirmation, even
+    # when it happens to resolve to exactly one instance, because the user
+    # did not name what gets destroyed — the selector chose it. (Mirrors the
+    # explicit-vs-selector distinction in _cmd_bulk_start_stop.)
+    if len(args.instance_id) == 1:
         instances_mod.destroy(paths, registry, target_ids[0])
         return 0
 

@@ -285,6 +285,44 @@ def test_destroy_single_id_still_confirmation_free(fleet_home, monkeypatch):
     assert recorder == ["oak--a"]
 
 
+def test_destroy_selector_matching_one_instance_non_tty_refuses(fleet_home, monkeypatch, capsys):
+    """A selector (--project/--all/--state) that resolves to exactly ONE
+    instance must still require confirmation — the single-instance bypass
+    only applies to an explicitly-typed positional id, never to a selector
+    result. Under non-tty stdin without --yes it must refuse."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(is_tty=False))
+    boom_called = []
+    monkeypatch.setattr(cli.instances_mod, "destroy", lambda *a, **kw: boom_called.append(True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "--project=other"])
+
+    assert exit_code == 1
+    assert "refusing to destroy 1 instances without --yes" in capsys.readouterr().err
+    assert boom_called == []
+
+
+def test_destroy_selector_matching_one_instance_yes_flag_proceeds(fleet_home, monkeypatch):
+    """Same selector-resolves-to-one-instance case, but with --yes: it must
+    proceed and actually destroy the resolved instance."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+    recorder = []
+    monkeypatch.setattr(
+        cli.instances_mod, "destroy", lambda paths, registry, iid, **kw: recorder.append(iid)
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "destroy", "--project=other", "--yes"])
+
+    assert exit_code == 0
+    assert recorder == ["other--c"]
+
+
 def test_destroy_multi_without_yes_non_tty_refuses(fleet_home, monkeypatch, capsys):
     _write_two_project_registry(fleet_home)
     monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(is_tty=False))
