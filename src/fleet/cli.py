@@ -107,6 +107,8 @@ def _build_parser() -> argparse.ArgumentParser:
             f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
         ),
     )
+    deploy_parser.add_argument("--count", "-n", type=int, default=1)
+    deploy_parser.add_argument("--skip-disk-check", action="store_true")
 
     destroy_parser = subparsers.add_parser("destroy")
     _add_bulk_target_args(destroy_parser)
@@ -219,7 +221,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "init":
             _cmd_init(fleet_home, args)
         elif args.command == "deploy":
-            _cmd_deploy(fleet_home, args)
+            return _cmd_deploy(fleet_home, args)
         elif args.command == "destroy":
             return _cmd_destroy(fleet_home, args)
         elif args.command == "start":
@@ -305,22 +307,57 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
             )
 
 
-def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> None:
+def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    url = instances_mod.deploy(
+
+    if args.count == 1:
+        url = instances_mod.deploy(
+            paths,
+            registry,
+            args.project,
+            args.template,
+            branch=args.branch,
+            label=args.label,
+            fresh=args.fresh,
+            force=args.force,
+            auth_enabled=args.auth,
+            auth_password=args.auth_password,
+        )
+        print(url)
+        return 0
+
+    if args.count == 0:
+        print("nothing to deploy (--count=0)")
+        return 0
+
+    outcome = bulk_mod.multi_deploy(
         paths,
         registry,
         args.project,
         args.template,
         branch=args.branch,
         label=args.label,
+        count=args.count,
         fresh=args.fresh,
         force=args.force,
         auth_enabled=args.auth,
         auth_password=args.auth_password,
+        skip_disk_check=args.skip_disk_check,
     )
-    print(url)
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
 def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:

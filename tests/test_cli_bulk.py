@@ -357,3 +357,212 @@ def test_destroy_bulk_partial_failure_exit_code_2(fleet_home, monkeypatch, capsy
     out, err = capsys.readouterr()
     assert "oak--a: OK" in out
     assert "oak--b: FAILED — still running" in err
+
+
+def test_deploy_count_default_is_single_deploy_unchanged(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+
+    monkeypatch.setattr(
+        cli.instances_mod, "deploy", lambda *a, **kw: "https://oak--develop.fleet.example.test"
+    )
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "deploy", "oak", "default", "--branch=main"]
+    )
+
+    assert exit_code == 0
+    assert "https://oak--develop.fleet.example.test" in capsys.readouterr().out
+
+
+def test_deploy_count_one_explicit_takes_single_deploy_path(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+
+    def boom(*a, **kw):
+        raise AssertionError("multi_deploy must not run for --count=1")
+
+    monkeypatch.setattr(cli.bulk_mod, "multi_deploy", boom)
+    monkeypatch.setattr(
+        cli.instances_mod, "deploy", lambda *a, **kw: "https://oak--develop.fleet.example.test"
+    )
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "deploy",
+            "oak",
+            "default",
+            "--branch=main",
+            "--count=1",
+        ]
+    )
+
+    assert exit_code == 0
+
+
+def test_deploy_count_zero_prints_noop_message_and_exits_0(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+
+    def boom(*a, **kw):
+        raise AssertionError("multi_deploy must not run for --count=0")
+
+    monkeypatch.setattr(cli.bulk_mod, "multi_deploy", boom)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "deploy",
+            "oak",
+            "default",
+            "--branch=main",
+            "--count=0",
+        ]
+    )
+
+    assert exit_code == 0
+    assert "nothing to deploy (--count=0)" in capsys.readouterr().out
+
+
+def test_deploy_count_21_rejected(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+    from fleet.core.errors import ValidationError
+
+    def fake_multi_deploy(paths, registry, project, template, *, count, **kw):
+        raise ValidationError(f"--count must be between 0 and 20 (got {count})")
+
+    monkeypatch.setattr(cli.bulk_mod, "multi_deploy", fake_multi_deploy)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "deploy",
+            "oak",
+            "default",
+            "--branch=main",
+            "--count=21",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "--count must be between 0 and 20 (got 21)" in capsys.readouterr().err
+
+
+def test_deploy_count_negative_one_rejected(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+    from fleet.core.errors import ValidationError
+
+    def fake_multi_deploy(paths, registry, project, template, *, count, **kw):
+        raise ValidationError(f"--count must be between 0 and 20 (got {count})")
+
+    monkeypatch.setattr(cli.bulk_mod, "multi_deploy", fake_multi_deploy)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "deploy",
+            "oak",
+            "default",
+            "--branch=main",
+            "--count=-1",
+        ]
+    )
+
+    assert exit_code == 1
+    assert "got -1" in capsys.readouterr().err
+
+
+def test_deploy_dash_n_shortflag_equivalent_to_count(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    captured = {}
+
+    def fake_multi_deploy(paths, registry, project, template, *, count, **kw):
+        captured["count"] = count
+        return cli.bulk_mod.BulkOutcome(kind="deploy", results=[])
+
+    monkeypatch.setattr(cli.bulk_mod, "multi_deploy", fake_multi_deploy)
+
+    cli.main(
+        ["--fleet-home", str(fleet_home), "deploy", "oak", "default", "--branch=main", "-n", "5"]
+    )
+
+    assert captured["count"] == 5
+
+
+def test_deploy_count_20_dispatches_multi_deploy_with_skip_disk_check_flag(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    captured = {}
+
+    def fake_multi_deploy(paths, registry, project, template, *, count, skip_disk_check, **kw):
+        captured["count"] = count
+        captured["skip_disk_check"] = skip_disk_check
+        return cli.bulk_mod.BulkOutcome(
+            kind="deploy",
+            results=[
+                cli.bulk_mod.BulkResult(
+                    instance_id=f"oak--generic-{n}", ok=True, error=None, duration_s=0.0
+                )
+                for n in range(1, count + 1)
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "multi_deploy", fake_multi_deploy)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "deploy",
+            "oak",
+            "default",
+            "--branch=main",
+            "--label=generic",
+            "--count=20",
+            "--skip-disk-check",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {"count": 20, "skip_disk_check": True}
+
+
+def test_deploy_multi_deploy_partial_failure_exit_code_2(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+
+    def fake_multi_deploy(paths, registry, project, template, *, count, **kw):
+        return cli.bulk_mod.BulkOutcome(
+            kind="deploy",
+            results=[
+                cli.bulk_mod.BulkResult(
+                    instance_id="oak--generic-1", ok=True, error=None, duration_s=0.0
+                ),
+                cli.bulk_mod.BulkResult(
+                    instance_id="oak--generic-2",
+                    ok=False,
+                    error="disk gate tripped",
+                    duration_s=0.0,
+                ),
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "multi_deploy", fake_multi_deploy)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "deploy",
+            "oak",
+            "default",
+            "--branch=main",
+            "--label=generic",
+            "--count=2",
+        ]
+    )
+
+    assert exit_code == 2
+    out, err = capsys.readouterr()
+    assert "oak--generic-1: OK" in out
+    assert "oak--generic-2: FAILED — disk gate tripped" in err
