@@ -76,3 +76,12 @@
     enabled: true
     state: started
   when: fleet_fail2ban_enabled
+
+- name: Deploy the conservative sysctl drop-in
+  ansible.builtin.copy:
+    src: 53fleet-sysctl.conf
+    dest: /etc/sysctl.d/60-fleet-hardening.conf
+    owner: root
+    group: root
+    mode: "0644"
+  notify: Reload sysctl
