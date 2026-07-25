@@ -210,7 +210,10 @@ projects:
     assert url == "https://demo--main.fleet.example.test"
 
 
-def test_deploy_missing_claude_token_raises(fleet_home, git_repo):
+def test_deploy_missing_claude_token_warns_and_proceeds(fleet_home, git_repo):
+    """No CLAUDE_CODE_OAUTH_TOKEN in secrets must NOT fail the deploy — it
+    should warn (into the instance's deploy log) and proceed without
+    injecting the token into web_environment."""
     paths = instances.FleetPaths.from_home(fleet_home)
     paths.registry.parent.mkdir(parents=True, exist_ok=True)
     paths.registry.write_text(_registry_text(fleet_home, str(git_repo["origin"])), encoding="utf-8")
@@ -218,14 +221,35 @@ def test_deploy_missing_claude_token_raises(fleet_home, git_repo):
     registry = Registry.load(paths.registry)
     runner = HybridRunner()
 
-    with pytest.raises(DeployError) as excinfo:
-        instances.deploy(
-            paths, registry, "demo", "default", branch="main", label="develop", runner=runner
-        )
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
 
-    message = str(excinfo.value)
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in message
-    assert "fleet init" in message
+    assert url == "https://demo--develop.fleet.example.test"
+
+    instance_dir = paths.instances / "demo--develop"
+    config_content = (instance_dir / ".ddev" / "config.fleet.yaml").read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in config_content
+
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "WARNING" in log_content
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in log_content
+
+
+def test_deploy_with_claude_token_injects_it(fleet_home, git_repo):
+    """Regression guard: when the token IS present, behaviour is unchanged
+    — it is still injected into web_environment."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    instance_dir = paths.instances / "demo--develop"
+    config_content = (instance_dir / ".ddev" / "config.fleet.yaml").read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-test" in config_content
 
 
 def test_instance_yaml_created_at_survives_redeploy(fleet_home, git_repo):
