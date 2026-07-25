@@ -57,16 +57,6 @@ GRANDFATHERED: dict[str, set[str]] = {
         "fleet.personal.example",
         "contact@personal.example",
     },
-    # Removed in the SAME commit as: Phase C task "De-personalise CLAUDE.md
-    # (final pass)" in 2026-07-24-fleet-open-source-release-plan.md. Blocked
-    # on the bulk-actions / port-exposure / security-hardening sibling plans
-    # each landing their own CLAUDE.md module-map row first.
-    "CLAUDE.md": {
-        "personal-maintainer",
-        "ddev.personal.example",
-        "fleet.personal.example",
-        "Kimsufi",
-    },
 }
 
 
