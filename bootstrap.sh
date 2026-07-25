@@ -165,11 +165,76 @@ case "${FLEET_SECURITY_HARDENING}" in
   0|1) ;;
   *) FLEET_SECURITY_HARDENING="$(_prompt_yes_default 'Enable security hardening (auto-updates, SSH lockdown, fail2ban, Docker robustness)? [Y/n] ')" ;;
 esac
-# NOTE: the sibling security-hardening plan
-# (2026-07-24-fleet-security-hardening-design.md §7) extends this same
-# phase with conditional msmtp email-relay prompts, asked only when
-# FLEET_SECURITY_HARDENING resolves to 1 — not implemented here; that is
-# the security-hardening plan's own task, not this plan's.
+# msmtp relay (reboot-required email channel) — asked only when security
+# hardening is enabled; entirely optional even then (blank host disables
+# just this channel, never blocks the install). Interfaces: env overrides
+# FLEET_MSMTP_HOST/_PORT/_USER/_PASSWORD/_FROM/_TO. Host/from/to are
+# persisted (unencrypted) into local-vars.yml below via _persist_if_absent;
+# user/password are SECRETS and never go there — they land in
+# /srv/fleet/.secrets as MSMTP_USER/MSMTP_PASSWORD, the keys the
+# security_hardening role's harden.yml reads back out.
+_validate_no_quote() {
+  # $1=varname (for the error message) $2=value — a literal `"` would
+  # corrupt the double-quoted YAML scalar _persist_if_absent writes.
+  case "$2" in
+    *'"'*)
+      echo "ERROR: $1 '$2' contains a double-quote character — not allowed." >&2
+      exit 1
+      ;;
+  esac
+}
+
+FLEET_MSMTP_HOST="${FLEET_MSMTP_HOST:-}"
+FLEET_MSMTP_PORT="${FLEET_MSMTP_PORT:-}"
+FLEET_MSMTP_USER="${FLEET_MSMTP_USER:-}"
+FLEET_MSMTP_PASSWORD="${FLEET_MSMTP_PASSWORD:-}"
+FLEET_MSMTP_FROM="${FLEET_MSMTP_FROM:-}"
+FLEET_MSMTP_TO="${FLEET_MSMTP_TO:-}"
+
+if [ "${FLEET_SECURITY_HARDENING}" = "1" ]; then
+  if [ -z "${FLEET_MSMTP_HOST}" ]; then
+    echo "==> Reboot-required email notifications (blank host = disable this channel)"
+    if _tty_openable; then
+      read -r -p "SMTP relay host (blank = disable reboot-required email) []: " FLEET_MSMTP_HOST < /dev/tty || FLEET_MSMTP_HOST=""
+    fi
+  fi
+
+  if [ -n "${FLEET_MSMTP_HOST}" ]; then
+    _validate_no_quote FLEET_MSMTP_HOST "${FLEET_MSMTP_HOST}"
+
+    if [ -z "${FLEET_MSMTP_PORT}" ] && _tty_openable; then
+      read -r -p "SMTP relay port [587]: " FLEET_MSMTP_PORT < /dev/tty || FLEET_MSMTP_PORT=""
+    fi
+    FLEET_MSMTP_PORT="${FLEET_MSMTP_PORT:-587}"
+    case "${FLEET_MSMTP_PORT}" in
+      *[![:digit:]]*|'')
+        echo "ERROR: FLEET_MSMTP_PORT '${FLEET_MSMTP_PORT}' is not a valid port number." >&2
+        exit 1
+        ;;
+    esac
+
+    if [ -z "${FLEET_MSMTP_USER}" ] && _tty_openable; then
+      read -r -p "SMTP username []: " FLEET_MSMTP_USER < /dev/tty || FLEET_MSMTP_USER=""
+    fi
+
+    if [ -z "${FLEET_MSMTP_PASSWORD}" ] && _tty_openable; then
+      read -r -s -p "SMTP password []: " FLEET_MSMTP_PASSWORD < /dev/tty || FLEET_MSMTP_PASSWORD=""
+      echo
+    fi
+
+    if [ -z "${FLEET_MSMTP_FROM}" ] && _tty_openable; then
+      read -r -p "From address []: " FLEET_MSMTP_FROM < /dev/tty || FLEET_MSMTP_FROM=""
+    fi
+    _validate_no_quote FLEET_MSMTP_FROM "${FLEET_MSMTP_FROM}"
+
+    if [ -z "${FLEET_MSMTP_TO}" ] && _tty_openable; then
+      read -r -p "Notify address (To:) []: " FLEET_MSMTP_TO < /dev/tty || FLEET_MSMTP_TO=""
+    fi
+    _validate_no_quote FLEET_MSMTP_TO "${FLEET_MSMTP_TO}"
+  else
+    echo "==> Reboot-required email disabled (blank relay host) — sidebar and web-UI channels are unaffected"
+  fi
+fi
 
 # NOTE: HTTPS default — at bootstrap time no SSH deploy key exists yet.
 # Ways to get the code onto the box:
@@ -238,6 +303,39 @@ _persist_if_absent fleet_domain "\"${FLEET_DOMAIN}\""
 _persist_if_absent acme_email "\"${FLEET_ACME_EMAIL}\""
 _persist_if_absent fleet_network_hardening_enabled "$([ "${FLEET_NETWORK_HARDENING}" = "1" ] && echo true || echo false)"
 _persist_if_absent fleet_security_hardening_enabled "$([ "${FLEET_SECURITY_HARDENING}" = "1" ] && echo true || echo false)"
+
+if [ -n "${FLEET_MSMTP_HOST}" ]; then
+  _persist_if_absent fleet_msmtp_host "\"${FLEET_MSMTP_HOST}\""
+  _persist_if_absent fleet_msmtp_port "${FLEET_MSMTP_PORT}"
+  _persist_if_absent fleet_msmtp_tls "true"
+  _persist_if_absent fleet_msmtp_from "\"${FLEET_MSMTP_FROM}\""
+  _persist_if_absent fleet_msmtp_to "\"${FLEET_MSMTP_TO}\""
+
+  # user/password are SECRETS — never written to local-vars.yml. They go
+  # into /srv/fleet/.secrets as MSMTP_USER/MSMTP_PASSWORD, the exact keys
+  # security_hardening/tasks/harden.yml greps back out. /srv/fleet may not
+  # exist yet at this point in a fresh install; the fleet_user role's
+  # later "touch, never overwrite content" task re-owns this file as
+  # fleet:fleet without touching what we write here.
+  FLEET_SECRETS_FILE=/srv/fleet/.secrets
+  mkdir -p "$(dirname "${FLEET_SECRETS_FILE}")"
+  touch "${FLEET_SECRETS_FILE}"
+  chmod 0600 "${FLEET_SECRETS_FILE}"
+
+  _persist_secret_if_absent() {
+    # $1=KEY $2=value -> writes KEY=value into FLEET_SECRETS_FILE unless
+    # already present. Mirrors _persist_if_absent but for the KEY=VALUE
+    # secrets file, never echoing the value to stdout.
+    if grep -q "^$1=" "${FLEET_SECRETS_FILE}" 2>/dev/null; then
+      echo "==> $1 already set in ${FLEET_SECRETS_FILE} — leaving it unchanged"
+    else
+      echo "$1=$2" >> "${FLEET_SECRETS_FILE}"
+    fi
+  }
+
+  [ -n "${FLEET_MSMTP_USER}" ] && _persist_secret_if_absent MSMTP_USER "${FLEET_MSMTP_USER}"
+  [ -n "${FLEET_MSMTP_PASSWORD}" ] && _persist_secret_if_absent MSMTP_PASSWORD "${FLEET_MSMTP_PASSWORD}"
+fi
 
 if grep -q '^fleet_admin_default_password:' "${FLEET_LOCAL_VARS}" 2>/dev/null; then
   echo "==> fleet_admin_default_password already set in ${FLEET_LOCAL_VARS} — leaving it unchanged"
