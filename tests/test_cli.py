@@ -1375,6 +1375,16 @@ def test_build_parser_accepts_reboot_notify_and_test_flag():
     assert args.test is False
 
 
+def test_build_parser_reboot_notify_interval_hours_defaults_and_overrides():
+    parser = cli._build_parser()
+
+    args = parser.parse_args(["reboot-notify"])
+    assert args.interval_hours == 24.0
+
+    args = parser.parse_args(["reboot-notify", "--interval-hours", "6"])
+    assert args.interval_hours == 6.0
+
+
 def test_cmd_reboot_notify_reads_to_from_env_file(tmp_path, monkeypatch):
     (tmp_path / "reboot-notify.env").write_text(
         "MSMTP_TO=ops@example.test\nMSMTP_FROM=fleet@example.test\n", encoding="utf-8"
@@ -1386,8 +1396,25 @@ def test_cmd_reboot_notify_reads_to_from_env_file(tmp_path, monkeypatch):
         return True
 
     monkeypatch.setattr(cli, "reboot_mod", type("M", (), {"reboot_notify": fake_reboot_notify}))
-    args = argparse.Namespace(test=False)
+    args = argparse.Namespace(test=False, interval_hours=24.0)
     rc = cli._cmd_reboot_notify(tmp_path, args)
     assert rc == 0
     assert captured["to_addr"] == "ops@example.test"
     assert captured["from_addr"] == "fleet@example.test"
+
+
+def test_cmd_reboot_notify_threads_interval_hours_through(tmp_path, monkeypatch):
+    (tmp_path / "reboot-notify.env").write_text(
+        "MSMTP_TO=ops@example.test\nMSMTP_FROM=fleet@example.test\n", encoding="utf-8"
+    )
+    captured = {}
+
+    def fake_reboot_notify(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(cli, "reboot_mod", type("M", (), {"reboot_notify": fake_reboot_notify}))
+    args = argparse.Namespace(test=False, interval_hours=6.0)
+    rc = cli._cmd_reboot_notify(tmp_path, args)
+    assert rc == 0
+    assert captured["interval_hours"] == 6.0
