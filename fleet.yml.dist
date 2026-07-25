@@ -9,7 +9,7 @@ projects:
     git: git@example.com:you/example.git
     default_branch: main
     default_template: default
-    # typesense: true                       # expose Typesense to the browser at /_typesense (optional)
+    # typesense: true    # expose Typesense to the browser at *.<domain>:9108 (optional, legacy form — see fleet.ports/ports: for the general mechanism)
     # ports: [typesense]                    # generic equivalent, once fleet.ports.typesense is defined above
     # NOTE: browser-exposed TYPESENSE_API_KEY must be a SEARCH-ONLY key, never the admin key.
     # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
