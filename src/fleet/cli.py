@@ -214,6 +214,7 @@ def _build_parser() -> argparse.ArgumentParser:
 
     reboot_notify_parser = subparsers.add_parser("reboot-notify")
     reboot_notify_parser.add_argument("--test", action="store_true")
+    reboot_notify_parser.add_argument("--interval-hours", type=float, default=24.0)
 
     return parser
 
@@ -792,6 +793,7 @@ def _cmd_reboot_notify(fleet_home: Path, args: argparse.Namespace) -> int:
         from_addr=from_addr,
         msmtprc_path=fleet_home / "msmtprc",
         state_path=fleet_home / "reboot-notify-state.json",
+        interval_hours=args.interval_hours,
         test=args.test,
     )
     if args.test:

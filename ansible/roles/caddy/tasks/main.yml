@@ -73,6 +73,9 @@
   register: caddy_admin_auth_snippet_stat
 
 - name: Fail fast if no admin password is configured (no public-safe default)
+  # Catches BOTH the undefined case and an empty string
+  # (-e fleet_admin_default_password="") — the latter previously slipped
+  # through this guard and went on to hash an empty password.
   ansible.builtin.fail:
     msg: >-
       fleet_admin_default_password is not set. There is no public-safe
@@ -82,7 +85,7 @@
       manual/dev run, pass -e fleet_admin_default_password=<value>.
   when:
     - not caddy_admin_auth_snippet_stat.stat.exists
-    - fleet_admin_default_password is not defined
+    - fleet_admin_default_password is not defined or fleet_admin_default_password | default('') | length == 0
 
 - name: Hash the distribution-default admin password (first provisioning only)
   ansible.builtin.command:

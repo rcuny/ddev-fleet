@@ -50,6 +50,29 @@ shell's own (unrelated) DDEV setup.
 | `core/reboot.py` | Single shared reader for Debian's reboot-required marker (`/var/run/reboot-required` + `.pkgs`) — `RebootStatus`/`read_reboot_status()` — plus the anti-spam notification cadence and msmtp email send backing `fleet reboot-notify [--test]`. Consumed by `tmux_sidebar.py` (sidebar banner) and `core/sysinfo.py` (web UI footer badge) — one implementation, not three |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
 
+## Ansible roles (`ansible/roles/`)
+
+Applied in this order by `ansible/site.yml`. `network_hardening` and
+`security_hardening` are independently optional (see
+`.claude/user/docs/specs/2026-07-24-fleet-security-hardening-design.md` in
+the companion repo) — every task in both gates on a single top-level
+`import_tasks ... when:`, so a bare `ansible-playbook site.yml` run with
+neither `fleet_network_hardening_enabled` nor `fleet_security_hardening_enabled`
+set stays fully inert for both.
+
+| Role | Responsibility |
+|---|---|
+| `base` | apt cache + base packages (git, rsync, curl, tmux, unattended-upgrades, …), periodic unattended-upgrades enablement |
+| `docker` | Docker CE apt repo + packages, `docker.service` enabled |
+| `fleet_user` | The `fleet` system user, `/srv/fleet` tree, `.secrets`, `fleet.yml` seed, deploy/push SSH keys, forge `known_hosts` |
+| `shell_profile` | System-wide interactive shell prompt/aliases/exports for root and `fleet`, plus the `CLAUDE_CODE_OAUTH_TOKEN` export hook |
+| `ddev` | DDEV apt repo + package, global router config (loopback-only ports), mkcert local CA |
+| `claude_cli` | Node.js/npm + the Claude Code CLI, so `claude setup-token` can mint `CLAUDE_CODE_OAUTH_TOKEN` |
+| `caddy` | Caddy apt repo + package, fleet-owned Caddy snippet dirs, seeded admin-auth default credentials, the rendered Caddyfile |
+| `fleet_service` | Clones/updates the product repo into `{{ fleet_opt_dir }}`, installs the editable venv, deploys `fleet.service` + the `fleet` CLI wrapper |
+| `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443/registry-port allows), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
+| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits, SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the `fleet-reboot-notify` timer |
+
 ## Testing
 
 Dev tooling is set up (unlike the companion shell, which has none yet —
