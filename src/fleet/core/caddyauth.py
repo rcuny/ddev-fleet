@@ -76,7 +76,8 @@ def hash_password(password: str, *, runner=run_streamed) -> str:
     Shells out rather than adding a bcrypt dependency: `caddy` is already
     installed on every host that runs this code (it's the reverse proxy in
     front of the daemon), `caddy hash-password` is already the documented
-    method (docs/runbook-server-rollout.md §3), and pyproject.toml carries
+    method (docs/operations.md's admin-password-rotation section), and
+    pyproject.toml carries
     no bcrypt/passlib dependency today — adding one just to duplicate a
     hash format `caddy` already implements natively would be pure
     redundancy. Raises CaddyAuthError if the command fails or is missing.

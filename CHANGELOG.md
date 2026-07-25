@@ -24,7 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - De-personalised all deployment-specific references (hostnames, hosting
   provider, private-forge URLs) throughout the codebase and documentation.
-- `docs/runbook-server-rollout.md` split into `docs/installation.md`
+- The old server-rollout runbook split into `docs/installation.md`
   (first-run) and `docs/operations.md` (ongoing).
 - The dashboard admin password is no longer a fixed default — the
   installer always generates or prompts for one.
@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 - `ansible/group_vars/all.yml`'s `fleet_admin_default_password: ddev-admin`
   fixed default.
-- `docs/runbook-server-rollout.md` (content split, see Changed).
+- The old server-rollout runbook (content split, see Changed).
 
 ## [0.3.0] - 2026-07-15
 

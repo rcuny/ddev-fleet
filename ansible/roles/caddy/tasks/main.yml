@@ -78,9 +78,8 @@
       fleet_admin_default_password is not set. There is no public-safe
       default for the dashboard admin password — bootstrap.sh's
       value-collection phase generates or prompts for one and writes it to
-      /etc/ddev-fleet/local-vars.yml (see docs/runbook-server-rollout.md,
-      repointed to docs/installation.md later this plan). For a manual/dev
-      run, pass -e fleet_admin_default_password=<value>.
+      /etc/ddev-fleet/local-vars.yml (see docs/installation.md). For a
+      manual/dev run, pass -e fleet_admin_default_password=<value>.
   when:
     - not caddy_admin_auth_snippet_stat.stat.exists
     - fleet_admin_default_password is not defined

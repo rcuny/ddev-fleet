@@ -46,41 +46,7 @@ DENYLIST = [
 # line in that file (e.g. the bare "personal-maintainer" substring also matches
 # inside "fleet.personal.example", so it must be listed alongside it or the
 # bare-substring needle keeps failing on its own).
-GRANDFATHERED: dict[str, set[str]] = {
-    # Removed in the SAME commit as: Phase C task "De-personalise
-    # test_caddyfile_template.py (post port-exposure)" in
-    # 2026-07-24-fleet-open-source-release-plan.md. Blocked on the sibling
-    # port-exposure plan's structural rewrite of this file landing first
-    # (2026-07-24-fleet-port-exposure-design.md §10).
-    "tests/test_caddyfile_template.py": {
-        "personal-maintainer",
-        "fleet.personal.example",
-        "contact@personal.example",
-    },
-    # Removed in the SAME commit as: Phase C task "De-personalise CLAUDE.md
-    # (final pass)" in 2026-07-24-fleet-open-source-release-plan.md. Blocked
-    # on the bulk-actions / port-exposure / security-hardening sibling plans
-    # each landing their own CLAUDE.md module-map row first.
-    "CLAUDE.md": {
-        "personal-maintainer",
-        "ddev.personal.example",
-        "fleet.personal.example",
-        "Kimsufi",
-    },
-    # Removed by: Phase B Task B8 "Repoint every reference to the old
-    # runbook, then delete it" in
-    # 2026-07-24-fleet-open-source-release-plan.md (`git rm
-    # docs/runbook-server-rollout.md`, after docs/installation.md and
-    # docs/operations.md exist). This file is the dated, host-specific
-    # rollout runbook and is deliberately not touched before Phase B.
-    "docs/runbook-server-rollout.md": {
-        "personal-maintainer",
-        "personal_maintainer",
-        "bitbucket.org/personal_maintainer",
-        "ddev.personal.example",
-        "fleet.personal.example",
-    },
-}
+GRANDFATHERED: dict[str, set[str]] = {}
 
 
 def _iter_text_files():

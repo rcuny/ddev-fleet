@@ -8,11 +8,10 @@ Type: documentation
 # CLAUDE.md — working on the ddev-fleet product repo
 
 This file is for Claude (or any agent) editing code in this repo,
-`/var/www/html/ddev-fleet` (remote: `ddev-fleet.git`). It is the **product**:
-the fleet manager itself, live in production on a Kimsufi KS-7 host
-(`ddev.personal.example`, Debian 13; instances under the
-`fleet.personal.example` wildcard). For the workspace/tooling this repo is
-built *from* (rules, skills, memory), see
+`/var/www/html/ddev-fleet` (remote: `ddev-fleet.git`, public,
+`github.com/rcuny/ddev-fleet`). It is the **product**: the fleet manager
+itself, runs live on a host operated by the maintainer. For the
+workspace/tooling this repo is built *from* (rules, skills, memory), see
 `/var/www/html/.claude/rules/30-project.md` and the rest of
 `/var/www/html/.claude/rules/`.
 
@@ -58,7 +57,7 @@ don't assume they're the same). From `/opt/ddev-fleet` on the server, or
 this repo's checkout locally:
 
 ```bash
-.venv/bin/pytest -q          # 257 tests as of 2026-07-16
+.venv/bin/pytest -q          # 662 tests as of 2026-07-25
 .venv/bin/ruff check .
 .venv/bin/black --check .
 ```
@@ -71,7 +70,7 @@ dependency groups. `ruff` selects `E,F,I`, line length 100 (`black` matches).
 
 ## Deploy model — shipping a code change to the live host
 
-Full details: `docs/runbook-server-rollout.md` §2a. Summary:
+Full details: `docs/operations.md`. Summary:
 
 - **Option B (preferred, enabled 2026-07-16).** `/opt/ddev-fleet` is a
   `fleet`-owned git checkout tracking `origin/main`, with a read-only
@@ -156,16 +155,34 @@ support, so path-prefixing didn't work end-to-end. If you find references to
 `fleet.yml.dist` comments), they're stale — the port-based scheme is the one
 actually implemented and deployed.
 
+## Optional hardening roles (`network_hardening`, `security_hardening`)
+
+Two Ansible roles, opt-in at install time (`docs/installation.md`'s
+`FLEET_NETWORK_HARDENING`/`FLEET_SECURITY_HARDENING` prompts, Yes by
+default): `ansible/roles/network_hardening/` renders a UFW ruleset plus a
+`DOCKER-USER` iptables guard (defends the assumption in "Typesense
+port/key coupling" above — that only Caddy, never a container port bound
+to all interfaces, is reachable from outside) and installs
+`/usr/local/sbin/fleet-ufw-sync`, the sudo helper `fleet refresh-ports`
+(`cli.py:_cmd_refresh_ports`) calls to keep UFW's allowed ports in sync
+with `Registry.public_ports_in_use()` — silently skipped when the helper
+isn't installed, so hardening is genuinely optional. `ansible/roles/
+security_hardening/` covers OS-level hardening unrelated to fleet's own
+code (unattended-upgrades, SSH config, fail2ban, auditd, a conservative
+sysctl profile, `/tmp` mount options) — nothing in `src/fleet/` depends on
+it. Neither role has a `core/` Python module of its own.
+
 ## Cross-references
 
 - `docs/srv-fleet-CLAUDE.md` — the registry schema + CLI reference, copied
   onto the server at `/srv/fleet/CLAUDE.md` so a `claude -p "..."` session
   run there (as the `fleet` user) has grounded context without reading the
   full spec. Keep it in sync with this file's CLI-shape facts and re-copy it
-  after any change (`docs/runbook-server-rollout.md` §9).
-- `docs/runbook-server-rollout.md` — full provisioning/rollout checklist
-  (DNS, delivery, admin password, deploy keys, Claude token mint,
-  live-verification items) and the ongoing update procedure (§2a).
+  after any change (`docs/operations.md`'s Claude-context-refresh section).
+- `docs/installation.md` — full first-rollout checklist (DNS, delivery,
+  admin password, deploy keys, Claude token mint, live-verification items).
+- `docs/operations.md` — the ongoing code-update procedure, rollback, and
+  admin-password rotation.
 - `docs/README-typesense.md` — the Typesense browser-search exposure design
   in full (topology, keys, env vars, reindexing, reachability caveat).
 - `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing

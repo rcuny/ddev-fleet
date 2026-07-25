@@ -154,6 +154,6 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   https://<project>--<label>.fleet.example.com:9108/health
 ```
 
-See also `docs/runbook-server-rollout.md` §6 for the fuller live-verification
-checklist (note: that section's `/_typesense/health` example predates this
-port-based design and is stale — use the `:9108` form above).
+See also `docs/operations.md`'s verification checklist for the fuller
+live-verification list (note: an earlier `/_typesense/health` example
+predates this port-based design and is stale — use the `:9108` form above).

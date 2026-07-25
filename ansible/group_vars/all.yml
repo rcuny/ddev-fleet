@@ -5,8 +5,7 @@
 # and `fleet_admin_default_password` have no public-safe default and MUST be
 # supplied via /etc/ddev-fleet/local-vars.yml (written by bootstrap.sh's
 # value-collection phase) before a real server rollout — see
-# docs/runbook-server-rollout.md (repointed to docs/installation.md later
-# this plan, once that file exists).
+# docs/installation.md.
 
 # --- OS assumption ----------------------------------------------------------
 # Roles use ansible.builtin.apt and target a Debian-family host. Verified
