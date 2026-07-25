@@ -34,22 +34,33 @@
     mode: "0644"
   notify: Restart docker
 
-- name: Assert the current operator is present in fleet_ssh_allow_users
+- name: Determine the real invoking operator (sudo-local, not root)
+  # The installer runs `ansible-playbook -c local` under `sudo`, so
+  # ansible_user_id is `root` — that is NOT who is actually connecting over
+  # SSH. ansible_env.SUDO_USER is the user who ran sudo; fall back to
+  # ansible_user_id when not run via sudo (e.g. logged in directly as root).
+  ansible.builtin.set_fact:
+    sh_real_operator: "{{ ansible_env.SUDO_USER | default(ansible_user_id, true) }}"
+
+- name: Assert the real operator is present in fleet_ssh_allow_users
   # Cheap pre-flight lockout guard, mirroring network_hardening's "assert
   # the SSH port is staged before ufw enable" pattern. `validate: "sshd -t
   # -f %s"` on the template task below only checks SYNTAX — an AllowUsers
   # line that is syntactically valid but omits the connecting operator
   # passes that check cleanly, and on the NEXT connection everyone is
-  # locked out of SSH. Only asserted when fleet_ssh_allow_users is
-  # non-empty: an empty list is not restricting who may log in by name, so
-  # there is nothing to guard against here (see 52fleet-sshd.conf.j2).
+  # locked out of SSH. Checked against the real operator (see
+  # sh_real_operator above), NOT ansible_user_id, which is `root` under the
+  # installer's `sudo -c local` invocation and would make this assert
+  # useless. Only asserted when fleet_ssh_allow_users is non-empty: an
+  # empty list is not restricting who may log in by name, so there is
+  # nothing to guard against here (see 52fleet-sshd.conf.j2).
   ansible.builtin.assert:
     that:
-      - ansible_user_id in fleet_ssh_allow_users
+      - sh_real_operator in fleet_ssh_allow_users
     fail_msg: >-
-      fleet_ssh_allow_users does not include the current user
-      ({{ ansible_user_id }}); applying this would lock you out of SSH.
-      Add {{ ansible_user_id }} to fleet_ssh_allow_users (or remove the
+      fleet_ssh_allow_users does not include the current operator
+      ({{ sh_real_operator }}); applying this would lock you out of SSH.
+      Add {{ sh_real_operator }} to fleet_ssh_allow_users (or remove the
       override to fall back to the safe default) before re-running this
       role.
   when: fleet_ssh_allow_users | length > 0

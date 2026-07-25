@@ -223,9 +223,12 @@ def deploy(
         secrets = read_secrets(paths.secrets)
         claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
         if not claude_token:
-            raise DeployError(
-                f"CLAUDE_CODE_OAUTH_TOKEN not found in {paths.secrets}; "
-                "run 'fleet init' or set it before deploying"
+            _append_log(
+                deploy_log,
+                f"WARNING: CLAUDE_CODE_OAUTH_TOKEN not found in {paths.secrets}; "
+                "proceeding without injecting a Claude token into this instance "
+                "(run 'fleet init' or 'fleet set-claude-token', then "
+                "'fleet refresh-instance-config' to inject it later)",
             )
         fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
 
@@ -528,9 +531,12 @@ def refresh_instance_config(
         secrets = read_secrets(paths.secrets)
         claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
         if not claude_token:
-            raise DeployError(
-                f"CLAUDE_CODE_OAUTH_TOKEN not found in {paths.secrets}; "
-                "run 'fleet init' or set it before deploying"
+            _append_log(
+                paths.logs / instance_id / "deploy.log",
+                f"WARNING: CLAUDE_CODE_OAUTH_TOKEN not found in {paths.secrets}; "
+                "proceeding without injecting a Claude token into this instance "
+                "(run 'fleet init' or 'fleet set-claude-token', then "
+                "'fleet refresh-instance-config' to inject it later)",
             )
         fqdns = [
             f"{h}.{instance_id}.{registry.domain}" for h in registry.additional_hostnames(project)

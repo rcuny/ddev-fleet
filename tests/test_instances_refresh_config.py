@@ -8,7 +8,7 @@ clone/git-update/ddev-start). See the design note referenced from
 import pytest
 
 from fleet.core import instances
-from fleet.core.errors import DeployError, FleetError
+from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult
 from fleet.core.secrets import write_secret
@@ -79,12 +79,23 @@ def test_refresh_instance_config_unknown_instance_raises(fleet_home):
         instances.refresh_instance_config(paths, registry, "demo--nonexistent")
 
 
-def test_refresh_instance_config_missing_token_raises(fleet_home):
+def test_refresh_instance_config_missing_token_warns_and_proceeds(fleet_home):
+    """No CLAUDE_CODE_OAUTH_TOKEN in secrets must NOT fail the refresh — it
+    should warn (into the instance's deploy log) and proceed without
+    injecting the token into web_environment."""
     paths, registry = _make_paths_and_registry(fleet_home)
-    _write_instance_dir(fleet_home, "demo--develop")
+    instance_dir = _write_instance_dir(fleet_home, "demo--develop")
 
-    with pytest.raises(DeployError):
-        instances.refresh_instance_config(paths, registry, "demo--develop")
+    instances.refresh_instance_config(paths, registry, "demo--develop")
+
+    config_path = instance_dir / ".ddev" / "config.fleet.yaml"
+    assert config_path.exists()
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in config_path.read_text(encoding="utf-8")
+
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "WARNING" in log_content
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in log_content
 
 
 def test_refresh_instance_config_rewrites_config_with_hook_token_and_typesense(fleet_home):

@@ -2,8 +2,14 @@
 fleet_security_hardening_enabled: false
 fleet_unattended_upgrades_origins:
   - "origin=Debian,codename=${distro_codename},label=Debian-Security"
-fleet_ssh_allow_users:
-  - "{{ ansible_user_id }}"
+# Default to the REAL operator, not ansible_user_id. The installer runs
+# `ansible-playbook -c local` under `sudo`, so ansible_user_id is `root` —
+# defaulting to it would emit `AllowUsers root` and lock out the actual SSH
+# operator (e.g. `debian` on this project's own production server), who can
+# only be recovered via console access. ansible_env.SUDO_USER is the user
+# who invoked sudo; fall back to ansible_user_id when not run via sudo
+# (e.g. logged in directly as root), and drop an empty result defensively.
+fleet_ssh_allow_users: "{{ [ansible_env.SUDO_USER | default(ansible_user_id, true)] | select | list }}"
 fleet_ssh_max_auth_tries: 3
 fleet_fail2ban_enabled: true
 fleet_docker_log_max_size: "10m"

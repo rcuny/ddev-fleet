@@ -55,12 +55,41 @@ case "${ID:-unknown}" in
     ;;
 esac
 
-# --- 3. Value collection (env var -> /dev/tty prompt -> generate/default) ---
+# --- 3. Value collection (env var -> persisted local-vars.yml -> /dev/tty
+#        prompt -> generate/default/fail-closed) -----------------------------
 # The curl|bash stdin trap: when piped, stdin IS the script body, so a bare
 # `read` here would consume leftover script text. Every prompt reads from
 # /dev/tty explicitly; if that's not openable (no tty — CI, cloud-init, a
 # fully piped non-interactive session), required values fail with an
 # actionable error instead of hanging or silently accepting an empty string.
+#
+# FLEET_LOCAL_VARS is set up here (moved ahead of §6 "persist collected
+# values") so a RE-RUN with no env var and no tty can still recover a value
+# a prior run already persisted, instead of failing closed on a value it
+# already knows. Idempotent either way: mkdir -p/touch/chmod are no-ops on
+# an already-provisioned file.
+FLEET_LOCAL_VARS=/etc/ddev-fleet/local-vars.yml
+mkdir -p "$(dirname "${FLEET_LOCAL_VARS}")"
+touch "${FLEET_LOCAL_VARS}"
+# Secrets (admin password, future SMTP creds) land in this file — lock it
+# down to root-only regardless of the umask that created it.
+chmod 0600 "${FLEET_LOCAL_VARS}"
+
+_persisted_value() {
+  # $1=yaml key -> prints the unquoted value already persisted in
+  # FLEET_LOCAL_VARS, or nothing if the key isn't there (fresh install, or
+  # a key that predates persistence). Matches _persist_if_absent's format:
+  # `key: "value"` for strings, `key: value` for bare bools.
+  local line
+  line="$(grep "^$1:" "${FLEET_LOCAL_VARS}" 2>/dev/null | head -n1)" || true
+  if [ -n "${line}" ]; then
+    line="${line#*: }"
+    line="${line%\"}"
+    line="${line#\"}"
+    printf '%s' "${line}"
+  fi
+}
+
 _prompt_required() {
   # $1=varname (for the error message) $2=prompt text -> prints the answer
   local prompt="$2" answer=""
@@ -124,11 +153,19 @@ _validate_email() {
 
 FLEET_DOMAIN="${FLEET_DOMAIN:-}"
 if [ -z "${FLEET_DOMAIN}" ]; then
+  FLEET_DOMAIN="$(_persisted_value fleet_domain)"
+  [ -n "${FLEET_DOMAIN}" ] && echo "==> fleet_domain already set in ${FLEET_LOCAL_VARS} — using existing value, not re-prompting"
+fi
+if [ -z "${FLEET_DOMAIN}" ]; then
   FLEET_DOMAIN="$(_prompt_required FLEET_DOMAIN 'Fleet domain (e.g. fleet.example.com): ')"
 fi
 _validate_domain "${FLEET_DOMAIN}"
 
 FLEET_ACME_EMAIL="${FLEET_ACME_EMAIL:-}"
+if [ -z "${FLEET_ACME_EMAIL}" ]; then
+  FLEET_ACME_EMAIL="$(_persisted_value acme_email)"
+  [ -n "${FLEET_ACME_EMAIL}" ] && echo "==> acme_email already set in ${FLEET_LOCAL_VARS} — using existing value, not re-prompting"
+fi
 if [ -z "${FLEET_ACME_EMAIL}" ]; then
   FLEET_ACME_EMAIL="$(_prompt_required FLEET_ACME_EMAIL "Let's Encrypt contact email: ")"
 fi
@@ -283,13 +320,8 @@ else
 fi
 
 # --- 6. Persist collected values (never overwrite an existing key) ---------
-FLEET_LOCAL_VARS=/etc/ddev-fleet/local-vars.yml
-mkdir -p "$(dirname "${FLEET_LOCAL_VARS}")"
-touch "${FLEET_LOCAL_VARS}"
-# Secrets (admin password, future SMTP creds) land in this file — lock it
-# down to root-only regardless of the umask that created it.
-chmod 0600 "${FLEET_LOCAL_VARS}"
-
+# FLEET_LOCAL_VARS itself is set up in §3 above, ahead of the value
+# collection that needs to read it back on a re-run.
 _persist_if_absent() {
   # $1=yaml key $2=value (already yaml-safe: quoted string or bare bool)
   if grep -q "^$1:" "${FLEET_LOCAL_VARS}" 2>/dev/null; then

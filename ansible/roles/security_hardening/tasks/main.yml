@@ -1,4 +1,4 @@
 ---
 - name: Apply security hardening (patching, SSH, Docker robustness, auditing)
   ansible.builtin.import_tasks: harden.yml
-  when: fleet_security_hardening_enabled
+  when: fleet_security_hardening_enabled | bool

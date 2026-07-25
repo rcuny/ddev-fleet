@@ -32,9 +32,9 @@
     modification_time: preserve
     access_time: preserve
 
-- name: Seed fleet.yml if it does not already exist (never clobber a real registry)
+- name: Seed config/fleet.yml if it does not already exist (never clobber a real registry)
   ansible.builtin.copy:
-    dest: "{{ fleet_srv_dir }}/fleet.yml"
+    dest: "{{ fleet_srv_dir }}/config/fleet.yml"
     owner: "{{ fleet_user }}"
     group: "{{ fleet_group }}"
     mode: "0640"
@@ -42,8 +42,6 @@
     content: |
       fleet:
         domain: {{ fleet_domain }}
-        assets_path: {{ fleet_srv_dir }}/assets
-        instances_path: {{ fleet_srv_dir }}/instances
 
       projects: {}
 
