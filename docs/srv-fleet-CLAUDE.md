@@ -1,19 +1,33 @@
+---
+Author: Claude Code
+Reviewer: none
+Last updated: 2026-07-25
+Type: documentation
+---
+
 # ddev-fleet server context
 
-This file is the server-side Claude Code context document (spec §10.2).
-The canonical copy lives in the product repo at `docs/srv-fleet-CLAUDE.md`;
+This file is the server-side Claude Code context document. The canonical
+copy lives in the product repo at `docs/srv-fleet-CLAUDE.md`;
 `docs/operations.md`'s Claude-context-refresh section copies it to
 `/srv/fleet/CLAUDE.md` so a `claude -p "..."` session run as the `fleet`
-user on the server has grounded context without reading the whole spec.
+user on the server has grounded context without reading the whole doc set.
+This is a compact, server-side reference — the full versions are
+`docs/configuration.md` (registry schema) and `docs/cli.md` (CLI), both in
+the product repo, not copied to the server.
 
 ## Registry (`/srv/fleet/config/fleet.yml`)
 
 ```yaml
 fleet:
-  domain: <string>                  # wildcard DNS root, e.g. fleet.example.com
+  domain: <string>                  # required — wildcard DNS root, e.g. fleet.example.com
   git_bot_name: <string>            # OPTIONAL — default commit identity name  (default "ddev-fleet bot")
   git_bot_email: <string>           # OPTIONAL — default commit identity email (default bot@<domain>)
   # git_bot: false                  # OPTIONAL — disable git identity injection fleet-wide
+  ports:                            # OPTIONAL — fleet-wide named-port catalogue
+    <port-name>:
+      public: <int>                 # Caddy's externally-reachable port (1-65535, not 22/80/443/8765)
+      router: <int>                 # loopback ddev-router port proxied to (not 8080/8443); shared across subscribers
 
 projects:
   <project-key>:
@@ -21,6 +35,8 @@ projects:
     default_template: <string>        # OPTIONAL — template used when `fleet deploy` omits one
     default_branch: <string>          # OPTIONAL — branch used when `fleet deploy` omits --branch
     additional_hostnames: [<string>, ...]  # OPTIONAL — extra FQDNs routed to the instance
+    typesense: true                   # OPTIONAL — legacy opt-in, expose Typesense at *.<domain>:9108 (see ports: below)
+    ports: [<port-name>, ...]         # OPTIONAL — general port-exposure mechanism; names must exist in fleet.ports
     git_bot:                          # OPTIONAL — per-project commit identity override:
       name: <string>                  #   {name, email} overrides for this project only
       email: <string>                 #   (omit either to inherit the fleet default)
@@ -31,13 +47,28 @@ projects:
         post_deploy: [<string>, ...]  # OPTIONAL — commands run after deploy for this template
 ```
 
+**Named ports (`fleet.ports` / project `ports:`).** Each `fleet.ports`
+entry is one externally-exposable named port: `public` is what Caddy
+terminates TLS on and listens for at `*.<domain>:<public>`; `router` is
+the loopback `ddev-router` port Caddy proxies to (shared across every
+subscribing instance — Host-header routing on the router's side picks the
+right one). Validated: both ints 1-65535, neither one of the reserved
+`22`/`80`/`443`/`8765`, `router` not `8080`/`8443`, `public != router`
+within an entry, and no `public`/`router` value reused across entries.
+`Registry.port_profile("typesense")` falls back to a built-in
+`public=9108, router=8108` default when `fleet.ports` has no explicit
+`typesense` entry, so a `typesense: true`-only registry needs zero edits.
+Apply a `ports:` edit with `fleet refresh-ports` (see below) — no Ansible
+run, no redeploy. Full reference: `docs/configuration.md`; runbook for
+adding a new port: `docs/networking.md`.
+
 **git identity injection.** The fleet injects `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
 into each instance's `config.fleet.yaml` `web_environment` so commits made
 inside a container are attributed to a known identity. **Those env vars override
 `git config user.*`** — so a project's own `git config` (e.g. a
 `config.claude-code.local.yaml` post-start hook) can only take effect if the
 project sets `git_bot: false` (opt-out). To attribute commits to a real person
-instead, set `git_bot: {name, email}` on the project (this is what `oak` does).
+instead, set `git_bot: {name, email}` on the project.
 
 The registry is declarative and read-only at runtime — `fleet.yml` lives in
 `/srv/fleet/config` (a git checkout kept in sync with `fleet refresh-config`,
@@ -52,7 +83,7 @@ Running instance id = `<project-key>--<label>` (double-dash), where `label`
 defaults to the slugified branch. This is the DDEV project name, the Docker
 Compose project prefix, and the hostname label under the fleet wildcard
 domain. A manual edit that breaks YAML syntax or the schema (project/
-template name pattern `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, no `--`, and no
+template/port name pattern `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, no `--`, and no
 `branch` key inside a template) will make every `fleet` command fail at
 registry load with an actionable message naming the bad key.
 
@@ -60,22 +91,29 @@ registry load with an actionable message naming the bad key.
 
 | Command | Arguments | Behavior |
 |---|---|---|
-| `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, `claude setup-token`, writes `.secrets` |
-| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force] [--no-auth] [--auth-password=<pw>]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password |
-| `fleet destroy <instance-id>` | — | Tears down containers, removes instance dir + lock file |
-| `fleet start <instance-id>` | — | `ddev start` on an existing, stopped instance |
-| `fleet stop <instance-id>` | — | `ddev stop` — frees RAM, keeps disk |
-| `fleet list` | — | Table: id, project, branch, state, URL, RAM |
+| `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, registry creation (local-file mode by default, or clones `FLEET_CONFIG_REPO` if set), `claude setup-token`, writes `.secrets` |
+| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n>] [--skip-disk-check]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password. `--count`/`-n` (default 1) bulk-deploys N labelled instances at once, gated by a disk-headroom check (`--skip-disk-check` to bypass); prints per-instance OK/FAILED + summary and a 0/1/2 exit code for N>1, same as the bulk commands below |
+| `fleet destroy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes instance dir + lock file. A single explicit id destroys immediately (no prompt, backward-compat); a selector or multiple ids always confirms (type the count, or pass `--yes`) |
+| `fleet start [<id>...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev start` on one or more existing, stopped instances |
+| `fleet stop [<id>...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev stop` — frees RAM, keeps disk |
+| `fleet list` | — | Table: id, project, branch, state, RAM, URL |
 | `fleet ssh-key` | — | Prints the fleet deploy public key |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
-| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | `ddev export-db --gzip=false` into the project's asset tree |
-| `fleet refresh-claude-token` | — | Rotates `CLAUDE_CODE_OAUTH_TOKEN` fleet-wide, rewrites every instance's `config.fleet.yaml`, restarts running instances |
-| `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value: hashes it (`caddy hash-password`), atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run |
+| `fleet secret set <project> <key> <value>` | — | Writes `KEY=VALUE` into `secrets/<project>.env` (0600), available at deploy as `[[key-with-dashes]]` |
+| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | `ddev export-db --gzip=false` into the project's asset tree; refuses to write `dumps/default.sql` |
+| `fleet refresh-claude-token` | `[--restart]` | Rotates `CLAUDE_CODE_OAUTH_TOKEN` fleet-wide, rewrites every instance's `config.fleet.yaml`; restarts running instances only if `--restart` |
+| `fleet set-claude-token <token>` | `[--restart]` | Same propagation as `refresh-claude-token` for a token you already have, instead of running `claude setup-token` |
+| `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value: hashes it, atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same way, and prints it once |
-| `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull) so the registry and assets checkout track their remote; a no-op message if `config/` isn't a git checkout |
+| `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull); no-op message if `config/` isn't a git checkout |
+| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it |
 | `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
-| `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach; applies mouse/clipboard/status-bar settings on every attach |
-| `fleet tmux-reset <window>` | — | Rebuild a tab's standard pane layout in place (general = 1 bash + sidebar; instance = 2 bash + sidebar), without killing the window; bound to `^b R` inside the workspace |
+| `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
+| `fleet ddev [<instance-id>] [-- args]` | — | Runs `ddev <args>` inside an instance's directory |
+| `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach |
+| `fleet tmux-sidebar` | `--window=<name> [--once]` | Internal: renders one tmux window's sidebar pane |
+| `fleet tmux-reset [<window>]` | — | Rebuild a tab's standard pane layout in place, without killing the window; bound to `^b R` inside the workspace |
+| `fleet reboot-notify` | `[--test]` | Checks Debian's reboot-required marker, sends an anti-spammed email if pending; `--test` forces a test send regardless |
 
 Projects and templates are declared by hand in `fleet.yml` — there is no
 `fleet project add` and no auto-registration of unknown projects on deploy.
@@ -91,25 +129,39 @@ into every instance of the project (`core/assets.py:_link_shared_dir`), and
 `fleet snapshot` refuses to write there (`FleetError`, even with an explicit
 `--dest-rel`) so a snapshot can never corrupt it for every other instance.
 
+## Bulk operations & exit codes
+
+`fleet start`/`fleet stop`/`fleet destroy` accept either one-or-more
+explicit instance ids, or a selector (`--all` / `--project=<p>` /
+`--state=running|deployed`) — never both. `--all` cannot combine with
+`--project`/`--state`. A selector matching zero instances is a no-op
+(exit `0`). `fleet deploy --count N` (N > 1) uses the same machinery for a
+bulk deploy. Every bulk operation (including `deploy --count`) prints a
+per-instance `OK`/`FAILED` line plus a `N succeeded, M failed` summary and
+exits `0` (all succeeded), `1` (all failed), or `2` (partial failure).
+Full detail + examples: `docs/cli.md`.
+
 ## Common workflows
 
 - **Deploy an already-declared project on a new branch push:** `fleet deploy <project> <template> --branch <ref>` (add `--label <name>` to control the instance name; otherwise it's the slugified branch).
 - **Re-deploy using the project's defaults:** `fleet deploy <project>` — uses `default_template`/`default_branch` from `fleet.yml` when the project declares them.
+- **Deploy several instances at once:** `fleet deploy <project> <template> --branch <ref> --count <n>`.
 - **Onboard a brand-new project:** edit `fleet.yml` to add `projects.<key>` (git URL, templates), run `fleet refresh-config` if `config/` is a shared git checkout, then `fleet deploy <key> <template> --branch <ref>`.
-- **Free RAM without losing disk state:** `fleet stop <instance-id>`; bring it back with `fleet start <instance-id>`.
-- **Fully tear down:** `fleet destroy <instance-id>` — irreversible, removes the instance directory.
+- **Free RAM without losing disk state:** `fleet stop <instance-id>` (or `--project`/`--all`/`--state` for many at once); bring back with `fleet start`.
+- **Fully tear down:** `fleet destroy <instance-id>` (or a selector + `--yes`) — irreversible, removes the instance directory.
 - **Refresh a stale DB dump for a project:** `fleet snapshot <instance-id>` (exports the running instance's DB into its project's shared asset tree) then `fleet deploy <project> <template> --branch <ref> --label <other-label>` to propagate it to another instance.
-- **Rotate the Claude Code token fleet-wide (e.g. before the ~1 year expiry):** `fleet refresh-claude-token` — safe to re-run; only running instances are restarted.
+- **Rotate the Claude Code token fleet-wide (e.g. before the ~1 year expiry):** `fleet refresh-claude-token` — safe to re-run; only running instances are restarted (with `--restart`).
 - **Rotate the dashboard admin password:** `fleet rotate-admin-password` (generated) or `fleet set-admin-password <password>` (explicit) — never requires an Ansible run.
 - **Pull the latest registry/assets after someone else edits `fleet.yml`:** `fleet refresh-config`.
 - **Expose a new port for a project (e.g. Typesense, a Playwright report port):** add it to `fleet.ports` and the project's `ports:` list in `fleet.yml`, then `fleet refresh-ports` — no Ansible run, no redeploy needed.
-- **Recovery when the daemon/web UI is down:** every command above works from the CLI directly against `fleet.core` — the daemon is not a dependency of the CLI (spec §11).
+- **Check for a pending host reboot and notify:** `fleet reboot-notify` (normally run on a timer); `--test` to verify the mail relay works.
+- **Recovery when the daemon/web UI is down:** every command above works from the CLI directly against `fleet.core` — the daemon is not a dependency of the CLI.
 
 ## `fleet tmux` operator notes
 
 - **Mouse is on.** Click a pane to focus it; scroll stays inside that pane
   (no more `^b [` copy-mode dance); drag with the mouse to select text —
-  the selection is confined to a single pane and copies straight to the Mac
+  the selection is confined to a single pane and copies straight to the local
   clipboard.
 - **One-time iTerm 2 setting** for that clipboard copy to work:
   *Preferences → General → Selection → "Applications in terminal may access
@@ -134,3 +186,24 @@ into every instance of the project (`core/assets.py:_link_shared_dir`), and
   branch inside an instance, the overview catches up within ~5 min (or press
   `^b R` to refresh that tab's sidebar immediately). `.fleet/instance.yml` still
   records the deploy-time branch and is not modified.
+
+## Reboot notifications
+
+`fleet reboot-notify` (intended to run on a timer, e.g. cron/systemd
+timer) checks Debian's `/var/run/reboot-required` marker and sends an
+email via `msmtp` if a reboot is pending and no notification has gone out
+recently (anti-spam cadence). Reads `MSMTP_TO`/`MSMTP_FROM` from
+`$FLEET_HOME/reboot-notify.env` and the relay config from
+`$FLEET_HOME/msmtprc`. `fleet reboot-notify --test` sends a one-off test
+email immediately, ignoring the pending-reboot check, to verify the relay
+is configured correctly — exits `1` if the test send fails.
+
+## Note on server-side Claude skills
+
+A sibling host-Claude plan is expected to install packaged skills under
+`/srv/fleet/.claude/skills/` (via the `claude_cli` Ansible role) for
+common fleet-operator workflows (batch deploys, status checks, triage,
+cleanup). As of this revision those skills have not landed yet
+(`ansible/roles/claude_cli/files/claude/skills/` does not exist in this
+repo) — this section will be regenerated to list them by name and path
+once they do; see `docs/operations.md`'s Claude-context-refresh procedure.
