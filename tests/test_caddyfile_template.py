@@ -8,8 +8,8 @@ TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "ansible" / "roles" / "cadd
 def _render() -> str:
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), keep_trailing_newline=True)
     return env.get_template("Caddyfile.j2").render(
-        acme_email="contact@personal.example",
-        fleet_domain="fleet.personal.example",
+        acme_email="admin@example.test",
+        fleet_domain="fleet.example.test",
         fleet_daemon_port=8765,
         fleet_caddy_snippet_dir="/etc/caddy/fleet",
         ddev_router_http_port=8080,
@@ -59,7 +59,7 @@ def test_caddyfile_admin_auth_imports_fleet_owned_snippet_not_inline_hash():
 
 def test_caddyfile_admin_auth_import_is_inside_protected_basic_auth_block():
     out = _render()
-    site_start = out.index("fleet.personal.example {")
+    site_start = out.index("fleet.example.test {")
     site_end = out.index("\n}", site_start)
     site_block = out[site_start:site_end]
     assert "basic_auth @protected {" in site_block
@@ -78,7 +78,7 @@ def test_caddyfile_instances_site_imports_per_instance_auth_snippets_via_glob():
     files is a silent Caddy no-op; a literal missing path is a hard
     validate/reload error."""
     out = _render()
-    site_start = out.index("*.fleet.personal.example {")
+    site_start = out.index("*.fleet.example.test {")
     site_end = out.index("\n}", site_start)
     site_block = out[site_start:site_end]
     assert "import /etc/caddy/fleet/instances/*.conf" in site_block

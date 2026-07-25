@@ -46,18 +46,7 @@ DENYLIST = [
 # line in that file (e.g. the bare "personal-maintainer" substring also matches
 # inside "fleet.personal.example", so it must be listed alongside it or the
 # bare-substring needle keeps failing on its own).
-GRANDFATHERED: dict[str, set[str]] = {
-    # Removed in the SAME commit as: Phase C task "De-personalise
-    # test_caddyfile_template.py (post port-exposure)" in
-    # 2026-07-24-fleet-open-source-release-plan.md. Blocked on the sibling
-    # port-exposure plan's structural rewrite of this file landing first
-    # (2026-07-24-fleet-port-exposure-design.md §10).
-    "tests/test_caddyfile_template.py": {
-        "personal-maintainer",
-        "fleet.personal.example",
-        "contact@personal.example",
-    },
-}
+GRANDFATHERED: dict[str, set[str]] = {}
 
 
 def _iter_text_files():
