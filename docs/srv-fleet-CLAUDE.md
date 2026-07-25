@@ -198,12 +198,47 @@ recently (anti-spam cadence). Reads `MSMTP_TO`/`MSMTP_FROM` from
 email immediately, ignoring the pending-reboot check, to verify the relay
 is configured correctly — exits `1` if the test send fails.
 
-## Note on server-side Claude skills
+## Claude Code skills (`/srv/fleet/.claude/skills/`)
 
-A sibling host-Claude plan is expected to install packaged skills under
-`/srv/fleet/.claude/skills/` (via the `claude_cli` Ansible role) for
-common fleet-operator workflows (batch deploys, status checks, triage,
-cleanup). As of this revision those skills have not landed yet
-(`ansible/roles/claude_cli/files/claude/skills/` does not exist in this
-repo) — this section will be regenerated to list them by name and path
-once they do; see `docs/operations.md`'s Claude-context-refresh procedure.
+Added by `2026-07-24-fleet-host-claude-design.md` (companion repo) — this
+spec owns this section; a later doc regeneration pass should pull from here,
+not re-derive it. An interactive `claude` session started at cwd
+`/srv/fleet` (`fleet shell` with no instance id, or `cd /srv/fleet && claude`)
+discovers four project-scoped skills:
+
+| Skill | Trigger | What it does |
+|---|---|---|
+| `/fleet-status` | `/fleet-status`, "how's the fleet doing" | Read-only health summary: running/deployed counts, RAM/disk headroom, and a deploy-log-derived anomaly list. Warns (never blocks) below 15% disk-free. |
+| `/fleet-triage <instance-id>` | `/fleet-triage <id>`, "why did `<id>` fail" | Reads that instance's full `deploy.log`, identifies the failing phase from its markers, cross-checks the registry, and suggests (never runs) a fix. |
+| `/fleet-deploy-batch` | `/fleet-deploy-batch`, "deploy `<project>` on branches x, y, z" | Deploys one instance per distinct branch (looped `fleet deploy` calls — the permanent mechanism, no native equivalent exists for distinct branches) or N replicas of one branch (native `fleet deploy --count`, if present). |
+| `/fleet-cleanup` | `/fleet-cleanup`, "what can we destroy" | Builds a candidate table (stopped >7 days, or an incomplete deploy) and destroys **only** after an explicit yes/no confirmation — a bare invocation never destroys anything. |
+
+**Delivery**: `ansible/roles/claude_cli` copies the skills to
+`/srv/fleet/.claude/skills/<name>/SKILL.md` and a permission allowlist to
+`/srv/fleet/.claude/settings.json` — both project-scoped at `FLEET_HOME`,
+**not** under `/home/fleet/.claude/` (which stays `$HOME`-scoped, holding
+only `.claude.json`). Applied via the scoped `ansible/claude-onboarding.yml`
+playbook (roles: `shell_profile`, `claude_cli`) — never the full `site.yml`.
+
+**Permission tiers (`/srv/fleet/.claude/settings.json`)**: read-only/
+reversible `fleet`/`ddev` commands are allow-tier (`fleet list`, `fleet
+deploy *`, `fleet start/stop/snapshot`, read-only `ddev`/`git`/`grep`/`find`/
+`df`/`free` commands). Credential and fleet-wide-restart commands
+(`fleet secret set`, `fleet {set,refresh,rotate}-*-token`,
+`fleet {set,rotate}-admin-password`, bulk selector forms `fleet start/stop
+--*`) ask. `fleet destroy` (any single- or multi-id form) is deliberately
+absent from allow and instead sits in ask, so the harness always prompts
+under a skill's own confirmation; `fleet destroy --all *` specifically is a
+categorical **deny**, which wins over any ask/allow match regardless of
+specificity. `.secrets`/`secrets/**` are denied for both `Read`/`Edit` and
+`cat`.
+
+**Token-reuse verification** (run once after any provisioning change):
+
+```bash
+sudo -u fleet bash -ic 'claude -p "What is 17 plus 25?"'
+```
+
+Expect `42`. This is the only reliable auth check — it skips onboarding
+entirely, unlike the interactive TUI, whose apparent "login screen" is very
+likely onboarding state, not an auth failure.
