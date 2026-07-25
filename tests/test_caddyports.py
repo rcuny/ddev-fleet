@@ -14,7 +14,9 @@ def test_render_port_snippet_shape():
     assert out == (
         "*.fleet.example.test:9324 {\n"
         "    reverse_proxy 127.0.0.1:8323\n"
-        "    tls { on_demand }\n"
+        "    tls {\n"
+        "        on_demand\n"
+        "    }\n"
         "}\n"
     )
 

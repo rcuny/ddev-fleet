@@ -49,20 +49,18 @@ def render_port_snippet(domain: str, profile: PortProfile) -> str:
     """Pure, no I/O. Structurally identical to today's static Typesense
     site block, generalized to any named port.
 
-    CAVEAT: the `tls { on_demand }` block below is rendered on one line,
-    whereas the static block it replaces
-    (`ansible/roles/caddy/templates/Caddyfile.j2`) used a multi-line form.
-    These are believed equivalent under Caddy's tokenizer, but the `caddy`
-    binary is not installed in this dev container, so — unlike the
-    glob-import no-op behavior this module's docstring cites (verified
-    against `caddy validate` v2.8.4 in `caddyauth`'s context) — this
-    specific one-line `tls { on_demand }` syntax has NOT itself been
-    checked against a real `caddy validate`/`caddy fmt`. Confirm on a
-    real server before relying on it."""
+    The `tls { on_demand }` block is rendered in MULTI-LINE form, matching
+    the static block it replaces (`ansible/roles/caddy/templates/
+    Caddyfile.j2`). The single-line `tls { on_demand }` form is INVALID —
+    proven against a real `caddy validate` (v2.11) on the live server,
+    2026-07-25: `Unexpected next token after '{' on same line`. Do not
+    "simplify" this back to one line."""
     return (
         f"*.{domain}:{profile.public} {{\n"
         f"    reverse_proxy 127.0.0.1:{profile.router}\n"
-        f"    tls {{ on_demand }}\n"
+        f"    tls {{\n"
+        f"        on_demand\n"
+        f"    }}\n"
         f"}}\n"
     )
 
