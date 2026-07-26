@@ -47,6 +47,7 @@ def test_index_page_renders_instance_list_and_deploy_form(fleet_home):
     assert response.status_code == 200
     body = response.text
     assert "demo--develop" in body
+    assert "<th>Commit</th>" in body  # short-HEAD column after Branch
     assert 'hx-post="/ui/deploy"' in body
     assert "unpkg.com" not in body
     assert "cdn." not in body

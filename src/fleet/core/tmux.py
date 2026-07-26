@@ -183,12 +183,31 @@ def ensure_session(home: Path, *, runner=run_streamed) -> None:
         runner,
         ["set-window-option", "-t", f"{SESSION}:{GENERAL_WINDOW}", "automatic-rename", "off"],
     )
-    ensure_sidebar(GENERAL_WINDOW, runner=runner)
+    ensure_general_layout(home, runner=runner)
     apply_settings(runner=runner)  # new session
+
+
+def ensure_general_layout(home: Path, *, runner=run_streamed) -> None:
+    """Give the `general` window the same 3-pane layout as instance windows: the
+    left sidebar plus TWO bash panes, so a human can run e.g. Claude in the
+    second bash pane. Idempotent and non-destructive: the second bash pane is
+    added only when the window currently has a single bash pane, so a human who
+    has split it further is left alone. Safe to call on every `fleet tmux`
+    reconcile — that is how an already-running session gains the second pane."""
+    ensure_sidebar(GENERAL_WINDOW, runner=runner)
+    bash_panes = [
+        pane_id
+        for pane_id, role in _list_panes_with_roles(GENERAL_WINDOW, runner=runner)
+        if role != SIDEBAR_ROLE
+    ]
+    if len(bash_panes) == 1:
+        _run(runner, ["split-window", "-h", "-t", bash_panes[0], "-c", str(home)])
+    apply_pane_layout(GENERAL_WINDOW, runner=runner)
 
 
 def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
     ensure_session(paths.home, runner=runner)
+    ensure_general_layout(paths.home, runner=runner)  # heal an already-running session
     for instance_id in sorted(instance_ids):
         ensure_instance_window(instance_id, paths.instances / instance_id, runner=runner)
     for window in list_window_names(runner=runner):
@@ -259,20 +278,16 @@ def apply_pane_layout(window: str, *, runner=run_streamed) -> None:
 
 def reset_window(paths, window: str, *, runner=run_streamed) -> None:
     """Rebuild the standard pane layout for `window` in place (no kill-window,
-    so the tab keeps its index). general -> 1 bash + sidebar; instance -> 2 bash
-    + sidebar. Best-effort: no-ops if the session/window is gone."""
+    so the tab keeps its index): 2 bash panes + sidebar for both the general and
+    instance windows. Best-effort: no-ops if the session/window is gone."""
     _assert_target_safe(window)
     if not session_exists(runner=runner):
         return
     if window not in list_window_names(runner=runner):
         return
 
-    if window == GENERAL_WINDOW:
-        cwd = paths.home
-        want_bash = 1
-    else:
-        cwd = paths.instances / window
-        want_bash = 2
+    cwd = paths.home if window == GENERAL_WINDOW else paths.instances / window
+    want_bash = 2
 
     panes = _list_panes_with_roles(window, runner=runner)
     non_sidebar = [pid for pid, role in panes if role != SIDEBAR_ROLE]

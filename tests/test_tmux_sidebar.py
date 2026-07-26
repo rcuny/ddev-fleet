@@ -242,3 +242,25 @@ def test_run_reboot_tick_is_independent_of_status_tick(monkeypatch, tmp_path):
     )
     # initial read (t=0) + refresh at t=15 and t=400 -> matches status cadence
     assert reboot_calls["n"] >= 3
+
+
+def test_branches_combines_branch_and_short_head(monkeypatch, tmp_path):
+    class P:
+        instances = tmp_path
+
+    monkeypatch.setattr(
+        tmux_sidebar, "read_instance_git_branch", lambda d: "feature/OAKS-1688-seo-geo-improvements"
+    )
+    monkeypatch.setattr(tmux_sidebar, "read_instance_git_head", lambda d: "9201b89b53")
+    out = tmux_sidebar._branches(P(), ["oak--dev-1"])
+    assert out["oak--dev-1"] == "feature/OAKS-1688-seo-geo-improvements (9201b89b53)"
+
+
+def test_branches_head_only_when_branch_empty(monkeypatch, tmp_path):
+    class P:
+        instances = tmp_path
+
+    monkeypatch.setattr(tmux_sidebar, "read_instance_git_branch", lambda d: "")
+    monkeypatch.setattr(tmux_sidebar, "read_instance_git_head", lambda d: "abc1234")
+    out = tmux_sidebar._branches(P(), ["x--y"])
+    assert out["x--y"] == "(abc1234)"
