@@ -278,20 +278,16 @@ def apply_pane_layout(window: str, *, runner=run_streamed) -> None:
 
 def reset_window(paths, window: str, *, runner=run_streamed) -> None:
     """Rebuild the standard pane layout for `window` in place (no kill-window,
-    so the tab keeps its index). general -> 1 bash + sidebar; instance -> 2 bash
-    + sidebar. Best-effort: no-ops if the session/window is gone."""
+    so the tab keeps its index): 2 bash panes + sidebar for both the general and
+    instance windows. Best-effort: no-ops if the session/window is gone."""
     _assert_target_safe(window)
     if not session_exists(runner=runner):
         return
     if window not in list_window_names(runner=runner):
         return
 
-    if window == GENERAL_WINDOW:
-        cwd = paths.home
-        want_bash = 1
-    else:
-        cwd = paths.instances / window
-        want_bash = 2
+    cwd = paths.home if window == GENERAL_WINDOW else paths.instances / window
+    want_bash = 2
 
     panes = _list_panes_with_roles(window, runner=runner)
     non_sidebar = [pid for pid, role in panes if role != SIDEBAR_ROLE]

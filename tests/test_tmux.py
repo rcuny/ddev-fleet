@@ -589,3 +589,30 @@ def test_ensure_general_layout_no_split_when_two_bash_panes():
     tmux.ensure_general_layout(home, runner=fake)
     joined = _joined(fake)
     assert not any(c.startswith("tmux split-window -h -t %") for c in joined)
+
+
+def test_reset_window_general_rebuilds_two_bash_panes():
+    """After the layout change, resetting the general window rebuilds it to TWO
+    bash panes + sidebar (previously one), and reruns the sidebar in place so it
+    picks up the current code (e.g. the branch/commit line)."""
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "general"
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(
+                0, ["general", "oak--click-3"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%10\t", "%11\tsidebar"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["sidebar"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    joined = _joined(fake)
+    assert any(c.startswith("tmux respawn-pane -k -t %10 -c /srv/fleet") for c in joined)
+    # general now ALSO gets a second bash pane
+    assert any(c.startswith("tmux split-window -h -t %10 -c /srv/fleet") for c in joined)
+    # sidebar rerun in place (so the commit display refreshes)
+    assert "tmux respawn-pane -k -t %11" in joined
