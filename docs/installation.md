@@ -135,9 +135,21 @@ sudo systemctl status fleet.service
 
 ## 6. First deploy
 
-Register a project in `/srv/fleet/config/fleet.yml` (see `fleet.yml.dist`
-for the schema — projects, `default_branch`/`default_template`, and
-per-template `post_deploy` commands), then:
+The installer seeds a bundled **`demo`** project (a generic `type: php` DDEV
+app with no database, built into a local repo at `/srv/fleet/_demo.git`), so
+you can prove the fleet end-to-end before registering anything of your own:
+
+```bash
+sudo -u fleet fleet deploy demo          # -> https://demo--main.<domain>/
+```
+
+Browse to the printed URL — you should see the "ddev-fleet demo is running"
+page. Tear it down with `sudo -u fleet fleet destroy demo--main` once you've
+confirmed it.
+
+Then register your own projects in `/srv/fleet/config/fleet.yml` (see
+`fleet.yml.dist` for the schema — projects, `default_branch`/`default_template`,
+and per-template `post_deploy` commands) and deploy:
 
 ```bash
 fleet deploy <project> <template> --branch <ref>
