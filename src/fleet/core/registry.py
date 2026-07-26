@@ -7,7 +7,8 @@ commands, etc.); `branch` and the instance `label` are resolved per-deploy,
 never stored in the registry.
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -23,6 +24,8 @@ _RESERVED_PORTS = frozenset({22, 80, 443, 8765})
 _ROUTER_RESERVED_PORTS = frozenset({8080, 8443})
 _MIN_PORT = 1
 _MAX_PORT = 65535
+_TTY_KEYS = ("tty1", "tty2")
+_TTY_KEY_RE = re.compile(r"^tty\d+$")
 
 
 @dataclass
@@ -33,6 +36,11 @@ class ResolvedInstance:
     label: str
     post_deploy: list[str]
     instance_id: str
+    # Defaults must trail every field above (dataclass field-order rule), so
+    # these live after `instance_id` rather than immediately after
+    # `post_deploy` despite the "place after post_deploy" framing upstream.
+    tty1: list[str] = field(default_factory=list)
+    tty2: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -143,6 +151,17 @@ class Registry:
                         "disable git identity injection for this project"
                     )
 
+            if "issue_id_regexp" in project_block:
+                pattern = project_block["issue_id_regexp"]
+                if not isinstance(pattern, str):
+                    raise RegistryError(f"projects.{project_key}.issue_id_regexp: must be a string")
+                try:
+                    re.compile(pattern)
+                except re.error as exc:
+                    raise RegistryError(
+                        f"projects.{project_key}.issue_id_regexp: invalid regexp — {exc}"
+                    ) from exc
+
             templates = project_block.get("templates") or {}
             for template_key, template_block in templates.items():
                 try:
@@ -156,6 +175,26 @@ class Registry:
                         f"projects.{project_key}.templates.{template_key}.branch: not "
                         "allowed — branch is resolved per-deploy, never stored in a template"
                     )
+                if template_block:
+                    for tty_key in _TTY_KEYS:
+                        if tty_key not in template_block:
+                            continue
+                        value = template_block[tty_key]
+                        if not isinstance(value, list) or not all(
+                            isinstance(item, str) for item in value
+                        ):
+                            raise RegistryError(
+                                f"projects.{project_key}.templates.{template_key}.{tty_key}: "
+                                "must be a list of strings"
+                            )
+                    for key in template_block:
+                        if key in _TTY_KEYS:
+                            continue
+                        if _TTY_KEY_RE.match(str(key)):
+                            raise RegistryError(
+                                f"projects.{project_key}.templates.{template_key}.{key}: not "
+                                "allowed — only tty1 and tty2 are supported"
+                            )
 
             for port_name in project_block.get("ports") or []:
                 if port_name not in fleet_ports:
@@ -245,6 +284,14 @@ class Registry:
         block = self._project_block(project)
         return bool(block.get("typesense"))
 
+    def issue_id_regexp(self, project: str) -> str | None:
+        """The project's `[[issue-id]]` extraction pattern (`extract_issue_id`
+        in `core/tokens.py`), or None when the project defines none — the
+        token is then simply absent from a deploy's context."""
+        block = self._project_block(project)
+        pattern = block.get("issue_id_regexp")
+        return str(pattern) if pattern is not None else None
+
     def port_profile(self, name: str) -> PortProfile:
         """Look up one `fleet.ports` entry by name. `'typesense'` falls back
         to the built-in legacy default (spec §3.2) when `fleet.ports` has
@@ -293,6 +340,8 @@ class Registry:
 
         template_block = templates[template] or {}
         post_deploy = [str(c) for c in (template_block.get("post_deploy") or [])]
+        tty1 = [str(c) for c in (template_block.get("tty1") or [])]
+        tty2 = [str(c) for c in (template_block.get("tty2") or [])]
 
         try:
             resolved_label = label if label else slugify(branch)
@@ -309,4 +358,6 @@ class Registry:
             label=resolved_label,
             post_deploy=post_deploy,
             instance_id=inst_id,
+            tty1=tty1,
+            tty2=tty2,
         )

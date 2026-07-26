@@ -18,6 +18,13 @@ projects:
     # ports: [typesense]                    # generic equivalent, once fleet.ports.typesense is defined above
     # NOTE: browser-exposed TYPESENSE_API_KEY must be a SEARCH-ONLY key, never the admin key.
     # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
+    # issue_id_regexp: 'ABC-[0-9]+'         # optional — derives [[issue-id]]/FLEET_ISSUE_ID from the
+    #                                       # instance label (checked first) or branch (fallback);
+    #                                       # matched case-insensitively, result uppercased.
     templates:
       default:
         post_deploy: [ddev start]
+      # jira-pull:                          # example template with interactive tmux commands (optional)
+      #   post_deploy: [ddev init --no-interactive]
+      #   tty1: ['ddev exec claude "/jira pull [[issue-id]] --create-branch"']  # typed into the middle pane
+      #   tty2: [ddev drush watchdog:tail]                                     # typed into the right pane

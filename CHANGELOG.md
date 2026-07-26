@@ -8,6 +8,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Per-project `issue_id_regexp` and the `[[issue-id]]` token: derived from
+  the deploying instance's label (checked first) or branch (fallback),
+  matched case-insensitively with the result uppercased; also exported as
+  `FLEET_ISSUE_ID`.
+- `templates.<name>.tty1`/`.tty2`: lists of commands typed (via `tmux
+  send-keys`) into the middle/right bash panes of an instance's `fleet
+  tmux` window the first time that window is created — for interactive
+  workflows (e.g. `ddev exec claude "/jira pull [[issue-id]] ..."`) the
+  operator can attach to and keep talking to. An unresolved `[[token]]` in
+  a `tty1`/`tty2` command is skipped with a warning rather than failing the
+  deploy.
 - MIT `LICENSE`.
 - `.github/` issue templates and a CI workflow (pytest, ruff, black).
 - `tests/test_no_personal_leakage.py`, a denylist test guarding against
@@ -22,6 +33,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CONTRIBUTING.md`.
 
 ### Changed
+- `post_deploy` commands are now actually `[[token]]`-substituted before
+  running (previously only documented, not implemented); an unresolved
+  token now aborts the deploy with a named `DeployError` instead of running
+  the literal, unsubstituted command.
 - De-personalised all deployment-specific references (hostnames, hosting
   provider, private-forge URLs) throughout the codebase and documentation.
 - The old server-rollout runbook split into `docs/installation.md`
