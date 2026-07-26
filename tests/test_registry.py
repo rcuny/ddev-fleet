@@ -759,6 +759,144 @@ projects:
     assert registry.public_ports_in_use() == [9108, 9111, 9324]
 
 
+def test_issue_id_regexp_invalid_pattern_raises_naming_the_project(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: "OAKS-[0-9"
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.issue_id_regexp"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_issue_id_regexp_non_string_raises(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: 12345
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.issue_id_regexp"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_issue_id_regexp_valid_is_returned(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: "OAKS-[0-9]+"
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert registry.issue_id_regexp("oak") == "OAKS-[0-9]+"
+
+
+def test_issue_id_regexp_absent_returns_none(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    assert registry.issue_id_regexp("demo") is None
+
+
+def test_tty1_not_a_list_raises_with_full_path(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    templates:
+      jira-pull:
+        tty1: "ddev exec claude [[issue-id]]"
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.templates\.jira-pull\.tty1"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_tty2_list_with_non_string_element_raises(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    templates:
+      jira-pull:
+        tty2:
+          - ddev drush watchdog:tail
+          - 42
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.templates\.jira-pull\.tty2"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_tty3_key_raises_mentioning_tty1_and_tty2(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    templates:
+      jira-pull:
+        tty3:
+          - echo hi
+"""
+    with pytest.raises(RegistryError, match=r"tty1 and tty2") as exc_info:
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert "projects.oak.templates.jira-pull.tty3" in str(exc_info.value)
+
+
+def test_resolve_populates_tty1_and_tty2(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: "OAKS-[0-9]+"
+    templates:
+      jira-pull:
+        post_deploy:
+          - ddev init --no-interactive
+        tty1:
+          - ddev exec claude "/jira pull [[issue-id]] --create-branch"
+        tty2:
+          - ddev drush watchdog:tail
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    resolved = registry.resolve("oak", "jira-pull", "OAKS-1781")
+
+    assert resolved.tty1 == ['ddev exec claude "/jira pull [[issue-id]] --create-branch"']
+    assert resolved.tty2 == ["ddev drush watchdog:tail"]
+
+
+def test_resolve_with_no_tty_commands_gives_two_empty_lists(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    resolved = registry.resolve("demo", "default", "main")
+
+    assert resolved.tty1 == []
+    assert resolved.tty2 == []
+
+
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):
     """A nonexistent fleet.yml must raise RegistryError with guidance,
     not a raw FileNotFoundError traceback in the CLI."""

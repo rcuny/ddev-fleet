@@ -1,7 +1,16 @@
 import pytest
 
 from fleet.core.errors import TokenError
-from fleet.core.tokens import build_context, env_vars, substitute_file, substitute_text
+from fleet.core.tokens import (
+    build_context,
+    env_vars,
+    extract_issue_id,
+    substitute_file,
+    substitute_lenient,
+    substitute_text,
+)
+
+ISSUE_ID_REGEXP = r"OAKS-[0-9]+"
 
 
 def test_build_context_composes_fqdn():
@@ -113,3 +122,116 @@ def test_substitute_file_exact_1mib_boundary_still_substitutes(tmp_path):
     assert result is True
     rewritten = path.read_text(encoding="utf-8")
     assert rewritten.startswith("PROJECT=demo\n")
+
+
+# --- extract_issue_id --------------------------------------------------
+
+
+def test_extract_issue_id_label_wins_over_branch():
+    """The label is tried first — a matching label always wins even when
+    the branch also matches a *different* id."""
+    issue_id = extract_issue_id(ISSUE_ID_REGEXP, "OAKS-1781", "feature/OAKS-1999-x")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_falls_back_to_branch():
+    issue_id = extract_issue_id(ISSUE_ID_REGEXP, "test2", "feature/OAKS-1781-seo-geo-improvements")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_no_match_returns_none():
+    assert extract_issue_id(ISSUE_ID_REGEXP, "test2", "develop") is None
+
+
+def test_extract_issue_id_no_pattern_returns_none():
+    assert extract_issue_id(None, "OAKS-1781", "OAKS-1781") is None
+
+
+def test_extract_issue_id_uses_capture_group_when_present():
+    pattern = r"feature/(OAKS-[0-9]+)-"
+    issue_id = extract_issue_id(pattern, "test2", "feature/OAKS-1781-seo-geo-improvements")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_rejects_shell_metacharacters():
+    """A permissive operator pattern must not become an injection vector —
+    a match outside the shell-safe charset is treated as no match. The
+    branch is also rejected here so the fallback can't paper over it."""
+    assert extract_issue_id(r".+", "a;rm -rf /", "also;bad") is None
+
+
+def test_extract_issue_id_rejected_label_still_tries_branch():
+    """A label match rejected by the charset check does not short-circuit —
+    the branch is still tried as a fallback."""
+    issue_id = extract_issue_id(r".+", "a;rm -rf /", "OAKS-1781")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_invalid_pattern_returns_none_not_raises():
+    assert extract_issue_id("OAKS-[0-9", "OAKS-1781", "develop") is None
+
+
+# --- build_context / env_vars with issue-id -----------------------------
+
+
+def test_build_context_without_issue_id_has_no_issue_id_key():
+    context = build_context("oak", "develop", "develop", "fleet.example.test")
+    assert "issue-id" not in context
+
+
+def test_build_context_with_issue_id_adds_key():
+    context = build_context("oak", "develop", "develop", "fleet.example.test", issue_id="OAKS-1781")
+    assert context["issue-id"] == "OAKS-1781"
+
+
+def test_env_vars_omits_fleet_issue_id_when_absent():
+    context = build_context("oak", "develop", "develop", "fleet.example.test")
+    assert "FLEET_ISSUE_ID" not in env_vars(context)
+
+
+def test_env_vars_includes_fleet_issue_id_when_present():
+    context = build_context("oak", "develop", "develop", "fleet.example.test", issue_id="OAKS-1781")
+    assert env_vars(context)["FLEET_ISSUE_ID"] == "OAKS-1781"
+
+
+# --- substitute_lenient --------------------------------------------------
+
+
+def test_substitute_lenient_leaves_unresolved_tokens_in_place():
+    context = build_context("oak", "develop", "develop", "fleet.example.test")
+    text = "ddev exec claude [[issue-id]] on [[project]]"
+
+    result, unresolved = substitute_lenient(text, context)
+
+    assert result == "ddev exec claude [[issue-id]] on oak"
+    assert unresolved == ["issue-id"]
+
+
+def test_substitute_lenient_reports_sorted_deduped_unresolved_names():
+    context = build_context("oak", "develop", "develop", "fleet.example.test")
+    text = "[[zeta-token]] [[issue-id]] [[issue-id]] [[alpha-token]]"
+
+    _, unresolved = substitute_lenient(text, context)
+
+    assert unresolved == ["alpha-token", "issue-id", "zeta-token"]
+
+
+def test_substitute_lenient_resolves_everything_gives_empty_unresolved():
+    context = build_context("oak", "develop", "develop", "fleet.example.test")
+    result, unresolved = substitute_lenient("[[project]]", context)
+
+    assert result == "oak"
+    assert unresolved == []
+
+
+def test_substitute_lenient_never_raises_while_substitute_text_still_does():
+    """Contrast: substitute_text keeps its strict, raising behaviour on the
+    exact same input that substitute_lenient tolerates."""
+    context = build_context("oak", "develop", "develop", "fleet.example.test")
+    text = "[[issue-id]]"
+
+    # Does not raise.
+    substitute_lenient(text, context)
+
+    with pytest.raises(TokenError):
+        substitute_text(text, context)
