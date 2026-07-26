@@ -130,12 +130,36 @@ def test_substitute_file_exact_1mib_boundary_still_substitutes(tmp_path):
 def test_extract_issue_id_label_wins_over_branch():
     """The label is tried first — a matching label always wins even when
     the branch also matches a *different* id."""
-    issue_id = extract_issue_id(ISSUE_ID_REGEXP, "OAKS-1781", "feature/OAKS-1999-x")
+    issue_id = extract_issue_id(ISSUE_ID_REGEXP, "oaks-1781", "feature/OAKS-1999-x")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_matches_lowercase_dns_safe_label():
+    """Labels are DNS labels (core/naming.py:validate_part), so they're
+    always lowercase — a case-sensitive `OAKS-[0-9]+` would never fire on
+    `oaks-1781`. Case-insensitive matching plus uppercasing the result is
+    what makes the natural, mixed-case operator pattern actually match."""
+    issue_id = extract_issue_id(ISSUE_ID_REGEXP, "oaks-1781", "develop")
     assert issue_id == "OAKS-1781"
 
 
 def test_extract_issue_id_falls_back_to_branch():
     issue_id = extract_issue_id(ISSUE_ID_REGEXP, "test2", "feature/OAKS-1781-seo-geo-improvements")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_falls_back_to_branch_when_label_does_not_match():
+    """Same pattern (no inline flag), label doesn't match at all — the
+    branch fallback still resolves and is uppercased."""
+    issue_id = extract_issue_id(
+        ISSUE_ID_REGEXP, "unrelated-label", "feature/OAKS-1781-seo-geo-improvements"
+    )
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_already_uppercase_is_unchanged():
+    """Idempotence: a branch that's already uppercase round-trips as-is."""
+    issue_id = extract_issue_id(ISSUE_ID_REGEXP, "test2", "feature/OAKS-1781-x")
     assert issue_id == "OAKS-1781"
 
 
@@ -151,6 +175,29 @@ def test_extract_issue_id_uses_capture_group_when_present():
     pattern = r"feature/(OAKS-[0-9]+)-"
     issue_id = extract_issue_id(pattern, "test2", "feature/OAKS-1781-seo-geo-improvements")
     assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_capture_group_matches_lowercase_and_uppercases():
+    """Capture-group pattern against a lowercase-in-the-relevant-part branch
+    still returns group 1, uppercased."""
+    pattern = r"feature/(oaks-[0-9]+)-"
+    issue_id = extract_issue_id(pattern, "test2", "feature/OAKS-1781-seo-geo-improvements")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_inline_flag_pattern_not_double_flagged():
+    """An operator pattern with its own inline `(?i)` must keep working —
+    combining it with the externally-applied re.IGNORECASE must not raise
+    or otherwise break the match."""
+    pattern = r"(?i)OAKS-[0-9]+"
+    issue_id = extract_issue_id(pattern, "oaks-1781", "develop")
+    assert issue_id == "OAKS-1781"
+
+
+def test_extract_issue_id_numeric_pattern_unaffected_by_uppercasing():
+    """A purely numeric id has no case, so uppercasing is a no-op."""
+    issue_id = extract_issue_id(r"[0-9]+", "build-4217", "develop")
+    assert issue_id == "4217"
 
 
 def test_extract_issue_id_rejects_shell_metacharacters():

@@ -918,8 +918,10 @@ projects:
         paths, registry, "demo", "default", branch="main", label="oaks-1781", runner=runner
     )
 
+    # extract_issue_id matches case-insensitively and uppercases the result,
+    # so the lowercase (DNS-safe) label recovers "OAKS-1781", not "oaks-1781".
     bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
-    assert bash_calls[0]["env"]["FLEET_ISSUE_ID"] == "oaks-1781"
+    assert bash_calls[0]["env"]["FLEET_ISSUE_ID"] == "OAKS-1781"
 
 
 def test_post_deploy_env_omits_fleet_issue_id_when_no_match(fleet_home, git_repo):

@@ -59,16 +59,18 @@ def test_plan_from_template_full_happy_path(fleet_home):
     # letters/digits/dashes only — see naming.py's `_PART_RE`), so a literal
     # "OAKS-1781" label (as the design doc's own worked-example table uses)
     # is rejected by registry.resolve()'s instance_id() check before it ever
-    # reaches token substitution. Using a lowercase label + a case-insensitive
-    # issue_id_regexp keeps this test realistic while still exercising the
-    # "label wins" priority path end to end.
+    # reaches token substitution. Using a lowercase label keeps this test
+    # realistic while still exercising the "label wins" priority path end to
+    # end; extract_issue_id matches case-insensitively and uppercases the
+    # result, so the recovered id is "OAKS-1781" even though the label is
+    # lowercase (and even without the pattern's own inline `(?i)`).
     registry = _registry(fleet_home)
     paths = _paths(fleet_home)
 
     plan = plan_from_template(registry, paths, "oak", "oaks-1781", "dev", "jira-pull")
 
     assert plan.tty1 == [
-        'ddev exec claude "/jira pull oaks-1781 --create-branch"',
+        'ddev exec claude "/jira pull OAKS-1781 --create-branch"',
         "ddev drush uli",
     ]
     assert plan.tty2 == ["ddev drush watchdog:tail"]
@@ -152,7 +154,8 @@ def _write_instance_yaml(paths, instance_id: str, text: str) -> None:
 
 def test_plan_for_instance_happy_path(fleet_home):
     # instance:/label follows the same lowercase naming constraint noted in
-    # test_plan_from_template_full_happy_path above.
+    # test_plan_from_template_full_happy_path above, and the recovered id is
+    # uppercased the same way.
     registry = _registry(fleet_home)
     paths = _paths(fleet_home)
     _write_instance_yaml(
@@ -169,7 +172,7 @@ template: jira-pull
     plan = plan_for_instance(registry, paths, "oak--oaks-1781")
 
     assert plan.tty1 == [
-        'ddev exec claude "/jira pull oaks-1781 --create-branch"',
+        'ddev exec claude "/jira pull OAKS-1781 --create-branch"',
         "ddev drush uli",
     ]
     assert plan.tty2 == ["ddev drush watchdog:tail"]

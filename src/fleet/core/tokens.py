@@ -36,13 +36,20 @@ def build_context(
 def _issue_id_from_match(match: "re.Match[str]") -> str | None:
     """Group 1 when the operator's pattern defines a capture group, else the
     whole match — so both `OAKS-[0-9]+` and `feature/(OAKS-[0-9]+)-` behave
-    as the author intends. Rejects (returns None) anything outside the
-    shell-safe charset: the value ends up typed into a tmux pane, so a
-    permissive pattern must not become an injection vector."""
+    as the author intends. The value is uppercased before the charset check
+    (uppercasing can't introduce an unsafe character, so order doesn't
+    affect the outcome): issue keys are conventionally uppercase, and this
+    gives one canonical form regardless of whether the id came from a
+    lowercase label or a mixed-case branch — see `extract_issue_id` for why
+    the label is lowercase in the first place. Rejects (returns None)
+    anything outside the shell-safe charset: the value ends up typed into a
+    tmux pane, so a permissive pattern must not become an injection
+    vector."""
     if match.re.groups >= 1 and match.group(1) is not None:
         value = match.group(1)
     else:
         value = match.group(0)
+    value = value.upper() if value else value
     if value and _ISSUE_ID_CHARSET_RE.match(value):
         return value
     return None
@@ -52,19 +59,31 @@ def extract_issue_id(pattern: str | None, label: str, branch: str) -> str | None
     """Resolve `[[issue-id]]` from a project's `issue_id_regexp`: the
     instance label is tried first, the branch is the fallback (spec's
     `[[issue-id]]` resolution) — a deploy's label is operator-chosen and
-    more specific than the branch name it may have defaulted from. Returns
-    None for no pattern, no match on either candidate, a match rejected by
-    the shell-safe charset, or (defence in depth — the registry already
-    validates patterns at load) an invalid regexp; never raises."""
+    more specific than the branch name it may have defaulted from.
+
+    Both candidates are matched case-insensitively, and the extracted value
+    is always returned uppercased. Instance labels are DNS labels
+    (`core/naming.py:validate_part` forces `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`,
+    all lowercase), so a Jira-style label is `oaks-1781`, never `OAKS-1781`
+    — an operator's natural `OAKS-[0-9]+` pattern would otherwise silently
+    never fire on the label. Branches keep their original case. Matching
+    case-insensitively and uppercasing the result gives one canonical
+    `[[issue-id]]` regardless of which candidate matched or what case the
+    operator wrote the pattern in.
+
+    Returns None for no pattern, no match on either candidate, a match
+    rejected by the shell-safe charset, or (defence in depth — the registry
+    already validates patterns at load) an invalid regexp; never raises."""
     if not pattern:
         return None
     try:
-        label_match = re.search(pattern, label)
+        flags = re.IGNORECASE
+        label_match = re.search(pattern, label, flags)
         if label_match is not None:
             issue_id = _issue_id_from_match(label_match)
             if issue_id is not None:
                 return issue_id
-        branch_match = re.search(pattern, branch)
+        branch_match = re.search(pattern, branch, flags)
         if branch_match is not None:
             return _issue_id_from_match(branch_match)
     except re.error:
