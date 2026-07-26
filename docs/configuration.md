@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-25
+Last updated: 2026-07-26
 Type: documentation
 ---
 
@@ -54,9 +54,12 @@ projects:
     typesense: true                        # optional, legacy back-compat
     ports: [<port-name>, ...]              # optional
     git_bot: {name: <string>, email: <string>} | false   # optional
+    issue_id_regexp: <string>              # optional
     templates:
       <template-name>:
         post_deploy: [<string>, ...]       # optional
+        tty1: [<string>, ...]              # optional
+        tty2: [<string>, ...]              # optional
 ```
 
 ## The `fleet:` block
@@ -126,6 +129,7 @@ Each key under `projects:` is a project id (same naming rule as port names:
 | `typesense` | bool | no | `false` | **Legacy** opt-in flag: expose Typesense at the `typesense` named port (`*.<domain>:9108` by default) for every instance of this project. Equivalent to `ports: [typesense]`; both may be present without duplicating the exposure (`Registry.project_ports` de-dupes). The browser-exposed key must be a **search-only** key, never the admin key — see `docs/README-typesense.md`. |
 | `ports` | list of strings | no | `[]` | The general mechanism superseding `typesense: true` — names must each exist as a key in `fleet.ports` (validated: `Registry._validate` raises if a project references an undeclared port name). |
 | `git_bot` | mapping `{name, email}` or `false` | no | (inherits the fleet-level default) | Per-project override of the injected git commit identity. A mapping overrides `name`/`email` individually (either key may be omitted, falling back to the fleet default for that field). `false` disables identity injection for this project only, letting the project's own `git config` (e.g. a post-start hook) win — note the injected `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars otherwise take precedence over `git config user.*`. |
+| `issue_id_regexp` | string | no | (none — `[[issue-id]]` and `FLEET_ISSUE_ID` are simply absent) | A Python `re` pattern used to derive the `[[issue-id]]` token for this project's deploys — see "`[[issue-id]]` resolution" below. Validated at registry load: must be a string that `re.compile()`s (`RegistryError` otherwise). |
 | `templates` | mapping | no | `{}` | See below. |
 
 ### `templates.<name>`
@@ -143,7 +147,108 @@ templates:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `post_deploy` | list of strings | no (default `[]`) | Commands run, in order, after the instance is cloned/configured/started, via `ddev exec`. `[[token]]` placeholders (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, per-project secret tokens, …) are substituted first — see `CLAUDE.md`'s "Per-project secrets model" for the token mechanism. |
+| `post_deploy` | list of strings | no (default `[]`) | Commands run, in order, after the instance is cloned/configured/started, each as `bash -c <command>` with the instance directory as cwd (so a command that itself needs the DDEV containers typically calls `ddev exec ...` or another `ddev` subcommand). `[[token]]` placeholders (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, `[[issue-id]]` when it resolves, per-project secret tokens, …) are substituted first — see `CLAUDE.md`'s "Per-project secrets model" for the token mechanism. This substitution is **strict**: a command left with an unresolved token raises `DeployError` naming the command and the token, and the deploy aborts — a `post_deploy` command is deploy-critical, so failing loudly beats silently skipping it. |
+| `tty1` | list of strings | no (default `[]`) | Commands typed into the **middle** bash pane of the instance's `fleet tmux` window, in order, the first time that window is created. See "`tty1`/`tty2`: interactive tmux commands" below. |
+| `tty2` | list of strings | no (default `[]`) | Same as `tty1`, for the **right** bash pane (the sidebar occupies the fixed-width left column). |
+
+### `[[issue-id]]` resolution
+
+A project that sets `issue_id_regexp` gets a per-deploy `[[issue-id]]`
+token, useful for handing an issue key to an interactive command (e.g.
+`ddev exec claude "/jira pull [[issue-id]] --create-branch"`) without
+hardcoding it into the template.
+
+Resolution (`core/tokens.py:extract_issue_id`), tried in order:
+
+1. `issue_id_regexp` is matched against the instance's **label** first.
+2. If that doesn't match, it's matched against the **branch**.
+3. If neither matches (or the project has no `issue_id_regexp`), `[[issue-id]]`
+   is simply absent — commands that reference it are handled per the
+   strict/lenient rule above.
+
+Both candidates are matched **case-insensitively**, and the extracted value
+is always **uppercased** before use. This matters because an instance label
+is a DNS label (lowercase only — `core/naming.py`'s `[a-z0-9]([a-z0-9-]*[a-z0-9])?`),
+so a Jira-style label is `abc-1234`, never `ABC-1234`; matching
+case-insensitively means an operator's naturally-uppercase pattern
+(`ABC-[0-9]+`) still fires on it, and uppercasing the result gives one
+canonical `[[issue-id]]` regardless of which candidate matched. If the
+pattern defines a capture group, group 1 is used; otherwise the whole match
+is used. A matched value containing anything outside `[A-Za-z0-9._/-]` is
+rejected (treated as no match) — the value is typed into a shell, so a
+permissive pattern must not become an injection vector.
+
+Worked examples, with `issue_id_regexp: 'ABC-[0-9]+'`:
+
+| Instance label | Branch | `[[issue-id]]` |
+|---|---|---|
+| `abc-1234` | `dev` | `ABC-1234` (label wins) |
+| `test2` | `feature/ABC-1234-some-improvement` | `ABC-1234` (branch fallback) |
+| `test2` | `develop` | *(absent — a command referencing it is skipped/aborted per the strict/lenient rule)* |
+
+The resolved value is also exported as `FLEET_ISSUE_ID` in the `post_deploy`
+environment, and merged into the same deploy-time token context asset files
+get (alongside `[[project]]`, `[[branch]]`, secret tokens, …) — so an asset
+file can use `[[issue-id]]` too.
+
+### `tty1` / `tty2`: interactive tmux commands
+
+A template's `tty1`/`tty2` commands are typed into a live bash shell inside
+the instance's `fleet tmux` window — via `tmux send-keys`, not spawned as
+the pane's argv — so the process owns a real TTY (an in-pane `claude`
+session renders and accepts input) and, when it exits, the operator is left
+with a shell rather than a dead pane. Pane mapping is fixed: sidebar
+(left) · `tty1` (middle) · `tty2` (right).
+
+```yaml
+projects:
+  example:
+    git: git@example.com:you/example.git
+    issue_id_regexp: 'ABC-[0-9]+'
+    templates:
+      jira-pull:
+        post_deploy:
+          - ddev init --no-interactive
+        tty1:
+          - ddev exec claude "/jira pull [[issue-id]] --create-branch"
+        tty2:
+          - ddev drush watchdog:tail
+```
+
+**They fire once, on window creation, never on re-attach.** Concretely:
+
+- If a `fleet` tmux session is already running when `fleet deploy` finishes,
+  the commands are typed in immediately as part of that deploy.
+- Otherwise, they fire the next time `fleet tmux` creates that instance's
+  window (`reconcile()`). Re-running `fleet tmux` against an *existing*
+  window never re-sends them — the window-creation check is itself the
+  idempotency guard.
+- One consequence worth planning around: after a host reboot (or any time
+  the `fleet` tmux session doesn't survive), `fleet tmux` recreates every
+  instance window from scratch, so **every** instance's `tty1`/`tty2`
+  commands fire again, all at once.
+- The fleet daemon never creates a tmux session by itself — only `fleet tmux`
+  (run interactively by an operator) does. A tmux server spawned by
+  `fleet.service` would live in that unit's cgroup and be killed by the next
+  `systemctl restart fleet`, taking the operator's whole workspace with it.
+
+**Unresolved tokens are lenient here**, unlike `post_deploy`: a `tty1`/`tty2`
+command left with an unresolved `[[token]]` (most commonly `[[issue-id]]`
+when the project has no `issue_id_regexp`, or neither the label nor the
+branch matched it) is dropped — not typed in at all — and a
+`WARNING: skipped tty1 (unresolved [[issue-id]]): <original command>` line
+is appended to the deploy log (or, when triggered by `fleet tmux`, only
+shown to the operator running it). The pane is left as a plain bash shell;
+the deploy itself is never affected.
+
+For `fleet tmux`'s `reconcile()` to know which commands to type into a
+window it's about to create for an already-deployed instance, each new
+deploy's resolved `template` name is recorded in `.fleet/instance.yml`. This
+reaches **new deploys only** — an instance deployed before this field
+existed simply resolves to no `tty1`/`tty2` commands (today's behaviour), and
+a template or project later removed from `fleet.yml` is treated the same way.
+Editing `fleet.yml` changes what a *future* window gets without a redeploy,
+since the template is looked up in the live registry each time.
 
 ## Walkthrough: `fleet.yml.dist` field by field
 
@@ -167,9 +272,16 @@ projects:
     # ports: [typesense]                    # generic equivalent, once fleet.ports.typesense is defined above
     # NOTE: browser-exposed TYPESENSE_API_KEY must be a SEARCH-ONLY key, never the admin key.
     # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
+    # issue_id_regexp: 'ABC-[0-9]+'         # optional — derives [[issue-id]]/FLEET_ISSUE_ID from the
+    #                                       # instance label (checked first) or branch (fallback);
+    #                                       # matched case-insensitively, result uppercased.
     templates:
       default:
         post_deploy: [ddev start]
+      # jira-pull:                          # example template with interactive tmux commands (optional)
+      #   post_deploy: [ddev init --no-interactive]
+      #   tty1: ['ddev exec claude "/jira pull [[issue-id]] --create-branch"']  # typed into the middle pane
+      #   tty2: [ddev drush watchdog:tail]                                     # typed into the right pane
 ```
 
 - `fleet.domain` — the only value `fleet init` patches automatically (to
@@ -184,6 +296,11 @@ projects:
   your real project id and SSH URL, uncomment/adjust `typesense`/`ports`/
   `additional_hostnames` as needed, and add one `templates.<name>` entry
   per deploy recipe you want (most projects need only `default`).
+- `issue_id_regexp` and the commented `jira-pull` template — both fully
+  commented out, so a fresh `fleet init` registry stays minimal and valid;
+  uncomment and adapt them to hand an issue-tracker key to an interactive
+  `tty1`/`tty2` command. See "`[[issue-id]]` resolution" and "`tty1`/`tty2`:
+  interactive tmux commands" above.
 
 ## Recommended for teams: `FLEET_CONFIG_REPO`
 
