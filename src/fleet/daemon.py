@@ -183,6 +183,21 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     @app.exception_handler(FleetError)
     async def fleet_error_handler(request: Request, exc: FleetError):
+        # htmx 1.9.12 does NOT swap non-2xx responses into hx-target by
+        # default — it only fires `htmx:responseError`, which nothing
+        # handled for the deploy form (bulk.js's old handler only covered
+        # `/ui/bulk/*`). Before ui-errors.js's generic `htmx:beforeSwap`
+        # fix, a validation error here was a correct-but-invisible 400: the
+        # Deploy button looked dead with no message anywhere. Every htmx
+        # request carries `HX-Request: true` (case-insensitive header name,
+        # per Starlette's Headers — the value itself is always lowercase
+        # "true" from htmx's own JS), so that's the signal to render an
+        # HTML body ui-errors.js can swap in, instead of the raw JSON the
+        # `/api/*` clients (never HTMX requests) still need unchanged.
+        if request.headers.get("hx-request", "").lower() == "true":
+            return templates.TemplateResponse(
+                request, "partials/error.html", {"message": exc.message}, status_code=400
+            )
         return JSONResponse(status_code=400, content={"error": exc.message})
 
     @app.get("/api/tls-authorize")
@@ -293,7 +308,15 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     async def index(request: Request):
         paths, registry = _paths_and_registry()
         statuses = await asyncio.to_thread(instances_mod.list_instances, paths, registry)
-        project_templates = {p: registry.template_keys(p) for p in registry.project_keys()}
+        project_keys = registry.project_keys()
+        project_templates = {p: registry.template_keys(p) for p in project_keys}
+        # The Template <select>'s initial render must match the Project
+        # <select>'s default selection (its first `<option>`), NOT every
+        # project's templates flattened together — that flattening let a
+        # user pick a template belonging to a different project, the
+        # second bug in this fix. `/ui/deploy/templates` (below) refreshes
+        # this same partial via hx-get whenever the Project select changes.
+        initial_templates = registry.template_keys(project_keys[0]) if project_keys else []
         sys_stats = await asyncio.to_thread(sysinfo.SystemStats.gather, paths.instances)
         return templates.TemplateResponse(
             request,
@@ -301,8 +324,25 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             {
                 "statuses": statuses,
                 "project_templates": project_templates,
+                "template_options": initial_templates,
                 "sys_stats": sys_stats.display(),
             },
+        )
+
+    @app.get("/ui/deploy/templates")
+    async def ui_deploy_templates(request: Request, project: str = Query(...)):
+        # Backs the Project select's `hx-get` (instances.html): re-renders
+        # ONLY `partials/template_options.html`, the same partial the index
+        # route above uses for the initial render, so there is one source
+        # of truth for "what templates does this project have" instead of
+        # two templates drifting apart. `registry.template_keys()` raises
+        # RegistryError (a FleetError) for an unknown project, which
+        # `fleet_error_handler` above turns into a renderable 400 for this
+        # htmx-originated request — no separate validation needed here.
+        _, registry = _paths_and_registry()
+        template_options = registry.template_keys(project)
+        return templates.TemplateResponse(
+            request, "partials/template_options.html", {"template_options": template_options}
         )
 
     @app.post("/ui/instances/{instance_id}/start")

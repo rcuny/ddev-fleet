@@ -1,0 +1,5 @@
+<select name="template" id="template-select" required>
+  {% for template in template_options %}
+    <option value="{{ template }}">{{ template }}</option>
+  {% endfor %}
+</select>

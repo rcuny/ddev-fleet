@@ -37,20 +37,16 @@
 <h2>Deploy</h2>
 <form class="deploy-form" hx-post="/ui/deploy" hx-target="#job-panel-slot" hx-swap="innerHTML">
   <label>Project
-    <select name="project" required>
-      {% for key, templates in project_templates.items() %}
+    <select name="project" required
+            hx-get="/ui/deploy/templates" hx-target="#template-select" hx-swap="outerHTML"
+            hx-trigger="change">
+      {% for key in project_templates.keys() %}
         <option value="{{ key }}">{{ key }}</option>
       {% endfor %}
     </select>
   </label>
   <label>Template
-    <select name="template" required>
-      {% for key, templates in project_templates.items() %}
-        {% for template in templates %}
-          <option value="{{ template }}">{{ template }}</option>
-        {% endfor %}
-      {% endfor %}
-    </select>
+    {% include "partials/template_options.html" %}
   </label>
   <label>Branch <input type="text" name="branch" required></label>
   <label>Label (optional) <input type="text" name="label"></label>

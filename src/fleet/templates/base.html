@@ -6,12 +6,17 @@
   <script src="/static/htmx.min.js"></script>
   <script src="/static/ws-log.js" defer></script>
   <script src="/static/bulk.js" defer></script>
+  <script src="/static/ui-errors.js" defer></script>
   <style>
     body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
     table { border-collapse: collapse; width: 100%; }
     th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #ddd; }
     form.deploy-form { margin: 1.5rem 0; display: flex; gap: 0.5rem; align-items: end; }
     .job-panel { margin-top: 1rem; border: 1px solid #ccc; padding: 0.8rem; }
+    .error-panel {
+      margin-top: 1rem; border: 1px solid #b00; padding: 0.8rem; color: #b00;
+      background: #fff0f0;
+    }
     .job-log {
       background: #111; color: #0f0; font-family: monospace; padding: 0.6rem;
       height: 12rem; overflow-y: auto; white-space: pre-wrap;
