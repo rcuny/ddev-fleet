@@ -12,7 +12,11 @@ from rich.console import Console
 from rich.text import Text
 
 from fleet.core import ddev, shell, tmux
-from fleet.core.instances import FleetPaths, read_instance_git_branch
+from fleet.core.instances import (
+    FleetPaths,
+    read_instance_git_branch,
+    read_instance_git_head,
+)
 from fleet.core.reboot import RebootStatus, format_duration_since, read_reboot_status
 
 STATUS_GLYPH = {"running": "●", "stopped": "○", "deployed": "•", "error": "!"}
@@ -63,7 +67,21 @@ def build_rows(instance_ids, statuses, current, branches=None) -> list[tuple[str
 
 
 def _branches(paths: FleetPaths, ids: list[str]) -> dict[str, str]:
-    return {i: read_instance_git_branch(paths.instances / i) for i in ids}
+    # The dim line under each instance shows "branch (shorthead)", e.g.
+    # "feature/OAKS-1688-seo-geo-improvements (9201b89b53)". The short HEAD makes
+    # it obvious which commit an instance is actually running.
+    out: dict[str, str] = {}
+    for i in ids:
+        instance_dir = paths.instances / i
+        branch = read_instance_git_branch(instance_dir)
+        head = read_instance_git_head(instance_dir)
+        if branch and head:
+            out[i] = f"{branch} ({head})"
+        elif branch:
+            out[i] = branch
+        elif head:
+            out[i] = f"({head})"
+    return out
 
 
 def _reboot_banner_lines(status: RebootStatus) -> list[str]:

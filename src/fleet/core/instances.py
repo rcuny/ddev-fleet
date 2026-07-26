@@ -715,6 +715,23 @@ def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
     return "\n".join(sha.lines).strip()
 
 
+def read_instance_git_head(instance_dir: Path, *, runner=run_streamed) -> str:
+    """Return the short commit SHA of the instance checkout's HEAD (e.g.
+    "9201b89b53"), or "" if it can't be determined. Best-effort: any git
+    error/exception yields "" so a bad checkout never breaks the sidebar refresh
+    loop or the web UI list."""
+    try:
+        result = runner(
+            ["git", "-C", str(instance_dir), "rev-parse", "--short", "HEAD"],
+            echo=False,
+        )
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        return ""
+    if result.returncode != 0:
+        return ""
+    return "\n".join(result.lines).strip()
+
+
 @dataclass
 class InstanceStatus:
     instance_id: str
@@ -724,6 +741,7 @@ class InstanceStatus:
     state: str
     url: str
     ram_mib: int | None
+    head: str = ""
 
 
 def list_instances(
@@ -768,6 +786,8 @@ def list_instances(
         if live_branch:
             branch = live_branch
 
+        head = read_instance_git_head(entry, runner=runner)
+
         state = "running" if current_id in running_ids else "deployed"
         statuses.append(
             InstanceStatus(
@@ -778,6 +798,7 @@ def list_instances(
                 state=state,
                 url=f"https://{current_id}.{registry.domain}",
                 ram_mib=ram.get(current_id),
+                head=head,
             )
         )
     return statuses

@@ -1,0 +1,48 @@
+from pathlib import Path
+
+from fleet.core.instances import read_instance_git_head
+from fleet.core.runner import RunResult
+from tests.conftest import FakeRunner
+
+
+def _key(d: Path, *rest: str) -> str:
+    return " ".join(["git", "-C", str(d), *rest])
+
+
+def test_returns_short_head_against_real_git(git_repo):
+    """DEFAULT runner (real subprocess) against an actual checkout — the short
+    HEAD is a non-empty hex string."""
+    work = git_repo["work"]
+    head = read_instance_git_head(work)
+    assert head and all(c in "0123456789abcdef" for c in head)
+
+
+def test_returns_short_head(tmp_path):
+    d = tmp_path / "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            _key(d, "rev-parse", "--short", "HEAD"): RunResult(0, ["9201b89b53"]),
+        }
+    )
+    assert read_instance_git_head(d, runner=fake) == "9201b89b53"
+
+
+def test_returns_empty_on_git_error(tmp_path):
+    d = tmp_path / "not-a-repo"
+    fake = FakeRunner(
+        scripted={
+            _key(d, "rev-parse", "--short", "HEAD"): RunResult(
+                128, ["fatal: not a git repository"]
+            ),
+        }
+    )
+    assert read_instance_git_head(d, runner=fake) == ""
+
+
+def test_returns_empty_when_runner_raises(tmp_path):
+    d = tmp_path / "oak--dev-1"
+
+    def boom(*a, **k):
+        raise OSError("git missing")
+
+    assert read_instance_git_head(d, runner=boom) == ""

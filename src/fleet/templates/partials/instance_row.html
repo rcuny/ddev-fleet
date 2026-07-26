@@ -3,6 +3,7 @@
   <td>{{ status.instance_id }}</td>
   <td>{{ status.project }}</td>
   <td>{{ status.branch }}</td>
+  <td>{{ status.head or "-" }}</td>
   <td>{{ status.state }}</td>
   <td><a href="{{ status.url }}">{{ status.url }}</a></td>
   <td>{{ status.ram_mib if status.ram_mib is not none else "-" }}</td>
