@@ -58,6 +58,70 @@ def test_resolve_explicit_label_overrides_slugified_branch(fleet_home, sample_re
     assert resolved.instance_id == "demo--mylabel"
 
 
+def test_resolve_explicit_label_is_normalised(fleet_home, sample_registry_text):
+    """An explicit --label is slugified just like a branch-derived one — a
+    ticket-style label like 'ABC-1234' must not be rejected."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "main", label="ABC-1234")
+
+    assert resolved.label == "abc-1234"
+    assert resolved.instance_id == "demo--abc-1234"
+
+
+@pytest.mark.parametrize(
+    "raw_label",
+    ["ABC_1234", "ABC 1234", "-abc-1234-", "abc--1234"],
+)
+def test_resolve_explicit_label_variants_normalise_to_same_slug(
+    fleet_home, sample_registry_text, raw_label
+):
+    """Underscores, spaces, leading/trailing dashes, and a doubled dash (which
+    would otherwise be a hard validate_part rejection as the id separator)
+    all normalise to the same slug."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "main", label=raw_label)
+
+    assert resolved.label == "abc-1234"
+
+
+def test_resolve_already_valid_label_passes_through_unchanged(fleet_home, sample_registry_text):
+    """An already-canonical label is not surprise-rewritten (byte-identical)."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "main", label="already-canonical")
+
+    assert resolved.label == "already-canonical"
+
+
+def test_resolve_label_that_slugifies_to_empty_raises_naming_original(
+    fleet_home, sample_registry_text
+):
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    with pytest.raises(RegistryError) as exc_info:
+        registry.resolve("demo", "default", "main", label="!!!")
+
+    assert "'!!!'" in str(exc_info.value)
+
+
+def test_resolve_label_normalisation_still_enforces_instance_id_length_limit(
+    fleet_home, sample_registry_text
+):
+    """slugify() must not quietly bypass the 63-char DNS label limit that
+    instance_id() enforces."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    with pytest.raises(RegistryError):
+        registry.resolve("demo", "default", "main", label="X" * 80)
+
+
 def test_registry_properties(fleet_home, sample_registry_text):
     path = _write(fleet_home / "fleet.yml", sample_registry_text)
     registry = Registry.load(path)

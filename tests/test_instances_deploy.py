@@ -144,6 +144,33 @@ def test_deploy_label_defaults_to_slugified_branch(fleet_home, git_repo):
     assert (paths.instances / "demo--main").exists()
 
 
+def test_deploy_logs_label_normalisation_when_explicit_label_changes(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="ABC-1234", runner=runner
+    )
+
+    assert url == "https://demo--abc-1234.fleet.example.test"
+    deploy_log = paths.logs / "demo--abc-1234" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "label 'ABC-1234' normalised to 'abc-1234'" in log_content
+
+
+def test_deploy_does_not_log_normalisation_for_already_canonical_label(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "normalised" not in log_content
+
+
 def test_deploy_missing_branch_without_default_raises(fleet_home, git_repo):
     """`demo` in _registry_text() sets default_template but no default_branch,
     so omitting branch (with template explicitly given) must exercise the

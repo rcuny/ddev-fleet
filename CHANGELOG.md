@@ -43,6 +43,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (first-run) and `docs/operations.md` (ongoing).
 - The dashboard admin password is no longer a fixed default — the
   installer always generates or prompts for one.
+- `fleet deploy --label` / the web UI's Label field is now normalised
+  (slugified) instead of rejected: lowercased, non-alphanumeric runs
+  collapsed to a single `-`, leading/trailing `-` stripped (e.g.
+  `--label=ABC-1234` → `abc-1234`) — matching the existing behaviour for a
+  branch-derived label. The deploy log records when an explicit label was
+  changed by this normalisation.
 
 ### Removed
 - `ansible/group_vars/all.yml`'s `fleet_admin_default_password: ddev-admin`

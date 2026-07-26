@@ -219,6 +219,12 @@ def deploy(
             f"deploy start: project={project} template={resolved.template} "
             f"label={resolved.label} branch={resolved.branch}",
         )
+        if label and label != resolved.label:
+            _append_log(
+                deploy_log,
+                f"label {label!r} normalised to {resolved.label!r} (instance ids "
+                "must be lowercase DNS labels)",
+            )
         if clone_result is not None:
             for line in clone_result.lines:
                 _append_log(deploy_log, line)

@@ -118,7 +118,20 @@ Full runbook: `docs/networking.md` §6.
 
 Each key under `projects:` is a project id (same naming rule as port names:
 `[a-z0-9]([a-z0-9-]*[a-z0-9])?`, no `--` — reserved as the
-`<project>--<label>` instance-id separator).
+`<project>--<label>` instance-id separator). Project and template keys are
+registry-authored and are **not** normalised — an invalid key here is a
+loud `RegistryError`, since it means a typo in the file you hand-author.
+
+The instance **label** (`fleet deploy --label=<name>` / the web UI's Label
+field, or the slugified branch when no label is given) is different: it is
+user-supplied per-deploy, so `Registry.resolve()` normalises it instead of
+rejecting it — lowercased, every run of non-`[a-z0-9]` characters collapsed
+to a single `-`, leading/trailing `-` stripped. `--label=ABC-1234` resolves
+to the instance label `abc-1234`; a label that normalises to empty (e.g.
+`"!!!"`) still raises. When a deploy's explicit label was changed by this
+normalisation, `fleet deploy`'s log records the substitution (e.g. `label
+'ABC-1234' normalised to 'abc-1234' (instance ids must be lowercase DNS
+labels)`).
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|

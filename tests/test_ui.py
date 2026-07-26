@@ -492,6 +492,44 @@ def test_ws_log_js_exposes_socket_reference_for_bulk_js_to_close(fleet_home):
     assert "_wsSocket" in body
 
 
+def test_ws_log_js_implements_stick_to_bottom_scroll_behaviour(fleet_home):
+    # Regression guard for the "log jumps to the top every 2s, then back to
+    # the bottom" bug: the fix needs a stickiness threshold, a handler that
+    # preserves scroll position across the htmx polling swap, and a guard so
+    # the restore doesn't clobber its own state via the scroll event it
+    # triggers. Assert the pieces are present rather than trying to drive an
+    # actual browser (none is available in this environment).
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get("/static/ws-log.js")
+    body = response.text
+
+    assert response.status_code == 200
+    assert "htmx:beforeSwap" in body
+    assert "STICK_THRESHOLD" in body
+    assert "_wsRestoring" in body
+    assert "requestAnimationFrame" in body
+
+
+def test_ws_log_js_onmessage_autoscroll_is_conditional_on_stuck_state(fleet_home):
+    # The original bug's other half: socket.onmessage unconditionally did
+    # `el.scrollTop = el.scrollHeight;`, yanking the view to the bottom on
+    # every line even if the user had scrolled up. Assert that bare,
+    # unconditional form no longer appears in the message handler — the
+    # fixed version gates it behind an `if (el._wsStuck)` check. Match on the
+    # statement with any leading whitespace so this doesn't break on
+    # reformatting, but still fail if the guard is ever removed.
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/static/ws-log.js").text
+
+    assert re.search(r"onmessage\s*=\s*function", body)
+    assert not re.search(r"\n\s*el\.scrollTop = el\.scrollHeight;\s*\n", body)
+    assert "if (el._wsStuck) el.scrollTop = el.scrollHeight;" in body
+
+
 def test_base_html_includes_bulk_js_script_tag(fleet_home):
     _setup_fleet_home(fleet_home)
     client = TestClient(create_app(fleet_home))
@@ -575,10 +613,24 @@ def test_base_html_includes_ui_errors_js_script_tag(fleet_home):
 # --- Deploy-error visibility (htmx 1.9.12 doesn't swap non-2xx responses) ---
 
 
-def test_ui_deploy_invalid_label_hx_request_returns_html_error(fleet_home):
-    _setup_fleet_home(fleet_home)
-    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+def test_ui_deploy_normalises_a_non_dns_safe_label_instead_of_rejecting_it(fleet_home, monkeypatch):
+    """A ticket key typed into the Label field is slugified, not refused.
 
+    `OAKS-1781` is the natural thing to type, and it used to 400 with a regex
+    the operator had to decode. It is now normalised to `oaks-1781` — see
+    `core/registry.py:resolve`. The uppercase form still reaches the tty
+    commands, because `[[issue-id]]` matching is case-insensitive and
+    uppercases its result (`core/tokens.py:extract_issue_id`)."""
+    from fleet import daemon as daemon_mod
+
+    _setup_fleet_home(fleet_home)
+
+    def fake_deploy(*args, **kwargs):
+        return "https://demo--oaks-1781.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "deploy", fake_deploy)
+
+    client = TestClient(create_app(fleet_home))
     response = client.post(
         "/ui/deploy",
         data={
@@ -590,16 +642,13 @@ def test_ui_deploy_invalid_label_hx_request_returns_html_error(fleet_home):
         headers={"HX-Request": "true"},
     )
 
-    assert response.status_code == 400
-    # Jinja2 autoescapes the message into the HTML body (partials/error.html
-    # has no `|safe`), so the apostrophes come back as `&#39;` entities —
-    # assert on the un-quoted substrings rather than the raw message string.
-    assert "invalid name" in response.text
-    assert "OAKS-1781" in response.text
-    assert "application/json" not in response.headers["content-type"]
+    assert response.status_code == 200
+    assert "demo--oaks-1781" in response.text
 
 
-def test_ui_deploy_invalid_label_without_hx_request_returns_json(fleet_home):
+def test_ui_deploy_unslugifiable_label_hx_request_returns_html_error(fleet_home):
+    """A label that survives slugification as an empty string is still a hard
+    error — normalisation rescues odd input, it does not invent a name."""
     _setup_fleet_home(fleet_home)
     client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
 
@@ -609,12 +658,36 @@ def test_ui_deploy_invalid_label_without_hx_request_returns_json(fleet_home):
             "project": "demo",
             "template": "default",
             "branch": "main",
-            "label": "OAKS-1781",
+            "label": "!!!",
+        },
+        headers={"HX-Request": "true"},
+    )
+
+    assert response.status_code == 400
+    # Jinja2 autoescapes the message into the HTML body (partials/error.html
+    # has no `|safe`), so the apostrophes come back as `&#39;` entities —
+    # assert on the un-quoted substrings rather than the raw message string.
+    assert "cannot slugify" in response.text
+    assert "!!!" in response.text
+    assert "application/json" not in response.headers["content-type"]
+
+
+def test_ui_deploy_unslugifiable_label_without_hx_request_returns_json(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+
+    response = client.post(
+        "/ui/deploy",
+        data={
+            "project": "demo",
+            "template": "default",
+            "branch": "main",
+            "label": "!!!",
         },
     )
 
     assert response.status_code == 400
-    assert "invalid name 'OAKS-1781'" in response.json()["error"]
+    assert "cannot slugify '!!!'" in response.json()["error"]
 
 
 def test_ui_deploy_mismatched_project_template_hx_request_returns_html_error(fleet_home):
