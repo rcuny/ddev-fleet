@@ -551,3 +551,41 @@ def test_reset_window_evens_bash_panes_end_to_end():
     joined = _joined(fake)
     assert f"tmux resize-pane -t %22 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar fixed
     assert "tmux resize-pane -t %20 -x 25" in joined  # bash-even, (100-50)//2=25
+
+
+def test_ensure_general_layout_adds_second_bash_pane():
+    home = Path("/srv/fleet")
+    role_fmt = "#{pane_id}\t#{" + tmux.SIDEBAR_ROLE_OPT + "}"
+    fake = FakeRunner(
+        scripted={
+            # sidebar already present -> ensure_sidebar no-ops
+            f"tmux list-panes -t fleet:general -F #{{{tmux.SIDEBAR_ROLE_OPT}}}": RunResult(
+                0, [tmux.SIDEBAR_ROLE, ""]
+            ),
+            # one sidebar pane + one bash pane -> needs a second bash pane
+            f"tmux list-panes -t fleet:general -F {role_fmt}": RunResult(
+                0, ["%1\t" + tmux.SIDEBAR_ROLE, "%2\t"]
+            ),
+        }
+    )
+    tmux.ensure_general_layout(home, runner=fake)
+    joined = _joined(fake)
+    assert "tmux split-window -h -t %2 -c " + str(home) in joined
+
+
+def test_ensure_general_layout_no_split_when_two_bash_panes():
+    home = Path("/srv/fleet")
+    role_fmt = "#{pane_id}\t#{" + tmux.SIDEBAR_ROLE_OPT + "}"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:general -F #{{{tmux.SIDEBAR_ROLE_OPT}}}": RunResult(
+                0, [tmux.SIDEBAR_ROLE, "", ""]
+            ),
+            f"tmux list-panes -t fleet:general -F {role_fmt}": RunResult(
+                0, ["%1\t" + tmux.SIDEBAR_ROLE, "%2\t", "%3\t"]
+            ),
+        }
+    )
+    tmux.ensure_general_layout(home, runner=fake)
+    joined = _joined(fake)
+    assert not any(c.startswith("tmux split-window -h -t %") for c in joined)

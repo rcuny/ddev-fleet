@@ -183,12 +183,31 @@ def ensure_session(home: Path, *, runner=run_streamed) -> None:
         runner,
         ["set-window-option", "-t", f"{SESSION}:{GENERAL_WINDOW}", "automatic-rename", "off"],
     )
-    ensure_sidebar(GENERAL_WINDOW, runner=runner)
+    ensure_general_layout(home, runner=runner)
     apply_settings(runner=runner)  # new session
+
+
+def ensure_general_layout(home: Path, *, runner=run_streamed) -> None:
+    """Give the `general` window the same 3-pane layout as instance windows: the
+    left sidebar plus TWO bash panes, so a human can run e.g. Claude in the
+    second bash pane. Idempotent and non-destructive: the second bash pane is
+    added only when the window currently has a single bash pane, so a human who
+    has split it further is left alone. Safe to call on every `fleet tmux`
+    reconcile — that is how an already-running session gains the second pane."""
+    ensure_sidebar(GENERAL_WINDOW, runner=runner)
+    bash_panes = [
+        pane_id
+        for pane_id, role in _list_panes_with_roles(GENERAL_WINDOW, runner=runner)
+        if role != SIDEBAR_ROLE
+    ]
+    if len(bash_panes) == 1:
+        _run(runner, ["split-window", "-h", "-t", bash_panes[0], "-c", str(home)])
+    apply_pane_layout(GENERAL_WINDOW, runner=runner)
 
 
 def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
     ensure_session(paths.home, runner=runner)
+    ensure_general_layout(paths.home, runner=runner)  # heal an already-running session
     for instance_id in sorted(instance_ids):
         ensure_instance_window(instance_id, paths.instances / instance_id, runner=runner)
     for window in list_window_names(runner=runner):
