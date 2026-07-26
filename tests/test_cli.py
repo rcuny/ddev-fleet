@@ -1348,6 +1348,79 @@ def test_tmux_dispatch_reconciles_and_attaches(fleet_home, monkeypatch):
     assert seen["attached"] is True
 
 
+def test_tmux_dispatch_passes_a_tty_for_resolver(fleet_home, monkeypatch):
+    """`fleet tmux` must load the registry and pass a `tty_for` callable into
+    `reconcile()` — not None — when the registry loads fine."""
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    seen = {}
+    monkeypatch.setattr(
+        cli.tmux_mod,
+        "reconcile",
+        lambda paths, ids, **kw: seen.setdefault("tty_for", kw.get("tty_for")),
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    assert callable(seen["tty_for"])
+    assert seen["attached"] is True
+
+
+def test_tmux_dispatch_tty_for_resolves_a_plan(fleet_home, monkeypatch):
+    """The `tty_for` resolver passed to `reconcile()` must actually resolve
+    an instance id to a `(tty1, tty2)` tuple via `ttycmds.plan_for_instance`,
+    and print any skipped-command warnings to stderr."""
+    _write_minimal_registry(fleet_home)
+    captured = {}
+    monkeypatch.setattr(
+        cli.tmux_mod,
+        "reconcile",
+        lambda paths, ids, **kw: captured.setdefault("tty_for", kw.get("tty_for")),
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: None)
+
+    from fleet.core.ttycmds import TtyPlan
+
+    monkeypatch.setattr(
+        cli.ttycmds,
+        "plan_for_instance",
+        lambda registry, paths, instance_id: TtyPlan(
+            tty1=["echo one"], tty2=[], skipped=["skipped tty2 (unresolved [[issue-id]]): echo"]
+        ),
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    result = captured["tty_for"]("demo--develop")
+    assert result == (["echo one"], [])
+
+
+def test_tmux_dispatch_survives_broken_registry(fleet_home, monkeypatch, capsys):
+    """A registry that fails to load (here: no fleet.yml at all, so
+    `Registry.load` raises `RegistryError`) must not break `fleet tmux` — it
+    should warn to stderr and fall back to tty_for=None, while still
+    reconciling and attaching."""
+    # Deliberately no _write_minimal_registry() call — paths.registry does
+    # not exist, so Registry.load() raises RegistryError (a FleetError).
+    seen = {}
+    monkeypatch.setattr(
+        cli.tmux_mod,
+        "reconcile",
+        lambda paths, ids, **kw: seen.setdefault("tty_for", kw.get("tty_for")),
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    assert seen["tty_for"] is None
+    assert seen["attached"] is True
+    assert "warning" in capsys.readouterr().err.lower()
+
+
 def test_tmux_sidebar_dispatch(fleet_home, monkeypatch):
     _write_minimal_registry(fleet_home)
     seen = {}

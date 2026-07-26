@@ -59,9 +59,10 @@ def test_deploy_adds_tmux_tab_when_session_exists(monkeypatch, tmp_path):
 
     monkeypatch.setattr(instances.tmux, "session_exists", lambda *, runner=None: True)
 
-    def fake_ensure(instance_id, instance_dir, *, runner=None):
+    def fake_ensure(instance_id, instance_dir, *, tty=None, runner=None):
         calls["instance_id"] = instance_id
         calls["instance_dir"] = instance_dir
+        calls["tty"] = tty
 
     monkeypatch.setattr(instances.tmux, "ensure_instance_window", fake_ensure)
 
@@ -75,6 +76,80 @@ def test_deploy_adds_tmux_tab_when_session_exists(monkeypatch, tmp_path):
     assert url == "https://demo--develop.fleet.example.test"
     assert calls["instance_id"] == "demo--develop"
     assert calls["instance_dir"] == paths.instances / "demo--develop"
+    # The template resolved by _fake_registry() carries no tty1/tty2, so the
+    # plan is empty — tty must be None (not an empty tuple), the sentinel
+    # that keeps ensure_instance_window()'s existing no-tty code path intact.
+    assert calls["tty"] is None
+
+
+def test_deploy_passes_resolved_tty_commands_to_ensure_instance_window(monkeypatch, tmp_path):
+    monkeypatch.setattr(instances.tmux, "session_exists", lambda *, runner=None: True)
+
+    calls = {}
+
+    def fake_ensure(instance_id, instance_dir, *, tty=None, runner=None):
+        calls["tty"] = tty
+
+    monkeypatch.setattr(instances.tmux, "ensure_instance_window", fake_ensure)
+
+    _stub_deploy_collaborators(monkeypatch, instances)
+
+    paths = instances.FleetPaths.from_home(tmp_path)
+    registry = _fake_registry(tty1=["ddev exec claude /jira"], tty2=["ddev drush watchdog:tail"])
+
+    url = instances.deploy(paths, registry, "demo", runner=_fake_runner)
+
+    assert url == "https://demo--develop.fleet.example.test"
+    assert calls["tty"] == (["ddev exec claude /jira"], ["ddev drush watchdog:tail"])
+
+
+def test_deploy_logs_skipped_tty_commands_and_still_succeeds(monkeypatch, tmp_path):
+    """An unresolvable tty command (spec's lenient path, decision 2) must
+    NOT fail an otherwise-complete deploy — it's dropped, with a WARNING
+    line in the deploy log, leaving that pane a plain bash shell."""
+    monkeypatch.setattr(instances.tmux, "session_exists", lambda *, runner=None: True)
+    monkeypatch.setattr(instances.tmux, "ensure_instance_window", lambda *a, **k: None)
+
+    _stub_deploy_collaborators(monkeypatch, instances)
+
+    paths = instances.FleetPaths.from_home(tmp_path)
+    # No issue_id_regexp configured for this fake project, so [[issue-id]]
+    # can never resolve — this tty1 command must be skipped.
+    registry = _fake_registry(tty1=["ddev exec claude [[issue-id]]"])
+
+    url = instances.deploy(paths, registry, "demo", runner=_fake_runner)
+
+    assert url == "https://demo--develop.fleet.example.test"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert (
+        "WARNING: skipped tty1 (unresolved [[issue-id]]): ddev exec claude [[issue-id]]"
+        in log_content
+    )
+
+
+def test_deploy_swallows_tty_resolution_errors(monkeypatch, tmp_path):
+    """A failure while RESOLVING the tty plan (not just ensure_instance_window
+    raising) must still only warn — the whole plan_from_template() +
+    ensure_instance_window() sequence lives inside the same best-effort
+    try/except as the rest of the tmux hook."""
+    monkeypatch.setattr(instances.tmux, "session_exists", lambda *, runner=None: True)
+
+    def fail_ensure(*a, **k):
+        raise AssertionError("ensure_instance_window should not be reached")
+
+    monkeypatch.setattr(instances.tmux, "ensure_instance_window", fail_ensure)
+
+    _stub_deploy_collaborators(monkeypatch, instances)
+
+    paths = instances.FleetPaths.from_home(tmp_path)
+    registry = _fake_registry(resolve_raises=RuntimeError("registry blew up"))
+
+    url = instances.deploy(paths, registry, "demo", runner=_fake_runner)
+
+    assert url == "https://demo--develop.fleet.example.test"
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    assert "WARNING: tmux tab update failed" in deploy_log.read_text(encoding="utf-8")
 
 
 def test_deploy_skips_tmux_tab_when_no_session(monkeypatch, tmp_path):
@@ -118,7 +193,13 @@ def _fake_runner(cmd, **kwargs):
     return RunResult(0, [])
 
 
-def _fake_registry():
+def _fake_registry(*, tty1=None, tty2=None, issue_id_regexp=None, resolve_raises=None):
+    """Fake `Registry` used both by `deploy()`'s own pipeline AND (new in
+    step 3) by `ttycmds.plan_from_template()`'s own `registry.resolve()`
+    call — the tmux hook re-resolves the template independently of
+    `resolve_target()` (which the tests below monkeypatch away), so this
+    fake needs a real `resolve()`/`issue_id_regexp()` to feed it."""
+
     class _Registry:
         domain = "fleet.example.test"
 
@@ -146,6 +227,25 @@ def _fake_registry():
 
         def all_port_profiles(self):
             return []
+
+        def issue_id_regexp(self, project):
+            return issue_id_regexp
+
+        def resolve(self, project, template, branch, label=None):
+            if resolve_raises is not None:
+                raise resolve_raises
+            from fleet.core.registry import ResolvedInstance
+
+            return ResolvedInstance(
+                project=project,
+                template=template,
+                branch=branch,
+                label=label or branch,
+                post_deploy=[],
+                instance_id=f"{project}--{label or branch}",
+                tty1=list(tty1 or []),
+                tty2=list(tty2 or []),
+            )
 
     return _Registry()
 

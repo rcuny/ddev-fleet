@@ -10,12 +10,13 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import caddyauth, caddyports, ddev, gitops, tmux, typesense
+from fleet.core import caddyauth, caddyports, ddev, gitops, tmux, ttycmds, typesense
 from fleet.core.errors import (
     CaddyAuthError,
     CaddyPortsError,
     DeployError,
     FleetError,
+    TokenError,
     TypesenseError,
 )
 from fleet.core.fleetconfig import (
@@ -29,7 +30,7 @@ from fleet.core.locks import instance_lock
 from fleet.core.registry import Registry, ResolvedInstance
 from fleet.core.runner import run_streamed
 from fleet.core.secrets import read_secrets, secret_tokens
-from fleet.core.tokens import build_context, env_vars
+from fleet.core.tokens import build_context, env_vars, extract_issue_id, substitute_text
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +80,9 @@ def _append_log(log_path: Path, message: str) -> None:
         fh.write(f"[{_now_iso()}] {message}\n")
 
 
-def _write_instance_yaml(instance_dir: Path, project: str, instance: str, branch: str) -> None:
+def _write_instance_yaml(
+    instance_dir: Path, project: str, instance: str, template: str, branch: str
+) -> None:
     fleet_dir = instance_dir / ".fleet"
     fleet_dir.mkdir(parents=True, exist_ok=True)
     info_path = fleet_dir / "instance.yml"
@@ -90,9 +93,14 @@ def _write_instance_yaml(instance_dir: Path, project: str, instance: str, branch
             existing = _yaml.load(fh) or {}
         created_at = existing.get("created-at", created_at)
 
+    # `template` is what lets a future `fleet tmux` recover this instance's
+    # tty1/tty2 commands from disk alone (core/ttycmds.py:plan_for_instance)
+    # — it reaches new deploys only; instances deployed before this field
+    # existed simply resolve to no tty commands (today's behaviour).
     data = {
         "project": project,
         "instance": instance,
+        "template": template,
         "branch": branch,
         "created-at": created_at,
         "last-deployed-at": _now_iso(),
@@ -314,7 +322,15 @@ def deploy(
             excludes.append(str(injected.relative_to(instance_dir)))
         ensure_git_exclude(instance_dir, excludes)
 
-        context = build_context(project, resolved.label, resolved.branch, registry.domain)
+        context = build_context(
+            project,
+            resolved.label,
+            resolved.branch,
+            registry.domain,
+            issue_id=extract_issue_id(
+                registry.issue_id_regexp(project), resolved.label, resolved.branch
+            ),
+        )
         project_secrets = read_secrets(paths.project_secrets / f"{project}.env")
         context.update(secret_tokens(project_secrets))
         copied = assets_mod.inject(paths.assets / project, instance_dir, context, runner=runner)
@@ -360,8 +376,16 @@ def deploy(
 
         env = env_vars(context)
         for command in resolved.post_deploy:
+            # STRICT substitution, unlike tty1/tty2 below: a post_deploy
+            # command is deploy-critical, so silently skipping it (the tty
+            # commands' lenient behaviour) would be worse than failing loudly
+            # — matches the existing rule that a non-zero exit aborts deploy.
+            try:
+                substituted = substitute_text(command, context)
+            except TokenError as exc:
+                raise DeployError(f"post_deploy command {command!r} has {exc.message}") from exc
             result = runner(
-                ["bash", "-c", command],
+                ["bash", "-c", substituted],
                 cwd=instance_dir,
                 env=env,
                 log_path=deploy_log,
@@ -371,12 +395,27 @@ def deploy(
                     f"post_deploy command {command!r} failed with exit code {result.returncode}"
                 )
 
-        _write_instance_yaml(instance_dir, project, resolved.label, resolved.branch)
+        _write_instance_yaml(
+            instance_dir, project, resolved.label, resolved.template, resolved.branch
+        )
         _append_log(deploy_log, "deploy complete")
 
     try:
         if tmux.session_exists(runner=runner):
-            tmux.ensure_instance_window(inst_id, instance_dir, runner=runner)
+            # LENIENT substitution here (decision 2 in the design doc): an
+            # unresolvable tty command must not fail a deploy that otherwise
+            # completed — it's just skipped, with a WARNING in the deploy
+            # log, leaving that pane as a plain bash shell. Resolution itself
+            # (registry/secrets lookups included) stays inside this whole
+            # try/except, so any failure here — not just ensure_instance_window
+            # raising — only ever warns, never fails a completed deploy.
+            plan = ttycmds.plan_from_template(
+                registry, paths, project, resolved.label, resolved.branch, resolved.template
+            )
+            for line in plan.skipped:
+                _append_log(deploy_log, f"WARNING: {line}")
+            tty = None if plan.is_empty else (plan.tty1, plan.tty2)
+            tmux.ensure_instance_window(inst_id, instance_dir, tty=tty, runner=runner)
     except Exception as exc:  # noqa: BLE001 - tmux tab is best-effort
         _append_log(deploy_log, f"WARNING: tmux tab update failed: {exc}")
 

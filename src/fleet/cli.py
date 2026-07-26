@@ -12,7 +12,7 @@ from ruamel.yaml import YAML
 from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
 from fleet.core import bulk as bulk_mod
-from fleet.core import caddyauth, caddyports, ddev, fleetconfig
+from fleet.core import caddyauth, caddyports, ddev, fleetconfig, ttycmds
 from fleet.core import instances as instances_mod
 from fleet.core import reboot as reboot_mod
 from fleet.core import shell as shell_mod
@@ -766,8 +766,36 @@ def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run
 def _cmd_tmux(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     ids = shell_mod.list_instance_ids(paths)
-    tmux_mod.reconcile(paths, ids)
+    tmux_mod.reconcile(paths, ids, tty_for=_tty_resolver(paths))
     tmux_mod.attach()
+
+
+def _tty_resolver(paths: instances_mod.FleetPaths):
+    """Build the `tty_for` callable `reconcile()` calls lazily, once per
+    newly-created window. A registry that fails to load (missing/malformed
+    fleet.yml) must not break `fleet tmux` — the whole point of the
+    workspace is to let the operator get IN and fix things — so this warns
+    and falls back to None (every window starts as a plain bash shell)
+    rather than raising."""
+    try:
+        registry = Registry.load(paths.registry)
+    except FleetError as exc:
+        print(
+            f"warning: fleet tmux could not load the registry ({exc.message}); "
+            "instance windows will start as plain shells",
+            file=sys.stderr,
+        )
+        return None
+
+    def tty_for(instance_id: str) -> tuple[list[str], list[str]] | None:
+        plan = ttycmds.plan_for_instance(registry, paths, instance_id)
+        for line in plan.skipped:
+            print(f"warning: {line}", file=sys.stderr)
+        if plan.is_empty:
+            return None
+        return (plan.tty1, plan.tty2)
+
+    return tty_for
 
 
 def _cmd_tmux_sidebar(fleet_home: Path, args: argparse.Namespace) -> None:

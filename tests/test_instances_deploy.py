@@ -252,6 +252,27 @@ def test_deploy_with_claude_token_injects_it(fleet_home, git_repo):
     assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-test" in config_content
 
 
+def test_instance_yaml_records_template_with_key_order(fleet_home, git_repo):
+    """`.fleet/instance.yml` gains a `template:` key (spec: it's what lets a
+    later `fleet tmux` recover an instance's tty commands from disk alone),
+    in the documented key order: project, instance, template, branch,
+    created-at, last-deployed-at."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    info_path = paths.instances / "demo--develop" / ".fleet" / "instance.yml"
+    keys = [
+        line.split(":", 1)[0].strip()
+        for line in info_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert keys == ["project", "instance", "template", "branch", "created-at", "last-deployed-at"]
+    assert "template: default" in info_path.read_text(encoding="utf-8")
+
+
 def test_instance_yaml_created_at_survives_redeploy(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     instances.deploy(
@@ -796,6 +817,141 @@ def test_deploy_without_any_dump_still_succeeds(fleet_home, git_repo):
     instance_dir = paths.instances / "demo--develop"
     assert not (instance_dir / "dumps").exists()
     assert (instance_dir / ".env").read_text(encoding="utf-8") == "PROJECT=demo\n"
+
+
+# --- post_deploy [[token]] substitution + [[issue-id]] (spec's "two
+# deliberate paths": post_deploy is STRICT, tty1/tty2 is lenient) ---
+
+
+def test_post_deploy_command_is_token_substituted_before_bash(fleet_home, git_repo):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    templates:
+      default:
+        post_deploy:
+          - echo [[instance-fqdn]]
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert len(bash_calls) == 1
+    assert bash_calls[0]["cmd"] == ["bash", "-c", "echo demo--develop.fleet.example.test"]
+
+
+def test_post_deploy_unresolved_token_raises_deploy_error_and_stops(fleet_home, git_repo):
+    """Strict on purpose (unlike tty1/tty2): a post_deploy command is
+    deploy-critical, so an unresolved [[token]] must abort the deploy with
+    an actionable DeployError, naming the offending command and token(s) —
+    and no LATER post_deploy command may run."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    templates:
+      default:
+        post_deploy:
+          - ddev init [[issue-id]]
+          - echo should-not-run
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    with pytest.raises(
+        DeployError,
+        match=r"post_deploy command 'ddev init \[\[issue-id\]\]' has unresolved token\(s\): "
+        r"\[\[issue-id\]\]",
+    ):
+        instances.deploy(
+            paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+        )
+
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert bash_calls == []  # neither post_deploy command ran
+
+
+def test_post_deploy_env_includes_fleet_issue_id_when_regexp_matches(fleet_home, git_repo):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    issue_id_regexp: "(?i)OAKS-[0-9]+"
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="oaks-1781", runner=runner
+    )
+
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert bash_calls[0]["env"]["FLEET_ISSUE_ID"] == "oaks-1781"
+
+
+def test_post_deploy_env_omits_fleet_issue_id_when_no_match(fleet_home, git_repo):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    issue_id_regexp: "(?i)OAKS-[0-9]+"
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    # Neither the label nor the branch matches OAKS-[0-9]+, so [[issue-id]]
+    # must be absent from the context and FLEET_ISSUE_ID absent from env.
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="test2", runner=runner
+    )
+
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert "FLEET_ISSUE_ID" not in bash_calls[0]["env"]
 
 
 # --- per-instance Caddy basic auth (default ON) ---
