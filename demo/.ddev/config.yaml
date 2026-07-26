@@ -1,0 +1,13 @@
+# Generic ddev-fleet demo project — the simplest thing the fleet can deploy.
+#
+# The fleet overrides `name` per instance (via the fleet-owned
+# .ddev/config.fleet.yaml it writes at deploy time), so the value here is just a
+# placeholder. No database: a static PHP landing page needs none, which keeps
+# the demo fast to deploy and light on RAM. This is deliberately the minimal
+# shape of a fleet-deployable project — copy it as a starting point.
+name: ddev-fleet-demo
+type: php
+docroot: web
+php_version: "8.3"
+webserver_type: nginx-fpm
+omit_containers: [db]

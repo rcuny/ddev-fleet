@@ -1,4 +1,9 @@
 # Example fleet registry. Copy to your private config repo as fleet.yml and edit.
+#
+# NOTE: a fresh install auto-seeds a bundled `demo` project (from the repo's
+# demo/ dir, built into file:///srv/fleet/_demo.git) into the *seeded* registry,
+# so `fleet deploy demo` works out of the box. This .dist file is the template
+# for your OWN registry; drop the demo once you have real projects.
 fleet:
   domain: fleet.example.com
   # ports:                                  # fleet-wide named-port catalogue (optional, see docs/networking.md)
