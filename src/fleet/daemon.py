@@ -376,6 +376,28 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         await asyncio.to_thread(instances_mod.destroy, paths, registry, instance_id)
         return HTMLResponse("")
 
+    @app.post("/ui/instances/{instance_id}/redeploy")
+    async def ui_redeploy(request: Request, instance_id: str):
+        # A redeploy destroys the instance before rebuilding it, so — like
+        # `/ui/deploy` — it is long-running and must return a job panel with
+        # a live log, NOT the row: the row-swapping start/stop/destroy routes
+        # above are all fast, fire-and-forget operations, but this one isn't.
+        # Follows `/ui/deploy`'s single-instance job submission exactly
+        # (log_path, app.state.jobs.submit, _job_ws_token, job_panel.html) so
+        # the two forms of "long job with a live log" never drift apart.
+        _validate_instance_id(instance_id)
+        paths, registry = _paths_and_registry()
+        log_path = str(paths.logs / instance_id / "deploy.log")
+
+        def run_redeploy():
+            return instances_mod.redeploy(paths, registry, instance_id)
+
+        job = await app.state.jobs.submit("redeploy", instance_id, run_redeploy, log_path=log_path)
+        ws_token = _job_ws_token(app.state.ws_secret, job)
+        return templates.TemplateResponse(
+            request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
+        )
+
     @app.post("/ui/deploy")
     async def ui_deploy(
         request: Request,
@@ -384,7 +406,6 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         branch: str = Form(""),
         label: str = Form(""),
         count: int = Form(1),
-        fresh: str = Form(""),
         auth: str = Form(""),
         auth_password: str = Form(""),
         skip_disk_check: str = Form(""),
@@ -409,7 +430,6 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                     template or None,
                     branch=branch or None,
                     label=label or None,
-                    fresh=bool(fresh),
                     # HTML checkboxes submit NOTHING when unchecked — `auth`
                     # arrives as "" (Form default) in that case, and bool("") is
                     # False, so an unchecked box means auth OFF, not a silent
@@ -451,7 +471,6 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 branch=branch or None,
                 label=label or None,
                 count=count,
-                fresh=bool(fresh),
                 auth_enabled=bool(auth),
                 auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
                 skip_disk_check=True,  # already checked synchronously above
@@ -536,6 +555,41 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             return json.dumps(final)
 
         job = await app.state.jobs.submit("bulk-destroy", "", run_bulk, instance_ids=instance_id)
+        job_holder["job"] = job
+        ws_token = _job_ws_token(app.state.ws_secret, job)
+        return templates.TemplateResponse(
+            request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}
+        )
+
+    @app.post("/ui/bulk/redeploy")
+    async def ui_bulk_redeploy(request: Request, instance_id: list[str] = Form(...)):
+        # Closest analogue is /ui/bulk/destroy above (destructive, job +
+        # bulk_progress) — but unlike bulk destroy, the confirmation on the
+        # button itself is a plain hx-confirm (instances.html), not the
+        # typed-count flow, so there is no confirm_count to check here.
+        # Sequential, like bulk destroy and multi_deploy — a redeploy is a
+        # full destroy + clone + DB import per instance.
+        paths, registry = _paths_and_registry()
+        job_holder: dict[str, object] = {}
+
+        def on_progress(progress: dict) -> None:
+            job_holder["job"].detail = json.dumps(progress)
+
+        def run_bulk():
+            outcome = bulk_mod.run_sequential(
+                paths,
+                registry,
+                instance_id,
+                instances_mod.redeploy,
+                kind="bulk-redeploy",
+                on_progress=on_progress,
+            )
+            final = _bulk_progress_payload(outcome)
+            if not outcome.all_ok:
+                raise _BulkJobFailed(json.dumps(final))
+            return json.dumps(final)
+
+        job = await app.state.jobs.submit("bulk-redeploy", "", run_bulk, instance_ids=instance_id)
         job_holder["job"] = job
         ws_token = _job_ws_token(app.state.ws_secret, job)
         return templates.TemplateResponse(

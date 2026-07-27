@@ -3,7 +3,15 @@ import errno
 import pytest
 
 from fleet.core.errors import LockHeldError
-from fleet.core.locks import instance_lock
+from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock
+
+
+def test_allocation_lock_id_is_the_original_multideploy_lock_file_name():
+    """MUST stay exactly "_multideploy" — it names an on-disk lock file
+    (see core/locks.py's docstring on ALLOCATION_LOCK_ID). This constant
+    used to be private to core/bulk.py; moving it here must not change the
+    on-disk lock file a running/rolling-out process would use."""
+    assert ALLOCATION_LOCK_ID == "_multideploy"
 
 
 def test_lock_can_be_acquired_and_released(tmp_path):

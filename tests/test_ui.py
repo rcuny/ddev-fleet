@@ -1,8 +1,10 @@
+import inspect
 import re
 import time
 
 from fastapi.testclient import TestClient
 
+from fleet.core import instances as real_instances_mod
 from fleet.daemon import create_app
 from fleet.jobs import Job
 
@@ -189,7 +191,7 @@ def test_ui_deploy_job_progresses_to_succeeded(fleet_home, monkeypatch):
         *,
         branch=None,
         label=None,
-        fresh=False,
+        replace=False,
         force=False,
         auth_enabled=True,
         auth_password="fleet",
@@ -216,6 +218,50 @@ def test_ui_deploy_job_progresses_to_succeeded(fleet_home, monkeypatch):
         time.sleep(0.05)
 
     assert final_state == "succeeded"
+
+
+def test_ui_deploy_call_args_match_real_deploy_signature(fleet_home, monkeypatch):
+    """Regression guard for the 2026-07-27 breakage where daemon.py kept
+    passing `fresh=` after core/instances.py's deploy() renamed that
+    parameter to `replace` — every /ui/deploy job raised TypeError inside
+    the job runner (never surfaced to the caller as an HTTP error, just a
+    'failed' job) and the existing test above didn't catch it because its
+    fake_deploy declares its own explicit signature rather than checking
+    against the real one.
+
+    Binds the daemon's actual call args against
+    `inspect.signature(instances_mod.deploy)` — the REAL function, imported
+    before any monkeypatching — so a future kwarg rename/removal fails this
+    test loudly instead of just marking a job 'failed' silently."""
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    real_sig = inspect.signature(real_instances_mod.deploy)
+
+    def fake_deploy(*args, **kwargs):
+        real_sig.bind(*args, **kwargs)
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "deploy", fake_deploy)
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/deploy",
+        data={"project": "demo", "template": "default", "branch": "main", "label": "develop"},
+    )
+    assert response.status_code == 200
+    job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+    final_state = None
+    for _ in range(50):
+        panel = client.get(f"/ui/jobs/{job_id}/panel")
+        if "succeeded" in panel.text or "failed" in panel.text:
+            final_state = "terminal"
+            break
+        time.sleep(0.05)
+
+    assert final_state == "terminal"
+    assert "succeeded" in panel.text
 
 
 def test_ui_deploy_checkbox_checked_enables_auth_with_given_password(fleet_home, monkeypatch):
@@ -451,6 +497,113 @@ def test_deploy_form_has_skip_disk_check_checkbox(fleet_home):
     body = client.get("/").text
 
     assert 'name="skip_disk_check"' in body
+
+
+def test_deploy_form_no_longer_renders_fresh_checkbox(fleet_home):
+    """`--fresh`/the "Fresh" checkbox is gone (design decision 3,
+    2026-07-27-fleet-redeploy-and-no-overwrite-design.md) — `redeploy`
+    replaces it."""
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert 'name="fresh"' not in body
+
+
+def test_ui_redeploy_creates_job_and_returns_job_panel(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    calls = []
+
+    def fake_redeploy(paths, registry, instance_id, **kw):
+        calls.append(instance_id)
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "redeploy", fake_redeploy)
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post("/ui/instances/demo--develop/redeploy")
+
+    assert response.status_code == 200
+    assert "job-panel-" in response.text
+    job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+    final_state = None
+    for _ in range(50):
+        panel = client.get(f"/ui/jobs/{job_id}/panel")
+        if "succeeded" in panel.text:
+            final_state = "succeeded"
+            break
+        time.sleep(0.05)
+
+    assert final_state == "succeeded"
+    assert calls == ["demo--develop"]
+
+
+def test_ui_redeploy_invalid_instance_id_returns_400(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+
+    # Uppercase fails `_INSTANCE_ID_RE` (`^[a-z0-9][a-z0-9-]*$`) — same
+    # validate-before-touching-anything pattern as ui_stop/ui_start/etc.
+    response = client.post("/ui/instances/Bad_ID/redeploy")
+
+    assert response.status_code == 400
+
+
+def test_ui_bulk_redeploy_creates_job(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    calls = []
+
+    def fake_redeploy(paths, registry, instance_id, **kw):
+        calls.append(instance_id)
+        return f"https://{instance_id}.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "redeploy", fake_redeploy)
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post("/ui/bulk/redeploy", data={"instance_id": ["demo--develop"]})
+
+    assert response.status_code == 200
+    job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+    final_state = None
+    for _ in range(50):
+        panel = client.get(f"/ui/jobs/{job_id}/panel")
+        if "succeeded" in panel.text or "failed" in panel.text:
+            final_state = "terminal"
+            break
+        time.sleep(0.05)
+
+    assert final_state == "terminal"
+    assert calls == ["demo--develop"]
+
+
+def test_instance_row_renders_redeploy_button_targeting_job_panel_slot(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert 'hx-post="/ui/instances/demo--develop/redeploy"' in body
+    # Must target the job-panel slot, NOT the row — a redeploy is
+    # long-running and needs the live log, exactly like a deploy.
+    redeploy_btn = body[body.index('hx-post="/ui/instances/demo--develop/redeploy"') :]
+    assert 'hx-target="#job-panel-slot"' in redeploy_btn[:400]
+    assert "hx-confirm=" in redeploy_btn[:400]
+
+
+def test_bulk_action_bar_renders_redeploy_selected_button(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert 'hx-post="/ui/bulk/redeploy"' in body
 
 
 def test_bulk_js_is_served(fleet_home):

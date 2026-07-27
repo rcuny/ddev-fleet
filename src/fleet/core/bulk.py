@@ -15,7 +15,7 @@ from fleet.core import instances as instances_mod
 from fleet.core import naming, sysinfo
 from fleet.core.caddyauth import DEFAULT_INSTANCE_PASSWORD
 from fleet.core.errors import DiskSpaceError, FleetError, ValidationError
-from fleet.core.locks import instance_lock
+from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock
 from fleet.core.runner import run_streamed
 
 # Matches JobManager's own concurrency=2 (fleet/jobs.py) — a shared constant
@@ -132,9 +132,6 @@ def run_concurrent(
     return BulkOutcome(kind=kind, results=results)
 
 
-_MULTIDEPLOY_LOCK_ID = "_multideploy"
-
-
 def multi_deploy(
     paths,
     registry,
@@ -144,7 +141,6 @@ def multi_deploy(
     branch: str | None = None,
     label: str | None = None,
     count: int = 1,
-    fresh: bool = False,
     force: bool = False,
     auth_enabled: bool = True,
     auth_password: str = DEFAULT_INSTANCE_PASSWORD,
@@ -156,8 +152,9 @@ def multi_deploy(
     (base label = `label`, or the branch slug if omitted — see
     resolve_target) and deploy each one sequentially (spec §5). Validates
     `count`, gates on disk headroom, then holds the fleet-wide
-    `_multideploy` advisory lock for the whole allocate-then-deploy loop so
-    a concurrent multi-deploy can't allocate overlapping ids."""
+    ALLOCATION_LOCK_ID advisory lock (core/locks.py) for the whole
+    allocate-then-deploy loop so a concurrent multi-deploy — or a single
+    deploy() doing its own allocation — can't allocate overlapping ids."""
     if not (0 <= count <= 20):
         raise ValidationError(f"--count must be between 0 and 20 (got {count})")
     if count == 0:
@@ -189,14 +186,22 @@ def multi_deploy(
             resolved_template,
             branch=resolved_branch,
             label=inst_label,
-            fresh=fresh,
+            # This id was JUST allocated (and re-checked above) under our
+            # own hold of ALLOCATION_LOCK_ID, below — deploy() must not try
+            # to allocate (and thus re-lock the SAME lock id from the SAME
+            # process, which flock() does not treat as reentrant) again.
+            # `replace=True` here is not about destroying anything (the
+            # existence check above already guarantees there is nothing to
+            # destroy) — it is purely how a caller that has already
+            # guaranteed a free id tells deploy() to skip allocation.
+            replace=True,
             force=force,
             auth_enabled=auth_enabled,
             auth_password=auth_password,
             runner=runner,
         )
 
-    with instance_lock(paths.locks, _MULTIDEPLOY_LOCK_ID):
+    with instance_lock(paths.locks, ALLOCATION_LOCK_ID):
         existing_ids = (
             {p.name for p in paths.instances.iterdir() if p.is_dir()}
             if paths.instances.exists()

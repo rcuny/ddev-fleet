@@ -274,6 +274,37 @@ def test_multi_deploy_aborts_instance_that_collided_mid_batch(fleet_home, monkey
     assert outcome.results[2].ok is True
 
 
+def test_multi_deploy_no_longer_accepts_fresh_kwarg(fleet_home):
+    """`fresh` was removed from multi_deploy() — the CLI flag that fed it
+    is gone too (a later step). `force` is unaffected."""
+    paths, registry = _make_paths_and_registry(fleet_home)
+
+    with pytest.raises(TypeError):
+        bulk.multi_deploy(paths, registry, "demo", "default", branch="main", count=1, fresh=True)
+
+
+def test_multi_deploy_passes_replace_true_to_deploy_per_instance(fleet_home, monkeypatch):
+    """multi_deploy() has already allocated a guaranteed-free id under its
+    own hold of the allocation lock, so it must call deploy() with
+    replace=True — passing the default (replace=False) would make deploy()
+    try to re-acquire the SAME lock file from inside the same process,
+    which is not reentrant."""
+    paths, registry = _make_paths_and_registry(fleet_home)
+    monkeypatch.setattr(bulk.sysinfo, "check_disk_headroom", lambda *a, **kw: None)
+
+    captured_kwargs = []
+
+    def fake_deploy(paths, registry, project, template, **kw):
+        captured_kwargs.append(kw)
+        return f"https://demo--{kw['label']}.x"
+
+    monkeypatch.setattr(bulk.instances_mod, "deploy", fake_deploy)
+
+    bulk.multi_deploy(paths, registry, "demo", "default", branch="main", label="generic", count=1)
+
+    assert captured_kwargs[0]["replace"] is True
+
+
 def test_multi_deploy_holds_multideploy_lock_during_allocation_and_dispatch(
     fleet_home, monkeypatch
 ):

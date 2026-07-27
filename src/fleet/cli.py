@@ -93,7 +93,6 @@ def _build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("template", nargs="?", default=None)
     deploy_parser.add_argument("--branch", default=None)
     deploy_parser.add_argument("--label", default=None)
-    deploy_parser.add_argument("--fresh", action="store_true")
     deploy_parser.add_argument("--force", action="store_true")
     deploy_parser.add_argument(
         "--no-auth",
@@ -116,6 +115,21 @@ def _build_parser() -> argparse.ArgumentParser:
     destroy_parser = subparsers.add_parser("destroy")
     _add_bulk_target_args(destroy_parser)
     destroy_parser.add_argument("--yes", action="store_true")
+
+    redeploy_parser = subparsers.add_parser("redeploy")
+    _add_bulk_target_args(redeploy_parser)
+    redeploy_parser.add_argument(
+        "--template",
+        default=None,
+        help="override the recorded template (required if none was recorded)",
+    )
+    redeploy_parser.add_argument(
+        "--auth-password",
+        default=None,
+        help="override the recorded basic-auth password (default: reuse what was recorded)",
+    )
+    redeploy_parser.add_argument("--force", action="store_true")
+    redeploy_parser.add_argument("--yes", action="store_true")
 
     start_parser = subparsers.add_parser("start")
     _add_bulk_target_args(start_parser)
@@ -231,6 +245,8 @@ def main(argv: list[str] | None = None) -> int:
             return _cmd_deploy(fleet_home, args)
         elif args.command == "destroy":
             return _cmd_destroy(fleet_home, args)
+        elif args.command == "redeploy":
+            return _cmd_redeploy(fleet_home, args)
         elif args.command == "start":
             return _cmd_start(fleet_home, args)
         elif args.command == "stop":
@@ -353,7 +369,6 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
             args.template,
             branch=args.branch,
             label=args.label,
-            fresh=args.fresh,
             force=args.force,
             auth_enabled=args.auth,
             auth_password=args.auth_password,
@@ -373,7 +388,6 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
         branch=args.branch,
         label=args.label,
         count=args.count,
-        fresh=args.fresh,
         force=args.force,
         auth_enabled=args.auth,
         auth_password=args.auth_password,
@@ -431,6 +445,85 @@ def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:
     outcome = bulk_mod.run_sequential(
         paths, registry, target_ids, instances_mod.destroy, kind="destroy"
     )
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
+
+
+def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
+    """Destroy-then-rebuild-in-place one or more instances. A `redeploy`
+    destroys before it rebuilds, so it mirrors `_cmd_destroy`'s confirmation
+    rule EXACTLY (see that function's comment): a single *explicit* instance
+    id bypasses confirmation entirely; any selector (--all/--project/--state)
+    — or multiple explicit ids — requires --yes (and refuses on a non-TTY
+    without it), even when the selector happens to resolve to exactly one
+    instance, because the user did not name what gets destroyed-and-rebuilt —
+    the selector chose it.
+
+    Bulk execution is sequential (bulk_mod.run_sequential), never
+    run_concurrent — a redeploy is a full destroy + clone + DB import, and
+    running several of those at once on one host is how you exhaust disk
+    mid-batch (same reasoning as multi_deploy())."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = Registry.load(paths.registry)
+    target_ids = _resolve_bulk_targets(paths, registry, args)
+
+    if not target_ids:
+        print("no instances matched the given selector", file=sys.stderr)
+        return 0
+
+    if len(args.instance_id) == 1:
+        url = instances_mod.redeploy(
+            paths,
+            registry,
+            target_ids[0],
+            template=args.template,
+            auth_password=args.auth_password,
+            force=args.force,
+        )
+        print(url)
+        return 0
+
+    if not args.yes:
+        print(f"About to redeploy {len(target_ids)} instances:", file=sys.stderr)
+        for instance_id in target_ids:
+            print(f"  {instance_id}", file=sys.stderr)
+        if not sys.stdin.isatty():
+            raise FleetError(
+                f"refusing to redeploy {len(target_ids)} instances without --yes: "
+                "not an interactive terminal"
+            )
+        answer = input(
+            f"Type {len(target_ids)} to confirm redeploying {len(target_ids)} instances: "
+        )
+        if answer.strip() != str(len(target_ids)):
+            raise FleetError("confirmation did not match; aborted, nothing redeployed")
+
+    # --template/--auth-password (when given) apply to every target in the
+    # selection — a bound closure over `args`, matching how ui_deploy's
+    # inline `run_deploy` closes over its own form fields in daemon.py.
+    def _redeploy_op(paths, registry, instance_id: str, *, runner=run_streamed):
+        return instances_mod.redeploy(
+            paths,
+            registry,
+            instance_id,
+            template=args.template,
+            auth_password=args.auth_password,
+            force=args.force,
+            runner=runner,
+        )
+
+    outcome = bulk_mod.run_sequential(paths, registry, target_ids, _redeploy_op, kind="redeploy")
     for result in outcome.results:
         if result.ok:
             print(f"{result.instance_id}: OK")

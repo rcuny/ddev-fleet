@@ -3,7 +3,7 @@ import subprocess
 import pytest
 
 from fleet.core import caddyauth, instances
-from fleet.core.errors import DirtyWorktreeError, FleetError
+from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult
 from fleet.core.secrets import write_secret
@@ -23,52 +23,21 @@ def _make_paths_and_registry(fleet_home, git_url):
     return paths, registry
 
 
-def test_update_refuses_dirty_worktree_without_force(fleet_home, git_repo):
-    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
-    runner = HybridRunner()
-    instances.deploy(
-        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
-    )
-
-    instance_dir = paths.instances / "demo--develop"
-    (instance_dir / "README.md").write_text("dirty\n", encoding="utf-8")
-
-    with pytest.raises(DirtyWorktreeError):
-        instances.deploy(
-            paths,
-            registry,
-            "demo",
-            "default",
-            branch="main",
-            label="develop",
-            runner=HybridRunner(),
-        )
+# NOTE: two tests used to live here — `test_update_refuses_dirty_worktree_
+# without_force` and `test_update_succeeds_with_force` — covering
+# deploy()'s OLD "an existing instance dir is an update" behaviour
+# (gitops.update(), honouring `force` and DirtyWorktreeError). That
+# behaviour was retired by the 2026-07-27 "deploy never overwrites" design:
+# a plain deploy() now always allocates a fresh id instead of landing on an
+# existing one, so `force`/dirty-worktree-refusal are no longer reachable
+# through deploy() at all (the only way to rebuild an existing id in place
+# is `replace=True`, which unconditionally destroys — it never calls
+# gitops.update()). The underlying gitops.update() dirty/force behaviour is
+# still directly unit-tested in tests/test_gitops.py, independent of
+# deploy() ever reaching it.
 
 
-def test_update_succeeds_with_force(fleet_home, git_repo):
-    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
-    instances.deploy(
-        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
-    )
-
-    instance_dir = paths.instances / "demo--develop"
-    (instance_dir / "README.md").write_text("dirty\n", encoding="utf-8")
-
-    url = instances.deploy(
-        paths,
-        registry,
-        "demo",
-        "default",
-        branch="main",
-        label="develop",
-        force=True,
-        runner=HybridRunner(),
-    )
-    assert url == "https://demo--develop.fleet.example.test"
-    assert (instance_dir / "README.md").read_text(encoding="utf-8") == "hello\n"
-
-
-def test_deploy_fresh_destroys_and_reclones(fleet_home, git_repo):
+def test_deploy_replace_destroys_and_reclones(fleet_home, git_repo):
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
     instances.deploy(
         paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
@@ -85,12 +54,12 @@ def test_deploy_fresh_destroys_and_reclones(fleet_home, git_repo):
         "default",
         branch="main",
         label="develop",
-        fresh=True,
+        replace=True,
         runner=runner,
     )
 
     command_names = [call["cmd"][0] for call in runner.calls]
-    # The fresh destroy's tmux teardown (best-effort `tmux has-session`
+    # The replace destroy's tmux teardown (best-effort `tmux has-session`
     # check, no session in tests) runs first, then `ddev delete`.
     assert command_names[0] == "tmux"
     assert command_names[1] == "ddev"

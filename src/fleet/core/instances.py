@@ -2,6 +2,7 @@
 (spec §5, §6, §11)."""
 
 import logging
+import os
 import shutil
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -10,7 +11,7 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import caddyauth, caddyports, ddev, gitops, tmux, ttycmds, typesense
+from fleet.core import caddyauth, caddyports, ddev, gitops, naming, tmux, ttycmds, typesense
 from fleet.core.errors import (
     CaddyAuthError,
     CaddyPortsError,
@@ -26,7 +27,7 @@ from fleet.core.fleetconfig import (
     write_settings_local,
     write_web_build,
 )
-from fleet.core.locks import instance_lock
+from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock
 from fleet.core.registry import Registry, ResolvedInstance
 from fleet.core.runner import run_streamed
 from fleet.core.secrets import read_secrets, secret_tokens
@@ -81,7 +82,13 @@ def _append_log(log_path: Path, message: str) -> None:
 
 
 def _write_instance_yaml(
-    instance_dir: Path, project: str, instance: str, template: str, branch: str
+    instance_dir: Path,
+    project: str,
+    instance: str,
+    template: str,
+    branch: str,
+    auth_enabled: bool,
+    auth_password: str,
 ) -> None:
     fleet_dir = instance_dir / ".fleet"
     fleet_dir.mkdir(parents=True, exist_ok=True)
@@ -97,16 +104,29 @@ def _write_instance_yaml(
     # tty1/tty2 commands from disk alone (core/ttycmds.py:plan_for_instance)
     # — it reaches new deploys only; instances deployed before this field
     # existed simply resolve to no tty commands (today's behaviour).
+    #
+    # `auth-enabled`/`auth-password` record the basic-auth state THIS
+    # deploy call configured, so a later `redeploy()` can reproduce it
+    # exactly instead of silently falling back to the default (design
+    # decision 5) — instances deployed before this field existed simply
+    # have no recorded auth state, same "reaches new deploys only" pattern
+    # as `template` above.
     data = {
         "project": project,
         "instance": instance,
         "template": template,
         "branch": branch,
+        "auth-enabled": auth_enabled,
+        "auth-password": auth_password,
         "created-at": created_at,
         "last-deployed-at": _now_iso(),
     }
     with open(info_path, "w", encoding="utf-8") as fh:
         _yaml.dump(data, fh)
+    # This file now holds a plaintext credential (auth-password) — 0600 on
+    # EVERY write, not just creation, since a redeploy rewrites it at the
+    # default umask otherwise. Same pattern as core/secrets.py:write_secret.
+    os.chmod(info_path, 0o600)
 
 
 def resolve_target(
@@ -150,7 +170,7 @@ def deploy(
     *,
     branch: str | None = None,
     label: str | None = None,
-    fresh: bool = False,
+    replace: bool = False,
     force: bool = False,
     auth_enabled: bool = True,
     auth_password: str = caddyauth.DEFAULT_INSTANCE_PASSWORD,
@@ -158,6 +178,25 @@ def deploy(
     auth_caddyfile_path: Path | None = None,
     runner=run_streamed,
 ) -> str:
+    """Deploy `project`/`template`/`branch`/`label` to an instance.
+
+    A plain deploy (`replace=False`, the default — every CLI/UI entry
+    point and `multi_deploy()` reach this) NEVER reuses an existing
+    instance id (design decision 1,
+    2026-07-27-fleet-redeploy-and-no-overwrite-design.md): if the resolved
+    label is already taken by a live instance, `naming.allocate_free_label`
+    appends `-1`, `-2`, … until a free one is found — whether the label
+    came from an explicit `label=` or was derived from `branch`.
+
+    `replace=True` is the internal destroy-then-rebuild-IN-PLACE primitive:
+    it skips allocation entirely (landing on the SAME id is the whole
+    point) and, if an instance already exists at the resolved id, destroys
+    it first (see the `_destroy_locked` call below). `redeploy()` (a later
+    step) is its only real caller for that reason. `multi_deploy()` also
+    passes `replace=True`, for a different reason: it has already allocated
+    a guaranteed-free id itself under the same allocation lock, so this
+    function must not try to allocate (and thus re-lock) again.
+    """
     # Resolved at call time (not baked into the parameter default) so tests
     # can redirect every real deploy()/destroy() call away from the real
     # /etc/caddy paths via a single monkeypatch of the caddyauth module
@@ -171,13 +210,57 @@ def deploy(
     )
 
     resolved = resolve_target(registry, project, template, branch, label)
+    slugified_label = resolved.label
+    allocated = False
+
+    if not replace:
+        # Allocation is serialised fleet-wide via the SAME advisory lock
+        # multi_deploy() uses (core/locks.py:ALLOCATION_LOCK_ID) — a single
+        # deploy() and a bulk multi_deploy() must never allocate the same
+        # id.
+        #
+        # The lock is released again as soon as a label is chosen here
+        # (allocate-THEN-lock, rather than nested with the per-instance
+        # instance_lock below): re-entering instance_lock() for the SAME
+        # lock id from inside the same process is NOT reentrant (flock() is
+        # per open-file-description, not per-process — see
+        # tests/test_locks.py::test_nested_lock_on_same_instance_raises_lock_held)
+        # and would raise LockHeldError rather than deadlock — but it's
+        # still wrong, so we simply don't hold both at once. This leaves a
+        # narrow, accepted TOCTOU window: the label chosen here isn't
+        # reflected in a directory listing until this call's OWN clone
+        # actually creates the directory, further down. Two deploys racing
+        # in that window could in theory choose the same id — the
+        # `if instance_dir.exists(): gitops.update(...)` branch below
+        # exists partly to degrade that (extremely rare) race safely
+        # rather than corrupt state.
+        with instance_lock(paths.locks, ALLOCATION_LOCK_ID):
+            # A directory that exists but has no `.git` is a partial/failed
+            # -destroy stub (see the recovered_stub handling below), not a
+            # live instance occupying this id. Excluding it here is what
+            # keeps the stub-recovery path reachable — otherwise a leftover
+            # stub would permanently "occupy" its id and every subsequent
+            # deploy attempt would allocate an ever-growing suffix instead
+            # of ever cleaning it up.
+            existing_ids = (
+                {p.name for p in paths.instances.iterdir() if p.is_dir() and (p / ".git").is_dir()}
+                if paths.instances.exists()
+                else set()
+            )
+            allocated_label = naming.allocate_free_label(existing_ids, project, slugified_label)
+        if allocated_label != slugified_label:
+            resolved = registry.resolve(
+                project, resolved.template, resolved.branch, label=allocated_label
+            )
+            allocated = True
+
     inst_id = resolved.instance_id
     instance_dir = paths.instances / inst_id
     # Central, destroy-proof location — see FleetPaths.logs docstring above.
     deploy_log = paths.logs / inst_id / "deploy.log"
 
     with instance_lock(paths.locks, inst_id):
-        if fresh and instance_dir.exists():
+        if replace and instance_dir.exists():
             _destroy_locked(
                 paths,
                 inst_id,
@@ -219,11 +302,17 @@ def deploy(
             f"deploy start: project={project} template={resolved.template} "
             f"label={resolved.label} branch={resolved.branch}",
         )
-        if label and label != resolved.label:
+        if label and label != slugified_label:
             _append_log(
                 deploy_log,
-                f"label {label!r} normalised to {resolved.label!r} (instance ids "
+                f"label {label!r} normalised to {slugified_label!r} (instance ids "
                 "must be lowercase DNS labels)",
+            )
+        if allocated:
+            _append_log(
+                deploy_log,
+                f"label {slugified_label!r} already in use — allocated {resolved.label!r} "
+                "instead (deploy never overwrites an existing instance)",
             )
         if clone_result is not None:
             for line in clone_result.lines:
@@ -402,7 +491,13 @@ def deploy(
                 )
 
         _write_instance_yaml(
-            instance_dir, project, resolved.label, resolved.template, resolved.branch
+            instance_dir,
+            project,
+            resolved.label,
+            resolved.template,
+            resolved.branch,
+            auth_enabled,
+            auth_password,
         )
         _append_log(deploy_log, "deploy complete")
 
@@ -426,6 +521,131 @@ def deploy(
         _append_log(deploy_log, f"WARNING: tmux tab update failed: {exc}")
 
     return f"https://{inst_id}.{registry.domain}"
+
+
+def redeploy(
+    paths: FleetPaths,
+    registry: Registry,
+    instance_id: str,
+    *,
+    template: str | None = None,
+    auth_password: str | None = None,
+    force: bool = False,
+    runner=run_streamed,
+) -> str:
+    """Destroy-and-rebuild `instance_id` IN PLACE, recovering its original
+    project/template/branch/label/auth parameters from
+    `<instance_dir>/.fleet/instance.yml` instead of requiring the caller to
+    re-supply them (design decision 2,
+    2026-07-27-fleet-redeploy-and-no-overwrite-design.md).
+
+    `deploy(replace=True)` is the PRIMITIVE that actually destroys and
+    rebuilds an instance at a fixed id; `redeploy()` is the operator-facing
+    OPERATION built on top of it that answers "with what parameters?" by
+    reading them back off disk. The registry is re-read by `deploy()` (it's
+    a plain call-through, not a snapshot), so a redeploy picks up any edits
+    made to the template's `post_deploy`/`tty1`/`tty2` since the original
+    deploy — "same parameters" means the same project/template/branch/label
+    IDENTITY, not a frozen copy of the recipe. Do not "fix" this into a
+    literal replay of the original deploy; it is intentional.
+
+    Contrast with `core/ttycmds.py:plan_for_instance`, the OTHER reader of
+    this same `instance.yml` file: that function silently degrades to an
+    EMPTY plan on anything short of a perfect read, because it runs inside
+    `fleet tmux`, where one broken/legacy instance must never stop the rest
+    of the tmux workspace from coming up. `redeploy()` has the opposite
+    obligation — it is about to destroy real containers and disk, there is
+    no "fall back to doing nothing" available once that starts, so every
+    condition below that `plan_for_instance` would shrug off instead raises
+    a loud, actionable `FleetError`. Guessing what to rebuild is how you
+    destroy the wrong thing.
+    """
+    instance_dir = paths.instances / instance_id
+    if not instance_dir.exists():
+        raise FleetError(f"unknown instance {instance_id!r}: {instance_dir} does not exist")
+
+    info_path = instance_dir / ".fleet" / "instance.yml"
+    try:
+        with open(info_path, "r", encoding="utf-8") as fh:
+            data = _yaml.load(fh)
+    except Exception:  # noqa: BLE001 - missing file, bad permissions, malformed
+        # YAML all collapse to the same "cannot redeploy" failure below; the
+        # exact cause is unrecoverable here.
+        data = None
+    if not isinstance(data, dict):
+        raise FleetError(
+            f"instance {instance_id!r} has no recorded deploy parameters "
+            f"({info_path} is missing, unreadable, or not a mapping) and cannot "
+            "be redeployed automatically"
+        )
+
+    recorded_project = data.get("project")
+    if not recorded_project:
+        raise FleetError(
+            f"instance {instance_id!r}'s recorded deploy parameters ({info_path}) "
+            "are missing 'project' and cannot be redeployed automatically"
+        )
+    recorded_project = str(recorded_project)
+    if not registry.has_project(recorded_project):
+        raise FleetError(
+            f"instance {instance_id!r} was deployed from project {recorded_project!r}, "
+            "which no longer exists in the registry — cannot redeploy automatically"
+        )
+
+    recorded_branch = data.get("branch")
+    if not recorded_branch:
+        raise FleetError(
+            f"instance {instance_id!r}'s recorded deploy parameters ({info_path}) "
+            "are missing 'branch' and cannot be redeployed automatically"
+        )
+    recorded_branch = str(recorded_branch)
+
+    recorded_label = str(data.get("instance") or instance_id)
+
+    # Precedence (design decision 4): the --template argument wins; else the
+    # recorded template:; else REFUSE — no silent fallback, since guessing a
+    # template for an instance predating template recording could rebuild it
+    # running the wrong post_deploy/tty commands entirely.
+    recorded_template = data.get("template")
+    resolved_template = template or (str(recorded_template) if recorded_template else None)
+    if not resolved_template:
+        available = registry.template_keys(recorded_project)
+        hint = f" (available: {', '.join(available)})" if available else ""
+        raise FleetError(
+            f"no template recorded for {instance_id!r} (deployed before template "
+            f"recording existed) — pass --template <name>{hint}"
+        )
+
+    # Auth: recorded auth-enabled defaults to True when absent (matching
+    # deploy()'s own default), and must NOT silently flip false->true just
+    # because `auth_password` was passed — only the password argument
+    # overrides the recorded password, never the enabled flag.
+    recorded_auth_enabled = data.get("auth-enabled")
+    resolved_auth_enabled = True if recorded_auth_enabled is None else bool(recorded_auth_enabled)
+    recorded_auth_password = data.get("auth-password")
+    resolved_auth_password = (
+        auth_password
+        if auth_password is not None
+        else (
+            str(recorded_auth_password)
+            if recorded_auth_password
+            else caddyauth.DEFAULT_INSTANCE_PASSWORD
+        )
+    )
+
+    return deploy(
+        paths,
+        registry,
+        recorded_project,
+        resolved_template,
+        branch=recorded_branch,
+        label=recorded_label,
+        replace=True,
+        force=force,
+        auth_enabled=resolved_auth_enabled,
+        auth_password=resolved_auth_password,
+        runner=runner,
+    )
 
 
 def _remove_instance_dir(instance_dir: Path) -> None:
@@ -459,8 +679,8 @@ def _destroy_locked(
 ) -> None:
     """Destroy an instance's containers, directory, and Caddy auth snippet.
     Assumes the caller already holds the instance lock (used by deploy()'s
-    --fresh path to avoid re-entering instance_lock, which would
-    deadlock/raise).
+    `replace=True` path to avoid re-entering instance_lock, which would
+    raise LockHeldError).
 
     The auth-snippet removal always runs, even if the instance never had
     auth enabled (disable_instance_auth() is a no-op in that case) — this is

@@ -1,7 +1,12 @@
 import pytest
 
 from fleet.core.errors import ValidationError
-from fleet.core.naming import allocate_multi_deploy_labels, instance_id, validate_part
+from fleet.core.naming import (
+    allocate_free_label,
+    allocate_multi_deploy_labels,
+    instance_id,
+    validate_part,
+)
 
 
 @pytest.mark.parametrize(
@@ -76,6 +81,37 @@ def test_allocate_multi_deploy_labels_raises_before_returning_when_over_63_chars
     base_label = "b" * 30  # composed for n=1: 30 + 2 + 30 + 2 = 64 chars
     with pytest.raises(ValidationError):
         allocate_multi_deploy_labels(set(), project, base_label, 1)
+
+
+def test_allocate_free_label_returns_bare_base_when_free():
+    assert allocate_free_label(set(), "oak", "generic") == "generic"
+
+
+def test_allocate_free_label_suffixes_1_when_base_taken():
+    existing = {"oak--generic"}
+    assert allocate_free_label(existing, "oak", "generic") == "generic-1"
+
+
+def test_allocate_free_label_suffixes_2_when_base_and_1_taken():
+    existing = {"oak--generic", "oak--generic-1"}
+    assert allocate_free_label(existing, "oak", "generic") == "generic-2"
+
+
+def test_allocate_free_label_reuses_gap_when_base_and_2_taken_but_not_1():
+    existing = {"oak--generic", "oak--generic-2"}
+    assert allocate_free_label(existing, "oak", "generic") == "generic-1"
+
+
+def test_allocate_free_label_raises_when_suffixed_result_exceeds_63_chars():
+    # Bare base fits (30 + 2 + 30 = 62), so only the SUFFIXED candidate
+    # (once the bare one is taken) tips over the 63-char DNS label limit —
+    # proving the raise happens on the chosen (suffixed) candidate, not
+    # merely on the bare base.
+    project = "a" * 30
+    base_label = "b" * 30
+    existing = {f"{project}--{base_label}"}
+    with pytest.raises(ValidationError):
+        allocate_free_label(existing, project, base_label)
 
 
 def test_allocate_multi_deploy_labels_validates_whole_batch_before_returning():

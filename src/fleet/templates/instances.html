@@ -21,6 +21,9 @@
           hx-target="#job-panel-slot" hx-swap="innerHTML">Start selected</button>
   <button type="button" hx-post="/ui/bulk/stop" hx-include="#bulk-form"
           hx-target="#job-panel-slot" hx-swap="innerHTML">Stop selected</button>
+  <button type="button" hx-post="/ui/bulk/redeploy" hx-include="#bulk-form"
+          hx-target="#job-panel-slot" hx-swap="innerHTML"
+          hx-confirm="Redeploy the selected instances? This DESTROYS each one (containers and disk state) and rebuilds it from scratch.">Redeploy selected</button>
   <button type="button" id="bulk-destroy-trigger">Destroy selected</button>
   <div id="bulk-destroy-confirm" hidden>
     <p>Type <span id="bulk-destroy-count"></span> to confirm destroying
@@ -51,7 +54,6 @@
   <label>Branch <input type="text" name="branch" required></label>
   <label>Label (optional) <input type="text" name="label"></label>
   <label>Count <input type="number" name="count" min="0" max="20" step="1" value="1" required></label>
-  <label><input type="checkbox" name="fresh" value="true"> Fresh</label>
   <label><input type="checkbox" name="auth" value="true" checked> Basic auth</label>
   <label>Auth password <input type="text" name="auth_password" value="fleet"></label>
   <label><input type="checkbox" name="skip_disk_check" value="true"> Skip disk-space check</label>
