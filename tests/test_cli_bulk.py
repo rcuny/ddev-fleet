@@ -397,6 +397,182 @@ def test_destroy_bulk_partial_failure_exit_code_2(fleet_home, monkeypatch, capsy
     assert "oak--b: FAILED — still running" in err
 
 
+# --- redeploy: mirrors destroy's confirmation ceremony exactly (spec §2,
+# 2026-07-27-fleet-redeploy-and-no-overwrite-design.md) since redeploy
+# destroys before rebuilding. ---
+
+
+def test_redeploy_single_explicit_id_no_confirmation_prints_url(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+    recorder = []
+
+    def fake_redeploy(paths, registry, iid, **kw):
+        recorder.append((iid, kw))
+        return f"https://{iid}.fleet.example.test"
+
+    monkeypatch.setattr(cli.instances_mod, "redeploy", fake_redeploy)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "redeploy", "oak--a"])
+
+    assert exit_code == 0
+    assert recorder[0][0] == "oak--a"
+    assert "https://oak--a.fleet.example.test" in capsys.readouterr().out
+
+
+def test_redeploy_selector_matching_one_instance_non_tty_refuses(fleet_home, monkeypatch, capsys):
+    """Same rule as destroy: a selector that resolves to exactly one
+    instance is NOT the same as an explicit single id — it still requires
+    confirmation."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(is_tty=False))
+    boom_called = []
+    monkeypatch.setattr(cli.instances_mod, "redeploy", lambda *a, **kw: boom_called.append(True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "redeploy", "--project=other"])
+
+    assert exit_code == 1
+    assert "refusing to redeploy 1 instances without --yes" in capsys.readouterr().err
+    assert boom_called == []
+
+
+def test_redeploy_selector_matching_one_instance_yes_flag_proceeds(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+    recorder = []
+    monkeypatch.setattr(
+        cli.instances_mod,
+        "redeploy",
+        lambda paths, registry, iid, **kw: recorder.append(iid) or f"https://{iid}",
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "redeploy", "--project=other", "--yes"])
+
+    assert exit_code == 0
+    assert recorder == ["other--c"]
+
+
+def test_redeploy_multi_without_yes_non_tty_refuses(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(cli.sys, "stdin", _FakeStdin(is_tty=False))
+    boom_called = []
+    monkeypatch.setattr(cli.instances_mod, "redeploy", lambda *a, **kw: boom_called.append(True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "redeploy", "oak--a", "oak--b"])
+
+    assert exit_code == 1
+    assert "refusing to redeploy 2 instances without --yes" in capsys.readouterr().err
+    assert boom_called == []
+
+
+def test_redeploy_multi_yes_flag_runs_sequentially(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    recorder = []
+
+    def fake_redeploy(paths, registry, iid, **kw):
+        recorder.append(iid)
+        return f"https://{iid}"
+
+    monkeypatch.setattr(cli.instances_mod, "redeploy", fake_redeploy)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "redeploy", "oak--a", "oak--b", "--yes"])
+
+    assert exit_code == 0
+    # run_sequential (not run_concurrent) preserves target order.
+    assert recorder == ["oak--a", "oak--b"]
+
+
+def test_redeploy_template_and_auth_password_reach_instances_mod(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    captured = {}
+
+    def fake_redeploy(paths, registry, iid, *, template=None, auth_password=None, **kw):
+        captured["template"] = template
+        captured["auth_password"] = auth_password
+        return f"https://{iid}"
+
+    monkeypatch.setattr(cli.instances_mod, "redeploy", fake_redeploy)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "redeploy",
+            "oak--a",
+            "--template=custom",
+            "--auth-password=s3cret",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == {"template": "custom", "auth_password": "s3cret"}
+
+
+def test_redeploy_template_applies_to_every_target_in_multi_selection(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    captured = []
+
+    def fake_redeploy(paths, registry, iid, *, template=None, **kw):
+        captured.append((iid, template))
+        return f"https://{iid}"
+
+    monkeypatch.setattr(cli.instances_mod, "redeploy", fake_redeploy)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "redeploy",
+            "oak--a",
+            "oak--b",
+            "--yes",
+            "--template=custom",
+        ]
+    )
+
+    assert exit_code == 0
+    assert captured == [("oak--a", "custom"), ("oak--b", "custom")]
+
+
+def test_redeploy_bulk_partial_failure_exit_code_2(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+
+    def fake_redeploy(paths, registry, iid, **kw):
+        if iid == "oak--b":
+            from fleet.core.errors import FleetError
+
+            raise FleetError("no template recorded")
+        return f"https://{iid}"
+
+    monkeypatch.setattr(cli.instances_mod, "redeploy", fake_redeploy)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "redeploy", "oak--a", "oak--b", "--yes"])
+
+    assert exit_code == 2
+    out, err = capsys.readouterr()
+    assert "oak--a: OK" in out
+    assert "oak--b: FAILED — no template recorded" in err
+
+
+def test_redeploy_bulk_all_fail_exit_code_1(fleet_home, monkeypatch, capsys):
+    _write_two_project_registry(fleet_home)
+
+    def fake_redeploy(paths, registry, iid, **kw):
+        from fleet.core.errors import FleetError
+
+        raise FleetError("boom")
+
+    monkeypatch.setattr(cli.instances_mod, "redeploy", fake_redeploy)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "redeploy", "oak--a", "oak--b", "--yes"])
+
+    assert exit_code == 1
+
+
 def test_deploy_count_default_is_single_deploy_unchanged(fleet_home, monkeypatch, capsys):
     _write_two_project_registry(fleet_home)
 

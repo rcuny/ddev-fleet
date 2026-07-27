@@ -1,9 +1,11 @@
 import argparse
+import inspect
 import stat
 from pathlib import Path
 
 from fleet import cli
 from fleet.core import caddyports
+from fleet.core import instances as real_instances_mod
 from fleet.core.errors import CaddyPortsError, DeployError
 from fleet.core.instances import FleetPaths, InstanceStatus
 from fleet.core.registry import Registry
@@ -39,12 +41,41 @@ def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
         *,
         branch=None,
         label=None,
-        fresh=False,
+        replace=False,
         force=False,
         auth_enabled=True,
         auth_password="fleet",
         runner=None,
     ):
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "deploy", "demo", "default", "--branch=main"]
+    )
+
+    assert exit_code == 0
+    assert "https://demo--develop.fleet.example.test" in capsys.readouterr().out
+
+
+def test_deploy_call_args_match_real_deploy_signature(fleet_home, monkeypatch, capsys):
+    """Regression guard for the 2026-07-27 breakage where cli.py kept
+    passing `fresh=` after core/instances.py's deploy() renamed that
+    parameter to `replace` — every deploy() call raised TypeError at
+    runtime, and NONE of the existing tests caught it because their
+    fake_deploy stand-ins declare their own (hand-copied, and in that case
+    stale) explicit signature rather than checking against the real one.
+
+    This test binds the CLI's actual call args against
+    `inspect.signature(instances_mod.deploy)` — the REAL function, imported
+    before any monkeypatching — so a future rename/removal of a keyword
+    argument raises a loud TypeError here instead of silently passing."""
+    _write_minimal_registry(fleet_home)
+    real_sig = inspect.signature(real_instances_mod.deploy)
+
+    def fake_deploy(*args, **kwargs):
+        real_sig.bind(*args, **kwargs)
         return "https://demo--develop.fleet.example.test"
 
     monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
@@ -127,6 +158,30 @@ def test_deploy_fleet_error_exits_1_and_prints_to_stderr(fleet_home, monkeypatch
 
     assert exit_code == 1
     assert "something specific went wrong" in capsys.readouterr().err
+
+
+def test_deploy_fresh_flag_removed_argparse_rejects_it(fleet_home, capsys):
+    """`--fresh` is gone (design decision 3,
+    2026-07-27-fleet-redeploy-and-no-overwrite-design.md) — `redeploy`
+    replaces it. argparse must reject the flag outright rather than
+    silently ignoring it."""
+    import pytest
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            [
+                "--fleet-home",
+                str(fleet_home),
+                "deploy",
+                "demo",
+                "default",
+                "--branch=main",
+                "--fresh",
+            ]
+        )
+
+    assert exc.value.code == 2
+    assert "unrecognized arguments: --fresh" in capsys.readouterr().err
 
 
 def test_list_renders_table(fleet_home, monkeypatch, capsys):

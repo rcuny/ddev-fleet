@@ -18,5 +18,10 @@
             hx-confirm="Destroy {{ status.instance_id }}? This removes containers and disk state.">
       Destroy
     </button>
+    <button class="redeploy" hx-post="/ui/instances/{{ status.instance_id }}/redeploy"
+            hx-target="#job-panel-slot" hx-swap="innerHTML"
+            hx-confirm="Redeploy {{ status.instance_id }}? This DESTROYS the instance (containers and disk state) and rebuilds it from scratch.">
+      Redeploy
+    </button>
   </td>
 </tr>

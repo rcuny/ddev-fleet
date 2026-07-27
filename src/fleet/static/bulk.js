@@ -3,8 +3,12 @@
 // design). Kept separate from ws-log.js, whose scope is only "tail one
 // already-known log" — this file owns bulk-specific concerns: select-all,
 // the destroy-confirmation reveal, guarding against an empty-selection POST,
-// surfacing a bulk route's error response, and closing a per-instance socket
-// when htmx swaps it out for the next one.
+// and closing a per-instance socket when htmx swaps it out for the next one.
+// (Surfacing a bulk route's error response used to live here too, as an
+// `htmx:responseError` alert() — superseded by the page-wide
+// `htmx:beforeSwap` fix in ui-errors.js, which renders the same error
+// inline in #job-panel-slot for every hx-target on the page, deploy form
+// included. Keeping both would double-report the same failure.)
 (function () {
   function selectedIds() {
     return Array.prototype.map.call(
@@ -59,24 +63,6 @@
     if (selectedIds().length === 0) {
       evt.preventDefault();
     }
-  });
-
-  // Surface a bulk route's error response (spec §8 review addition) rather
-  // than silently failing: htmx does not swap non-2xx responses into the
-  // target by default, it only fires `htmx:responseError` — so a rejected
-  // destroy confirmation (400, confirm_count mismatch) would otherwise
-  // vanish with no visible feedback.
-  document.addEventListener("htmx:responseError", function (evt) {
-    var elt = evt.detail && evt.detail.elt;
-    var path = elt && elt.getAttribute && elt.getAttribute("hx-post");
-    if (!path || path.indexOf("/ui/bulk/") !== 0) return;
-    var message = "bulk action failed";
-    try {
-      message = JSON.parse(evt.detail.xhr.responseText).error || message;
-    } catch (e) {
-      // non-JSON body: fall back to the generic message above
-    }
-    alert(message);
   });
 
   // WebSocket log-switching fix (spec §8): a bulk/multi-deploy job panel

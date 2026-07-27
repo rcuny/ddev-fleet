@@ -86,3 +86,34 @@ def allocate_multi_deploy_labels(
         instance_id(project, label)  # raises ValidationError if too long
 
     return labels
+
+
+def allocate_free_label(existing_ids: set[str], project: str, base_label: str) -> str:
+    """Return the first free label from the sequence `base_label`,
+    `base_label-1`, `base_label-2`, … — "free" meaning the composed
+    `f"{project}--{label}"` is not in `existing_ids`. Unlike
+    `allocate_multi_deploy_labels` above, the BARE base label is returned
+    when it is free (no suffix at all).
+
+    This is deliberately the opposite default of `allocate_multi_deploy_labels`:
+    this is the single-deploy allocator (`deploy()` never overwrites an
+    existing instance — see 2026-07-27-fleet-redeploy-and-no-overwrite-design.md
+    decision 1), where landing on the clean, unsuffixed id is the whole
+    point when nothing is in the way. `allocate_multi_deploy_labels` ALWAYS
+    suffixes starting at `-1` because a *batch* of `count` instances
+    deployed in one `deploy --count=N` call has no single "the" instance to
+    give the bare name to — a batch of one bare name makes no sense. Do
+    not merge these two functions on the theory that one is a special case
+    of the other: their starting points answer different questions ("is
+    THIS name free?" vs "give me N names, none of which is THIS one").
+
+    Validates only the FINAL chosen label through `instance_id()`, so the
+    63-char DNS label limit still raises.
+    """
+    n = 0
+    candidate_label = base_label
+    while f"{project}--{candidate_label}" in existing_ids:
+        n += 1
+        candidate_label = f"{base_label}-{n}"
+    instance_id(project, candidate_label)  # raises ValidationError if too long
+    return candidate_label

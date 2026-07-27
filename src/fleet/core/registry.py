@@ -331,6 +331,22 @@ class Registry:
     def resolve(
         self, project: str, template: str, branch: str, label: str | None = None
     ) -> ResolvedInstance:
+        """Resolve `(project, template, branch, label)` into a `ResolvedInstance`.
+
+        The instance label is always normalised via `slugify()` — lowercased,
+        every run of non-`[a-z0-9]` characters collapsed to a single `-`,
+        leading/trailing `-` stripped — whether it is derived from `branch`
+        (no explicit `label`) or passed explicitly. An explicit label is
+        normalised, not rejected: e.g. `label="ABC-1234"` resolves to
+        `"abc-1234"`. This is the single choke point for the CLI, the web
+        UI, and bulk/multi-deploy, which all reach it via
+        `instances.resolve_target`.
+
+        Raises RegistryError if `template` is unknown, `branch` is empty, or
+        the resolved label/instance id fails validation (e.g. slugifies to
+        empty, or the composed `<project>--<label>` exceeds the 63-character
+        DNS label limit).
+        """
         block = self._project_block(project)
         templates = block.get("templates") or {}
         if template not in templates:
@@ -344,7 +360,7 @@ class Registry:
         tty2 = [str(c) for c in (template_block.get("tty2") or [])]
 
         try:
-            resolved_label = label if label else slugify(branch)
+            resolved_label = slugify(label) if label else slugify(branch)
             inst_id = instance_id(project, resolved_label)
         except ValidationError as exc:
             raise RegistryError(
