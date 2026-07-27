@@ -41,13 +41,15 @@ def test_deploy_threads_deploy_log_path_to_git_and_ddev_calls(fleet_home, git_re
     ddev_start_calls = [c for c in runner.calls if c["cmd"] == ["ddev", "start"]]
     assert ddev_start_calls and all(c["log_path"] == expected_log for c in ddev_start_calls)
 
-    # Redeploy (update path): git fetch/checkout/reset stream into the log live.
-    runner = HybridRunner()
-    instances.deploy(
-        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
-    )
+    # gitops.update()'s own git fetch/checkout/reset calls stream into
+    # whatever log_path they're given — verified directly against
+    # gitops.update() rather than through a second deploy() call, since a
+    # plain deploy() no longer reaches this branch at all: it always
+    # allocates a fresh id instead of updating an existing one (design
+    # decision 1, 2026-07-27-fleet-redeploy-and-no-overwrite-design.md).
+    instance_dir = paths.instances / "demo--develop"
+    update_runner = HybridRunner()
+    instances.gitops.update(instance_dir, "main", log_path=expected_log, runner=update_runner)
 
-    git_calls = [c for c in runner.calls if c["cmd"][0] == "git"]
-    ddev_start_calls = [c for c in runner.calls if c["cmd"] == ["ddev", "start"]]
+    git_calls = [c for c in update_runner.calls if c["cmd"][0] == "git"]
     assert git_calls and all(c["log_path"] == expected_log for c in git_calls)
-    assert ddev_start_calls and all(c["log_path"] == expected_log for c in ddev_start_calls)

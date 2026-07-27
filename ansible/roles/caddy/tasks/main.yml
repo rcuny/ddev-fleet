@@ -28,12 +28,24 @@
     state: present
 
 - name: Ensure the fleet-owned Caddy credential snippet directory exists
+  # setgid (the leading "2" in mode 2750): Caddy runs as User=caddy and
+  # reads these snippets straight off disk on every `systemctl restart
+  # caddy` (reboot, package upgrade, unattended-upgrades) — not just via
+  # `caddy reload`'s admin API. But the snippets themselves are written by
+  # the fleet user (core/caddyauth.py's _atomic_write, e.g. a rotated
+  # admin-auth.conf), whose primary group is `fleet`, not `caddy`, and
+  # `caddy` is not a member of the `fleet` group. Without setgid, a
+  # fleet-written file would land group `fleet` and be unreadable by the
+  # caddy user on a fresh `caddy run` — every site down. setgid on the
+  # directory makes the kernel assign new files the directory's group
+  # (caddy) regardless of the writing process's own group, with no chown
+  # needed on the Python side.
   ansible.builtin.file:
     path: "{{ fleet_caddy_snippet_dir }}"
     state: directory
     owner: "{{ fleet_user }}"
     group: caddy
-    mode: "0750"
+    mode: "2750"
 
 - name: Ensure the fleet-owned per-instance Caddy auth snippet directory exists
   # Per-instance basic-auth snippets (fleet.core.caddyauth, written/removed
@@ -42,12 +54,55 @@
   # *.{{ fleet_domain }} site's glob import (Caddyfile.j2) never depends on
   # Python-side mkdir() guessing at group ownership when a fresh instance
   # is the very first to enable auth.
+  #
+  # setgid (mode 2750, see the parent-dir task above for the full why):
+  # every snippet the fleet user writes here (mkstemp + rename) inherits
+  # this directory's `caddy` group automatically, so `caddy`, which is not
+  # in the `fleet` group, can still read it on a plain `systemctl restart
+  # caddy` (not just a fleet-triggered `caddy reload`).
   ansible.builtin.file:
     path: "{{ fleet_caddy_snippet_dir }}/instances"
     state: directory
     owner: "{{ fleet_user }}"
     group: caddy
-    mode: "0750"
+    mode: "2750"
+
+- name: Ensure the fleet-owned Caddy named-port snippet directory exists
+  # Per-port-name exposure snippets (fleet.core.caddyports, written/removed
+  # by deploy()/destroy()/`fleet refresh-ports`/daemon startup — never by
+  # Ansible past this one-time seed) live here. Pre-creating it with the
+  # same ownership as the parent snippet dir means the *.{{ fleet_domain }}
+  # Caddyfile's glob import (Caddyfile.j2) never depends on Python-side
+  # mkdir() guessing at group ownership when the first port is subscribed.
+  #
+  # setgid (mode 2750, see the parent-dir task above for the full why):
+  # same fleet-writes/caddy-reads mismatch as the instances/ dir above.
+  ansible.builtin.file:
+    path: "{{ fleet_caddy_snippet_dir }}/ports"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: caddy
+    mode: "2750"
+
+- name: Fix the group of any pre-existing snippets from before the setgid fix
+  # setgid only affects files created AFTER the directory gets the setgid
+  # bit — a box provisioned before this change can already have
+  # fleet:fleet snippets on disk (written by core/caddyauth.py /
+  # core/caddyports.py before the dirs above were setgid). Recursively
+  # re-group any such stragglers to `caddy` so a re-run of this role also
+  # repairs an already-broken box. Idempotent: ansible.builtin.file only
+  # reports changed for entries whose group actually differs, so this is
+  # changed=0 once every snippet is already `caddy`-owned. Deliberately
+  # omits `mode:` so existing file permissions (0640 — group-readable) are
+  # left untouched; only ownership metadata (group) is touched.
+  ansible.builtin.file:
+    path: "{{ fleet_caddy_snippet_dir }}/{{ item }}"
+    state: directory
+    recurse: true
+    group: caddy
+  loop:
+    - instances
+    - ports
 
 - name: Check whether the admin-auth snippet already exists
   # Guards the seed below — this MUST run before we ever hash the default
@@ -57,6 +112,39 @@
   ansible.builtin.stat:
     path: "{{ fleet_caddy_snippet_dir }}/admin-auth.conf"
   register: caddy_admin_auth_snippet_stat
+
+- name: Fix the group of a pre-existing admin-auth snippet from before the setgid fix
+  # Same latent bug as the instances/ports snippets above: admin-auth.conf
+  # is rewritten in place by core/caddyauth.py on every
+  # `fleet rotate-admin-password` / `fleet set-admin-password`, as the
+  # fleet user, via the same fleet:fleet-by-default mkstemp path. On a box
+  # provisioned (or rotated) before the parent dir got setgid, the file can
+  # already sit at group `fleet`, unreadable by caddy on a plain
+  # `systemctl restart caddy`. Only runs when the snippet already exists
+  # (the seed task below only ever WRITES a fresh one; it never re-groups
+  # an existing one). Idempotent: changed=0 once the group is already
+  # `caddy`. Mode is deliberately left untouched (stays 0640,
+  # group-readable).
+  ansible.builtin.file:
+    path: "{{ fleet_caddy_snippet_dir }}/admin-auth.conf"
+    state: file
+    group: caddy
+  when: caddy_admin_auth_snippet_stat.stat.exists
+
+- name: Fail fast if no admin password is configured (no public-safe default)
+  # Catches BOTH the undefined case and an empty string
+  # (-e fleet_admin_default_password="") — the latter previously slipped
+  # through this guard and went on to hash an empty password.
+  ansible.builtin.fail:
+    msg: >-
+      fleet_admin_default_password is not set. There is no public-safe
+      default for the dashboard admin password — bootstrap.sh's
+      value-collection phase generates or prompts for one and writes it to
+      /etc/ddev-fleet/local-vars.yml (see docs/installation.md). For a
+      manual/dev run, pass -e fleet_admin_default_password=<value>.
+  when:
+    - not caddy_admin_auth_snippet_stat.stat.exists
+    - fleet_admin_default_password is not defined or fleet_admin_default_password | default('') | length == 0
 
 - name: Hash the distribution-default admin password (first provisioning only)
   ansible.builtin.command:

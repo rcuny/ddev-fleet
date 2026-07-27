@@ -19,6 +19,7 @@ class Job:
     state: str = "queued"  # "queued" | "running" | "succeeded" | "failed"
     detail: str | None = None
     log_path: str | None = None
+    instance_ids: list[str] | None = None  # bulk jobs only; None = single-instance job
 
 
 _TERMINAL_STATES = ("succeeded", "failed")
@@ -34,8 +35,22 @@ class JobManager:
         # loop — without this set a pending job task can be GC'd mid-flight.
         self._tasks: set[asyncio.Task] = set()
 
-    async def submit(self, kind: str, instance_id: str, fn, *, log_path: str | None = None) -> Job:
-        job = Job(id=uuid.uuid4().hex[:12], kind=kind, instance_id=instance_id, log_path=log_path)
+    async def submit(
+        self,
+        kind: str,
+        instance_id: str,
+        fn,
+        *,
+        log_path: str | None = None,
+        instance_ids: list[str] | None = None,
+    ) -> Job:
+        job = Job(
+            id=uuid.uuid4().hex[:12],
+            kind=kind,
+            instance_id=instance_id,
+            log_path=log_path,
+            instance_ids=instance_ids,
+        )
         self._jobs[job.id] = job
         self._order.append(job.id)
         task = asyncio.create_task(self._run(job, fn))

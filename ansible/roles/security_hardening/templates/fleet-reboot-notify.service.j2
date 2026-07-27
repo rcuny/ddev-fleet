@@ -1,0 +1,9 @@
+[Unit]
+Description=fleet reboot-required notification (spec §6.3)
+After=network.target
+
+[Service]
+Type=oneshot
+User={{ fleet_user }}
+NoNewPrivileges=yes
+ExecStart={{ fleet_opt_dir }}/venv/bin/fleet reboot-notify --interval-hours {{ fleet_reboot_notify_interval_hours }}

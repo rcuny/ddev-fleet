@@ -1,35 +1,35 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-16
+Last updated: 2026-07-25
 Type: documentation
 ---
 
 # ddev-fleet
 
+[![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+
 A fleet manager for running many independent DDEV-based projects (mainly
 Drupal, not exclusively) in parallel on one bare-metal host, with minimal
 human interaction. It provides a registry (`fleet.yml`), a CLI that
-clones/configures/starts/tears down instances, centralized per-project
-secrets and assets (DB dumps, `.env` values, local settings) shared across
-a project's instances, and a web UI with TLS/routing for every instance
-under one wildcard domain.
+clones/configures/starts/tears down instances (singly or in bulk),
+centralized per-project secrets and assets (DB dumps, `.env` values, local
+settings) shared across a project's instances, and a web UI with
+TLS/routing for every instance under one wildcard domain.
 
-**Status:** live in production on a Kimsufi KS-7 host
-(`ddev.personal.example`, Debian 13), serving instances under the
-`fleet.personal.example` wildcard domain.
-
-Full design: see the companion repo's
-`.claude/user/docs/specs/2026-07-02-ddev-fleet-v1-design.md`.
+**Status:** runs on any Debian-family bare-metal or VPS host.
 
 ## Architecture
 
 The fleet manager runs **natively on the host** — never inside DDEV/Docker
 itself — so it can keep managing (and recovering) other DDEV projects even
-if one of them, or Docker, is unhealthy.
+if one of them, or Docker, is unhealthy. Caddy is the only
+Internet-facing process; it terminates TLS and proxies to a shared,
+loopback-only DDEV router, which routes to the right instance's
+containers by Host header.
 
 ```
-Kimsufi host (bare metal)
+Bare-metal / VPS host
 ├── fleet.service (systemd, User=fleet, 127.0.0.1:8765)
 │   ├── FastAPI + uvicorn daemon — web UI (Jinja2 + HTMX) + JSON/WS API
 │   └── fleet.core (Python library) — deploy/destroy/start/stop/list, driven
@@ -37,7 +37,7 @@ Kimsufi host (bare metal)
 ├── Caddy (systemd) — public TLS, the only externally reachable process
 │   ├── fleet.<domain>            → basic_auth → reverse_proxy 127.0.0.1:8765 (web UI)
 │   ├── *.<domain>                → on-demand TLS → optional per-instance basic_auth → reverse_proxy 127.0.0.1:8080 (ddev-router HTTP)
-│   └── *.<domain>:9108           → on-demand TLS → reverse_proxy 127.0.0.1:8108 (ddev-router, Typesense)
+│   └── *.<domain>:<port>         → on-demand TLS → reverse_proxy 127.0.0.1:<router-port>, one per fleet.yml-registered named port (Typesense, Playwright reports, ...) — see docs/networking.md
 └── Docker (DDEV)
     ├── ddev-router (shared Traefik) — HTTP/HTTPS entrypoints, loopback-only
     ├── project1--main    (PHP · MariaDB · … containers)
@@ -45,173 +45,79 @@ Kimsufi host (bare metal)
     └── × N more instances, one DDEV project per `<project>--<label>`
 ```
 
-Provisioning is Ansible (`ansible/site.yml`, roles `base`, `docker`,
-`fleet_user`, `ddev`, `claude_cli`, `caddy`, `fleet_service`) — see
-Quickstart below and `docs/runbook-server-rollout.md` for the full
-first-rollout checklist.
+Full design, module map, and the daemon/CLI split: `docs/architecture.md`.
 
-## Quickstart (server provisioning)
+## Quickstart
 
 ```bash
-# Repo is PRIVATE — the bare raw-URL one-liner is auth-gated. Either:
-#   (a) scp bootstrap.sh to the server, then: sudo bash bootstrap.sh
-#       (export FLEET_REPO_URL=https://<user>:<app-password>@bitbucket.org/personal_maintainer/ddev-fleet.git first), or
-#   (b) pre-clone the repo to /opt/ddev-fleet manually, then: sudo bash /opt/ddev-fleet/bootstrap.sh
-# public-repo variant: curl -fsSL https://bitbucket.org/personal_maintainer/ddev-fleet/raw/main/bootstrap.sh | sudo bash
+curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo bash
 ```
 
 `bootstrap.sh` installs git + Ansible, then runs `ansible/site.yml`, which
 installs Docker, DDEV, Caddy, and the `fleet` system user and Python
 package (editable install into a venv at `/opt/ddev-fleet/venv`), and
-enables (but does not start) the `fleet.service` systemd unit. See
-`docs/runbook-server-rollout.md` for the full first-rollout checklist (DNS,
-admin password, deploy key, Claude token) and §2a for how to ship a code
-update to an already-live host (git-pull based, no full playbook re-run).
+enables (but does not start) the `fleet.service` systemd unit. From
+there: DNS, adding the deploy key, `fleet init`, and the first deploy are
+covered end to end in **`docs/installation.md`** — start there for a new
+install. For updating an already-live host, see `docs/operations.md`.
 
-## On-server layout
+## Network exposure
 
-```
-/opt/ddev-fleet/            # product code — fleet-owned git checkout of ddev-fleet.git
-├── venv/                   # editable pip install; a `fleet.service` restart picks up new code
-└── (this repo's tree)
+Public traffic reaches every instance through Caddy, the only
+Internet-facing process: it terminates TLS (on-demand certs) and proxies
+to a shared, loopback-only DDEV router, which routes by Host header to
+the right instance's containers — this happens automatically for every
+instance's main site, no configuration needed. Extra per-project ports
+(Typesense, a Playwright report port, a search dashboard, ...) are
+opt-in: declare them once in `fleet.yml`'s `fleet.ports` catalogue and
+list the names a project subscribes to in its own `ports:` key, then run
+`fleet refresh-ports` to apply — no Ansible re-run, no redeploy. See
+`docs/networking.md` for the full topology, every port in one table, and
+the exact steps to add a new one.
 
-/srv/fleet/                 # fleet's runtime home (FLEET_HOME)
-├── config/                 # git checkout of the private ddev-fleet-config repo:
-│   ├── fleet.yml           #   the project/template registry (edited by hand, read-only at runtime)
-│   └── assets/<project>/   #   per-project DB dumps, .env templates, local-settings templates
-├── secrets/<project>.env   # per-project secrets (KEY=VALUE, mode 0600) — `fleet secret set`
-├── instances/<id>/         # deployed git worktrees, one per `<project>--<label>`
-├── locks/                  # per-instance flock files (concurrency safety)
-├── .secrets                # CLAUDE_CODE_OAUTH_TOKEN etc. (mode 0600)
-└── .push-key/              # fleet's read-write git push key (kept out of default SSH search path)
-```
+## Security note: default credentials
 
-## Default credentials — rotate before going public
-
-`bootstrap.sh`/Ansible seed working default credentials on first
-provisioning so the fleet is usable immediately. **These are published
-defaults, not secrets — anyone with this repo knows them.** A host left on
-defaults and reachable from the public internet is unprotected.
-
-| What | User | Password |
-|---|---|---|
-| Dashboard (`https://fleet.<domain>`, Caddy `basic_auth`) | `admin` | `ddev-admin` |
-| Per-instance basic auth (`https://<instance>.<domain>`) | `fleet` | `fleet` (per-deploy override, see below) |
-
-Rotate the dashboard password immediately after rollout — and any time
-after — with no Ansible run required:
+`bootstrap.sh` always sets a real dashboard password on first
+provisioning — either one you supplied or a randomly generated one,
+printed once. There is no fixed public default to rotate away from.
+Per-instance basic auth (separate from the dashboard) is **on by default**
+on every `fleet deploy`, user `fleet` / password `fleet` unless
+overridden with `--auth-password` or disabled with `--no-auth`. Rotate the
+dashboard password any time, with no Ansible run required:
 
 ```bash
-fleet rotate-admin-password   # generates a strong random password, applies it,
-                               # prints it ONCE (not stored anywhere in the clear)
-fleet set-admin-password <password>   # or set an explicit password yourself
+fleet rotate-admin-password   # generates a strong random password, applies it, prints it ONCE
 ```
 
-Both commands hash the password (`caddy hash-password`), atomically rewrite
-the fleet-owned Caddy snippet at `/etc/caddy/fleet/admin-auth.conf`,
-validate the resulting Caddyfile, and reload Caddy — see
-`fleet.core.caddyauth`. Re-running the `caddy` Ansible role afterwards will
-**not** revert a rotated password; the seed step only ever runs once, on a
-host where the snippet doesn't exist yet.
-
-**Per-instance basic auth** protects every deployed instance's own URL
-(`https://<instance>.<domain>`) — not just the dashboard. It is **on by
-default** on every `fleet deploy` (user `fleet`, password `fleet` unless
-overridden) and reconciled on every re-deploy:
-
-```bash
-fleet deploy <project> --auth-password <password>   # deploy with a non-default password
-fleet deploy <project> --no-auth                    # deploy this instance with auth OFF
-```
-
-The web UI's deploy form mirrors this: a "Basic auth" checkbox (checked by
-default) and an "Auth password" field (defaulting to `fleet`) — unchecking
-the box deploys that instance with auth disabled. Each instance gets its own
-fleet-owned Caddy snippet at `/etc/caddy/fleet/instances/<instance-id>.conf`
-(hash → write → `caddy validate` → reload, same pipeline as the dashboard
-password above), imported by the `*.<domain>` site via a **glob**
-(`import .../instances/*.conf`) so an empty/no-instances-with-auth directory
-is a silent no-op rather than a hard Caddyfile error. `fleet destroy` always
-removes an instance's snippet (and reloads Caddy) so a torn-down instance
-never leaves a stale auth rule behind.
-
-## Operator CLI
-
-Projects and their deploy `templates` (post_deploy recipes) are declared by
-hand in `fleet.yml` — the registry is declarative and read-only at runtime;
-there is no `fleet project add` and no auto-registration on deploy. On the
-server, `/usr/local/bin/fleet` (installed by the `fleet_service` Ansible
-role) execs the venv CLI as the `fleet` user, so any admin account can run
-these without `sudo -u fleet` or the venv path.
-
-| Command | Arguments | Behavior |
-|---|---|---|
-| `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, `claude setup-token`, writes `.secrets` |
-| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force] [--no-auth] [--auth-password=<pw>]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password |
-| `fleet destroy <instance-id>` | — | Tears down containers, removes instance dir + lock file |
-| `fleet start <instance-id>` | — | `ddev start` on an existing, stopped instance |
-| `fleet stop <instance-id>` | — | `ddev stop` — frees RAM, keeps disk |
-| `fleet list` | — | Table: id, project, branch, state, URL, RAM |
-| `fleet ssh-key` | — | Prints the fleet deploy (read-only) public key |
-| `fleet secret set <project> <key> <value>` | — | Writes `KEY=VALUE` into `/srv/fleet/secrets/<project>.env` (0600); values are available to deploy as `[[key-with-dashes]]` tokens |
-| `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
-| `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | Runs `ddev export-db --gzip=false` into the project's asset tree |
-| `fleet refresh-claude-token` | — | Rotates the Claude Code OAuth token fleet-wide, rewrites every instance's `config.fleet.yaml`, restarts running instances |
-| `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value; hashes, writes, validates, and reloads Caddy — no Ansible run |
-| `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it, and prints it once |
-| `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (the `fleet.yml` registry + assets checkout) |
-
-`fleet snapshot` writes plain, uncompressed SQL (`--gzip=false`) because
-that's what each project's own `.ddev/commands/web/install-site-from-db`
-import script expects (`dumps/<SITE>.sql`, piped straight into
-`drush sql:connect`, no gunzip). The default dest is
-`dumps/default-<instance-id>.sql` — never `dumps/default.sql`, which is the
-project's **shared** dump that every instance of that project hard-links and
-imports from by default (`core/assets.py:_link_shared_dir`); `fleet
-snapshot` refuses to write there (even via an explicit `--dest-rel`) so a
-snapshot can never corrupt it. To promote a snapshot to the shared default,
-copy it explicitly (e.g. `fleet assets push`) once you've verified it.
-
-## Web UI
-
-Once `fleet.service` is running (see `docs/runbook-server-rollout.md`),
-browse to `https://fleet.<domain>` for the web UI: an instance list (id,
-project, branch, state, URL, RAM) with per-row Start/Stop/Destroy actions,
-a deploy form (project/template/branch/label/fresh/basic-auth
-toggle/auth-password), and a live deploy log streamed over WebSocket while
-a deploy job runs. The UI has no login of its own for the dashboard itself
-— Caddy's `basic_auth` in front of `fleet.<domain>` is the single auth
-layer there; the daemon itself binds `127.0.0.1:8765` only and is
-unreachable except through Caddy. Each *deployed instance*'s own auth is
-separate — see "Default credentials" above.
+Full detail (both credential types, the underlying mechanism): `docs/operations.md`.
 
 ## Repository layout
 
 - `src/fleet/` — the Python package: `core/` (deploy engine — registry,
-  gitops, ddev wrappers, secrets, tokens, typesense, locks, naming, assets),
-  `cli.py` (argparse CLI), `daemon.py` (FastAPI app), `jobs.py` (in-memory
-  job registry for the web UI), `templates/` + `static/` (Jinja2/HTMX UI)
-- `ansible/` — provisioning playbook (`site.yml`; roles: `base`, `docker`,
-  `fleet_user`, `ddev`, `claude_cli`, `caddy`, `fleet_service`)
+  gitops, ddev wrappers, secrets, tokens, typesense, bulk orchestration,
+  caddy port/auth reconciliation, locks, naming, assets), `cli.py`
+  (argparse CLI), `daemon.py` (FastAPI app), `jobs.py` (in-memory job
+  registry for the web UI), `templates/` + `static/` (Jinja2/HTMX UI)
+- `ansible/` — provisioning playbook (`site.yml` and its roles)
 - `bootstrap.sh` — one-shot installer entry point
 - `tests/` — pytest suite (unit + FastAPI `TestClient`/`httpx` tests)
-- `docs/` — operational runbooks and reference docs:
-  - `docs/runbook-server-rollout.md` — ordered first-rollout checklist and
-    the ongoing code-update procedure (§2a)
-  - `docs/srv-fleet-CLAUDE.md` — the registry/CLI reference copied onto the
-    server for `claude -p "..."` sessions run there
-  - `docs/README-typesense.md` — the Typesense browser-search exposure
-    (port-based topology, keys, env injection)
-- `fleet.yml.dist` — example registry (project/template skeleton); the live
-  registry is edited directly at `/srv/fleet/config/fleet.yml` on the
-  server, not committed to this repo
-- `assets/`, `instances/` — per-project asset trees and deployed instance
-  checkouts (gitignored; these directories mirror `/srv/fleet/` locally but
-  are not used by the live server, which has its own `/srv/fleet/`)
+- `fleet.yml.dist` — example registry (project/template/ports skeleton);
+  the live registry is edited at `<config-repo>/fleet.yml` or
+  `/srv/fleet/config/fleet.yml`, not committed to this repo
+- `docs/` — the full documentation set, linked below
 
-## Docs / pointers
+## Documentation
 
-- Full first-rollout checklist and the ongoing code-update procedure:
-  `docs/runbook-server-rollout.md`.
-- Typesense browser-search exposure (port-based topology, admin vs.
-  search-only keys, env injection): `docs/README-typesense.md`.
+| Doc | Covers |
+|---|---|
+| `docs/installation.md` | First-run checklist: DNS, the installer, deploy key, `fleet init`, first deploy, web UI check |
+| `docs/operations.md` | Ongoing procedures: code updates, rollback, credential rotation, bulk operations, verification checklist |
+| `docs/configuration.md` | The `fleet.yml` registry schema, field by field |
+| `docs/cli.md` | The full `fleet` CLI command reference, with examples |
+| `docs/networking.md` | Full network topology, every port in one table, and how to expose a new one |
+| `docs/architecture.md` | Native-not-in-DDEV design, module map, the daemon/CLI split |
+| `docs/README-typesense.md` | The Typesense browser-search exposure worked example |
+| `CONTRIBUTING.md` | Dev setup, code style, and how to submit a change |
+| `CHANGELOG.md` | Release history |
+
+Licence: [MIT](LICENSE).

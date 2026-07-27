@@ -1,0 +1,11 @@
+---
+# Project-wide convention: variables use the fleet_ prefix (see
+# ansible/group_vars/all.yml and every role's defaults), not a per-role
+# prefix. ansible-lint's var-naming[no-role-prefix] rule assumes the
+# opposite convention and would otherwise flag every fleet_*-named role
+# default (e.g. fleet_network_hardening_enabled, fleet_ufw_ssh_port) as a
+# violation. Internal role-scratch vars (nh_*, register: results) are
+# exempt for the same reason — they follow the same project-wide style of
+# short, role-scoped-by-context prefixes rather than the full role name.
+skip_list:
+  - var-naming[no-role-prefix]

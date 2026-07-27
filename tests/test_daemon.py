@@ -1,7 +1,15 @@
+import json
+import re
+import time
+from pathlib import Path
+
 import pytest
 from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
+from fleet import daemon
+from fleet.core import caddyports
+from fleet.core.errors import CaddyPortsError
 from fleet.core.instances import FleetPaths
 from fleet.daemon import create_app, mint_ws_token, verify_ws_token
 from fleet.jobs import Job
@@ -339,3 +347,370 @@ def test_instance_log_route_rejects_path_traversal_attempt(fleet_home):
     ):
         response = client.get(attempt)
         assert response.status_code == 404
+
+
+def test_startup_syncs_caddy_ports(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    calls = []
+
+    def fake_sync(registry, **kwargs):
+        calls.append(registry.domain)
+        return caddyports.SyncResult(written=[], removed=[])
+
+    monkeypatch.setattr(daemon.caddyports, "sync", fake_sync)
+
+    with TestClient(create_app(fleet_home)) as _client:
+        pass
+
+    assert calls == ["fleet.example.test"]
+
+
+def test_startup_port_sync_failure_does_not_crash_app(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+
+    def failing_sync(registry, **kwargs):
+        raise CaddyPortsError("boom")
+
+    monkeypatch.setattr(daemon.caddyports, "sync", failing_sync)
+
+    with TestClient(create_app(fleet_home)) as client:
+        response = client.get(
+            "/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"}
+        )
+    assert response.status_code == 200
+
+
+def test_startup_port_sync_survives_non_caddyports_error(fleet_home, monkeypatch):
+    """IMPORTANT regression: `sync()` does `snippet_dir.mkdir()`/`.glob()`
+    before its own internal try/except (core/caddyports.py), so a bare
+    `OSError`/`PermissionError` (or anything else unanticipated) can escape
+    `CaddyPortsError`'s wrapping. The startup lifespan hook must never let
+    ANY exception from the port sync stop the app from booting — a fleet
+    manager that refuses to start over one bad port snippet is worse than
+    one that boots and reports the problem."""
+    _setup_fleet_home(fleet_home)
+
+    def failing_sync(registry, **kwargs):
+        raise OSError("permission denied: /etc/caddy/fleet/ports")
+
+    monkeypatch.setattr(daemon.caddyports, "sync", failing_sync)
+
+    with TestClient(create_app(fleet_home)) as client:
+        response = client.get(
+            "/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"}
+        )
+    assert response.status_code == 200
+
+
+def test_startup_real_sync_honours_isolated_snippet_dir(fleet_home):
+    """CRITICAL regression: the lifespan hook must pass `snippet_dir=` to
+    `caddyports.sync()` explicitly, not rely on `sync()`'s bound default.
+    Every other startup test in this module mocks `daemon.caddyports.sync`
+    wholesale, so none would notice a regression to the bare
+    `caddyports.sync(registry)` call — `sync()`'s own
+    `snippet_dir=DEFAULT_PORTS_SNIPPET_DIR` default is bound at import time,
+    so conftest's autouse monkeypatch of the module attribute would silently
+    stop applying and the real (unmocked) `sync()` would `mkdir()` the real
+    `/etc/caddy/fleet/ports` on the host. This test lets the REAL `sync()`
+    run (no mock) and asserts it landed in the isolated tmp_path directory."""
+    _setup_fleet_home(fleet_home)
+    real_default = Path("/etc/caddy/fleet/ports")
+    assert not real_default.exists(), "precondition: real Caddy dir must not pre-exist"
+
+    with TestClient(create_app(fleet_home)) as _client:
+        pass
+
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.exists()
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.is_relative_to(fleet_home.parent)
+    assert not real_default.exists()
+
+
+def test_ui_bulk_start_returns_bulk_job_panel(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    (fleet_home / "instances" / "demo--other").mkdir(parents=True)
+    from fleet import daemon as daemon_mod
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "start", lambda paths, registry, iid, **kw: None)
+
+    # `with` (not a bare TestClient()) is required here: /ui/bulk/start's
+    # job body calls bulk_mod.run_concurrent, which spins up its own nested
+    # ThreadPoolExecutor. A bare TestClient() gives every single request its
+    # own throwaway anyio blocking portal/event loop (see
+    # starlette.testclient.TestClient._portal_factory) — the background
+    # asyncio.create_task from JobManager.submit() is scheduled on the POST
+    # request's portal loop, and once that portal closes (right after the
+    # response is sent) an in-flight asyncio.to_thread() future can no
+    # longer report its result back, orphaning the task forever regardless
+    # of how many follow-up GETs poll it. run_concurrent's extra thread-pool
+    # spin-up is reliably slower than that portal's lifetime, so this
+    # deadlocks 100% of the time on a bare TestClient(); a single `with`
+    # block keeps one portal/loop alive across the whole poll, matching
+    # test_startup_real_sync_honours_isolated_snippet_dir's pattern above.
+    with TestClient(create_app(fleet_home)) as client:
+        response = client.post(
+            "/ui/bulk/start", data={"instance_id": ["demo--develop", "demo--other"]}
+        )
+
+        assert response.status_code == 200
+        job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+        final = None
+        for _ in range(50):
+            panel = client.get(f"/ui/jobs/{job_id}/panel")
+            if "succeeded" in panel.text:
+                final = panel.text
+                break
+            time.sleep(0.02)
+
+    assert final is not None
+    assert "demo--develop" in final
+    assert "demo--other" in final
+
+
+def test_ui_bulk_destroy_confirm_count_mismatch_returns_400_and_destroys_nothing(
+    fleet_home, monkeypatch
+):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    calls = []
+    monkeypatch.setattr(daemon_mod.instances_mod, "destroy", lambda *a, **kw: calls.append(True))
+
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+    response = client.post(
+        "/ui/bulk/destroy", data={"instance_id": ["demo--develop"], "confirm_count": 2}
+    )
+
+    assert response.status_code == 400
+    assert calls == []
+
+
+def test_ui_bulk_destroy_confirm_count_match_dispatches_bulk_destroy(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    (fleet_home / "instances" / "demo--other").mkdir(parents=True)
+    from fleet import daemon as daemon_mod
+
+    calls = []
+    monkeypatch.setattr(
+        daemon_mod.instances_mod, "destroy", lambda paths, registry, iid, **kw: calls.append(iid)
+    )
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/bulk/destroy",
+        data={"instance_id": ["demo--develop", "demo--other"], "confirm_count": 2},
+    )
+
+    assert response.status_code == 200
+    job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+    for _ in range(50):
+        panel = client.get(f"/ui/jobs/{job_id}/panel")
+        if "succeeded" in panel.text:
+            break
+        time.sleep(0.02)
+
+    assert set(calls) == {"demo--develop", "demo--other"}
+
+
+def test_ui_deploy_count_greater_than_1_dispatches_multi_deploy(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    captured = {}
+
+    def fake_multi_deploy(paths, registry, project, template, *, count, **kw):
+        captured["count"] = count
+        return daemon_mod.bulk_mod.BulkOutcome(
+            kind="deploy",
+            results=[
+                daemon_mod.bulk_mod.BulkResult(
+                    instance_id=f"demo--generic-{n}", ok=True, error=None, duration_s=0.0
+                )
+                for n in range(1, count + 1)
+            ],
+        )
+
+    monkeypatch.setattr(daemon_mod.bulk_mod, "multi_deploy", fake_multi_deploy)
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/deploy",
+        data={
+            "project": "demo",
+            "template": "default",
+            "branch": "main",
+            "label": "generic",
+            "count": 3,
+        },
+    )
+
+    assert response.status_code == 200
+    job_id = re.search(r"job-panel-(\w+)", response.text).group(1)
+
+    for _ in range(50):
+        panel = client.get(f"/ui/jobs/{job_id}/panel")
+        if "succeeded" in panel.text:
+            break
+        time.sleep(0.02)
+
+    assert captured["count"] == 3
+
+
+def test_ui_deploy_disk_gate_tripped_returns_400(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+    from fleet.core.errors import DiskSpaceError
+
+    def failing_check(instances_dir, **kw):
+        raise DiskSpaceError("refusing to deploy 5 instances: only 2.0% free")
+
+    monkeypatch.setattr(daemon_mod.sysinfo, "check_disk_headroom", failing_check)
+
+    client = TestClient(create_app(fleet_home), raise_server_exceptions=False)
+    response = client.post(
+        "/ui/deploy",
+        data={"project": "demo", "template": "default", "branch": "main", "count": 5},
+    )
+
+    assert response.status_code == 400
+    assert "refusing to deploy 5 instances" in response.text
+
+
+def test_ui_deploy_count_1_path_unchanged(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    def boom(*a, **kw):
+        raise AssertionError("multi_deploy must not run for count=1")
+
+    monkeypatch.setattr(daemon_mod.bulk_mod, "multi_deploy", boom)
+    monkeypatch.setattr(
+        daemon_mod.instances_mod,
+        "deploy",
+        lambda *a, **kw: "https://demo--develop.fleet.example.test",
+    )
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/deploy",
+        data={"project": "demo", "template": "default", "branch": "main", "label": "develop"},
+    )
+
+    assert response.status_code == 200
+
+
+def test_bulk_job_panel_omits_hx_preserve_and_uses_current_instance_ws_url(fleet_home):
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["bulk1"] = Job(
+        id="bulk1",
+        kind="bulk-start",
+        instance_id="",
+        state="running",
+        instance_ids=["demo--develop", "demo--other"],
+        detail=json.dumps(
+            {
+                "total": 2,
+                "done": 1,
+                "failed": 0,
+                "current": "demo--other",
+                "results": [{"instance_id": "demo--develop", "ok": True, "error": None}],
+            }
+        ),
+    )
+
+    response = client.get("/ui/jobs/bulk1/panel")
+
+    assert response.status_code == 200
+    assert 'hx-preserve="true"' not in response.text
+    assert "/ws/instances/demo--other/log" in response.text
+
+
+def _extract_ws_token(body: str) -> str:
+    match = re.search(r"token=([^\"&]+)", body)
+    assert match, f"no ws token found in panel body: {body!r}"
+    return match.group(1)
+
+
+def test_bulk_job_panel_ws_token_verifies_for_current_instance(fleet_home):
+    # Regression for the multi-deploy live-log bug: bulk/multi-deploy jobs
+    # are submitted with instance_id="" (the real ids live in
+    # job.instance_ids / job.detail's "current"), so minting the panel's
+    # WS token from job.instance_id signs a token for "" — it can never
+    # verify against the instance the socket URL actually points at
+    # (progress.current), and the live log silently never connects.
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["bulk1"] = Job(
+        id="bulk1",
+        kind="bulk-start",
+        instance_id="",
+        state="running",
+        instance_ids=["demo--develop", "demo--other"],
+        detail=json.dumps(
+            {
+                "total": 2,
+                "done": 1,
+                "failed": 0,
+                "current": "demo--other",
+                "results": [{"instance_id": "demo--develop", "ok": True, "error": None}],
+            }
+        ),
+    )
+
+    response = client.get("/ui/jobs/bulk1/panel")
+    assert response.status_code == 200
+
+    token = _extract_ws_token(response.text)
+    assert verify_ws_token(app.state.ws_secret, token, "demo--other") is True
+
+
+def test_single_deploy_job_panel_ws_token_still_verifies_for_own_instance_id(fleet_home):
+    # Regression guard: a single-instance job must keep minting its token
+    # for job.instance_id exactly as before — only bulk/multi-deploy jobs
+    # should switch to progress.current.
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["solo1"] = Job(
+        id="solo1", kind="deploy", instance_id="demo--develop", state="running"
+    )
+
+    response = client.get("/ui/jobs/solo1/panel")
+    assert response.status_code == 200
+
+    token = _extract_ws_token(response.text)
+    assert verify_ws_token(app.state.ws_secret, token, "demo--develop") is True
+
+
+def test_bulk_job_panel_with_no_current_instance_omits_log_element(fleet_home):
+    # Boundary: between bulk-job steps (or right after submit, before the
+    # background thread's first on_progress call), progress.current can be
+    # empty/None. The panel must not render a log element pointing at an
+    # empty instance id (which would mint/verify against "" and never
+    # connect) — job_panel.html's `{% if progress.current %}` guard already
+    # skips the log div in that case; the 2s poll will pick it up once
+    # progress.current is set.
+    _setup_fleet_home(fleet_home)
+    app = create_app(fleet_home)
+    client = TestClient(app)
+
+    app.state.jobs._jobs["bulk2"] = Job(
+        id="bulk2",
+        kind="multi-deploy",
+        instance_id="",
+        state="running",
+        instance_ids=["demo--develop", "demo--other"],
+        detail=None,
+    )
+
+    response = client.get("/ui/jobs/bulk2/panel")
+    assert response.status_code == 200
+    assert "job-log" not in response.text
+    assert "/ws/instances//log" not in response.text

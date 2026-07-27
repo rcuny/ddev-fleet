@@ -12,6 +12,7 @@ from fleet.core.fleetconfig import (
     write_settings_local,
     write_web_build,
 )
+from fleet.core.registry import PortProfile
 
 
 def _extract_hook_exec(config_path):
@@ -264,6 +265,51 @@ def test_write_fleet_config_no_longer_writes_typesense_path(tmp_path):
     )
     content = path.read_text(encoding="utf-8")
     assert "FLEET_TYPESENSE_PATH" not in content
+
+
+def test_write_fleet_config_with_ports_injects_fleet_port_vars(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        "sk-ant-oat01-xyz",
+        typesense=True,
+        ports=[
+            PortProfile(name="typesense", public=9108, router=8108),
+            PortProfile(name="playwright", public=9324, router=8323),
+        ],
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "FLEET_PORT_PLAYWRIGHT=9324" in content
+    assert "FLEET_TYPESENSE_HOST=oak--develop.fleet.example.test" in content
+    assert "FLEET_TYPESENSE_PORT=9108" in content
+    # the typesense PortProfile passed via `ports` must NOT also produce a
+    # generic FLEET_PORT_TYPESENSE — its bespoke FLEET_TYPESENSE_* names
+    # (above) are the only ones settings.project.php reads.
+    assert "FLEET_PORT_TYPESENSE" not in content
+
+
+def test_write_fleet_config_ports_name_with_dash_becomes_upper_snake_case(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir,
+        "oak--develop",
+        "fleet.example.test",
+        None,
+        ports=[PortProfile(name="ts-dashboard", public=9111, router=8110)],
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "FLEET_PORT_TS_DASHBOARD=9111" in content
+
+
+def test_write_fleet_config_without_ports_omits_fleet_port_vars(tmp_path):
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(
+        instance_dir, "oak--develop", "fleet.example.test", "sk-ant-oat01-xyz"
+    )
+    content = path.read_text(encoding="utf-8")
+    assert "FLEET_PORT_" not in content
 
 
 def test_write_ddev_env_creates_file(tmp_path):

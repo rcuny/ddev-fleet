@@ -551,3 +551,296 @@ def test_reset_window_evens_bash_panes_end_to_end():
     joined = _joined(fake)
     assert f"tmux resize-pane -t %22 -x {tmux.SIDEBAR_WIDTH}" in joined  # sidebar fixed
     assert "tmux resize-pane -t %20 -x 25" in joined  # bash-even, (100-50)//2=25
+
+
+def test_ensure_general_layout_adds_second_bash_pane():
+    home = Path("/srv/fleet")
+    role_fmt = "#{pane_id}\t#{" + tmux.SIDEBAR_ROLE_OPT + "}"
+    fake = FakeRunner(
+        scripted={
+            # sidebar already present -> ensure_sidebar no-ops
+            f"tmux list-panes -t fleet:general -F #{{{tmux.SIDEBAR_ROLE_OPT}}}": RunResult(
+                0, [tmux.SIDEBAR_ROLE, ""]
+            ),
+            # one sidebar pane + one bash pane -> needs a second bash pane
+            f"tmux list-panes -t fleet:general -F {role_fmt}": RunResult(
+                0, ["%1\t" + tmux.SIDEBAR_ROLE, "%2\t"]
+            ),
+        }
+    )
+    tmux.ensure_general_layout(home, runner=fake)
+    joined = _joined(fake)
+    assert "tmux split-window -h -t %2 -c " + str(home) in joined
+
+
+def test_ensure_general_layout_no_split_when_two_bash_panes():
+    home = Path("/srv/fleet")
+    role_fmt = "#{pane_id}\t#{" + tmux.SIDEBAR_ROLE_OPT + "}"
+    fake = FakeRunner(
+        scripted={
+            f"tmux list-panes -t fleet:general -F #{{{tmux.SIDEBAR_ROLE_OPT}}}": RunResult(
+                0, [tmux.SIDEBAR_ROLE, "", ""]
+            ),
+            f"tmux list-panes -t fleet:general -F {role_fmt}": RunResult(
+                0, ["%1\t" + tmux.SIDEBAR_ROLE, "%2\t", "%3\t"]
+            ),
+        }
+    )
+    tmux.ensure_general_layout(home, runner=fake)
+    joined = _joined(fake)
+    assert not any(c.startswith("tmux split-window -h -t %") for c in joined)
+
+
+# --- Step 1b: tty1/tty2 pane commands -----------------------------------
+
+BASH_PANE_FMT = "#{pane_id}\t#{pane_left}\t#{@fleet_role}"
+
+
+def _bash_pane_list_key(window: str) -> str:
+    return f"tmux list-panes -t fleet:{window} -F {BASH_PANE_FMT}"
+
+
+def test_send_pane_command_emits_literal_and_enter_argv():
+    fake = FakeRunner()
+    tmux.send_pane_command("%5", "echo hi", runner=fake)
+    assert [c["cmd"] for c in fake.calls] == [
+        ["tmux", "send-keys", "-t", "%5", "-l", "--", "echo hi"],
+        ["tmux", "send-keys", "-t", "%5", "Enter"],
+    ]
+
+
+def test_send_pane_command_passes_key_name_looking_text_verbatim():
+    """`-l` must make tmux treat the whole command as literal text, not key
+    names — otherwise C-c/Space/Escape-looking substrings would be parsed as
+    keystrokes instead of typed characters."""
+    fake = FakeRunner()
+    cmd = 'ddev exec claude "/jira pull OAKS-1781" C-c Space'
+    tmux.send_pane_command("%5", cmd, runner=fake)
+    assert fake.calls[0]["cmd"] == ["tmux", "send-keys", "-t", "%5", "-l", "--", cmd]
+    assert fake.calls[1]["cmd"] == ["tmux", "send-keys", "-t", "%5", "Enter"]
+
+
+def test_bash_pane_ids_orders_by_pane_left_not_listing_order():
+    win = "oak--click-3"
+    fake = FakeRunner(
+        scripted={
+            _bash_pane_list_key(win): RunResult(
+                0,
+                [
+                    "%7\t60\t",  # right bash pane, listed first
+                    "%1\t0\tsidebar",  # sidebar, must be excluded regardless of pane_left
+                    "%5\t10\t",  # middle bash pane
+                ],
+            ),
+        }
+    )
+    assert tmux.bash_pane_ids(win, runner=fake) == ["%5", "%7"]
+
+
+def test_bash_pane_ids_unparseable_pane_left_sorts_last_not_raises():
+    win = "oak--click-3"
+    fake = FakeRunner(
+        scripted={
+            _bash_pane_list_key(win): RunResult(
+                0,
+                [
+                    "%9\t??\t",  # unparseable pane_left -> must sort last, not raise
+                    "%5\t10\t",
+                ],
+            ),
+        }
+    )
+    assert tmux.bash_pane_ids(win, runner=fake) == ["%5", "%9"]
+
+
+def test_send_tty_commands_sends_tty1_and_tty2_to_ordered_panes():
+    win = "oak--click-3"
+    fake = FakeRunner(
+        scripted={
+            _bash_pane_list_key(win): RunResult(0, ["%9\t-50\tsidebar", "%6\t50\t", "%5\t0\t"]),
+        }
+    )
+    tmux.send_tty_commands(win, ["a1", "a2"], ["b1"], runner=fake)
+    joined = _joined(fake)
+    assert "tmux send-keys -t %5 -l -- a1" in joined
+    assert "tmux send-keys -t %5 -l -- a2" in joined
+    assert "tmux send-keys -t %6 -l -- b1" in joined
+    # order preserved: a1 sent (and Enter'd) before a2
+    a1_idx = joined.index("tmux send-keys -t %5 -l -- a1")
+    a2_idx = joined.index("tmux send-keys -t %5 -l -- a2")
+    assert a1_idx < a2_idx
+
+
+def test_send_tty_commands_skips_tty2_when_only_one_bash_pane():
+    win = "oak--click-3"
+    fake = FakeRunner(
+        scripted={
+            _bash_pane_list_key(win): RunResult(0, ["%5\t0\t", "%9\t-50\tsidebar"]),
+        }
+    )
+    tmux.send_tty_commands(win, ["a"], ["b"], runner=fake)
+    joined = _joined(fake)
+    assert "tmux send-keys -t %5 -l -- a" in joined
+    assert not any("-- b" in c for c in joined)
+
+
+def test_ensure_instance_window_with_tty_sends_to_leftmost_bash_panes(monkeypatch):
+    import sys as _sys
+
+    win = "oak--click-3"
+    dir_ = Path("/srv/fleet/instances/oak--click-3")
+    monkeypatch.setattr(tmux, "apply_pane_layout", lambda window, *, runner=None: None)
+    sidebar_split = (
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:{win} -d -P -F "
+        "#{pane_id} -- " + _sys.executable + f" -m fleet.cli tmux-sidebar --window {win}"
+    )
+    fake = FakeRunner(
+        scripted={
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general"]),
+            f"tmux new-window -t fleet -n {win} -c {dir_} -P -F #{{pane_id}}": RunResult(0, ["%5"]),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["", ""]),
+            sidebar_split: RunResult(0, ["%9"]),
+            _bash_pane_list_key(win): RunResult(0, ["%5\t0\t", "%6\t50\t", "%9\t-50\tsidebar"]),
+        },
+    )
+    tmux.ensure_instance_window(win, dir_, tty=(["a"], ["b"]), runner=fake)
+    joined = _joined(fake)
+    assert "tmux send-keys -t %5 -l -- a" in joined
+    assert "tmux send-keys -t %5 Enter" in joined
+    assert "tmux send-keys -t %6 -l -- b" in joined
+    assert "tmux send-keys -t %6 Enter" in joined
+
+
+def test_ensure_instance_window_existing_with_tty_sends_nothing():
+    fake = FakeRunner(
+        scripted={
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(
+                0, ["general", "oak--click-3"]
+            ),
+        },
+    )
+    tmux.ensure_instance_window("oak--click-3", Path("/x"), tty=(["a"], ["b"]), runner=fake)
+    assert _joined(fake) == ["tmux list-windows -t fleet -F #{window_name}"]
+
+
+def test_ensure_instance_window_tty_none_sends_nothing():
+    import sys as _sys
+
+    win = "oak--click-3"
+    dir_ = Path("/srv/fleet/instances/oak--click-3")
+    sidebar_split = (
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:{win} -d -P -F "
+        "#{pane_id} -- " + _sys.executable + f" -m fleet.cli tmux-sidebar --window {win}"
+    )
+    fake = FakeRunner(
+        scripted={
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general"]),
+            f"tmux new-window -t fleet -n {win} -c {dir_} -P -F #{{pane_id}}": RunResult(0, ["%5"]),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["", ""]),
+            sidebar_split: RunResult(0, ["%9"]),
+        },
+    )
+    tmux.ensure_instance_window(win, dir_, runner=fake)
+    assert not any(c.startswith("tmux send-keys") for c in _joined(fake))
+
+
+def test_reconcile_calls_tty_for_only_for_newly_created_windows(monkeypatch):
+    paths_instances = Path("/srv/fleet/instances")
+
+    class P:  # minimal FleetPaths stand-in
+        home = Path("/srv/fleet")
+        instances = paths_instances
+
+    fake = FakeRunner(
+        default=RunResult(0, []),
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(
+                0, ["general", "existing--a"]
+            ),
+            "tmux list-windows -t fleet -F #{window_name}\t#{@fleet_managed}": RunResult(
+                0, ["general\t", "existing--a\t1"]
+            ),
+            "tmux list-panes -t fleet:general -F #{@fleet_role}": RunResult(0, ["sidebar"]),
+            "tmux list-panes -t fleet:existing--a -F #{@fleet_role}": RunResult(0, ["sidebar"]),
+        },
+    )
+    created_windows = []
+    monkeypatch.setattr(
+        tmux,
+        "ensure_instance_window",
+        lambda instance_id, instance_dir, *, tty=None, runner=None: created_windows.append(
+            (instance_id, tty)
+        ),
+    )
+    tty_calls = []
+
+    def tty_for(instance_id):
+        tty_calls.append(instance_id)
+        return (["cmd1"], [])
+
+    tmux.reconcile(P, ["existing--a", "new--b"], tty_for=tty_for, runner=fake)
+    assert tty_calls == ["new--b"]
+    assert ("new--b", (["cmd1"], [])) in created_windows
+    assert ("existing--a", None) in created_windows
+
+
+def test_reconcile_survives_raising_tty_for_and_still_creates_window(monkeypatch):
+    paths_instances = Path("/srv/fleet/instances")
+
+    class P:  # minimal FleetPaths stand-in
+        home = Path("/srv/fleet")
+        instances = paths_instances
+
+    fake = FakeRunner(
+        default=RunResult(0, []),
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general"]),
+            "tmux list-windows -t fleet -F #{window_name}\t#{@fleet_managed}": RunResult(
+                0, ["general\t"]
+            ),
+            "tmux list-panes -t fleet:general -F #{@fleet_role}": RunResult(0, ["sidebar"]),
+        },
+    )
+    created_windows = []
+    monkeypatch.setattr(
+        tmux,
+        "ensure_instance_window",
+        lambda instance_id, instance_dir, *, tty=None, runner=None: created_windows.append(
+            (instance_id, tty)
+        ),
+    )
+
+    def tty_for(instance_id):
+        raise RuntimeError("boom")
+
+    tmux.reconcile(P, ["new--b"], tty_for=tty_for, runner=fake)
+    assert created_windows == [("new--b", None)]
+
+
+def test_reset_window_general_rebuilds_two_bash_panes():
+    """After the layout change, resetting the general window rebuilds it to TWO
+    bash panes + sidebar (previously one), and reruns the sidebar in place so it
+    picks up the current code (e.g. the branch/commit line)."""
+    paths = _FakePaths(home=Path("/srv/fleet"), instances=Path("/srv/fleet/instances"))
+    win = "general"
+    fake = FakeRunner(
+        scripted={
+            "tmux has-session -t fleet": RunResult(0, []),
+            "tmux list-windows -t fleet -F #{window_name}": RunResult(
+                0, ["general", "oak--click-3"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{pane_id}}\t#{{@fleet_role}}": RunResult(
+                0, ["%10\t", "%11\tsidebar"]
+            ),
+            f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["sidebar"]),
+        },
+    )
+    tmux.reset_window(paths, win, runner=fake)
+    joined = _joined(fake)
+    assert any(c.startswith("tmux respawn-pane -k -t %10 -c /srv/fleet") for c in joined)
+    # general now ALSO gets a second bash pane
+    assert any(c.startswith("tmux split-window -h -t %10 -c /srv/fleet") for c in joined)
+    # sidebar rerun in place (so the commit display refreshes)
+    assert "tmux respawn-pane -k -t %11" in joined

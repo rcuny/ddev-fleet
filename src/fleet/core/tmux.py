@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Callable
 from pathlib import Path
 
 from fleet.core.errors import FleetError
@@ -65,9 +66,28 @@ def managed_window_names(*, runner=run_streamed) -> list[str]:
     return names
 
 
-def ensure_instance_window(instance_id: str, instance_dir: Path, *, runner=run_streamed) -> None:
+def ensure_instance_window(
+    instance_id: str,
+    instance_dir: Path,
+    *,
+    tty: tuple[list[str], list[str]] | None = None,
+    runner=run_streamed,
+) -> None:
     """Create the window (two bash panes + sidebar) if absent. Assumes the
-    `fleet` session already exists (callers guarantee this)."""
+    `fleet` session already exists (callers guarantee this).
+
+    `tty`, when given as `(tty1_commands, tty2_commands)`, is typed into the
+    two bash panes (via `send_tty_commands`) right after the layout is
+    applied, so a deploy template's `tty1`/`tty2` commands land in a real TTY
+    the operator can interact with. This module stays registry-agnostic —
+    `tty` is a plain tuple of command-string lists, never anything that knows
+    about `fleet.yml`/templates.
+
+    The early return above (when the window already exists) is the whole
+    idempotency mechanism for `tty`: a template's commands are only ever typed
+    once, at window creation, never re-sent into a live pane on a later
+    reconcile.
+    """
     _assert_target_safe(instance_id)
     if window_exists(instance_id, runner=runner):
         return
@@ -95,6 +115,8 @@ def ensure_instance_window(instance_id: str, instance_dir: Path, *, runner=run_s
     _run(runner, ["set-option", "-w", "-t", f"{SESSION}:{instance_id}", MANAGED_OPT, "1"])
     ensure_sidebar(instance_id, runner=runner)
     apply_pane_layout(instance_id, runner=runner)
+    if tty is not None:
+        send_tty_commands(instance_id, tty[0], tty[1], runner=runner)
     _run(runner, ["select-pane", "-t", main_pane])
 
 
@@ -183,14 +205,55 @@ def ensure_session(home: Path, *, runner=run_streamed) -> None:
         runner,
         ["set-window-option", "-t", f"{SESSION}:{GENERAL_WINDOW}", "automatic-rename", "off"],
     )
-    ensure_sidebar(GENERAL_WINDOW, runner=runner)
+    ensure_general_layout(home, runner=runner)
     apply_settings(runner=runner)  # new session
 
 
-def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
+def ensure_general_layout(home: Path, *, runner=run_streamed) -> None:
+    """Give the `general` window the same 3-pane layout as instance windows: the
+    left sidebar plus TWO bash panes, so a human can run e.g. Claude in the
+    second bash pane. Idempotent and non-destructive: the second bash pane is
+    added only when the window currently has a single bash pane, so a human who
+    has split it further is left alone. Safe to call on every `fleet tmux`
+    reconcile — that is how an already-running session gains the second pane."""
+    ensure_sidebar(GENERAL_WINDOW, runner=runner)
+    bash_panes = [
+        pane_id
+        for pane_id, role in _list_panes_with_roles(GENERAL_WINDOW, runner=runner)
+        if role != SIDEBAR_ROLE
+    ]
+    if len(bash_panes) == 1:
+        _run(runner, ["split-window", "-h", "-t", bash_panes[0], "-c", str(home)])
+    apply_pane_layout(GENERAL_WINDOW, runner=runner)
+
+
+def reconcile(
+    paths,
+    instance_ids,
+    *,
+    tty_for: Callable[[str], tuple[list[str], list[str]] | None] | None = None,
+    runner=run_streamed,
+) -> None:
+    """Reconcile the `fleet` session against `instance_ids`: create missing
+    instance windows, prune stale managed ones, self-heal sidebars/layout.
+
+    `tty_for`, when given, resolves an instance id to its `(tty1, tty2)`
+    command tuple. It is called LAZILY — only for an instance whose window
+    does not already exist — so an already-up window never pays the
+    registry/secret-resolution cost `tty_for` implies. A `tty_for` that raises
+    must not break reconcile: the exception is swallowed and that instance's
+    window is created with `tty=None` (a plain bash pane), same as if no
+    resolver had been supplied."""
     ensure_session(paths.home, runner=runner)
+    ensure_general_layout(paths.home, runner=runner)  # heal an already-running session
     for instance_id in sorted(instance_ids):
-        ensure_instance_window(instance_id, paths.instances / instance_id, runner=runner)
+        tty: tuple[list[str], list[str]] | None = None
+        if tty_for is not None and not window_exists(instance_id, runner=runner):
+            try:
+                tty = tty_for(instance_id)
+            except Exception:
+                tty = None
+        ensure_instance_window(instance_id, paths.instances / instance_id, tty=tty, runner=runner)
     for window in list_window_names(runner=runner):
         ensure_sidebar(window, runner=runner)  # self-heal
     for window in managed_window_names(runner=runner):
@@ -210,6 +273,72 @@ def _list_panes_with_roles(window: str, *, runner=run_streamed) -> list[tuple[st
         pane_id, _, role = line.partition("\t")
         panes.append((pane_id.strip(), role.strip()))
     return panes
+
+
+def bash_pane_ids(window: str, *, runner=run_streamed) -> list[str]:
+    """Ids of the non-sidebar (bash) panes in `window`, left-to-right.
+
+    Ordering is by the `#{pane_left}` screen-position variable, NOT by pane
+    index or listing order: `ensure_sidebar()` inserts the sidebar with
+    `split-window -hbf`, which renumbers panes, so index order is not a safe
+    proxy for left-to-right. A pane whose `pane_left` fails to parse as an int
+    (should never happen, but tmux output is not something we control) sorts
+    last rather than raising, so one malformed line can't take down the whole
+    reconcile."""
+    result = _run(
+        runner,
+        [
+            "list-panes",
+            "-t",
+            f"{SESSION}:{window}",
+            "-F",
+            f"#{{pane_id}}\t#{{pane_left}}\t#{{{SIDEBAR_ROLE_OPT}}}",
+        ],
+    )
+    panes: list[tuple[str, int]] = []
+    for line in result.lines:
+        if not line.strip():
+            continue
+        pane_id, _, rest = line.partition("\t")
+        pane_left, _, role = rest.partition("\t")
+        if role.strip() == SIDEBAR_ROLE:
+            continue
+        try:
+            left = int(pane_left.strip())
+        except ValueError:
+            left = sys.maxsize
+        panes.append((pane_id.strip(), left))
+    panes.sort(key=lambda p: p[1])
+    return [pane_id for pane_id, _ in panes]
+
+
+def send_pane_command(pane_id: str, command: str, *, runner=run_streamed) -> None:
+    """Type `command` into `pane_id` as if the operator had typed it, then press
+    Enter — two separate `send-keys` calls, matching how tmux itself expects a
+    typed-then-submitted line.
+
+    The `-l` (literal) flag is REQUIRED, not cosmetic: without it tmux parses
+    its argument as key NAMES rather than literal text, so a command
+    containing tokens like `C-c`, `Space`, or `Escape` would be silently
+    mangled into keystrokes instead of typed verbatim. `--` guards a command
+    that itself starts with `-` from being parsed as a `send-keys` flag."""
+    _run(runner, ["send-keys", "-t", pane_id, "-l", "--", command])
+    _run(runner, ["send-keys", "-t", pane_id, "Enter"])
+
+
+def send_tty_commands(
+    window: str, tty1: list[str], tty2: list[str], *, runner=run_streamed
+) -> None:
+    """Send `tty1` commands to the leftmost bash pane and `tty2` to the next
+    one, in list order. Best-effort cosmetics, matching the rest of the
+    sidebar/layout machinery: a list whose target pane does not exist (fewer
+    bash panes than expected) is silently skipped rather than raising."""
+    panes = bash_pane_ids(window, runner=runner)
+    for commands, index in ((tty1, 0), (tty2, 1)):
+        if index >= len(panes):
+            continue
+        for command in commands:
+            send_pane_command(panes[index], command, runner=runner)
 
 
 def _sidebar_pane_id(window: str, *, runner=run_streamed) -> str | None:
@@ -259,20 +388,16 @@ def apply_pane_layout(window: str, *, runner=run_streamed) -> None:
 
 def reset_window(paths, window: str, *, runner=run_streamed) -> None:
     """Rebuild the standard pane layout for `window` in place (no kill-window,
-    so the tab keeps its index). general -> 1 bash + sidebar; instance -> 2 bash
-    + sidebar. Best-effort: no-ops if the session/window is gone."""
+    so the tab keeps its index): 2 bash panes + sidebar for both the general and
+    instance windows. Best-effort: no-ops if the session/window is gone."""
     _assert_target_safe(window)
     if not session_exists(runner=runner):
         return
     if window not in list_window_names(runner=runner):
         return
 
-    if window == GENERAL_WINDOW:
-        cwd = paths.home
-        want_bash = 1
-    else:
-        cwd = paths.instances / window
-        want_bash = 2
+    cwd = paths.home if window == GENERAL_WINDOW else paths.instances / window
+    want_bash = 2
 
     panes = _list_panes_with_roles(window, runner=runner)
     non_sidebar = [pid for pid, role in panes if role != SIDEBAR_ROLE]

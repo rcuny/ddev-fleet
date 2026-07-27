@@ -1,0 +1,8 @@
+---
+fleet_network_hardening_enabled: false
+fleet_ufw_extra_ports: []
+fleet_ufw_ssh_port: 22
+fleet_ufw_assert_loopback_router: true
+fleet_ufw_docker_bridge: docker0
+fleet_ufw_deadman_switch_enabled: true
+fleet_ufw_deadman_grace_minutes: 10

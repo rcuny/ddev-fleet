@@ -7,7 +7,8 @@ commands, etc.); `branch` and the instance `label` are resolved per-deploy,
 never stored in the registry.
 """
 
-from dataclasses import dataclass
+import re
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from ruamel.yaml import YAML
@@ -19,6 +20,13 @@ _yaml = YAML()
 _yaml.preserve_quotes = True
 _yaml.width = 4096
 
+_RESERVED_PORTS = frozenset({22, 80, 443, 8765})
+_ROUTER_RESERVED_PORTS = frozenset({8080, 8443})
+_MIN_PORT = 1
+_MAX_PORT = 65535
+_TTY_KEYS = ("tty1", "tty2")
+_TTY_KEY_RE = re.compile(r"^tty\d+$")
+
 
 @dataclass
 class ResolvedInstance:
@@ -28,6 +36,21 @@ class ResolvedInstance:
     label: str
     post_deploy: list[str]
     instance_id: str
+    # Defaults must trail every field above (dataclass field-order rule), so
+    # these live after `instance_id` rather than immediately after
+    # `post_deploy` despite the "place after post_deploy" framing upstream.
+    tty1: list[str] = field(default_factory=list)
+    tty2: list[str] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class PortProfile:
+    name: str
+    public: int
+    router: int
+
+
+_TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
 
 
 class Registry:
@@ -47,6 +70,57 @@ class Registry:
         registry._validate()
         return registry
 
+    def _validate_fleet_ports(self, fleet_block: dict) -> dict:
+        """Validate `fleet.ports` (spec §3.1) and return the raw mapping
+        `{name: {"public": int, "router": int}}` for Task 3's per-project
+        `ports:` unknown-reference check. `{}` if `fleet.ports` is absent —
+        a legacy-only registry (just `typesense: true`) stays valid."""
+        fleet_ports = fleet_block.get("ports") or {}
+        seen_public: dict[int, str] = {}
+        seen_router: dict[int, str] = {}
+        for name, entry in fleet_ports.items():
+            path = f"fleet.ports.{name}"
+            try:
+                validate_part(name)
+            except ValidationError as exc:
+                raise RegistryError(f"{path}: {exc.message}") from exc
+
+            if not isinstance(entry, dict) or set(entry.keys()) != {"public", "router"}:
+                raise RegistryError(
+                    f"{path}: must be a mapping with exactly the keys 'public' and 'router'"
+                )
+            public, router = entry["public"], entry["router"]
+            for field_name, value in (("public", public), ("router", router)):
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise RegistryError(f"{path}.{field_name}: must be an int, got {value!r}")
+                if not (_MIN_PORT <= value <= _MAX_PORT):
+                    raise RegistryError(
+                        f"{path}.{field_name}: {value} is out of range "
+                        f"[{_MIN_PORT}, {_MAX_PORT}]"
+                    )
+                if value in _RESERVED_PORTS:
+                    raise RegistryError(
+                        f"{path}.{field_name}: {value} is reserved (22/80/443/8765)"
+                    )
+            if router in _ROUTER_RESERVED_PORTS:
+                raise RegistryError(
+                    f"{path}.router: {router} collides with the reserved ddev-router "
+                    "ports (8080/8443)"
+                )
+            if public == router:
+                raise RegistryError(f"{path}: public and router must differ (both {public})")
+            if public in seen_public:
+                raise RegistryError(
+                    f"{path}.public: {public} is already used by fleet.ports.{seen_public[public]}"
+                )
+            seen_public[public] = name
+            if router in seen_router:
+                raise RegistryError(
+                    f"{path}.router: {router} is already used by fleet.ports.{seen_router[router]}"
+                )
+            seen_router[router] = name
+        return fleet_ports
+
     def _validate(self) -> None:
         data = self._data
         if "fleet" not in data:
@@ -54,6 +128,8 @@ class Registry:
         fleet_block = data["fleet"] or {}
         if "domain" not in fleet_block:
             raise RegistryError("missing key 'fleet.domain'")
+
+        fleet_ports = self._validate_fleet_ports(fleet_block)
 
         projects = data.get("projects") or {}
         for project_key, project_block in projects.items():
@@ -75,6 +151,17 @@ class Registry:
                         "disable git identity injection for this project"
                     )
 
+            if "issue_id_regexp" in project_block:
+                pattern = project_block["issue_id_regexp"]
+                if not isinstance(pattern, str):
+                    raise RegistryError(f"projects.{project_key}.issue_id_regexp: must be a string")
+                try:
+                    re.compile(pattern)
+                except re.error as exc:
+                    raise RegistryError(
+                        f"projects.{project_key}.issue_id_regexp: invalid regexp — {exc}"
+                    ) from exc
+
             templates = project_block.get("templates") or {}
             for template_key, template_block in templates.items():
                 try:
@@ -87,6 +174,33 @@ class Registry:
                     raise RegistryError(
                         f"projects.{project_key}.templates.{template_key}.branch: not "
                         "allowed — branch is resolved per-deploy, never stored in a template"
+                    )
+                if template_block:
+                    for tty_key in _TTY_KEYS:
+                        if tty_key not in template_block:
+                            continue
+                        value = template_block[tty_key]
+                        if not isinstance(value, list) or not all(
+                            isinstance(item, str) for item in value
+                        ):
+                            raise RegistryError(
+                                f"projects.{project_key}.templates.{template_key}.{tty_key}: "
+                                "must be a list of strings"
+                            )
+                    for key in template_block:
+                        if key in _TTY_KEYS:
+                            continue
+                        if _TTY_KEY_RE.match(str(key)):
+                            raise RegistryError(
+                                f"projects.{project_key}.templates.{template_key}.{key}: not "
+                                "allowed — only tty1 and tty2 are supported"
+                            )
+
+            for port_name in project_block.get("ports") or []:
+                if port_name not in fleet_ports:
+                    raise RegistryError(
+                        f"projects.{project_key}.ports: unknown port name {port_name!r} "
+                        "(not defined in fleet.ports)"
                     )
 
     @property
@@ -170,9 +284,69 @@ class Registry:
         block = self._project_block(project)
         return bool(block.get("typesense"))
 
+    def issue_id_regexp(self, project: str) -> str | None:
+        """The project's `[[issue-id]]` extraction pattern (`extract_issue_id`
+        in `core/tokens.py`), or None when the project defines none — the
+        token is then simply absent from a deploy's context."""
+        block = self._project_block(project)
+        pattern = block.get("issue_id_regexp")
+        return str(pattern) if pattern is not None else None
+
+    def port_profile(self, name: str) -> PortProfile:
+        """Look up one `fleet.ports` entry by name. `'typesense'` falls back
+        to the built-in legacy default (spec §3.2) when `fleet.ports` has
+        no explicit entry for it — so `typesense: true`-only registries need
+        zero edits. Any other unknown name raises RegistryError."""
+        fleet_ports = self._data["fleet"].get("ports") or {}
+        if name in fleet_ports:
+            entry = fleet_ports[name]
+            return PortProfile(name=name, public=int(entry["public"]), router=int(entry["router"]))
+        if name == "typesense":
+            return _TYPESENSE_LEGACY_DEFAULT
+        raise RegistryError(f"unknown port name {name!r} (not defined in fleet.ports)")
+
+    def project_ports(self, project: str) -> list[PortProfile]:
+        """`projects.<project>.ports` resolved by name, plus a synthetic
+        'typesense' entry when `typesense_enabled(project)` and 'typesense'
+        isn't already listed (dedupes the legacy/new overlap, spec §3.3)."""
+        block = self._project_block(project)
+        names = list(block.get("ports") or [])
+        if self.typesense_enabled(project) and "typesense" not in names:
+            names.append("typesense")
+        return [self.port_profile(name) for name in names]
+
+    def all_port_profiles(self) -> list[PortProfile]:
+        """Union of every PortProfile referenced by ANY project, one each,
+        sorted by name — the accessor the firewall spec's `fleet-ufw-sync`
+        and `core/caddyports.py` both consume."""
+        seen: dict[str, PortProfile] = {}
+        for project in self.project_keys():
+            for profile in self.project_ports(project):
+                seen[profile.name] = profile
+        return [seen[name] for name in sorted(seen)]
+
+    def public_ports_in_use(self) -> list[int]:
+        return sorted({p.public for p in self.all_port_profiles()})
+
     def resolve(
         self, project: str, template: str, branch: str, label: str | None = None
     ) -> ResolvedInstance:
+        """Resolve `(project, template, branch, label)` into a `ResolvedInstance`.
+
+        The instance label is always normalised via `slugify()` — lowercased,
+        every run of non-`[a-z0-9]` characters collapsed to a single `-`,
+        leading/trailing `-` stripped — whether it is derived from `branch`
+        (no explicit `label`) or passed explicitly. An explicit label is
+        normalised, not rejected: e.g. `label="ABC-1234"` resolves to
+        `"abc-1234"`. This is the single choke point for the CLI, the web
+        UI, and bulk/multi-deploy, which all reach it via
+        `instances.resolve_target`.
+
+        Raises RegistryError if `template` is unknown, `branch` is empty, or
+        the resolved label/instance id fails validation (e.g. slugifies to
+        empty, or the composed `<project>--<label>` exceeds the 63-character
+        DNS label limit).
+        """
         block = self._project_block(project)
         templates = block.get("templates") or {}
         if template not in templates:
@@ -182,9 +356,11 @@ class Registry:
 
         template_block = templates[template] or {}
         post_deploy = [str(c) for c in (template_block.get("post_deploy") or [])]
+        tty1 = [str(c) for c in (template_block.get("tty1") or [])]
+        tty2 = [str(c) for c in (template_block.get("tty2") or [])]
 
         try:
-            resolved_label = label if label else slugify(branch)
+            resolved_label = slugify(label) if label else slugify(branch)
             inst_id = instance_id(project, resolved_label)
         except ValidationError as exc:
             raise RegistryError(
@@ -198,4 +374,6 @@ class Registry:
             label=resolved_label,
             post_deploy=post_deploy,
             instance_id=inst_id,
+            tty1=tty1,
+            tty2=tty2,
         )

@@ -12,7 +12,12 @@ from rich.console import Console
 from rich.text import Text
 
 from fleet.core import ddev, shell, tmux
-from fleet.core.instances import FleetPaths, read_instance_git_branch
+from fleet.core.instances import (
+    FleetPaths,
+    read_instance_git_branch,
+    read_instance_git_head,
+)
+from fleet.core.reboot import RebootStatus, format_duration_since, read_reboot_status
 
 STATUS_GLYPH = {"running": "●", "stopped": "○", "deployed": "•", "error": "!"}
 STATUS_STYLE = {"running": "green", "stopped": "grey50", "deployed": "cyan", "error": "red"}
@@ -62,7 +67,35 @@ def build_rows(instance_ids, statuses, current, branches=None) -> list[tuple[str
 
 
 def _branches(paths: FleetPaths, ids: list[str]) -> dict[str, str]:
-    return {i: read_instance_git_branch(paths.instances / i) for i in ids}
+    # The dim line under each instance shows "branch (shorthead)", e.g.
+    # "feature/OAKS-1688-seo-geo-improvements (9201b89b53)". The short HEAD makes
+    # it obvious which commit an instance is actually running.
+    out: dict[str, str] = {}
+    for i in ids:
+        instance_dir = paths.instances / i
+        branch = read_instance_git_branch(instance_dir)
+        head = read_instance_git_head(instance_dir)
+        if branch and head:
+            out[i] = f"{branch} ({head})"
+        elif branch:
+            out[i] = branch
+        elif head:
+            out[i] = f"({head})"
+    return out
+
+
+def _reboot_banner_lines(status: RebootStatus) -> list[str]:
+    avail = tmux.SIDEBAR_WIDTH - 4
+    duration = format_duration_since(status.since) if status.since else "?"
+    lines = ["REBOOT REQUIRED", f"pending {duration}"]
+    shown = status.packages[:3]
+    pkg_text = ", ".join(shown)
+    if len(status.packages) > 3:
+        pkg_text += f" +{len(status.packages) - 3} more"
+    if pkg_text:
+        for start in range(0, len(pkg_text), avail):
+            lines.append(pkg_text[start : start + avail])
+    return lines
 
 
 def _render(
@@ -71,9 +104,14 @@ def _render(
     ids: list[str],
     statuses: dict[str, str],
     branches: dict[str, str],
+    reboot_status: RebootStatus | None = None,
 ) -> None:
     body = Text()
     body.append("FLEET\n\n", style="bold")
+    if reboot_status is not None and reboot_status.pending:
+        for line in _reboot_banner_lines(reboot_status):
+            body.append(line + "\n", style="red bold")
+        body.append("\n")
     for text, style in build_rows(ids, statuses, window, branches):
         body.append(text + "\n", style=("reverse bold" if style == "current" else style))
     body.append("\nkeys · ^b = Ctrl-b\n", style="bold grey50")
@@ -92,13 +130,16 @@ def run(
     list_interval: float = 2.0,
     status_interval: float = 10.0,
     branch_interval: float = 300.0,
+    reboot_interval: float = 10.0,
 ) -> None:
     console = Console()
     statuses = _statuses()
     ids = shell.list_instance_ids(paths)
     branches = _branches(paths, ids)
+    reboot_status = read_reboot_status()
     last_status = time.monotonic()
     last_branch = last_status
+    last_reboot = last_status
     while True:
         now = time.monotonic()
         if now - last_status >= status_interval:
@@ -108,7 +149,10 @@ def run(
         if now - last_branch >= branch_interval:
             branches = _branches(paths, ids)
             last_branch = now
-        _render(console, window, ids, statuses, branches)
+        if now - last_reboot >= reboot_interval:
+            reboot_status = read_reboot_status()
+            last_reboot = now
+        _render(console, window, ids, statuses, branches, reboot_status)
         if once:
             return
         try:

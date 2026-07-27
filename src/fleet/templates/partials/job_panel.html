@@ -1,6 +1,31 @@
 <div class="job-panel" id="job-panel-{{ job.id }}"
      {% if job.state in ("queued", "running") %}hx-get="/ui/jobs/{{ job.id }}/panel" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}>
-  <p>Job {{ job.id }} ({{ job.kind }} {{ job.instance_id }}): <strong>{{ job.state }}</strong></p>
-  {% if job.detail %}<p>{{ job.detail }}</p>{% endif %}
-  <div class="job-log" id="log-{{ job.id }}" hx-preserve="true" data-ws-url="/ws/instances/{{ job.instance_id }}/log?token={{ ws_token }}"></div>
+  {% set is_bulk = job.kind.startswith("bulk-") or job.kind == "multi-deploy" %}
+  {% if is_bulk %}
+    {% set progress = job.detail | bulk_progress %}
+    <p>Job {{ job.id }} ({{ job.kind }}): <strong>{{ job.state }}</strong></p>
+    {% if progress %}
+      <table class="bulk-results">
+        <thead><tr><th>Instance</th><th>Result</th></tr></thead>
+        <tbody>
+          {% for r in progress.results %}
+            <tr>
+              <td>{{ r.instance_id }}</td>
+              <td>{% if r.ok %}&check;{% else %}&cross; {{ r.error }}{% endif %}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      <p>{{ progress.done }}/{{ progress.total }} done, {{ progress.failed }} failed</p>
+      {% if progress.current %}
+        <div class="job-log" id="log-{{ job.id }}"
+             data-ws-url="/ws/instances/{{ progress.current }}/log?token={{ ws_token }}"></div>
+      {% endif %}
+    {% endif %}
+  {% else %}
+    <p>Job {{ job.id }} ({{ job.kind }} {{ job.instance_id }}): <strong>{{ job.state }}</strong></p>
+    {% if job.detail %}<p>{{ job.detail }}</p>{% endif %}
+    <div class="job-log" id="log-{{ job.id }}" hx-preserve="true"
+         data-ws-url="/ws/instances/{{ job.instance_id }}/log?token={{ ws_token }}"></div>
+  {% endif %}
 </div>

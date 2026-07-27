@@ -1,0 +1,36 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(fleet list)", "Bash(fleet list *)", "Bash(fleet deploy *)",
+      "Bash(fleet start *)", "Bash(fleet stop *)", "Bash(fleet snapshot *)",
+      "Bash(fleet refresh-config)", "Bash(fleet refresh-ports)",
+      "Bash(fleet ssh-key)",
+      "Bash(fleet tmux-sidebar *)",
+      "Bash(ddev list *)", "Bash(ddev describe *)", "Bash(ddev status *)",
+      "Bash(ddev logs *)",
+      "Bash(cat /srv/fleet/logs/*)", "Bash(tail /srv/fleet/logs/*)",
+      "Bash(ls *)", "Bash(find *)", "Bash(grep *)", "Bash(wc *)",
+      "Bash(df *)", "Bash(free *)", "Bash(du *)",
+      "Bash(git -C /srv/fleet/config status *)",
+      "Bash(git -C /srv/fleet/config log *)",
+      "Bash(git -C /srv/fleet/config diff *)"
+    ],
+    "ask": [
+      "Bash(fleet destroy *)", "Bash(fleet secret set *)",
+      "Bash(fleet set-claude-token *)", "Bash(fleet refresh-claude-token *)",
+      "Bash(fleet set-admin-password *)", "Bash(fleet rotate-admin-password *)",
+      "Bash(fleet refresh-instance-config *)",
+      "Bash(fleet stop --*)", "Bash(fleet start --*)",
+      "Bash(ddev delete *)", "Bash(ddev restart *)"
+    ],
+    "deny": [
+      "Read(/srv/fleet/.secrets)", "Edit(/srv/fleet/.secrets)",
+      "Read(/srv/fleet/secrets/**)", "Edit(/srv/fleet/secrets/**)",
+      "Bash(cat /srv/fleet/.secrets*)", "Bash(cat /srv/fleet/secrets/**)",
+      "Bash(rm -rf *)", "Bash(sudo *)",
+      "Bash(fleet destroy --all *)"
+    ],
+    "defaultMode": "default"
+  }
+}

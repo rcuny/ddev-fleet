@@ -1,7 +1,12 @@
+import argparse
+import inspect
 import stat
+from pathlib import Path
 
 from fleet import cli
-from fleet.core.errors import DeployError
+from fleet.core import caddyports
+from fleet.core import instances as real_instances_mod
+from fleet.core.errors import CaddyPortsError, DeployError
 from fleet.core.instances import FleetPaths, InstanceStatus
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult
@@ -36,12 +41,41 @@ def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
         *,
         branch=None,
         label=None,
-        fresh=False,
+        replace=False,
         force=False,
         auth_enabled=True,
         auth_password="fleet",
         runner=None,
     ):
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "deploy", "demo", "default", "--branch=main"]
+    )
+
+    assert exit_code == 0
+    assert "https://demo--develop.fleet.example.test" in capsys.readouterr().out
+
+
+def test_deploy_call_args_match_real_deploy_signature(fleet_home, monkeypatch, capsys):
+    """Regression guard for the 2026-07-27 breakage where cli.py kept
+    passing `fresh=` after core/instances.py's deploy() renamed that
+    parameter to `replace` — every deploy() call raised TypeError at
+    runtime, and NONE of the existing tests caught it because their
+    fake_deploy stand-ins declare their own (hand-copied, and in that case
+    stale) explicit signature rather than checking against the real one.
+
+    This test binds the CLI's actual call args against
+    `inspect.signature(instances_mod.deploy)` — the REAL function, imported
+    before any monkeypatching — so a future rename/removal of a keyword
+    argument raises a loud TypeError here instead of silently passing."""
+    _write_minimal_registry(fleet_home)
+    real_sig = inspect.signature(real_instances_mod.deploy)
+
+    def fake_deploy(*args, **kwargs):
+        real_sig.bind(*args, **kwargs)
         return "https://demo--develop.fleet.example.test"
 
     monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
@@ -126,6 +160,30 @@ def test_deploy_fleet_error_exits_1_and_prints_to_stderr(fleet_home, monkeypatch
     assert "something specific went wrong" in capsys.readouterr().err
 
 
+def test_deploy_fresh_flag_removed_argparse_rejects_it(fleet_home, capsys):
+    """`--fresh` is gone (design decision 3,
+    2026-07-27-fleet-redeploy-and-no-overwrite-design.md) — `redeploy`
+    replaces it. argparse must reject the flag outright rather than
+    silently ignoring it."""
+    import pytest
+
+    with pytest.raises(SystemExit) as exc:
+        cli.main(
+            [
+                "--fleet-home",
+                str(fleet_home),
+                "deploy",
+                "demo",
+                "default",
+                "--branch=main",
+                "--fresh",
+            ]
+        )
+
+    assert exc.value.code == 2
+    assert "unrecognized arguments: --fresh" in capsys.readouterr().err
+
+
 def test_list_renders_table(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
 
@@ -179,8 +237,80 @@ def test_init_skip_claude_creates_skeleton_non_interactively(tmp_path):
     assert (fleet_home / "locks").is_dir()
     registry = Registry.load(fleet_home / "config" / "fleet.yml")
     assert registry.domain == "fleet.example.test"
-    assert registry.project_keys() == []
+    assert registry.project_keys() == ["example"]
     assert not (fleet_home / ".secrets").exists()
+
+
+def test_init_local_file_mode_copies_dist_verbatim_and_patches_domain(tmp_path):
+    fleet_home = tmp_path / "new-fleet-home"
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test", "--skip-claude"]
+    )
+
+    assert exit_code == 0
+    registry_text = (fleet_home / "config" / "fleet.yml").read_text(encoding="utf-8")
+    # Copied from the real fleet.yml.dist verbatim (comments included),
+    # not the old hand-built skeleton dict.
+    assert "Example fleet registry" in registry_text
+    assert "post_deploy: [ddev start]" in registry_text
+    registry = Registry.load(fleet_home / "config" / "fleet.yml")
+    assert registry.domain == "fleet.example.test"
+
+
+def test_init_config_repo_mode_clones_when_not_already_a_checkout(tmp_path, monkeypatch):
+    fleet_home = tmp_path / "new-fleet-home"
+    recorder = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        recorder.append(cmd)
+        # Simulate a real clone by creating the destination + a fake .git
+        dest = Path(cmd[-1])
+        (dest / ".git").mkdir(parents=True)
+        (dest / "fleet.yml").write_text(
+            "fleet:\n  domain: fleet.example.test\nprojects: {}\n", encoding="utf-8"
+        )
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setenv("FLEET_CONFIG_REPO", "git@example.test:org/fleet-config.git")
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test", "--skip-claude"]
+    )
+
+    assert exit_code == 0
+    assert recorder == [
+        ["git", "clone", "git@example.test:org/fleet-config.git", str(fleet_home / "config")]
+    ]
+    registry = Registry.load(fleet_home / "config" / "fleet.yml")
+    assert registry.domain == "fleet.example.test"
+
+
+def test_init_config_repo_mode_never_re_clones_an_existing_checkout(tmp_path, monkeypatch, capsys):
+    fleet_home = tmp_path / "new-fleet-home"
+    config_dir = fleet_home / "config"
+    (config_dir / ".git").mkdir(parents=True)
+    (config_dir / "fleet.yml").write_text(
+        "fleet:\n  domain: fleet.example.test\nprojects: {}\n", encoding="utf-8"
+    )
+
+    recorder = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        recorder.append(cmd)
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setenv("FLEET_CONFIG_REPO", "git@example.test:org/fleet-config.git")
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "init", "--domain=fleet.example.test", "--skip-claude"]
+    )
+
+    assert exit_code == 0
+    assert recorder == []  # never re-cloned
+    assert "already exists" in capsys.readouterr().err
 
 
 def test_destroy_dispatch(fleet_home, monkeypatch):
@@ -838,6 +968,153 @@ def test_secret_set_writes_per_project_secret_file(fleet_home):
     assert mode == 0o600
 
 
+def test_refresh_ports_prints_no_changes_when_sync_returns_empty(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    calls = []
+
+    def fake_sync(registry, **kwargs):
+        calls.append(registry.domain)
+        return caddyports.SyncResult(written=[], removed=[])
+
+    monkeypatch.setattr(cli.caddyports, "sync", fake_sync)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    assert calls == ["fleet.example.test"]
+    assert "caddy: no changes" in capsys.readouterr().out
+
+
+def test_refresh_ports_prints_written_and_removed_snippet_names(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.caddyports,
+        "sync",
+        lambda registry, **kw: caddyports.SyncResult(written=["typesense"], removed=["stale"]),
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+    out = capsys.readouterr().out
+
+    assert exit_code == 0
+    assert "wrote port snippet 'typesense'" in out
+    assert "removed port snippet 'stale'" in out
+
+
+def test_refresh_ports_caddy_ports_error_exits_1_and_prints_to_stderr(
+    fleet_home, monkeypatch, capsys
+):
+    _write_minimal_registry(fleet_home)
+
+    def failing_sync(registry, **kw):
+        raise CaddyPortsError("caddy validate exploded")
+
+    monkeypatch.setattr(cli.caddyports, "sync", failing_sync)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 1
+    assert "caddy validate exploded" in capsys.readouterr().err
+
+
+def test_refresh_ports_skips_ufw_sync_when_helper_absent(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.caddyports, "sync", lambda registry, **kw: caddyports.SyncResult([], [])
+    )
+    monkeypatch.setattr(cli, "_FLEET_UFW_SYNC_HELPER", Path("/does/not/exist/fleet-ufw-sync"))
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    assert calls == []
+    assert "ufw:" not in capsys.readouterr().out
+
+
+def test_refresh_ports_runs_ufw_sync_when_helper_present(fleet_home, monkeypatch, capsys, tmp_path):
+    _write_minimal_registry(fleet_home)
+    helper = tmp_path / "fleet-ufw-sync"
+    helper.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cli, "_FLEET_UFW_SYNC_HELPER", helper)
+    monkeypatch.setattr(
+        cli.caddyports, "sync", lambda registry, **kw: caddyports.SyncResult([], [])
+    )
+
+    calls = []
+
+    def fake_runner(cmd, *, cwd=None, env=None, log_path=None, echo=True):
+        calls.append(list(cmd))
+        return RunResult(returncode=0, lines=[])
+
+    monkeypatch.setattr(cli, "run_streamed", fake_runner)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    assert ["sudo", str(helper)] in calls
+    assert "ufw: synced" in capsys.readouterr().out
+
+
+def test_refresh_ports_ufw_sync_failure_exits_1(fleet_home, monkeypatch, capsys, tmp_path):
+    _write_minimal_registry(fleet_home)
+    helper = tmp_path / "fleet-ufw-sync"
+    helper.write_text("", encoding="utf-8")
+    monkeypatch.setattr(cli, "_FLEET_UFW_SYNC_HELPER", helper)
+    monkeypatch.setattr(
+        cli.caddyports, "sync", lambda registry, **kw: caddyports.SyncResult([], [])
+    )
+    monkeypatch.setattr(
+        cli, "run_streamed", lambda cmd, **kw: RunResult(returncode=1, lines=["permission denied"])
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 1
+    assert "permission denied" in capsys.readouterr().err
+
+
+def test_refresh_ports_real_sync_honours_isolated_snippet_dir(fleet_home, monkeypatch):
+    """Regression: `_cmd_refresh_ports` must pass `snippet_dir=` explicitly to
+    `caddyports.sync()`, not rely on `sync()`'s bound default.
+
+    Every other test in this module mocks `cli.caddyports.sync` wholesale, so
+    none of them would notice if the call site regressed to the bare
+    `caddyports.sync(registry, runner=runner)` form — `sync()`'s own
+    `snippet_dir=DEFAULT_PORTS_SNIPPET_DIR` default parameter is bound at
+    caddyports.py's import time, so conftest's autouse monkeypatch of the
+    *module attribute* `caddyports.DEFAULT_PORTS_SNIPPET_DIR` would silently
+    stop applying, and the real (unmocked) `sync()` would `mkdir()` the real
+    `/etc/caddy/fleet/ports` on the host. This test lets the REAL `sync()` run
+    (no mock) and asserts it landed in the isolated tmp_path directory, not
+    the real default.
+    """
+    _write_minimal_registry(fleet_home)
+    real_default = Path("/etc/caddy/fleet/ports")
+    assert not real_default.exists(), "precondition: real Caddy dir must not pre-exist"
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    assert exit_code == 0
+    # sync() unconditionally does `snippet_dir.mkdir(parents=True,
+    # exist_ok=True)` before comparing wanted/existing snippets, so if the
+    # isolated dir (patched by conftest's autouse `_isolate_caddy_paths`
+    # fixture) was actually used, it now exists on disk.
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.exists()
+    assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.is_relative_to(fleet_home.parent)
+    # And the real system default must remain untouched — this is the part
+    # that fails if the call site reverts to the bare `caddyports.sync(...)`
+    # default.
+    assert not real_default.exists()
+
+
 def _make_instance_dir(fleet_home, instance_id):
     paths = FleetPaths.from_home(fleet_home)
     (paths.instances / instance_id).mkdir(parents=True, exist_ok=True)
@@ -1126,6 +1403,79 @@ def test_tmux_dispatch_reconciles_and_attaches(fleet_home, monkeypatch):
     assert seen["attached"] is True
 
 
+def test_tmux_dispatch_passes_a_tty_for_resolver(fleet_home, monkeypatch):
+    """`fleet tmux` must load the registry and pass a `tty_for` callable into
+    `reconcile()` — not None — when the registry loads fine."""
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    seen = {}
+    monkeypatch.setattr(
+        cli.tmux_mod,
+        "reconcile",
+        lambda paths, ids, **kw: seen.setdefault("tty_for", kw.get("tty_for")),
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    assert callable(seen["tty_for"])
+    assert seen["attached"] is True
+
+
+def test_tmux_dispatch_tty_for_resolves_a_plan(fleet_home, monkeypatch):
+    """The `tty_for` resolver passed to `reconcile()` must actually resolve
+    an instance id to a `(tty1, tty2)` tuple via `ttycmds.plan_for_instance`,
+    and print any skipped-command warnings to stderr."""
+    _write_minimal_registry(fleet_home)
+    captured = {}
+    monkeypatch.setattr(
+        cli.tmux_mod,
+        "reconcile",
+        lambda paths, ids, **kw: captured.setdefault("tty_for", kw.get("tty_for")),
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: None)
+
+    from fleet.core.ttycmds import TtyPlan
+
+    monkeypatch.setattr(
+        cli.ttycmds,
+        "plan_for_instance",
+        lambda registry, paths, instance_id: TtyPlan(
+            tty1=["echo one"], tty2=[], skipped=["skipped tty2 (unresolved [[issue-id]]): echo"]
+        ),
+    )
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    result = captured["tty_for"]("demo--develop")
+    assert result == (["echo one"], [])
+
+
+def test_tmux_dispatch_survives_broken_registry(fleet_home, monkeypatch, capsys):
+    """A registry that fails to load (here: no fleet.yml at all, so
+    `Registry.load` raises `RegistryError`) must not break `fleet tmux` — it
+    should warn to stderr and fall back to tty_for=None, while still
+    reconciling and attaching."""
+    # Deliberately no _write_minimal_registry() call — paths.registry does
+    # not exist, so Registry.load() raises RegistryError (a FleetError).
+    seen = {}
+    monkeypatch.setattr(
+        cli.tmux_mod,
+        "reconcile",
+        lambda paths, ids, **kw: seen.setdefault("tty_for", kw.get("tty_for")),
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    assert seen["tty_for"] is None
+    assert seen["attached"] is True
+    assert "warning" in capsys.readouterr().err.lower()
+
+
 def test_tmux_sidebar_dispatch(fleet_home, monkeypatch):
     _write_minimal_registry(fleet_home)
     seen = {}
@@ -1141,3 +1491,58 @@ def test_tmux_sidebar_dispatch(fleet_home, monkeypatch):
 
     assert exit_code == 0
     assert seen == {"window": "general", "once": True}
+
+
+def test_build_parser_accepts_reboot_notify_and_test_flag():
+    parser = cli._build_parser()
+    args = parser.parse_args(["reboot-notify", "--test"])
+    assert args.command == "reboot-notify"
+    assert args.test is True
+
+    args = parser.parse_args(["reboot-notify"])
+    assert args.test is False
+
+
+def test_build_parser_reboot_notify_interval_hours_defaults_and_overrides():
+    parser = cli._build_parser()
+
+    args = parser.parse_args(["reboot-notify"])
+    assert args.interval_hours == 24.0
+
+    args = parser.parse_args(["reboot-notify", "--interval-hours", "6"])
+    assert args.interval_hours == 6.0
+
+
+def test_cmd_reboot_notify_reads_to_from_env_file(tmp_path, monkeypatch):
+    (tmp_path / "reboot-notify.env").write_text(
+        "MSMTP_TO=ops@example.test\nMSMTP_FROM=fleet@example.test\n", encoding="utf-8"
+    )
+    captured = {}
+
+    def fake_reboot_notify(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(cli, "reboot_mod", type("M", (), {"reboot_notify": fake_reboot_notify}))
+    args = argparse.Namespace(test=False, interval_hours=24.0)
+    rc = cli._cmd_reboot_notify(tmp_path, args)
+    assert rc == 0
+    assert captured["to_addr"] == "ops@example.test"
+    assert captured["from_addr"] == "fleet@example.test"
+
+
+def test_cmd_reboot_notify_threads_interval_hours_through(tmp_path, monkeypatch):
+    (tmp_path / "reboot-notify.env").write_text(
+        "MSMTP_TO=ops@example.test\nMSMTP_FROM=fleet@example.test\n", encoding="utf-8"
+    )
+    captured = {}
+
+    def fake_reboot_notify(**kwargs):
+        captured.update(kwargs)
+        return True
+
+    monkeypatch.setattr(cli, "reboot_mod", type("M", (), {"reboot_notify": fake_reboot_notify}))
+    args = argparse.Namespace(test=False, interval_hours=6.0)
+    rc = cli._cmd_reboot_notify(tmp_path, args)
+    assert rc == 0
+    assert captured["interval_hours"] == 6.0

@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fleet.core.errors import RegistryError
-from fleet.core.registry import Registry
+from fleet.core.registry import PortProfile, Registry
 
 
 def _write(path: Path, text: str) -> Path:
@@ -56,6 +56,70 @@ def test_resolve_explicit_label_overrides_slugified_branch(fleet_home, sample_re
     assert resolved.branch == "feature/foo"
     assert resolved.label == "mylabel"
     assert resolved.instance_id == "demo--mylabel"
+
+
+def test_resolve_explicit_label_is_normalised(fleet_home, sample_registry_text):
+    """An explicit --label is slugified just like a branch-derived one — a
+    ticket-style label like 'ABC-1234' must not be rejected."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "main", label="ABC-1234")
+
+    assert resolved.label == "abc-1234"
+    assert resolved.instance_id == "demo--abc-1234"
+
+
+@pytest.mark.parametrize(
+    "raw_label",
+    ["ABC_1234", "ABC 1234", "-abc-1234-", "abc--1234"],
+)
+def test_resolve_explicit_label_variants_normalise_to_same_slug(
+    fleet_home, sample_registry_text, raw_label
+):
+    """Underscores, spaces, leading/trailing dashes, and a doubled dash (which
+    would otherwise be a hard validate_part rejection as the id separator)
+    all normalise to the same slug."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "main", label=raw_label)
+
+    assert resolved.label == "abc-1234"
+
+
+def test_resolve_already_valid_label_passes_through_unchanged(fleet_home, sample_registry_text):
+    """An already-canonical label is not surprise-rewritten (byte-identical)."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    resolved = registry.resolve("demo", "default", "main", label="already-canonical")
+
+    assert resolved.label == "already-canonical"
+
+
+def test_resolve_label_that_slugifies_to_empty_raises_naming_original(
+    fleet_home, sample_registry_text
+):
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    with pytest.raises(RegistryError) as exc_info:
+        registry.resolve("demo", "default", "main", label="!!!")
+
+    assert "'!!!'" in str(exc_info.value)
+
+
+def test_resolve_label_normalisation_still_enforces_instance_id_length_limit(
+    fleet_home, sample_registry_text
+):
+    """slugify() must not quietly bypass the 63-char DNS label limit that
+    instance_id() enforces."""
+    path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    registry = Registry.load(path)
+
+    with pytest.raises(RegistryError):
+        registry.resolve("demo", "default", "main", label="X" * 80)
 
 
 def test_registry_properties(fleet_home, sample_registry_text):
@@ -360,6 +424,541 @@ projects:
 """
     with pytest.raises(RegistryError, match="projects.oak.git_bot"):
         Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_port_profile_returns_explicit_entry(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert registry.port_profile("playwright") == PortProfile(
+        name="playwright", public=9324, router=8323
+    )
+
+
+def test_port_profile_typesense_falls_back_to_legacy_default_when_undefined(
+    fleet_home, sample_registry_text
+):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    assert registry.port_profile("typesense") == PortProfile(
+        name="typesense", public=9108, router=8108
+    )
+
+
+def test_port_profile_explicit_typesense_entry_overrides_legacy_default(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    typesense: { public: 9200, router: 8200 }
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert registry.port_profile("typesense") == PortProfile(
+        name="typesense", public=9200, router=8200
+    )
+
+
+def test_port_profile_unknown_name_raises(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    with pytest.raises(RegistryError, match="unknown port name 'bogus'"):
+        registry.port_profile("bogus")
+
+
+def test_fleet_ports_invalid_name_format_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    Bad_Name: { public: 9200, router: 8200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.Bad_Name"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_wrong_shape_missing_router_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    ts-dashboard: { public: 9111 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.ts-dashboard"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_wrong_shape_extra_key_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 8200, proto: udp }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.bad"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_out_of_range_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    toohigh: { public: 70000, router: 8200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.toohigh.public"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+@pytest.mark.parametrize("value", [0, 65536])
+def test_fleet_ports_public_range_boundary_raises(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: {{ public: {value}, router: 9200 }}
+
+projects: {{}}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.bad.public"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+@pytest.mark.parametrize("value", [0, 65536])
+def test_fleet_ports_router_range_boundary_raises(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: {{ public: 9200, router: {value} }}
+
+projects: {{}}
+"""
+    with pytest.raises(RegistryError, match="fleet.ports.bad.router"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+@pytest.mark.parametrize("value", [1, 65535])
+def test_fleet_ports_public_range_boundary_loads(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    ok: {{ public: {value}, router: 9200 }}
+
+projects: {{}}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.port_profile("ok") == PortProfile(name="ok", public=value, router=9200)
+
+
+@pytest.mark.parametrize("value", [1, 65535])
+def test_fleet_ports_router_range_boundary_loads(fleet_home, value):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    ok: {{ public: 9200, router: {value} }}
+
+projects: {{}}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.port_profile("ok") == PortProfile(name="ok", public=9200, router=value)
+
+
+@pytest.mark.parametrize("reserved", [22, 80, 443, 8765])
+def test_fleet_ports_reserved_public_port_raises(fleet_home, reserved):
+    text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: {{ public: {reserved}, router: 8200 }}
+
+projects: {{}}
+"""
+    with pytest.raises(RegistryError, match="reserved"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_router_collides_with_ddev_router_http_port_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 8080 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="8080"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_router_collides_with_ddev_router_https_port_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 8443 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="8443"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_self_collision_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    bad: { public: 9200, router: 9200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="must differ"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_duplicate_public_ports_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    one: { public: 9200, router: 8200 }
+    two: { public: 9200, router: 8201 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="already used by fleet.ports.one"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_duplicate_router_ports_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    one: { public: 9200, router: 8200 }
+    two: { public: 9201, router: 8200 }
+
+projects: {}
+"""
+    with pytest.raises(RegistryError, match="already used by fleet.ports.one"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_fleet_ports_absent_is_valid(fleet_home, sample_registry_text):
+    """A registry with no `fleet.ports` key at all (legacy-only) must stay valid."""
+    Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+
+
+def test_project_ports_resolves_named_list(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+    ts-dashboard: { public: 9111, router: 8110 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    ports: [playwright, ts-dashboard]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.project_ports("oak") == [
+        PortProfile(name="playwright", public=9324, router=8323),
+        PortProfile(name="ts-dashboard", public=9111, router=8110),
+    ]
+
+
+def test_project_ports_dedupes_legacy_typesense_overlap(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    typesense: { public: 9108, router: 8108 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    ports: [typesense]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.project_ports("oak") == [
+        PortProfile(name="typesense", public=9108, router=8108)
+    ]
+
+
+def test_project_ports_adds_synthetic_typesense_when_enabled_and_not_listed(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.project_ports("oak") == [
+        PortProfile(name="typesense", public=9108, router=8108)
+    ]
+
+
+def test_project_ports_empty_when_unsubscribed(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    assert registry.project_ports("demo") == []
+
+
+def test_project_ports_unknown_reference_raises(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    ports: [ghost]
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.ports.*ghost"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_project_ports_typesense_in_list_without_explicit_entry_is_unknown_reference(fleet_home):
+    """Listing 'typesense' explicitly in `ports:` is NOT the legacy boolean
+    — it must resolve against a real fleet.ports.typesense entry like any
+    other name (§3.1's unknown-reference rule draws no exception here)."""
+    text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    ports: [typesense]
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.ports.*typesense"):
+        Registry.load(_write(fleet_home / "fleet.yml", text))
+
+
+def test_all_port_profiles_unions_dedupes_and_sorts(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+    ts-dashboard: { public: 9111, router: 8110 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    ports: [playwright, ts-dashboard]
+    templates:
+      default: {}
+  other:
+    git: git@example.test:org/other.git
+    ports: [playwright]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert [p.name for p in registry.all_port_profiles()] == [
+        "playwright",
+        "ts-dashboard",
+        "typesense",
+    ]
+
+
+def test_public_ports_in_use_returns_sorted_dedup_public_ports(fleet_home):
+    text = """\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: { public: 9324, router: 8323 }
+    ts-dashboard: { public: 9111, router: 8110 }
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    typesense: true
+    ports: [playwright, ts-dashboard]
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", text))
+    assert registry.public_ports_in_use() == [9108, 9111, 9324]
+
+
+def test_issue_id_regexp_invalid_pattern_raises_naming_the_project(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: "OAKS-[0-9"
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.issue_id_regexp"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_issue_id_regexp_non_string_raises(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: 12345
+    templates:
+      default: {}
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.issue_id_regexp"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_issue_id_regexp_valid_is_returned(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: "OAKS-[0-9]+"
+    templates:
+      default: {}
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert registry.issue_id_regexp("oak") == "OAKS-[0-9]+"
+
+
+def test_issue_id_regexp_absent_returns_none(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    assert registry.issue_id_regexp("demo") is None
+
+
+def test_tty1_not_a_list_raises_with_full_path(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    templates:
+      jira-pull:
+        tty1: "ddev exec claude [[issue-id]]"
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.templates\.jira-pull\.tty1"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_tty2_list_with_non_string_element_raises(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    templates:
+      jira-pull:
+        tty2:
+          - ddev drush watchdog:tail
+          - 42
+"""
+    with pytest.raises(RegistryError, match=r"projects\.oak\.templates\.jira-pull\.tty2"):
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+
+
+def test_tty3_key_raises_mentioning_tty1_and_tty2(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    templates:
+      jira-pull:
+        tty3:
+          - echo hi
+"""
+    with pytest.raises(RegistryError, match=r"tty1 and tty2") as exc_info:
+        Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    assert "projects.oak.templates.jira-pull.tty3" in str(exc_info.value)
+
+
+def test_resolve_populates_tty1_and_tty2(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  oak:
+    git: git@example.test:org/oak.git
+    issue_id_regexp: "OAKS-[0-9]+"
+    templates:
+      jira-pull:
+        post_deploy:
+          - ddev init --no-interactive
+        tty1:
+          - ddev exec claude "/jira pull [[issue-id]] --create-branch"
+        tty2:
+          - ddev drush watchdog:tail
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", registry_text))
+    resolved = registry.resolve("oak", "jira-pull", "OAKS-1781")
+
+    assert resolved.tty1 == ['ddev exec claude "/jira pull [[issue-id]] --create-branch"']
+    assert resolved.tty2 == ["ddev drush watchdog:tail"]
+
+
+def test_resolve_with_no_tty_commands_gives_two_empty_lists(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    resolved = registry.resolve("demo", "default", "main")
+
+    assert resolved.tty1 == []
+    assert resolved.tty2 == []
 
 
 def test_load_missing_file_raises_actionable_registry_error(fleet_home):

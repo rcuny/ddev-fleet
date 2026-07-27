@@ -114,3 +114,27 @@ def test_job_manager_prune_never_evicts_non_terminal_oldest():
         assert len(manager._jobs) > 2
 
     asyncio.run(scenario())
+
+
+def test_job_instance_ids_defaults_to_none():
+    job = Job(id="x", kind="deploy", instance_id="demo--a")
+    assert job.instance_ids is None
+
+
+def test_job_manager_submit_accepts_instance_ids_for_bulk_jobs():
+    async def scenario():
+        manager = JobManager(concurrency=2)
+        job = await manager.submit("bulk-start", "", lambda: "done", instance_ids=["a", "b", "c"])
+        assert job.instance_ids == ["a", "b", "c"]
+        assert job.instance_id == ""
+
+    asyncio.run(scenario())
+
+
+def test_job_manager_submit_single_instance_job_leaves_instance_ids_none():
+    async def scenario():
+        manager = JobManager(concurrency=2)
+        job = await manager.submit("deploy", "demo--a", lambda: "ok")
+        assert job.instance_ids is None
+
+    asyncio.run(scenario())

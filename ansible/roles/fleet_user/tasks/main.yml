@@ -32,20 +32,62 @@
     modification_time: preserve
     access_time: preserve
 
-- name: Seed fleet.yml if it does not already exist (never clobber a real registry)
+# Bundled demo project: turn the repo's demo/ source into a local bare git repo
+# so `fleet deploy demo` works on a fresh install with no private config repo and
+# no network. Staged from the playbook checkout; the bare repo is built once
+# (creates: guard) — to refresh it after editing demo/, remove _demo.git first.
+- name: Stage the bundled demo project source on the host
   ansible.builtin.copy:
-    dest: "{{ fleet_srv_dir }}/fleet.yml"
+    src: "{{ playbook_dir }}/../demo/"
+    dest: "{{ fleet_srv_dir }}/_demo-src/"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0644"
+    directory_mode: "0755"
+
+- name: Build the local demo bare repo from the staged source (first provision only)
+  become: true
+  become_user: "{{ fleet_user }}"
+  ansible.builtin.shell: |
+    set -euo pipefail
+    work="$(mktemp -d)"
+    cp -a "{{ fleet_srv_dir }}/_demo-src/." "$work/"
+    git -C "$work" init -q -b main
+    git -C "$work" -c user.name='ddev-fleet' -c user.email='fleet@localhost' add -A
+    git -C "$work" -c user.name='ddev-fleet' -c user.email='fleet@localhost' commit -q -m 'ddev-fleet demo'
+    # -b main so the bare repo's HEAD matches the pushed branch (a plain clone
+    # would otherwise fail to check out — default bare HEAD is refs/heads/master).
+    git init -q --bare -b main "{{ fleet_srv_dir }}/_demo.git"
+    git -C "$work" push -q "{{ fleet_srv_dir }}/_demo.git" main
+    rm -rf "$work"
+  args:
+    creates: "{{ fleet_srv_dir }}/_demo.git/HEAD"
+
+- name: Seed config/fleet.yml if it does not already exist (never clobber a real registry)
+  ansible.builtin.copy:
+    dest: "{{ fleet_srv_dir }}/config/fleet.yml"
     owner: "{{ fleet_user }}"
     group: "{{ fleet_group }}"
     mode: "0640"
     force: false
     content: |
+      # Seeded by ddev-fleet on first provision. Replace with your own registry
+      # (e.g. a private config repo checked out at {{ fleet_srv_dir }}/config) —
+      # this file is never overwritten once it exists. The `demo` project below
+      # deploys the bundled demo (file://{{ fleet_srv_dir }}/_demo.git) so
+      # `fleet deploy demo` works out of the box; remove it once you have real
+      # projects.
       fleet:
         domain: {{ fleet_domain }}
-        assets_path: {{ fleet_srv_dir }}/assets
-        instances_path: {{ fleet_srv_dir }}/instances
 
-      projects: {}
+      projects:
+        demo:
+          git: file://{{ fleet_srv_dir }}/_demo.git
+          default_branch: main
+          default_template: default
+          templates:
+            default:
+              post_deploy: [ddev start]
 
 - name: Ensure /home/fleet/.ssh exists
   ansible.builtin.file:

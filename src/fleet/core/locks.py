@@ -8,6 +8,22 @@ from typing import Iterator
 
 from fleet.core.errors import LockHeldError
 
+# Shared fleet-wide advisory lock id serialising ALLOCATION of a new
+# instance id — the "pick a free label" step in both a single deploy()
+# (core/instances.py) and a bulk multi_deploy() (core/bulk.py) — so the two
+# paths can never allocate the same id concurrently. This used to be a
+# private constant in core/bulk.py (`_MULTIDEPLOY_LOCK_ID`); it moved here
+# once core/instances.py's own deploy() started needing the same lock for
+# its own (single-instance) allocation.
+#
+# The STRING VALUE must stay exactly "_multideploy" — it names an on-disk
+# lock file (`<locks_dir>/_multideploy.lock`), not just a Python symbol. A
+# process still running the old code (e.g. mid-rollout, before every host
+# picks up this change) locks that same path under the old private
+# constant; renaming the string here would let it and a new process
+# allocate concurrently, defeating the whole point of the lock.
+ALLOCATION_LOCK_ID = "_multideploy"
+
 
 @contextlib.contextmanager
 def instance_lock(locks_dir: Path, instance_id: str) -> Iterator[None]:

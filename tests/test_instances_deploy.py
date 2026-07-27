@@ -144,6 +144,33 @@ def test_deploy_label_defaults_to_slugified_branch(fleet_home, git_repo):
     assert (paths.instances / "demo--main").exists()
 
 
+def test_deploy_logs_label_normalisation_when_explicit_label_changes(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="ABC-1234", runner=runner
+    )
+
+    assert url == "https://demo--abc-1234.fleet.example.test"
+    deploy_log = paths.logs / "demo--abc-1234" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "label 'ABC-1234' normalised to 'abc-1234'" in log_content
+
+
+def test_deploy_does_not_log_normalisation_for_already_canonical_label(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "normalised" not in log_content
+
+
 def test_deploy_missing_branch_without_default_raises(fleet_home, git_repo):
     """`demo` in _registry_text() sets default_template but no default_branch,
     so omitting branch (with template explicitly given) must exercise the
@@ -210,7 +237,10 @@ projects:
     assert url == "https://demo--main.fleet.example.test"
 
 
-def test_deploy_missing_claude_token_raises(fleet_home, git_repo):
+def test_deploy_missing_claude_token_warns_and_proceeds(fleet_home, git_repo):
+    """No CLAUDE_CODE_OAUTH_TOKEN in secrets must NOT fail the deploy — it
+    should warn (into the instance's deploy log) and proceed without
+    injecting the token into web_environment."""
     paths = instances.FleetPaths.from_home(fleet_home)
     paths.registry.parent.mkdir(parents=True, exist_ok=True)
     paths.registry.write_text(_registry_text(fleet_home, str(git_repo["origin"])), encoding="utf-8")
@@ -218,26 +248,88 @@ def test_deploy_missing_claude_token_raises(fleet_home, git_repo):
     registry = Registry.load(paths.registry)
     runner = HybridRunner()
 
-    with pytest.raises(DeployError) as excinfo:
-        instances.deploy(
-            paths, registry, "demo", "default", branch="main", label="develop", runner=runner
-        )
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
 
-    message = str(excinfo.value)
-    assert "CLAUDE_CODE_OAUTH_TOKEN" in message
-    assert "fleet init" in message
+    assert url == "https://demo--develop.fleet.example.test"
+
+    instance_dir = paths.instances / "demo--develop"
+    config_content = (instance_dir / ".ddev" / "config.fleet.yaml").read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN" not in config_content
+
+    deploy_log = paths.logs / "demo--develop" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "WARNING" in log_content
+    assert "CLAUDE_CODE_OAUTH_TOKEN" in log_content
 
 
-def test_instance_yaml_created_at_survives_redeploy(fleet_home, git_repo):
+def test_deploy_with_claude_token_injects_it(fleet_home, git_repo):
+    """Regression guard: when the token IS present, behaviour is unchanged
+    — it is still injected into web_environment."""
     paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    instance_dir = paths.instances / "demo--develop"
+    config_content = (instance_dir / ".ddev" / "config.fleet.yaml").read_text(encoding="utf-8")
+    assert "CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-test" in config_content
+
+
+def test_instance_yaml_records_template_with_key_order(fleet_home, git_repo):
+    """`.fleet/instance.yml` gains a `template:` key (spec: it's what lets a
+    later `fleet tmux` recover an instance's tty commands from disk alone),
+    in the documented key order: project, instance, template, branch,
+    auth-enabled, auth-password, created-at, last-deployed-at."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
     instances.deploy(
         paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
     )
+
     info_path = paths.instances / "demo--develop" / ".fleet" / "instance.yml"
+    keys = [
+        line.split(":", 1)[0].strip()
+        for line in info_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert keys == [
+        "project",
+        "instance",
+        "template",
+        "branch",
+        "auth-enabled",
+        "auth-password",
+        "created-at",
+        "last-deployed-at",
+    ]
+    assert "template: default" in info_path.read_text(encoding="utf-8")
+
+
+def test_instance_yaml_created_at_survives_rewrite(fleet_home):
+    """`_write_instance_yaml` (deploy()'s helper) preserves the ORIGINAL
+    created-at across a second write to the same `.fleet/instance.yml` —
+    e.g. a redeploy's rewrite of an already-deployed instance's file, once
+    the directory has been recreated by the destroy-then-reclone primitive.
+    Only `last-deployed-at` should move forward. Tested directly against
+    the helper (rather than through a full deploy()) because `replace=True`
+    fully destroys and recreates the instance directory in between — this
+    isolates the created-at-preservation behaviour from that unrelated
+    destroy/reclone plumbing."""
+    instance_dir = fleet_home / "instances" / "demo--develop"
+    instance_dir.mkdir(parents=True)
+
+    instances._write_instance_yaml(
+        instance_dir, "demo", "develop", "default", "main", True, "fleet"
+    )
+    info_path = instance_dir / ".fleet" / "instance.yml"
     first = info_path.read_text(encoding="utf-8")
 
-    instances.deploy(
-        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    instances._write_instance_yaml(
+        instance_dir, "demo", "develop", "default", "main", True, "fleet"
     )
     second = info_path.read_text(encoding="utf-8")
 
@@ -436,6 +528,42 @@ projects:
     assert "FLEET_TYPESENSE_PATH" not in content
 
 
+def test_deploy_uses_explicit_fleet_ports_typesense_override(fleet_home, git_repo):
+    """An explicit fleet.ports.typesense entry must override the built-in
+    9108/8108 legacy default — proves the port now comes from the
+    registry, not a hardcoded Python constant."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    typesense: {{ public: 9200, router: 8200 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
+    content = config_path.read_text(encoding="utf-8")
+    assert "FLEET_TYPESENSE_PORT=9200" in content
+
+
 def test_deploy_generates_and_registers_typesense_keys_when_enabled(
     monkeypatch, fleet_home, git_repo
 ):
@@ -588,6 +716,103 @@ def test_deploy_independent_labels_do_not_clobber_each_other(fleet_home, git_rep
     assert (paths.instances / "demo--two").exists()
 
 
+# --- deploy() never overwrites (design decision 1) ---
+
+
+def test_deploy_never_overwrites_suffixes_second_deploy_of_explicit_label(fleet_home, git_repo):
+    """A second plain deploy() targeting the SAME explicit --label must
+    never touch the first instance — it allocates 'develop-1' instead."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    first_url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+    second_url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    assert first_url == "https://demo--develop.fleet.example.test"
+    assert second_url == "https://demo--develop-1.fleet.example.test"
+    assert (paths.instances / "demo--develop").exists()
+    assert (paths.instances / "demo--develop-1").exists()
+
+    deploy_log = paths.logs / "demo--develop-1" / "deploy.log"
+    log_content = deploy_log.read_text(encoding="utf-8")
+    assert "already in use — allocated 'develop-1' instead" in log_content
+
+
+def test_deploy_never_overwrites_suffixes_second_deploy_of_branch_derived_label(
+    fleet_home, git_repo
+):
+    """Same guarantee as above, but for a label derived from `branch` (no
+    explicit --label at all) — decision 1 applies to both."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    first_url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", runner=HybridRunner()
+    )
+    second_url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", runner=HybridRunner()
+    )
+
+    assert first_url == "https://demo--main.fleet.example.test"
+    assert second_url == "https://demo--main-1.fleet.example.test"
+    assert (paths.instances / "demo--main").exists()
+    assert (paths.instances / "demo--main-1").exists()
+
+
+def test_deploy_never_overwrites_suffix_reuses_gap(fleet_home, git_repo):
+    """generic and generic-2 taken -> the third deploy must land on
+    generic-1 (gap reuse), matching allocate_free_label's own contract."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="generic", runner=HybridRunner()
+    )
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="generic-2",
+        runner=HybridRunner(),
+    )
+    third_url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="generic", runner=HybridRunner()
+    )
+
+    assert third_url == "https://demo--generic-1.fleet.example.test"
+
+
+def test_deploy_replace_true_lands_on_same_id_and_does_not_suffix(fleet_home, git_repo):
+    """replace=True is the destroy-then-rebuild-IN-PLACE primitive: it must
+    land on the exact same id, never a suffixed one."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+    (paths.instances / "demo--develop" / "stray-file.txt").write_text(
+        "leftover\n", encoding="utf-8"
+    )
+
+    url = instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        replace=True,
+        runner=HybridRunner(),
+    )
+
+    assert url == "https://demo--develop.fleet.example.test"
+    assert not (paths.instances / "demo--develop-1").exists()
+    assert not (paths.instances / "demo--develop" / "stray-file.txt").exists()
+
+
 def test_deploy_excludes_token_config_before_asset_injection_fails(fleet_home, git_repo):
     """If asset token substitution raises TokenError, the live token file
     written earlier in deploy() must already be git-excluded — closing the
@@ -738,6 +963,185 @@ def test_deploy_without_any_dump_still_succeeds(fleet_home, git_repo):
     assert (instance_dir / ".env").read_text(encoding="utf-8") == "PROJECT=demo\n"
 
 
+# --- post_deploy [[token]] substitution + [[issue-id]] (spec's "two
+# deliberate paths": post_deploy is STRICT, tty1/tty2 is lenient) ---
+
+
+def test_post_deploy_command_is_token_substituted_before_bash(fleet_home, git_repo):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    templates:
+      default:
+        post_deploy:
+          - echo [[instance-fqdn]]
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert len(bash_calls) == 1
+    assert bash_calls[0]["cmd"] == ["bash", "-c", "echo demo--develop.fleet.example.test"]
+
+
+def test_post_deploy_unresolved_token_raises_deploy_error_and_stops(fleet_home, git_repo):
+    """Strict on purpose (unlike tty1/tty2): a post_deploy command is
+    deploy-critical, so an unresolved [[token]] must abort the deploy with
+    an actionable DeployError, naming the offending command and token(s) —
+    and no LATER post_deploy command may run."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    templates:
+      default:
+        post_deploy:
+          - ddev init [[issue-id]]
+          - echo should-not-run
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    with pytest.raises(
+        DeployError,
+        match=r"post_deploy command 'ddev init \[\[issue-id\]\]' has unresolved token\(s\): "
+        r"\[\[issue-id\]\]",
+    ):
+        instances.deploy(
+            paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+        )
+
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert bash_calls == []  # neither post_deploy command ran
+
+
+def test_post_deploy_env_includes_fleet_issue_id_when_regexp_matches(fleet_home, git_repo):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    issue_id_regexp: "(?i)OAKS-[0-9]+"
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="oaks-1781", runner=runner
+    )
+
+    # extract_issue_id matches case-insensitively and uppercases the result,
+    # so the lowercase (DNS-safe) label recovers "OAKS-1781", not "oaks-1781".
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert bash_calls[0]["env"]["FLEET_ISSUE_ID"] == "OAKS-1781"
+
+
+def test_post_deploy_env_omits_fleet_issue_id_when_no_match(fleet_home, git_repo):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    issue_id_regexp: "(?i)OAKS-[0-9]+"
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+    runner = HybridRunner()
+
+    # Neither the label nor the branch matches OAKS-[0-9]+, so [[issue-id]]
+    # must be absent from the context and FLEET_ISSUE_ID absent from env.
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="test2", runner=runner
+    )
+
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert "FLEET_ISSUE_ID" not in bash_calls[0]["env"]
+
+
+def test_issue_id_still_resolves_from_a_label_suffixed_by_allocation(fleet_home, git_repo):
+    """A label suffixed by naming.allocate_free_label (e.g. 'oaks-1781-1',
+    the SECOND deploy targeting the same base label) must still resolve
+    [[issue-id]] correctly — the digit run in `OAKS-[0-9]+` stops at the
+    dash, so the numeric suffix that allocation appended doesn't get
+    swallowed into (or otherwise corrupt) the extracted issue id."""
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    issue_id_regexp: "OAKS-[0-9]+"
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+
+    # First deploy takes the bare label...
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="oaks-1781", runner=HybridRunner()
+    )
+    # ...the second deploy of the SAME label allocates "oaks-1781-1" instead
+    # of overwriting it (design decision 1).
+    runner = HybridRunner()
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="oaks-1781", runner=runner
+    )
+
+    assert (paths.instances / "demo--oaks-1781-1").exists()
+    bash_calls = [c for c in runner.calls if c["cmd"][0] == "bash"]
+    assert bash_calls[0]["env"]["FLEET_ISSUE_ID"] == "OAKS-1781"
+
+
 # --- per-instance Caddy basic auth (default ON) ---
 
 
@@ -809,6 +1213,53 @@ def test_deploy_uses_custom_auth_password(fleet_home, git_repo):
     ]
 
 
+def test_deploy_records_auth_state_in_instance_yaml_mode_0600(fleet_home, git_repo):
+    """`.fleet/instance.yml` records auth-enabled/auth-password with the
+    exact values passed to deploy() (design decision 5: so a later
+    redeploy can reproduce them exactly), and the file is written mode
+    0600 — it now holds a plaintext credential."""
+    import stat as stat_mod
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        auth_enabled=True,
+        auth_password="s3cret",
+        runner=HybridRunner(),
+    )
+
+    info_path = paths.instances / "demo--develop" / ".fleet" / "instance.yml"
+    content = info_path.read_text(encoding="utf-8")
+    assert "auth-enabled: true" in content
+    assert "auth-password: s3cret" in content
+    assert stat_mod.S_IMODE(info_path.stat().st_mode) == 0o600
+
+
+def test_deploy_records_auth_disabled_in_instance_yaml(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="develop",
+        auth_enabled=False,
+        runner=HybridRunner(),
+    )
+
+    info_path = paths.instances / "demo--develop" / ".fleet" / "instance.yml"
+    content = info_path.read_text(encoding="utf-8")
+    assert "auth-enabled: false" in content
+
+
 def test_deploy_raises_deploy_error_when_caddy_validate_fails(fleet_home, git_repo):
     """If the auth-snippet's Caddyfile validation fails, deploy() must fail
     loudly with an actionable DeployError — never continue on to ddev start
@@ -834,3 +1285,104 @@ def test_deploy_raises_deploy_error_when_caddy_validate_fails(fleet_home, git_re
         c for c in runner.calls if c["cmd"][:2] == ["caddy", "reload"] or c["cmd"][:1] == ["ddev"]
     ]
     assert reload_or_ddev_calls == []
+
+
+def test_deploy_writes_caddy_port_snippet_for_project_ports(fleet_home, git_repo):
+    from fleet.core import caddyports
+
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: {{ public: 9324, router: 8323 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    ports: [playwright]
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    snippet_path = caddyports.DEFAULT_PORTS_SNIPPET_DIR / "playwright.conf"
+    assert snippet_path.exists()
+    assert "9324" in snippet_path.read_text(encoding="utf-8")
+
+
+def test_destroy_removes_caddy_port_snippet_when_registry_no_longer_declares_it(
+    fleet_home, git_repo
+):
+    # NOTE: `Registry` is declarative and read-only at runtime (core/registry.py) —
+    # `all_port_profiles()` reflects what `fleet.yml` *currently* declares for a
+    # project, not which instances of that project happen to exist on disk.
+    # `sync()` reconciles the snippet dir to that declaration. So "unsubscribing"
+    # a port is a registry edit (dropping it from a project's `ports:` list and
+    # reloading), not a side effect of destroying the last instance — a project
+    # with zero deployed instances but a live `ports:` entry still keeps its
+    # snippet, which is correct: the Caddy site block is fleet-wide and harmless
+    # to leave up, and another instance of the project may be deployed at any
+    # moment. Do not "fix" this back to an instance-count check.
+    from fleet.core import caddyports
+
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    registry_text_with_port = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: {{ public: 9324, router: 8323 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    ports: [playwright]
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text_with_port, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    registry = Registry.load(paths.registry)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+    snippet_path = caddyports.DEFAULT_PORTS_SNIPPET_DIR / "playwright.conf"
+    assert snippet_path.exists()
+
+    # Operator un-subscribes project `demo` from the `playwright` port profile.
+    registry_text_without_port = f"""\
+fleet:
+  domain: fleet.example.test
+  ports:
+    playwright: {{ public: 9324, router: 8323 }}
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    default_template: default
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text_without_port, encoding="utf-8")
+    registry = Registry.load(paths.registry)
+
+    instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+    assert not snippet_path.exists()

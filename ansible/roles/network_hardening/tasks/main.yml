@@ -1,0 +1,4 @@
+---
+- name: Apply network hardening (UFW + DOCKER-USER guard)
+  ansible.builtin.import_tasks: harden.yml
+  when: fleet_network_hardening_enabled | bool

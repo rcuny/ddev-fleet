@@ -11,8 +11,10 @@ from ruamel.yaml import YAML
 
 from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
-from fleet.core import caddyauth, ddev, fleetconfig
+from fleet.core import bulk as bulk_mod
+from fleet.core import caddyauth, caddyports, ddev, fleetconfig, ttycmds
 from fleet.core import instances as instances_mod
+from fleet.core import reboot as reboot_mod
 from fleet.core import shell as shell_mod
 from fleet.core import tmux as tmux_mod
 from fleet.core.errors import FleetError
@@ -22,8 +24,12 @@ from fleet.core.secrets import write_secret
 
 DEFAULT_FLEET_HOME = "/srv/fleet"
 
+_FLEET_UFW_SYNC_HELPER = Path("/usr/local/sbin/fleet-ufw-sync")
+
 _yaml = YAML()
 _yaml.default_flow_style = False
+
+_DIST_REGISTRY_PATH = Path(__file__).resolve().parents[2] / "fleet.yml.dist"
 
 _CLAUDE_TOKEN_RE = re.compile(r"sk-ant-oat01-[A-Za-z0-9_-]+")
 _VALID_CLAUDE_TOKEN_RE = re.compile(r"^sk-ant-oat01-[A-Za-z0-9_-]+$")
@@ -66,6 +72,13 @@ def _fleet_home(args: argparse.Namespace) -> Path:
     return Path(os.environ.get("FLEET_HOME", DEFAULT_FLEET_HOME))
 
 
+def _add_bulk_target_args(subparser: argparse.ArgumentParser) -> None:
+    subparser.add_argument("instance_id", nargs="*", default=[])
+    subparser.add_argument("--all", action="store_true")
+    subparser.add_argument("--project", default=None)
+    subparser.add_argument("--state", default=None, choices=["running", "deployed"])
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="fleet")
     parser.add_argument("--fleet-home", default=None)
@@ -80,7 +93,6 @@ def _build_parser() -> argparse.ArgumentParser:
     deploy_parser.add_argument("template", nargs="?", default=None)
     deploy_parser.add_argument("--branch", default=None)
     deploy_parser.add_argument("--label", default=None)
-    deploy_parser.add_argument("--fresh", action="store_true")
     deploy_parser.add_argument("--force", action="store_true")
     deploy_parser.add_argument(
         "--no-auth",
@@ -97,15 +109,33 @@ def _build_parser() -> argparse.ArgumentParser:
             f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
         ),
     )
+    deploy_parser.add_argument("--count", "-n", type=int, default=1)
+    deploy_parser.add_argument("--skip-disk-check", action="store_true")
 
     destroy_parser = subparsers.add_parser("destroy")
-    destroy_parser.add_argument("instance_id")
+    _add_bulk_target_args(destroy_parser)
+    destroy_parser.add_argument("--yes", action="store_true")
+
+    redeploy_parser = subparsers.add_parser("redeploy")
+    _add_bulk_target_args(redeploy_parser)
+    redeploy_parser.add_argument(
+        "--template",
+        default=None,
+        help="override the recorded template (required if none was recorded)",
+    )
+    redeploy_parser.add_argument(
+        "--auth-password",
+        default=None,
+        help="override the recorded basic-auth password (default: reuse what was recorded)",
+    )
+    redeploy_parser.add_argument("--force", action="store_true")
+    redeploy_parser.add_argument("--yes", action="store_true")
 
     start_parser = subparsers.add_parser("start")
-    start_parser.add_argument("instance_id")
+    _add_bulk_target_args(start_parser)
 
     stop_parser = subparsers.add_parser("stop")
-    stop_parser.add_argument("instance_id")
+    _add_bulk_target_args(stop_parser)
 
     subparsers.add_parser("list")
 
@@ -177,6 +207,8 @@ def _build_parser() -> argparse.ArgumentParser:
         ),
     )
 
+    subparsers.add_parser("refresh-ports")
+
     shell_parser = subparsers.add_parser("shell")
     shell_parser.add_argument("instance_id", nargs="?", default=None)
     shell_parser.add_argument("-l", "--list", action="store_true", dest="list_instances")
@@ -194,6 +226,10 @@ def _build_parser() -> argparse.ArgumentParser:
     tmux_reset_parser = subparsers.add_parser("tmux-reset")
     tmux_reset_parser.add_argument("window", nargs="?")
 
+    reboot_notify_parser = subparsers.add_parser("reboot-notify")
+    reboot_notify_parser.add_argument("--test", action="store_true")
+    reboot_notify_parser.add_argument("--interval-hours", type=float, default=24.0)
+
     return parser
 
 
@@ -206,13 +242,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "init":
             _cmd_init(fleet_home, args)
         elif args.command == "deploy":
-            _cmd_deploy(fleet_home, args)
+            return _cmd_deploy(fleet_home, args)
         elif args.command == "destroy":
-            _cmd_destroy(fleet_home, args)
+            return _cmd_destroy(fleet_home, args)
+        elif args.command == "redeploy":
+            return _cmd_redeploy(fleet_home, args)
         elif args.command == "start":
-            _cmd_start(fleet_home, args)
+            return _cmd_start(fleet_home, args)
         elif args.command == "stop":
-            _cmd_stop(fleet_home, args)
+            return _cmd_stop(fleet_home, args)
         elif args.command == "list":
             _cmd_list(fleet_home, args)
         elif args.command == "ssh-key":
@@ -235,6 +273,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_refresh_config(fleet_home, runner=run_streamed)
         elif args.command == "refresh-instance-config":
             _cmd_refresh_instance_config(fleet_home, args)
+        elif args.command == "refresh-ports":
+            return _cmd_refresh_ports(fleet_home, args, runner=run_streamed)
         elif args.command == "shell":
             _cmd_shell(fleet_home, args)
         elif args.command == "ddev":
@@ -245,11 +285,41 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_tmux_sidebar(fleet_home, args)
         elif args.command == "tmux-reset":
             _cmd_tmux_reset(fleet_home, args)
+        elif args.command == "reboot-notify":
+            return _cmd_reboot_notify(fleet_home, args)
     except FleetError as exc:
         print(exc.message, file=sys.stderr)
         return 1
 
     return 0
+
+
+def _init_local_file_mode(registry_path: Path, domain: str) -> None:
+    """Copy fleet.yml.dist verbatim (comments included), then patch only
+    the fleet.domain key — the public default per locked decision 3
+    (2026-07-24-fleet-open-source-release-design.md)."""
+    with open(_DIST_REGISTRY_PATH, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh)
+    data["fleet"]["domain"] = domain
+    with open(registry_path, "w", encoding="utf-8") as fh:
+        _yaml.dump(data, fh)
+
+
+def _init_config_repo_mode(paths: "instances_mod.FleetPaths", config_repo: str) -> None:
+    """Advanced mode (locked decision 3's opt-in path): clone the private
+    config repo (real fleet.yml + per-project assets/) into
+    $FLEET_HOME/config, matching this author's own actual setup. Never
+    re-clones or pulls an existing checkout — that remote is the
+    operator's own to manage from here on."""
+    config_dir = paths.registry.parent
+    if (config_dir / ".git").exists():
+        print(f"{config_dir} already exists as a git checkout — skipping clone", file=sys.stderr)
+        return
+    result = run_streamed(["git", "clone", config_repo, str(config_dir)])
+    if result.returncode != 0:
+        raise FleetError(
+            f"git clone {config_repo} {config_dir} failed with exit code {result.returncode}"
+        )
 
 
 def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
@@ -269,14 +339,11 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
     if registry_path.exists():
         print(f"{registry_path} already exists — skipping", file=sys.stderr)
     else:
-        skeleton = {
-            "fleet": {
-                "domain": domain,
-            },
-            "projects": {},
-        }
-        with open(registry_path, "w", encoding="utf-8") as fh:
-            _yaml.dump(skeleton, fh)
+        config_repo = os.environ.get("FLEET_CONFIG_REPO")
+        if config_repo:
+            _init_config_repo_mode(paths, config_repo)
+        else:
+            _init_local_file_mode(registry_path, domain)
 
     if not args.skip_claude:
         token = _mint_claude_token_interactive(runner=run_interactive, reader=input)
@@ -290,40 +357,262 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
             )
 
 
-def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> None:
+def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    url = instances_mod.deploy(
+
+    if args.count == 1:
+        url = instances_mod.deploy(
+            paths,
+            registry,
+            args.project,
+            args.template,
+            branch=args.branch,
+            label=args.label,
+            force=args.force,
+            auth_enabled=args.auth,
+            auth_password=args.auth_password,
+        )
+        print(url)
+        return 0
+
+    if args.count == 0:
+        print("nothing to deploy (--count=0)")
+        return 0
+
+    outcome = bulk_mod.multi_deploy(
         paths,
         registry,
         args.project,
         args.template,
         branch=args.branch,
         label=args.label,
-        fresh=args.fresh,
+        count=args.count,
         force=args.force,
         auth_enabled=args.auth,
         auth_password=args.auth_password,
+        skip_disk_check=args.skip_disk_check,
     )
-    print(url)
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
-def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> None:
+def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    instances_mod.destroy(paths, registry, args.instance_id)
+    target_ids = _resolve_bulk_targets(paths, registry, args)
+
+    if not target_ids:
+        print("no instances matched the given selector", file=sys.stderr)
+        return 0
+
+    # A single *explicit* instance id bypasses confirmation entirely —
+    # today's exact behaviour, preserved for backward compatibility. A
+    # selector (--all/--project/--state) always requires confirmation, even
+    # when it happens to resolve to exactly one instance, because the user
+    # did not name what gets destroyed — the selector chose it. (Mirrors the
+    # explicit-vs-selector distinction in _cmd_bulk_start_stop.)
+    if len(args.instance_id) == 1:
+        instances_mod.destroy(paths, registry, target_ids[0])
+        return 0
+
+    if not args.yes:
+        print(f"About to destroy {len(target_ids)} instances:", file=sys.stderr)
+        for instance_id in target_ids:
+            print(f"  {instance_id}", file=sys.stderr)
+        if not sys.stdin.isatty():
+            raise FleetError(
+                f"refusing to destroy {len(target_ids)} instances without --yes: "
+                "not an interactive terminal"
+            )
+        answer = input(
+            f"Type {len(target_ids)} to confirm destroying {len(target_ids)} instances: "
+        )
+        if answer.strip() != str(len(target_ids)):
+            raise FleetError("confirmation did not match; aborted, nothing destroyed")
+
+    outcome = bulk_mod.run_sequential(
+        paths, registry, target_ids, instances_mod.destroy, kind="destroy"
+    )
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
-def _cmd_start(fleet_home: Path, args: argparse.Namespace) -> None:
+def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
+    """Destroy-then-rebuild-in-place one or more instances. A `redeploy`
+    destroys before it rebuilds, so it mirrors `_cmd_destroy`'s confirmation
+    rule EXACTLY (see that function's comment): a single *explicit* instance
+    id bypasses confirmation entirely; any selector (--all/--project/--state)
+    — or multiple explicit ids — requires --yes (and refuses on a non-TTY
+    without it), even when the selector happens to resolve to exactly one
+    instance, because the user did not name what gets destroyed-and-rebuilt —
+    the selector chose it.
+
+    Bulk execution is sequential (bulk_mod.run_sequential), never
+    run_concurrent — a redeploy is a full destroy + clone + DB import, and
+    running several of those at once on one host is how you exhaust disk
+    mid-batch (same reasoning as multi_deploy())."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    instances_mod.start(paths, registry, args.instance_id)
+    target_ids = _resolve_bulk_targets(paths, registry, args)
+
+    if not target_ids:
+        print("no instances matched the given selector", file=sys.stderr)
+        return 0
+
+    if len(args.instance_id) == 1:
+        url = instances_mod.redeploy(
+            paths,
+            registry,
+            target_ids[0],
+            template=args.template,
+            auth_password=args.auth_password,
+            force=args.force,
+        )
+        print(url)
+        return 0
+
+    if not args.yes:
+        print(f"About to redeploy {len(target_ids)} instances:", file=sys.stderr)
+        for instance_id in target_ids:
+            print(f"  {instance_id}", file=sys.stderr)
+        if not sys.stdin.isatty():
+            raise FleetError(
+                f"refusing to redeploy {len(target_ids)} instances without --yes: "
+                "not an interactive terminal"
+            )
+        answer = input(
+            f"Type {len(target_ids)} to confirm redeploying {len(target_ids)} instances: "
+        )
+        if answer.strip() != str(len(target_ids)):
+            raise FleetError("confirmation did not match; aborted, nothing redeployed")
+
+    # --template/--auth-password (when given) apply to every target in the
+    # selection — a bound closure over `args`, matching how ui_deploy's
+    # inline `run_deploy` closes over its own form fields in daemon.py.
+    def _redeploy_op(paths, registry, instance_id: str, *, runner=run_streamed):
+        return instances_mod.redeploy(
+            paths,
+            registry,
+            instance_id,
+            template=args.template,
+            auth_password=args.auth_password,
+            force=args.force,
+            runner=runner,
+        )
+
+    outcome = bulk_mod.run_sequential(paths, registry, target_ids, _redeploy_op, kind="redeploy")
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
-def _cmd_stop(fleet_home: Path, args: argparse.Namespace) -> None:
+def _resolve_bulk_targets(
+    paths: instances_mod.FleetPaths, registry: Registry, args: argparse.Namespace
+) -> list[str]:
+    """Apply spec §1's precedence/combination rules and return the
+    resolved list of instance ids to act on. An empty list means
+    'selector matched nothing' — callers must treat that as a no-op
+    success (exit 0), not an error."""
+    ids = list(args.instance_id)
+    has_selector = args.all or args.project or args.state
+
+    if ids and has_selector:
+        raise FleetError("cannot combine explicit instance ids with --all/--project/--state")
+    if args.all and (args.project or args.state):
+        raise FleetError("--all cannot be combined with --project/--state")
+    if not ids and not has_selector:
+        raise FleetError(
+            "at least one instance id or a --all/--project/--state selector is required"
+        )
+
+    if ids:
+        return ids
+
+    statuses = instances_mod.list_instances(paths, registry)
+    if args.all:
+        return [s.instance_id for s in statuses]
+    matched = statuses
+    if args.project:
+        matched = [s for s in matched if s.project == args.project]
+    if args.state:
+        matched = [s for s in matched if s.state == args.state]
+    return [s.instance_id for s in matched]
+
+
+def _cmd_start(fleet_home: Path, args: argparse.Namespace) -> int:
+    return _cmd_bulk_start_stop(fleet_home, args, kind="start", op=instances_mod.start)
+
+
+def _cmd_stop(fleet_home: Path, args: argparse.Namespace) -> int:
+    return _cmd_bulk_start_stop(fleet_home, args, kind="stop", op=instances_mod.stop)
+
+
+def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: str, op) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = Registry.load(paths.registry)
-    instances_mod.stop(paths, registry, args.instance_id)
+    target_ids = _resolve_bulk_targets(paths, registry, args)
+
+    if not target_ids:
+        print("no instances matched the given selector", file=sys.stderr)
+        return 0
+
+    # A single *explicit* instance id bypasses the bulk machinery entirely —
+    # today's exact behaviour, preserved for backward compatibility. A
+    # selector (--all/--project/--state) always goes through run_concurrent
+    # even when it happens to resolve to exactly one instance, so progress
+    # reporting/exit-code semantics stay consistent regardless of how many
+    # instances currently match.
+    if len(args.instance_id) == 1:
+        op(paths, registry, target_ids[0])
+        return 0
+
+    outcome = bulk_mod.run_concurrent(paths, registry, target_ids, op, kind=kind)
+    for result in outcome.results:
+        if result.ok:
+            print(f"{result.instance_id}: OK")
+        else:
+            print(f"{result.instance_id}: FAILED — {result.error}", file=sys.stderr)
+    n_ok = len(outcome.succeeded)
+    n_failed = len(outcome.failed)
+    print(f"{n_ok} succeeded, {n_failed} failed")
+    if n_failed == 0:
+        return 0
+    if n_ok == 0:
+        return 1
+    return 2
 
 
 def _cmd_list(fleet_home: Path, args: argparse.Namespace) -> None:
@@ -534,11 +823,72 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
         print(f"  cd {instance_dir} && ddev restart")
 
 
+def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:
+    """Reconcile Caddy port-exposure snippets to `fleet.yml`'s current
+    `fleet.ports`/`ports:` state — the "apply my port edits now"
+    command (spec §5). Also runs the UFW half via the sudo helper when
+    the network_hardening role is installed; silently skipped when the
+    helper is absent (not an error)."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = Registry.load(paths.registry)
+
+    result = caddyports.sync(
+        registry, snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR, runner=runner
+    )
+    if result.written or result.removed:
+        for name in result.written:
+            print(f"caddy: wrote port snippet {name!r}")
+        for name in result.removed:
+            print(f"caddy: removed port snippet {name!r}")
+    else:
+        print("caddy: no changes")
+
+    if _FLEET_UFW_SYNC_HELPER.exists():
+        ufw_result = runner(["sudo", str(_FLEET_UFW_SYNC_HELPER)], echo=False)
+        if ufw_result.returncode != 0:
+            detail = "\n".join(ufw_result.lines)
+            raise FleetError(
+                f"'sudo {_FLEET_UFW_SYNC_HELPER}' failed (exit "
+                f"{ufw_result.returncode}):\n{detail}"
+            )
+        print("ufw: synced")
+
+    return 0
+
+
 def _cmd_tmux(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     ids = shell_mod.list_instance_ids(paths)
-    tmux_mod.reconcile(paths, ids)
+    tmux_mod.reconcile(paths, ids, tty_for=_tty_resolver(paths))
     tmux_mod.attach()
+
+
+def _tty_resolver(paths: instances_mod.FleetPaths):
+    """Build the `tty_for` callable `reconcile()` calls lazily, once per
+    newly-created window. A registry that fails to load (missing/malformed
+    fleet.yml) must not break `fleet tmux` — the whole point of the
+    workspace is to let the operator get IN and fix things — so this warns
+    and falls back to None (every window starts as a plain bash shell)
+    rather than raising."""
+    try:
+        registry = Registry.load(paths.registry)
+    except FleetError as exc:
+        print(
+            f"warning: fleet tmux could not load the registry ({exc.message}); "
+            "instance windows will start as plain shells",
+            file=sys.stderr,
+        )
+        return None
+
+    def tty_for(instance_id: str) -> tuple[list[str], list[str]] | None:
+        plan = ttycmds.plan_for_instance(registry, paths, instance_id)
+        for line in plan.skipped:
+            print(f"warning: {line}", file=sys.stderr)
+        if plan.is_empty:
+            return None
+        return (plan.tty1, plan.tty2)
+
+    return tty_for
 
 
 def _cmd_tmux_sidebar(fleet_home: Path, args: argparse.Namespace) -> None:
@@ -550,6 +900,33 @@ def _cmd_tmux_reset(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     window = args.window or tmux_mod.current_window()
     tmux_mod.reset_window(paths, window)
+
+
+def _cmd_reboot_notify(fleet_home: Path, args: argparse.Namespace) -> int:
+    from fleet.core.secrets import read_secrets
+
+    env = read_secrets(fleet_home / "reboot-notify.env")
+    to_addr = env.get("MSMTP_TO", "")
+    from_addr = env.get("MSMTP_FROM", "")
+
+    sent = reboot_mod.reboot_notify(
+        to_addr=to_addr,
+        from_addr=from_addr,
+        msmtprc_path=fleet_home / "msmtprc",
+        state_path=fleet_home / "reboot-notify-state.json",
+        interval_hours=args.interval_hours,
+        test=args.test,
+    )
+    if args.test:
+        print("test email sent" if sent else "test email FAILED to send (check msmtprc/relay)")
+        return 0 if sent else 1
+    print(
+        "reboot-notify: notification sent"
+        if sent
+        else "reboot-notify: no notification sent (not pending, "
+        "already notified recently, or email disabled)"
+    )
+    return 0
 
 
 if __name__ == "__main__":

@@ -8,7 +8,7 @@ import subprocess
 
 import pytest
 
-from fleet.core import caddyauth
+from fleet.core import caddyauth, caddyports
 from fleet.core.runner import RunResult
 
 
@@ -25,9 +25,13 @@ def _isolate_caddy_paths(monkeypatch, tmp_path):
     every real (non-monkeypatched) deploy()/destroy() call in the suite
     without threading tmp_path overrides through ~30 individual call sites.
     Harmless for tests that don't touch instances.deploy()/destroy() at all.
+
+    Also redirects `caddyports.DEFAULT_PORTS_SNIPPET_DIR` for the same
+    reason — `deploy()`/`destroy()` now also call `caddyports.sync()`.
     """
     monkeypatch.setattr(caddyauth, "DEFAULT_INSTANCE_SNIPPET_DIR", tmp_path / "caddy-instances")
     monkeypatch.setattr(caddyauth, "DEFAULT_CADDYFILE_PATH", tmp_path / "Caddyfile")
+    monkeypatch.setattr(caddyports, "DEFAULT_PORTS_SNIPPET_DIR", tmp_path / "caddy-ports")
 
 
 SAMPLE_REGISTRY_YAML = """\
@@ -77,9 +81,17 @@ class FakeRunner:
         self._scripted = scripted or {}
         self._default = default if default is not None else RunResult(returncode=0, lines=[])
 
-    def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True):
+    def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True, input_text=None):
         key = " ".join(str(c) for c in cmd)
-        self.calls.append({"cmd": list(cmd), "cwd": cwd, "env": env, "log_path": log_path})
+        self.calls.append(
+            {
+                "cmd": list(cmd),
+                "cwd": cwd,
+                "env": env,
+                "log_path": log_path,
+                "input_text": input_text,
+            }
+        )
         return self._scripted.get(key, self._default)
 
 

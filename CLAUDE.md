@@ -8,11 +8,10 @@ Type: documentation
 # CLAUDE.md — working on the ddev-fleet product repo
 
 This file is for Claude (or any agent) editing code in this repo,
-`/var/www/html/ddev-fleet` (remote: `ddev-fleet.git`). It is the **product**:
-the fleet manager itself, live in production on a Kimsufi KS-7 host
-(`ddev.personal.example`, Debian 13; instances under the
-`fleet.personal.example` wildcard). For the workspace/tooling this repo is
-built *from* (rules, skills, memory), see
+`/var/www/html/ddev-fleet` (remote: `ddev-fleet.git`, public,
+`github.com/rcuny/ddev-fleet`). It is the **product**: the fleet manager
+itself, runs live on a host operated by the maintainer. For the
+workspace/tooling this repo is built *from* (rules, skills, memory), see
 `/var/www/html/.claude/rules/30-project.md` and the rest of
 `/var/www/html/.claude/rules/`.
 
@@ -34,19 +33,46 @@ shell's own (unrelated) DDEV setup.
 | `daemon.py` | FastAPI app: `/api/tls-authorize` (Caddy on-demand TLS callback), `/api/jobs/{id}`, `/ws/instances/{id}/log` (HMAC-token-gated WebSocket), `/` + `/ui/*` HTMX routes for the web UI. The `/` index also renders a footer of host stats via `core/sysinfo` |
 | `jobs.py` | In-memory `JobManager` backing the web UI's async deploy jobs (not a system of record — `.fleet/deploy.log` on disk is) |
 | `core/registry.py` | Loads/validates `fleet.yml` (`Registry`), resolves `(project, template, branch, label)` → `ResolvedInstance`; registry is declarative and read-only at runtime. `git_bot(project)` resolves the per-instance commit identity — per-project `git_bot: {name,email}` override or `false` opt-out, over fleet-level defaults |
-| `core/instances.py` | Orchestrates `deploy`/`destroy`/`start`/`stop`/`list_instances`/`snapshot` — the core engine; `FleetPaths` maps `FLEET_HOME` to all on-disk paths |
+| `core/instances.py` | Orchestrates `deploy`/`redeploy`/`destroy`/`start`/`stop`/`list_instances`/`snapshot` — the core engine; `FleetPaths` maps `FLEET_HOME` to all on-disk paths. `deploy()`'s `replace` param (internal; the CLI/UI never pass it) is the destroy-then-rebuild-IN-PLACE primitive: `False` (the default) allocates a guaranteed-free id via `core/naming.py:allocate_free_label` under the `core/locks.py:ALLOCATION_LOCK_ID` advisory lock — a plain deploy never overwrites an existing instance — while `True` skips allocation and destroys+rebuilds at the SAME id, which is what `redeploy()` (and `multi_deploy()`, for its own already-allocated ids) rely on. `redeploy()` recovers project/template/branch/label/auth from `.fleet/instance.yml` and refuses (naming `--template`) if no template was recorded. `_write_instance_yaml()` writes that file (mode `0600` — it now holds a plaintext `auth-password`) on every deploy/redeploy |
 | `core/fleetconfig.py` | Writes the one fleet-owned file per instance, `.ddev/config.fleet.yaml` (name, project_tld, `web_environment` incl. Claude token, git bot identity, Typesense vars), plus `.ddev/.env`, `settings.local.php`/`services.fleet.yml`, and `.git/info/exclude` bookkeeping |
 | `core/gitops.py` | `clone`/`update` of an instance's git worktree |
 | `core/ddev.py` | Subprocess wrappers: `start`/`stop`/`restart`/`delete`/`list_projects`/`ram_usage` |
 | `core/assets.py` | rsync-mirrors a project's asset tree into an instance, then runs the `[[token]]` substitution pass over copied files |
-| `core/tokens.py` | The `[[token]]` substitution engine (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, secret tokens, …) and `FLEET_*` env var derivation for `post_deploy` commands |
+| `core/bulk.py` | Bulk orchestration over the existing single-instance primitives in `core/instances.py` — `BulkResult`/`BulkOutcome`, `run_sequential`/`run_concurrent` (continue-on-error, no new locking), and `multi_deploy()` (multi-instance deploy: `core/naming.py:allocate_multi_deploy_labels` + `core/sysinfo.py:check_disk_headroom` disk gate + the `_multideploy` advisory lock via `core/locks.py:instance_lock`). Used by both `cli.py` (bulk `start`/`stop`/`destroy`, `deploy --count`) and `daemon.py` (`/ui/bulk/*`, `/ui/deploy` with `count>1`) |
+| `core/tokens.py` | The `[[token]]` substitution engine (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, `[[issue-id]]`, secret tokens, …) and `FLEET_*` env var derivation (incl. `FLEET_ISSUE_ID`) for `post_deploy` commands. `extract_issue_id()` resolves `[[issue-id]]` from a project's `issue_id_regexp` against the instance label then the branch (case-insensitive, result uppercased). Two substitution paths: `substitute_text()` (strict — raises `TokenError` on an unresolved token, used by `post_deploy`) and `substitute_lenient()` (reports unresolved names instead of raising, used by `tty1`/`tty2` via `core/ttycmds.py`) |
+| `core/ttycmds.py` | Resolves an instance's `tty1`/`tty2` template commands into a `TtyPlan` (substituted commands + skip reasons for any left unresolved) — the one implementation shared by `deploy()`'s tmux hook (already knows project/label/branch/template) and `fleet tmux`'s `reconcile()` (recovers them from `.fleet/instance.yml`'s `template:` field, written at deploy time). Keeps `core/tmux.py` registry-agnostic — it only ever sees plain command lists |
 | `core/secrets.py` | Read/write `KEY=VALUE` files (0600) — both the fleet-wide `.secrets` and per-project `secrets/<project>.env` |
 | `core/typesense.py` | Generates/persists per-project Typesense admin+search-only keys, registers the search-only key against a running instance's Typesense admin API |
 | `core/caddyauth.py` | Rotates the Caddy dashboard `basic_auth` password WITHOUT Ansible: hashes via `caddy hash-password`, atomically rewrites the fleet-owned snippet `/etc/caddy/fleet/admin-auth.conf` (imported by `Caddyfile.j2`, seeded once by the `caddy` Ansible role), `caddy validate`s, then reloads Caddy via `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019 — no sudo, no privilege escalation, works under `fleet.service`'s `NoNewPrivileges=yes` sandbox). Backs `fleet set-admin-password` / `fleet rotate-admin-password` |
-| `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race |
-| `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe) |
+| `core/caddyports.py` | Reconciles fleet-owned Caddy named-port exposure snippets (`/etc/caddy/fleet/ports/<name>.conf`) to `Registry.all_port_profiles()` — one snippet per port NAME with ≥1 subscribing project (Typesense, Playwright reports, etc.), imported by `Caddyfile.j2` via a glob. Mirrors `caddyauth.py`'s write/validate/reload pattern (`sync()`: atomic write → `caddy validate` → `caddy reload`, one batch per call) but raises the sibling `CaddyPortsError`, not `CaddyAuthError`. Called from `core/instances.py`'s `deploy()`/`destroy()`, the `fleet refresh-ports` CLI command, and once at daemon startup as a safety net |
+| `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race. Also owns the shared `ALLOCATION_LOCK_ID = "_multideploy"` constant — the same on-disk lock file `core/bulk.py`'s `multi_deploy()` and `core/instances.py:deploy()`'s own label-allocation step both take, so a single deploy and a bulk deploy can never allocate the same id |
+| `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe). Two label allocators, deliberately not merged: `allocate_multi_deploy_labels()` (batch of N, always suffixed `-1`, `-2`, … — a batch has no single "the" instance to give the bare name to) for `deploy --count`/`multi_deploy()`, and `allocate_free_label()` (single free label, returns the BARE base when free) for a plain `deploy()`'s never-overwrite behavior |
 | `core/sysinfo.py` | Host stats for the web UI footer: `SystemStats.gather` (free/total RAM from `/proc/meminfo`, free/total disk from `shutil.disk_usage` on the instances mount) + `fmt_bytes`; memory → `n/a` if `/proc/meminfo` is unreadable |
+| `core/reboot.py` | Single shared reader for Debian's reboot-required marker (`/var/run/reboot-required` + `.pkgs`) — `RebootStatus`/`read_reboot_status()` — plus the anti-spam notification cadence and msmtp email send backing `fleet reboot-notify [--test]`. Consumed by `tmux_sidebar.py` (sidebar banner) and `core/sysinfo.py` (web UI footer badge) — one implementation, not three |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
+
+## Ansible roles (`ansible/roles/`)
+
+Applied in this order by `ansible/site.yml`. `network_hardening` and
+`security_hardening` are independently optional (see
+`.claude/user/docs/specs/2026-07-24-fleet-security-hardening-design.md` in
+the companion repo) — every task in both gates on a single top-level
+`import_tasks ... when:`, so a bare `ansible-playbook site.yml` run with
+neither `fleet_network_hardening_enabled` nor `fleet_security_hardening_enabled`
+set stays fully inert for both.
+
+| Role | Responsibility |
+|---|---|
+| `base` | apt cache + base packages (git, rsync, curl, tmux, unattended-upgrades, …), periodic unattended-upgrades enablement |
+| `docker` | Docker CE apt repo + packages, `docker.service` enabled |
+| `fleet_user` | The `fleet` system user, `/srv/fleet` tree, `.secrets`, `fleet.yml` seed, deploy/push SSH keys, forge `known_hosts` |
+| `shell_profile` | System-wide interactive shell prompt/aliases/exports for root and `fleet`, plus the `CLAUDE_CODE_OAUTH_TOKEN` export hook |
+| `ddev` | DDEV apt repo + package, global router config (loopback-only ports), mkcert local CA |
+| `claude_cli` | Node.js/npm + the Claude Code CLI, so `claude setup-token` can mint `CLAUDE_CODE_OAUTH_TOKEN` |
+| `caddy` | Caddy apt repo + package, fleet-owned Caddy snippet dirs, seeded admin-auth default credentials, the rendered Caddyfile |
+| `fleet_service` | Clones/updates the product repo into `{{ fleet_opt_dir }}`, installs the editable venv, deploys `fleet.service` + the `fleet` CLI wrapper |
+| `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443/registry-port allows), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
+| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits, SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the `fleet-reboot-notify` timer |
 
 ## Testing
 
@@ -55,7 +81,7 @@ don't assume they're the same). From `/opt/ddev-fleet` on the server, or
 this repo's checkout locally:
 
 ```bash
-.venv/bin/pytest -q          # 257 tests as of 2026-07-16
+.venv/bin/pytest -q          # 662 tests as of 2026-07-25
 .venv/bin/ruff check .
 .venv/bin/black --check .
 ```
@@ -68,7 +94,7 @@ dependency groups. `ruff` selects `E,F,I`, line length 100 (`black` matches).
 
 ## Deploy model — shipping a code change to the live host
 
-Full details: `docs/runbook-server-rollout.md` §2a. Summary:
+Full details: `docs/operations.md`. Summary:
 
 - **Option B (preferred, enabled 2026-07-16).** `/opt/ddev-fleet` is a
   `fleet`-owned git checkout tracking `origin/main`, with a read-only
@@ -124,15 +150,19 @@ Full details: `docs/runbook-server-rollout.md` §2a. Summary:
 
 ## Typesense port/key coupling
 
-Full human-readable design: `docs/README-typesense.md`. The load-bearing
-fact for anyone touching this code: **`fleet.core.instances.TYPESENSE_PUBLIC_PORT`
-(currently `9108`) MUST stay numerically in sync with
-`fleet_typesense_public_port` in `ansible/group_vars/all.yml`** (which feeds
-the `*.{{ fleet_domain }}:{{ fleet_typesense_public_port }}` site in
-`ansible/roles/caddy/templates/Caddyfile.j2`) — the two are independently
-configured with no code-level dependency, so a change to one without the
-other silently breaks the browser-facing Typesense URL. `TYPESENSE_ROUTER_HTTP_PORT`
-(`8108`) must likewise match `ddev_typesense_http_port`.
+Full human-readable design: `docs/README-typesense.md`; the generic
+mechanism it now rides on: `docs/networking.md` + `core/caddyports.py`.
+Typesense's public/router ports are no longer Python constants hand-synced
+against Ansible vars — that footgun was eliminated 2026-07-24
+(`2026-07-24-fleet-port-exposure-design.md`). They are now
+`Registry.port_profile("typesense")` (`core/registry.py`): an explicit
+`fleet.ports.typesense: { public, router }` entry in `fleet.yml`, or — if
+absent — a built-in legacy default of `public=9108`/`router=8108` (so an
+existing `fleet.yml` with only `typesense: true` needs zero edits). Any
+project opted in (via `typesense: true` or `ports: [typesense, ...]`) gets
+its Caddy exposure reconciled by `core/caddyports.py`'s `sync()`, called
+from `deploy()`/`destroy()`, `fleet refresh-ports`, and daemon startup —
+not by Ansible past the one-time `ports/` directory seed.
 
 Two keys are generated per opted-in project (`core/typesense.py`): a strong
 admin key (`TYPESENSE_API_KEY`, written to the instance's `.ddev/.env` for
@@ -149,16 +179,34 @@ support, so path-prefixing didn't work end-to-end. If you find references to
 `fleet.yml.dist` comments), they're stale — the port-based scheme is the one
 actually implemented and deployed.
 
+## Optional hardening roles (`network_hardening`, `security_hardening`)
+
+Two Ansible roles, opt-in at install time (`docs/installation.md`'s
+`FLEET_NETWORK_HARDENING`/`FLEET_SECURITY_HARDENING` prompts, Yes by
+default): `ansible/roles/network_hardening/` renders a UFW ruleset plus a
+`DOCKER-USER` iptables guard (defends the assumption in "Typesense
+port/key coupling" above — that only Caddy, never a container port bound
+to all interfaces, is reachable from outside) and installs
+`/usr/local/sbin/fleet-ufw-sync`, the sudo helper `fleet refresh-ports`
+(`cli.py:_cmd_refresh_ports`) calls to keep UFW's allowed ports in sync
+with `Registry.public_ports_in_use()` — silently skipped when the helper
+isn't installed, so hardening is genuinely optional. `ansible/roles/
+security_hardening/` covers OS-level hardening unrelated to fleet's own
+code (unattended-upgrades, SSH config, fail2ban, auditd, a conservative
+sysctl profile, `/tmp` mount options) — nothing in `src/fleet/` depends on
+it. Neither role has a `core/` Python module of its own.
+
 ## Cross-references
 
 - `docs/srv-fleet-CLAUDE.md` — the registry schema + CLI reference, copied
   onto the server at `/srv/fleet/CLAUDE.md` so a `claude -p "..."` session
   run there (as the `fleet` user) has grounded context without reading the
   full spec. Keep it in sync with this file's CLI-shape facts and re-copy it
-  after any change (`docs/runbook-server-rollout.md` §9).
-- `docs/runbook-server-rollout.md` — full provisioning/rollout checklist
-  (DNS, delivery, admin password, deploy keys, Claude token mint,
-  live-verification items) and the ongoing update procedure (§2a).
+  after any change (`docs/operations.md`'s Claude-context-refresh section).
+- `docs/installation.md` — full first-rollout checklist (DNS, delivery,
+  admin password, deploy keys, Claude token mint, live-verification items).
+- `docs/operations.md` — the ongoing code-update procedure, rollback, and
+  admin-password rotation.
 - `docs/README-typesense.md` — the Typesense browser-search exposure design
   in full (topology, keys, env vars, reindexing, reachability caveat).
 - `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing

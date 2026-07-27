@@ -1,0 +1,4 @@
+-w /etc/passwd -p wa -k fleet-identity
+-w /etc/shadow -p wa -k fleet-identity
+-w /etc/sudoers -p wa -k fleet-sudoers
+-w /var/run/docker.sock -p wa -k fleet-docker-sock

@@ -1,0 +1,8 @@
+# Managed by the security_hardening Ansible role (spec §6.2 task 5).
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+MaxAuthTries {{ fleet_ssh_max_auth_tries }}
+{% if fleet_ssh_allow_users | length > 0 %}
+AllowUsers {{ fleet_ssh_allow_users | join(' ') }}
+{% endif %}
