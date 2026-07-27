@@ -8,6 +8,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `fleet redeploy <instance-id>... [--all|--project=P|--state=S] [--template T] [--auth-password P] [--force] [--yes]`,
+  plus a per-row Redeploy button and a bulk "Redeploy selected" action in the
+  web UI. Destroys an instance and rebuilds it under the same id, recovering
+  project/template/branch/label/auth from `.fleet/instance.yml`. Refuses if
+  no `template` was recorded (an instance deployed before template recording
+  existed) unless `--template` is given. Confirmation and bulk targeting
+  mirror `destroy` exactly; bulk redeploy runs sequentially.
 - Per-project `issue_id_regexp` and the `[[issue-id]]` token: derived from
   the deploying instance's label (checked first) or branch (fallback),
   matched case-insensitively with the result uppercased; also exported as
@@ -33,6 +40,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `CONTRIBUTING.md`.
 
 ### Changed
+- `fleet deploy` never overwrites an existing instance. If the resolved
+  instance id is already taken — whether the label came from `--branch` or
+  an explicit `--label` — `-1`, `-2`, … is appended until a free one is
+  found; the deploy log records the substitution. This applies to a single
+  deploy as well as `deploy --count` (which already always suffixed).
+- `.fleet/instance.yml` now also records `auth-enabled`/`auth-password` (so
+  a redeploy can reproduce an instance's basic-auth settings), and is
+  written mode `0600` on every write instead of the default umask, since it
+  now holds a plaintext credential.
 - `post_deploy` commands are now actually `[[token]]`-substituted before
   running (previously only documented, not implemented); an unresolved
   token now aborts the deploy with a named `DeployError` instead of running
@@ -51,6 +67,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   changed by this normalisation.
 
 ### Removed
+- `fleet deploy --fresh` and the web UI's "Fresh" checkbox. `fleet redeploy`
+  (see Added) replaces both — one operation, one name.
 - `ansible/group_vars/all.yml`'s `fleet_admin_default_password: ddev-admin`
   fixed default.
 - The old server-rollout runbook (content split, see Changed).

@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 Type: documentation
 ---
 
@@ -262,6 +262,55 @@ existed simply resolves to no `tty1`/`tty2` commands (today's behaviour), and
 a template or project later removed from `fleet.yml` is treated the same way.
 Editing `fleet.yml` changes what a *future* window gets without a redeploy,
 since the template is looked up in the live registry each time.
+
+## `.fleet/instance.yml`: recorded deploy parameters
+
+Every deploy writes `<instance-dir>/.fleet/instance.yml`, a small YAML file
+recording the parameters that deploy resolved:
+
+```yaml
+project: demo
+instance: preview
+template: default
+branch: main
+auth-enabled: true
+auth-password: fleet
+created-at: 2026-07-20T10:00:00+00:00
+last-deployed-at: 2026-07-27T09:30:00+00:00
+```
+
+| Key | Meaning |
+|---|---|
+| `project` | The project key this instance was deployed from. |
+| `instance` | The instance's label (the part after `--` in `<project>--<label>`). |
+| `template` | The resolved template name — what lets `fleet tmux`'s `reconcile()` (and `fleet redeploy`, below) recover which `tty1`/`tty2`/deploy recipe to use, without needing it re-supplied. |
+| `branch` | The branch this instance tracks. |
+| `auth-enabled` | Whether per-instance basic auth was on for this deploy. |
+| `auth-password` | The basic-auth password configured for this deploy, in plaintext. |
+| `created-at` | Timestamp of the instance's first deploy — preserved across later redeploys/updates. |
+| `last-deployed-at` | Timestamp of the most recent deploy/redeploy. |
+
+Every key **reaches new deploys only**: an instance deployed before a given
+key existed simply has no recorded value for it (same "reaches new deploys
+only" pattern as `template` above) — see `fleet redeploy`'s refusal rule
+below for the consequence of a missing `template`.
+
+Because `auth-password` is a plaintext credential, the file is written
+(and rewritten) at mode **`0600`** on every write, not just on creation —
+matching how `core/secrets.py` treats other secret-bearing files. It is not
+part of the instance's git history: `.fleet/` is added to the instance's
+`.git/info/exclude` at deploy time, alongside `.ddev/config.fleet.yaml` and
+the other fleet-injected files, so it can never be accidentally committed.
+
+**`fleet redeploy`** (`docs/cli.md`) reads this file to recover an
+instance's project/template/branch/label/auth and rebuild it in place under
+the same id, without the operator re-supplying any of them. If `template`
+was never recorded (the instance predates this field), `redeploy` refuses
+with an actionable error naming `--template` rather than guessing a recipe
+to rebuild with. `--template`/`--auth-password` passed to `redeploy`
+override the recorded value for that one call; the registry itself is
+re-read at rebuild time, so a redeploy also picks up any edits made since
+the original deploy to the resolved template's `post_deploy`/`tty1`/`tty2`.
 
 ## Walkthrough: `fleet.yml.dist` field by field
 

@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-26
+Last updated: 2026-07-27
 Type: documentation
 ---
 
@@ -69,8 +69,10 @@ raises `DeployError`, aborting the deploy) but **lenient** for `tty1`/`tty2`
 (that one command is dropped with a `WARNING: skipped ...` log line, pane
 left as plain bash — never fails a deploy). Which template an instance's
 window should use is recorded as `template:` in that instance's
-`.fleet/instance.yml`, written at deploy time; instances deployed before
-this field existed simply get no `tty1`/`tty2` commands. Full reference:
+`.fleet/instance.yml`, written at deploy time (mode `0600` — the file also
+records `auth-enabled`/`auth-password`); instances deployed before this
+field existed simply get no `tty1`/`tty2` commands, and can't be rebuilt via
+`fleet redeploy` without an explicit `--template`. Full reference:
 `docs/configuration.md`.
 
 **Named ports (`fleet.ports` / project `ports:`).** Each `fleet.ports`
@@ -118,7 +120,8 @@ registry load with an actionable message naming the bad key.
 | Command | Arguments | Behavior |
 |---|---|---|
 | `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, registry creation (local-file mode by default, or clones `FLEET_CONFIG_REPO` if set), `claude setup-token`, writes `.secrets` |
-| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--fresh] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n>] [--skip-disk-check]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password. `--count`/`-n` (default 1) bulk-deploys N labelled instances at once, gated by a disk-headroom check (`--skip-disk-check` to bypass); prints per-instance OK/FAILED + summary and a 0/1/2 exit code for N>1, same as the bulk commands below |
+| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n>] [--skip-disk-check]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. **Never reuses an existing instance id** — if the resolved id is taken, `-1`/`-2`/… is appended until one is free. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password. `--count`/`-n` (default 1) bulk-deploys N labelled instances at once, gated by a disk-headroom check (`--skip-disk-check` to bypass); prints per-instance OK/FAILED + summary and a 0/1/2 exit code for N>1, same as the bulk commands below |
+| `fleet redeploy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--template=<name>] [--auth-password=<pw>] [--force] [--yes]` | Destroys and rebuilds an instance **in place, same id**, from the project/template/branch/label/auth recorded in `.fleet/instance.yml`. Refuses if no `template` was recorded, unless `--template` is given. Confirmation and bulk targeting match `destroy` exactly; bulk redeploy runs sequentially. This is now the only way to rebuild an instance in place — `deploy` never does |
 | `fleet destroy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes instance dir + lock file. A single explicit id destroys immediately (no prompt, backward-compat); a selector or multiple ids always confirms (type the count, or pass `--yes`) |
 | `fleet start [<id>...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev start` on one or more existing, stopped instances |
 | `fleet stop [<id>...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev stop` — frees RAM, keeps disk |
@@ -174,6 +177,7 @@ Full detail + examples: `docs/cli.md`.
 - **Deploy several instances at once:** `fleet deploy <project> <template> --branch <ref> --count <n>`.
 - **Onboard a brand-new project:** edit `fleet.yml` to add `projects.<key>` (git URL, templates), run `fleet refresh-config` if `config/` is a shared git checkout, then `fleet deploy <key> <template> --branch <ref>`.
 - **Free RAM without losing disk state:** `fleet stop <instance-id>` (or `--project`/`--all`/`--state` for many at once); bring back with `fleet start`.
+- **Rebuild an instance from scratch, same parameters:** `fleet redeploy <instance-id>` — destroys and redeploys it under the same id, from what's recorded in its `.fleet/instance.yml`. Needs `--template <name>` if the instance predates template recording.
 - **Fully tear down:** `fleet destroy <instance-id>` (or a selector + `--yes`) — irreversible, removes the instance directory.
 - **Refresh a stale DB dump for a project:** `fleet snapshot <instance-id>` (exports the running instance's DB into its project's shared asset tree) then `fleet deploy <project> <template> --branch <ref> --label <other-label>` to propagate it to another instance.
 - **Rotate the Claude Code token fleet-wide (e.g. before the ~1 year expiry):** `fleet refresh-claude-token` — safe to re-run; only running instances are restarted (with `--restart`).

@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-25
+Last updated: 2026-07-27
 Type: documentation
 ---
 
@@ -31,7 +31,8 @@ port) see `docs/installation.md` and `docs/operations.md`; for the
 | Command | Arguments | Behavior |
 |---|---|---|
 | `fleet init` | `[--domain=<domain>] [--skip-claude]` | Interactive first-run setup: creates `$FLEET_HOME`'s directory tree, prompts for the fleet domain if `--domain` is omitted, creates `fleet.yml` (local-file mode by default — copies `fleet.yml.dist` and patches only `fleet.domain`; or clones a private config repo when `FLEET_CONFIG_REPO` is set — see below), and runs `claude setup-token` to mint `CLAUDE_CODE_OAUTH_TOKEN` into `.secrets` (skip with `--skip-claude`). Never overwrites an existing `fleet.yml` or re-clones an existing `config/` checkout — safe to re-run. |
-| `fleet deploy <project> [<template>]` | `--branch <ref> [--label=<name>] [--fresh] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n> \| -n <n>] [--skip-disk-check]` | Full deploy pipeline. `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted. Running instance is named `<project>--<label>` (`label` defaults to the slugified branch; an explicit `--label` is normalised the same way — lowercased, non-alphanumeric runs collapsed to `-`, e.g. `--label=ABC-1234` → `abc-1234` — rather than rejected, see `docs/configuration.md`). Refuses a dirty/unpushed worktree update without `--force`. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password. `--count`/`-n` (default `1`) deploys that many independently-labelled instances in one call — see "Bulk deploy" below. |
+| `fleet deploy <project> [<template>]` | `--branch <ref> [--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n> \| -n <n>] [--skip-disk-check]` | Full deploy pipeline. `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted. Running instance is named `<project>--<label>` (`label` defaults to the slugified branch; an explicit `--label` is normalised the same way — lowercased, non-alphanumeric runs collapsed to `-`, e.g. `--label=ABC-1234` → `abc-1234` — rather than rejected, see `docs/configuration.md`). **Never overwrites an existing instance**: if the resolved id is already in use, `-1`, `-2`, … is appended until a free one is found — see "`fleet deploy` never overwrites" below. Refuses a dirty/unpushed worktree update without `--force`. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password. `--count`/`-n` (default `1`) deploys that many independently-labelled instances in one call — see "Bulk deploy" below. |
+| `fleet redeploy [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--template=<name>] [--auth-password=<pw>] [--force] [--yes]` | Destroys an instance and rebuilds it under the **same id**, from the project/template/branch/label/auth recorded in its `.fleet/instance.yml` at the last deploy. Refuses if no `template` was recorded (an instance deployed before template recording existed) unless `--template` is given. See "`fleet redeploy`" below. |
 | `fleet destroy [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes the instance dir + lock file. Accepts one explicit id (legacy single-instance form, no prompt), several explicit ids, or a selector (`--all`, `--project=<name>`, `--state=running\|deployed`) — never mixed with explicit ids. See "Bulk actions" below for confirmation/exit-code behavior. |
 | `fleet start [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev start` on one or more existing, stopped instances. Same targeting rules as `destroy`. |
 | `fleet stop [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev stop` — frees RAM, keeps disk. Same targeting rules as `destroy`. |
@@ -61,9 +62,9 @@ Single-target commands (`fleet deploy` with `--count 1`, a single-id
 follow the ordinary convention: `0` on success, `1` on a `FleetError`
 (message printed to stderr).
 
-**Bulk operations** — multi-instance `start`/`stop`/`destroy` (selector or
-several explicit ids) and `deploy --count N` for `N > 1` — use a
-three-way exit code instead, based on the per-instance outcome:
+**Bulk operations** — multi-instance `start`/`stop`/`destroy`/`redeploy`
+(selector or several explicit ids) and `deploy --count N` for `N > 1` — use
+a three-way exit code instead, based on the per-instance outcome:
 
 | Exit code | Meaning |
 |---|---|
@@ -110,6 +111,10 @@ fleet destroy --project demo --state deployed --yes
 fleet destroy oak--old-one oak--old-two   # 2 explicit ids → still confirms
 ```
 
+`fleet redeploy` accepts the exact same targeting forms and mirrors
+`destroy`'s confirmation rule — see "`fleet redeploy`" below for its own
+options and examples.
+
 ## Bulk deploy: `deploy --count`
 
 ```bash
@@ -126,6 +131,89 @@ fleet deploy <project> [<template>] --branch <ref> --count <n> [--skip-disk-chec
   room). Prints the same per-instance `OK`/`FAILED` lines and
   `N succeeded, M failed` summary, and uses the same three-way exit code,
   as the bulk `start`/`stop`/`destroy` commands above.
+
+## `fleet deploy` never overwrites
+
+A plain `fleet deploy` always produces a **new** instance — it never treats
+an existing instance directory as something to update in place. If the
+resolved instance id (`<project>--<label>`) is already taken, the label
+gets `-1`, `-2`, … appended until a free one is found. This applies equally
+to a label derived from `--branch` and to an explicit `--label`:
+
+```bash
+fleet deploy demo default --branch main --label preview   # → demo--preview
+fleet deploy demo default --branch main --label preview   # → demo--preview-1 (preview is taken)
+fleet deploy demo default --branch main --label preview   # → demo--preview-2 (preview and preview-1 are taken)
+```
+
+The deploy log for the second run records the substitution:
+
+```
+label 'preview' already in use — allocated 'preview-1' instead (deploy never overwrites an existing instance)
+```
+
+`fleet deploy --count N` already suffixed every label it allocated (`-1`,
+`-2`, …, never the bare base) — that behavior is unchanged. What's new here
+is that a **single** deploy (`--count 1`, the default) no longer reuses an
+existing id either.
+
+To rebuild an existing instance **in place**, use `fleet redeploy` instead
+(below) — that is now the only way to do it; deploy itself will not.
+
+## `fleet redeploy`
+
+```bash
+fleet redeploy <instance-id>... [--all | --project P | --state S]
+               [--template T] [--auth-password P] [--force] [--yes]
+```
+
+Destroys the named instance(s) and rebuilds each one under its **same
+id**, recovering the project/template/branch/label/auth it was originally
+deployed with from `<instance-dir>/.fleet/instance.yml` — see
+`docs/configuration.md` for that file's full field reference. The registry
+is re-read at rebuild time, so a redeploy picks up any edits made since the
+original deploy to the resolved template's `post_deploy`/`tty1`/`tty2` —
+"same parameters" means the same project/template/branch/label *identity*,
+not a frozen copy of the recipe.
+
+| Option | Meaning |
+|---|---|
+| `--template <name>` | Use this template instead of the recorded one. **Required** if the instance has no recorded `template:` (it predates template recording) — the command refuses with an actionable error naming `--template` and listing the project's available templates. Applied to every targeted instance when redeploying more than one. |
+| `--auth-password <pw>` | Override the recorded basic-auth password. Omit it to reproduce the recorded password exactly (or today's default, `fleet`, if none was recorded). The recorded `auth-enabled` flag itself is never flipped by this flag. |
+| `--force` | Same meaning as `deploy --force` (passed through to the rebuild). |
+| `--yes` | Skip the interactive confirmation prompt for a selector or multiple ids (see below). |
+
+**Targeting** uses the same `_resolve_bulk_targets` rules as
+`destroy`/`start`/`stop` — one or more explicit ids, or a selector
+(`--all`/`--project=<p>`/`--state=running\|deployed`), never mixed.
+
+**Confirmation mirrors `destroy` exactly**, because a redeploy destroys
+before it rebuilds: a single *explicit* instance id runs immediately, no
+prompt. Anything else — a selector, or more than one explicit id — always
+requires confirmation: it lists every instance about to be redeployed,
+then either requires `--yes`, or, on an interactive terminal, asks you to
+type the exact count (`Type N to confirm redeploying N instances:`).
+Non-interactive without `--yes` raises a `FleetError` refusing to proceed.
+
+**Bulk redeploy runs sequentially**, never concurrently — like
+`multi_deploy()`, since a redeploy is a full destroy + clone + DB import,
+and running several of those at once on one host is how you exhaust disk
+mid-batch.
+
+```bash
+# Rebuild one instance in place, same project/template/branch/label/auth
+fleet redeploy demo--preview
+
+# The instance predates template recording — must name one explicitly
+fleet redeploy demo--preview --template default
+
+# Rebuild every deployed instance of a project, unattended
+fleet redeploy --project demo --state deployed --yes
+```
+
+**Web UI**: a per-row **Redeploy** button (with a confirm prompt) and a
+**Redeploy selected** bulk action are available alongside the existing
+instance actions; both open the live-log job panel, the same as a deploy.
 
 ## `fleet init` — the two registry modes
 
@@ -158,8 +246,11 @@ fleet deploy demo
 # Deploy a specific branch under an explicit label
 fleet deploy demo default --branch feature/new-thing --label preview
 
-# Deploy 3 fresh instances of the same branch at once
+# Deploy 3 new instances of the same branch at once
 fleet deploy demo default --branch main --count 3
+
+# Rebuild an instance in place, same project/template/branch/label/auth
+fleet redeploy demo--preview
 
 # Free RAM on everything for one project, without losing disk state
 fleet stop --project demo
