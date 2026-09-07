@@ -133,9 +133,24 @@ def _build_parser() -> argparse.ArgumentParser:
 
     start_parser = subparsers.add_parser("start")
     _add_bulk_target_args(start_parser)
+    start_parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help=(
+            "run the bulk start one instance at a time (bulk_mod.run_sequential) "
+            "instead of the default 2-at-a-time run_concurrent — used at boot "
+            "(fleet-boot.service) to avoid CPU spikes and ddev-ssh-agent "
+            "registration races across many instances starting together"
+        ),
+    )
 
     stop_parser = subparsers.add_parser("stop")
     _add_bulk_target_args(stop_parser)
+    stop_parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="run the bulk stop one instance at a time instead of the default run_concurrent",
+    )
 
     subparsers.add_parser("list")
 
@@ -591,7 +606,7 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
 
     # A single *explicit* instance id bypasses the bulk machinery entirely —
     # today's exact behaviour, preserved for backward compatibility. A
-    # selector (--all/--project/--state) always goes through run_concurrent
+    # selector (--all/--project/--state) always goes through the bulk runner
     # even when it happens to resolve to exactly one instance, so progress
     # reporting/exit-code semantics stay consistent regardless of how many
     # instances currently match.
@@ -599,7 +614,14 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
         op(paths, registry, target_ids[0])
         return 0
 
-    outcome = bulk_mod.run_concurrent(paths, registry, target_ids, op, kind=kind)
+    # --sequential (used by fleet-boot.service: `fleet start --all --sequential`)
+    # routes through run_sequential — one instance at a time, in the order
+    # target_ids resolved in (sorted(iterdir()) alphabetical order for --all,
+    # see _resolve_bulk_targets/list_instances) — instead of the default
+    # 2-at-a-time run_concurrent. Manual CLI usage without the flag keeps
+    # today's exact behaviour.
+    runner_fn = bulk_mod.run_sequential if args.sequential else bulk_mod.run_concurrent
+    outcome = runner_fn(paths, registry, target_ids, op, kind=kind)
     for result in outcome.results:
         if result.ok:
             print(f"{result.instance_id}: OK")

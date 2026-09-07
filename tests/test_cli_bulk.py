@@ -221,6 +221,97 @@ def test_start_bulk_exit_code_0_when_all_succeed(fleet_home, monkeypatch):
     assert exit_code == 0
 
 
+def test_start_all_sequential_routes_through_run_sequential(fleet_home, monkeypatch):
+    """`fleet start --all --sequential` (the fleet-boot.service invocation)
+    must dispatch via bulk_mod.run_sequential, one instance at a time, not
+    the default run_concurrent."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+
+    def boom(*a, **kw):
+        raise AssertionError("run_concurrent must not be called when --sequential is passed")
+
+    monkeypatch.setattr(cli.bulk_mod, "run_concurrent", boom)
+
+    recorder = []
+
+    def fake_run_sequential(paths, registry, instance_ids, op, *, kind, **kw):
+        recorder.append((kind, list(instance_ids)))
+        return cli.bulk_mod.BulkOutcome(
+            kind=kind,
+            results=[
+                cli.bulk_mod.BulkResult(instance_id=i, ok=True, error=None, duration_s=0.0)
+                for i in instance_ids
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "run_sequential", fake_run_sequential)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "start", "--all", "--sequential"])
+
+    assert exit_code == 0
+    assert recorder == [("start", ["oak--a", "oak--b", "other--c"])]
+
+
+def test_start_all_without_sequential_still_uses_run_concurrent(fleet_home, monkeypatch):
+    """Default (flag absent) behaviour must be unchanged: run_concurrent,
+    not run_sequential."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+
+    def boom(*a, **kw):
+        raise AssertionError("run_sequential must not be called without --sequential")
+
+    monkeypatch.setattr(cli.bulk_mod, "run_sequential", boom)
+
+    recorder = []
+
+    def fake_run_concurrent(paths, registry, instance_ids, op, *, kind, **kw):
+        recorder.append((kind, list(instance_ids)))
+        return cli.bulk_mod.BulkOutcome(
+            kind=kind,
+            results=[
+                cli.bulk_mod.BulkResult(instance_id=i, ok=True, error=None, duration_s=0.0)
+                for i in instance_ids
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "run_concurrent", fake_run_concurrent)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "start", "--all"])
+
+    assert exit_code == 0
+    assert recorder == [("start", ["oak--a", "oak--b", "other--c"])]
+
+
+def test_stop_sequential_routes_through_run_sequential(fleet_home, monkeypatch):
+    _write_two_project_registry(fleet_home)
+    recorder = []
+
+    def fake_run_sequential(paths, registry, instance_ids, op, *, kind, **kw):
+        recorder.append(kind)
+        return cli.bulk_mod.BulkOutcome(
+            kind=kind,
+            results=[
+                cli.bulk_mod.BulkResult(instance_id=i, ok=True, error=None, duration_s=0.0)
+                for i in instance_ids
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "run_sequential", fake_run_sequential)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "stop", "oak--a", "oak--b", "--sequential"]
+    )
+
+    assert exit_code == 0
+    assert recorder == ["stop"]
+
+
 def test_stop_uses_run_concurrent_for_multiple_ids(fleet_home, monkeypatch):
     _write_two_project_registry(fleet_home)
     recorder = []

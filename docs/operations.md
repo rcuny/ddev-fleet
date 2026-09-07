@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-24
+Last updated: 2026-09-07
 Type: documentation
 ---
 
@@ -107,6 +107,38 @@ passed; a *single explicit* instance id (the traditional `fleet destroy
 compatibility. Each command prints a per-instance `OK`/`FAILED` line and a
 final `N succeeded, M failed` summary; the exit code is `0` if all
 succeeded, `1` if all failed, `2` on a partial failure.
+
+### Automatic instance startup after reboot
+
+DDEV instances do **not** auto-start on their own when the host reboots —
+Docker restarts containers per its own restart policy, but `ddev start`'s
+project-level bookkeeping (router registration, `ddev-ssh-agent`, etc.)
+still needs to run per instance. The `fleet_service` Ansible role installs
+`fleet-boot.service`, a `Type=oneshot` systemd unit enabled at boot
+(`WantedBy=multi-user.target`, ordered `After=docker.service`) that runs:
+
+```bash
+fleet start --all --sequential
+```
+
+`--sequential` starts every instance **one at a time**, in the same
+alphabetical instance-id order `fleet list` shows, instead of the default
+2-at-a-time `run_concurrent` bulk path — running many `ddev start`s at once
+right after a reboot causes CPU spikes and `ddev-ssh-agent` registration
+races. `TimeoutStartSec=0` on the unit means systemd will not kill it
+partway through a long batch.
+
+Check it after a reboot:
+
+```bash
+systemctl status fleet-boot.service
+journalctl -u fleet-boot.service -b
+```
+
+**NOTE:** it starts **every** existing instance, including ones you had
+deliberately stopped before the reboot to save RAM — there is no persisted
+"was running" state yet, so a deliberately-stopped instance will be woken
+back up too.
 
 ### Deploying multiple instances at once
 

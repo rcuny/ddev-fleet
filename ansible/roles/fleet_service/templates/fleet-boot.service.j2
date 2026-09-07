@@ -1,0 +1,36 @@
+[Unit]
+Description=ddev-fleet: start all instances sequentially after a reboot
+# docker.service must be up before `fleet start` can talk to the Docker
+# socket; fleet.service (the daemon) doesn't strictly have to be running
+# first, but ordering after it avoids racing daemon startup against a long
+# batch of `ddev start` calls on the same host. network-online.target covers
+# instances whose containers need to resolve/reach anything on first boot.
+After=docker.service network-online.target fleet.service
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=no
+# Starting every instance sequentially can take many minutes on a fleet with
+# a large instance count (one `ddev start` at a time, deliberately — see
+# ExecStart comment below). Do NOT let systemd's default 90s start timeout
+# kill this mid-batch.
+TimeoutStartSec=0
+# Same identity/venv/env pattern as fleet.service.j2 (User={{ fleet_user }},
+# WorkingDirectory={{ fleet_opt_dir }}, EnvironmentFile from .secrets) —
+# invoking the venv's `fleet` entrypoint directly, NOT the /usr/local/bin/fleet
+# wrapper (fleet.j2), because that wrapper re-execs itself via
+# `sudo -u {{ fleet_user }}` when the caller isn't already {{ fleet_user }};
+# since this unit already runs as User={{ fleet_user }}, going through the
+# wrapper would be a pointless double-sudo. --sequential (not the default
+# 2-at-a-time run_concurrent) is required here: many `ddev start`s at once
+# on a freshly-rebooted host causes CPU spikes and ddev-ssh-agent
+# registration races.
+User={{ fleet_user }}
+WorkingDirectory={{ fleet_opt_dir }}
+EnvironmentFile={{ fleet_srv_dir }}/.secrets
+ExecStart={{ fleet_opt_dir }}/venv/bin/fleet start --all --sequential
+
+[Install]
+WantedBy=multi-user.target
