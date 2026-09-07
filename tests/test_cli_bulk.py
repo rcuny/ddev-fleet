@@ -2,6 +2,8 @@
 selectors for start/stop/destroy, multi-deploy --count, and destroy
 confirmation (spec §1-§3, 2026-07-24 fleet-bulk-actions design)."""
 
+import functools
+
 from fleet import cli
 from fleet.core.instances import FleetPaths, InstanceStatus
 
@@ -286,6 +288,85 @@ def test_start_all_without_sequential_still_uses_run_concurrent(fleet_home, monk
 
     assert exit_code == 0
     assert recorder == [("start", ["oak--a", "oak--b", "other--c"])]
+
+
+def test_start_all_sequential_timeout_binds_partial_onto_op(fleet_home, monkeypatch):
+    """`fleet start --all --sequential --timeout 1800` (fleet-boot.service)
+    must bind the timeout onto the per-instance op via functools.partial,
+    without breaking run_sequential's generic
+    op(paths, registry, instance_id, runner=...) calling convention."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+
+    captured_ops = []
+
+    def fake_run_sequential(paths, registry, instance_ids, op, *, kind, **kw):
+        captured_ops.append(op)
+        return cli.bulk_mod.BulkOutcome(
+            kind=kind,
+            results=[
+                cli.bulk_mod.BulkResult(instance_id=i, ok=True, error=None, duration_s=0.0)
+                for i in instance_ids
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "run_sequential", fake_run_sequential)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "start", "--all", "--sequential", "--timeout", "1800"]
+    )
+
+    assert exit_code == 0
+    assert isinstance(captured_ops[0], functools.partial)
+    assert captured_ops[0].func is cli.instances_mod.start
+    assert captured_ops[0].keywords == {"timeout": 1800.0}
+
+
+def test_start_all_without_timeout_op_is_unwrapped(fleet_home, monkeypatch):
+    """Default (flag absent) behaviour must be unchanged: op is passed
+    through as-is, no functools.partial wrapping."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+
+    captured_ops = []
+
+    def fake_run_concurrent(paths, registry, instance_ids, op, *, kind, **kw):
+        captured_ops.append(op)
+        return cli.bulk_mod.BulkOutcome(
+            kind=kind,
+            results=[
+                cli.bulk_mod.BulkResult(instance_id=i, ok=True, error=None, duration_s=0.0)
+                for i in instance_ids
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "run_concurrent", fake_run_concurrent)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "start", "--all"])
+
+    assert exit_code == 0
+    assert captured_ops[0] is cli.instances_mod.start
+
+
+def test_start_single_explicit_id_honours_timeout(fleet_home, monkeypatch):
+    """The single-explicit-id fast path (bypasses the bulk machinery
+    entirely) must still honour --timeout."""
+    _write_two_project_registry(fleet_home)
+    captured = []
+
+    def fake_start(paths, registry, instance_id, *, timeout=None, runner=None):
+        captured.append((instance_id, timeout))
+
+    monkeypatch.setattr(cli.instances_mod, "start", fake_start)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "start", "oak--a", "--timeout", "1800"])
+
+    assert exit_code == 0
+    assert captured == [("oak--a", 1800.0)]
 
 
 def test_stop_sequential_routes_through_run_sequential(fleet_home, monkeypatch):

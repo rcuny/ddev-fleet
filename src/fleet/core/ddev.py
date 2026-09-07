@@ -1,21 +1,63 @@
 """Subprocess wrappers around `ddev`/`docker` (spec §11, §16d/e)."""
 
 import json
+import subprocess
 from pathlib import Path
 
+from fleet.core.errors import FleetError
 from fleet.core.runner import RunResult, run_streamed
 
 
-def start(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "start"], cwd=instance_dir, log_path=log_path)
+def _run_with_timeout_guard(argv: list[str], instance_dir: Path, *, log_path, timeout, runner):
+    # Only forward `timeout=` when actually set. Most callers (and most
+    # test-double runners across the suite) never pass one, so omitting the
+    # kwarg entirely when it's None keeps today's exact call signature
+    # unchanged for them — only a caller that opts into a timeout sees the
+    # new kwarg at all.
+    kwargs = {"cwd": instance_dir, "log_path": log_path}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    try:
+        return runner(argv, **kwargs)
+    except subprocess.TimeoutExpired as exc:
+        verb = argv[1] if len(argv) > 1 else argv[0]
+        raise FleetError(f"ddev {verb} timed out after {timeout}s for {instance_dir.name}") from exc
 
 
-def stop(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "stop"], cwd=instance_dir, log_path=log_path)
+def start(
+    instance_dir: Path,
+    *,
+    log_path: Path | None = None,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> RunResult:
+    return _run_with_timeout_guard(
+        ["ddev", "start"], instance_dir, log_path=log_path, timeout=timeout, runner=runner
+    )
 
 
-def restart(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "restart"], cwd=instance_dir, log_path=log_path)
+def stop(
+    instance_dir: Path,
+    *,
+    log_path: Path | None = None,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> RunResult:
+    return _run_with_timeout_guard(
+        ["ddev", "stop"], instance_dir, log_path=log_path, timeout=timeout, runner=runner
+    )
+
+
+def restart(
+    instance_dir: Path,
+    *,
+    log_path: Path | None = None,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> RunResult:
+    return _run_with_timeout_guard(
+        ["ddev", "restart"], instance_dir, log_path=log_path, timeout=timeout, runner=runner
+    )
 
 
 def delete(instance_dir: Path, *, runner=run_streamed) -> RunResult:

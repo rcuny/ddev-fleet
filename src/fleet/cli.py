@@ -1,6 +1,7 @@
 """Thin argparse CLI exposing the fleet.core command surface (spec §11)."""
 
 import argparse
+import functools
 import os
 import re
 import secrets as _stdlib_secrets
@@ -143,6 +144,17 @@ def _build_parser() -> argparse.ArgumentParser:
             "registration races across many instances starting together"
         ),
     )
+    start_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=(
+            "per-instance hang guard in seconds — if a single `ddev start` "
+            "doesn't finish within this many seconds it is killed and treated "
+            "as a failed instance (continue-on-error), instead of stalling the "
+            "whole batch. Default: no timeout (wait forever), today's behaviour"
+        ),
+    )
 
     stop_parser = subparsers.add_parser("stop")
     _add_bulk_target_args(stop_parser)
@@ -150,6 +162,15 @@ def _build_parser() -> argparse.ArgumentParser:
         "--sequential",
         action="store_true",
         help="run the bulk stop one instance at a time instead of the default run_concurrent",
+    )
+    stop_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=(
+            "per-instance hang guard in seconds — same semantics as `fleet "
+            "start --timeout`. Default: no timeout"
+        ),
     )
 
     subparsers.add_parser("list")
@@ -603,6 +624,15 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
     if not target_ids:
         print("no instances matched the given selector", file=sys.stderr)
         return 0
+
+    # --timeout (used by fleet-boot.service: `fleet start --all --sequential
+    # --timeout 1800`) is a per-instance hang guard, not a slowness limit —
+    # bind it onto the op via partial so it flows through run_sequential/
+    # run_concurrent's generic op(paths, registry, instance_id, runner=...)
+    # calling convention untouched. Absent, behaviour is unchanged (no
+    # timeout).
+    if args.timeout is not None:
+        op = functools.partial(op, timeout=args.timeout)
 
     # A single *explicit* instance id bypasses the bulk machinery entirely —
     # today's exact behaviour, preserved for backward compatibility. A

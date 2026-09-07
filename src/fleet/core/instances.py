@@ -838,24 +838,38 @@ def refresh_instance_config(
                 )
 
 
-def start(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed) -> None:
+def start(
+    paths: FleetPaths,
+    registry: Registry,
+    instance_id: str,
+    *,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> None:
     instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"instance directory not found for {instance_id!r}")
     with instance_lock(paths.locks, instance_id):
-        result = ddev.start(instance_dir, runner=runner)
+        result = ddev.start(instance_dir, timeout=timeout, runner=runner)
         if result.returncode != 0:
             raise FleetError(
                 f"ddev start failed for {instance_id!r} with exit code {result.returncode}"
             )
 
 
-def stop(paths: FleetPaths, registry: Registry, instance_id: str, *, runner=run_streamed) -> None:
+def stop(
+    paths: FleetPaths,
+    registry: Registry,
+    instance_id: str,
+    *,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> None:
     instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"instance directory not found for {instance_id!r}")
     with instance_lock(paths.locks, instance_id):
-        result = ddev.stop(instance_dir, runner=runner)
+        result = ddev.stop(instance_dir, timeout=timeout, runner=runner)
         if result.returncode != 0:
             raise FleetError(
                 f"ddev stop failed for {instance_id!r} with exit code {result.returncode}"

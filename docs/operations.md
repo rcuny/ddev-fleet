@@ -118,7 +118,7 @@ still needs to run per instance. The `fleet_service` Ansible role installs
 (`WantedBy=multi-user.target`, ordered `After=docker.service`) that runs:
 
 ```bash
-fleet start --all --sequential
+fleet start --all --sequential --timeout 1800
 ```
 
 `--sequential` starts every instance **one at a time**, in the same
@@ -127,6 +127,17 @@ alphabetical instance-id order `fleet list` shows, instead of the default
 right after a reboot causes CPU spikes and `ddev-ssh-agent` registration
 races. `TimeoutStartSec=0` on the unit means systemd will not kill it
 partway through a long batch.
+
+`--timeout 1800` is a **per-instance hang guard**, not a slowness limit: if
+a single `ddev start` doesn't finish within 30 minutes — e.g. an
+`ssh-agent` passphrase prompt blocking forever in this non-interactive boot
+context — it is killed and that instance is recorded as a failed result
+(`FAILED — ddev start timed out after 1800.0s for <instance-id>`), and the
+batch moves straight on to the next instance instead of stalling forever.
+It never fires on ordinary slowness; 30 minutes is a generous ceiling. Omit
+`--timeout` for the old no-timeout (wait forever) behaviour on a manual
+`fleet start`/`fleet stop` invocation — it is opt-in everywhere except
+`fleet-boot.service`.
 
 Check it after a reboot:
 

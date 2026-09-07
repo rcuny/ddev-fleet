@@ -34,8 +34,8 @@ port) see `docs/installation.md` and `docs/operations.md`; for the
 | `fleet deploy <project> [<template>]` | `--branch <ref> [--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n> \| -n <n>] [--skip-disk-check]` | Full deploy pipeline. `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted. Running instance is named `<project>--<label>` (`label` defaults to the slugified branch; an explicit `--label` is normalised the same way — lowercased, non-alphanumeric runs collapsed to `-`, e.g. `--label=ABC-1234` → `abc-1234` — rather than rejected, see `docs/configuration.md`). **Never overwrites an existing instance**: if the resolved id is already in use, `-1`, `-2`, … is appended until a free one is found — see "`fleet deploy` never overwrites" below. Refuses a dirty/unpushed worktree update without `--force`. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password. `--count`/`-n` (default `1`) deploys that many independently-labelled instances in one call — see "Bulk deploy" below. |
 | `fleet redeploy [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--template=<name>] [--auth-password=<pw>] [--force] [--yes]` | Destroys an instance and rebuilds it under the **same id**, from the project/template/branch/label/auth recorded in its `.fleet/instance.yml` at the last deploy. Refuses if no `template` was recorded (an instance deployed before template recording existed) unless `--template` is given. See "`fleet redeploy`" below. |
 | `fleet destroy [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes the instance dir + lock file. Accepts one explicit id (legacy single-instance form, no prompt), several explicit ids, or a selector (`--all`, `--project=<name>`, `--state=running\|deployed`) — never mixed with explicit ids. See "Bulk actions" below for confirmation/exit-code behavior. |
-| `fleet start [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential]` | `ddev start` on one or more existing, stopped instances. Same targeting rules as `destroy`. `--sequential` runs the bulk path one instance at a time (`run_sequential`) instead of the default 2-at-a-time `run_concurrent` — used by `fleet-boot.service` (`fleet start --all --sequential`) at boot to avoid CPU spikes / `ddev-ssh-agent` races; see `docs/operations.md`'s "Automatic instance startup after reboot". |
-| `fleet stop [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential]` | `ddev stop` — frees RAM, keeps disk. Same targeting rules as `destroy`; same `--sequential` flag. |
+| `fleet start [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential] [--timeout=<seconds>]` | `ddev start` on one or more existing, stopped instances. Same targeting rules as `destroy`. `--sequential` runs the bulk path one instance at a time (`run_sequential`) instead of the default 2-at-a-time `run_concurrent` — used by `fleet-boot.service` (`fleet start --all --sequential --timeout 1800`) at boot to avoid CPU spikes / `ddev-ssh-agent` races; see `docs/operations.md`'s "Automatic instance startup after reboot". `--timeout` is a per-instance **hang guard**: a `ddev start` that doesn't finish within that many seconds is killed and recorded as a failed instance (continue-on-error) instead of stalling the batch forever. Default: no timeout. Also honoured by the single-explicit-id fast path. |
+| `fleet stop [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential] [--timeout=<seconds>]` | `ddev stop` — frees RAM, keeps disk. Same targeting rules as `destroy`; same `--sequential`/`--timeout` flags and semantics. |
 | `fleet list` | — | Prints a table: instance id, project, branch, state, RAM (MiB), URL. |
 | `fleet ssh-key` | — | Prints the fleet deploy (read-only) public key, for adding to each forge. |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>`. |
@@ -101,6 +101,18 @@ Rules (`_resolve_bulk_targets` in `cli.py`):
   `fleet list` shows) instead of the default 2-at-a-time `run_concurrent`.
   Manual usage without the flag is unchanged; `fleet-boot.service` (boot-time
   auto-start, see `docs/operations.md`) always passes it.
+- `fleet start`/`fleet stop` also accept `--timeout=<seconds>` — a
+  per-instance **hang guard**, not a slowness limit. It's bound onto the
+  per-instance op via `functools.partial` (so `run_sequential`/
+  `run_concurrent`'s generic `op(paths, registry, instance_id, runner=...)`
+  calling convention is untouched) and forwarded down through
+  `core/instances.py` → `core/ddev.py` → `core/runner.py:run_streamed`,
+  which kills the child and raises `subprocess.TimeoutExpired` if it hasn't
+  exited within the deadline; `core/ddev.py` converts that into a
+  `FleetError` (`"ddev start timed out after <n>s for <instance-id>"`),
+  which `run_sequential`'s continue-on-error then records as a normal failed
+  `BulkResult` — the batch keeps going. Default: no timeout (today's
+  behaviour). `fleet-boot.service` passes `--timeout 1800` (30 minutes).
 
 **Confirmation for `destroy`:** a *single* explicit instance id (the
 traditional `fleet destroy <id>` form) is destroyed immediately, no
