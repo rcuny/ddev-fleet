@@ -1,21 +1,83 @@
 """Subprocess wrappers around `ddev`/`docker` (spec §11, §16d/e)."""
 
 import json
+import subprocess
 from pathlib import Path
 
+from fleet.core.errors import FleetError
 from fleet.core.runner import RunResult, run_streamed
 
 
-def start(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "start"], cwd=instance_dir, log_path=log_path)
+def _run_with_timeout_guard(argv: list[str], instance_dir: Path, *, log_path, timeout, runner):
+    # Only forward `timeout=` when actually set. Most callers (and most
+    # test-double runners across the suite) never pass one, so omitting the
+    # kwarg entirely when it's None keeps today's exact call signature
+    # unchanged for them — only a caller that opts into a timeout sees the
+    # new kwarg at all.
+    kwargs = {"cwd": instance_dir, "log_path": log_path}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    try:
+        return runner(argv, **kwargs)
+    except subprocess.TimeoutExpired as exc:
+        verb = argv[1] if len(argv) > 1 else argv[0]
+        raise FleetError(f"ddev {verb} timed out after {timeout}s for {instance_dir.name}") from exc
 
 
-def stop(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "stop"], cwd=instance_dir, log_path=log_path)
+def start(
+    instance_dir: Path,
+    *,
+    log_path: Path | None = None,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> RunResult:
+    return _run_with_timeout_guard(
+        ["ddev", "start"], instance_dir, log_path=log_path, timeout=timeout, runner=runner
+    )
 
 
-def restart(instance_dir: Path, *, log_path: Path | None = None, runner=run_streamed) -> RunResult:
-    return runner(["ddev", "restart"], cwd=instance_dir, log_path=log_path)
+def stop(
+    instance_dir: Path,
+    *,
+    log_path: Path | None = None,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> RunResult:
+    return _run_with_timeout_guard(
+        ["ddev", "stop"], instance_dir, log_path=log_path, timeout=timeout, runner=runner
+    )
+
+
+def restart(
+    instance_dir: Path,
+    *,
+    log_path: Path | None = None,
+    timeout: float | None = None,
+    runner=run_streamed,
+) -> RunResult:
+    return _run_with_timeout_guard(
+        ["ddev", "restart"], instance_dir, log_path=log_path, timeout=timeout, runner=runner
+    )
+
+
+# Docker error text fleet-boot.service's --retry-port-conflict self-heals:
+# a `ddev start` FAST-FAILs because a host port from a just-stopped (or
+# still-starting) sibling container hasn't been released by the kernel yet
+# — a race, not a real conflict — and a clean stop-then-start once the port
+# frees up resolves it. Matched case-insensitively; either marker alone is
+# sufficient since Docker doesn't always print both lines.
+_PORT_CONFLICT_MARKERS = (
+    "port is already allocated",
+    "failed to set up container networking",
+)
+
+
+def is_port_conflict(text: str) -> bool:
+    """True if `text` (the captured output of a failed `ddev start`) looks
+    like the Docker port-allocation race described above, rather than some
+    other `ddev start` failure that a stop-then-start retry wouldn't fix."""
+    lowered = text.lower()
+    return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
 
 
 def delete(instance_dir: Path, *, runner=run_streamed) -> RunResult:

@@ -1,6 +1,10 @@
 import json
+import subprocess
+
+import pytest
 
 from fleet.core import ddev
+from fleet.core.errors import FleetError
 from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
 
@@ -15,6 +19,7 @@ def test_start_composes_correct_argv(tmp_path):
             "env": None,
             "log_path": None,
             "input_text": None,
+            "timeout": None,
         }
     ]
 
@@ -96,6 +101,48 @@ def test_stop_forwards_log_path(tmp_path):
     assert fake.calls[0]["log_path"] == log_path
 
 
+def test_start_forwards_timeout_to_runner(tmp_path):
+    fake = FakeRunner()
+    ddev.start(tmp_path, timeout=1800, runner=fake)
+    assert fake.calls[0]["timeout"] == 1800
+
+
+def test_stop_forwards_timeout_to_runner(tmp_path):
+    fake = FakeRunner()
+    ddev.stop(tmp_path, timeout=1800, runner=fake)
+    assert fake.calls[0]["timeout"] == 1800
+
+
+def test_start_timeout_defaults_to_none(tmp_path):
+    fake = FakeRunner()
+    ddev.start(tmp_path, runner=fake)
+    assert fake.calls[0]["timeout"] is None
+
+
+def test_start_wraps_timeout_expired_in_fleet_error(tmp_path):
+    def timing_out_runner(
+        cmd, *, cwd=None, env=None, log_path=None, echo=True, input_text=None, timeout=None
+    ):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    with pytest.raises(FleetError) as exc_info:
+        ddev.start(tmp_path, timeout=5, runner=timing_out_runner)
+    assert "timed out after 5s" in str(exc_info.value)
+    assert tmp_path.name in str(exc_info.value)
+
+
+def test_stop_wraps_timeout_expired_in_fleet_error(tmp_path):
+    def timing_out_runner(
+        cmd, *, cwd=None, env=None, log_path=None, echo=True, input_text=None, timeout=None
+    ):
+        raise subprocess.TimeoutExpired(cmd, timeout)
+
+    with pytest.raises(FleetError) as exc_info:
+        ddev.stop(tmp_path, timeout=5, runner=timing_out_runner)
+    assert "timed out after 5s" in str(exc_info.value)
+    assert tmp_path.name in str(exc_info.value)
+
+
 def test_restart_composes_correct_argv(tmp_path):
     fake = FakeRunner()
     ddev.restart(tmp_path, runner=fake)
@@ -106,5 +153,28 @@ def test_restart_composes_correct_argv(tmp_path):
             "env": None,
             "log_path": None,
             "input_text": None,
+            "timeout": None,
         }
     ]
+
+
+# --- is_port_conflict() — the --retry-port-conflict detection predicate ---
+
+
+def test_is_port_conflict_matches_port_already_allocated():
+    assert ddev.is_port_conflict("Bind for 127.0.0.1:32839 failed: port is already allocated")
+
+
+def test_is_port_conflict_matches_container_networking_marker():
+    assert ddev.is_port_conflict(
+        "failed to set up container networking: driver failed programming "
+        "external connectivity on endpoint ddev-oak-a-db"
+    )
+
+
+def test_is_port_conflict_is_case_insensitive():
+    assert ddev.is_port_conflict("PORT IS ALREADY ALLOCATED")
+
+
+def test_is_port_conflict_false_for_unrelated_failure():
+    assert not ddev.is_port_conflict("Error: some other ddev start failure\nexit status 1")

@@ -1,6 +1,7 @@
 """Thin argparse CLI exposing the fleet.core command surface (spec §11)."""
 
 import argparse
+import functools
 import os
 import re
 import secrets as _stdlib_secrets
@@ -133,9 +134,56 @@ def _build_parser() -> argparse.ArgumentParser:
 
     start_parser = subparsers.add_parser("start")
     _add_bulk_target_args(start_parser)
+    start_parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help=(
+            "run the bulk start one instance at a time (bulk_mod.run_sequential) "
+            "instead of the default 2-at-a-time run_concurrent — used at boot "
+            "(fleet-boot.service) to avoid CPU spikes and ddev-ssh-agent "
+            "registration races across many instances starting together"
+        ),
+    )
+    start_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=(
+            "per-instance hang guard in seconds — if a single `ddev start` "
+            "doesn't finish within this many seconds it is killed and treated "
+            "as a failed instance (continue-on-error), instead of stalling the "
+            "whole batch. Default: no timeout (wait forever), today's behaviour"
+        ),
+    )
+    start_parser.add_argument(
+        "--retry-port-conflict",
+        action="store_true",
+        help=(
+            "opt-in self-heal for a Docker port-allocation race: if `ddev "
+            "start` FAST-FAILs with a port-already-allocated / container-"
+            "networking error, do one clean `ddev stop` + `ddev start` before "
+            "giving up (continue-on-error still applies if that retry also "
+            "fails). Default: off, today's behaviour unchanged. Passed by "
+            "fleet-boot.service for the post-reboot bulk start"
+        ),
+    )
 
     stop_parser = subparsers.add_parser("stop")
     _add_bulk_target_args(stop_parser)
+    stop_parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="run the bulk stop one instance at a time instead of the default run_concurrent",
+    )
+    stop_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=(
+            "per-instance hang guard in seconds — same semantics as `fleet "
+            "start --timeout`. Default: no timeout"
+        ),
+    )
 
     subparsers.add_parser("list")
 
@@ -589,9 +637,28 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
         print("no instances matched the given selector", file=sys.stderr)
         return 0
 
+    # --timeout (used by fleet-boot.service: `fleet start --all --sequential
+    # --timeout 1800`) is a per-instance hang guard, not a slowness limit, and
+    # --retry-port-conflict (start-only; `stop` never defines the flag, hence
+    # getattr with a False default so this code path doesn't crash reading
+    # it for `kind="stop"`) is the opt-in port-conflict self-heal. Both bind
+    # onto the op the same way — accumulate into one kwargs dict and apply a
+    # single functools.partial — so they flow through run_sequential/
+    # run_concurrent's generic op(paths, registry, instance_id, runner=...)
+    # calling convention untouched, and combine cleanly when both are given.
+    # Neither flag present: op is passed through as-is, today's exact
+    # behaviour.
+    op_kwargs = {}
+    if args.timeout is not None:
+        op_kwargs["timeout"] = args.timeout
+    if getattr(args, "retry_port_conflict", False):
+        op_kwargs["retry_port_conflict"] = True
+    if op_kwargs:
+        op = functools.partial(op, **op_kwargs)
+
     # A single *explicit* instance id bypasses the bulk machinery entirely —
     # today's exact behaviour, preserved for backward compatibility. A
-    # selector (--all/--project/--state) always goes through run_concurrent
+    # selector (--all/--project/--state) always goes through the bulk runner
     # even when it happens to resolve to exactly one instance, so progress
     # reporting/exit-code semantics stay consistent regardless of how many
     # instances currently match.
@@ -599,7 +666,14 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
         op(paths, registry, target_ids[0])
         return 0
 
-    outcome = bulk_mod.run_concurrent(paths, registry, target_ids, op, kind=kind)
+    # --sequential (used by fleet-boot.service: `fleet start --all --sequential`)
+    # routes through run_sequential — one instance at a time, in the order
+    # target_ids resolved in (sorted(iterdir()) alphabetical order for --all,
+    # see _resolve_bulk_targets/list_instances) — instead of the default
+    # 2-at-a-time run_concurrent. Manual CLI usage without the flag keeps
+    # today's exact behaviour.
+    runner_fn = bulk_mod.run_sequential if args.sequential else bulk_mod.run_concurrent
+    outcome = runner_fn(paths, registry, target_ids, op, kind=kind)
     for result in outcome.results:
         if result.ok:
             print(f"{result.instance_id}: OK")

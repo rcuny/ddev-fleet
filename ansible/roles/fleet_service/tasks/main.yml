@@ -85,3 +85,29 @@
     owner: root
     group: root
     mode: "0755"
+
+- name: Deploy the fleet-boot.service systemd unit (boot-time sequential instance start)
+  # Runs `fleet start --all --sequential` once at boot so existing DDEV
+  # instances come back up after a server reboot without manual
+  # intervention — they do not auto-start on their own. Tagged separately
+  # so this (and the enable task below) can be applied without the
+  # git-remote-rewriting clone/pip tasks above (see ddev-fleet/CLAUDE.md's
+  # "do NOT run the full site.yml casually" caveat).
+  ansible.builtin.template:
+    src: fleet-boot.service.j2
+    dest: /etc/systemd/system/fleet-boot.service
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [fleet_boot]
+  notify: Reload systemd daemon
+
+- name: Enable fleet-boot.service at boot (not started now — it is boot-only)
+  # Not started here: the companion dev container has no systemd (PID 1),
+  # and even on the real host this unit is meant to fire only at boot, not
+  # on every ansible run.
+  ansible.builtin.systemd:
+    name: fleet-boot.service
+    enabled: true
+    daemon_reload: true
+  tags: [fleet_boot]

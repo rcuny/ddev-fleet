@@ -1,3 +1,6 @@
+import subprocess
+import time
+
 import pytest
 
 from fleet.core.errors import FleetError
@@ -93,3 +96,52 @@ def test_run_streamed_pipes_input_text_to_stdin():
     result = run_streamed(["cat"], input_text="hello stdin\n", echo=False)
     assert result.returncode == 0
     assert result.lines == ["hello stdin"]
+
+
+def test_run_streamed_without_timeout_waits_for_slow_command():
+    # No timeout given (default None) — today's behaviour, preserved: a
+    # command slower than any of the timeouts used elsewhere in this test
+    # file must still be waited out in full.
+    result = run_streamed(["sleep", "0.3"], echo=False)
+    assert result.returncode == 0
+
+
+def test_run_streamed_raises_timeout_expired_when_command_hangs():
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_streamed(["sleep", "5"], echo=False, timeout=0.2)
+    elapsed = time.monotonic() - start
+    # Generous ceiling — just proving it didn't wait out the full 5s sleep.
+    assert elapsed < 3
+
+
+def test_run_streamed_kills_the_child_process_on_timeout():
+    process_holder = {}
+    orig_popen = subprocess.Popen
+
+    def spying_popen(*args, **kwargs):
+        proc = orig_popen(*args, **kwargs)
+        process_holder["proc"] = proc
+        return proc
+
+    import fleet.core.runner as runner_mod
+
+    orig = runner_mod.subprocess.Popen
+    runner_mod.subprocess.Popen = spying_popen
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_streamed(["sleep", "5"], echo=False, timeout=0.2)
+    finally:
+        runner_mod.subprocess.Popen = orig
+
+    proc = process_holder["proc"]
+    # Give the killed child a moment to actually exit.
+    proc.wait(timeout=5)
+    assert proc.returncode is not None
+    assert proc.returncode != 0
+
+
+def test_run_streamed_completes_normally_within_a_generous_timeout():
+    result = run_streamed(["echo", "hello"], echo=False, timeout=10)
+    assert result.returncode == 0
+    assert result.lines == ["hello"]
