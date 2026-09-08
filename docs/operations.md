@@ -118,7 +118,7 @@ still needs to run per instance. The `fleet_service` Ansible role installs
 (`WantedBy=multi-user.target`, ordered `After=docker.service`) that runs:
 
 ```bash
-fleet start --all --sequential --timeout 1800
+fleet start --all --sequential --timeout 1800 --retry-port-conflict
 ```
 
 `--sequential` starts every instance **one at a time**, in the same
@@ -138,6 +138,26 @@ It never fires on ordinary slowness; 30 minutes is a generous ceiling. Omit
 `--timeout` for the old no-timeout (wait forever) behaviour on a manual
 `fleet start`/`fleet stop` invocation — it is opt-in everywhere except
 `fleet-boot.service`.
+
+`--retry-port-conflict` self-heals a **separate, distinct** failure mode
+from the hang guard above: even run one instance at a time, some instances'
+`ddev start` **FAST-FAILs** on a Docker port-allocation race — the db
+container's host port hasn't been released by the kernel yet, e.g.:
+
+```
+failed to set up container networking: driver failed programming external connectivity on endpoint ddev-<id>-db ...
+Bind for 127.0.0.1:32839 failed: port is already allocated
+```
+
+— leaving the web container Up-but-unhealthy. Because it fails almost
+instantly, `--timeout` never sees it. The proven manual fix is a clean
+`fleet stop <id>` then `fleet start <id>` (releases and reallocates the
+host ports). With `--retry-port-conflict`, `fleet start` does exactly that
+automatically — ONE `ddev stop` + `ddev start` — before giving up on that
+instance; a still-failing retry (or any other kind of failure) still just
+fails that instance and the sequential batch continues, as before. It is
+opt-in (default off, no behaviour change) everywhere except
+`fleet-boot.service`, which always passes it.
 
 Check it after a reboot:
 

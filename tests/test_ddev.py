@@ -156,3 +156,25 @@ def test_restart_composes_correct_argv(tmp_path):
             "timeout": None,
         }
     ]
+
+
+# --- is_port_conflict() — the --retry-port-conflict detection predicate ---
+
+
+def test_is_port_conflict_matches_port_already_allocated():
+    assert ddev.is_port_conflict("Bind for 127.0.0.1:32839 failed: port is already allocated")
+
+
+def test_is_port_conflict_matches_container_networking_marker():
+    assert ddev.is_port_conflict(
+        "failed to set up container networking: driver failed programming "
+        "external connectivity on endpoint ddev-oak-a-db"
+    )
+
+
+def test_is_port_conflict_is_case_insensitive():
+    assert ddev.is_port_conflict("PORT IS ALREADY ALLOCATED")
+
+
+def test_is_port_conflict_false_for_unrelated_failure():
+    assert not ddev.is_port_conflict("Error: some other ddev start failure\nexit status 1")

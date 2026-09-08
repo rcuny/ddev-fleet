@@ -201,6 +201,93 @@ def test_stop_missing_instance_dir_raises(fleet_home, git_repo):
         instances.stop(paths, registry, "demo--nonexistent", runner=HybridRunner())
 
 
+# --- start(retry_port_conflict=True) — the fleet-boot.service self-heal ---
+
+
+def _make_counting_runner(scripted_results):
+    """Returns a `RunResult` per call, one entry of `scripted_results` per
+    call in order (extra calls beyond the list repeat the last entry).
+    Records the argv of every call for assertions."""
+    calls: list[list[str]] = []
+
+    def runner(cmd, *, cwd=None, env=None, log_path=None, echo=True, input_text=None, timeout=None):
+        calls.append(list(cmd))
+        idx = min(len(calls) - 1, len(scripted_results) - 1)
+        returncode, lines = scripted_results[idx]
+        return RunResult(returncode=returncode, lines=lines)
+
+    runner.calls = calls
+    return runner
+
+
+def _deploy_demo_develop(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+    return paths, registry
+
+
+def test_start_retry_port_conflict_recovers_on_second_attempt(fleet_home, git_repo):
+    """First `ddev start` FAST-FAILs with a port-conflict marker; with the
+    flag on, `start()` must do exactly one `ddev stop` + `ddev start` and
+    succeed without raising."""
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    runner = _make_counting_runner(
+        [
+            (1, ["Bind for 127.0.0.1:32839 failed: port is already allocated"]),
+            (0, []),  # ddev stop
+            (0, []),  # ddev start (retry) succeeds
+        ]
+    )
+
+    instances.start(paths, registry, "demo--develop", retry_port_conflict=True, runner=runner)
+
+    assert runner.calls == [["ddev", "start"], ["ddev", "stop"], ["ddev", "start"]]
+
+
+def test_start_retry_port_conflict_fails_after_second_conflict(fleet_home, git_repo):
+    """A SECOND consecutive port conflict (even after the stop+start retry)
+    must still raise FleetError — no infinite retrying."""
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    runner = _make_counting_runner(
+        [
+            (1, ["port is already allocated"]),
+            (0, []),  # ddev stop
+            (1, ["port is already allocated"]),
+        ]
+    )
+
+    with pytest.raises(FleetError):
+        instances.start(paths, registry, "demo--develop", retry_port_conflict=True, runner=runner)
+
+    assert runner.calls == [["ddev", "start"], ["ddev", "stop"], ["ddev", "start"]]
+
+
+def test_start_retry_port_conflict_skips_non_port_conflict_failure(fleet_home, git_repo):
+    """A non-port-conflict FleetError must propagate immediately — `ddev
+    stop` must never be called."""
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    runner = _make_counting_runner([(1, ["some unrelated ddev start failure"])])
+
+    with pytest.raises(FleetError):
+        instances.start(paths, registry, "demo--develop", retry_port_conflict=True, runner=runner)
+
+    assert runner.calls == [["ddev", "start"]]
+
+
+def test_start_without_retry_flag_does_not_retry_port_conflict(fleet_home, git_repo):
+    """Default (flag absent/False): a port-conflict failure behaves exactly
+    like today — raises immediately, no stop+start retry."""
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    runner = _make_counting_runner([(1, ["port is already allocated"])])
+
+    with pytest.raises(FleetError):
+        instances.start(paths, registry, "demo--develop", runner=runner)
+
+    assert runner.calls == [["ddev", "start"]]
+
+
 # --- destroy() cleans up the per-instance Caddy auth snippet ---
 
 

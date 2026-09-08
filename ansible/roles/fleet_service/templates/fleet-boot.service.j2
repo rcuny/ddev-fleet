@@ -32,11 +32,21 @@ TimeoutStartSec=0
 # non-interactive boot context) it is killed and recorded as a failed
 # instance, and the batch moves on to the next one instead of stalling
 # forever — TimeoutStartSec=0 above still lets the whole batch legitimately
-# run long across many instances.
+# run long across many instances. --retry-port-conflict is a SEPARATE
+# self-heal for a different failure mode: even run one-at-a-time, some
+# instances' `ddev start` FAST-FAILs on a Docker port-allocation race (the
+# db container's host port hasn't been released by the kernel yet — error
+# text mentions "port is already allocated" / "failed to set up container
+# networking"), leaving the web container Up-but-unhealthy. Unlike the hang
+# above, this fails almost instantly, so the --timeout guard never sees it.
+# The flag makes `fleet start` do exactly the proven manual fix — one clean
+# `ddev stop` + `ddev start` — automatically before giving up on that
+# instance; a still-failing retry (or any non-port-conflict error) still
+# just fails that instance and the batch continues, as before.
 User={{ fleet_user }}
 WorkingDirectory={{ fleet_opt_dir }}
 EnvironmentFile={{ fleet_srv_dir }}/.secrets
-ExecStart={{ fleet_opt_dir }}/venv/bin/fleet start --all --sequential --timeout 1800
+ExecStart={{ fleet_opt_dir }}/venv/bin/fleet start --all --sequential --timeout 1800 --retry-port-conflict
 
 [Install]
 WantedBy=multi-user.target

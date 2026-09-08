@@ -155,6 +155,18 @@ def _build_parser() -> argparse.ArgumentParser:
             "whole batch. Default: no timeout (wait forever), today's behaviour"
         ),
     )
+    start_parser.add_argument(
+        "--retry-port-conflict",
+        action="store_true",
+        help=(
+            "opt-in self-heal for a Docker port-allocation race: if `ddev "
+            "start` FAST-FAILs with a port-already-allocated / container-"
+            "networking error, do one clean `ddev stop` + `ddev start` before "
+            "giving up (continue-on-error still applies if that retry also "
+            "fails). Default: off, today's behaviour unchanged. Passed by "
+            "fleet-boot.service for the post-reboot bulk start"
+        ),
+    )
 
     stop_parser = subparsers.add_parser("stop")
     _add_bulk_target_args(stop_parser)
@@ -626,13 +638,23 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
         return 0
 
     # --timeout (used by fleet-boot.service: `fleet start --all --sequential
-    # --timeout 1800`) is a per-instance hang guard, not a slowness limit —
-    # bind it onto the op via partial so it flows through run_sequential/
+    # --timeout 1800`) is a per-instance hang guard, not a slowness limit, and
+    # --retry-port-conflict (start-only; `stop` never defines the flag, hence
+    # getattr with a False default so this code path doesn't crash reading
+    # it for `kind="stop"`) is the opt-in port-conflict self-heal. Both bind
+    # onto the op the same way — accumulate into one kwargs dict and apply a
+    # single functools.partial — so they flow through run_sequential/
     # run_concurrent's generic op(paths, registry, instance_id, runner=...)
-    # calling convention untouched. Absent, behaviour is unchanged (no
-    # timeout).
+    # calling convention untouched, and combine cleanly when both are given.
+    # Neither flag present: op is passed through as-is, today's exact
+    # behaviour.
+    op_kwargs = {}
     if args.timeout is not None:
-        op = functools.partial(op, timeout=args.timeout)
+        op_kwargs["timeout"] = args.timeout
+    if getattr(args, "retry_port_conflict", False):
+        op_kwargs["retry_port_conflict"] = True
+    if op_kwargs:
+        op = functools.partial(op, **op_kwargs)
 
     # A single *explicit* instance id bypasses the bulk machinery entirely —
     # today's exact behaviour, preserved for backward compatibility. A

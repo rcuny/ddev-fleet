@@ -324,6 +324,76 @@ def test_start_all_sequential_timeout_binds_partial_onto_op(fleet_home, monkeypa
     assert captured_ops[0].keywords == {"timeout": 1800.0}
 
 
+def test_start_all_sequential_retry_port_conflict_combines_with_timeout(fleet_home, monkeypatch):
+    """`--retry-port-conflict` must bind onto the op alongside `--timeout`
+    (both accumulate into the same functools.partial) without clobbering
+    either kwarg — the combination fleet-boot.service actually uses."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+
+    captured_ops = []
+
+    def fake_run_sequential(paths, registry, instance_ids, op, *, kind, **kw):
+        captured_ops.append(op)
+        return cli.bulk_mod.BulkOutcome(
+            kind=kind,
+            results=[
+                cli.bulk_mod.BulkResult(instance_id=i, ok=True, error=None, duration_s=0.0)
+                for i in instance_ids
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "run_sequential", fake_run_sequential)
+
+    exit_code = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "start",
+            "--all",
+            "--sequential",
+            "--timeout",
+            "1800",
+            "--retry-port-conflict",
+        ]
+    )
+
+    assert exit_code == 0
+    assert isinstance(captured_ops[0], functools.partial)
+    assert captured_ops[0].func is cli.instances_mod.start
+    assert captured_ops[0].keywords == {"timeout": 1800.0, "retry_port_conflict": True}
+
+
+def test_start_all_without_retry_flag_op_is_unwrapped(fleet_home, monkeypatch):
+    """Absent `--retry-port-conflict` (and absent `--timeout`): op is passed
+    through unwrapped exactly like today, no functools.partial at all."""
+    _write_two_project_registry(fleet_home)
+    monkeypatch.setattr(
+        cli.instances_mod, "list_instances", lambda paths, registry, **kw: _fake_statuses()
+    )
+
+    captured_ops = []
+
+    def fake_run_concurrent(paths, registry, instance_ids, op, *, kind, **kw):
+        captured_ops.append(op)
+        return cli.bulk_mod.BulkOutcome(
+            kind=kind,
+            results=[
+                cli.bulk_mod.BulkResult(instance_id=i, ok=True, error=None, duration_s=0.0)
+                for i in instance_ids
+            ],
+        )
+
+    monkeypatch.setattr(cli.bulk_mod, "run_concurrent", fake_run_concurrent)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "start", "--all"])
+
+    assert exit_code == 0
+    assert captured_ops[0] is cli.instances_mod.start
+
+
 def test_start_all_without_timeout_op_is_unwrapped(fleet_home, monkeypatch):
     """Default (flag absent) behaviour must be unchanged: op is passed
     through as-is, no functools.partial wrapping."""

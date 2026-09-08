@@ -844,6 +844,7 @@ def start(
     instance_id: str,
     *,
     timeout: float | None = None,
+    retry_port_conflict: bool = False,
     runner=run_streamed,
 ) -> None:
     instance_dir = paths.instances / instance_id
@@ -852,6 +853,23 @@ def start(
     with instance_lock(paths.locks, instance_id):
         result = ddev.start(instance_dir, timeout=timeout, runner=runner)
         if result.returncode != 0:
+            # Opt-in self-heal for the Docker port-allocation race (spec
+            # §16d/fleet-boot.service): a FAST-FAIL `ddev start` whose output
+            # names a port conflict gets exactly ONE clean stop-then-start
+            # before we give up — this releases and reallocates the host
+            # ports, which is the proven manual fix. Any other failure (or a
+            # second consecutive port conflict) propagates immediately;
+            # `retry_port_conflict=False` (the default) never changes
+            # behaviour at all.
+            if retry_port_conflict and ddev.is_port_conflict("\n".join(result.lines)):
+                print(f"{instance_id}: port conflict on start — retrying with stop+start")
+                ddev.stop(instance_dir, runner=runner)
+                result = ddev.start(instance_dir, timeout=timeout, runner=runner)
+                if result.returncode != 0:
+                    raise FleetError(
+                        f"ddev start failed for {instance_id!r} with exit code {result.returncode}"
+                    )
+                return
             raise FleetError(
                 f"ddev start failed for {instance_id!r} with exit code {result.returncode}"
             )

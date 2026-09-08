@@ -60,6 +60,26 @@ def restart(
     )
 
 
+# Docker error text fleet-boot.service's --retry-port-conflict self-heals:
+# a `ddev start` FAST-FAILs because a host port from a just-stopped (or
+# still-starting) sibling container hasn't been released by the kernel yet
+# — a race, not a real conflict — and a clean stop-then-start once the port
+# frees up resolves it. Matched case-insensitively; either marker alone is
+# sufficient since Docker doesn't always print both lines.
+_PORT_CONFLICT_MARKERS = (
+    "port is already allocated",
+    "failed to set up container networking",
+)
+
+
+def is_port_conflict(text: str) -> bool:
+    """True if `text` (the captured output of a failed `ddev start`) looks
+    like the Docker port-allocation race described above, rather than some
+    other `ddev start` failure that a stop-then-start retry wouldn't fix."""
+    lowered = text.lower()
+    return any(marker in lowered for marker in _PORT_CONFLICT_MARKERS)
+
+
 def delete(instance_dir: Path, *, runner=run_streamed) -> RunResult:
     # Flag names verified against the DDEV CLI at the time of writing; spec
     # §16 flags this as a verify-at-implementation point if a future DDEV
