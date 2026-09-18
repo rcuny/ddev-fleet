@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- Per-instance basic auth is now symmetric: the `--auth-password` / web-UI
+  "Auth user & password" value is used as BOTH username and password
+  (previously the username was always `fleet`). Because it doubles as a
+  Caddyfile username token, it must be a single word (no whitespace, quotes,
+  braces, backslashes, or leading `#`) — rejected up front otherwise.
+  Existing instances keep their old `fleet`/<password> credentials until
+  redeployed.
+
 ### Added
 - `fleet redeploy <instance-id>... [--all|--project=P|--state=S] [--template T] [--auth-password P] [--force] [--yes]`,
   plus a per-row Redeploy button and a bulk "Redeploy selected" action in the

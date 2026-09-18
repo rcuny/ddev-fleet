@@ -209,6 +209,9 @@ def deploy(
         auth_caddyfile_path if auth_caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
 
+    if auth_enabled:
+        caddyauth.validate_instance_credential(auth_password)
+
     resolved = resolve_target(registry, project, template, branch, label)
     slugified_label = resolved.label
     allocated = False
@@ -336,7 +339,8 @@ def deploy(
         fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
 
         # Reconcile this instance's Caddy basic-auth state to what THIS
-        # deploy call asked for (default: enabled, password "fleet"). Runs
+        # deploy call asked for (default: enabled, `fleet`/`fleet` — the
+        # password doubles as the username). Runs
         # after the fresh-destroy above (which already tore down any prior
         # snippet via _destroy_locked) and before ddev start, so an instance
         # is never briefly live without the auth state its operator asked

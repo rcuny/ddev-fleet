@@ -1,7 +1,7 @@
 import pytest
 
 from fleet.core import caddyauth
-from fleet.core.errors import CaddyAuthError
+from fleet.core.errors import CaddyAuthError, ValidationError
 from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
 
@@ -332,3 +332,39 @@ def test_disable_instance_auth_is_a_noop_when_nothing_to_remove(tmp_path):
     )
 
     assert fake.calls == []
+
+
+def test_enable_instance_auth_uses_password_as_username(tmp_path):
+    snippet_dir = tmp_path / "instances"
+    caddyfile_path = tmp_path / "Caddyfile"
+    scripted = {
+        "caddy hash-password --plaintext fern": RunResult(returncode=0, lines=["$2a$14$fernhash"]),
+        f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
+            returncode=0, lines=[]
+        ),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
+    }
+    caddyauth.enable_instance_auth(
+        "oak--client",
+        "oak--client.fleet.example.test",
+        "fern",
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=FakeRunner(scripted=scripted),
+    )
+    content = (snippet_dir / "oak--client.conf").read_text(encoding="utf-8")
+    assert "    fern $2a$14$fernhash\n" in content
+    assert "fleet" not in content.replace("fleet.example.test", "")
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "two words", 'q"uote', "br{ace", "back\\slash", "#hash", "tab\tx"]
+)
+def test_validate_instance_credential_rejects_non_token_values(bad):
+    with pytest.raises(ValidationError):
+        caddyauth.validate_instance_credential(bad)
+
+
+@pytest.mark.parametrize("good", ["fleet", "fern", "Client-2026!", "a#b"])
+def test_validate_instance_credential_accepts_single_words(good):
+    caddyauth.validate_instance_credential(good)

@@ -58,14 +58,17 @@ import os
 import tempfile
 from pathlib import Path
 
-from fleet.core.errors import CaddyAuthError
+from fleet.core.errors import CaddyAuthError, ValidationError
 from fleet.core.runner import run_streamed
 
 DEFAULT_ADMIN_USERNAME = "admin"
 DEFAULT_SNIPPET_PATH = Path("/etc/caddy/fleet/admin-auth.conf")
 DEFAULT_CADDYFILE_PATH = Path("/etc/caddy/Caddyfile")
 
-DEFAULT_INSTANCE_USERNAME = "fleet"
+# Per-instance credentials are SYMMETRIC: the one "auth password" an
+# operator types is used as both the basic-auth username and password
+# (e.g. `fern` -> `fern`/`fern`). It is a cheap privacy layer for handing
+# an instance URL to a client, not a security boundary.
 DEFAULT_INSTANCE_PASSWORD = "fleet"
 DEFAULT_INSTANCE_SNIPPET_DIR = Path("/etc/caddy/fleet/instances")
 
@@ -248,12 +251,28 @@ def rotate(
     reload_caddy(caddyfile_path=caddyfile_path, runner=runner)
 
 
+def validate_instance_credential(credential: str) -> None:
+    """Refuse a per-instance credential that can't be written as a bare
+    Caddyfile token. Because the credential doubles as the basic-auth
+    USERNAME (see DEFAULT_INSTANCE_PASSWORD), it lands unhashed in the
+    snippet, where whitespace, quotes, braces or a leading `#` would break
+    (or silently change) the parsed config. Called up front by deploy() /
+    multi_deploy() so a bad value is rejected before anything is torn down."""
+    if not credential:
+        raise ValidationError("auth password must not be empty")
+    if any(c.isspace() or c in '"`{}\\' for c in credential) or credential.startswith("#"):
+        raise ValidationError(
+            f"auth password {credential!r} is also used as the username, so it must be a "
+            "single word: no spaces, quotes, braces, backslashes, or leading '#'"
+        )
+
+
 def enable_instance_auth(
     instance_id: str,
     fqdn: str,
     password: str,
     *,
-    username: str = DEFAULT_INSTANCE_USERNAME,
+    username: str | None = None,
     snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
     caddyfile_path: Path = DEFAULT_CADDYFILE_PATH,
     runner=run_streamed,
@@ -264,7 +283,12 @@ def enable_instance_auth(
     (a FleetError) on any failure — same never-half-applied-undetectably
     contract as `rotate()`: if validation or reload fails, the snippet is
     already on disk but Caddy has NOT been reloaded, so it is not yet
-    protecting anything live."""
+    protecting anything live.
+
+    `username` defaults to `password` — per-instance credentials are
+    symmetric (see DEFAULT_INSTANCE_PASSWORD)."""
+    if username is None:
+        username = password
     bcrypt_hash = hash_password(password, runner=runner)
     write_instance_auth_snippet(instance_id, fqdn, username, bcrypt_hash, snippet_dir=snippet_dir)
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)

@@ -106,7 +106,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--auth-password",
         default=caddyauth.DEFAULT_INSTANCE_PASSWORD,
         help=(
-            "basic auth password for this instance "
+            "basic auth credential for this instance, used as BOTH username and password "
             f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
         ),
     )
