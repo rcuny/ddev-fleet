@@ -48,6 +48,7 @@ port) see `docs/installation.md` and `docs/operations.md`; for the
 | `fleet refresh-config` | — | If `$FLEET_HOME/config` is a git checkout (`FLEET_CONFIG_REPO` mode), runs `git fetch --quiet && git pull --ff-only`. Otherwise prints a no-op message (local-file mode — edit `fleet.yml` in place). |
 | `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (including the Claude onboarding hook) without a full deploy. The rewrite always happens; `--restart` additionally restarts the instance (omit it and the command prints the `ddev restart` command to run yourself). |
 | `fleet refresh-ports` | — | Reconciles Caddy's fleet-owned port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s current `fleet.ports`/per-project `ports:` state — no Ansible re-run, no redeploy. Also runs `sudo /usr/local/sbin/fleet-ufw-sync` when that helper exists (installed by the network-hardening role) — silently skipped otherwise, not an error. |
+| `fleet refresh-auth` | — | Re-applies per-instance basic auth to every deployed instance from `fleet.yml`'s current `fleet.auth_bypass_cidrs` whitelist (and each instance's recorded `auth-enabled`/`auth-password`) — the "apply my whitelist edit now" command. Rewrites every `/etc/caddy/fleet/instances/*.conf` snippet, then validates and reloads Caddy ONCE. No redeploy, no Ansible run. |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Drops into an interactive shell in an instance's directory (or the fleet home if no id given). `--list`/`-l` prints the known instance ids instead of prompting. |
 | `fleet ddev [<instance-id>] [-- <ddev-args>...]` | — | Runs `ddev <ddev-args>` inside the given instance's directory (prompts for the instance if omitted). |
 | `fleet tmux` | — | Attaches the persistent tmux session (general tab + one tab per instance), reconciling tabs to the current instance list on every attach. |
@@ -312,3 +313,53 @@ fleet reboot-notify --test
   rotation, bulk operations, port changes).
 - `docs/networking.md` — the port-exposure mechanism behind
   `fleet refresh-ports`.
+
+
+## Per-instance basic auth and the IP whitelist
+
+Every instance is protected by HTTP basic auth by default. The credential is
+**symmetric** — the one value you pass is both username and password:
+
+```bash
+fleet deploy oak default --branch develop --auth-password=fern   # login: fern / fern
+fleet deploy oak default --branch develop --no-auth              # no auth at all
+```
+
+Some corporate networks block HTTP basic auth outright, so visitors there
+cannot reach the instance at all. `fleet.auth_bypass_cidrs` in `fleet.yml`
+(per fleet server — see `docs/configuration.md`) lists networks that skip the
+prompt:
+
+```yaml
+fleet:
+  domain: fleet.example.com
+  auth_bypass_cidrs:
+    - 203.0.113.31/32
+    - 203.0.113.80/29
+```
+
+Each instance's Caddy snippet then reads:
+
+```
+@auth-oak--main {
+    host oak--main.fleet.example.com
+    not remote_ip 203.0.113.31/32 203.0.113.80/29
+}
+basic_auth @auth-oak--main { ... }
+```
+
+The matcher guards `basic_auth` only — a listed visitor is let straight
+through, everyone else gets the prompt. There is no deny entry: **the prompt
+IS the default**, and this list never blocks anyone. Entries may be bare
+addresses (normalised to `/32`) or CIDR ranges (host bits masked off);
+duplicates are dropped.
+
+`remote_ip` matches the **direct peer**, not `X-Forwarded-For`. Caddy is the
+edge here, so the peer is the real visitor — putting a CDN in front of Caddy
+would break this.
+
+Editing the list does not require redeploying anything:
+
+```bash
+fleet refresh-auth      # rewrite every instance snippet, validate, reload Caddy once
+```

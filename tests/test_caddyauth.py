@@ -368,3 +368,71 @@ def test_validate_instance_credential_rejects_non_token_values(bad):
 @pytest.mark.parametrize("good", ["fleet", "fern", "Client-2026!", "a#b"])
 def test_validate_instance_credential_accepts_single_words(good):
     caddyauth.validate_instance_credential(good)
+
+
+# --- auth bypass whitelist (fleet.auth_bypass_cidrs -> `not remote_ip`) ---
+
+
+def test_instance_snippet_with_bypass_cidrs_guards_matcher_with_not_remote_ip(tmp_path):
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_auth_snippet(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fern",
+        "$2a$14$hash",
+        bypass_cidrs=["203.0.113.31/32", "203.0.113.80/29"],
+        snippet_dir=snippet_dir,
+    )
+
+    assert (snippet_dir / "oak--main.conf").read_text(encoding="utf-8") == (
+        "@auth-oak--main {\n"
+        "    host oak--main.fleet.example.test\n"
+        "    not remote_ip 203.0.113.31/32 203.0.113.80/29\n"
+        "}\n"
+        "basic_auth @auth-oak--main {\n"
+        "    fern $2a$14$hash\n"
+        "}\n"
+    )
+
+
+def test_instance_snippet_without_bypass_cidrs_keeps_single_line_matcher(tmp_path):
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_auth_snippet(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fleet",
+        "$2a$14$hash",
+        snippet_dir=snippet_dir,
+    )
+
+    content = (snippet_dir / "oak--main.conf").read_text(encoding="utf-8")
+    assert content.startswith("@auth-oak--main host oak--main.fleet.example.test\n")
+    assert "remote_ip" not in content
+
+
+def test_enable_instance_auth_passes_bypass_cidrs_through(tmp_path):
+    snippet_dir = tmp_path / "instances"
+    caddyfile_path = tmp_path / "Caddyfile"
+    scripted = {
+        "caddy hash-password --plaintext fern": RunResult(returncode=0, lines=["$2a$14$fernhash"]),
+        f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
+            returncode=0, lines=[]
+        ),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
+    }
+
+    caddyauth.enable_instance_auth(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fern",
+        bypass_cidrs=["10.0.0.0/8"],
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=FakeRunner(scripted=scripted),
+    )
+
+    assert "not remote_ip 10.0.0.0/8" in (snippet_dir / "oak--main.conf").read_text(
+        encoding="utf-8"
+    )

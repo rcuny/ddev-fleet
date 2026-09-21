@@ -56,6 +56,7 @@ separator.
 
 import os
 import tempfile
+from collections.abc import Sequence
 from pathlib import Path
 
 from fleet.core.errors import CaddyAuthError, ValidationError
@@ -153,20 +154,42 @@ def write_instance_auth_snippet(
     username: str,
     bcrypt_hash: str,
     *,
+    bypass_cidrs: Sequence[str] = (),
     snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
 ) -> Path:
     """Atomically write `instance_id`'s own auth snippet: a named matcher
     scoped to `fqdn` via `host`, plus a `basic_auth` block guarded by that
     matcher. Returns the path written. Imported by the `*.{{ fleet_domain }}`
-    site in Caddyfile.j2 via a glob — see the module docstring."""
+    site in Caddyfile.j2 via a glob — see the module docstring.
+
+    `bypass_cidrs` (from `fleet.auth_bypass_cidrs`, see
+    `Registry.auth_bypass_cidrs`) narrows the matcher with `not remote_ip
+    <ranges>`, so visitors from those networks are never prompted. The
+    matcher is what guards `basic_auth`, so a non-match simply means "no
+    auth for this request" — traffic is never blocked by this snippet, and
+    everyone outside the list still gets the prompt (the implicit default
+    IS the prompt; there is no deny entry). Emitted as a multi-line matcher
+    block only when there is a bypass list, so an empty list keeps the
+    original one-line `@m host <fqdn>` form.
+
+    Caddy's `remote_ip` matches the DIRECT peer address, deliberately not
+    `X-Forwarded-For` (which would need the `forwarded` keyword and a
+    trusted-proxy config). Caddy is the edge here — it terminates TLS for
+    `*.{{ fleet_domain }}` straight from the client — so the direct peer IS
+    the visitor. If a CDN/proxy is ever put in front of Caddy, every request
+    will appear to come from that proxy and this list must be revisited."""
     snippet_path = instance_snippet_path(instance_id, snippet_dir=snippet_dir)
     matcher = instance_matcher_name(instance_id)
-    content = (
-        f"@{matcher} host {fqdn}\n"
-        f"basic_auth @{matcher} {{\n"
-        f"    {username} {bcrypt_hash}\n"
-        f"}}\n"
-    )
+    if bypass_cidrs:
+        header = (
+            f"@{matcher} {{\n"
+            f"    host {fqdn}\n"
+            f"    not remote_ip {' '.join(bypass_cidrs)}\n"
+            f"}}\n"
+        )
+    else:
+        header = f"@{matcher} host {fqdn}\n"
+    content = header + f"basic_auth @{matcher} {{\n    {username} {bcrypt_hash}\n}}\n"
     _atomic_write(snippet_path, content, prefix=f".{instance_id}-auth-")
     return snippet_path
 
@@ -273,6 +296,7 @@ def enable_instance_auth(
     password: str,
     *,
     username: str | None = None,
+    bypass_cidrs: Sequence[str] = (),
     snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
     caddyfile_path: Path = DEFAULT_CADDYFILE_PATH,
     runner=run_streamed,
@@ -290,7 +314,14 @@ def enable_instance_auth(
     if username is None:
         username = password
     bcrypt_hash = hash_password(password, runner=runner)
-    write_instance_auth_snippet(instance_id, fqdn, username, bcrypt_hash, snippet_dir=snippet_dir)
+    write_instance_auth_snippet(
+        instance_id,
+        fqdn,
+        username,
+        bcrypt_hash,
+        bypass_cidrs=bypass_cidrs,
+        snippet_dir=snippet_dir,
+    )
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
     reload_caddy(caddyfile_path=caddyfile_path, runner=runner)
 

@@ -137,6 +137,7 @@ registry load with an actionable message naming the bad key.
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull); no-op message if `config/` isn't a git checkout |
 | `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it |
 | `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
+| `fleet refresh-auth` | — | Re-applies per-instance basic auth to every deployed instance from `fleet.auth_bypass_cidrs` + each instance's recorded `auth-enabled`/`auth-password` — the "apply my auth-whitelist edit now" command; rewrites every `/etc/caddy/fleet/instances/*.conf`, then ONE `caddy validate` + `caddy reload` |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
 | `fleet ddev [<instance-id>] [-- args]` | — | Runs `ddev <args>` inside an instance's directory |
 | `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach — a newly-created instance window has its template's `tty1`/`tty2` commands typed into its two bash panes |
@@ -183,6 +184,9 @@ Full detail + examples: `docs/cli.md`.
 - **Rotate the Claude Code token fleet-wide (e.g. before the ~1 year expiry):** `fleet refresh-claude-token` — safe to re-run; only running instances are restarted (with `--restart`).
 - **Rotate the dashboard admin password:** `fleet rotate-admin-password` (generated) or `fleet set-admin-password <password>` (explicit) — never requires an Ansible run.
 - **Pull the latest registry/assets after someone else edits `fleet.yml`:** `fleet refresh-config`.
+- **Let a network skip the basic-auth prompt:** add its CIDR to
+  `fleet.auth_bypass_cidrs` in `fleet.yml`, then `fleet refresh-auth` — no
+  redeploy, no Ansible run. Unlisted visitors still get the prompt.
 - **Expose a new port for a project (e.g. Typesense, a Playwright report port):** add it to `fleet.ports` and the project's `ports:` list in `fleet.yml`, then `fleet refresh-ports` — no Ansible run, no redeploy needed.
 - **Check for a pending host reboot and notify:** `fleet reboot-notify` (normally run on a timer); `--test` to verify the mail relay works.
 - **Recovery when the daemon/web UI is down:** every command above works from the CLI directly against `fleet.core` — the daemon is not a dependency of the CLI.

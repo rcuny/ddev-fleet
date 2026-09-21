@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- `fleet.auth_bypass_cidrs` in `fleet.yml` (per fleet server): IP addresses /
+  CIDR ranges whose visitors skip per-instance HTTP basic auth, rendered into
+  each instance's Caddy snippet as `not remote_ip …`. Anything unlisted still
+  gets the prompt — the list never denies. For networks where corporate policy
+  blocks basic auth outright.
+- `fleet refresh-auth`: re-applies that whitelist (plus each instance's
+  recorded auth settings) to every deployed instance — rewrite all snippets,
+  then one `caddy validate` + `caddy reload`. No redeploy, no Ansible run.
+
 ### Changed
 - Per-instance basic auth is now symmetric: the `--auth-password` / web-UI
   "Auth user & password" value is used as BOTH username and password
