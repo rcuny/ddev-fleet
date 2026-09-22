@@ -286,7 +286,7 @@ last-deployed-at: 2026-07-27T09:30:00+00:00
 | `template` | The resolved template name — what lets `fleet tmux`'s `reconcile()` (and `fleet redeploy`, below) recover which `tty1`/`tty2`/deploy recipe to use, without needing it re-supplied. |
 | `branch` | The branch this instance tracks. |
 | `auth-enabled` | Whether per-instance basic auth was on for this deploy. |
-| `auth-password` | The basic-auth password configured for this deploy, in plaintext. |
+| `auth-password` | The basic-auth credential configured for this deploy, in plaintext. Used as BOTH username and password. |
 | `created-at` | Timestamp of the instance's first deploy — preserved across later redeploys/updates. |
 | `last-deployed-at` | Timestamp of the most recent deploy/redeploy. |
 
@@ -396,3 +396,36 @@ mode: `docs/installation.md` §4.
 - `docs/cli.md` — the full CLI reference.
 - `CLAUDE.md` — `Registry`'s implementation notes (`core/registry.py`) and
   the git-identity-injection mechanism in more depth.
+
+
+## `fleet.auth_bypass_cidrs` — skip basic auth for known networks
+
+Optional, top-level under `fleet:` — a per-server list of IP addresses / CIDR
+ranges whose visitors are **not** prompted for per-instance basic auth:
+
+```yaml
+fleet:
+  domain: fleet.example.com
+  auth_bypass_cidrs:
+    - 203.0.113.31/32      # office egress
+    - 203.0.113.80/29     # branch office range
+    - 9.9.9.9              # bare address == /32
+```
+
+| Rule | Behaviour |
+|---|---|
+| Not listed | Basic auth prompt, as before. **The prompt is the default** — no deny entry is needed or supported. |
+| Listed | No prompt for any instance on this fleet. |
+| Instance deployed `--no-auth` | No prompt for anyone; the whitelist is irrelevant. |
+| Invalid entry | `fleet.yml` fails to load with a `RegistryError` naming the entry. |
+
+Entries are normalised to canonical CIDR (`198.51.100.191/29` →
+`198.51.100.184/29`) and de-duplicated. The list is written into every
+instance's Caddy snippet as `not remote_ip …`, which matches the **direct
+peer address** — correct here because Caddy is the edge, but wrong if a CDN
+is ever placed in front of it.
+
+The list is fleet-wide, so a new instance picks it up at deploy time and
+existing instances pick it up with **`fleet refresh-auth`** (rewrites every
+instance snippet, then one `caddy validate` + `caddy reload`). A failed
+validate means Caddy keeps serving the previous config.

@@ -55,7 +55,7 @@
   <label>Label (optional) <input type="text" name="label"></label>
   <label>Count <input type="number" name="count" min="0" max="20" step="1" value="1" required></label>
   <label><input type="checkbox" name="auth" value="true" checked> Basic auth</label>
-  <label>Auth password <input type="text" name="auth_password" value="fleet"></label>
+  <label title="Used as both username and password, e.g. fern → fern / fern">Auth user &amp; password <input type="text" name="auth_password" value="fleet"></label>
   <label><input type="checkbox" name="skip_disk_check" value="true"> Skip disk-space check</label>
   <button type="submit">Deploy</button>
 </form>

@@ -161,8 +161,9 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             except CaddyPortsError as exc:
                 logger.warning("startup port sync failed: %s", exc.message)
             except Exception:
-                # `sync()` performs `snippet_dir.mkdir()`/`.glob()` before its
-                # own try/except wrapping (core/caddyports.py), so a bare
+                # `sync()` probes the snippet dir (ensure_snippet_dir) and
+                # `.glob()`s it before its own try/except wrapping
+                # (core/caddyports.py), so a bare
                 # PermissionError/OSError (or anything else unanticipated)
                 # can escape uncaught. Startup must NEVER be blocked by a
                 # broken port sync — a fleet manager that refuses to boot
@@ -413,6 +414,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         naming.validate_part(project)
         if not (0 <= count <= 20):
             raise FleetError(f"--count must be between 0 and 20 (got {count})")
+        auth_password = auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD
+        if auth:
+            # Synchronous 400 rather than a failed background job — the
+            # credential doubles as the basic-auth username.
+            caddyauth.validate_instance_credential(auth_password)
         paths, registry = _paths_and_registry()
 
         if count == 1:
@@ -438,7 +444,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                     # would make "unchecked" indistinguishable from "field never
                     # sent" and always resolve to ON, which is the classic bug.
                     auth_enabled=bool(auth),
-                    auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
+                    auth_password=auth_password,
                 )
 
             job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
@@ -472,7 +478,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 label=label or None,
                 count=count,
                 auth_enabled=bool(auth),
-                auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
+                auth_password=auth_password,
                 skip_disk_check=True,  # already checked synchronously above
                 on_progress=on_progress,
             )

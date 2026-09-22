@@ -209,6 +209,9 @@ def deploy(
         auth_caddyfile_path if auth_caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
 
+    if auth_enabled:
+        caddyauth.validate_instance_credential(auth_password)
+
     resolved = resolve_target(registry, project, template, branch, label)
     slugified_label = resolved.label
     allocated = False
@@ -336,7 +339,8 @@ def deploy(
         fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
 
         # Reconcile this instance's Caddy basic-auth state to what THIS
-        # deploy call asked for (default: enabled, password "fleet"). Runs
+        # deploy call asked for (default: enabled, `fleet`/`fleet` — the
+        # password doubles as the username). Runs
         # after the fresh-destroy above (which already tore down any prior
         # snippet via _destroy_locked) and before ddev start, so an instance
         # is never briefly live without the auth state its operator asked
@@ -349,6 +353,7 @@ def deploy(
                     inst_id,
                     f"{inst_id}.{registry.domain}",
                     auth_password,
+                    bypass_cidrs=registry.auth_bypass_cidrs,
                     snippet_dir=snippet_dir,
                     caddyfile_path=caddyfile_path,
                     runner=runner,
@@ -646,6 +651,101 @@ def redeploy(
         auth_password=resolved_auth_password,
         runner=runner,
     )
+
+
+@dataclass
+class AuthSyncResult:
+    """Outcome of `sync_instance_auth`: which instances had their Caddy
+    basic-auth snippet (re)written, which had one removed, and whether
+    Caddy was actually reloaded."""
+
+    written: list[str]
+    removed: list[str]
+    reloaded: bool
+
+
+def sync_instance_auth(
+    paths: FleetPaths,
+    registry: Registry,
+    *,
+    snippet_dir: Path | None = None,
+    caddyfile_path: Path | None = None,
+    runner=run_streamed,
+) -> AuthSyncResult:
+    """Re-render EVERY deployed instance's Caddy basic-auth snippet from its
+    recorded `.fleet/instance.yml` settings plus the registry's CURRENT
+    `fleet.auth_bypass_cidrs`, then validate and reload Caddy ONCE.
+
+    This is the "apply my whitelist edit now" command (`fleet refresh-auth`),
+    the auth counterpart to `refresh_instance_config`/`caddyports.sync`: the
+    bypass list is fleet-wide and lives in fleet.yml, so editing it must not
+    require redeploying every live instance. Instances whose recorded
+    `auth-enabled` is false get their snippet removed instead (keeping this
+    command a true reconcile, not just a rewrite).
+
+    Deliberately NOT per-instance validate+reload: a fleet with dozens of
+    instances would otherwise reload Caddy dozens of times, and a mid-way
+    failure would leave a partially-reloaded config. Writes are atomic per
+    snippet; the single validate at the end is what gates the reload, so a
+    bad whitelist means Caddy keeps serving the OLD config (the new snippets
+    sit on disk, unloaded) and the error names what to fix."""
+    resolved_snippet_dir = (
+        snippet_dir if snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
+    )
+    resolved_caddyfile = (
+        caddyfile_path if caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
+    )
+    bypass_cidrs = registry.auth_bypass_cidrs
+
+    written: list[str] = []
+    removed: list[str] = []
+    if not paths.instances.exists():
+        return AuthSyncResult(written=written, removed=removed, reloaded=False)
+
+    for entry in sorted(paths.instances.iterdir()):
+        if not entry.is_dir():
+            continue
+        inst_id = entry.name
+        info_path = entry / ".fleet" / "instance.yml"
+        data = {}
+        if info_path.exists():
+            with open(info_path, "r", encoding="utf-8") as fh:
+                data = _yaml.load(fh) or {}
+        # Same defaults as redeploy(): auth on, password `fleet`, for
+        # instances deployed before those fields were recorded.
+        recorded_enabled = data.get("auth-enabled")
+        auth_enabled = True if recorded_enabled is None else bool(recorded_enabled)
+        recorded_password = data.get("auth-password")
+        password = (
+            str(recorded_password) if recorded_password else caddyauth.DEFAULT_INSTANCE_PASSWORD
+        )
+
+        if not auth_enabled:
+            if caddyauth.remove_instance_auth_snippet(inst_id, snippet_dir=resolved_snippet_dir):
+                removed.append(inst_id)
+            continue
+
+        caddyauth.validate_instance_credential(password)
+        bcrypt_hash = caddyauth.hash_password(password, runner=runner)
+        caddyauth.write_instance_auth_snippet(
+            inst_id,
+            f"{inst_id}.{registry.domain}",
+            password,
+            bcrypt_hash,
+            bypass_cidrs=bypass_cidrs,
+            snippet_dir=resolved_snippet_dir,
+        )
+        written.append(inst_id)
+
+    if not written and not removed:
+        return AuthSyncResult(written=written, removed=removed, reloaded=False)
+
+    try:
+        caddyauth.validate_caddyfile(caddyfile_path=resolved_caddyfile, runner=runner)
+        caddyauth.reload_caddy(caddyfile_path=resolved_caddyfile, runner=runner)
+    except CaddyAuthError as exc:
+        raise FleetError(f"failed to apply instance auth changes: {exc.message}") from exc
+    return AuthSyncResult(written=written, removed=removed, reloaded=True)
 
 
 def _remove_instance_dir(instance_dir: Path) -> None:

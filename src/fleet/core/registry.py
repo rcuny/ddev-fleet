@@ -7,6 +7,7 @@ commands, etc.); `branch` and the instance `label` are resolved per-deploy,
 never stored in the registry.
 """
 
+import ipaddress
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -130,6 +131,7 @@ class Registry:
             raise RegistryError("missing key 'fleet.domain'")
 
         fleet_ports = self._validate_fleet_ports(fleet_block)
+        self._validate_auth_bypass(fleet_block)
 
         projects = data.get("projects") or {}
         for project_key, project_block in projects.items():
@@ -203,9 +205,45 @@ class Registry:
                         "(not defined in fleet.ports)"
                     )
 
+    def _validate_auth_bypass(self, fleet_block: dict) -> None:
+        """Validate `fleet.auth_bypass_cidrs` (optional): a list of IPv4/IPv6
+        addresses or CIDR ranges whose visitors skip per-instance basic auth."""
+        raw = fleet_block.get("auth_bypass_cidrs")
+        if raw is None:
+            return
+        if not isinstance(raw, list):
+            raise RegistryError(
+                "fleet.auth_bypass_cidrs: must be a list of IP addresses/CIDR ranges"
+            )
+        for entry in raw:
+            try:
+                ipaddress.ip_network(str(entry), strict=False)
+            except ValueError as exc:
+                raise RegistryError(f"fleet.auth_bypass_cidrs: invalid entry {entry!r} — {exc}")
+
     @property
     def domain(self) -> str:
         return str(self._data["fleet"]["domain"])
+
+    @property
+    def auth_bypass_cidrs(self) -> list[str]:
+        """Networks whose visitors are NOT prompted for per-instance basic
+        auth (`fleet.auth_bypass_cidrs` in fleet.yml — per fleet server).
+
+        Entries are normalised to canonical CIDR form (host bits masked off,
+        so `10.0.0.5/29` becomes `10.0.0.0/29`) and de-duplicated, preserving
+        first-seen order: the list is written verbatim into every instance's
+        Caddy snippet as `not remote_ip ...`, and hand-maintained allow-lists
+        routinely carry both duplicates and un-masked prefixes. A bare address
+        normalises to a /32 (or /128), which is what Caddy expects.
+
+        Anything NOT matching one of these falls through to the basic-auth
+        prompt — there is no explicit deny entry; the default IS deny."""
+        raw = (self._data.get("fleet") or {}).get("auth_bypass_cidrs") or []
+        seen: dict[str, None] = {}
+        for entry in raw:
+            seen.setdefault(str(ipaddress.ip_network(str(entry), strict=False)), None)
+        return list(seen)
 
     def git_bot(self, project: str | None = None) -> tuple[str, str] | None:
         """Resolve the git commit identity injected into an instance's

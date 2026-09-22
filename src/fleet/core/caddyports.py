@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from fleet.core import caddyauth
-from fleet.core.errors import CaddyPortsError, FleetError
+from fleet.core.errors import CaddyAuthError, CaddyPortsError, FleetError
 from fleet.core.naming import validate_part
 from fleet.core.registry import PortProfile, Registry
 from fleet.core.runner import run_streamed
@@ -124,7 +124,16 @@ def sync(
     to detect "ports out of sync" cannot silently miss that case.
     """
     wanted = {p.name: p for p in registry.all_port_profiles()}
-    snippet_dir.mkdir(parents=True, exist_ok=True)
+    # Same guard as every fleet-owned snippet write: a provisioned dir under
+    # /etc/caddy must never be recreated on the fly (setgid would be lost and
+    # Caddy could no longer read what we write) — see
+    # caddyauth.ensure_snippet_dir.
+    try:
+        caddyauth.ensure_snippet_dir(snippet_dir)
+    except CaddyAuthError as exc:
+        # Re-raise in THIS module's error type so callers keep their single
+        # `except CaddyPortsError` contract (instances.deploy/destroy).
+        raise CaddyPortsError(exc.message) from exc
     existing_names = {p.stem for p in snippet_dir.glob("*.conf")}
 
     written: list[str] = []

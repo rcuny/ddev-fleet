@@ -106,7 +106,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--auth-password",
         default=caddyauth.DEFAULT_INSTANCE_PASSWORD,
         help=(
-            "basic auth password for this instance "
+            "basic auth credential for this instance, used as BOTH username and password "
             f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
         ),
     )
@@ -256,6 +256,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("refresh-ports")
+    subparsers.add_parser("refresh-auth")
 
     shell_parser = subparsers.add_parser("shell")
     shell_parser.add_argument("instance_id", nargs="?", default=None)
@@ -323,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_refresh_instance_config(fleet_home, args)
         elif args.command == "refresh-ports":
             return _cmd_refresh_ports(fleet_home, args, runner=run_streamed)
+        elif args.command == "refresh-auth":
+            return _cmd_refresh_auth(fleet_home, args, runner=run_streamed)
         elif args.command == "shell":
             _cmd_shell(fleet_home, args)
         elif args.command == "ddev":
@@ -895,6 +898,32 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
         instance_dir = paths.instances / args.instance_id
         print(f"{args.instance_id}: config refreshed (not restarted)")
         print(f"  cd {instance_dir} && ddev restart")
+
+
+def _cmd_refresh_auth(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:
+    """Re-apply per-instance basic auth to every deployed instance from
+    fleet.yml's current `fleet.auth_bypass_cidrs` — the "apply my whitelist
+    edit now" command, so editing the bypass list never requires redeploying
+    live instances."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = Registry.load(paths.registry)
+
+    bypass = registry.auth_bypass_cidrs
+    if bypass:
+        print(f"auth bypass: {len(bypass)} network(s) skip basic auth ({bypass[0]}, …)")
+    else:
+        print("auth bypass: none configured — every visitor gets the basic-auth prompt")
+
+    result = instances_mod.sync_instance_auth(paths, registry, runner=runner)
+    for inst_id in result.written:
+        print(f"caddy: wrote auth snippet for {inst_id}")
+    for inst_id in result.removed:
+        print(f"caddy: removed auth snippet for {inst_id} (auth disabled)")
+    if result.reloaded:
+        print("caddy: validated and reloaded")
+    else:
+        print("caddy: no instances to update")
+    return 0
 
 
 def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:

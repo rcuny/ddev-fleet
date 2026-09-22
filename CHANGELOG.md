@@ -8,6 +8,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `fleet.auth_bypass_cidrs` in `fleet.yml` (per fleet server): IP addresses /
+  CIDR ranges whose visitors skip per-instance HTTP basic auth, rendered into
+  each instance's Caddy snippet as `not remote_ip …`. Anything unlisted still
+  gets the prompt — the list never denies. For networks where corporate policy
+  blocks basic auth outright.
+- `fleet refresh-auth`: re-applies that whitelist (plus each instance's
+  recorded auth settings) to every deployed instance — rewrite all snippets,
+  then one `caddy validate` + `caddy reload`. No redeploy, no Ansible run.
+
+### Fixed
+- Fleet-owned Caddy snippet directories under `/etc/caddy` are no longer
+  created on the fly: `caddyauth.ensure_snippet_dir()` now refuses to write
+  when the directory is missing OR has lost its **setgid** bit, naming the
+  exact fix. A `mkdir` there drops setgid, so every snippet written after it
+  is group-owned by `fleet` instead of `caddy` and Caddy cannot read it —
+  which took ddev2's Caddy down from 2026-09-14 to 2026-09-21, invisibly,
+  because a reload keeps serving the old config until the next restart. The
+  unprivileged `fleet` user cannot repair setgid itself (Linux drops S_ISGID
+  for a non-member group), so provisioning owns these directories.
+
+### Changed
+- Per-instance basic auth is now symmetric: the `--auth-password` / web-UI
+  "Auth user & password" value is used as BOTH username and password
+  (previously the username was always `fleet`). Because it doubles as a
+  Caddyfile username token, it must be a single word (no whitespace, quotes,
+  braces, backslashes, or leading `#`) — rejected up front otherwise.
+  Existing instances keep their old `fleet`/<password> credentials until
+  redeployed.
+
+### Added
 - `fleet redeploy <instance-id>... [--all|--project=P|--state=S] [--template T] [--auth-password P] [--force] [--yes]`,
   plus a per-row Redeploy button and a bulk "Redeploy selected" action in the
   web UI. Destroys an instance and rebuilds it under the same id, recovering

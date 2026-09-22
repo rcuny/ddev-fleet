@@ -1,7 +1,7 @@
 import pytest
 
 from fleet.core import caddyauth
-from fleet.core.errors import CaddyAuthError
+from fleet.core.errors import CaddyAuthError, ValidationError
 from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
 
@@ -332,3 +332,171 @@ def test_disable_instance_auth_is_a_noop_when_nothing_to_remove(tmp_path):
     )
 
     assert fake.calls == []
+
+
+def test_enable_instance_auth_uses_password_as_username(tmp_path):
+    snippet_dir = tmp_path / "instances"
+    caddyfile_path = tmp_path / "Caddyfile"
+    scripted = {
+        "caddy hash-password --plaintext fern": RunResult(returncode=0, lines=["$2a$14$fernhash"]),
+        f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
+            returncode=0, lines=[]
+        ),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
+    }
+    caddyauth.enable_instance_auth(
+        "oak--client",
+        "oak--client.fleet.example.test",
+        "fern",
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=FakeRunner(scripted=scripted),
+    )
+    content = (snippet_dir / "oak--client.conf").read_text(encoding="utf-8")
+    assert "    fern $2a$14$fernhash\n" in content
+    assert "fleet" not in content.replace("fleet.example.test", "")
+
+
+@pytest.mark.parametrize(
+    "bad", ["", "two words", 'q"uote', "br{ace", "back\\slash", "#hash", "tab\tx"]
+)
+def test_validate_instance_credential_rejects_non_token_values(bad):
+    with pytest.raises(ValidationError):
+        caddyauth.validate_instance_credential(bad)
+
+
+@pytest.mark.parametrize("good", ["fleet", "fern", "Client-2026!", "a#b"])
+def test_validate_instance_credential_accepts_single_words(good):
+    caddyauth.validate_instance_credential(good)
+
+
+# --- auth bypass whitelist (fleet.auth_bypass_cidrs -> `not remote_ip`) ---
+
+
+def test_instance_snippet_with_bypass_cidrs_guards_matcher_with_not_remote_ip(tmp_path):
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_auth_snippet(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fern",
+        "$2a$14$hash",
+        bypass_cidrs=["203.0.113.31/32", "203.0.113.80/29"],
+        snippet_dir=snippet_dir,
+    )
+
+    assert (snippet_dir / "oak--main.conf").read_text(encoding="utf-8") == (
+        "@auth-oak--main {\n"
+        "    host oak--main.fleet.example.test\n"
+        "    not remote_ip 203.0.113.31/32 203.0.113.80/29\n"
+        "}\n"
+        "basic_auth @auth-oak--main {\n"
+        "    fern $2a$14$hash\n"
+        "}\n"
+    )
+
+
+def test_instance_snippet_without_bypass_cidrs_keeps_single_line_matcher(tmp_path):
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_auth_snippet(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fleet",
+        "$2a$14$hash",
+        snippet_dir=snippet_dir,
+    )
+
+    content = (snippet_dir / "oak--main.conf").read_text(encoding="utf-8")
+    assert content.startswith("@auth-oak--main host oak--main.fleet.example.test\n")
+    assert "remote_ip" not in content
+
+
+def test_enable_instance_auth_passes_bypass_cidrs_through(tmp_path):
+    snippet_dir = tmp_path / "instances"
+    caddyfile_path = tmp_path / "Caddyfile"
+    scripted = {
+        "caddy hash-password --plaintext fern": RunResult(returncode=0, lines=["$2a$14$fernhash"]),
+        f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
+            returncode=0, lines=[]
+        ),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
+    }
+
+    caddyauth.enable_instance_auth(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fern",
+        bypass_cidrs=["10.0.0.0/8"],
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=FakeRunner(scripted=scripted),
+    )
+
+    assert "not remote_ip 10.0.0.0/8" in (snippet_dir / "oak--main.conf").read_text(
+        encoding="utf-8"
+    )
+
+
+# --- provisioned snippet dirs must never be created on the fly ---
+
+
+def test_ensure_snippet_dir_creates_unmanaged_dirs(tmp_path):
+    target = tmp_path / "instances"
+
+    caddyauth.ensure_snippet_dir(target)
+
+    assert target.is_dir()
+
+
+def test_ensure_snippet_dir_refuses_missing_managed_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    missing = tmp_path / "fleet" / "instances"
+
+    with pytest.raises(CaddyAuthError) as exc:
+        caddyauth.ensure_snippet_dir(missing)
+
+    assert "install -d -o fleet -g caddy -m 2750" in str(exc.value)
+    assert not missing.exists()
+
+
+def test_ensure_snippet_dir_refuses_managed_dir_without_setgid(tmp_path, monkeypatch):
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    target = tmp_path / "fleet" / "instances"
+    target.mkdir(parents=True)
+    target.chmod(0o750)
+
+    with pytest.raises(CaddyAuthError) as exc:
+        caddyauth.ensure_snippet_dir(target)
+
+    assert "setgid" in str(exc.value)
+
+
+def test_ensure_snippet_dir_accepts_managed_dir_with_setgid(tmp_path, monkeypatch):
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    target = tmp_path / "fleet" / "instances"
+    target.mkdir(parents=True)
+    target.chmod(0o2750)
+
+    caddyauth.ensure_snippet_dir(target)
+
+
+def test_write_instance_snippet_refuses_managed_dir_without_setgid(tmp_path, monkeypatch):
+    """The guard fires on the real write path, not just when called directly —
+    this is the ddev2 outage (2026-09-14): snippets written into a setgid-less
+    dir are unreadable by Caddy, which then fails its next restart."""
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    snippet_dir = tmp_path / "fleet" / "instances"
+    snippet_dir.mkdir(parents=True)
+    snippet_dir.chmod(0o750)
+
+    with pytest.raises(CaddyAuthError):
+        caddyauth.write_instance_auth_snippet(
+            "demo--main",
+            "demo--main.fleet.example.test",
+            "fleet",
+            "$2a$14$hash",
+            snippet_dir=snippet_dir,
+        )
+
+    assert list(snippet_dir.iterdir()) == []
