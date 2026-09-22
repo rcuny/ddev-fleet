@@ -196,6 +196,88 @@
       docs/installation.md.
     success_msg: "fleet_tls_mode='{{ fleet_tls_mode }}' is valid"
 
+# --- ovh_dns mode: OVH API credentials -------------------------------------
+# Ansible NEVER writes /etc/caddy/ovh.env's CONTENTS (spec decision 5) — an
+# operator creates it (bootstrap.sh's TLS-mode prompt, or by hand). This
+# role only asserts it exists with all four required keys, fixes its
+# owner/group/mode, and wires it into caddy.service via a systemd drop-in.
+- name: OVH DNS credentials (ovh_dns mode only)
+  when: fleet_tls_mode == 'ovh_dns'
+  block:
+    - name: Check whether the OVH credentials file exists
+      ansible.builtin.stat:
+        path: "{{ fleet_ovh_env_file }}"
+      register: fleet_ovh_env_stat
+
+    - name: Fail fast if the OVH credentials file is missing
+      ansible.builtin.fail:
+        msg: >-
+          fleet_tls_mode is 'ovh_dns' but {{ fleet_ovh_env_file }} does not
+          exist. Ansible never writes this file's contents (it holds OVH API
+          secrets) — create it first: bootstrap.sh's TLS-mode prompt does
+          this interactively, or write it by hand (0600 root:root) with
+          OVH_ENDPOINT, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET,
+          OVH_CONSUMER_KEY — see docs/installation.md.
+      when: not fleet_ovh_env_stat.stat.exists
+
+    - name: Read the OVH credentials file to check for required keys
+      # no_log: the file's raw content includes secret VALUES, not just key
+      # names — must never land in Ansible output/logs.
+      ansible.builtin.slurp:
+        src: "{{ fleet_ovh_env_file }}"
+      register: fleet_ovh_env_content
+      no_log: true
+
+    - name: Determine which required OVH keys are present (key NAMES only, never values)
+      ansible.builtin.set_fact:
+        fleet_ovh_env_missing_keys: >-
+          {{ ['OVH_ENDPOINT', 'OVH_APPLICATION_KEY', 'OVH_APPLICATION_SECRET', 'OVH_CONSUMER_KEY']
+          | difference((fleet_ovh_env_content.content | b64decode)
+          | regex_findall('(?m)^[ \t]*([A-Z_]+)[ \t]*=[ \t]*[^\s]')) }}
+      no_log: true
+
+    - name: Fail fast if the OVH credentials file is missing a required key
+      # The message names only key NAMES, never values — safe to print.
+      ansible.builtin.fail:
+        msg: >-
+          {{ fleet_ovh_env_file }} is missing required key(s):
+          {{ fleet_ovh_env_missing_keys | join(', ') }}. Not printing file
+          contents. See docs/installation.md.
+      when: fleet_ovh_env_missing_keys | length > 0
+
+    - name: Fix ownership/permissions of the OVH credentials file
+      # 0640 root:caddy — same read model as every other fleet-owned Caddy
+      # secret: group-readable by caddy, never world-readable. Ansible runs
+      # as root, so this is a plain chown/chmod, not the fleet-write/
+      # setgid-inherit pattern the snippet dirs need.
+      ansible.builtin.file:
+        path: "{{ fleet_ovh_env_file }}"
+        state: file
+        owner: root
+        group: caddy
+        mode: "0640"
+
+    - name: Ensure the caddy.service systemd drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/caddy.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the caddy.service EnvironmentFile drop-in for OVH credentials
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy.service.d/ovh-env.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Service]
+          EnvironmentFile={{ fleet_ovh_env_file }}
+      notify:
+        - Reload systemd daemon
+        - Restart caddy
+
 # --- ovh_dns mode: custom caddy binary with the caddy-dns/ovh plugin ------
 # Caddy's official method for a custom build alongside the apt package
 # (https://caddyserver.com/docs/build#package-support-files-for-custom-builds-for-debianubunturaspbian):
@@ -273,89 +355,6 @@
         label: "{{ item.path }}"
       changed_when: true
       notify: Restart caddy
-
-# --- ovh_dns mode: OVH API credentials -------------------------------------
-# Ansible NEVER writes /etc/caddy/ovh.env's CONTENTS (spec decision 5) — an
-# operator creates it (bootstrap.sh's TLS-mode prompt, or by hand). This
-# role only asserts it exists with all four required keys, fixes its
-# owner/group/mode, and wires it into caddy.service via a systemd drop-in.
-- name: OVH DNS credentials (ovh_dns mode only)
-  when: fleet_tls_mode == 'ovh_dns'
-  block:
-    - name: Check whether the OVH credentials file exists
-      ansible.builtin.stat:
-        path: "{{ fleet_ovh_env_file }}"
-      register: fleet_ovh_env_stat
-
-    - name: Fail fast if the OVH credentials file is missing
-      ansible.builtin.fail:
-        msg: >-
-          fleet_tls_mode is 'ovh_dns' but {{ fleet_ovh_env_file }} does not
-          exist. Ansible never writes this file's contents (it holds OVH API
-          secrets) — create it first: bootstrap.sh's TLS-mode prompt does
-          this interactively, or write it by hand (0600 root:root) with
-          OVH_ENDPOINT, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET,
-          OVH_CONSUMER_KEY — see docs/installation.md.
-      when: not fleet_ovh_env_stat.stat.exists
-
-    - name: Read the OVH credentials file to check for required keys
-      # no_log: the file's raw content includes secret VALUES, not just key
-      # names — must never land in Ansible output/logs.
-      ansible.builtin.slurp:
-        src: "{{ fleet_ovh_env_file }}"
-      register: fleet_ovh_env_content
-      no_log: true
-
-    - name: Determine which required OVH keys are present (key NAMES only, never values)
-      ansible.builtin.set_fact:
-        fleet_ovh_env_missing_keys: >-
-          {{ ['OVH_ENDPOINT', 'OVH_APPLICATION_KEY', 'OVH_APPLICATION_SECRET', 'OVH_CONSUMER_KEY']
-          | difference((fleet_ovh_env_content.content | b64decode).splitlines()
-          | select('match', '^[A-Z_]+=')
-          | map('regex_replace', '^([A-Z_]+)=.*$', '\\1') | list) }}
-      no_log: true
-
-    - name: Fail fast if the OVH credentials file is missing a required key
-      # The message names only key NAMES, never values — safe to print.
-      ansible.builtin.fail:
-        msg: >-
-          {{ fleet_ovh_env_file }} is missing required key(s):
-          {{ fleet_ovh_env_missing_keys | join(', ') }}. Not printing file
-          contents. See docs/installation.md.
-      when: fleet_ovh_env_missing_keys | length > 0
-
-    - name: Fix ownership/permissions of the OVH credentials file
-      # 0640 root:caddy — same read model as every other fleet-owned Caddy
-      # secret: group-readable by caddy, never world-readable. Ansible runs
-      # as root, so this is a plain chown/chmod, not the fleet-write/
-      # setgid-inherit pattern the snippet dirs need.
-      ansible.builtin.file:
-        path: "{{ fleet_ovh_env_file }}"
-        state: file
-        owner: root
-        group: caddy
-        mode: "0640"
-
-    - name: Ensure the caddy.service systemd drop-in directory exists
-      ansible.builtin.file:
-        path: /etc/systemd/system/caddy.service.d
-        state: directory
-        owner: root
-        group: root
-        mode: "0755"
-
-    - name: Install the caddy.service EnvironmentFile drop-in for OVH credentials
-      ansible.builtin.copy:
-        dest: /etc/systemd/system/caddy.service.d/ovh-env.conf
-        owner: root
-        group: root
-        mode: "0644"
-        content: |
-          [Service]
-          EnvironmentFile={{ fleet_ovh_env_file }}
-      notify:
-        - Reload systemd daemon
-        - Restart caddy
 
 - name: Render the shared TLS snippet (tls.conf, per fleet_tls_mode)
   # MUST run before "Deploy the Caddyfile" below — both the *.{{ fleet_domain
