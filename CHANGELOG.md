@@ -8,6 +8,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- `FLEET_INSTANCE_HOST=<instance-id>.<domain>` injected into every
+  instance's `web_environment`, so a project's own Drupal Domain Access
+  config can build its alias-matching patterns without hardcoding the
+  fleet domain: `"<h>-" . getenv('FLEET_INSTANCE_HOST')`.
+
+### Changed
+- `additional_hostnames` alias FQDNs are now **flattened**:
+  `<h>-<instance-id>.<domain>` (e.g.
+  `news-oak--translations-test.fleet.example.com`) instead of the previous
+  nested `<h>.<instance-id>.<domain>` form, which Caddy's single-label
+  `*.<domain>` site block could never match. Each entry is now validated
+  at registry load as a bare DNS label (lowercase, no dots —
+  `RegistryError` otherwise), and deploy raises `DeployError` if a
+  composed alias label exceeds the 63-character DNS limit. See
+  `docs/networking.md` §7.
+
+### Fixed
+- **Security:** per-instance Caddy basic auth now covers alias hosts too —
+  the `@auth-<instance-id>` matcher lists the instance FQDN and every
+  registered alias FQDN in the same `host` clause (`fleet refresh-auth`
+  re-applies this to already-deployed instances). Previously an alias host
+  bypassed basic auth entirely, since the matcher only ever named the bare
+  instance FQDN.
+- **Security:** `/api/tls-authorize` no longer authorizes any
+  `<prefix>-<instance-id>` label — only the bare instance id, or a label
+  matching one of that instance's project's registered
+  `additional_hostnames`. The previous generic
+  `label.endswith(f"-{instance_id}")` check let anyone mint an on-demand
+  TLS certificate for an arbitrary, unregistered alias pointed at a real
+  instance.
+
+### Added
+- Template-level `drupal_env` in `fleet.yml`: fleet writes `DRUPAL_ENV=<value>`
+  into the deployed instance's own root `.env` (after asset injection, in
+  place — comments, key order and every other value preserved), overriding the
+  default the project's `assets/<project>/.env` ships. A template without
+  `drupal_env` leaves the file untouched. Lets one project run a `staging`
+  template beside its `dev` one.
 - `fleet.auth_bypass_cidrs` in `fleet.yml` (per fleet server): IP addresses /
   CIDR ranges whose visitors skip per-instance HTTP basic auth, rendered into
   each instance's Caddy snippet as `not remote_ip …`. Anything unlisted still

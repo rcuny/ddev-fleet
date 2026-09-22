@@ -71,6 +71,7 @@ def test_write_fleet_config_with_token(tmp_path):
         "performance_mode: none\n"
         "web_environment:\n"
         "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
+        "  - FLEET_INSTANCE_HOST=oak--develop.fleet.example.test\n"
         "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n" + _EXPECTED_HOOKS_YAML
     )
 
@@ -84,7 +85,8 @@ def test_write_fleet_config_without_token(tmp_path):
         "project_tld: fleet.example.test\n"
         "performance_mode: none\n"
         "web_environment:\n"
-        "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n" + _EXPECTED_HOOKS_YAML
+        "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
+        "  - FLEET_INSTANCE_HOST=oak--develop.fleet.example.test\n" + _EXPECTED_HOOKS_YAML
     )
 
 
@@ -109,6 +111,17 @@ def test_write_fleet_config_sets_drush_options_uri_to_instance_fqdn(tmp_path):
 
     content = path.read_text(encoding="utf-8")
     assert "DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test" in content
+
+
+def test_write_fleet_config_sets_fleet_instance_host(tmp_path):
+    """FLEET_INSTANCE_HOST is what a project's Drupal Domain Access config
+    builds alias hostnames from (`"<h>-" . getenv('FLEET_INSTANCE_HOST')`),
+    so it must always be the instance's bare fleet host (no scheme)."""
+    instance_dir = tmp_path / "instance"
+    path = write_fleet_config(instance_dir, "oak--develop", "fleet.example.test", None)
+
+    content = path.read_text(encoding="utf-8")
+    assert "FLEET_INSTANCE_HOST=oak--develop.fleet.example.test" in content
 
 
 def test_write_fleet_config_with_additional_fqdns(tmp_path):
@@ -148,6 +161,7 @@ def test_write_fleet_config_with_token_and_git_bot(tmp_path):
         "performance_mode: none\n"
         "web_environment:\n"
         "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
+        "  - FLEET_INSTANCE_HOST=oak--develop.fleet.example.test\n"
         "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
         "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
         "  - GIT_AUTHOR_EMAIL=bot@x\n"
@@ -172,6 +186,7 @@ def test_write_fleet_config_without_token_with_git_bot_creates_web_environment(t
         "performance_mode: none\n"
         "web_environment:\n"
         "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
+        "  - FLEET_INSTANCE_HOST=oak--develop.fleet.example.test\n"
         "  - GIT_AUTHOR_NAME=ddev-fleet bot\n"
         "  - GIT_AUTHOR_EMAIL=bot@x\n"
         "  - GIT_COMMITTER_NAME=ddev-fleet bot\n"
@@ -195,6 +210,7 @@ def test_write_fleet_config_with_typesense(tmp_path):
         "performance_mode: none\n"
         "web_environment:\n"
         "  - DRUSH_OPTIONS_URI=https://oak--develop.fleet.example.test\n"
+        "  - FLEET_INSTANCE_HOST=oak--develop.fleet.example.test\n"
         "  - CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-xyz\n"
         "  - FLEET_TYPESENSE_HOST=oak--develop.fleet.example.test\n"
         "  - FLEET_TYPESENSE_PORT=9108\n" + _EXPECTED_HOOKS_YAML

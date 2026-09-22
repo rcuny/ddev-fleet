@@ -23,7 +23,7 @@ from starlette.requests import Request
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, naming, sysinfo
 from fleet.core import instances as instances_mod
-from fleet.core.errors import CaddyPortsError, FleetError
+from fleet.core.errors import CaddyPortsError, DeployError, FleetError
 from fleet.core.registry import Registry
 from fleet.jobs import JobManager
 
@@ -203,6 +203,13 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     @app.get("/api/tls-authorize")
     def tls_authorize(domain: str = Query(...)):
+        # Authorizes on-demand TLS issuance for Caddy (Caddyfile.j2's
+        # `on_demand_tls.ask`). Deliberately narrow: only a bare known
+        # instance id, or a label matching one of THAT instance's project's
+        # registered `additional_hostnames` aliases — never a generic
+        # `*-<instance_id>` suffix match (removed 2026-09-22; it would have
+        # let anyone mint a cert for an unregistered `foo-<instance_id>`
+        # hostname pointed at a real instance).
         paths, registry = _paths_and_registry()
         suffix = f".{registry.domain}"
         if not domain.endswith(suffix):
@@ -217,8 +224,24 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             return JSONResponse(status_code=404, content={"authorized": False})
 
         known_ids = {p.name for p in instances_path.iterdir() if p.is_dir()}
+        if label in known_ids:
+            return JSONResponse(status_code=200, content={"authorized": True})
+
         for instance_id in known_ids:
-            if label == instance_id or label.endswith(f"-{instance_id}"):
+            project = instances_mod.project_for_instance(instances_path / instance_id, instance_id)
+            if not registry.has_project(project):
+                # Deployed from a project since removed from the registry —
+                # only the bare instance label above authorizes; no aliases.
+                continue
+            try:
+                aliases = instances_mod.alias_fqdns(registry, project, instance_id)
+            except DeployError:
+                # A misconfigured additional_hostnames entry for SOME OTHER
+                # instance must never block TLS issuance for this request —
+                # deploy()/refresh-instance-config are what surface that
+                # loudly; this endpoint just skips it.
+                continue
+            if domain in aliases:
                 return JSONResponse(status_code=200, content={"authorized": True})
         return JSONResponse(status_code=404, content={"authorized": False})
 

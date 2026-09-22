@@ -438,6 +438,103 @@ def test_enable_instance_auth_passes_bypass_cidrs_through(tmp_path):
     )
 
 
+# --- alias hosts (additional_hostnames) must be covered by the SAME
+# matcher as the bare instance FQDN, in both the one-line and the
+# bypass-cidrs multi-line matcher forms ---
+
+
+def test_instance_snippet_one_line_form_lists_alias_hosts(tmp_path):
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_auth_snippet(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fleet",
+        "$2a$14$hash",
+        alias_fqdns=["es-oak--main.fleet.example.test", "news-oak--main.fleet.example.test"],
+        snippet_dir=snippet_dir,
+    )
+
+    assert (snippet_dir / "oak--main.conf").read_text(encoding="utf-8") == (
+        "@auth-oak--main host oak--main.fleet.example.test "
+        "es-oak--main.fleet.example.test news-oak--main.fleet.example.test\n"
+        "basic_auth @auth-oak--main {\n"
+        "    fleet $2a$14$hash\n"
+        "}\n"
+    )
+
+
+def test_instance_snippet_multi_line_form_lists_alias_hosts(tmp_path):
+    """Same alias-host coverage when `bypass_cidrs` is also set — the
+    multi-line matcher block form must list `host` and `not remote_ip` as
+    separate lines, both fully populated."""
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_auth_snippet(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fern",
+        "$2a$14$hash",
+        bypass_cidrs=["203.0.113.31/32"],
+        alias_fqdns=["es-oak--main.fleet.example.test"],
+        snippet_dir=snippet_dir,
+    )
+
+    assert (snippet_dir / "oak--main.conf").read_text(encoding="utf-8") == (
+        "@auth-oak--main {\n"
+        "    host oak--main.fleet.example.test es-oak--main.fleet.example.test\n"
+        "    not remote_ip 203.0.113.31/32\n"
+        "}\n"
+        "basic_auth @auth-oak--main {\n"
+        "    fern $2a$14$hash\n"
+        "}\n"
+    )
+
+
+def test_instance_snippet_without_alias_fqdns_keeps_bare_host(tmp_path):
+    """No `additional_hostnames` for the project — default empty
+    `alias_fqdns` — must not change the existing one-host output."""
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_auth_snippet(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fleet",
+        "$2a$14$hash",
+        snippet_dir=snippet_dir,
+    )
+
+    content = (snippet_dir / "oak--main.conf").read_text(encoding="utf-8")
+    assert content.startswith("@auth-oak--main host oak--main.fleet.example.test\n")
+
+
+def test_enable_instance_auth_passes_alias_fqdns_through(tmp_path):
+    snippet_dir = tmp_path / "instances"
+    caddyfile_path = tmp_path / "Caddyfile"
+    scripted = {
+        "caddy hash-password --plaintext fleet": RunResult(
+            returncode=0, lines=["$2a$14$freshhash"]
+        ),
+        f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
+            returncode=0, lines=[]
+        ),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
+    }
+
+    caddyauth.enable_instance_auth(
+        "oak--main",
+        "oak--main.fleet.example.test",
+        "fleet",
+        alias_fqdns=["es-oak--main.fleet.example.test"],
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=FakeRunner(scripted=scripted),
+    )
+
+    content = (snippet_dir / "oak--main.conf").read_text(encoding="utf-8")
+    assert "es-oak--main.fleet.example.test" in content
+
+
 # --- provisioned snippet dirs must never be created on the fly ---
 
 

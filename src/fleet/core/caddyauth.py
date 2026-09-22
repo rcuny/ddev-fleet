@@ -217,12 +217,22 @@ def write_instance_auth_snippet(
     bcrypt_hash: str,
     *,
     bypass_cidrs: Sequence[str] = (),
+    alias_fqdns: Sequence[str] = (),
     snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
 ) -> Path:
     """Atomically write `instance_id`'s own auth snippet: a named matcher
-    scoped to `fqdn` via `host`, plus a `basic_auth` block guarded by that
-    matcher. Returns the path written. Imported by the `*.{{ fleet_domain }}`
-    site in Caddyfile.j2 via a glob — see the module docstring.
+    scoped to `fqdn` (plus any `alias_fqdns`) via `host`, plus a
+    `basic_auth` block guarded by that matcher. Returns the path written.
+    Imported by the `*.{{ fleet_domain }}` site in Caddyfile.j2 via a glob —
+    see the module docstring.
+
+    `alias_fqdns` (from `core.instances.alias_fqdns()`, the instance's
+    Domain-Access alias hosts) are listed alongside `fqdn` in the SAME
+    `host` matcher — Caddy's `host` matcher accepts multiple space-separated
+    hosts and matches if any one of them matches. Without this, an alias
+    host would be a different `host` than the one the matcher guards and
+    would bypass basic auth entirely — that was a real gap the alias
+    feature would otherwise have opened.
 
     `bypass_cidrs` (from `fleet.auth_bypass_cidrs`, see
     `Registry.auth_bypass_cidrs`) narrows the matcher with `not remote_ip
@@ -232,7 +242,7 @@ def write_instance_auth_snippet(
     everyone outside the list still gets the prompt (the implicit default
     IS the prompt; there is no deny entry). Emitted as a multi-line matcher
     block only when there is a bypass list, so an empty list keeps the
-    original one-line `@m host <fqdn>` form.
+    original one-line `@m host <fqdn> [alias ...]` form.
 
     Caddy's `remote_ip` matches the DIRECT peer address, deliberately not
     `X-Forwarded-For` (which would need the `forwarded` keyword and a
@@ -242,15 +252,16 @@ def write_instance_auth_snippet(
     will appear to come from that proxy and this list must be revisited."""
     snippet_path = instance_snippet_path(instance_id, snippet_dir=snippet_dir)
     matcher = instance_matcher_name(instance_id)
+    hosts = " ".join((fqdn, *alias_fqdns))
     if bypass_cidrs:
         header = (
             f"@{matcher} {{\n"
-            f"    host {fqdn}\n"
+            f"    host {hosts}\n"
             f"    not remote_ip {' '.join(bypass_cidrs)}\n"
             f"}}\n"
         )
     else:
-        header = f"@{matcher} host {fqdn}\n"
+        header = f"@{matcher} host {hosts}\n"
     content = header + f"basic_auth @{matcher} {{\n    {username} {bcrypt_hash}\n}}\n"
     _atomic_write(snippet_path, content, prefix=f".{instance_id}-auth-")
     return snippet_path
@@ -359,6 +370,7 @@ def enable_instance_auth(
     *,
     username: str | None = None,
     bypass_cidrs: Sequence[str] = (),
+    alias_fqdns: Sequence[str] = (),
     snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
     caddyfile_path: Path = DEFAULT_CADDYFILE_PATH,
     runner=run_streamed,
@@ -372,7 +384,10 @@ def enable_instance_auth(
     protecting anything live.
 
     `username` defaults to `password` — per-instance credentials are
-    symmetric (see DEFAULT_INSTANCE_PASSWORD)."""
+    symmetric (see DEFAULT_INSTANCE_PASSWORD). `alias_fqdns` — the
+    instance's Domain-Access alias hosts (`core.instances.alias_fqdns()`) —
+    are folded into the SAME matcher as `fqdn`; see
+    `write_instance_auth_snippet` for why that matters."""
     if username is None:
         username = password
     bcrypt_hash = hash_password(password, runner=runner)
@@ -382,6 +397,7 @@ def enable_instance_auth(
         username,
         bcrypt_hash,
         bypass_cidrs=bypass_cidrs,
+        alias_fqdns=alias_fqdns,
         snippet_dir=snippet_dir,
     )
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)

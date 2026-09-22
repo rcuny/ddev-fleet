@@ -42,6 +42,9 @@ class ResolvedInstance:
     # `post_deploy` despite the "place after post_deploy" framing upstream.
     tty1: list[str] = field(default_factory=list)
     tty2: list[str] = field(default_factory=list)
+    # `drupal_env` from the template, or None when the template does not set
+    # one — None means "leave the project's own .env alone".
+    drupal_env: str | None = None
 
 
 @dataclass(frozen=True)
@@ -177,6 +180,17 @@ class Registry:
                         f"projects.{project_key}.templates.{template_key}.branch: not "
                         "allowed — branch is resolved per-deploy, never stored in a template"
                     )
+                if template_block and "drupal_env" in template_block:
+                    value = template_block["drupal_env"]
+                    # Written verbatim as a shell-style `DRUPAL_ENV=<value>`
+                    # line in the instance's .env, so it must be a plain
+                    # single-token word — no quoting/escaping is applied.
+                    if not isinstance(value, str) or not value or any(c.isspace() for c in value):
+                        raise RegistryError(
+                            f"projects.{project_key}.templates.{template_key}.drupal_env: "
+                            "must be a non-empty single-word string (e.g. dev, staging)"
+                        )
+
                 if template_block:
                     for tty_key in _TTY_KEYS:
                         if tty_key not in template_block:
@@ -197,6 +211,25 @@ class Registry:
                                 f"projects.{project_key}.templates.{template_key}.{key}: not "
                                 "allowed — only tty1 and tty2 are supported"
                             )
+
+            for hostname in project_block.get("additional_hostnames") or []:
+                # Each entry becomes the `<h>` half of a flattened alias
+                # FQDN, `<h>-<instance-id>.<domain>` (core/instances.py's
+                # `alias_fqdns`) — so it must itself be a bare DNS label: no
+                # dots (an alias host is single-label, matching Caddy's
+                # `*.{{ fleet_domain }}` site block), lowercase only. Same
+                # pattern/error shape as `validate_part(project_key)` above.
+                if not isinstance(hostname, str):
+                    raise RegistryError(
+                        f"projects.{project_key}.additional_hostnames: entries must be "
+                        f"strings, got {hostname!r}"
+                    )
+                try:
+                    validate_part(hostname)
+                except ValidationError as exc:
+                    raise RegistryError(
+                        f"projects.{project_key}.additional_hostnames.{hostname}: {exc.message}"
+                    ) from exc
 
             for port_name in project_block.get("ports") or []:
                 if port_name not in fleet_ports:
@@ -394,6 +427,8 @@ class Registry:
 
         template_block = templates[template] or {}
         post_deploy = [str(c) for c in (template_block.get("post_deploy") or [])]
+        drupal_env = template_block.get("drupal_env")
+        drupal_env = str(drupal_env) if drupal_env is not None else None
         tty1 = [str(c) for c in (template_block.get("tty1") or [])]
         tty2 = [str(c) for c in (template_block.get("tty2") or [])]
 
@@ -414,4 +449,5 @@ class Registry:
             instance_id=inst_id,
             tty1=tty1,
             tty2=tty2,
+            drupal_env=drupal_env,
         )

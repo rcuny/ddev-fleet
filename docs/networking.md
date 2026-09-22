@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-24
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -107,7 +107,47 @@ per named service, not per instance.
    curl -s -o /dev/null -w '%{http_code}\n' https://<instance>.fleet.<domain>:9400/
    ```
 
-## 7. Cross-references
+## 7. Domain-Access alias hostnames (`additional_hostnames`)
+
+A project's `additional_hostnames: [news, odihr, ...]` (`fleet.yml`) gives
+each instance extra hostnames for Drupal Domain Access-style multi-domain
+sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
+`docs/configuration.md`'s `additional_hostnames` row.
+
+- **Flattened, single-label form.** An alias for hostname `h` on instance
+  `<instance-id>` is `<h>-<instance-id>.<domain>` — e.g.
+  `news-oak--translations-test.fleet.example.com` — never a nested/
+  multi-label form (`news.oak--translations-test...`). Caddy's site block
+  for this fleet is a single-label wildcard, `*.{{ fleet_domain }}` (§5
+  above), which can only ever match one label; a nested alias would be
+  unreachable and `/api/tls-authorize` rejects any dotted label anyway.
+  `core/instances.py`'s `alias_fqdns()` is the one place that composes this
+  string — nothing else should format one by hand.
+- **63-character DNS label limit.** `<h>-<instance-id>` must itself be a
+  valid DNS label (RFC 1035). `alias_fqdns()` raises `DeployError` at
+  deploy time (naming the hostname and the resulting length) if it doesn't
+  fit — a long project/label/hostname combination can hit this even though
+  the bare instance id was already within the limit on its own.
+- **Basic auth covers alias hosts too.** The per-instance Caddy snippet's
+  `@auth-<instance-id>` matcher (`core/caddyauth.py`) lists the instance
+  FQDN *and* every alias FQDN in the same `host` clause, so an alias can
+  never bypass the dashboard's basic-auth prompt.
+- **`FLEET_INSTANCE_HOST`** — injected into every instance's
+  `web_environment` (`core/fleetconfig.py`) as `<instance-id>.<domain>` (no
+  scheme). A project's Domain Access config builds its own alias-matching
+  patterns from it: `"<h>-" . getenv('FLEET_INSTANCE_HOST')` in PHP,
+  guaranteed to compose the exact same string `alias_fqdns()` does
+  fleet-side.
+- **Certificates.** Each alias host is a distinct hostname to Caddy's
+  on-demand TLS, so it gets its **own** Let's Encrypt certificate the first
+  time it's requested — it is not covered by the instance's own cert. A
+  registered domain gets roughly 50 new-certificate issuances per week from
+  Let's Encrypt; a project with many aliases across many instances can run
+  into that limit before a wildcard DNS-01 certificate (issued once per
+  `*.<domain>`, no `/api/tls-authorize` round trip per alias) becomes the
+  fix — not yet implemented.
+
+## 8. Cross-references
 
 - `docs/README-typesense.md` — the worked example this document
   generalizes (topology, admin vs. search-only keys, env injection).

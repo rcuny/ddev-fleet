@@ -45,14 +45,80 @@ def test_exact_label_match_returns_200(fleet_home):
     assert response.status_code == 200
 
 
-def test_flat_multidomain_prefix_returns_200(fleet_home):
+def test_unregistered_alias_prefix_returns_404(fleet_home):
+    """A `<prefix>-<instance_id>` label is NOT authorized unless `prefix` is
+    one of that instance's project's registered `additional_hostnames` —
+    this replaced the old generic `label.endswith(f"-{instance_id}")`
+    acceptance (security bug: it let anyone mint a cert for an arbitrary,
+    unregistered alias pointed at a real instance)."""
     _setup_fleet_home(fleet_home)
     client = TestClient(create_app(fleet_home))
 
     response = client.get(
         "/api/tls-authorize", params={"domain": "es-demo--develop.fleet.example.test"}
     )
+    assert response.status_code == 404
+
+
+def test_registered_alias_hostname_returns_200(fleet_home):
+    """A label matching `<h>-<instance_id>`, for an `h` listed in the
+    instance's project's `additional_hostnames`, IS authorized — the
+    flattened alias form (`core.instances.alias_fqdns`)."""
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - es
+    templates:
+      default: {}
+""",
+        encoding="utf-8",
+    )
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "es-demo--develop.fleet.example.test"}
+    )
     assert response.status_code == 200
+
+
+def test_alias_hostname_for_unknown_project_returns_404(fleet_home):
+    """An instance whose recorded/derived project no longer exists in the
+    registry authorizes only its bare instance label — never an alias,
+    since there is no `additional_hostnames` list to check it against."""
+    fleet_home_paths = FleetPaths.from_home(fleet_home)
+    fleet_home_paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    fleet_home_paths.registry.write_text(
+        """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  other:
+    git: git@example.test:org/other.git
+    templates:
+      default: {}
+""",
+        encoding="utf-8",
+    )
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+    client = TestClient(create_app(fleet_home))
+
+    bare = client.get("/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"})
+    assert bare.status_code == 200
+
+    alias = client.get(
+        "/api/tls-authorize", params={"domain": "es-demo--develop.fleet.example.test"}
+    )
+    assert alias.status_code == 404
 
 
 def test_unknown_label_returns_404(fleet_home):

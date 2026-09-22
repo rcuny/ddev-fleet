@@ -173,6 +173,73 @@ projects:
     assert registry.additional_hostnames("demo") == ["www", "api"]
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "News",  # uppercase
+        "news.example",  # dot — must be a bare DNS label
+        "-news",  # leading dash
+        "news-",  # trailing dash
+        "news_site",  # underscore
+        "",  # empty
+    ],
+)
+def test_additional_hostnames_rejects_invalid_dns_labels(fleet_home, bad):
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - {bad!r}
+    templates:
+      default: {{}}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    with pytest.raises(RegistryError, match=r"projects\.demo\.additional_hostnames"):
+        Registry.load(path)
+
+
+def test_additional_hostnames_rejects_non_string_entry(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - 123
+    templates:
+      default: {}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    with pytest.raises(RegistryError, match=r"projects\.demo\.additional_hostnames"):
+        Registry.load(path)
+
+
+def test_additional_hostnames_accepts_valid_dns_labels(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - news
+      - es2
+      - a-b-c
+    templates:
+      default: {}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    registry = Registry.load(path)
+    assert registry.additional_hostnames("demo") == ["news", "es2", "a-b-c"]
+
+
 def test_typesense_enabled(fleet_home):
     text = """\
 fleet:
