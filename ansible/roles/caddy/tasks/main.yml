@@ -366,7 +366,9 @@
     dest: "{{ fleet_caddy_snippet_dir }}/tls.conf"
     owner: root
     group: caddy
-    mode: "0640"
+    # 0644: no secrets inside (runtime {env.*} placeholders only), and the
+    # fleet daemon's own `caddy validate` runs as `fleet`, which must read it.
+    mode: "0644"
   notify: Reload caddy
 
 - name: Deploy the Caddyfile (spec §9.3)
@@ -376,14 +378,7 @@
     owner: root
     group: root
     mode: "0644"
-    # Validate with the SAME environment caddy.service gets from its
-    # EnvironmentFile drop-in: tls.conf's `{$OVH_*}` placeholders are
-    # substituted at Caddyfile parse time, so validating without them would
-    # parse `endpoint` etc. with no argument and fail. No-op when the file
-    # is absent (on_demand mode).
-    validate: >-
-      /bin/sh -c 'set -a; if [ -r {{ fleet_ovh_env_file }} ]; then . {{ fleet_ovh_env_file }}; fi;
-      exec caddy validate --config "$1" --adapter caddyfile' sh %s
+    validate: "caddy validate --config %s --adapter caddyfile"
   notify: Reload caddy
 
 - name: Ensure caddy.service is enabled and started

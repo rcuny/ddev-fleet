@@ -30,13 +30,22 @@
    In ovh_dns mode this is the ONE wildcard cert (*.{{ fleet_domain }})
    shared by the :443 site and every named-port site — same cert name in
    Caddy's storage, since they all import this identical block. #}
+{#
+   `{env.OVH_*}` are RUNTIME placeholders, resolved by the caddy-dns/ovh
+   module's Provision() from caddy.service's environment (EnvironmentFile
+   /etc/caddy/ovh.env). Do NOT switch to parse-time `{$OVH_*}`: those are
+   substituted while the Caddyfile is read, so every `caddy validate` —
+   including the fleet daemon's own, run as the `fleet` user, which can't
+   read ovh.env — would see empty values and fail. This file holds no
+   secrets, so it is world-readable within its fleet:caddy 2750 directory.
+#}
 {% if fleet_tls_mode == 'ovh_dns' %}
 tls {
     dns ovh {
-        endpoint {$OVH_ENDPOINT}
-        application_key {$OVH_APPLICATION_KEY}
-        application_secret {$OVH_APPLICATION_SECRET}
-        consumer_key {$OVH_CONSUMER_KEY}
+        endpoint {env.OVH_ENDPOINT}
+        application_key {env.OVH_APPLICATION_KEY}
+        application_secret {env.OVH_APPLICATION_SECRET}
+        consumer_key {env.OVH_CONSUMER_KEY}
     }
 }
 {% else %}

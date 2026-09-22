@@ -4,10 +4,7 @@
 #   1. daemon-reload, so systemd knows the caddy.service.d/ovh-env.conf
 #      drop-in (EnvironmentFile=/etc/caddy/ovh.env);
 #   2. restart, so the process picks up a swapped binary and that env;
-#   3. reload last. `caddy reload` re-parses the Caddyfile, whose tls.conf
-#      `{$OVH_*}` placeholders are substituted at parse time — run before
-#      1+2 it would see an empty environment and fail. After a restart it
-#      is a harmless no-op.
+#   3. reload last — after a restart it is a harmless no-op.
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true
