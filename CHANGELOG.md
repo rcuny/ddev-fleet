@@ -8,6 +8,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- Template-level `drupal_env` in `fleet.yml`: fleet writes `DRUPAL_ENV=<value>`
+  into the deployed instance's own root `.env` (after asset injection, in
+  place — comments, key order and every other value preserved), overriding the
+  default the project's `assets/<project>/.env` ships. A template without
+  `drupal_env` leaves the file untouched. Lets one project run a `staging`
+  template beside its `dev` one.
 - `fleet.auth_bypass_cidrs` in `fleet.yml` (per fleet server): IP addresses /
   CIDR ranges whose visitors skip per-instance HTTP basic auth, rendered into
   each instance's Caddy snippet as `not remote_ip …`. Anything unlisted still

@@ -262,6 +262,7 @@ def _stub_deploy_collaborators(monkeypatch, mod):
         label = "develop"
         branch = "develop"
         post_deploy = []
+        drupal_env = None
 
     monkeypatch.setattr(mod, "resolve_target", lambda *a, **k: _Resolved())
     monkeypatch.setattr(mod.gitops, "clone", lambda *a, **k: RunResult(0, []))

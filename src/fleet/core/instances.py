@@ -22,6 +22,7 @@ from fleet.core.errors import (
 )
 from fleet.core.fleetconfig import (
     ensure_git_exclude,
+    set_env_file_var,
     write_ddev_env,
     write_fleet_config,
     write_settings_local,
@@ -435,6 +436,17 @@ def deploy(
         context.update(secret_tokens(project_secrets))
         copied = assets_mod.inject(paths.assets / project, instance_dir, context, runner=runner)
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
+
+        # `drupal_env` from the resolved TEMPLATE overrides whatever the
+        # project's own .env ships (assets/<project>/.env carries
+        # `DRUPAL_ENV=dev`), so one project can run a `staging` template —
+        # different modules/cache — from the same codebase. Runs AFTER asset
+        # injection, which is what puts that .env in place; a template with
+        # no `drupal_env` leaves the file untouched.
+        if resolved.drupal_env:
+            env_path = set_env_file_var(instance_dir / ".env", "DRUPAL_ENV", resolved.drupal_env)
+            ensure_git_exclude(instance_dir, [str(env_path.relative_to(instance_dir))])
+            _append_log(deploy_log, f"DRUPAL_ENV={resolved.drupal_env} written to .env")
 
         start_result = ddev.start(instance_dir, log_path=deploy_log, runner=runner)
         if start_result.returncode != 0:

@@ -57,6 +57,7 @@ projects:
     issue_id_regexp: <string>              # optional
     templates:
       <template-name>:
+        drupal_env: <word>                 # optional
         post_deploy: [<string>, ...]       # optional
         tty1: [<string>, ...]              # optional
         tty2: [<string>, ...]              # optional
@@ -155,12 +156,17 @@ per-deploy, from `fleet deploy` arguments, never from the registry; a
 ```yaml
 templates:
   default:
+    drupal_env: dev
     post_deploy: [ddev start, ddev drush deploy]
+  staging:
+    drupal_env: staging
+    post_deploy: [ddev init --db=staging.sql --no-interactive]
 ```
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `post_deploy` | list of strings | no (default `[]`) | Commands run, in order, after the instance is cloned/configured/started, each as `bash -c <command>` with the instance directory as cwd (so a command that itself needs the DDEV containers typically calls `ddev exec ...` or another `ddev` subcommand). `[[token]]` placeholders (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, `[[issue-id]]` when it resolves, per-project secret tokens, …) are substituted first — see `CLAUDE.md`'s "Per-project secrets model" for the token mechanism. This substitution is **strict**: a command left with an unresolved token raises `DeployError` naming the command and the token, and the deploy aborts — a `post_deploy` command is deploy-critical, so failing loudly beats silently skipping it. |
+| `drupal_env` | string (single word) | no | Written as `DRUPAL_ENV=<value>` into the instance's own root `.env` after asset injection, overriding whatever the project's `assets/<project>/.env` ships. Lets one codebase run a `staging` template (different modules/cache) alongside a `dev` one. Omit it and the `.env` is left exactly as the project shipped it — an absent key means "don't touch", never "write dev". Rejected at load time if it is empty, non-string, or contains whitespace: it is written verbatim, with no quoting. |
 | `tty1` | list of strings | no (default `[]`) | Commands typed into the **middle** bash pane of the instance's `fleet tmux` window, in order, the first time that window is created. See "`tty1`/`tty2`: interactive tmux commands" below. |
 | `tty2` | list of strings | no (default `[]`) | Same as `tty1`, for the **right** bash pane (the sidebar occupies the fixed-width left column). |
 

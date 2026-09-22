@@ -247,6 +247,42 @@ def write_ddev_env(instance_dir: Path, values: dict[str, str]) -> Path:
     return env_path
 
 
+def set_env_file_var(env_path: Path, key: str, value: str) -> Path:
+    """Upsert `KEY=value` in a project's own `.env`, IN PLACE and
+    line-by-line: an existing assignment is replaced where it stands, and a
+    missing one is appended. Everything else — comments, blank lines, key
+    order, values we don't own — is preserved byte for byte.
+
+    Deliberately NOT `write_ddev_env()`'s parse-and-rewrite: that one owns
+    `.ddev/.env` outright (a fleet-generated file) and may reorder it, while
+    THIS file is the project's own, shipped from `assets/<project>/.env` with
+    real credentials and comments in it. Rewriting it wholesale would strip
+    the comments and shuffle the keys of a file the project authors maintain.
+
+    Only the FIRST assignment of `key` is replaced — in shell-style env
+    files a later duplicate would win, so a file containing two
+    `DRUPAL_ENV=` lines is malformed to begin with; we do not silently
+    "fix" it by editing both, we leave the duplicate visible.
+
+    Creates the file if it does not exist. Returns the path written.
+    """
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    prefix = f"{key}="
+    for index, line in enumerate(lines):
+        if line.strip().startswith(prefix):
+            lines[index] = f"{key}={value}"
+            break
+    else:
+        lines.append(f"{key}={value}")
+
+    env_path.parent.mkdir(parents=True, exist_ok=True)
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return env_path
+
+
 def ensure_git_exclude(instance_dir: Path, patterns: list[str]) -> None:
     exclude_path = instance_dir / ".git" / "info" / "exclude"
     exclude_path.parent.mkdir(parents=True, exist_ok=True)

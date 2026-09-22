@@ -1386,3 +1386,92 @@ projects:
     instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
 
     assert not snippet_path.exists()
+
+
+# --- drupal_env: template-level override of the project's own .env ---
+
+
+def _registry_text_with_drupal_env(git_url, value="staging"):
+    return f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_url}
+    default_template: default
+    templates:
+      default:
+        drupal_env: {value}
+        post_deploy:
+          - echo hi
+      plain:
+        post_deploy:
+          - echo hi
+"""
+
+
+def _paths_registry_with(fleet_home, git_url, text):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(text, encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    return paths, Registry.load(paths.registry)
+
+
+def test_deploy_overrides_drupal_env_in_the_asset_env_file(fleet_home, git_repo):
+    """The shipped asset .env carries DRUPAL_ENV=dev; the template's
+    `drupal_env: staging` must win, with the rest of the file untouched."""
+    paths, registry = _paths_registry_with(
+        fleet_home, str(git_repo["origin"]), _registry_text_with_drupal_env(git_repo["origin"])
+    )
+    asset_dir = paths.assets / "demo"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / ".env").write_text(
+        "# project env\nDRUPAL_ENV=dev\nOTHER_KEY=keep-me\n", encoding="utf-8"
+    )
+
+    instances.deploy(paths, registry, "demo", branch="main", runner=HybridRunner())
+
+    env_text = (paths.instances / "demo--main" / ".env").read_text(encoding="utf-8")
+    assert env_text == "# project env\nDRUPAL_ENV=staging\nOTHER_KEY=keep-me\n"
+
+
+def test_deploy_writes_drupal_env_even_without_an_asset_env_file(fleet_home, git_repo):
+    paths, registry = _paths_registry_with(
+        fleet_home, str(git_repo["origin"]), _registry_text_with_drupal_env(git_repo["origin"])
+    )
+
+    instances.deploy(paths, registry, "demo", branch="main", runner=HybridRunner())
+
+    assert (paths.instances / "demo--main" / ".env").read_text(encoding="utf-8") == (
+        "DRUPAL_ENV=staging\n"
+    )
+
+
+def test_deploy_leaves_env_untouched_when_template_has_no_drupal_env(fleet_home, git_repo):
+    paths, registry = _paths_registry_with(
+        fleet_home, str(git_repo["origin"]), _registry_text_with_drupal_env(git_repo["origin"])
+    )
+    asset_dir = paths.assets / "demo"
+    asset_dir.mkdir(parents=True, exist_ok=True)
+    (asset_dir / ".env").write_text("DRUPAL_ENV=dev\n", encoding="utf-8")
+
+    instances.deploy(paths, registry, "demo", "plain", branch="main", runner=HybridRunner())
+
+    assert (paths.instances / "demo--main" / ".env").read_text(
+        encoding="utf-8"
+    ) == "DRUPAL_ENV=dev\n"
+
+
+def test_deploy_git_excludes_the_env_file_it_wrote(fleet_home, git_repo):
+    paths, registry = _paths_registry_with(
+        fleet_home, str(git_repo["origin"]), _registry_text_with_drupal_env(git_repo["origin"])
+    )
+
+    instances.deploy(paths, registry, "demo", branch="main", runner=HybridRunner())
+
+    exclude = (paths.instances / "demo--main" / ".git" / "info" / "exclude").read_text(
+        encoding="utf-8"
+    )
+    assert ".env" in exclude.splitlines()
