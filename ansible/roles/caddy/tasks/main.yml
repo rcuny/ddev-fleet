@@ -376,7 +376,14 @@
     owner: root
     group: root
     mode: "0644"
-    validate: "caddy validate --config %s --adapter caddyfile"
+    # Validate with the SAME environment caddy.service gets from its
+    # EnvironmentFile drop-in: tls.conf's `{$OVH_*}` placeholders are
+    # substituted at Caddyfile parse time, so validating without them would
+    # parse `endpoint` etc. with no argument and fail. No-op when the file
+    # is absent (on_demand mode).
+    validate: >-
+      /bin/sh -c 'set -a; if [ -r {{ fleet_ovh_env_file }} ]; then . {{ fleet_ovh_env_file }}; fi;
+      exec caddy validate --config "$1" --adapter caddyfile' sh %s
   notify: Reload caddy
 
 - name: Ensure caddy.service is enabled and started
