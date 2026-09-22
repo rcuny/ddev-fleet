@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-27
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -34,7 +34,7 @@ projects:
     git: <ssh-git-url>
     default_template: <string>        # OPTIONAL — template used when `fleet deploy` omits one
     default_branch: <string>          # OPTIONAL — branch used when `fleet deploy` omits --branch
-    additional_hostnames: [<string>, ...]  # OPTIONAL — extra FQDNs routed to the instance
+    additional_hostnames: [<string>, ...]  # OPTIONAL — Domain Access alias hostnames (bare DNS labels)
     typesense: true                   # OPTIONAL — legacy opt-in, expose Typesense at *.<domain>:9108 (see ports: below)
     ports: [<port-name>, ...]         # OPTIONAL — general port-exposure mechanism; names must exist in fleet.ports
     git_bot:                          # OPTIONAL — per-project commit identity override:
@@ -89,6 +89,23 @@ within an entry, and no `public`/`router` value reused across entries.
 Apply a `ports:` edit with `fleet refresh-ports` (see below) — no Ansible
 run, no redeploy. Full reference: `docs/configuration.md`; runbook for
 adding a new port: `docs/networking.md`.
+
+**Domain Access alias hostnames (`additional_hostnames`).** Each entry
+must be a bare DNS label (lowercase, no dots — rejected at registry load
+otherwise) and resolves per instance to the FLATTENED FQDN
+`<h>-<instance-id>.<domain>` (never nested under the instance id —
+`core/instances.py:alias_fqdns()`), e.g.
+`news-oak--translations-test.fleet.example.com`. Raises `DeployError` if
+that composed label exceeds 63 characters. Alias hosts are covered by the
+SAME per-instance basic-auth matcher as the instance's own FQDN
+(`core/caddyauth.py`) and each gets its own on-demand Let's Encrypt
+certificate (mind Let's Encrypt's ~50 new-certs/registered-domain/week rate
+limit with many aliases — a wildcard DNS-01 cert is the future fix, not yet
+implemented). Every instance also gets `FLEET_INSTANCE_HOST=<instance-id>.
+<domain>` injected into `web_environment`, so a project's own Domain
+Access config can build these same alias patterns in PHP:
+`"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full reference:
+`docs/networking.md` §7, `docs/configuration.md`.
 
 **git identity injection.** The fleet injects `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
 into each instance's `config.fleet.yaml` `web_environment` so commits made

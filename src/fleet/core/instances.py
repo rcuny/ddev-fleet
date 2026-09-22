@@ -130,6 +130,71 @@ def _write_instance_yaml(
     os.chmod(info_path, 0o600)
 
 
+def project_for_instance(instance_dir: Path, instance_id: str) -> str:
+    """Resolve an instance directory's owning project: the `project:` field
+    recorded in `.fleet/instance.yml` at deploy time, falling back to the
+    `<project>--<label>` id split for instances deployed before that field
+    existed (or with no recorded instance.yml at all). The one shared
+    implementation of a pattern otherwise duplicated across this module —
+    used by `refresh_instance_config()`, `sync_instance_auth()`, and
+    daemon.py's `/api/tls-authorize` (none of which already have the
+    project in hand the way `deploy()` does, as a plain function
+    parameter)."""
+    info_path = instance_dir / ".fleet" / "instance.yml"
+    if info_path.exists():
+        with open(info_path, "r", encoding="utf-8") as fh:
+            data = _yaml.load(fh) or {}
+        return str(data.get("project") or instance_id.split("--", 1)[0])
+    return instance_id.split("--", 1)[0]
+
+
+# Mirrors fleet.core.naming's 63-character DNS label limit (RFC 1035). Kept
+# as its own constant rather than importing naming's private
+# _MAX_INSTANCE_ID_LENGTH: an alias label (`<hostname>-<instance-id>`) is a
+# DIFFERENT label from the instance id itself and validated independently —
+# see `alias_fqdns()` below.
+_MAX_ALIAS_LABEL_LENGTH = 63
+
+
+def alias_fqdns(registry: Registry, project: str, instance_id: str) -> list[str]:
+    """Compute `instance_id`'s Domain-Access alias FQDNs from
+    `Registry.additional_hostnames(project)` — the single choke point every
+    caller (deploy(), refresh_instance_config(), sync_instance_auth(),
+    daemon.py's /api/tls-authorize) uses so they can never drift apart.
+
+    Aliases are FLATTENED, not nested: `<h>-<instance_id>.<domain>`, e.g.
+    `news-oak--translations-test.fleet.example.test` — NOT
+    `news.oak--translations-test.fleet...`. Caddy's site block for this
+    fleet is a SINGLE-label wildcard (`*.{{ fleet_domain }}`), which can
+    never match a nested (multi-label) alias, and `/api/tls-authorize`
+    rejects any label containing a dot outright — so a nested alias would
+    be unreachable and uncertifiable. This function is the only place that
+    composes an alias FQDN; nothing else should string-format one by hand.
+
+    Raises DeployError if any resulting label `<h>-<instance_id>` exceeds
+    the 63-character DNS label limit, naming the offending hostname and the
+    resulting length — a `deploy()`/`refresh_instance_config()` call must
+    fail loudly here rather than silently write a DDEV `additional_fqdns`
+    entry (or a Caddy auth-matcher host) that no CA could ever issue a
+    certificate for. The bare instance label itself is untouched by this
+    check — it was already validated against the same limit by
+    `naming.instance_id()` at resolve time.
+    """
+    domain = registry.domain
+    fqdns: list[str] = []
+    for hostname in registry.additional_hostnames(project):
+        label = f"{hostname}-{instance_id}"
+        if len(label) > _MAX_ALIAS_LABEL_LENGTH:
+            raise DeployError(
+                f"additional_hostnames entry {hostname!r} for project {project!r} "
+                f"composes the alias label {label!r} ({len(label)} characters) for "
+                f"instance {instance_id!r}, which exceeds the "
+                f"{_MAX_ALIAS_LABEL_LENGTH}-character DNS label limit"
+            )
+        fqdns.append(f"{label}.{domain}")
+    return fqdns
+
+
 def resolve_target(
     registry: Registry,
     project: str,
@@ -337,7 +402,7 @@ def deploy(
                 "(run 'fleet init' or 'fleet set-claude-token', then "
                 "'fleet refresh-instance-config' to inject it later)",
             )
-        fqdns = [f"{h}.{inst_id}.{registry.domain}" for h in registry.additional_hostnames(project)]
+        alias_hosts = alias_fqdns(registry, project, inst_id)
 
         # Reconcile this instance's Caddy basic-auth state to what THIS
         # deploy call asked for (default: enabled, `fleet`/`fleet` — the
@@ -348,6 +413,11 @@ def deploy(
         # for. A failure here must not leave a half-configured instance
         # silently public — raise an actionable DeployError rather than
         # continuing the pipeline.
+        #
+        # `alias_hosts` is passed through so the auth matcher covers the
+        # instance's Domain-Access alias hosts too — without it, an alias
+        # host would silently bypass basic auth entirely (it's a different
+        # `host` than the one the matcher guards).
         try:
             if auth_enabled:
                 caddyauth.enable_instance_auth(
@@ -355,6 +425,7 @@ def deploy(
                     f"{inst_id}.{registry.domain}",
                     auth_password,
                     bypass_cidrs=registry.auth_bypass_cidrs,
+                    alias_fqdns=alias_hosts,
                     snippet_dir=snippet_dir,
                     caddyfile_path=caddyfile_path,
                     runner=runner,
@@ -402,7 +473,7 @@ def deploy(
             inst_id,
             registry.domain,
             claude_token,
-            additional_fqdns=fqdns,
+            additional_fqdns=alias_hosts,
             git_bot=registry.git_bot(project),
             typesense=typesense_enabled,
             typesense_port=registry.port_profile("typesense").public,
@@ -737,6 +808,17 @@ def sync_instance_auth(
                 removed.append(inst_id)
             continue
 
+        # Same project resolution as project_for_instance(), inlined here
+        # since `data` is already in hand from the instance.yml read above —
+        # no need for a second file read. A project no longer in the
+        # registry (deleted from fleet.yml since this instance was
+        # deployed) falls back to no aliases rather than crashing the
+        # whole `fleet refresh-auth` run over one stale instance.
+        project = str(data.get("project") or inst_id.split("--", 1)[0])
+        alias_hosts = (
+            alias_fqdns(registry, project, inst_id) if registry.has_project(project) else []
+        )
+
         caddyauth.validate_instance_credential(password)
         bcrypt_hash = caddyauth.hash_password(password, runner=runner)
         caddyauth.write_instance_auth_snippet(
@@ -745,6 +827,7 @@ def sync_instance_auth(
             password,
             bcrypt_hash,
             bypass_cidrs=bypass_cidrs,
+            alias_fqdns=alias_hosts,
             snippet_dir=resolved_snippet_dir,
         )
         written.append(inst_id)
@@ -897,13 +980,7 @@ def refresh_instance_config(
         raise FleetError(f"instance directory not found for {instance_id!r}")
 
     with instance_lock(paths.locks, instance_id):
-        info_path = instance_dir / ".fleet" / "instance.yml"
-        if info_path.exists():
-            with open(info_path, "r", encoding="utf-8") as fh:
-                data = _yaml.load(fh) or {}
-            project = str(data.get("project") or instance_id.split("--", 1)[0])
-        else:
-            project = instance_id.split("--", 1)[0]
+        project = project_for_instance(instance_dir, instance_id)
 
         secrets = read_secrets(paths.secrets)
         claude_token = secrets.get("CLAUDE_CODE_OAUTH_TOKEN")
@@ -915,9 +992,7 @@ def refresh_instance_config(
                 "(run 'fleet init' or 'fleet set-claude-token', then "
                 "'fleet refresh-instance-config' to inject it later)",
             )
-        fqdns = [
-            f"{h}.{instance_id}.{registry.domain}" for h in registry.additional_hostnames(project)
-        ]
+        alias_hosts = alias_fqdns(registry, project, instance_id)
 
         typesense_enabled = registry.typesense_enabled(project)
         typesense_admin_key = None
@@ -932,7 +1007,7 @@ def refresh_instance_config(
             instance_id,
             registry.domain,
             claude_token,
-            additional_fqdns=fqdns,
+            additional_fqdns=alias_hosts,
             git_bot=registry.git_bot(project),
             typesense=typesense_enabled,
             typesense_port=registry.port_profile("typesense").public,

@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-27
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -139,7 +139,7 @@ labels)`).
 | `git` | string | **yes** | — | SSH git URL cloned/updated for every instance of this project. The fleet's read-only deploy key (`fleet ssh-key`) must be added to the forge as a deploy key. |
 | `default_template` | string | no | (none — `fleet deploy` errors without one) | Template name used when `fleet deploy <project>` omits its `<template>` positional arg. |
 | `default_branch` | string | no | (none — `fleet deploy` errors without one) | Branch used when `fleet deploy` omits `--branch`. |
-| `additional_hostnames` | list of strings | no | `[]` | Extra FQDNs routed to the instance alongside `<instance-id>.<domain>` (e.g. Drupal's domain-access-style subdomains). |
+| `additional_hostnames` | list of strings | no | `[]` | Extra alias hostnames routed to the instance alongside `<instance-id>.<domain>` (e.g. Drupal Domain Access-style subdomains). Each entry must be a bare DNS label (lowercase, `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, no dots — validated at registry load, `RegistryError` otherwise). Resolved per instance as the FLATTENED FQDN `<h>-<instance-id>.<domain>` (`core/instances.py:alias_fqdns()`), e.g. `news-oak--translations-test.fleet.example.com` — never nested under the instance id, since Caddy's site block is a single-label wildcard. Deploy raises `DeployError` if `<h>-<instance-id>` exceeds the 63-character DNS label limit. Alias hosts are covered by the SAME per-instance basic-auth matcher as the instance's own FQDN (`core/caddyauth.py`) and each gets its own on-demand Let's Encrypt certificate (mind the ~50 new-certs/domain/week rate limit with many aliases). Every instance also gets `FLEET_INSTANCE_HOST=<instance-id>.<domain>` injected into `web_environment`, so Drupal can build the same alias pattern: `"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full design: `docs/networking.md` §7. |
 | `typesense` | bool | no | `false` | **Legacy** opt-in flag: expose Typesense at the `typesense` named port (`*.<domain>:9108` by default) for every instance of this project. Equivalent to `ports: [typesense]`; both may be present without duplicating the exposure (`Registry.project_ports` de-dupes). The browser-exposed key must be a **search-only** key, never the admin key — see `docs/README-typesense.md`. |
 | `ports` | list of strings | no | `[]` | The general mechanism superseding `typesense: true` — names must each exist as a key in `fleet.ports` (validated: `Registry._validate` raises if a project references an undeclared port name). |
 | `git_bot` | mapping `{name, email}` or `false` | no | (inherits the fleet-level default) | Per-project override of the injected git commit identity. A mapping overrides `name`/`email` individually (either key may be omitted, falling back to the fleet default for that field). `false` disables identity injection for this project only, letting the project's own `git config` (e.g. a post-start hook) win — note the injected `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars otherwise take precedence over `git config user.*`. |
@@ -339,7 +339,7 @@ projects:
     # typesense: true    # expose Typesense to the browser at *.<domain>:9108 (optional, legacy form — see fleet.ports/ports: for the general mechanism)
     # ports: [typesense]                    # generic equivalent, once fleet.ports.typesense is defined above
     # NOTE: browser-exposed TYPESENSE_API_KEY must be a SEARCH-ONLY key, never the admin key.
-    # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
+    # additional_hostnames: [sub1, sub2]   # Domain Access aliases (optional) -> sub1-<instance-id>.<domain>
     # issue_id_regexp: 'ABC-[0-9]+'         # optional — derives [[issue-id]]/FLEET_ISSUE_ID from the
     #                                       # instance label (checked first) or branch (fallback);
     #                                       # matched case-insensitively, result uppercased.

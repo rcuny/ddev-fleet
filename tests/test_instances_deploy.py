@@ -459,8 +459,9 @@ projects:
 
 def test_deploy_writes_additional_fqdns_from_project_hostnames(fleet_home, git_repo):
     """A project declaring `additional_hostnames` must have those hostnames
-    resolved to full per-instance FQDNs and written into the instance's
-    config.fleet.yaml as `additional_fqdns`."""
+    resolved to full per-instance FQDNs — FLATTENED as `<h>-<instance_id>.
+    <domain>`, not nested under the instance id — and written into the
+    instance's config.fleet.yaml as `additional_fqdns`."""
     paths = instances.FleetPaths.from_home(fleet_home)
     paths.registry.parent.mkdir(parents=True, exist_ok=True)
     registry_text = f"""\
@@ -490,7 +491,92 @@ projects:
     config_path = paths.instances / "demo--develop" / ".ddev" / "config.fleet.yaml"
     content = config_path.read_text(encoding="utf-8")
     assert "additional_fqdns:" in content
-    assert "albania.demo--develop.fleet.example.test" in content
+    assert "albania-demo--develop.fleet.example.test" in content
+
+
+def _registry_with_hostnames(fleet_home, git_url, hostnames):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    hostnames_yaml = "\n".join(f"      - {h}" for h in hostnames)
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_url}
+    default_template: default
+    additional_hostnames:
+{hostnames_yaml}
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+    paths.registry.write_text(registry_text, encoding="utf-8")
+    return paths, Registry.load(paths.registry)
+
+
+def test_alias_fqdns_flattens_hostname_and_instance_id(fleet_home, git_repo):
+    paths, registry = _registry_with_hostnames(fleet_home, git_repo["origin"], ["albania"])
+
+    assert instances.alias_fqdns(registry, "demo", "demo--develop") == [
+        "albania-demo--develop.fleet.example.test"
+    ]
+
+
+def test_alias_fqdns_empty_when_no_additional_hostnames(fleet_home, git_repo):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_repo["origin"]}
+    templates:
+      default: {{}}
+""",
+        encoding="utf-8",
+    )
+    registry = Registry.load(paths.registry)
+
+    assert instances.alias_fqdns(registry, "demo", "demo--develop") == []
+
+
+def test_alias_fqdns_raises_deployerror_over_63_char_label(fleet_home, git_repo):
+    """`<hostname>-<instance_id>` composing a label over the 63-character
+    DNS limit must raise DeployError naming the hostname and the length —
+    the instance id itself (already validated by naming.instance_id() at
+    resolve time) is untouched by this check."""
+    long_hostname = "h" * 40
+    paths, registry = _registry_with_hostnames(fleet_home, git_repo["origin"], [long_hostname])
+    long_instance_id = "demo--" + "x" * 40  # well within naming's own 63-char limit
+
+    with pytest.raises(DeployError, match=r"63-character"):
+        instances.alias_fqdns(registry, "demo", long_instance_id)
+
+
+def test_deploy_raises_deployerror_when_alias_label_too_long(fleet_home, git_repo):
+    """The same 63-char alias check must actually gate deploy(), not just
+    exist as an unused pure function."""
+    long_hostname = "h" * 40
+    paths, registry = _registry_with_hostnames(fleet_home, git_repo["origin"], [long_hostname])
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    runner = HybridRunner()
+
+    with pytest.raises(DeployError, match=r"63-character"):
+        instances.deploy(
+            paths,
+            registry,
+            "demo",
+            "default",
+            branch="main",
+            label="x" * 40,
+            runner=runner,
+        )
 
 
 def test_deploy_writes_typesense_env_when_enabled(fleet_home, git_repo):

@@ -87,7 +87,16 @@ def write_fleet_config(
     # from a committed settings/config.local.yaml. Reuses the same
     # instance_id + domain FQDN pattern as FLEET_TYPESENSE_HOST below /
     # tokens.py's [[instance-fqdn]] token.
-    web_environment: list[str] = [f"DRUSH_OPTIONS_URI=https://{instance_id}.{domain}"]
+    # FLEET_INSTANCE_HOST — the instance's own bare fleet hostname (no
+    # scheme), so a project's Drupal Domain Access config can build its
+    # ALIAS hosts without hardcoding the fleet domain: an alias for
+    # hostname `h` is always `"<h>-" . getenv('FLEET_INSTANCE_HOST')`
+    # (core/instances.py's `alias_fqdns()` composes the exact same string
+    # fleet-side, so the two can never drift apart).
+    web_environment: list[str] = [
+        f"DRUSH_OPTIONS_URI=https://{instance_id}.{domain}",
+        f"FLEET_INSTANCE_HOST={instance_id}.{domain}",
+    ]
     if claude_token:
         web_environment.append(f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}")
     if git_bot:

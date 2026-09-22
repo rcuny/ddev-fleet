@@ -212,6 +212,25 @@ class Registry:
                                 "allowed — only tty1 and tty2 are supported"
                             )
 
+            for hostname in project_block.get("additional_hostnames") or []:
+                # Each entry becomes the `<h>` half of a flattened alias
+                # FQDN, `<h>-<instance-id>.<domain>` (core/instances.py's
+                # `alias_fqdns`) — so it must itself be a bare DNS label: no
+                # dots (an alias host is single-label, matching Caddy's
+                # `*.{{ fleet_domain }}` site block), lowercase only. Same
+                # pattern/error shape as `validate_part(project_key)` above.
+                if not isinstance(hostname, str):
+                    raise RegistryError(
+                        f"projects.{project_key}.additional_hostnames: entries must be "
+                        f"strings, got {hostname!r}"
+                    )
+                try:
+                    validate_part(hostname)
+                except ValidationError as exc:
+                    raise RegistryError(
+                        f"projects.{project_key}.additional_hostnames.{hostname}: {exc.message}"
+                    ) from exc
+
             for port_name in project_block.get("ports") or []:
                 if port_name not in fleet_ports:
                     raise RegistryError(
