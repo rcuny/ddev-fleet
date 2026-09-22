@@ -168,6 +168,21 @@ your real registry + assets instead. `fleet init` never overwrites an
 existing `fleet.yml` or re-clones an existing `config/` checkout — safe
 to re-run.
 
+### Multi-server: one config repo, per-host domain
+
+The private-config-repo pattern above extends naturally to running
+`fleet.yml` on **several servers at once** (e.g. staging + production, each
+with its own domain) — point `FLEET_CONFIG_REPO` at the SAME repo on every
+host. The one thing that can't be shared is the domain, so each host keeps
+its own in `/srv/fleet/host.yml`, rendered automatically by the installer's
+`caddy` Ansible role from the `fleet_domain` you answered/configured for
+THAT host — you don't create or edit it by hand. `host.yml`'s domain always
+wins over whatever `fleet.yml`'s own (shared) `fleet.domain` says, so
+`fleet.domain` becomes optional in `fleet.yml` once every host in the
+fleet has been provisioned (and thus has its own `host.yml`). See
+`docs/configuration.md`'s "Per-host domain" section for the full precedence
+rules and schema.
+
 ## 6. Start the fleet daemon
 
 ```bash

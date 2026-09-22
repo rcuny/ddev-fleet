@@ -32,11 +32,42 @@ A syntax error or schema violation makes every `fleet` command fail at
 registry load (`Registry.load`) with an actionable message naming the bad
 key — nothing partially loads.
 
+## Per-host domain (`host.yml`) — sharing one `fleet.yml` across servers
+
+`fleet.domain` (below) is normally the only place the wildcard domain lives.
+But when several fleet servers share **one** config repo (so `fleet.yml` is
+literally the same file, checked out on each host), a single hardcoded
+`fleet.domain` can't be right for all of them. `<FLEET_HOME>/host.yml`
+(`/srv/fleet/host.yml` by default — a SIBLING of `config/`, never inside the
+shared repo) solves this: a small, per-host YAML mapping,
+
+```yaml
+domain: fleet.this-host.example.com
+```
+
+rendered by the `caddy` Ansible role from its own `fleet_domain` variable
+(`ansible/group_vars/all.yml`/`/etc/ddev-fleet/local-vars.yml`), owned by the
+fleet user, mode `0644`. It is intentionally an open schema — unknown keys
+are ignored, so more host-level settings can be added later without a
+migration.
+
+**Precedence:** `host.yml`'s `domain` wins whenever the file exists and sets
+it — even if `fleet.yml`'s own `fleet.domain` also has a (different) value;
+that's the whole point of a domain that belongs to the host, not the shared
+registry. Falls back to `fleet.yml`'s `fleet.domain` when `host.yml` is
+absent or has no `domain` key. `fleet.domain` becomes fully **optional** in
+`fleet.yml` once every host that reads it carries its own `host.yml` — if
+neither source has a domain, `Registry.load` fails at load time naming both
+locations checked. Every CLI/daemon call site loads the registry through
+`fleet.core.instances.load_registry(paths)`, the one constructor that always
+passes `paths.host_config` through — so this precedence can never be
+forgotten at some call site.
+
 ## Top-level shape
 
 ```yaml
 fleet:
-  domain: <string>              # required
+  domain: <string>              # required, unless host.yml provides it (see above)
   git_bot_name: <string>        # optional
   git_bot_email: <string>       # optional
   git_bot: false                # optional
@@ -67,7 +98,7 @@ projects:
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `domain` | string | **yes** | — | The wildcard DNS root, e.g. `fleet.example.com`. Every instance is reachable at `<instance-id>.<domain>`; the dashboard/web UI at `<domain>` itself (behind Caddy's `fleet.<domain>` site — see `docs/networking.md`). |
+| `domain` | string | yes, unless `host.yml` sets it (see "Per-host domain" above) | — | The wildcard DNS root, e.g. `fleet.example.com`. Every instance is reachable at `<instance-id>.<domain>`; the dashboard/web UI at `<domain>` itself (behind Caddy's `fleet.<domain>` site — see `docs/networking.md`). |
 | `git_bot_name` | string | no | `ddev-fleet bot` | Default commit-author/committer name injected as `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME` into every instance's `web_environment`, unless a project overrides it. |
 | `git_bot_email` | string | no | `bot@<domain>` | Default commit-author/committer email, same injection. |
 | `git_bot` | `false` | no | (unset = enabled) | Set to `false` to disable git identity injection **fleet-wide** — every instance's own `git config` then decides commit identity. Per-project `git_bot: false` (below) overrides this for one project only. |

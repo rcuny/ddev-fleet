@@ -410,7 +410,7 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
 
 def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
 
     if args.count == 1:
         url = instances_mod.deploy(
@@ -461,7 +461,7 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
 
 def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
@@ -526,7 +526,7 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
     running several of those at once on one host is how you exhaust disk
     mid-batch (same reasoning as multi_deploy())."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
@@ -633,7 +633,7 @@ def _cmd_stop(fleet_home: Path, args: argparse.Namespace) -> int:
 
 def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: str, op) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
@@ -694,7 +694,7 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
 
 def _cmd_list(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     statuses = instances_mod.list_instances(paths, registry)
 
     print(f"{'INSTANCE ID':30} {'PROJECT':20} {'BRANCH':15} {'STATE':10} {'RAM(MiB)':10} URL")
@@ -716,7 +716,7 @@ def _cmd_ssh_key(fleet_home: Path, args: argparse.Namespace) -> None:
 def _cmd_assets(fleet_home: Path, args: argparse.Namespace) -> None:
     if args.assets_command == "push":
         paths = instances_mod.FleetPaths.from_home(fleet_home)
-        registry = Registry.load(paths.registry)
+        registry = instances_mod.load_registry(paths)
         if not registry.has_project(args.project):
             raise FleetError(f"unknown project {args.project!r}")
         assets_dir = paths.assets / args.project
@@ -732,7 +732,7 @@ def _cmd_secret(fleet_home: Path, args: argparse.Namespace) -> None:
 
 def _cmd_snapshot(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     dest = instances_mod.snapshot(paths, registry, args.instance_id, dest_rel=args.dest_rel)
     print(dest)
 
@@ -889,7 +889,7 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
     as `set-claude-token`/`refresh-claude-token` — see
     `_propagate_claude_token`)."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     instances_mod.refresh_instance_config(paths, registry, args.instance_id, restart=args.restart)
 
     if args.restart:
@@ -906,7 +906,7 @@ def _cmd_refresh_auth(fleet_home: Path, args: argparse.Namespace, *, runner=run_
     edit now" command, so editing the bypass list never requires redeploying
     live instances."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
 
     bypass = registry.auth_bypass_cidrs
     if bypass:
@@ -933,7 +933,7 @@ def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run
     the network_hardening role is installed; silently skipped when the
     helper is absent (not an error)."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
 
     result = caddyports.sync(
         registry, snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR, runner=runner
@@ -974,7 +974,7 @@ def _tty_resolver(paths: instances_mod.FleetPaths):
     and falls back to None (every window starts as a plain bash shell)
     rather than raising."""
     try:
-        registry = Registry.load(paths.registry)
+        registry = instances_mod.load_registry(paths)
     except FleetError as exc:
         print(
             f"warning: fleet tmux could not load the registry ({exc.message}); "

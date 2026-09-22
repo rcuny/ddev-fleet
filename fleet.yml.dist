@@ -6,6 +6,10 @@
 # for your OWN registry; drop the demo once you have real projects.
 fleet:
   domain: fleet.example.com
+  # `domain` is OPTIONAL when this fleet.yml is shared across several
+  # servers, each with its own /srv/fleet/host.yml (rendered by Ansible's
+  # caddy role from fleet_domain) — host.yml's domain wins when present.
+  # See docs/configuration.md's "Per-host domain" section.
   # ports:                                  # fleet-wide named-port catalogue (optional, see docs/networking.md)
   #   typesense:  { public: 9108, router: 8108 }  # explicit form of the built-in legacy default below
   #   playwright: { public: 9324, router: 8323 }

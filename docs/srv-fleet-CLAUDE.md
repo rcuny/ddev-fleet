@@ -16,11 +16,26 @@ This is a compact, server-side reference — the full versions are
 `docs/configuration.md` (registry schema) and `docs/cli.md` (CLI), both in
 the product repo, not copied to the server.
 
+## Per-host domain (`/srv/fleet/host.yml`)
+
+Lets several fleet servers share ONE `fleet.yml` (via the config repo) while
+each keeps its own domain. A small, open-schema mapping — `domain:
+<string>` — rendered by Ansible's `caddy` role from `fleet_domain`, owned
+by the fleet user, mode `0644`. Deliberately a SIBLING of `config/`, never
+inside the shared config repo. Precedence: `host.yml`'s `domain` wins when
+present (even over a different `fleet.domain` in `fleet.yml`); falls back
+to `fleet.yml`'s `fleet.domain` otherwise; if neither is set, `Registry.load`
+fails at load time naming both locations. `fleet.domain` in `fleet.yml`
+below is therefore optional once every host has its own `host.yml`. Every
+call site loads via `fleet.core.instances.load_registry(paths)`, which
+always passes `host.yml` through — never call `Registry.load()` directly.
+Full detail: `docs/configuration.md`.
+
 ## Registry (`/srv/fleet/config/fleet.yml`)
 
 ```yaml
 fleet:
-  domain: <string>                  # required — wildcard DNS root, e.g. fleet.example.com
+  domain: <string>                  # required, unless /srv/fleet/host.yml sets it (see above)
   git_bot_name: <string>            # OPTIONAL — default commit identity name  (default "ddev-fleet bot")
   git_bot_email: <string>           # OPTIONAL — default commit identity email (default bot@<domain>)
   # git_bot: false                  # OPTIONAL — disable git identity injection fleet-wide

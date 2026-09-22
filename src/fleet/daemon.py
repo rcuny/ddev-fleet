@@ -24,7 +24,6 @@ from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, naming, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core.errors import CaddyPortsError, DeployError, FleetError
-from fleet.core.registry import Registry
 from fleet.jobs import JobManager
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -136,7 +135,7 @@ def _job_ws_token(secret: bytes, job) -> str | None:
 def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -> FastAPI:
     def _paths_and_registry():
         paths = instances_mod.FleetPaths.from_home(fleet_home)
-        registry = Registry.load(paths.registry)
+        registry = instances_mod.load_registry(paths)
         return paths, registry
 
     @asynccontextmanager

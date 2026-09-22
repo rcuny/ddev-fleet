@@ -546,6 +546,16 @@ def test_ensure_snippet_dir_creates_unmanaged_dirs(tmp_path):
     assert target.is_dir()
 
 
+def test_ensure_snippet_dir_create_false_does_not_create_unmanaged_dir(tmp_path):
+    """`create=False` (used by the pre-destroy preflight in core/instances.py)
+    must be a pure read — no mkdir, even for an unmanaged (tests/local) dir."""
+    target = tmp_path / "instances"
+
+    caddyauth.ensure_snippet_dir(target, create=False)
+
+    assert not target.exists()
+
+
 def test_ensure_snippet_dir_refuses_missing_managed_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
     missing = tmp_path / "fleet" / "instances"
@@ -576,6 +586,17 @@ def test_ensure_snippet_dir_accepts_managed_dir_with_setgid(tmp_path, monkeypatc
     target.chmod(0o2750)
 
     caddyauth.ensure_snippet_dir(target)
+
+
+def test_ensure_snippet_dir_create_false_still_guards_managed_dir(tmp_path, monkeypatch):
+    """`create=False` only changes the unmanaged branch — the managed-root
+    guard (missing dir / lost setgid) was always read-only and must still
+    fire exactly the same."""
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    missing = tmp_path / "fleet" / "instances"
+
+    with pytest.raises(CaddyAuthError):
+        caddyauth.ensure_snippet_dir(missing, create=False)
 
 
 def test_write_instance_snippet_refuses_managed_dir_without_setgid(tmp_path, monkeypatch):

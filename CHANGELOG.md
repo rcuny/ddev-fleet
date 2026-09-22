@@ -8,6 +8,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Pre-destroy preflight** for redeploy/replace: `redeploy()` and
+  `deploy(replace=True)` (and, more lightly, `destroy()`) now run cheap,
+  side-effect-free checks — registry still resolves the deploy target,
+  alias FQDNs still compose, the Caddy snippet directory guard, and the
+  CURRENT Caddy config still validates — BEFORE anything is torn down.
+  Raises `DeployError` naming the reason and stating nothing was
+  destroyed. Closes the gap that let `fleet redeploy --all` destroy 5
+  instances on 2026-09-22 and then fail to rebuild them because `caddy
+  validate` was already broken for an unrelated reason.
+- **Per-host `fleet.domain`** (`<FLEET_HOME>/host.yml`, e.g.
+  `/srv/fleet/host.yml`): lets several fleet servers share ONE `fleet.yml`
+  (via the config repo) while each keeps its own domain. Rendered by the
+  `caddy` Ansible role from `fleet_domain`; `host.yml`'s `domain` wins over
+  `fleet.yml`'s own `fleet.domain` when both are set, and `fleet.domain`
+  becomes optional in `fleet.yml` once every host has its own `host.yml`.
+  See `docs/configuration.md`'s "Per-host domain" section.
 - **TLS certificate mode**, chosen at install time (`fleet_tls_mode`,
   `on_demand` default or `ovh_dns`): `on_demand` keeps today's
   per-hostname Let's Encrypt behaviour (HTTP-01 via `/api/tls-authorize`,
