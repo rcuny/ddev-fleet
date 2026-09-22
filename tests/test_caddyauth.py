@@ -436,3 +436,67 @@ def test_enable_instance_auth_passes_bypass_cidrs_through(tmp_path):
     assert "not remote_ip 10.0.0.0/8" in (snippet_dir / "oak--main.conf").read_text(
         encoding="utf-8"
     )
+
+
+# --- provisioned snippet dirs must never be created on the fly ---
+
+
+def test_ensure_snippet_dir_creates_unmanaged_dirs(tmp_path):
+    target = tmp_path / "instances"
+
+    caddyauth.ensure_snippet_dir(target)
+
+    assert target.is_dir()
+
+
+def test_ensure_snippet_dir_refuses_missing_managed_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    missing = tmp_path / "fleet" / "instances"
+
+    with pytest.raises(CaddyAuthError) as exc:
+        caddyauth.ensure_snippet_dir(missing)
+
+    assert "install -d -o fleet -g caddy -m 2750" in str(exc.value)
+    assert not missing.exists()
+
+
+def test_ensure_snippet_dir_refuses_managed_dir_without_setgid(tmp_path, monkeypatch):
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    target = tmp_path / "fleet" / "instances"
+    target.mkdir(parents=True)
+    target.chmod(0o750)
+
+    with pytest.raises(CaddyAuthError) as exc:
+        caddyauth.ensure_snippet_dir(target)
+
+    assert "setgid" in str(exc.value)
+
+
+def test_ensure_snippet_dir_accepts_managed_dir_with_setgid(tmp_path, monkeypatch):
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    target = tmp_path / "fleet" / "instances"
+    target.mkdir(parents=True)
+    target.chmod(0o2750)
+
+    caddyauth.ensure_snippet_dir(target)
+
+
+def test_write_instance_snippet_refuses_managed_dir_without_setgid(tmp_path, monkeypatch):
+    """The guard fires on the real write path, not just when called directly —
+    this is the ddev2 outage (2026-09-14): snippets written into a setgid-less
+    dir are unreadable by Caddy, which then fails its next restart."""
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    snippet_dir = tmp_path / "fleet" / "instances"
+    snippet_dir.mkdir(parents=True)
+    snippet_dir.chmod(0o750)
+
+    with pytest.raises(CaddyAuthError):
+        caddyauth.write_instance_auth_snippet(
+            "demo--main",
+            "demo--main.fleet.example.test",
+            "fleet",
+            "$2a$14$hash",
+            snippet_dir=snippet_dir,
+        )
+
+    assert list(snippet_dir.iterdir()) == []

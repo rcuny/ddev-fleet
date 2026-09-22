@@ -161,8 +161,9 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             except CaddyPortsError as exc:
                 logger.warning("startup port sync failed: %s", exc.message)
             except Exception:
-                # `sync()` performs `snippet_dir.mkdir()`/`.glob()` before its
-                # own try/except wrapping (core/caddyports.py), so a bare
+                # `sync()` probes the snippet dir (ensure_snippet_dir) and
+                # `.glob()`s it before its own try/except wrapping
+                # (core/caddyports.py), so a bare
                 # PermissionError/OSError (or anything else unanticipated)
                 # can escape uncaught. Startup must NEVER be blocked by a
                 # broken port sync — a fleet manager that refuses to boot

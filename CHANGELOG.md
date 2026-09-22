@@ -17,6 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorded auth settings) to every deployed instance — rewrite all snippets,
   then one `caddy validate` + `caddy reload`. No redeploy, no Ansible run.
 
+### Fixed
+- Fleet-owned Caddy snippet directories under `/etc/caddy` are no longer
+  created on the fly: `caddyauth.ensure_snippet_dir()` now refuses to write
+  when the directory is missing OR has lost its **setgid** bit, naming the
+  exact fix. A `mkdir` there drops setgid, so every snippet written after it
+  is group-owned by `fleet` instead of `caddy` and Caddy cannot read it —
+  which took ddev2's Caddy down from 2026-09-14 to 2026-09-21, invisibly,
+  because a reload keeps serving the old config until the next restart. The
+  unprivileged `fleet` user cannot repair setgid itself (Linux drops S_ISGID
+  for a non-member group), so provisioning owns these directories.
+
 ### Changed
 - Per-instance basic auth is now symmetric: the `--auth-password` / web-UI
   "Auth user & password" value is used as BOTH username and password

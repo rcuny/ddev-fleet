@@ -55,6 +55,7 @@ separator.
 """
 
 import os
+import stat
 import tempfile
 from collections.abc import Sequence
 from pathlib import Path
@@ -72,6 +73,12 @@ DEFAULT_CADDYFILE_PATH = Path("/etc/caddy/Caddyfile")
 # an instance URL to a client, not a security boundary.
 DEFAULT_INSTANCE_PASSWORD = "fleet"
 DEFAULT_INSTANCE_SNIPPET_DIR = Path("/etc/caddy/fleet/instances")
+
+# Snippet directories under this root are PROVISIONED (Ansible's `caddy`
+# role), never created on the fly — see ensure_snippet_dir(). Tests and
+# local runs write to tmp dirs outside it and keep the old create-on-demand
+# behaviour.
+MANAGED_SNIPPET_ROOT = Path("/etc/caddy")
 
 
 def hash_password(password: str, *, runner=run_streamed) -> str:
@@ -99,6 +106,61 @@ def hash_password(password: str, *, runner=run_streamed) -> str:
     raise CaddyAuthError("'caddy hash-password' produced no output")
 
 
+def ensure_snippet_dir(directory: Path) -> None:
+    """Guard a fleet-owned Caddy snippet directory before writing into it.
+
+    Under MANAGED_SNIPPET_ROOT the directory must already exist AND carry the
+    **setgid** bit; anywhere else (tests, local runs) it is simply created.
+
+    Why this is a hard error rather than a `mkdir` (learned on ddev2, where
+    it took Caddy down for a week, 2026-09-14 → 2026-09-21): fleet writes
+    these snippets, `caddy` reads them, and the `fleet` user is NOT in the
+    `caddy` group. The ONLY thing making that handoff work is setgid on the
+    directory — a new file inherits the dir's group (`caddy`), so mode 0640
+    is readable by Caddy. A plain `mkdir` creates the dir WITHOUT setgid
+    (Python applies `mode & ~umask`), every snippet written into it comes
+    out `fleet:fleet 0640`, and Caddy then dies at startup with
+    `Could not import …: permission denied`.
+
+    Worse, that failure is invisible until Caddy restarts: `caddy reload` on
+    a running process keeps serving the old config, so the box looks healthy
+    and only fails to come back after a reboot. Hence: refuse up front, with
+    the fix in the message.
+
+    The unprivileged `fleet` user CANNOT repair this itself — Linux silently
+    drops S_ISGID when a non-root caller chmods a directory whose group it
+    does not belong to — so self-healing is not an option; provisioning owns
+    these directories."""
+    try:
+        managed = directory.resolve().is_relative_to(MANAGED_SNIPPET_ROOT.resolve())
+    except OSError:
+        managed = False
+
+    if not managed:
+        directory.mkdir(parents=True, exist_ok=True)
+        return
+
+    if not directory.is_dir():
+        raise CaddyAuthError(
+            f"Caddy snippet directory {directory} does not exist. It is seeded by the "
+            "'caddy' Ansible role and must NOT be created on the fly: a plain mkdir "
+            "loses the setgid bit, and every snippet written afterwards is unreadable "
+            "by Caddy (which then fails to start). Recreate it explicitly:\n"
+            f"  sudo install -d -o fleet -g caddy -m 2750 {directory}"
+        )
+
+    if not directory.stat().st_mode & stat.S_ISGID:
+        raise CaddyAuthError(
+            f"Caddy snippet directory {directory} has lost its setgid bit, so snippets "
+            "written here would be group-owned by 'fleet' instead of 'caddy' and Caddy "
+            "could not read them (it would fail on its next restart). Refusing to write. "
+            "Fix as root:\n"
+            f"  sudo chgrp -R caddy {MANAGED_SNIPPET_ROOT / 'fleet'}\n"
+            f"  sudo find {MANAGED_SNIPPET_ROOT / 'fleet'} -type d -exec chmod 2750 {{}} +\n"
+            f"  sudo find {MANAGED_SNIPPET_ROOT / 'fleet'} -type f -exec chmod 0640 {{}} +"
+        )
+
+
 def _atomic_write(path: Path, content: str, *, prefix: str, mode: int = 0o640) -> None:
     """Shared primitive behind every fleet-owned Caddy snippet write (both
     the single admin-auth snippet and per-instance auth snippets).
@@ -109,7 +171,7 @@ def _atomic_write(path: Path, content: str, *, prefix: str, mode: int = 0o640) -
     would otherwise fail `caddy validate`/reload and take that snippet's
     auth down with it).
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
+    ensure_snippet_dir(path.parent)
 
     fd, tmp_name = tempfile.mkstemp(dir=str(path.parent), prefix=prefix, suffix=".tmp")
     try:

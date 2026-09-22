@@ -549,3 +549,28 @@ def test_sync_raises_caddy_ports_error_naming_both_failures_when_rollback_itself
     assert "validat" in message
     assert "rollback" in message
     assert isinstance(excinfo.value.__cause__, OSError)
+
+
+def test_sync_refuses_managed_snippet_dir_without_setgid(tmp_path, monkeypatch):
+    """A provisioned dir that lost its setgid bit must abort the port sync as
+    a CaddyPortsError (callers catch only that), never be silently written to
+    — snippets there are unreadable by Caddy. See caddyauth.ensure_snippet_dir."""
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    snippet_dir = tmp_path / "fleet" / "ports"
+    snippet_dir.mkdir(parents=True)
+    snippet_dir.chmod(0o750)
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    registry = _StubRegistry(
+        "fleet.example.test", [PortProfile(name="playwright", public=9324, router=8323)]
+    )
+
+    with pytest.raises(CaddyPortsError) as exc:
+        caddyports.sync(
+            registry,
+            snippet_dir=snippet_dir,
+            caddyfile_path=tmp_path / "Caddyfile",
+            runner=fake,
+        )
+
+    assert "setgid" in str(exc.value)
+    assert fake.calls == []
