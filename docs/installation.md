@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-24
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -11,18 +11,58 @@ This is the first-run checklist: DNS, the installer, adding the deploy
 key, minting the Claude Code token, and the first deploy. For ongoing
 operations (updates, rollback, password rotation) see `docs/operations.md`.
 
-## 1. DNS
+## 1. Choosing a TLS mode
 
-Before running the installer, create the wildcard DNS record. A wildcard
-matches exactly one label, so both of the following are required —
-`fleet.<domain>` is NOT covered by the `*.fleet.<domain>` wildcard:
+The installer asks how Caddy should get Let's Encrypt certificates for
+`*.<domain>` (every deployed instance) and any named-port site
+(`docs/networking.md`). This is the `fleet_tls_mode` Ansible var
+(`ansible/group_vars/all.yml`), persisted per host in
+`/etc/ddev-fleet/local-vars.yml`:
+
+| Mode | How it works | Tradeoff |
+|---|---|---|
+| **`on_demand`** (default) | Caddy requests a fresh Let's Encrypt cert the first time each exact hostname is seen, via the HTTP-01 challenge, authorized by `/api/tls-authorize`. | No setup. But Let's Encrypt caps **new** certificate issuance at roughly **50 per registered domain per rolling 7 days** (refilling ~1 every 3.4 hours) — renewals don't count against this, but a project with many instances/aliases can hit it. |
+| **`ovh_dns`** | Caddy issues **one wildcard certificate** for `*.<domain>`, shared by every instance and named port, via the DNS-01 challenge — it writes the `_acme-challenge` TXT record straight into your DNS zone through the OVH API (the `caddy-dns/ovh` plugin, requires a custom Caddy build — the installer/role handles this). | No per-hostname limit (a wildcard is **one** certificate, covering exactly one label — `*.<domain>` covers `foo.<domain>` but not `foo.bar.<domain>`). Needs an OVH API key scoped to your DNS zone. OVH is currently the only supported DNS provider. |
+
+**DNS records needed:**
 
 ```
-fleet.<domain>       A     <server-ip>
-*.fleet.<domain>     A     <server-ip>
+<domain>       A     <server-ip>      # both modes — the dashboard, fleet.<domain>
+*.<domain>     A     <server-ip>      # on_demand mode only
 ```
 
-## 2. Run the installer
+In `ovh_dns` mode, `*.<domain>` does **not** need its own DNS A/AAAA
+record — Caddy proves domain ownership via the DNS-01 TXT record instead,
+so the wildcard cert is issued without any wildcard DNS entry pointing at
+the server. (You'll usually still want one if you expect any client to
+resolve an instance hostname without the fleet's own DNS setup — but it is
+not required for the certificate itself.)
+
+**If you choose `ovh_dns`,** create an OVH API token before or during the
+prompt:
+
+1. Go to `https://eu.api.ovh.com/createToken/` (or your regional
+   equivalent — `ca.api.ovh.com`/`api.ovh.com` for other OVH regions; the
+   installer's `OVH_ENDPOINT` default is `ovh-eu`).
+2. Grant these rights, scoped to your registered zone (e.g. `example.com`):
+   - `GET /domain/zone/<zone>/*`
+   - `POST /domain/zone/<zone>/*`
+   - `DELETE /domain/zone/<zone>/*`
+3. Optionally restrict the token to this server's IP address.
+4. Note the **Application Key**, **Application Secret**, and **Consumer
+   Key** it gives you — the installer prompts for these (application
+   secret and consumer key are read silently, never echoed) and writes
+   them to `/etc/caddy/ovh.env` (`0600 root:root`, then re-owned
+   `0640 root:caddy` once the `caddy` role has run). **Ansible never
+   writes or reads back this file's contents** — only checks that all
+   four required keys are present.
+
+## 2. DNS
+
+Create the DNS record(s) from the table above before running the
+installer.
+
+## 3. Run the installer
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo bash
@@ -43,7 +83,9 @@ The installer will:
 3. Collect: `FLEET_DOMAIN` (the fleet wildcard domain, required),
    `FLEET_ACME_EMAIL` (Let's Encrypt contact, required), `FLEET_ADMIN_PASSWORD`
    (optional — a strong one is generated and printed once if you don't
-   supply it), `FLEET_REPO_VERSION` (optional, defaults to `main`), and two
+   supply it), a **TLS certificate mode** choice (`FLEET_TLS_MODE`,
+   `on_demand` or `ovh_dns` — see "Choosing a TLS mode" below),
+   `FLEET_REPO_VERSION` (optional, defaults to `main`), and two
    Yes-by-default hardening prompts (`FLEET_NETWORK_HARDENING`,
    `FLEET_SECURITY_HARDENING` — see the sibling hardening documentation
    once that work lands). Every value can be supplied as an env var to
@@ -95,7 +137,7 @@ bare `curl | bash` one-liner is auth-gated. Two options:
 detached (`nohup … &` to a logfile, then poll) rather than holding an SSH
 session open.
 
-## 3. Add the deploy key to each forge
+## 4. Add the deploy key to each forge
 
 ```bash
 cat /srv/fleet/fleet-deploy-key.pub
@@ -104,7 +146,7 @@ cat /srv/fleet/fleet-deploy-key.pub
 Add it as a **read-only** deploy key on every forge hosting a project
 you'll register in `/srv/fleet/config/fleet.yml`.
 
-## 4. `fleet init` — create the registry and mint the Claude Code token
+## 5. `fleet init` — create the registry and mint the Claude Code token
 
 ```bash
 sudo -u fleet -i
@@ -126,14 +168,14 @@ your real registry + assets instead. `fleet init` never overwrites an
 existing `fleet.yml` or re-clones an existing `config/` checkout — safe
 to re-run.
 
-## 5. Start the fleet daemon
+## 6. Start the fleet daemon
 
 ```bash
 sudo systemctl start fleet.service
 sudo systemctl status fleet.service
 ```
 
-## 6. First deploy
+## 7. First deploy
 
 The installer seeds a bundled **`demo`** project (a generic `type: php` DDEV
 app with no database, built into a local repo at `/srv/fleet/_demo.git`), so
@@ -157,7 +199,7 @@ fleet deploy <project> <template> --branch <ref>
 
 Browse to the printed instance URL.
 
-## 7. Web UI first-run check
+## 8. Web UI first-run check
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/api/jobs/nonexistent
@@ -165,14 +207,56 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/api/jobs/nonexist
 
 Expected: `404`. Then browse to `https://fleet.<domain>`, confirm the
 basic-auth prompt (the password printed by the installer, or one you
-supplied), log in, and confirm the instance deployed in step 6 is
+supplied), log in, and confirm the instance deployed in step 7 is
 listed. Trigger a fresh deploy from the UI's deploy form and confirm the
 live log pane updates over WebSocket while `post_deploy` runs.
+
+## Switching TLS mode on an existing server
+
+No need to re-run the full installer. From the server:
+
+1. Edit `/etc/ddev-fleet/local-vars.yml`, set `fleet_tls_mode: "ovh_dns"`
+   (or back to `"on_demand"`).
+2. If switching **to** `ovh_dns`, create `/etc/caddy/ovh.env` (`0600
+   root:root`) with `OVH_ENDPOINT`, `OVH_APPLICATION_KEY`,
+   `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` — see "Choosing a TLS
+   mode" above for the token-creation steps. Skip this if switching back
+   to `on_demand`.
+3. Re-apply just the `caddy` role:
+   ```bash
+   cd /opt/ddev-fleet/ansible
+   sudo ansible-playbook caddy-only.yml
+   ```
+   This is the same scoped-playbook pattern as `ddev-only.yml` — never run
+   the full `site.yml` against a live host (see `CLAUDE.md` /
+   `docs/operations.md`).
+
+**Upgrade order matters — read this if the server is already running an
+older `fleet.core.caddyports`.** Named-port snippets (Typesense, etc.) only
+`import` the shared `tls.conf` file when it's already on disk; if it isn't
+yet (e.g. right after a plain code-only rollout — `push-product`'s git-pull
++ `systemctl restart fleet`, which reconciles port snippets on daemon
+startup with no Ansible involved), they fall back to inlining the legacy
+`tls { on_demand }` block instead, so an un-migrated server never ends up
+importing a file that doesn't exist (which would otherwise fail `caddy
+validate` and take every instance down on Caddy's next restart). So:
+
+1. Run step 3 above (`caddy-only.yml`) **first** — this creates
+   `/etc/caddy/fleet/tls.conf`.
+2. Then run `sudo -u fleet fleet refresh-ports` (or just let the next
+   `fleet.service` restart do it) to rewrite existing named-port snippets
+   from the inline fallback over to the `import`.
+
+Doing it in the other order is harmless (the fallback keeps Caddy healthy
+either way) but leaves snippets on the inline block until the next
+`refresh-ports`/restart.
 
 ## See also
 
 - `docs/operations.md` — ongoing code updates, rollback, password
   rotation, the verification checklist as a repeatable template.
+- `docs/networking.md` — TLS termination points and every port in one
+  table, including the `fleet_tls_mode` mechanics.
 - `fleet.yml.dist` — the `fleet.yml` registry schema, with the full set
   of optional keys (named ports, Typesense, additional hostnames)
   commented out as examples.

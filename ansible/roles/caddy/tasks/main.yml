@@ -182,6 +182,194 @@
     path: /etc/sudoers.d/fleet-caddy-reload
     state: absent
 
+- name: Fail fast if fleet_tls_mode is not a recognised value
+  # No public-safe "just guess" behaviour here — an unrecognised mode means
+  # tls.conf.j2 below would render nothing useful, so refuse before that.
+  ansible.builtin.assert:
+    that:
+      - fleet_tls_mode in ['on_demand', 'ovh_dns']
+    fail_msg: >-
+      fleet_tls_mode='{{ fleet_tls_mode }}' is not recognised. Allowed
+      values: 'on_demand' (default — per-hostname Let's Encrypt via HTTP-01,
+      no setup) or 'ovh_dns' (wildcard cert via the OVH DNS-01 challenge,
+      needs /etc/caddy/ovh.env). See ansible/group_vars/all.yml and
+      docs/installation.md.
+    success_msg: "fleet_tls_mode='{{ fleet_tls_mode }}' is valid"
+
+# --- ovh_dns mode: custom caddy binary with the caddy-dns/ovh plugin ------
+# Caddy's official method for a custom build alongside the apt package
+# (https://caddyserver.com/docs/build#package-support-files-for-custom-builds-for-debianubunturaspbian):
+# divert the apt-installed binary aside, download a custom build carrying
+# the plugin, then register BOTH as `update-alternatives` choices for
+# /usr/bin/caddy so a future `apt upgrade` of the caddy package keeps
+# reinstalling to the diverted path (caddy.default) without clobbering the
+# custom binary — `update-alternatives` (not a raw symlink) is what makes
+# that survive package upgrades cleanly.
+#
+# In on_demand mode NONE of this runs — the package binary is used as-is,
+# and any PRE-EXISTING divert/alternatives from a prior ovh_dns install is
+# left untouched (switching a server back to on_demand only needs
+# tls.conf.j2 to stop emitting the ovh directive; the custom binary is
+# harmless to leave in place — see docs/installation.md "switching mode").
+- name: Determine the caddy-dns/ovh download architecture from ansible_architecture
+  ansible.builtin.set_fact:
+    fleet_caddy_arch_map:
+      x86_64: amd64
+      amd64: amd64
+      aarch64: arm64
+      arm64: arm64
+  when: fleet_tls_mode == 'ovh_dns'
+
+- name: Resolve fleet_caddy_ovh_arch from the architecture map
+  ansible.builtin.set_fact:
+    fleet_caddy_ovh_arch: "{{ fleet_caddy_arch_map[ansible_architecture] | default(ansible_architecture) }}"
+  when: fleet_tls_mode == 'ovh_dns'
+
+- name: Check whether the currently active caddy binary already has the OVH DNS module
+  # Idempotency gate for the whole divert+download+alternatives block below —
+  # `caddy list-modules` lists `dns.providers.ovh` only once the custom
+  # binary is the one `update-alternatives` currently selects.
+  ansible.builtin.command: caddy list-modules
+  register: fleet_caddy_modules
+  changed_when: false
+  failed_when: false
+  when: fleet_tls_mode == 'ovh_dns'
+
+- name: Build and install a caddy binary with the caddy-dns/ovh plugin (first ovh_dns provisioning only)
+  when:
+    - fleet_tls_mode == 'ovh_dns'
+    - "'dns.providers.ovh' not in fleet_caddy_modules.stdout"
+  block:
+    - name: Check whether /usr/bin/caddy is already diverted aside
+      ansible.builtin.command: dpkg-divert --list /usr/bin/caddy
+      register: fleet_caddy_divert_list
+      changed_when: false
+
+    - name: Divert the apt-installed caddy binary to /usr/bin/caddy.default
+      ansible.builtin.command: dpkg-divert --divert /usr/bin/caddy.default --rename /usr/bin/caddy
+      when: fleet_caddy_divert_list.stdout == ""
+      changed_when: true
+
+    - name: Download the custom caddy build with the caddy-dns/ovh plugin
+      ansible.builtin.get_url:
+        url: "https://caddyserver.com/api/download?os=linux&arch={{ fleet_caddy_ovh_arch }}&p=github.com%2Fcaddy-dns%2Fovh"
+        dest: /usr/bin/caddy.custom
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Validate the downloaded custom caddy binary actually runs
+      ansible.builtin.command: /usr/bin/caddy.custom version
+      changed_when: false
+
+    - name: Register both caddy binaries as update-alternatives choices for /usr/bin/caddy
+      # Higher priority (50) wins automatically in auto mode, so /usr/bin/caddy
+      # now resolves to caddy.custom without a manual `--set`.
+      ansible.builtin.command: "update-alternatives --install /usr/bin/caddy caddy {{ item.path }} {{ item.priority }}"
+      loop:
+        - { path: /usr/bin/caddy.default, priority: 10 }
+        - { path: /usr/bin/caddy.custom, priority: 50 }
+      loop_control:
+        label: "{{ item.path }}"
+      changed_when: true
+      notify: Restart caddy
+
+# --- ovh_dns mode: OVH API credentials -------------------------------------
+# Ansible NEVER writes /etc/caddy/ovh.env's CONTENTS (spec decision 5) — an
+# operator creates it (bootstrap.sh's TLS-mode prompt, or by hand). This
+# role only asserts it exists with all four required keys, fixes its
+# owner/group/mode, and wires it into caddy.service via a systemd drop-in.
+- name: OVH DNS credentials (ovh_dns mode only)
+  when: fleet_tls_mode == 'ovh_dns'
+  block:
+    - name: Check whether the OVH credentials file exists
+      ansible.builtin.stat:
+        path: "{{ fleet_ovh_env_file }}"
+      register: fleet_ovh_env_stat
+
+    - name: Fail fast if the OVH credentials file is missing
+      ansible.builtin.fail:
+        msg: >-
+          fleet_tls_mode is 'ovh_dns' but {{ fleet_ovh_env_file }} does not
+          exist. Ansible never writes this file's contents (it holds OVH API
+          secrets) — create it first: bootstrap.sh's TLS-mode prompt does
+          this interactively, or write it by hand (0600 root:root) with
+          OVH_ENDPOINT, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET,
+          OVH_CONSUMER_KEY — see docs/installation.md.
+      when: not fleet_ovh_env_stat.stat.exists
+
+    - name: Read the OVH credentials file to check for required keys
+      # no_log: the file's raw content includes secret VALUES, not just key
+      # names — must never land in Ansible output/logs.
+      ansible.builtin.slurp:
+        src: "{{ fleet_ovh_env_file }}"
+      register: fleet_ovh_env_content
+      no_log: true
+
+    - name: Determine which required OVH keys are present (key NAMES only, never values)
+      ansible.builtin.set_fact:
+        fleet_ovh_env_missing_keys: >-
+          {{ ['OVH_ENDPOINT', 'OVH_APPLICATION_KEY', 'OVH_APPLICATION_SECRET', 'OVH_CONSUMER_KEY']
+          | difference((fleet_ovh_env_content.content | b64decode).splitlines()
+          | select('match', '^[A-Z_]+=')
+          | map('regex_replace', '^([A-Z_]+)=.*$', '\\1') | list) }}
+      no_log: true
+
+    - name: Fail fast if the OVH credentials file is missing a required key
+      # The message names only key NAMES, never values — safe to print.
+      ansible.builtin.fail:
+        msg: >-
+          {{ fleet_ovh_env_file }} is missing required key(s):
+          {{ fleet_ovh_env_missing_keys | join(', ') }}. Not printing file
+          contents. See docs/installation.md.
+      when: fleet_ovh_env_missing_keys | length > 0
+
+    - name: Fix ownership/permissions of the OVH credentials file
+      # 0640 root:caddy — same read model as every other fleet-owned Caddy
+      # secret: group-readable by caddy, never world-readable. Ansible runs
+      # as root, so this is a plain chown/chmod, not the fleet-write/
+      # setgid-inherit pattern the snippet dirs need.
+      ansible.builtin.file:
+        path: "{{ fleet_ovh_env_file }}"
+        state: file
+        owner: root
+        group: caddy
+        mode: "0640"
+
+    - name: Ensure the caddy.service systemd drop-in directory exists
+      ansible.builtin.file:
+        path: /etc/systemd/system/caddy.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Install the caddy.service EnvironmentFile drop-in for OVH credentials
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/caddy.service.d/ovh-env.conf
+        owner: root
+        group: root
+        mode: "0644"
+        content: |
+          [Service]
+          EnvironmentFile={{ fleet_ovh_env_file }}
+      notify:
+        - Reload systemd daemon
+        - Restart caddy
+
+- name: Render the shared TLS snippet (tls.conf, per fleet_tls_mode)
+  # MUST run before "Deploy the Caddyfile" below — both the *.{{ fleet_domain
+  # }} site and every fleet-owned named-port snippet (fleet.core.caddyports)
+  # import this by a LITERAL path, which is a hard Caddy validate error if
+  # missing.
+  ansible.builtin.template:
+    src: tls.conf.j2
+    dest: "{{ fleet_caddy_snippet_dir }}/tls.conf"
+    owner: root
+    group: caddy
+    mode: "0640"
+  notify: Reload caddy
+
 - name: Deploy the Caddyfile (spec §9.3)
   ansible.builtin.template:
     src: Caddyfile.j2

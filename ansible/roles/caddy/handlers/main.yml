@@ -3,3 +3,21 @@
   ansible.builtin.systemd:
     name: caddy
     state: reloaded
+
+- name: Reload systemd daemon
+  # Needed after installing/changing the caddy.service.d/ovh-env.conf
+  # drop-in — systemd only picks up unit file changes on daemon-reload, not
+  # on a plain service reload/restart. Runs before "Restart caddy" below
+  # because handlers execute in the order they're DEFINED here, not the
+  # order they're notified.
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart caddy
+  # A config reload (`caddy reload`, above) does NOT pick up a swapped
+  # binary (ovh_dns mode's update-alternatives switch) or a fresh
+  # EnvironmentFile= drop-in (systemd only reads unit env files at process
+  # start) — both need a real restart, not a reload.
+  ansible.builtin.systemd:
+    name: caddy
+    state: restarted

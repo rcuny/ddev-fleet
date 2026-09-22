@@ -189,6 +189,127 @@ if [ -z "${FLEET_ADMIN_PASSWORD}" ]; then
   _admin_password_generated=1
 fi
 
+# TLS certificate mode (docs/installation.md "Choosing a TLS mode" / spec
+# `fleet_tls_mode`): how Caddy gets Let's Encrypt certs for *.<domain>.
+# `1`/`on_demand` (default) needs no setup; `2`/`ovh_dns` trades an OVH API
+# key for a single wildcard cert with no per-hostname rate limit.
+FLEET_TLS_MODE="${FLEET_TLS_MODE:-}"
+if [ -z "${FLEET_TLS_MODE}" ]; then
+  FLEET_TLS_MODE="$(_persisted_value fleet_tls_mode)"
+  [ -n "${FLEET_TLS_MODE}" ] && echo "==> fleet_tls_mode already set in ${FLEET_LOCAL_VARS} — using existing value, not re-prompting"
+fi
+if [ -z "${FLEET_TLS_MODE}" ]; then
+  if _tty_openable; then
+    echo "TLS certificates (Let's Encrypt):"
+    echo "  1) Per-hostname (HTTP challenge) — no setup; max ~50 NEW hostnames per 7 days per registered domain"
+    echo "  2) Wildcard via OVH DNS — one certificate for *.<domain>, no hostname limit; needs an OVH API key for your DNS zone"
+    read -r -p "Choose [1]: " _fleet_tls_choice < /dev/tty || _fleet_tls_choice=""
+  else
+    _fleet_tls_choice=""
+  fi
+  case "${_fleet_tls_choice}" in
+    2) FLEET_TLS_MODE="ovh_dns" ;;
+    ""|1) FLEET_TLS_MODE="on_demand" ;;
+    *)
+      echo "ERROR: unrecognised TLS mode choice '${_fleet_tls_choice}' (expected 1 or 2)." >&2
+      exit 1
+      ;;
+  esac
+fi
+case "${FLEET_TLS_MODE}" in
+  on_demand|ovh_dns) ;;
+  *)
+    echo "ERROR: FLEET_TLS_MODE '${FLEET_TLS_MODE}' is not valid (expected 'on_demand' or 'ovh_dns')." >&2
+    exit 1
+    ;;
+esac
+
+# ovh_dns credentials: /etc/caddy/ovh.env, mode 0600 root:root (the caddy
+# Ansible role later re-owns it 0640 root:caddy once the `caddy` group
+# exists — apt hasn't installed the package yet at this point in the
+# script). Ansible never writes this file's contents; this is the ONLY
+# place they're collected. Secrets never go to local-vars.yml or stdout.
+FLEET_OVH_ENV_FILE=/etc/caddy/ovh.env
+_ovh_env_has_all_keys() {
+  # Prints nothing; returns 0 (true) only if every required key is present
+  # as a KEY=... line. Never echoes values.
+  [ -f "${FLEET_OVH_ENV_FILE}" ] || return 1
+  for _k in OVH_ENDPOINT OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY; do
+    grep -q "^${_k}=" "${FLEET_OVH_ENV_FILE}" 2>/dev/null || return 1
+  done
+  return 0
+}
+
+if [ "${FLEET_TLS_MODE}" = "ovh_dns" ]; then
+  if _ovh_env_has_all_keys; then
+    echo "==> ${FLEET_OVH_ENV_FILE} already has all required OVH keys — leaving it unchanged"
+  else
+    OVH_ENDPOINT="${OVH_ENDPOINT:-}"
+    OVH_APPLICATION_KEY="${OVH_APPLICATION_KEY:-}"
+    OVH_APPLICATION_SECRET="${OVH_APPLICATION_SECRET:-}"
+    OVH_CONSUMER_KEY="${OVH_CONSUMER_KEY:-}"
+
+    if [ -z "${OVH_ENDPOINT}" ] && _tty_openable; then
+      read -r -p "OVH API endpoint [ovh-eu]: " OVH_ENDPOINT < /dev/tty || OVH_ENDPOINT=""
+    fi
+    OVH_ENDPOINT="${OVH_ENDPOINT:-ovh-eu}"
+
+    if [ -z "${OVH_APPLICATION_KEY}${OVH_APPLICATION_SECRET}${OVH_CONSUMER_KEY}" ] && _tty_openable; then
+      _ovh_zone="${OVH_ZONE:-}"
+      if [ -z "${_ovh_zone}" ]; then
+        read -r -p "OVH DNS zone (the registered domain in your OVH account, e.g. example.com): " _ovh_zone < /dev/tty || _ovh_zone=""
+      fi
+      echo "==> Create an OVH API token at: https://eu.api.ovh.com/createToken/"
+      echo "    Rights needed (GET/POST/DELETE), scoped to your zone:"
+      if [ -n "${_ovh_zone}" ]; then
+        echo "      GET    /domain/zone/${_ovh_zone}/*"
+        echo "      POST   /domain/zone/${_ovh_zone}/*"
+        echo "      DELETE /domain/zone/${_ovh_zone}/*"
+      else
+        echo "      GET/POST/DELETE  /domain/zone/<your-zone>/*"
+      fi
+      echo "    Optionally restrict the token to this server's IP."
+    fi
+
+    if [ -z "${OVH_APPLICATION_KEY}" ]; then
+      OVH_APPLICATION_KEY="$(_prompt_required OVH_APPLICATION_KEY 'OVH application key: ')"
+    fi
+    if [ -z "${OVH_APPLICATION_SECRET}" ]; then
+      if _tty_openable; then
+        read -r -s -p "OVH application secret: " OVH_APPLICATION_SECRET < /dev/tty || OVH_APPLICATION_SECRET=""
+        echo
+      fi
+      if [ -z "${OVH_APPLICATION_SECRET}" ]; then
+        echo "ERROR: OVH_APPLICATION_SECRET is required and no value was supplied." >&2
+        exit 1
+      fi
+    fi
+    if [ -z "${OVH_CONSUMER_KEY}" ]; then
+      if _tty_openable; then
+        read -r -s -p "OVH consumer key: " OVH_CONSUMER_KEY < /dev/tty || OVH_CONSUMER_KEY=""
+        echo
+      fi
+      if [ -z "${OVH_CONSUMER_KEY}" ]; then
+        echo "ERROR: OVH_CONSUMER_KEY is required and no value was supplied." >&2
+        exit 1
+      fi
+    fi
+
+    mkdir -p "$(dirname "${FLEET_OVH_ENV_FILE}")"
+    umask 077
+    {
+      echo "OVH_ENDPOINT=${OVH_ENDPOINT}"
+      echo "OVH_APPLICATION_KEY=${OVH_APPLICATION_KEY}"
+      echo "OVH_APPLICATION_SECRET=${OVH_APPLICATION_SECRET}"
+      echo "OVH_CONSUMER_KEY=${OVH_CONSUMER_KEY}"
+    } > "${FLEET_OVH_ENV_FILE}"
+    umask 022
+    chown root:root "${FLEET_OVH_ENV_FILE}"
+    chmod 0600 "${FLEET_OVH_ENV_FILE}"
+    echo "==> Wrote ${FLEET_OVH_ENV_FILE} (0600 root:root — the caddy role re-owns it 0640 root:caddy once provisioned)"
+  fi
+fi
+
 FLEET_REPO_VERSION="${FLEET_REPO_VERSION:-main}"
 
 FLEET_NETWORK_HARDENING="${FLEET_NETWORK_HARDENING:-}"
@@ -333,6 +454,7 @@ _persist_if_absent() {
 
 _persist_if_absent fleet_domain "\"${FLEET_DOMAIN}\""
 _persist_if_absent acme_email "\"${FLEET_ACME_EMAIL}\""
+_persist_if_absent fleet_tls_mode "\"${FLEET_TLS_MODE}\""
 _persist_if_absent fleet_network_hardening_enabled "$([ "${FLEET_NETWORK_HARDENING}" = "1" ] && echo true || echo false)"
 _persist_if_absent fleet_security_hardening_enabled "$([ "${FLEET_SECURITY_HARDENING}" = "1" ] && echo true || echo false)"
 
@@ -401,6 +523,12 @@ if [ "${_admin_password_generated}" -eq 1 ]; then
   echo "Dashboard admin password (generated, printed ONCE — save it now):"
   echo "  ${FLEET_ADMIN_PASSWORD}"
   echo "Rotate later with: sudo -u fleet fleet rotate-admin-password"
+  echo
+fi
+if [ "${FLEET_TLS_MODE}" = "ovh_dns" ]; then
+  echo "==> TLS mode is 'ovh_dns': Caddy issues one wildcard cert for *.${FLEET_DOMAIN}"
+  echo "    via the OVH DNS-01 challenge. Only '${FLEET_DOMAIN}' A/AAAA needs to point"
+  echo "    at this server — '*.${FLEET_DOMAIN}' does NOT need its own DNS record."
   echo
 fi
 if [ "${FLEET_NETWORK_HARDENING}" = "1" ]; then
