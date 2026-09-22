@@ -8,6 +8,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bounded timeouts on `fleet list`'s read-only status calls** so a
+  stalled `docker`/`ddev`/`git` process degrades the table instead of
+  hanging the whole command forever (observed once on ddev2, 2026-09-22:
+  a `fleet list` hung >2 minutes with no output before being killed by
+  hand — not reproduced since, so this is defensive hardening rather than
+  a confirmed root-cause fix). `ddev list --json-output`
+  (`core/ddev.py:LIST_TIMEOUT` = 30s), `docker stats --no-stream`
+  (`core/ddev.py:STATS_TIMEOUT` = 20s), and the per-instance `git
+  rev-parse` branch/HEAD reads (`core/instances.py:GIT_READ_TIMEOUT` =
+  10s) now all time out rather than block indefinitely. On a `ddev list`
+  timeout/failure, instances are still listed from on-disk state but
+  `InstanceStatus.state` reports a new `"unknown"` value instead of the
+  previous, inaccurate `"deployed"` (which asserted a live fact — nothing
+  running — that was never actually observed); a `docker stats`
+  timeout/failure only blanks the RAM column; a git-read timeout/failure
+  falls back quietly to the deploy-time recorded branch, same as its other
+  failure modes. Each of the first two prints one `warning: …` line to
+  stderr naming what's unavailable. Deploy/destroy/start/stop/import paths
+  are untouched — they still wait indefinitely by design. See
+  `docs/cli.md`'s "`fleet list` degraded state".
+- **Pre-destroy preflight** for redeploy/replace: `redeploy()` and
+  `deploy(replace=True)` (and, more lightly, `destroy()`) now run cheap,
+  side-effect-free checks — registry still resolves the deploy target,
+  alias FQDNs still compose, the Caddy snippet directory guard, and the
+  CURRENT Caddy config still validates — BEFORE anything is torn down.
+  Raises `DeployError` naming the reason and stating nothing was
+  destroyed. Closes the gap that let `fleet redeploy --all` destroy 5
+  instances on 2026-09-22 and then fail to rebuild them because `caddy
+  validate` was already broken for an unrelated reason.
+- **Per-host `fleet.domain`** (`<FLEET_HOME>/host.yml`, e.g.
+  `/srv/fleet/host.yml`): lets several fleet servers share ONE `fleet.yml`
+  (via the config repo) while each keeps its own domain. Rendered by the
+  `caddy` Ansible role from `fleet_domain`; `host.yml`'s `domain` wins over
+  `fleet.yml`'s own `fleet.domain` when both are set, and `fleet.domain`
+  becomes optional in `fleet.yml` once every host has its own `host.yml`.
+  See `docs/configuration.md`'s "Per-host domain" section.
 - **TLS certificate mode**, chosen at install time (`fleet_tls_mode`,
   `on_demand` default or `ovh_dns`): `on_demand` keeps today's
   per-hostname Let's Encrypt behaviour (HTTP-01 via `/api/tls-authorize`,

@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import sys
 from pathlib import Path
 
 from fleet.core.errors import FleetError
@@ -87,8 +88,32 @@ def delete(instance_dir: Path, *, runner=run_streamed) -> RunResult:
     return runner(["ddev", "delete", "--omit-snapshot", "--yes"], cwd=instance_dir)
 
 
-def list_projects(*, runner=run_streamed) -> list[dict]:
-    result = runner(["ddev", "list", "--json-output"])
+# Read-only status calls (`ddev list`, `docker stats`) must degrade, never
+# hang: `fleet list` is a status view, not an operation, and a stalled
+# docker/ddev daemon must never freeze it indefinitely. On 2026-09-22 a
+# `fleet list` run on ddev2 hung for >2 minutes with no output before being
+# killed by hand — not reproduced since, so these bounds are defensive
+# hardening rather than a confirmed root-cause fix, but a hang here has no
+# good outcome, so both calls now get a generous-but-bounded ceiling.
+LIST_TIMEOUT = 30.0
+STATS_TIMEOUT = 20.0
+
+
+def list_projects(*, timeout: float | None = None, runner=run_streamed) -> list[dict]:
+    # `timeout=` is forwarded to the runner only when the caller actually
+    # opts in (mirrors `_run_with_timeout_guard` above) — callers that don't
+    # pass one (e.g. the tmux sidebar refresh loop, refresh-claude-token's
+    # running-instance probe) keep today's exact wait-forever behaviour and
+    # today's exact runner call signature, so their existing fakes/tests are
+    # untouched. `list_instances()` below is the caller that opts in, with
+    # LIST_TIMEOUT.
+    kwargs = {}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
+    try:
+        result = runner(["ddev", "list", "--json-output"], **kwargs)
+    except subprocess.TimeoutExpired as exc:
+        raise FleetError(f"'ddev list' timed out after {timeout:g}s") from exc
     text = "\n".join(result.lines).strip()
     if not text:
         return []
@@ -103,10 +128,25 @@ def list_projects(*, runner=run_streamed) -> list[dict]:
     return []
 
 
-def ram_usage(*, runner=run_streamed) -> dict[str, int]:
+def ram_usage(*, timeout: float | None = None, runner=run_streamed) -> dict[str, int]:
     usage: dict[str, int] = {}
+    kwargs = {}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     try:
-        result = runner(["docker", "stats", "--no-stream", "--format", "{{json .}}"])
+        result = runner(["docker", "stats", "--no-stream", "--format", "{{json .}}"], **kwargs)
+    except subprocess.TimeoutExpired:
+        # RAM is best-effort/cosmetic for `fleet list` — degrade quietly to
+        # {} like every other ram_usage() failure mode, but this one case is
+        # common/expected enough (a stalled docker daemon) to name out loud.
+        print(
+            f"warning: 'docker stats' timed out after {timeout:g}s — RAM column unavailable",
+            file=sys.stderr,
+        )
+        return {}
+    except Exception:
+        return {}
+    try:
         for line in result.lines:
             stripped = line.strip()
             if not stripped:

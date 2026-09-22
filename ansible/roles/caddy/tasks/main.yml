@@ -27,6 +27,32 @@
     name: caddy
     state: present
 
+- name: Render the per-host fleet domain file (host.yml)
+  # Lets several fleet servers share ONE fleet.yml (via the config repo)
+  # while each keeps its own domain — Caddy's vhosts (fleet_domain, below)
+  # and fleet's own instance hostnames (fleet.core.registry.Registry.domain)
+  # must always agree, so this file is the single source both derive from
+  # on THIS host. Rendered by the caddy role (not fleet_user) because
+  # caddy-only.yml — the scoped playbook actually used to re-apply config on
+  # live hosts (see its own header comment) — only runs this role; {{
+  # fleet_srv_dir }} itself is created by the fleet_user role, which always
+  # runs before caddy in site.yml and is assumed already present when
+  # caddy-only.yml runs alone.
+  #
+  # Deliberately OUTSIDE {{ fleet_srv_dir }}/config/ (the shared, git-tracked
+  # fleet.yml registry repo) — see core/instances.py's
+  # FleetPaths.host_config docstring. A shared registry must never carry one
+  # server's domain; this per-host file is how it doesn't have to.
+  ansible.builtin.copy:
+    dest: "{{ fleet_srv_dir }}/host.yml"
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0644"
+    content: |
+      # managed by Ansible (caddy role) from fleet_domain — per-host; do not
+      # put this in the shared config repo
+      domain: {{ fleet_domain }}
+
 - name: Ensure the fleet-owned Caddy credential snippet directory exists
   # setgid (the leading "2" in mode 2750): Caddy runs as User=caddy and
   # reads these snippets straight off disk on every `systemctl restart

@@ -1,6 +1,7 @@
 """Streamed subprocess execution with line-by-line logging (spec §12)."""
 
 import os
+import signal
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -33,6 +34,17 @@ def run_streamed(
     if env:
         full_env.update(env)
 
+    # Only start the child in its own process group/session when a timeout
+    # is in play. That lets the timeout path kill the whole group (see
+    # below) so a grandchild that inherited the stdout pipe can't keep the
+    # reader thread blocked forever. We deliberately do NOT set this for
+    # the timeout=None path — interactive/long-running callers rely on the
+    # child staying in our process group so Ctrl-C (SIGINT) propagates to
+    # it normally.
+    popen_kwargs: dict = {}
+    if timeout is not None:
+        popen_kwargs["start_new_session"] = True
+
     try:
         process = subprocess.Popen(
             cmd,
@@ -43,6 +55,7 @@ def run_streamed(
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
+            **popen_kwargs,
         )
     except FileNotFoundError as exc:
         raise FleetError(f"command not found: {cmd[0]}") from exc
@@ -87,9 +100,34 @@ def run_streamed(
     reader.join(timeout=timeout)
 
     if reader.is_alive():
-        process.kill()
-        process.wait()
-        reader.join()
+        # Kill the whole process group, not just the direct child: `ddev`/
+        # `docker` (and shell wrappers in general) commonly spawn
+        # grandchildren that inherit the stdout pipe's write end. Killing
+        # only the direct child leaves that pipe open, so the reader
+        # thread's `for raw_line in process.stdout` never unblocks and this
+        # function would hang despite the timeout. `start_new_session=True`
+        # above put the child in its own process group, so its pgid equals
+        # its pid.
+        try:
+            os.killpg(os.getpgid(process.pid), signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            process.kill()
+
+        # Bound every step below so this function can never hang, even if
+        # something still doesn't die/close promptly.
+        try:
+            process.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            pass
+
+        if process.stdout is not None:
+            try:
+                process.stdout.close()
+            except OSError:
+                pass
+
+        reader.join(timeout=5)
+
         # Mirror what subprocess.run(..., timeout=...) would raise, so
         # callers (fleet.core.ddev) can catch the same exception type
         # regardless of the streaming mechanics here.

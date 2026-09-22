@@ -75,6 +75,50 @@ def test_ram_usage_returns_empty_dict_when_runner_raises():
     assert ddev.ram_usage(runner=exploding_runner) == {}
 
 
+def test_list_projects_timeout_defaults_to_none():
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[json.dumps({"raw": []})]))
+    ddev.list_projects(runner=fake)
+    assert fake.calls[0]["timeout"] is None
+
+
+def test_list_projects_forwards_timeout_to_runner():
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[json.dumps({"raw": []})]))
+    ddev.list_projects(timeout=ddev.LIST_TIMEOUT, runner=fake)
+    assert fake.calls[0]["timeout"] == ddev.LIST_TIMEOUT
+
+
+def test_list_projects_wraps_timeout_expired_in_fleet_error():
+    def timing_out_runner(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+    with pytest.raises(FleetError) as exc_info:
+        ddev.list_projects(timeout=ddev.LIST_TIMEOUT, runner=timing_out_runner)
+    assert f"timed out after {ddev.LIST_TIMEOUT:g}s" in str(exc_info.value)
+
+
+def test_ram_usage_timeout_defaults_to_none():
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    ddev.ram_usage(runner=fake)
+    assert fake.calls[0]["timeout"] is None
+
+
+def test_ram_usage_forwards_timeout_to_runner():
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    ddev.ram_usage(timeout=ddev.STATS_TIMEOUT, runner=fake)
+    assert fake.calls[0]["timeout"] == ddev.STATS_TIMEOUT
+
+
+def test_ram_usage_returns_empty_dict_and_warns_on_timeout(capsys):
+    def timing_out_runner(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+    assert ddev.ram_usage(timeout=ddev.STATS_TIMEOUT, runner=timing_out_runner) == {}
+    err = capsys.readouterr().err
+    assert "'docker stats' timed out" in err
+    assert f"{ddev.STATS_TIMEOUT:g}s" in err
+    assert "RAM column unavailable" in err
+
+
 def test_ram_usage_separates_two_projects():
     lines = [
         json.dumps({"Name": "ddev-oak--develop-web", "MemUsage": "150MiB / 2GiB"}),

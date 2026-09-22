@@ -8,6 +8,7 @@ never stored in the registry.
 """
 
 import ipaddress
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -16,6 +17,8 @@ from ruamel.yaml import YAML
 
 from fleet.core.errors import RegistryError, ValidationError
 from fleet.core.naming import instance_id, slugify, validate_part
+
+logger = logging.getLogger(__name__)
 
 _yaml = YAML()
 _yaml.preserve_quotes = True
@@ -57,21 +60,84 @@ class PortProfile:
 _TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
 
 
+def _load_host_domain(host_config_path: Path) -> str | None:
+    """Read the per-host `domain` override from `host_config_path` (a
+    `host.yml` — see `FleetPaths.host_config` / docs/configuration.md's
+    "per-host domain" section), or `None` if the file doesn't exist or
+    carries no `domain` key. `host.yml`'s schema is deliberately a small,
+    open mapping (more host-level keys may be added later) — unknown keys
+    are ignored here, not rejected.
+
+    Raises RegistryError if the file exists but isn't a mapping, or if
+    `domain` is present but not a bare hostname (non-empty string, no
+    scheme, no slashes — it is composed straight into instance FQDNs and
+    Caddy site blocks, so a URL-shaped value would silently break both)."""
+    if not host_config_path.exists():
+        return None
+    with open(host_config_path, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh)
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise RegistryError(f"{host_config_path}: host config must be a mapping")
+    if "domain" not in data:
+        return None
+    value = data["domain"]
+    if not isinstance(value, str) or not value.strip():
+        raise RegistryError(f"{host_config_path}: 'domain' must be a non-empty string")
+    if "://" in value or "/" in value:
+        raise RegistryError(
+            f"{host_config_path}: 'domain' must be a bare hostname — no scheme or "
+            f"slashes — got {value!r}"
+        )
+    return value
+
+
 class Registry:
-    def __init__(self, data, path: Path) -> None:
+    def __init__(self, data, path: Path, *, host_domain: str | None = None) -> None:
         self._data = data
         self._path = path
+        # The per-host `host.yml` domain override, already read and
+        # validated by `load()` — `None` means no override, so `domain`
+        # falls back to `fleet.domain` in fleet.yml as before.
+        self._host_domain = host_domain
 
     @classmethod
-    def load(cls, path: Path) -> "Registry":
+    def load(cls, path: Path, *, host_config_path: Path | None = None) -> "Registry":
+        """Load and validate `fleet.yml` at `path`.
+
+        `host_config_path`, when given, is checked for a per-host `domain`
+        override (`host.yml` — see `_load_host_domain`): several fleet
+        servers can then share ONE `fleet.yml` (via the shared config repo)
+        while each keeps its own `fleet.domain`. When `host_config_path` is
+        omitted (the default), behaviour is unchanged from before this
+        existed — `fleet.domain` in `path` is the only source, and it is
+        REQUIRED. Prefer `fleet.core.instances.load_registry(paths)` over
+        calling this directly wherever a `FleetPaths` is already in hand —
+        it's the one call site that can never forget to pass
+        `host_config_path`.
+        """
         if not path.exists():
             raise RegistryError(f"{path}: registry not found; run 'fleet init' first")
         with open(path, "r", encoding="utf-8") as fh:
             data = _yaml.load(fh)
         if data is None:
             raise RegistryError(f"{path}: empty or invalid registry file")
-        registry = cls(data, path)
-        registry._validate()
+
+        host_domain = _load_host_domain(host_config_path) if host_config_path is not None else None
+
+        fleet_block = data.get("fleet") or {}
+        fleet_yml_domain = fleet_block.get("domain")
+        if host_domain is not None and fleet_yml_domain and str(fleet_yml_domain) != host_domain:
+            logger.debug(
+                "domain override: host.yml (%s) wins over fleet.yml's fleet.domain "
+                "(%s) — this is expected when fleet.yml is shared across hosts",
+                host_domain,
+                fleet_yml_domain,
+            )
+
+        registry = cls(data, path, host_domain=host_domain)
+        registry._validate(host_config_path=host_config_path)
         return registry
 
     def _validate_fleet_ports(self, fleet_block: dict) -> dict:
@@ -125,13 +191,18 @@ class Registry:
             seen_router[router] = name
         return fleet_ports
 
-    def _validate(self) -> None:
+    def _validate(self, *, host_config_path: Path | None = None) -> None:
         data = self._data
         if "fleet" not in data:
             raise RegistryError("missing top-level key 'fleet'")
         fleet_block = data["fleet"] or {}
-        if "domain" not in fleet_block:
-            raise RegistryError("missing key 'fleet.domain'")
+        # `fleet.domain` is only required when NO host.yml override resolved
+        # it (see `load()`/`_load_host_domain`) — a shared fleet.yml across
+        # several hosts may legitimately omit it entirely once every host
+        # carries its own host.yml.
+        if "domain" not in fleet_block and self._host_domain is None:
+            where = f" or in {host_config_path}" if host_config_path is not None else ""
+            raise RegistryError(f"missing key 'fleet.domain' in {self._path}{where}")
 
         fleet_ports = self._validate_fleet_ports(fleet_block)
         self._validate_auth_bypass(fleet_block)
@@ -256,6 +327,12 @@ class Registry:
 
     @property
     def domain(self) -> str:
+        """The fleet's wildcard domain. `host.yml`'s `domain` (per-host,
+        see `load()`) wins when present, even if `fleet.yml`'s own
+        `fleet.domain` also has a value — that's the whole point of sharing
+        one `fleet.yml` across hosts with different domains."""
+        if self._host_domain is not None:
+            return self._host_domain
         return str(self._data["fleet"]["domain"])
 
     @property

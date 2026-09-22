@@ -106,11 +106,17 @@ def hash_password(password: str, *, runner=run_streamed) -> str:
     raise CaddyAuthError("'caddy hash-password' produced no output")
 
 
-def ensure_snippet_dir(directory: Path) -> None:
+def ensure_snippet_dir(directory: Path, *, create: bool = True) -> None:
     """Guard a fleet-owned Caddy snippet directory before writing into it.
 
     Under MANAGED_SNIPPET_ROOT the directory must already exist AND carry the
     **setgid** bit; anywhere else (tests, local runs) it is simply created.
+
+    `create=False` (used by `core/instances.py`'s pre-destroy preflight,
+    which must never have side effects) skips the create-on-demand `mkdir`
+    for an unmanaged directory, turning this into a pure read-only check —
+    the managed-root branch below was already read-only (stat only, never
+    mkdir), so `create=False` just makes the unmanaged branch match it.
 
     Why this is a hard error rather than a `mkdir` (learned on ddev2, where
     it took Caddy down for a week, 2026-09-14 → 2026-09-21): fleet writes
@@ -137,7 +143,8 @@ def ensure_snippet_dir(directory: Path) -> None:
         managed = False
 
     if not managed:
-        directory.mkdir(parents=True, exist_ok=True)
+        if create:
+            directory.mkdir(parents=True, exist_ok=True)
         return
 
     if not directory.is_dir():

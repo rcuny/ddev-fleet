@@ -46,3 +46,36 @@ def test_returns_empty_when_runner_raises(tmp_path):
         raise OSError("git missing")
 
     assert read_instance_git_head(d, runner=boom) == ""
+
+
+def test_returns_empty_on_timeout(tmp_path):
+    import subprocess
+
+    d = tmp_path / "oak--dev-1"
+
+    def timing_out(cmd, **kwargs):
+        raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+
+    assert read_instance_git_head(d, timeout=10.0, runner=timing_out) == ""
+
+
+def test_timeout_defaults_to_none(tmp_path):
+    d = tmp_path / "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            _key(d, "rev-parse", "--short", "HEAD"): RunResult(0, ["abc1234"]),
+        }
+    )
+    read_instance_git_head(d, runner=fake)
+    assert fake.calls[0]["timeout"] is None
+
+
+def test_forwards_timeout_to_runner(tmp_path):
+    d = tmp_path / "oak--dev-1"
+    fake = FakeRunner(
+        scripted={
+            _key(d, "rev-parse", "--short", "HEAD"): RunResult(0, ["abc1234"]),
+        }
+    )
+    read_instance_git_head(d, timeout=10.0, runner=fake)
+    assert fake.calls[0]["timeout"] == 10.0

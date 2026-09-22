@@ -4,6 +4,7 @@
 import logging
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -51,6 +52,7 @@ class FleetPaths:
     project_secrets: Path
     locks: Path
     push_key_dir: Path
+    host_config: Path
 
     @classmethod
     def from_home(cls, home: Path) -> "FleetPaths":
@@ -69,7 +71,24 @@ class FleetPaths:
             project_secrets=home / "secrets",
             locks=home / "locks",
             push_key_dir=home / ".push-key",
+            # Deliberately OUTSIDE config_dir/ — config_dir is the shared,
+            # git-tracked `fleet.yml` registry repo that multiple servers can
+            # point at, while host.yml is per-host (rendered by the `caddy`
+            # Ansible role from `fleet_domain`, see docs/configuration.md's
+            # "per-host domain" section) and must never live inside a repo
+            # that gets committed/shared across hosts.
+            host_config=home / "host.yml",
         )
+
+
+def load_registry(paths: FleetPaths) -> Registry:
+    """THE one constructor every CLI/daemon call site uses to load the
+    registry — wraps `Registry.load()` with `paths.host_config` so a
+    per-host `domain` override (see `FleetPaths.host_config`'s docstring
+    note above and `Registry.load`'s `host_config_path` parameter) is never
+    forgotten at some call site. Prefer this over calling `Registry.load()`
+    directly anywhere `paths` is already in hand."""
+    return Registry.load(paths.registry, host_config_path=paths.host_config)
 
 
 def _now_iso() -> str:
@@ -228,6 +247,100 @@ def resolve_target(
     return registry.resolve(project, resolved_template, resolved_branch, label=label)
 
 
+def _preflight_rebuild(
+    registry: Registry,
+    instance_id: str,
+    *,
+    project: str | None = None,
+    template: str | None = None,
+    branch: str | None = None,
+    label: str | None = None,
+    snippet_dir: Path,
+    caddyfile_path: Path,
+    runner=run_streamed,
+) -> None:
+    """Cheap, side-effect-free checks run BEFORE any destroy-then-rebuild
+    starts tearing anything down: `deploy()`'s `replace=True` path (and thus
+    `redeploy()`, its only real caller — see design decision 2) and, more
+    lightly, `destroy()` itself.
+
+    Incident 2026-09-22: `fleet redeploy --all` destroyed 5 instances, then
+    failed removing each one's basic-auth snippet because `caddy validate`
+    was failing for a reason unrelated to any of them (a fleet-wide Caddy
+    config problem, not something about those instances). The rebuild never
+    ran, so those 5 instances were simply gone. None of that failure mode
+    involves writing/destroying anything itself — it's pure validation — so
+    every check below is cheap and side-effect-free, and a failure here
+    leaves the existing instance completely untouched.
+
+    Checks, in order (each is skipped when the caller passes no
+    project/template/branch — see `destroy()`, which has no rebuild target
+    to resolve and only runs the last two, Caddy-focused checks):
+
+      1. The registry still resolves this instance's deploy target — same
+         path `deploy()`/`redeploy()` themselves use
+         (`resolve_target`/`Registry.resolve`). If the project, template, or
+         branch default has since vanished from `fleet.yml`, the rebuild
+         could never complete anyway. Through the current call sites this is
+         also caught even earlier, by `deploy()`'s own unconditional
+         `resolve_target()` call before the replace/destroy decision is
+         made — this check stays part of the contract anyway (defense in
+         depth for any future caller of this primitive, and directly
+         testable in isolation).
+      2. This instance's Domain-Access alias FQDNs
+         (`additional_hostnames`) still compose without exceeding the DNS
+         label limit (`alias_fqdns`) — today this is only computed by
+         `deploy()` AFTER the destroy+re-clone, so checking it here is new
+         protection against the exact same "destroyed but not rebuilt"
+         failure shape as the incident, just from a different error source.
+      3. The Caddy snippet directory `_destroy_locked()` is about to touch
+         still passes `caddyauth.ensure_snippet_dir()`'s guard — called with
+         `create=False` so this is a pure read even for the "unmanaged"
+         (tests/local) branch.
+      4. The CURRENT (pre-destroy) Caddy config still validates. If it
+         doesn't, `_destroy_locked()`'s own `disable_instance_auth()` call
+         would fail AFTER the instance directory is already gone — exactly
+         the incident above. Skipped gracefully when `caddyfile_path`
+         doesn't exist yet — nothing live to validate against, the same
+         "nothing to do" skip `caddyports.sync()` applies when a sync
+         writes/removes nothing.
+
+    Raises DeployError, always prefixed so the operator knows the existing
+    instance was left untouched, naming which check failed and why.
+    """
+    prefix = f"preflight failed for instance {instance_id!r} — NOTHING WAS DESTROYED: "
+
+    if project is not None:
+        try:
+            resolve_target(registry, project, template, branch, label)
+        except FleetError as exc:
+            raise DeployError(
+                prefix + "the registry no longer resolves this instance's deploy target: "
+                f"{exc.message}"
+            ) from exc
+
+        try:
+            alias_fqdns(registry, project, instance_id)
+        except FleetError as exc:
+            raise DeployError(prefix + exc.message) from exc
+
+    try:
+        caddyauth.ensure_snippet_dir(snippet_dir, create=False)
+    except FleetError as exc:
+        raise DeployError(
+            prefix + f"the Caddy snippet directory check failed: {exc.message}"
+        ) from exc
+
+    if caddyfile_path.exists():
+        try:
+            caddyauth.validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
+        except FleetError as exc:
+            raise DeployError(
+                prefix + "the CURRENT Caddy config does not validate — fix Caddy first, "
+                f"then retry: {exc.message}"
+            ) from exc
+
+
 def deploy(
     paths: FleetPaths,
     registry: Registry,
@@ -330,6 +443,17 @@ def deploy(
 
     with instance_lock(paths.locks, inst_id):
         if replace and instance_dir.exists():
+            _preflight_rebuild(
+                registry,
+                inst_id,
+                project=project,
+                template=resolved.template,
+                branch=resolved.branch,
+                label=resolved.label,
+                snippet_dir=snippet_dir,
+                caddyfile_path=caddyfile_path,
+                runner=runner,
+            )
             _destroy_locked(
                 paths,
                 inst_id,
@@ -936,13 +1060,36 @@ def destroy(
     instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
         raise FleetError(f"unknown instance {instance_id!r}: {instance_dir} does not exist")
+
+    # Same None-sentinel resolution deploy() does above, resolved here (not
+    # left to _destroy_locked's own defaulting) so the preflight check below
+    # and _destroy_locked agree on the exact same paths.
+    snippet_dir = (
+        auth_snippet_dir if auth_snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
+    )
+    caddyfile_path = (
+        auth_caddyfile_path if auth_caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
+    )
+
     with instance_lock(paths.locks, instance_id):
+        # Lighter than deploy()'s preflight (no rebuild target to resolve —
+        # a plain destroy has nothing to rebuild): just the two Caddy checks,
+        # so a fleet-wide Caddy problem is surfaced before the instance
+        # directory is removed rather than after (see _preflight_rebuild's
+        # docstring for the incident this guards against).
+        _preflight_rebuild(
+            registry,
+            instance_id,
+            snippet_dir=snippet_dir,
+            caddyfile_path=caddyfile_path,
+            runner=runner,
+        )
         _destroy_locked(
             paths,
             instance_id,
             registry,
-            auth_snippet_dir=auth_snippet_dir,
-            auth_caddyfile_path=auth_caddyfile_path,
+            auth_snippet_dir=snippet_dir,
+            auth_caddyfile_path=caddyfile_path,
             runner=runner,
         )
 
@@ -1169,16 +1316,33 @@ def read_instance_branch(instance_dir: Path) -> str:
     return str(data.get("branch", ""))
 
 
-def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
+# Per-instance git reads (branch/HEAD) run once per instance on every
+# `fleet list` — a bound bad checkout/stalled git process can't hang, so it
+# gets the same defensive ceiling as the ddev/docker calls above (see
+# ddev.LIST_TIMEOUT/STATS_TIMEOUT: 2026-09-22 ddev2 incident). Both
+# functions already treat every failure mode (bad checkout, missing git,
+# non-zero exit) as a quiet "" — a timeout is just one more entry in that
+# same best-effort contract, so it degrades silently like the others rather
+# than adding a new per-instance warning line to `fleet list` output.
+GIT_READ_TIMEOUT = 10.0
+
+
+def read_instance_git_branch(
+    instance_dir: Path, *, timeout: float | None = None, runner=run_streamed
+) -> str:
     """Return the ACTUAL current git branch of the instance checkout, or "" if
     it can't be determined. Uses `git rev-parse` (works for both git worktrees
     and full clones). On a detached HEAD, returns the short commit SHA rather
-    than the literal "HEAD". Best-effort: any git error/exception yields "" so a
-    bad checkout never crashes the sidebar refresh loop."""
+    than the literal "HEAD". Best-effort: any git error/exception (including a
+    timeout, when `timeout=` is passed) yields "" so a bad or stalled checkout
+    never crashes the sidebar refresh loop or `fleet list`."""
+    kwargs = {"echo": False}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     try:
         result = runner(
             ["git", "-C", str(instance_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-            echo=False,
+            **kwargs,
         )
     except Exception:  # noqa: BLE001 - best-effort display helper
         return ""
@@ -1190,7 +1354,7 @@ def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
     try:
         sha = runner(
             ["git", "-C", str(instance_dir), "rev-parse", "--short", "HEAD"],
-            echo=False,
+            **kwargs,
         )
     except Exception:  # noqa: BLE001 - best-effort display helper
         return ""
@@ -1199,15 +1363,21 @@ def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
     return "\n".join(sha.lines).strip()
 
 
-def read_instance_git_head(instance_dir: Path, *, runner=run_streamed) -> str:
+def read_instance_git_head(
+    instance_dir: Path, *, timeout: float | None = None, runner=run_streamed
+) -> str:
     """Return the short commit SHA of the instance checkout's HEAD (e.g.
     "9201b89b53"), or "" if it can't be determined. Best-effort: any git
-    error/exception yields "" so a bad checkout never breaks the sidebar refresh
-    loop or the web UI list."""
+    error/exception (including a timeout, when `timeout=` is passed) yields ""
+    so a bad or stalled checkout never breaks the sidebar refresh loop or the
+    web UI list."""
+    kwargs = {"echo": False}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     try:
         result = runner(
             ["git", "-C", str(instance_dir), "rev-parse", "--short", "HEAD"],
-            echo=False,
+            **kwargs,
         )
     except Exception:  # noqa: BLE001 - best-effort display helper
         return ""
@@ -1235,16 +1405,28 @@ def list_instances(
     if not instances_root.exists():
         return []
 
+    # `live_state_known` distinguishes "ddev list ran and reported nothing
+    # running" (state can honestly be "deployed") from "ddev list didn't run
+    # at all / timed out / errored" (state must be "unknown" — claiming
+    # "deployed" here would be asserting a fact we never actually observed;
+    # see ddev.LIST_TIMEOUT's docstring for the 2026-09-22 ddev2 incident
+    # that prompted this distinction).
     try:
-        ddev_projects = ddev.list_projects(runner=runner)
-    except Exception:
+        ddev_projects = ddev.list_projects(timeout=ddev.LIST_TIMEOUT, runner=runner)
+        live_state_known = True
+    except Exception as exc:
         ddev_projects = []
+        live_state_known = False
+        print(
+            f"warning: {exc} — live state unavailable, showing on-disk instances",
+            file=sys.stderr,
+        )
     running_ids = {
         p.get("name") for p in ddev_projects if str(p.get("status", "")).lower() == "running"
     }
 
     try:
-        ram = ddev.ram_usage(runner=runner)
+        ram = ddev.ram_usage(timeout=ddev.STATS_TIMEOUT, runner=runner)
     except Exception:
         ram = {}
 
@@ -1266,13 +1448,18 @@ def list_instances(
             instance = parts[1] if len(parts) > 1 else ""
             branch = ""
 
-        live_branch = read_instance_git_branch(entry, runner=runner)
+        live_branch = read_instance_git_branch(entry, timeout=GIT_READ_TIMEOUT, runner=runner)
         if live_branch:
             branch = live_branch
 
-        head = read_instance_git_head(entry, runner=runner)
+        head = read_instance_git_head(entry, timeout=GIT_READ_TIMEOUT, runner=runner)
 
-        state = "running" if current_id in running_ids else "deployed"
+        if current_id in running_ids:
+            state = "running"
+        elif live_state_known:
+            state = "deployed"
+        else:
+            state = "unknown"
         statuses.append(
             InstanceStatus(
                 instance_id=current_id,

@@ -780,3 +780,44 @@ def test_bulk_job_panel_with_no_current_instance_omits_log_element(fleet_home):
     assert response.status_code == 200
     assert "job-log" not in response.text
     assert "/ws/instances//log" not in response.text
+
+
+# --- per-host domain (host.yml) — 2026-09-22 multi-server shared-config design ---
+
+
+def test_tls_authorize_uses_host_yml_domain_override(fleet_home):
+    """`host.yml`'s `domain` must win over `fleet.yml`'s `fleet.domain` end
+    to end through the daemon: `/api/tls-authorize` authorizes hostnames
+    under the host.yml domain, not the (different) one recorded in the
+    shared fleet.yml."""
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {}
+""",
+        encoding="utf-8",
+    )
+    paths.host_config.write_text("domain: fleet.other-host.test\n", encoding="utf-8")
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    client = TestClient(create_app(fleet_home))
+
+    # host.yml's domain is authorized...
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "demo--develop.fleet.other-host.test"}
+    )
+    assert response.status_code == 200
+
+    # ...fleet.yml's own (overridden) domain is not.
+    response = client.get(
+        "/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"}
+    )
+    assert response.status_code == 404
