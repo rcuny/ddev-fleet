@@ -74,6 +74,40 @@ fleet_admin_user: admin
 # (see ansible/roles/caddy/tasks/main.yml).
 fleet_caddy_snippet_dir: /etc/caddy/fleet
 
+# --- TLS certificate mode (docs/installation.md "Choosing a TLS mode") -----
+# How Caddy gets Let's Encrypt certificates for `*.{{ fleet_domain }}` and
+# every named-port site (core/caddyports.py). Two allowed values (asserted
+# in the caddy role — an unrecognised value fails fast with a clear
+# message):
+#
+#   on_demand (default): one cert per exact hostname, issued the first time
+#     it's requested, authorized via HTTP-01 through /api/tls-authorize. No
+#     setup. Limited to ~50 NEW certs per registered domain per rolling 7
+#     days (Let's Encrypt's "Certificates per Registered Domain" rate
+#     limit) — can bite a project with many instances/aliases.
+#
+#   ovh_dns: ONE wildcard cert for *.{{ fleet_domain }} via the DNS-01
+#     challenge, with Caddy writing the _acme-challenge TXT record through
+#     the OVH API (caddy-dns/ovh plugin, requires a custom Caddy build —
+#     see the caddy role). No per-hostname limit. OVH is currently the only
+#     supported DNS provider; a future provider would be a new mode named
+#     `<provider>_dns`, following the same pattern.
+#
+# Persisted per host in /etc/ddev-fleet/local-vars.yml (bootstrap.sh's
+# "TLS certificates" prompt), like fleet_domain. Switching an existing
+# server's mode: edit local-vars.yml, then (for ovh_dns) create
+# /etc/caddy/ovh.env, then re-run `ansible/caddy-only.yml` — see
+# docs/installation.md.
+fleet_tls_mode: on_demand
+
+# --- OVH DNS-01 (ovh_dns mode only; ignored otherwise) ----------------------
+# Ansible NEVER writes the credential file's CONTENTS (see the caddy role) —
+# it only asserts /etc/caddy/ovh.env exists with all four keys and fixes its
+# owner/group/mode. The operator creates it (bootstrap.sh prompts for the
+# values and writes it 0600 root:root; the caddy role then re-owns it
+# 0640 root:caddy so Caddy's systemd EnvironmentFile= can read it).
+fleet_ovh_env_file: /etc/caddy/ovh.env
+
 # --- Product repo (spec §3.1, §17) -------------------------------------------
 fleet_repo_url: https://github.com/rcuny/ddev-fleet.git
 fleet_repo_version: main

@@ -8,6 +8,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **TLS certificate mode**, chosen at install time (`fleet_tls_mode`,
+  `on_demand` default or `ovh_dns`): `on_demand` keeps today's
+  per-hostname Let's Encrypt behaviour (HTTP-01 via `/api/tls-authorize`,
+  ~50 new certs/registered-domain/7 days); `ovh_dns` issues a single
+  wildcard certificate for `*.<domain>` via the OVH DNS-01 challenge
+  (`caddy-dns/ovh` plugin, custom Caddy build installed via
+  `update-alternatives`), removing the per-hostname rate limit entirely.
+  Both modes render from one shared Caddy snippet, `tls.conf`, imported by
+  a literal path from the `*.<domain>` site and every named-port site
+  (`fleet.core.caddyports` needs no knowledge of the mode). New scoped
+  playbook `ansible/caddy-only.yml` lets an existing server switch mode
+  (or domain) without running `site.yml`. `bootstrap.sh` prompts for the
+  mode and, for `ovh_dns`, the OVH API credentials (written straight to
+  `/etc/caddy/ovh.env`, never to `local-vars.yml`). See
+  `docs/installation.md` "Choosing a TLS mode" and `docs/networking.md` §4.
+- The `*.<domain>` site now sends `X-Robots-Tag: noindex, nofollow` on
+  every response, in both TLS modes — instance URLs are ephemeral,
+  often-unfinished work and should never be indexed.
 - `FLEET_INSTANCE_HOST=<instance-id>.<domain>` injected into every
   instance's `web_environment`, so a project's own Drupal Domain Access
   config can build its alias-matching patterns without hardcoding the

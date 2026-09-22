@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-25
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -21,8 +21,8 @@ Bare-metal / VPS host
 │       directly by the CLI too, so the CLI never depends on the daemon
 ├── Caddy (systemd) — public TLS, the only externally reachable process
 │   ├── fleet.<domain>            → basic_auth → reverse_proxy 127.0.0.1:8765 (web UI)
-│   ├── *.<domain>                → on-demand TLS → optional per-instance basic_auth → reverse_proxy 127.0.0.1:8080 (ddev-router HTTP)
-│   └── *.<domain>:9108           → on-demand TLS → reverse_proxy 127.0.0.1:8108 (ddev-router, Typesense)
+│   ├── *.<domain>                → TLS (on_demand OR ovh_dns wildcard — fleet_tls_mode) → optional per-instance basic_auth → reverse_proxy 127.0.0.1:8080 (ddev-router HTTP)
+│   └── *.<domain>:9108           → TLS (same tls.conf snippet) → reverse_proxy 127.0.0.1:8108 (ddev-router, Typesense)
 └── Docker (DDEV)
     ├── ddev-router (shared Traefik) — HTTP/HTTPS entrypoints, loopback-only
     ├── project1--main    (PHP · MariaDB · … containers)
@@ -32,7 +32,10 @@ Bare-metal / VPS host
 
 Provisioning is Ansible (`ansible/site.yml`, roles `base`, `docker`,
 `fleet_user`, `shell_profile`, `ddev`, `claude_cli`, `caddy`,
-`fleet_service`) — see `docs/installation.md`.
+`fleet_service`) — see `docs/installation.md`. The `caddy` role also
+renders the shared `tls.conf` snippet per `fleet_tls_mode`
+(`on_demand`/`ovh_dns` — see `docs/networking.md` §4), and `ansible/
+caddy-only.yml` reapplies just that role on a live host.
 
 ## Module map (`src/fleet/`)
 

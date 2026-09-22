@@ -1,4 +1,22 @@
 ---
+# Handlers execute in the order they are DEFINED here, not the order they
+# are notified — and that order matters on an ovh_dns switch:
+#   1. daemon-reload, so systemd knows the caddy.service.d/ovh-env.conf
+#      drop-in (EnvironmentFile=/etc/caddy/ovh.env);
+#   2. restart, so the process picks up a swapped binary and that env;
+#   3. reload last — after a restart it is a harmless no-op.
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart caddy
+  # A config reload does NOT pick up a swapped binary (ovh_dns mode's
+  # update-alternatives switch) or a fresh EnvironmentFile= drop-in
+  # (systemd only reads unit env files at process start).
+  ansible.builtin.systemd:
+    name: caddy
+    state: restarted
+
 - name: Reload caddy
   ansible.builtin.systemd:
     name: caddy

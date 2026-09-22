@@ -62,6 +62,39 @@ Nothing downstream ever terminates TLS — the loopback hop from Caddy to
 only because it never leaves the host (`127.0.0.1`). Caddy sets
 `X-Forwarded-Proto=https` so Drupal still sees the request as secure.
 
+### Certificate mode (`fleet_tls_mode`)
+
+How Caddy actually *gets* those certificates is chosen at install time
+(`docs/installation.md` "Choosing a TLS mode") and persisted as the
+`fleet_tls_mode` Ansible var:
+
+- **`on_demand`** (default) — one cert per exact hostname, issued the
+  first time it's requested, via the HTTP-01 challenge authorized by
+  `/api/tls-authorize`. Subject to Let's Encrypt's ~50-new-certs-per-
+  registered-domain-per-7-days limit (see §7 below).
+- **`ovh_dns`** — one wildcard cert for `*.{{ fleet_domain }}`, via the
+  DNS-01 challenge (`caddy-dns/ovh` plugin writing the `_acme-challenge`
+  TXT record through the OVH API). No per-hostname limit; needs an OVH API
+  key. OVH is currently the only supported DNS provider — a future
+  provider would be a new mode named `<provider>_dns`.
+
+Both modes render the same shape of Caddy config: the full `tls { ... }`
+directive lives in ONE file, `{{ fleet_caddy_snippet_dir }}/tls.conf`
+(rendered by the `caddy` Ansible role from `tls.conf.j2`, per
+`fleet_tls_mode` — never by `fleet.core`), imported by a **literal** path
+from both the `*.{{ fleet_domain }}` site (`Caddyfile.j2`) and every
+fleet-owned named-port site (`fleet.core.caddyports.render_port_snippet()`)
+— so `core/caddyports.py` carries zero knowledge of TLS mode, and in
+`ovh_dns` mode every one of those sites shares the exact same wildcard
+certificate (same cert name in Caddy's storage, since they all import the
+identical `tls.conf`). The dashboard site (`fleet.{{ fleet_domain }}`
+itself) keeps Caddy's own default automatic HTTPS (HTTP-01) in **both**
+modes — it isn't a wildcard-eligible hostname.
+
+Switching an existing server's mode: `ansible/caddy-only.yml` (a scoped
+playbook, mirroring `ddev-only.yml`) reapplies just the `caddy` role — see
+`docs/installation.md` "Switching TLS mode on an existing server".
+
 ## 5. Host-header routing
 
 Every named port's Caddy site block (`*.{{ fleet_domain }}:<port> {
@@ -138,14 +171,16 @@ sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
   patterns from it: `"<h>-" . getenv('FLEET_INSTANCE_HOST')` in PHP,
   guaranteed to compose the exact same string `alias_fqdns()` does
   fleet-side.
-- **Certificates.** Each alias host is a distinct hostname to Caddy's
-  on-demand TLS, so it gets its **own** Let's Encrypt certificate the first
-  time it's requested — it is not covered by the instance's own cert. A
-  registered domain gets roughly 50 new-certificate issuances per week from
-  Let's Encrypt; a project with many aliases across many instances can run
-  into that limit before a wildcard DNS-01 certificate (issued once per
-  `*.<domain>`, no `/api/tls-authorize` round trip per alias) becomes the
-  fix — not yet implemented.
+- **Certificates.** In the default `on_demand` mode, each alias host is a
+  distinct hostname to Caddy's on-demand TLS, so it gets its **own** Let's
+  Encrypt certificate the first time it's requested — it is not covered by
+  the instance's own cert. A registered domain gets roughly 50
+  new-certificate issuances per week from Let's Encrypt; a project with
+  many aliases across many instances can run into that limit. Switching
+  to `fleet_tls_mode: ovh_dns` (§4 above) removes this limit entirely — a
+  single wildcard cert for `*.<domain>` already covers every alias host
+  (they're all single-label subdomains of the same domain), with no
+  `/api/tls-authorize` round trip and no per-hostname issuance at all.
 
 ## 8. Cross-references
 

@@ -32,6 +32,43 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PORTS_SNIPPET_DIR = Path("/etc/caddy/fleet/ports")
 
+# The shared TLS snippet (`tls.conf`) lives one level up from the per-port
+# snippet dir, at the fleet-owned Caddy snippet root ({{ fleet_caddy_snippet_dir
+# }} in Ansible — see ansible/roles/caddy/templates/tls.conf.j2). It carries
+# the FULL `tls { ... }` directive for whichever mode the server was
+# installed with (`fleet_tls_mode`: `on_demand` or `ovh_dns`) so this module
+# needs zero knowledge of TLS mode — it just imports the same literal path
+# every named-port site block and the *.{{ fleet_domain }} site both import.
+#
+# UPGRADE SAFETY: a literal (non-glob) import is a HARD Caddy error if the
+# file is missing — correct once tls.conf is provisioned, but NOT yet true
+# the moment this code first ships to a server whose `caddy` role hasn't
+# been re-run yet (e.g. the live primary via `push-product`'s git-pull +
+# `systemctl restart fleet`, which reconciles port snippets on daemon
+# startup — no Ansible involved). Rewriting a snippet to `import` a
+# not-yet-existing tls.conf on such a host would make `caddy validate` fail
+# on Caddy's NEXT restart, taking every instance down. `render_port_snippet`
+# therefore falls back to inlining the legacy multi-line `tls { on_demand }`
+# block (the pre-feature behaviour — exactly correct for an un-migrated
+# on_demand server) whenever tls.conf does not exist on disk yet. Run
+# `ansible/caddy-only.yml` to create tls.conf, then `fleet refresh-ports` (or
+# the next daemon restart) to flip existing snippets over to the import —
+# see docs/installation.md "Switching TLS mode".
+TLS_SNIPPET_FILENAME = "tls.conf"
+
+# The exact legacy inline block, kept byte-for-byte identical to what this
+# module rendered before tls.conf existed (verified against a real `caddy
+# validate` v2.11, 2026-07-25 — the single-line form is invalid Caddyfile
+# syntax).
+_LEGACY_ON_DEMAND_TLS_BLOCK = "    tls {\n        on_demand\n    }\n"
+
+
+def tls_snippet_path(*, snippet_dir: Path = DEFAULT_PORTS_SNIPPET_DIR) -> Path:
+    """The shared tls.conf path for a given per-port snippet_dir — always
+    snippet_dir's PARENT (the fleet Caddy snippet root), since tls.conf is
+    not port-specific."""
+    return snippet_dir.parent / TLS_SNIPPET_FILENAME
+
 
 def port_snippet_path(port_name: str, *, snippet_dir: Path = DEFAULT_PORTS_SNIPPET_DIR) -> Path:
     """Raises ``ValidationError`` (via ``naming.validate_part``) for any
@@ -45,22 +82,44 @@ def port_snippet_path(port_name: str, *, snippet_dir: Path = DEFAULT_PORTS_SNIPP
     return snippet_dir / f"{port_name}.conf"
 
 
-def render_port_snippet(domain: str, profile: PortProfile) -> str:
-    """Pure, no I/O. Structurally identical to today's static Typesense
-    site block, generalized to any named port.
+def render_port_snippet(
+    domain: str,
+    profile: PortProfile,
+    *,
+    snippet_dir: Path = DEFAULT_PORTS_SNIPPET_DIR,
+    tls_snippet_exists: bool | None = None,
+) -> str:
+    """Structurally identical to today's static Typesense site block,
+    generalized to any named port.
 
-    The `tls { on_demand }` block is rendered in MULTI-LINE form, matching
-    the static block it replaces (`ansible/roles/caddy/templates/
-    Caddyfile.j2`). The single-line `tls { on_demand }` form is INVALID —
-    proven against a real `caddy validate` (v2.11) on the live server,
-    2026-07-25: `Unexpected next token after '{' on same line`. Do not
-    "simplify" this back to one line."""
+    The TLS directive normally `import`s the shared `tls.conf` snippet
+    (`tls_snippet_path()`, one level up from `snippet_dir`) instead of
+    being inlined, so this module carries zero knowledge of
+    `fleet_tls_mode` (`on_demand` vs `ovh_dns`) — `ansible/roles/caddy/
+    templates/tls.conf.j2` renders the actual `tls { ... }` block for
+    whichever mode the server was installed with.
+
+    UPGRADE-SAFETY FALLBACK: a literal (non-glob) import is a hard Caddy
+    error if the file is missing, which is only safe once tls.conf has
+    actually been provisioned (the `caddy` Ansible role). On a host that
+    hasn't had that role re-run yet, this function inlines the legacy
+    multi-line `tls { on_demand }` block instead — the exact pre-feature
+    behaviour, correct for an un-migrated on_demand server. `tls_snippet_exists`
+    is injectable for tests; left as `None` (the default), the function does
+    ONE `Path.exists()` I/O call against `tls_snippet_path(snippet_dir=
+    snippet_dir)` to decide. See the module-level comment on
+    `TLS_SNIPPET_FILENAME` for the full upgrade-ordering rationale."""
+    if tls_snippet_exists is None:
+        tls_snippet_exists = tls_snippet_path(snippet_dir=snippet_dir).exists()
+    tls_block = (
+        f"    import {tls_snippet_path(snippet_dir=snippet_dir)}\n"
+        if tls_snippet_exists
+        else _LEGACY_ON_DEMAND_TLS_BLOCK
+    )
     return (
         f"*.{domain}:{profile.public} {{\n"
         f"    reverse_proxy 127.0.0.1:{profile.router}\n"
-        f"    tls {{\n"
-        f"        on_demand\n"
-        f"    }}\n"
+        f"{tls_block}"
         f"}}\n"
     )
 
@@ -69,7 +128,7 @@ def write_port_snippet(
     domain: str, profile: PortProfile, *, snippet_dir: Path = DEFAULT_PORTS_SNIPPET_DIR
 ) -> Path:
     path = port_snippet_path(profile.name, snippet_dir=snippet_dir)
-    content = render_port_snippet(domain, profile)
+    content = render_port_snippet(domain, profile, snippet_dir=snippet_dir)
     caddyauth._atomic_write(path, content, prefix=f".{profile.name}-port-")
     return path
 
@@ -177,7 +236,7 @@ def sync(
 
     for name, profile in wanted.items():
         path = port_snippet_path(name, snippet_dir=snippet_dir)
-        new_content = render_port_snippet(registry.domain, profile)
+        new_content = render_port_snippet(registry.domain, profile, snippet_dir=snippet_dir)
         if path.exists() and path.read_text(encoding="utf-8") == new_content:
             continue
         _snapshot(name, path)
