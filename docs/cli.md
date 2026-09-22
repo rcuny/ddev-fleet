@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-07
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -36,7 +36,7 @@ port) see `docs/installation.md` and `docs/operations.md`; for the
 | `fleet destroy [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes the instance dir + lock file. Accepts one explicit id (legacy single-instance form, no prompt), several explicit ids, or a selector (`--all`, `--project=<name>`, `--state=running\|deployed`) — never mixed with explicit ids. See "Bulk actions" below for confirmation/exit-code behavior. |
 | `fleet start [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential] [--timeout=<seconds>] [--retry-port-conflict]` | `ddev start` on one or more existing, stopped instances. Same targeting rules as `destroy`. `--sequential` runs the bulk path one instance at a time (`run_sequential`) instead of the default 2-at-a-time `run_concurrent` — used by `fleet-boot.service` (`fleet start --all --sequential --timeout 1800 --retry-port-conflict`) at boot to avoid CPU spikes / `ddev-ssh-agent` races; see `docs/operations.md`'s "Automatic instance startup after reboot". `--timeout` is a per-instance **hang guard**: a `ddev start` that doesn't finish within that many seconds is killed and recorded as a failed instance (continue-on-error) instead of stalling the batch forever. Default: no timeout. `--retry-port-conflict` self-heals a Docker port-allocation race: if `ddev start` FAST-FAILs with a port-already-allocated / container-networking error, it does one clean `ddev stop` + `ddev start` before giving up (a still-failing retry, or any other kind of failure, still just fails that instance — continue-on-error unchanged). Default: off. Both flags are also honoured by the single-explicit-id fast path. |
 | `fleet stop [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential] [--timeout=<seconds>]` | `ddev stop` — frees RAM, keeps disk. Same targeting rules as `destroy`; same `--sequential`/`--timeout` flags and semantics. |
-| `fleet list` | — | Prints a table: instance id, project, branch, state, RAM (MiB), URL. |
+| `fleet list` | — | Prints a table: instance id, project, branch, state, RAM (MiB), URL. `state` is `running`/`deployed`/`unknown` — see "Degraded state" below for when `unknown` appears and why. |
 | `fleet ssh-key` | — | Prints the fleet deploy (read-only) public key, for adding to each forge. |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>`. |
 | `fleet secret set <project> <key> <value>` | — | Writes `KEY=VALUE` into `secrets/<project>.env` (mode `0600`, upserts). Values become available at deploy time as `[[key-with-dashes]]` tokens. |
@@ -76,6 +76,33 @@ a three-way exit code instead, based on the per-instance outcome:
 Each bulk command prints one `<instance-id>: OK` or `<instance-id>: FAILED
 — <error>` line per target, followed by a `N succeeded, M failed` summary
 line.
+
+## `fleet list` degraded state
+
+`fleet list` is a read-only status view, so its `ddev list --json-output`,
+`docker stats --no-stream`, and per-instance `git rev-parse` calls all run
+under bounded timeouts (`core/ddev.py:LIST_TIMEOUT` = 30s,
+`core/ddev.py:STATS_TIMEOUT` = 20s, `core/instances.py:GIT_READ_TIMEOUT` =
+10s) — a stalled `docker`/`ddev`/`git` process degrades the table instead of
+hanging the whole command forever. (Deploy/destroy/start/stop/import
+operations are unaffected — those keep waiting indefinitely, by design.)
+
+On a timeout (or any other failure) of `ddev list`, the table still renders
+from on-disk instances (`.fleet/instance.yml`), but the `state` column
+reports `unknown` rather than `deployed` for every instance not confirmed
+running — `deployed` is a claim that `ddev list` actually observed the
+instance as not-running, which isn't true if the call never completed. One
+warning is printed to stderr naming what was unavailable, e.g.:
+
+```
+warning: 'ddev list' timed out after 30s — live state unavailable, showing on-disk instances
+warning: 'docker stats' timed out after 20s — RAM column unavailable
+```
+
+A `docker stats` timeout/failure only blanks the `RAM(MiB)` column (`-`);
+it never affects `state`. A per-instance `git rev-parse` timeout/failure
+falls back quietly to the branch recorded at deploy time — no warning, same
+as its other failure modes (bad checkout, missing `git`, non-zero exit).
 
 ## Bulk actions: `start` / `stop` / `destroy`
 

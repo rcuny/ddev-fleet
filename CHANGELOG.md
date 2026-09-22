@@ -8,6 +8,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bounded timeouts on `fleet list`'s read-only status calls** so a
+  stalled `docker`/`ddev`/`git` process degrades the table instead of
+  hanging the whole command forever (observed once on ddev2, 2026-09-22:
+  a `fleet list` hung >2 minutes with no output before being killed by
+  hand — not reproduced since, so this is defensive hardening rather than
+  a confirmed root-cause fix). `ddev list --json-output`
+  (`core/ddev.py:LIST_TIMEOUT` = 30s), `docker stats --no-stream`
+  (`core/ddev.py:STATS_TIMEOUT` = 20s), and the per-instance `git
+  rev-parse` branch/HEAD reads (`core/instances.py:GIT_READ_TIMEOUT` =
+  10s) now all time out rather than block indefinitely. On a `ddev list`
+  timeout/failure, instances are still listed from on-disk state but
+  `InstanceStatus.state` reports a new `"unknown"` value instead of the
+  previous, inaccurate `"deployed"` (which asserted a live fact — nothing
+  running — that was never actually observed); a `docker stats`
+  timeout/failure only blanks the RAM column; a git-read timeout/failure
+  falls back quietly to the deploy-time recorded branch, same as its other
+  failure modes. Each of the first two prints one `warning: …` line to
+  stderr naming what's unavailable. Deploy/destroy/start/stop/import paths
+  are untouched — they still wait indefinitely by design. See
+  `docs/cli.md`'s "`fleet list` degraded state".
 - **Pre-destroy preflight** for redeploy/replace: `redeploy()` and
   `deploy(replace=True)` (and, more lightly, `destroy()`) now run cheap,
   side-effect-free checks — registry still resolves the deploy target,

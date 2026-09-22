@@ -4,6 +4,7 @@
 import logging
 import os
 import shutil
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -1315,16 +1316,33 @@ def read_instance_branch(instance_dir: Path) -> str:
     return str(data.get("branch", ""))
 
 
-def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
+# Per-instance git reads (branch/HEAD) run once per instance on every
+# `fleet list` — a bound bad checkout/stalled git process can't hang, so it
+# gets the same defensive ceiling as the ddev/docker calls above (see
+# ddev.LIST_TIMEOUT/STATS_TIMEOUT: 2026-09-22 ddev2 incident). Both
+# functions already treat every failure mode (bad checkout, missing git,
+# non-zero exit) as a quiet "" — a timeout is just one more entry in that
+# same best-effort contract, so it degrades silently like the others rather
+# than adding a new per-instance warning line to `fleet list` output.
+GIT_READ_TIMEOUT = 10.0
+
+
+def read_instance_git_branch(
+    instance_dir: Path, *, timeout: float | None = None, runner=run_streamed
+) -> str:
     """Return the ACTUAL current git branch of the instance checkout, or "" if
     it can't be determined. Uses `git rev-parse` (works for both git worktrees
     and full clones). On a detached HEAD, returns the short commit SHA rather
-    than the literal "HEAD". Best-effort: any git error/exception yields "" so a
-    bad checkout never crashes the sidebar refresh loop."""
+    than the literal "HEAD". Best-effort: any git error/exception (including a
+    timeout, when `timeout=` is passed) yields "" so a bad or stalled checkout
+    never crashes the sidebar refresh loop or `fleet list`."""
+    kwargs = {"echo": False}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     try:
         result = runner(
             ["git", "-C", str(instance_dir), "rev-parse", "--abbrev-ref", "HEAD"],
-            echo=False,
+            **kwargs,
         )
     except Exception:  # noqa: BLE001 - best-effort display helper
         return ""
@@ -1336,7 +1354,7 @@ def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
     try:
         sha = runner(
             ["git", "-C", str(instance_dir), "rev-parse", "--short", "HEAD"],
-            echo=False,
+            **kwargs,
         )
     except Exception:  # noqa: BLE001 - best-effort display helper
         return ""
@@ -1345,15 +1363,21 @@ def read_instance_git_branch(instance_dir: Path, *, runner=run_streamed) -> str:
     return "\n".join(sha.lines).strip()
 
 
-def read_instance_git_head(instance_dir: Path, *, runner=run_streamed) -> str:
+def read_instance_git_head(
+    instance_dir: Path, *, timeout: float | None = None, runner=run_streamed
+) -> str:
     """Return the short commit SHA of the instance checkout's HEAD (e.g.
     "9201b89b53"), or "" if it can't be determined. Best-effort: any git
-    error/exception yields "" so a bad checkout never breaks the sidebar refresh
-    loop or the web UI list."""
+    error/exception (including a timeout, when `timeout=` is passed) yields ""
+    so a bad or stalled checkout never breaks the sidebar refresh loop or the
+    web UI list."""
+    kwargs = {"echo": False}
+    if timeout is not None:
+        kwargs["timeout"] = timeout
     try:
         result = runner(
             ["git", "-C", str(instance_dir), "rev-parse", "--short", "HEAD"],
-            echo=False,
+            **kwargs,
         )
     except Exception:  # noqa: BLE001 - best-effort display helper
         return ""
@@ -1381,16 +1405,28 @@ def list_instances(
     if not instances_root.exists():
         return []
 
+    # `live_state_known` distinguishes "ddev list ran and reported nothing
+    # running" (state can honestly be "deployed") from "ddev list didn't run
+    # at all / timed out / errored" (state must be "unknown" — claiming
+    # "deployed" here would be asserting a fact we never actually observed;
+    # see ddev.LIST_TIMEOUT's docstring for the 2026-09-22 ddev2 incident
+    # that prompted this distinction).
     try:
-        ddev_projects = ddev.list_projects(runner=runner)
-    except Exception:
+        ddev_projects = ddev.list_projects(timeout=ddev.LIST_TIMEOUT, runner=runner)
+        live_state_known = True
+    except Exception as exc:
         ddev_projects = []
+        live_state_known = False
+        print(
+            f"warning: {exc} — live state unavailable, showing on-disk instances",
+            file=sys.stderr,
+        )
     running_ids = {
         p.get("name") for p in ddev_projects if str(p.get("status", "")).lower() == "running"
     }
 
     try:
-        ram = ddev.ram_usage(runner=runner)
+        ram = ddev.ram_usage(timeout=ddev.STATS_TIMEOUT, runner=runner)
     except Exception:
         ram = {}
 
@@ -1412,13 +1448,18 @@ def list_instances(
             instance = parts[1] if len(parts) > 1 else ""
             branch = ""
 
-        live_branch = read_instance_git_branch(entry, runner=runner)
+        live_branch = read_instance_git_branch(entry, timeout=GIT_READ_TIMEOUT, runner=runner)
         if live_branch:
             branch = live_branch
 
-        head = read_instance_git_head(entry, runner=runner)
+        head = read_instance_git_head(entry, timeout=GIT_READ_TIMEOUT, runner=runner)
 
-        state = "running" if current_id in running_ids else "deployed"
+        if current_id in running_ids:
+            state = "running"
+        elif live_state_known:
+            state = "deployed"
+        else:
+            state = "unknown"
         statuses.append(
             InstanceStatus(
                 instance_id=current_id,

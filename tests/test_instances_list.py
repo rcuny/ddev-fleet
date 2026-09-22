@@ -1,6 +1,9 @@
 import json
+import subprocess
 
 from fleet.core import instances
+from fleet.core.ddev import LIST_TIMEOUT, STATS_TIMEOUT
+from fleet.core.instances import GIT_READ_TIMEOUT
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
@@ -73,7 +76,11 @@ def test_list_instances_empty_when_no_instances_dir(fleet_home):
     assert instances.list_instances(paths, registry, runner=FakeRunner()) == []
 
 
-def test_list_instances_degrades_gracefully_when_runner_raises(fleet_home):
+def test_list_instances_degrades_gracefully_when_runner_raises(fleet_home, capsys):
+    """When even `ddev list` can't be run at all (not just a timeout), the
+    on-disk instance must still be listed, but its state must be "unknown" —
+    not "deployed", which would assert a live fact (nothing is running) that
+    was never actually observed."""
     registry = _registry(fleet_home)
     paths = instances.FleetPaths.from_home(fleet_home)
     _write_instance(fleet_home / "instances", "demo--develop", "demo", "develop", "main")
@@ -85,8 +92,98 @@ def test_list_instances_degrades_gracefully_when_runner_raises(fleet_home):
 
     assert len(statuses) == 1
     assert statuses[0].instance_id == "demo--develop"
-    assert statuses[0].state == "deployed"
+    assert statuses[0].state == "unknown"
     assert statuses[0].ram_mib is None
+    assert "warning:" in capsys.readouterr().err
+
+
+def test_list_instances_ddev_list_timeout_yields_unknown_state_and_warns(fleet_home, capsys):
+    """A `ddev list` timeout specifically (not just any failure) must still
+    list on-disk instances with state "unknown", and must name `ddev list`
+    and its timeout value in the stderr warning."""
+    registry = _registry(fleet_home)
+    paths = instances.FleetPaths.from_home(fleet_home)
+    _write_instance(fleet_home / "instances", "demo--develop", "demo", "develop", "main")
+
+    def timing_out_runner(cmd, **kwargs):
+        if cmd == ["ddev", "list", "--json-output"]:
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+        return RunResult(returncode=0, lines=[])
+
+    statuses = instances.list_instances(paths, registry, runner=timing_out_runner)
+
+    assert len(statuses) == 1
+    assert statuses[0].state == "unknown"
+    err = capsys.readouterr().err
+    assert "'ddev list' timed out" in err
+    assert f"{LIST_TIMEOUT:g}s" in err
+    assert "live state unavailable" in err
+
+
+def test_list_instances_docker_stats_timeout_leaves_ram_empty_but_state_intact(fleet_home, capsys):
+    """A `docker stats` timeout must not affect the instance list or state —
+    only the RAM column degrades (to None/"-") — and must warn on stderr
+    naming `docker stats` and its timeout value."""
+    registry = _registry(fleet_home)
+    paths = instances.FleetPaths.from_home(fleet_home)
+    _write_instance(fleet_home / "instances", "demo--develop", "demo", "develop", "main")
+
+    list_json = json.dumps({"raw": [{"name": "demo--develop", "status": "running"}]})
+
+    def timing_out_runner(cmd, **kwargs):
+        if cmd == ["ddev", "list", "--json-output"]:
+            return RunResult(returncode=0, lines=[list_json])
+        if cmd == ["docker", "stats", "--no-stream", "--format", "{{json .}}"]:
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+        return RunResult(returncode=0, lines=[])
+
+    statuses = instances.list_instances(paths, registry, runner=timing_out_runner)
+
+    assert len(statuses) == 1
+    assert statuses[0].state == "running"  # ddev list still succeeded
+    assert statuses[0].ram_mib is None
+    err = capsys.readouterr().err
+    assert "'docker stats' timed out" in err
+    assert f"{STATS_TIMEOUT:g}s" in err
+    assert "RAM column unavailable" in err
+
+
+def test_list_instances_git_read_timeout_yields_empty_branch_no_crash(fleet_home, capsys):
+    """A per-instance git-branch-read timeout must degrade quietly to the
+    recorded (deploy-time) branch, exactly like any other git-read failure —
+    no crash, and (deliberately, unlike ddev list/docker stats) no extra
+    stderr warning per instance."""
+    registry = _registry(fleet_home)
+    paths = instances.FleetPaths.from_home(fleet_home)
+    inst_root = fleet_home / "instances"
+    _write_instance(inst_root, "demo--develop", "demo", "develop", "main")
+
+    list_json = json.dumps({"raw": []})
+    branch_key = [
+        "git",
+        "-C",
+        str(inst_root / "demo--develop"),
+        "rev-parse",
+        "--abbrev-ref",
+        "HEAD",
+    ]
+
+    def timing_out_runner(cmd, **kwargs):
+        if cmd == ["ddev", "list", "--json-output"]:
+            return RunResult(returncode=0, lines=[list_json])
+        if cmd == ["docker", "stats", "--no-stream", "--format", "{{json .}}"]:
+            return RunResult(returncode=0, lines=[])
+        if cmd == branch_key:
+            assert kwargs.get("timeout") == GIT_READ_TIMEOUT
+            raise subprocess.TimeoutExpired(cmd, kwargs.get("timeout"))
+        return RunResult(returncode=0, lines=[])
+
+    statuses = instances.list_instances(paths, registry, runner=timing_out_runner)
+
+    assert len(statuses) == 1
+    assert statuses[0].state == "deployed"
+    assert statuses[0].branch == "main"  # falls back to the recorded branch
+    assert capsys.readouterr().err == ""
 
 
 def test_list_instances_fallback_for_dir_without_instance_yml(fleet_home):
