@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-16
+Last updated: 2026-09-25
 Type: documentation
 ---
 
@@ -49,6 +49,8 @@ shell's own (unrelated) DDEV setup.
 | `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe). Two label allocators, deliberately not merged: `allocate_multi_deploy_labels()` (batch of N, always suffixed `-1`, `-2`, … — a batch has no single "the" instance to give the bare name to) for `deploy --count`/`multi_deploy()`, and `allocate_free_label()` (single free label, returns the BARE base when free) for a plain `deploy()`'s never-overwrite behavior |
 | `core/sysinfo.py` | Host stats for the web UI footer: `SystemStats.gather` (free/total RAM from `/proc/meminfo`, free/total disk from `shutil.disk_usage` on the instances mount) + `fmt_bytes`; memory → `n/a` if `/proc/meminfo` is unreadable |
 | `core/reboot.py` | Single shared reader for Debian's reboot-required marker (`/var/run/reboot-required` + `.pkgs`) — `RebootStatus`/`read_reboot_status()` — plus the anti-spam notification cadence and msmtp email send backing `fleet reboot-notify [--test]`. Consumed by `tmux_sidebar.py` (sidebar banner) and `core/sysinfo.py` (web UI footer badge) — one implementation, not three |
+| `core/runner.py` | `run_streamed()`/`run_interactive()` — subprocess execution with line-by-line logging, an optional bounded `timeout`, and (2026-09-23) a process-GROUP kill (`start_new_session=True` + `os.killpg`) on timeout so a grandchild holding stdout open (e.g. a stalled `ddev`/`git`/`docker` call) can't defeat the timeout and hang the reader thread forever — the bug behind the `fleet list` hang hardening below |
+| `core/shell.py` | Argv/cwd construction (unit-testable) + the single `exec_in_dir()` that actually `chdir()`s and `execvp()`s, behind `fleet shell`/`fleet ddev` — reproduces the retired `fleet-shell` script |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
 
 ## Ansible roles (`ansible/roles/`)
@@ -81,7 +83,7 @@ don't assume they're the same). From `/opt/ddev-fleet` on the server, or
 this repo's checkout locally:
 
 ```bash
-.venv/bin/pytest -q          # 662 tests as of 2026-07-25
+.venv/bin/pytest -q          # 951 tests as of 2026-09-23
 .venv/bin/ruff check .
 .venv/bin/black --check .
 ```
