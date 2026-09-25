@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-27
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -32,11 +32,42 @@ A syntax error or schema violation makes every `fleet` command fail at
 registry load (`Registry.load`) with an actionable message naming the bad
 key — nothing partially loads.
 
+## Per-host domain (`host.yml`) — sharing one `fleet.yml` across servers
+
+`fleet.domain` (below) is normally the only place the wildcard domain lives.
+But when several fleet servers share **one** config repo (so `fleet.yml` is
+literally the same file, checked out on each host), a single hardcoded
+`fleet.domain` can't be right for all of them. `<FLEET_HOME>/host.yml`
+(`/srv/fleet/host.yml` by default — a SIBLING of `config/`, never inside the
+shared repo) solves this: a small, per-host YAML mapping,
+
+```yaml
+domain: fleet.this-host.example.com
+```
+
+rendered by the `caddy` Ansible role from its own `fleet_domain` variable
+(`ansible/group_vars/all.yml`/`/etc/ddev-fleet/local-vars.yml`), owned by the
+fleet user, mode `0644`. It is intentionally an open schema — unknown keys
+are ignored, so more host-level settings can be added later without a
+migration.
+
+**Precedence:** `host.yml`'s `domain` wins whenever the file exists and sets
+it — even if `fleet.yml`'s own `fleet.domain` also has a (different) value;
+that's the whole point of a domain that belongs to the host, not the shared
+registry. Falls back to `fleet.yml`'s `fleet.domain` when `host.yml` is
+absent or has no `domain` key. `fleet.domain` becomes fully **optional** in
+`fleet.yml` once every host that reads it carries its own `host.yml` — if
+neither source has a domain, `Registry.load` fails at load time naming both
+locations checked. Every CLI/daemon call site loads the registry through
+`fleet.core.instances.load_registry(paths)`, the one constructor that always
+passes `paths.host_config` through — so this precedence can never be
+forgotten at some call site.
+
 ## Top-level shape
 
 ```yaml
 fleet:
-  domain: <string>              # required
+  domain: <string>              # required, unless host.yml provides it (see above)
   git_bot_name: <string>        # optional
   git_bot_email: <string>       # optional
   git_bot: false                # optional
@@ -57,6 +88,7 @@ projects:
     issue_id_regexp: <string>              # optional
     templates:
       <template-name>:
+        drupal_env: <word>                 # optional
         post_deploy: [<string>, ...]       # optional
         tty1: [<string>, ...]              # optional
         tty2: [<string>, ...]              # optional
@@ -66,7 +98,7 @@ projects:
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `domain` | string | **yes** | — | The wildcard DNS root, e.g. `fleet.example.com`. Every instance is reachable at `<instance-id>.<domain>`; the dashboard/web UI at `<domain>` itself (behind Caddy's `fleet.<domain>` site — see `docs/networking.md`). |
+| `domain` | string | yes, unless `host.yml` sets it (see "Per-host domain" above) | — | The wildcard DNS root, e.g. `fleet.example.com`. Every instance is reachable at `<instance-id>.<domain>`; the dashboard/web UI at `<domain>` itself (behind Caddy's `fleet.<domain>` site — see `docs/networking.md`). |
 | `git_bot_name` | string | no | `ddev-fleet bot` | Default commit-author/committer name injected as `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME` into every instance's `web_environment`, unless a project overrides it. |
 | `git_bot_email` | string | no | `bot@<domain>` | Default commit-author/committer email, same injection. |
 | `git_bot` | `false` | no | (unset = enabled) | Set to `false` to disable git identity injection **fleet-wide** — every instance's own `git config` then decides commit identity. Per-project `git_bot: false` (below) overrides this for one project only. |
@@ -138,7 +170,7 @@ labels)`).
 | `git` | string | **yes** | — | SSH git URL cloned/updated for every instance of this project. The fleet's read-only deploy key (`fleet ssh-key`) must be added to the forge as a deploy key. |
 | `default_template` | string | no | (none — `fleet deploy` errors without one) | Template name used when `fleet deploy <project>` omits its `<template>` positional arg. |
 | `default_branch` | string | no | (none — `fleet deploy` errors without one) | Branch used when `fleet deploy` omits `--branch`. |
-| `additional_hostnames` | list of strings | no | `[]` | Extra FQDNs routed to the instance alongside `<instance-id>.<domain>` (e.g. Drupal's domain-access-style subdomains). |
+| `additional_hostnames` | list of strings | no | `[]` | Extra alias hostnames routed to the instance alongside `<instance-id>.<domain>` (e.g. Drupal Domain Access-style subdomains). Each entry must be a bare DNS label (lowercase, `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, no dots — validated at registry load, `RegistryError` otherwise). Resolved per instance as the FLATTENED FQDN `<h>-<instance-id>.<domain>` (`core/instances.py:alias_fqdns()`), e.g. `news-oak--translations-test.fleet.example.com` — never nested under the instance id, since Caddy's site block is a single-label wildcard. Deploy raises `DeployError` if `<h>-<instance-id>` exceeds the 63-character DNS label limit. Alias hosts are covered by the SAME per-instance basic-auth matcher as the instance's own FQDN (`core/caddyauth.py`) and each gets its own on-demand Let's Encrypt certificate (mind the ~50 new-certs/domain/week rate limit with many aliases). Every instance also gets `FLEET_INSTANCE_HOST=<instance-id>.<domain>` injected into `web_environment`, so Drupal can build the same alias pattern: `"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full design: `docs/networking.md` §7. |
 | `typesense` | bool | no | `false` | **Legacy** opt-in flag: expose Typesense at the `typesense` named port (`*.<domain>:9108` by default) for every instance of this project. Equivalent to `ports: [typesense]`; both may be present without duplicating the exposure (`Registry.project_ports` de-dupes). The browser-exposed key must be a **search-only** key, never the admin key — see `docs/README-typesense.md`. |
 | `ports` | list of strings | no | `[]` | The general mechanism superseding `typesense: true` — names must each exist as a key in `fleet.ports` (validated: `Registry._validate` raises if a project references an undeclared port name). |
 | `git_bot` | mapping `{name, email}` or `false` | no | (inherits the fleet-level default) | Per-project override of the injected git commit identity. A mapping overrides `name`/`email` individually (either key may be omitted, falling back to the fleet default for that field). `false` disables identity injection for this project only, letting the project's own `git config` (e.g. a post-start hook) win — note the injected `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars otherwise take precedence over `git config user.*`. |
@@ -155,12 +187,17 @@ per-deploy, from `fleet deploy` arguments, never from the registry; a
 ```yaml
 templates:
   default:
+    drupal_env: dev
     post_deploy: [ddev start, ddev drush deploy]
+  staging:
+    drupal_env: staging
+    post_deploy: [ddev init --db=staging.sql --no-interactive]
 ```
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
 | `post_deploy` | list of strings | no (default `[]`) | Commands run, in order, after the instance is cloned/configured/started, each as `bash -c <command>` with the instance directory as cwd (so a command that itself needs the DDEV containers typically calls `ddev exec ...` or another `ddev` subcommand). `[[token]]` placeholders (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, `[[issue-id]]` when it resolves, per-project secret tokens, …) are substituted first — see `CLAUDE.md`'s "Per-project secrets model" for the token mechanism. This substitution is **strict**: a command left with an unresolved token raises `DeployError` naming the command and the token, and the deploy aborts — a `post_deploy` command is deploy-critical, so failing loudly beats silently skipping it. |
+| `drupal_env` | string (single word) | no | Written as `DRUPAL_ENV=<value>` into the instance's own root `.env` after asset injection, overriding whatever the project's `assets/<project>/.env` ships. Lets one codebase run a `staging` template (different modules/cache) alongside a `dev` one. Omit it and the `.env` is left exactly as the project shipped it — an absent key means "don't touch", never "write dev". Rejected at load time if it is empty, non-string, or contains whitespace: it is written verbatim, with no quoting. |
 | `tty1` | list of strings | no (default `[]`) | Commands typed into the **middle** bash pane of the instance's `fleet tmux` window, in order, the first time that window is created. See "`tty1`/`tty2`: interactive tmux commands" below. |
 | `tty2` | list of strings | no (default `[]`) | Same as `tty1`, for the **right** bash pane (the sidebar occupies the fixed-width left column). |
 
@@ -286,7 +323,7 @@ last-deployed-at: 2026-07-27T09:30:00+00:00
 | `template` | The resolved template name — what lets `fleet tmux`'s `reconcile()` (and `fleet redeploy`, below) recover which `tty1`/`tty2`/deploy recipe to use, without needing it re-supplied. |
 | `branch` | The branch this instance tracks. |
 | `auth-enabled` | Whether per-instance basic auth was on for this deploy. |
-| `auth-password` | The basic-auth password configured for this deploy, in plaintext. |
+| `auth-password` | The basic-auth credential configured for this deploy, in plaintext. Used as BOTH username and password. |
 | `created-at` | Timestamp of the instance's first deploy — preserved across later redeploys/updates. |
 | `last-deployed-at` | Timestamp of the most recent deploy/redeploy. |
 
@@ -333,7 +370,7 @@ projects:
     # typesense: true    # expose Typesense to the browser at *.<domain>:9108 (optional, legacy form — see fleet.ports/ports: for the general mechanism)
     # ports: [typesense]                    # generic equivalent, once fleet.ports.typesense is defined above
     # NOTE: browser-exposed TYPESENSE_API_KEY must be a SEARCH-ONLY key, never the admin key.
-    # additional_hostnames: [sub1, sub2]   # domain-module subdomains (optional)
+    # additional_hostnames: [sub1, sub2]   # Domain Access aliases (optional) -> sub1-<instance-id>.<domain>
     # issue_id_regexp: 'ABC-[0-9]+'         # optional — derives [[issue-id]]/FLEET_ISSUE_ID from the
     #                                       # instance label (checked first) or branch (fallback);
     #                                       # matched case-insensitively, result uppercased.
@@ -396,3 +433,36 @@ mode: `docs/installation.md` §4.
 - `docs/cli.md` — the full CLI reference.
 - `CLAUDE.md` — `Registry`'s implementation notes (`core/registry.py`) and
   the git-identity-injection mechanism in more depth.
+
+
+## `fleet.auth_bypass_cidrs` — skip basic auth for known networks
+
+Optional, top-level under `fleet:` — a per-server list of IP addresses / CIDR
+ranges whose visitors are **not** prompted for per-instance basic auth:
+
+```yaml
+fleet:
+  domain: fleet.example.com
+  auth_bypass_cidrs:
+    - 203.0.113.31/32      # office egress
+    - 203.0.113.80/29     # branch office range
+    - 9.9.9.9              # bare address == /32
+```
+
+| Rule | Behaviour |
+|---|---|
+| Not listed | Basic auth prompt, as before. **The prompt is the default** — no deny entry is needed or supported. |
+| Listed | No prompt for any instance on this fleet. |
+| Instance deployed `--no-auth` | No prompt for anyone; the whitelist is irrelevant. |
+| Invalid entry | `fleet.yml` fails to load with a `RegistryError` naming the entry. |
+
+Entries are normalised to canonical CIDR (`198.51.100.191/29` →
+`198.51.100.184/29`) and de-duplicated. The list is written into every
+instance's Caddy snippet as `not remote_ip …`, which matches the **direct
+peer address** — correct here because Caddy is the edge, but wrong if a CDN
+is ever placed in front of it.
+
+The list is fleet-wide, so a new instance picks it up at deploy time and
+existing instances pick it up with **`fleet refresh-auth`** (rewrites every
+instance snippet, then one `caddy validate` + `caddy reload`). A failed
+validate means Caddy keeps serving the previous config.

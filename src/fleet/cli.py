@@ -1,6 +1,7 @@
 """Thin argparse CLI exposing the fleet.core command surface (spec §11)."""
 
 import argparse
+import functools
 import os
 import re
 import secrets as _stdlib_secrets
@@ -105,7 +106,7 @@ def _build_parser() -> argparse.ArgumentParser:
         "--auth-password",
         default=caddyauth.DEFAULT_INSTANCE_PASSWORD,
         help=(
-            "basic auth password for this instance "
+            "basic auth credential for this instance, used as BOTH username and password "
             f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
         ),
     )
@@ -133,9 +134,56 @@ def _build_parser() -> argparse.ArgumentParser:
 
     start_parser = subparsers.add_parser("start")
     _add_bulk_target_args(start_parser)
+    start_parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help=(
+            "run the bulk start one instance at a time (bulk_mod.run_sequential) "
+            "instead of the default 2-at-a-time run_concurrent — used at boot "
+            "(fleet-boot.service) to avoid CPU spikes and ddev-ssh-agent "
+            "registration races across many instances starting together"
+        ),
+    )
+    start_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=(
+            "per-instance hang guard in seconds — if a single `ddev start` "
+            "doesn't finish within this many seconds it is killed and treated "
+            "as a failed instance (continue-on-error), instead of stalling the "
+            "whole batch. Default: no timeout (wait forever), today's behaviour"
+        ),
+    )
+    start_parser.add_argument(
+        "--retry-port-conflict",
+        action="store_true",
+        help=(
+            "opt-in self-heal for a Docker port-allocation race: if `ddev "
+            "start` FAST-FAILs with a port-already-allocated / container-"
+            "networking error, do one clean `ddev stop` + `ddev start` before "
+            "giving up (continue-on-error still applies if that retry also "
+            "fails). Default: off, today's behaviour unchanged. Passed by "
+            "fleet-boot.service for the post-reboot bulk start"
+        ),
+    )
 
     stop_parser = subparsers.add_parser("stop")
     _add_bulk_target_args(stop_parser)
+    stop_parser.add_argument(
+        "--sequential",
+        action="store_true",
+        help="run the bulk stop one instance at a time instead of the default run_concurrent",
+    )
+    stop_parser.add_argument(
+        "--timeout",
+        type=float,
+        default=None,
+        help=(
+            "per-instance hang guard in seconds — same semantics as `fleet "
+            "start --timeout`. Default: no timeout"
+        ),
+    )
 
     subparsers.add_parser("list")
 
@@ -208,6 +256,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
 
     subparsers.add_parser("refresh-ports")
+    subparsers.add_parser("refresh-auth")
 
     shell_parser = subparsers.add_parser("shell")
     shell_parser.add_argument("instance_id", nargs="?", default=None)
@@ -275,6 +324,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_refresh_instance_config(fleet_home, args)
         elif args.command == "refresh-ports":
             return _cmd_refresh_ports(fleet_home, args, runner=run_streamed)
+        elif args.command == "refresh-auth":
+            return _cmd_refresh_auth(fleet_home, args, runner=run_streamed)
         elif args.command == "shell":
             _cmd_shell(fleet_home, args)
         elif args.command == "ddev":
@@ -359,7 +410,7 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
 
 def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
 
     if args.count == 1:
         url = instances_mod.deploy(
@@ -410,7 +461,7 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
 
 def _cmd_destroy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
@@ -475,7 +526,7 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
     running several of those at once on one host is how you exhaust disk
     mid-batch (same reasoning as multi_deploy())."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
@@ -582,16 +633,35 @@ def _cmd_stop(fleet_home: Path, args: argparse.Namespace) -> int:
 
 def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: str, op) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
         print("no instances matched the given selector", file=sys.stderr)
         return 0
 
+    # --timeout (used by fleet-boot.service: `fleet start --all --sequential
+    # --timeout 1800`) is a per-instance hang guard, not a slowness limit, and
+    # --retry-port-conflict (start-only; `stop` never defines the flag, hence
+    # getattr with a False default so this code path doesn't crash reading
+    # it for `kind="stop"`) is the opt-in port-conflict self-heal. Both bind
+    # onto the op the same way — accumulate into one kwargs dict and apply a
+    # single functools.partial — so they flow through run_sequential/
+    # run_concurrent's generic op(paths, registry, instance_id, runner=...)
+    # calling convention untouched, and combine cleanly when both are given.
+    # Neither flag present: op is passed through as-is, today's exact
+    # behaviour.
+    op_kwargs = {}
+    if args.timeout is not None:
+        op_kwargs["timeout"] = args.timeout
+    if getattr(args, "retry_port_conflict", False):
+        op_kwargs["retry_port_conflict"] = True
+    if op_kwargs:
+        op = functools.partial(op, **op_kwargs)
+
     # A single *explicit* instance id bypasses the bulk machinery entirely —
     # today's exact behaviour, preserved for backward compatibility. A
-    # selector (--all/--project/--state) always goes through run_concurrent
+    # selector (--all/--project/--state) always goes through the bulk runner
     # even when it happens to resolve to exactly one instance, so progress
     # reporting/exit-code semantics stay consistent regardless of how many
     # instances currently match.
@@ -599,7 +669,14 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
         op(paths, registry, target_ids[0])
         return 0
 
-    outcome = bulk_mod.run_concurrent(paths, registry, target_ids, op, kind=kind)
+    # --sequential (used by fleet-boot.service: `fleet start --all --sequential`)
+    # routes through run_sequential — one instance at a time, in the order
+    # target_ids resolved in (sorted(iterdir()) alphabetical order for --all,
+    # see _resolve_bulk_targets/list_instances) — instead of the default
+    # 2-at-a-time run_concurrent. Manual CLI usage without the flag keeps
+    # today's exact behaviour.
+    runner_fn = bulk_mod.run_sequential if args.sequential else bulk_mod.run_concurrent
+    outcome = runner_fn(paths, registry, target_ids, op, kind=kind)
     for result in outcome.results:
         if result.ok:
             print(f"{result.instance_id}: OK")
@@ -617,7 +694,7 @@ def _cmd_bulk_start_stop(fleet_home: Path, args: argparse.Namespace, *, kind: st
 
 def _cmd_list(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     statuses = instances_mod.list_instances(paths, registry)
 
     print(f"{'INSTANCE ID':30} {'PROJECT':20} {'BRANCH':15} {'STATE':10} {'RAM(MiB)':10} URL")
@@ -639,7 +716,7 @@ def _cmd_ssh_key(fleet_home: Path, args: argparse.Namespace) -> None:
 def _cmd_assets(fleet_home: Path, args: argparse.Namespace) -> None:
     if args.assets_command == "push":
         paths = instances_mod.FleetPaths.from_home(fleet_home)
-        registry = Registry.load(paths.registry)
+        registry = instances_mod.load_registry(paths)
         if not registry.has_project(args.project):
             raise FleetError(f"unknown project {args.project!r}")
         assets_dir = paths.assets / args.project
@@ -655,7 +732,7 @@ def _cmd_secret(fleet_home: Path, args: argparse.Namespace) -> None:
 
 def _cmd_snapshot(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     dest = instances_mod.snapshot(paths, registry, args.instance_id, dest_rel=args.dest_rel)
     print(dest)
 
@@ -812,7 +889,7 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
     as `set-claude-token`/`refresh-claude-token` — see
     `_propagate_claude_token`)."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
     instances_mod.refresh_instance_config(paths, registry, args.instance_id, restart=args.restart)
 
     if args.restart:
@@ -823,6 +900,32 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
         print(f"  cd {instance_dir} && ddev restart")
 
 
+def _cmd_refresh_auth(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:
+    """Re-apply per-instance basic auth to every deployed instance from
+    fleet.yml's current `fleet.auth_bypass_cidrs` — the "apply my whitelist
+    edit now" command, so editing the bypass list never requires redeploying
+    live instances."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = instances_mod.load_registry(paths)
+
+    bypass = registry.auth_bypass_cidrs
+    if bypass:
+        print(f"auth bypass: {len(bypass)} network(s) skip basic auth ({bypass[0]}, …)")
+    else:
+        print("auth bypass: none configured — every visitor gets the basic-auth prompt")
+
+    result = instances_mod.sync_instance_auth(paths, registry, runner=runner)
+    for inst_id in result.written:
+        print(f"caddy: wrote auth snippet for {inst_id}")
+    for inst_id in result.removed:
+        print(f"caddy: removed auth snippet for {inst_id} (auth disabled)")
+    if result.reloaded:
+        print("caddy: validated and reloaded")
+    else:
+        print("caddy: no instances to update")
+    return 0
+
+
 def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:
     """Reconcile Caddy port-exposure snippets to `fleet.yml`'s current
     `fleet.ports`/`ports:` state — the "apply my port edits now"
@@ -830,7 +933,7 @@ def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run
     the network_hardening role is installed; silently skipped when the
     helper is absent (not an error)."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = Registry.load(paths.registry)
+    registry = instances_mod.load_registry(paths)
 
     result = caddyports.sync(
         registry, snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR, runner=runner
@@ -871,7 +974,7 @@ def _tty_resolver(paths: instances_mod.FleetPaths):
     and falls back to None (every window starts as a plain bash shell)
     rather than raising."""
     try:
-        registry = Registry.load(paths.registry)
+        registry = instances_mod.load_registry(paths)
     except FleetError as exc:
         print(
             f"warning: fleet tmux could not load the registry ({exc.message}); "

@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-27
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -16,11 +16,26 @@ This is a compact, server-side reference — the full versions are
 `docs/configuration.md` (registry schema) and `docs/cli.md` (CLI), both in
 the product repo, not copied to the server.
 
+## Per-host domain (`/srv/fleet/host.yml`)
+
+Lets several fleet servers share ONE `fleet.yml` (via the config repo) while
+each keeps its own domain. A small, open-schema mapping — `domain:
+<string>` — rendered by Ansible's `caddy` role from `fleet_domain`, owned
+by the fleet user, mode `0644`. Deliberately a SIBLING of `config/`, never
+inside the shared config repo. Precedence: `host.yml`'s `domain` wins when
+present (even over a different `fleet.domain` in `fleet.yml`); falls back
+to `fleet.yml`'s `fleet.domain` otherwise; if neither is set, `Registry.load`
+fails at load time naming both locations. `fleet.domain` in `fleet.yml`
+below is therefore optional once every host has its own `host.yml`. Every
+call site loads via `fleet.core.instances.load_registry(paths)`, which
+always passes `host.yml` through — never call `Registry.load()` directly.
+Full detail: `docs/configuration.md`.
+
 ## Registry (`/srv/fleet/config/fleet.yml`)
 
 ```yaml
 fleet:
-  domain: <string>                  # required — wildcard DNS root, e.g. fleet.example.com
+  domain: <string>                  # required, unless /srv/fleet/host.yml sets it (see above)
   git_bot_name: <string>            # OPTIONAL — default commit identity name  (default "ddev-fleet bot")
   git_bot_email: <string>           # OPTIONAL — default commit identity email (default bot@<domain>)
   # git_bot: false                  # OPTIONAL — disable git identity injection fleet-wide
@@ -34,7 +49,7 @@ projects:
     git: <ssh-git-url>
     default_template: <string>        # OPTIONAL — template used when `fleet deploy` omits one
     default_branch: <string>          # OPTIONAL — branch used when `fleet deploy` omits --branch
-    additional_hostnames: [<string>, ...]  # OPTIONAL — extra FQDNs routed to the instance
+    additional_hostnames: [<string>, ...]  # OPTIONAL — Domain Access alias hostnames (bare DNS labels)
     typesense: true                   # OPTIONAL — legacy opt-in, expose Typesense at *.<domain>:9108 (see ports: below)
     ports: [<port-name>, ...]         # OPTIONAL — general port-exposure mechanism; names must exist in fleet.ports
     git_bot:                          # OPTIONAL — per-project commit identity override:
@@ -90,6 +105,23 @@ Apply a `ports:` edit with `fleet refresh-ports` (see below) — no Ansible
 run, no redeploy. Full reference: `docs/configuration.md`; runbook for
 adding a new port: `docs/networking.md`.
 
+**Domain Access alias hostnames (`additional_hostnames`).** Each entry
+must be a bare DNS label (lowercase, no dots — rejected at registry load
+otherwise) and resolves per instance to the FLATTENED FQDN
+`<h>-<instance-id>.<domain>` (never nested under the instance id —
+`core/instances.py:alias_fqdns()`), e.g.
+`news-oak--translations-test.fleet.example.com`. Raises `DeployError` if
+that composed label exceeds 63 characters. Alias hosts are covered by the
+SAME per-instance basic-auth matcher as the instance's own FQDN
+(`core/caddyauth.py`) and each gets its own on-demand Let's Encrypt
+certificate (mind Let's Encrypt's ~50 new-certs/registered-domain/week rate
+limit with many aliases — a wildcard DNS-01 cert is the future fix, not yet
+implemented). Every instance also gets `FLEET_INSTANCE_HOST=<instance-id>.
+<domain>` injected into `web_environment`, so a project's own Domain
+Access config can build these same alias patterns in PHP:
+`"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full reference:
+`docs/networking.md` §7, `docs/configuration.md`.
+
 **git identity injection.** The fleet injects `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
 into each instance's `config.fleet.yaml` `web_environment` so commits made
 inside a container are attributed to a known identity. **Those env vars override
@@ -120,7 +152,7 @@ registry load with an actionable message naming the bad key.
 | Command | Arguments | Behavior |
 |---|---|---|
 | `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, registry creation (local-file mode by default, or clones `FLEET_CONFIG_REPO` if set), `claude setup-token`, writes `.secrets` |
-| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n>] [--skip-disk-check]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. **Never reuses an existing instance id** — if the resolved id is taken, `-1`/`-2`/… is appended until one is free. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default password. `--count`/`-n` (default 1) bulk-deploys N labelled instances at once, gated by a disk-headroom check (`--skip-disk-check` to bypass); prints per-instance OK/FAILED + summary and a 0/1/2 exit code for N>1, same as the bulk commands below |
+| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n>] [--skip-disk-check]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. **Never reuses an existing instance id** — if the resolved id is taken, `-1`/`-2`/… is appended until one is free. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default credential, used as BOTH username and password (e.g. `--auth-password=fern` → `fern`/`fern`). `--count`/`-n` (default 1) bulk-deploys N labelled instances at once, gated by a disk-headroom check (`--skip-disk-check` to bypass); prints per-instance OK/FAILED + summary and a 0/1/2 exit code for N>1, same as the bulk commands below |
 | `fleet redeploy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--template=<name>] [--auth-password=<pw>] [--force] [--yes]` | Destroys and rebuilds an instance **in place, same id**, from the project/template/branch/label/auth recorded in `.fleet/instance.yml`. Refuses if no `template` was recorded, unless `--template` is given. Confirmation and bulk targeting match `destroy` exactly; bulk redeploy runs sequentially. This is now the only way to rebuild an instance in place — `deploy` never does |
 | `fleet destroy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes instance dir + lock file. A single explicit id destroys immediately (no prompt, backward-compat); a selector or multiple ids always confirms (type the count, or pass `--yes`) |
 | `fleet start [<id>...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev start` on one or more existing, stopped instances |
@@ -137,6 +169,7 @@ registry load with an actionable message naming the bad key.
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull); no-op message if `config/` isn't a git checkout |
 | `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it |
 | `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
+| `fleet refresh-auth` | — | Re-applies per-instance basic auth to every deployed instance from `fleet.auth_bypass_cidrs` + each instance's recorded `auth-enabled`/`auth-password` — the "apply my auth-whitelist edit now" command; rewrites every `/etc/caddy/fleet/instances/*.conf`, then ONE `caddy validate` + `caddy reload` |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
 | `fleet ddev [<instance-id>] [-- args]` | — | Runs `ddev <args>` inside an instance's directory |
 | `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach — a newly-created instance window has its template's `tty1`/`tty2` commands typed into its two bash panes |
@@ -183,6 +216,9 @@ Full detail + examples: `docs/cli.md`.
 - **Rotate the Claude Code token fleet-wide (e.g. before the ~1 year expiry):** `fleet refresh-claude-token` — safe to re-run; only running instances are restarted (with `--restart`).
 - **Rotate the dashboard admin password:** `fleet rotate-admin-password` (generated) or `fleet set-admin-password <password>` (explicit) — never requires an Ansible run.
 - **Pull the latest registry/assets after someone else edits `fleet.yml`:** `fleet refresh-config`.
+- **Let a network skip the basic-auth prompt:** add its CIDR to
+  `fleet.auth_bypass_cidrs` in `fleet.yml`, then `fleet refresh-auth` — no
+  redeploy, no Ansible run. Unlisted visitors still get the prompt.
 - **Expose a new port for a project (e.g. Typesense, a Playwright report port):** add it to `fleet.ports` and the project's `ports:` list in `fleet.yml`, then `fleet refresh-ports` — no Ansible run, no redeploy needed.
 - **Check for a pending host reboot and notify:** `fleet reboot-notify` (normally run on a timer); `--test` to verify the mail relay works.
 - **Recovery when the daemon/web UI is down:** every command above works from the CLI directly against `fleet.core` — the daemon is not a dependency of the CLI.

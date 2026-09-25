@@ -173,6 +173,73 @@ projects:
     assert registry.additional_hostnames("demo") == ["www", "api"]
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        "News",  # uppercase
+        "news.example",  # dot — must be a bare DNS label
+        "-news",  # leading dash
+        "news-",  # trailing dash
+        "news_site",  # underscore
+        "",  # empty
+    ],
+)
+def test_additional_hostnames_rejects_invalid_dns_labels(fleet_home, bad):
+    registry_text = f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - {bad!r}
+    templates:
+      default: {{}}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    with pytest.raises(RegistryError, match=r"projects\.demo\.additional_hostnames"):
+        Registry.load(path)
+
+
+def test_additional_hostnames_rejects_non_string_entry(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - 123
+    templates:
+      default: {}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    with pytest.raises(RegistryError, match=r"projects\.demo\.additional_hostnames"):
+        Registry.load(path)
+
+
+def test_additional_hostnames_accepts_valid_dns_labels(fleet_home):
+    registry_text = """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    additional_hostnames:
+      - news
+      - es2
+      - a-b-c
+    templates:
+      default: {}
+"""
+    path = _write(fleet_home / "fleet.yml", registry_text)
+    registry = Registry.load(path)
+    assert registry.additional_hostnames("demo") == ["news", "es2", "a-b-c"]
+
+
 def test_typesense_enabled(fleet_home):
     text = """\
 fleet:
@@ -969,3 +1036,64 @@ def test_load_missing_file_raises_actionable_registry_error(fleet_home):
     with pytest.raises(RegistryError) as exc_info:
         Registry.load(path)
     assert "fleet init" in str(exc_info.value)
+
+
+# --- fleet.auth_bypass_cidrs (per-instance basic-auth whitelist) ---
+
+_BYPASS_REGISTRY = """\
+fleet:
+  domain: fleet.example.test
+  auth_bypass_cidrs:
+    - 203.0.113.31/32
+    - 203.0.113.80/29
+    - 198.51.100.191/29      # host bits set — normalised to .184/29
+    - 203.0.113.80/29       # duplicate
+    - 9.9.9.9                # bare address -> /32
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+"""
+
+
+def test_auth_bypass_cidrs_normalises_masks_and_dedupes(fleet_home):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", _BYPASS_REGISTRY))
+
+    assert registry.auth_bypass_cidrs == [
+        "203.0.113.31/32",
+        "203.0.113.80/29",
+        "198.51.100.184/29",
+        "9.9.9.9/32",
+    ]
+
+
+def test_auth_bypass_cidrs_defaults_to_empty(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+
+    assert registry.auth_bypass_cidrs == []
+
+
+def test_auth_bypass_cidrs_rejects_invalid_entry(fleet_home):
+    bad = _BYPASS_REGISTRY.replace("203.0.113.31/32", "not-an-ip")
+
+    with pytest.raises(RegistryError) as exc:
+        Registry.load(_write(fleet_home / "fleet.yml", bad))
+
+    assert "auth_bypass_cidrs" in str(exc.value)
+
+
+def test_auth_bypass_cidrs_rejects_non_list(fleet_home):
+    bad = """\
+fleet:
+  domain: fleet.example.test
+  auth_bypass_cidrs: 203.0.113.31/32
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+"""
+
+    with pytest.raises(RegistryError) as exc:
+        Registry.load(_write(fleet_home / "fleet.yml", bad))
+
+    assert "auth_bypass_cidrs" in str(exc.value)

@@ -13,7 +13,7 @@ from typing import Callable
 
 from fleet.core import instances as instances_mod
 from fleet.core import naming, sysinfo
-from fleet.core.caddyauth import DEFAULT_INSTANCE_PASSWORD
+from fleet.core.caddyauth import DEFAULT_INSTANCE_PASSWORD, validate_instance_credential
 from fleet.core.errors import DiskSpaceError, FleetError, ValidationError
 from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock
 from fleet.core.runner import run_streamed
@@ -159,6 +159,9 @@ def multi_deploy(
         raise ValidationError(f"--count must be between 0 and 20 (got {count})")
     if count == 0:
         return BulkOutcome(kind="deploy", results=[])
+
+    if auth_enabled:
+        validate_instance_credential(auth_password)
 
     if not skip_disk_check:
         try:

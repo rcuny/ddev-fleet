@@ -8,6 +8,128 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Bounded timeouts on `fleet list`'s read-only status calls** so a
+  stalled `docker`/`ddev`/`git` process degrades the table instead of
+  hanging the whole command forever (observed once on ddev2, 2026-09-22:
+  a `fleet list` hung >2 minutes with no output before being killed by
+  hand — not reproduced since, so this is defensive hardening rather than
+  a confirmed root-cause fix). `ddev list --json-output`
+  (`core/ddev.py:LIST_TIMEOUT` = 30s), `docker stats --no-stream`
+  (`core/ddev.py:STATS_TIMEOUT` = 20s), and the per-instance `git
+  rev-parse` branch/HEAD reads (`core/instances.py:GIT_READ_TIMEOUT` =
+  10s) now all time out rather than block indefinitely. On a `ddev list`
+  timeout/failure, instances are still listed from on-disk state but
+  `InstanceStatus.state` reports a new `"unknown"` value instead of the
+  previous, inaccurate `"deployed"` (which asserted a live fact — nothing
+  running — that was never actually observed); a `docker stats`
+  timeout/failure only blanks the RAM column; a git-read timeout/failure
+  falls back quietly to the deploy-time recorded branch, same as its other
+  failure modes. Each of the first two prints one `warning: …` line to
+  stderr naming what's unavailable. Deploy/destroy/start/stop/import paths
+  are untouched — they still wait indefinitely by design. See
+  `docs/cli.md`'s "`fleet list` degraded state".
+- **Pre-destroy preflight** for redeploy/replace: `redeploy()` and
+  `deploy(replace=True)` (and, more lightly, `destroy()`) now run cheap,
+  side-effect-free checks — registry still resolves the deploy target,
+  alias FQDNs still compose, the Caddy snippet directory guard, and the
+  CURRENT Caddy config still validates — BEFORE anything is torn down.
+  Raises `DeployError` naming the reason and stating nothing was
+  destroyed. Closes the gap that let `fleet redeploy --all` destroy 5
+  instances on 2026-09-22 and then fail to rebuild them because `caddy
+  validate` was already broken for an unrelated reason.
+- **Per-host `fleet.domain`** (`<FLEET_HOME>/host.yml`, e.g.
+  `/srv/fleet/host.yml`): lets several fleet servers share ONE `fleet.yml`
+  (via the config repo) while each keeps its own domain. Rendered by the
+  `caddy` Ansible role from `fleet_domain`; `host.yml`'s `domain` wins over
+  `fleet.yml`'s own `fleet.domain` when both are set, and `fleet.domain`
+  becomes optional in `fleet.yml` once every host has its own `host.yml`.
+  See `docs/configuration.md`'s "Per-host domain" section.
+- **TLS certificate mode**, chosen at install time (`fleet_tls_mode`,
+  `on_demand` default or `ovh_dns`): `on_demand` keeps today's
+  per-hostname Let's Encrypt behaviour (HTTP-01 via `/api/tls-authorize`,
+  ~50 new certs/registered-domain/7 days); `ovh_dns` issues a single
+  wildcard certificate for `*.<domain>` via the OVH DNS-01 challenge
+  (`caddy-dns/ovh` plugin, custom Caddy build installed via
+  `update-alternatives`), removing the per-hostname rate limit entirely.
+  Both modes render from one shared Caddy snippet, `tls.conf`, imported by
+  a literal path from the `*.<domain>` site and every named-port site
+  (`fleet.core.caddyports` needs no knowledge of the mode). New scoped
+  playbook `ansible/caddy-only.yml` lets an existing server switch mode
+  (or domain) without running `site.yml`. `bootstrap.sh` prompts for the
+  mode and, for `ovh_dns`, the OVH API credentials (written straight to
+  `/etc/caddy/ovh.env`, never to `local-vars.yml`). See
+  `docs/installation.md` "Choosing a TLS mode" and `docs/networking.md` §4.
+- The `*.<domain>` site now sends `X-Robots-Tag: noindex, nofollow` on
+  every response, in both TLS modes — instance URLs are ephemeral,
+  often-unfinished work and should never be indexed.
+- `FLEET_INSTANCE_HOST=<instance-id>.<domain>` injected into every
+  instance's `web_environment`, so a project's own Drupal Domain Access
+  config can build its alias-matching patterns without hardcoding the
+  fleet domain: `"<h>-" . getenv('FLEET_INSTANCE_HOST')`.
+
+### Changed
+- `additional_hostnames` alias FQDNs are now **flattened**:
+  `<h>-<instance-id>.<domain>` (e.g.
+  `news-oak--translations-test.fleet.example.com`) instead of the previous
+  nested `<h>.<instance-id>.<domain>` form, which Caddy's single-label
+  `*.<domain>` site block could never match. Each entry is now validated
+  at registry load as a bare DNS label (lowercase, no dots —
+  `RegistryError` otherwise), and deploy raises `DeployError` if a
+  composed alias label exceeds the 63-character DNS limit. See
+  `docs/networking.md` §7.
+
+### Fixed
+- **Security:** per-instance Caddy basic auth now covers alias hosts too —
+  the `@auth-<instance-id>` matcher lists the instance FQDN and every
+  registered alias FQDN in the same `host` clause (`fleet refresh-auth`
+  re-applies this to already-deployed instances). Previously an alias host
+  bypassed basic auth entirely, since the matcher only ever named the bare
+  instance FQDN.
+- **Security:** `/api/tls-authorize` no longer authorizes any
+  `<prefix>-<instance-id>` label — only the bare instance id, or a label
+  matching one of that instance's project's registered
+  `additional_hostnames`. The previous generic
+  `label.endswith(f"-{instance_id}")` check let anyone mint an on-demand
+  TLS certificate for an arbitrary, unregistered alias pointed at a real
+  instance.
+
+### Added
+- Template-level `drupal_env` in `fleet.yml`: fleet writes `DRUPAL_ENV=<value>`
+  into the deployed instance's own root `.env` (after asset injection, in
+  place — comments, key order and every other value preserved), overriding the
+  default the project's `assets/<project>/.env` ships. A template without
+  `drupal_env` leaves the file untouched. Lets one project run a `staging`
+  template beside its `dev` one.
+- `fleet.auth_bypass_cidrs` in `fleet.yml` (per fleet server): IP addresses /
+  CIDR ranges whose visitors skip per-instance HTTP basic auth, rendered into
+  each instance's Caddy snippet as `not remote_ip …`. Anything unlisted still
+  gets the prompt — the list never denies. For networks where corporate policy
+  blocks basic auth outright.
+- `fleet refresh-auth`: re-applies that whitelist (plus each instance's
+  recorded auth settings) to every deployed instance — rewrite all snippets,
+  then one `caddy validate` + `caddy reload`. No redeploy, no Ansible run.
+
+### Fixed
+- Fleet-owned Caddy snippet directories under `/etc/caddy` are no longer
+  created on the fly: `caddyauth.ensure_snippet_dir()` now refuses to write
+  when the directory is missing OR has lost its **setgid** bit, naming the
+  exact fix. A `mkdir` there drops setgid, so every snippet written after it
+  is group-owned by `fleet` instead of `caddy` and Caddy cannot read it —
+  which took ddev2's Caddy down from 2026-09-14 to 2026-09-21, invisibly,
+  because a reload keeps serving the old config until the next restart. The
+  unprivileged `fleet` user cannot repair setgid itself (Linux drops S_ISGID
+  for a non-member group), so provisioning owns these directories.
+
+### Changed
+- Per-instance basic auth is now symmetric: the `--auth-password` / web-UI
+  "Auth user & password" value is used as BOTH username and password
+  (previously the username was always `fleet`). Because it doubles as a
+  Caddyfile username token, it must be a single word (no whitespace, quotes,
+  braces, backslashes, or leading `#`) — rejected up front otherwise.
+  Existing instances keep their old `fleet`/<password> credentials until
+  redeployed.
+
+### Added
 - `fleet redeploy <instance-id>... [--all|--project=P|--state=S] [--template T] [--auth-password P] [--force] [--yes]`,
   plus a per-row Redeploy button and a bulk "Redeploy selected" action in the
   web UI. Destroys an instance and rebuilds it under the same id, recovering

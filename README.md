@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-25
+Last updated: 2026-09-25
 Type: documentation
 ---
 
@@ -82,7 +82,13 @@ provisioning — either one you supplied or a randomly generated one,
 printed once. There is no fixed public default to rotate away from.
 Per-instance basic auth (separate from the dashboard) is **on by default**
 on every `fleet deploy`, user `fleet` / password `fleet` unless
-overridden with `--auth-password` or disabled with `--no-auth`. Rotate the
+overridden with `--auth-password` or disabled with `--no-auth`. The
+credential is symmetric: `--auth-password=fern` gives user `fern` /
+password `fern`. Where a network's own policy blocks HTTP basic auth
+outright (it looks like a server error to the client, not a login
+prompt), `fleet.auth_bypass_cidrs` in `fleet.yml` lists CIDR ranges that
+skip the prompt entirely — everyone else still gets it; see
+`docs/configuration.md`. Rotate the
 dashboard password any time, with no Ansible run required:
 
 ```bash

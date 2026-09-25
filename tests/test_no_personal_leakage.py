@@ -34,8 +34,19 @@ DENYLIST = [
     "contact@personal.example",
     "Kimsufi",
     "bitbucket.org/personal_maintainer",
-    "OVH",
 ]
+
+# "OVH" itself is intentionally NOT on the denylist (removed 2026-09-22,
+# fleet_tls_mode / caddy-dns-ovh feature work): it originally only ever
+# appeared as an incidental leak of the maintainer's own hosting provider
+# (Kimsufi is OVH's budget-server brand — still denylisted above). It is
+# now also a genuine, generic, user-facing feature name — `fleet_tls_mode:
+# ovh_dns`, the `caddy-dns/ovh` Caddy plugin, `OVH_ENDPOINT`/
+# `OVH_APPLICATION_KEY`/etc. — that any operator can opt into regardless of
+# where they host, exactly like naming "Cloudflare" or "Route53" would be
+# in a tool supporting those DNS backends. Banning the bare substring would
+# make this permanent, intentional feature unshippable. "Kimsufi" alone
+# still catches the original personal-deployment leak this rule exists for.
 
 # Tracked, temporary exceptions. See the docstring at the top of this file
 # and 2026-07-24-fleet-open-source-release-plan.md Phase B/C tasks for

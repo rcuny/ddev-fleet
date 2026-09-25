@@ -28,13 +28,15 @@
 }
 
 *.{{ fleet_domain }} {
-    # Caddy terminates the client TLS (on-demand cert per instance) and proxies
-    # to DDEV's Traefik HTTP entrypoint. Proxying to Traefik's HTTPS port
-    # ({{ ddev_router_https_port }}) instead returns 404 — Traefik's HTTPS router
-    # matching does not engage for Caddy's proxied request — whereas the HTTP
-    # entrypoint routes correctly by Host header. Caddy sets
-    # X-Forwarded-Proto=https so Drupal still sees the request as secure; the
-    # 127.0.0.1 hop is plaintext-safe (never leaves the host).
+    # Caddy terminates the client TLS (per-hostname on-demand cert, or a
+    # single shared *.{{ fleet_domain }} wildcard cert — see the tls.conf
+    # import below) and proxies to DDEV's Traefik HTTP entrypoint. Proxying
+    # to Traefik's HTTPS port ({{ ddev_router_https_port }}) instead returns
+    # 404 — Traefik's HTTPS router matching does not engage for Caddy's
+    # proxied request — whereas the HTTP entrypoint routes correctly by
+    # Host header. Caddy sets X-Forwarded-Proto=https so Drupal still sees
+    # the request as secure; the 127.0.0.1 hop is plaintext-safe (never
+    # leaves the host).
     #
     # Per-instance basic auth: each instance opting in (default: on) gets its
     # own fleet-owned snippet at {{ fleet_caddy_snippet_dir }}/instances/<id>.conf
@@ -49,9 +51,17 @@
     # state.
     import {{ fleet_caddy_snippet_dir }}/instances/*.conf
     reverse_proxy 127.0.0.1:{{ ddev_router_http_port }}
-    tls {
-        on_demand
-    }
+    # Instances are ephemeral, often unfinished work — keep them out of
+    # search indexes regardless of TLS mode.
+    header X-Robots-Tag "noindex, nofollow"
+    # The full tls{} directive lives in tls.conf (rendered by tls.conf.j2
+    # per fleet_tls_mode: on_demand or ovh_dns) and is imported here by a
+    # LITERAL path — Caddy hard-errors on a missing literal import, which is
+    # correct since tls.conf is provisioned by this role and must always
+    # exist. See fleet.core.caddyports for the sibling named-port snippets
+    # that import the SAME file, so ovh_dns mode issues exactly one
+    # wildcard cert shared across all of them.
+    import {{ fleet_caddy_snippet_dir }}/tls.conf
 }
 
 # Fleet-managed named-port exposure (e.g. Typesense, Playwright reports):

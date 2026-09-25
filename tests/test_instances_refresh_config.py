@@ -122,7 +122,8 @@ def test_refresh_instance_config_rewrites_config_with_hook_token_and_typesense(f
     assert f"FLEET_TYPESENSE_SEARCH_KEY={search_key}" in content
     assert "FLEET_TYPESENSE_HOST=demo--develop.fleet.example.test" in content
     assert "FLEET_TYPESENSE_PORT=9108" in content
-    assert "albania.demo--develop.fleet.example.test" in content
+    assert "albania-demo--develop.fleet.example.test" in content
+    assert "FLEET_INSTANCE_HOST=demo--develop.fleet.example.test" in content
 
     web_build_path = instance_dir / ".ddev" / "web-build" / "Dockerfile.fleet-claude"
     assert web_build_path.exists()

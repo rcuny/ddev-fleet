@@ -87,7 +87,16 @@ def write_fleet_config(
     # from a committed settings/config.local.yaml. Reuses the same
     # instance_id + domain FQDN pattern as FLEET_TYPESENSE_HOST below /
     # tokens.py's [[instance-fqdn]] token.
-    web_environment: list[str] = [f"DRUSH_OPTIONS_URI=https://{instance_id}.{domain}"]
+    # FLEET_INSTANCE_HOST — the instance's own bare fleet hostname (no
+    # scheme), so a project's Drupal Domain Access config can build its
+    # ALIAS hosts without hardcoding the fleet domain: an alias for
+    # hostname `h` is always `"<h>-" . getenv('FLEET_INSTANCE_HOST')`
+    # (core/instances.py's `alias_fqdns()` composes the exact same string
+    # fleet-side, so the two can never drift apart).
+    web_environment: list[str] = [
+        f"DRUSH_OPTIONS_URI=https://{instance_id}.{domain}",
+        f"FLEET_INSTANCE_HOST={instance_id}.{domain}",
+    ]
     if claude_token:
         web_environment.append(f"CLAUDE_CODE_OAUTH_TOKEN={claude_token}")
     if git_bot:
@@ -243,6 +252,42 @@ def write_ddev_env(instance_dir: Path, values: dict[str, str]) -> Path:
     existing.update(values)
 
     lines = [f"{key}={value}" for key, value in existing.items()]
+    env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return env_path
+
+
+def set_env_file_var(env_path: Path, key: str, value: str) -> Path:
+    """Upsert `KEY=value` in a project's own `.env`, IN PLACE and
+    line-by-line: an existing assignment is replaced where it stands, and a
+    missing one is appended. Everything else — comments, blank lines, key
+    order, values we don't own — is preserved byte for byte.
+
+    Deliberately NOT `write_ddev_env()`'s parse-and-rewrite: that one owns
+    `.ddev/.env` outright (a fleet-generated file) and may reorder it, while
+    THIS file is the project's own, shipped from `assets/<project>/.env` with
+    real credentials and comments in it. Rewriting it wholesale would strip
+    the comments and shuffle the keys of a file the project authors maintain.
+
+    Only the FIRST assignment of `key` is replaced — in shell-style env
+    files a later duplicate would win, so a file containing two
+    `DRUPAL_ENV=` lines is malformed to begin with; we do not silently
+    "fix" it by editing both, we leave the duplicate visible.
+
+    Creates the file if it does not exist. Returns the path written.
+    """
+    lines: list[str] = []
+    if env_path.exists():
+        lines = env_path.read_text(encoding="utf-8").splitlines()
+
+    prefix = f"{key}="
+    for index, line in enumerate(lines):
+        if line.strip().startswith(prefix):
+            lines[index] = f"{key}={value}"
+            break
+    else:
+        lines.append(f"{key}={value}")
+
+    env_path.parent.mkdir(parents=True, exist_ok=True)
     env_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     return env_path
 

@@ -48,19 +48,23 @@
 - name: Build the local demo bare repo from the staged source (first provision only)
   become: true
   become_user: "{{ fleet_user }}"
-  ansible.builtin.shell: |
-    set -euo pipefail
-    work="$(mktemp -d)"
-    cp -a "{{ fleet_srv_dir }}/_demo-src/." "$work/"
-    git -C "$work" init -q -b main
-    git -C "$work" -c user.name='ddev-fleet' -c user.email='fleet@localhost' add -A
-    git -C "$work" -c user.name='ddev-fleet' -c user.email='fleet@localhost' commit -q -m 'ddev-fleet demo'
-    # -b main so the bare repo's HEAD matches the pushed branch (a plain clone
-    # would otherwise fail to check out — default bare HEAD is refs/heads/master).
-    git init -q --bare -b main "{{ fleet_srv_dir }}/_demo.git"
-    git -C "$work" push -q "{{ fleet_srv_dir }}/_demo.git" main
-    rm -rf "$work"
-  args:
+  ansible.builtin.shell:
+    # cmd: (block-scalar), not free-form — a free-form multi-line string here
+    # defeats ansible's split_args (unbalanced-quote/jinja2 parse error) once
+    # it contains both {{ }} templating and embedded quotes. This form is
+    # parsed as a single literal string, sidestepping that entirely.
+    cmd: |
+      set -euo pipefail
+      work="$(mktemp -d)"
+      cp -a "{{ fleet_srv_dir }}/_demo-src/." "$work/"
+      git -C "$work" init -q -b main
+      git -C "$work" -c user.name='ddev-fleet' -c user.email='fleet@localhost' add -A
+      git -C "$work" -c user.name='ddev-fleet' -c user.email='fleet@localhost' commit -q -m 'ddev-fleet demo'
+      # -b main so the bare repo's HEAD matches the pushed branch (a plain clone
+      # would otherwise fail to check out — default bare HEAD is refs/heads/master).
+      git init -q --bare -b main "{{ fleet_srv_dir }}/_demo.git"
+      git -C "$work" push -q "{{ fleet_srv_dir }}/_demo.git" main
+      rm -rf "$work"
     creates: "{{ fleet_srv_dir }}/_demo.git/HEAD"
 
 - name: Seed config/fleet.yml if it does not already exist (never clobber a real registry)

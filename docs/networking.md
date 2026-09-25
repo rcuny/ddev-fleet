@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-24
+Last updated: 2026-09-22
 Type: documentation
 ---
 
@@ -62,6 +62,39 @@ Nothing downstream ever terminates TLS — the loopback hop from Caddy to
 only because it never leaves the host (`127.0.0.1`). Caddy sets
 `X-Forwarded-Proto=https` so Drupal still sees the request as secure.
 
+### Certificate mode (`fleet_tls_mode`)
+
+How Caddy actually *gets* those certificates is chosen at install time
+(`docs/installation.md` "Choosing a TLS mode") and persisted as the
+`fleet_tls_mode` Ansible var:
+
+- **`on_demand`** (default) — one cert per exact hostname, issued the
+  first time it's requested, via the HTTP-01 challenge authorized by
+  `/api/tls-authorize`. Subject to Let's Encrypt's ~50-new-certs-per-
+  registered-domain-per-7-days limit (see §7 below).
+- **`ovh_dns`** — one wildcard cert for `*.{{ fleet_domain }}`, via the
+  DNS-01 challenge (`caddy-dns/ovh` plugin writing the `_acme-challenge`
+  TXT record through the OVH API). No per-hostname limit; needs an OVH API
+  key. OVH is currently the only supported DNS provider — a future
+  provider would be a new mode named `<provider>_dns`.
+
+Both modes render the same shape of Caddy config: the full `tls { ... }`
+directive lives in ONE file, `{{ fleet_caddy_snippet_dir }}/tls.conf`
+(rendered by the `caddy` Ansible role from `tls.conf.j2`, per
+`fleet_tls_mode` — never by `fleet.core`), imported by a **literal** path
+from both the `*.{{ fleet_domain }}` site (`Caddyfile.j2`) and every
+fleet-owned named-port site (`fleet.core.caddyports.render_port_snippet()`)
+— so `core/caddyports.py` carries zero knowledge of TLS mode, and in
+`ovh_dns` mode every one of those sites shares the exact same wildcard
+certificate (same cert name in Caddy's storage, since they all import the
+identical `tls.conf`). The dashboard site (`fleet.{{ fleet_domain }}`
+itself) keeps Caddy's own default automatic HTTPS (HTTP-01) in **both**
+modes — it isn't a wildcard-eligible hostname.
+
+Switching an existing server's mode: `ansible/caddy-only.yml` (a scoped
+playbook, mirroring `ddev-only.yml`) reapplies just the `caddy` role — see
+`docs/installation.md` "Switching TLS mode on an existing server".
+
 ## 5. Host-header routing
 
 Every named port's Caddy site block (`*.{{ fleet_domain }}:<port> {
@@ -107,7 +140,49 @@ per named service, not per instance.
    curl -s -o /dev/null -w '%{http_code}\n' https://<instance>.fleet.<domain>:9400/
    ```
 
-## 7. Cross-references
+## 7. Domain-Access alias hostnames (`additional_hostnames`)
+
+A project's `additional_hostnames: [news, odihr, ...]` (`fleet.yml`) gives
+each instance extra hostnames for Drupal Domain Access-style multi-domain
+sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
+`docs/configuration.md`'s `additional_hostnames` row.
+
+- **Flattened, single-label form.** An alias for hostname `h` on instance
+  `<instance-id>` is `<h>-<instance-id>.<domain>` — e.g.
+  `news-oak--translations-test.fleet.example.com` — never a nested/
+  multi-label form (`news.oak--translations-test...`). Caddy's site block
+  for this fleet is a single-label wildcard, `*.{{ fleet_domain }}` (§5
+  above), which can only ever match one label; a nested alias would be
+  unreachable and `/api/tls-authorize` rejects any dotted label anyway.
+  `core/instances.py`'s `alias_fqdns()` is the one place that composes this
+  string — nothing else should format one by hand.
+- **63-character DNS label limit.** `<h>-<instance-id>` must itself be a
+  valid DNS label (RFC 1035). `alias_fqdns()` raises `DeployError` at
+  deploy time (naming the hostname and the resulting length) if it doesn't
+  fit — a long project/label/hostname combination can hit this even though
+  the bare instance id was already within the limit on its own.
+- **Basic auth covers alias hosts too.** The per-instance Caddy snippet's
+  `@auth-<instance-id>` matcher (`core/caddyauth.py`) lists the instance
+  FQDN *and* every alias FQDN in the same `host` clause, so an alias can
+  never bypass the dashboard's basic-auth prompt.
+- **`FLEET_INSTANCE_HOST`** — injected into every instance's
+  `web_environment` (`core/fleetconfig.py`) as `<instance-id>.<domain>` (no
+  scheme). A project's Domain Access config builds its own alias-matching
+  patterns from it: `"<h>-" . getenv('FLEET_INSTANCE_HOST')` in PHP,
+  guaranteed to compose the exact same string `alias_fqdns()` does
+  fleet-side.
+- **Certificates.** In the default `on_demand` mode, each alias host is a
+  distinct hostname to Caddy's on-demand TLS, so it gets its **own** Let's
+  Encrypt certificate the first time it's requested — it is not covered by
+  the instance's own cert. A registered domain gets roughly 50
+  new-certificate issuances per week from Let's Encrypt; a project with
+  many aliases across many instances can run into that limit. Switching
+  to `fleet_tls_mode: ovh_dns` (§4 above) removes this limit entirely — a
+  single wildcard cert for `*.<domain>` already covers every alias host
+  (they're all single-label subdomains of the same domain), with no
+  `/api/tls-authorize` round trip and no per-hostname issuance at all.
+
+## 8. Cross-references
 
 - `docs/README-typesense.md` — the worked example this document
   generalizes (topology, admin vs. search-only keys, env injection).

@@ -1,8 +1,10 @@
+import subprocess
 import time
+from pathlib import Path
 
 import pytest
 
-from fleet.core import bulk, instances
+from fleet.core import bulk, ddev, instances
 from fleet.core.errors import DeployError, DiskSpaceError, ValidationError
 from fleet.core.registry import Registry
 from fleet.core.secrets import write_secret
@@ -35,6 +37,36 @@ def test_run_sequential_continues_past_failing_instance():
     assert outcome.results[0].ok is True
     assert outcome.results[1].ok is False
     assert outcome.results[1].error == "boom"
+    assert outcome.results[2].ok is True
+
+
+def test_run_sequential_continues_past_ddev_start_timeout():
+    """A single hung `ddev start` (subprocess.TimeoutExpired from the
+    runner) must surface as a FleetError — via ddev.start()'s conversion —
+    and be recorded as a failed BulkResult, without aborting the batch (the
+    fleet-boot.service hang-guard scenario)."""
+
+    from fleet.core.runner import RunResult
+
+    def make_runner(instance_id):
+        def runner(
+            cmd, *, cwd=None, env=None, log_path=None, echo=True, input_text=None, timeout=None
+        ):
+            if instance_id == "b":
+                raise subprocess.TimeoutExpired(cmd, timeout)
+            return RunResult(returncode=0, lines=[])
+
+        return runner
+
+    def op(paths, registry, instance_id, *, runner=None):
+        ddev.start(Path(f"/fake/{instance_id}"), timeout=5, runner=make_runner(instance_id))
+
+    outcome = bulk.run_sequential(None, None, ["a", "b", "c"], op, kind="start")
+
+    assert [r.instance_id for r in outcome.results] == ["a", "b", "c"]
+    assert outcome.results[0].ok is True
+    assert outcome.results[1].ok is False
+    assert "timed out after 5s" in outcome.results[1].error
     assert outcome.results[2].ok is True
 
 

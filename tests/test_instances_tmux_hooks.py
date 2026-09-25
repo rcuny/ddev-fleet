@@ -202,6 +202,7 @@ def _fake_registry(*, tty1=None, tty2=None, issue_id_regexp=None, resolve_raises
 
     class _Registry:
         domain = "fleet.example.test"
+        auth_bypass_cidrs: list[str] = []
 
         def git_url(self, project):
             return "git@example.test:org/demo.git"
@@ -261,6 +262,7 @@ def _stub_deploy_collaborators(monkeypatch, mod):
         label = "develop"
         branch = "develop"
         post_deploy = []
+        drupal_env = None
 
     monkeypatch.setattr(mod, "resolve_target", lambda *a, **k: _Resolved())
     monkeypatch.setattr(mod.gitops, "clone", lambda *a, **k: RunResult(0, []))

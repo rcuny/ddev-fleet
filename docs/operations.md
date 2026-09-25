@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-24
+Last updated: 2026-09-07
 Type: documentation
 ---
 
@@ -107,6 +107,69 @@ passed; a *single explicit* instance id (the traditional `fleet destroy
 compatibility. Each command prints a per-instance `OK`/`FAILED` line and a
 final `N succeeded, M failed` summary; the exit code is `0` if all
 succeeded, `1` if all failed, `2` on a partial failure.
+
+### Automatic instance startup after reboot
+
+DDEV instances do **not** auto-start on their own when the host reboots —
+Docker restarts containers per its own restart policy, but `ddev start`'s
+project-level bookkeeping (router registration, `ddev-ssh-agent`, etc.)
+still needs to run per instance. The `fleet_service` Ansible role installs
+`fleet-boot.service`, a `Type=oneshot` systemd unit enabled at boot
+(`WantedBy=multi-user.target`, ordered `After=docker.service`) that runs:
+
+```bash
+fleet start --all --sequential --timeout 1800 --retry-port-conflict
+```
+
+`--sequential` starts every instance **one at a time**, in the same
+alphabetical instance-id order `fleet list` shows, instead of the default
+2-at-a-time `run_concurrent` bulk path — running many `ddev start`s at once
+right after a reboot causes CPU spikes and `ddev-ssh-agent` registration
+races. `TimeoutStartSec=0` on the unit means systemd will not kill it
+partway through a long batch.
+
+`--timeout 1800` is a **per-instance hang guard**, not a slowness limit: if
+a single `ddev start` doesn't finish within 30 minutes — e.g. an
+`ssh-agent` passphrase prompt blocking forever in this non-interactive boot
+context — it is killed and that instance is recorded as a failed result
+(`FAILED — ddev start timed out after 1800.0s for <instance-id>`), and the
+batch moves straight on to the next instance instead of stalling forever.
+It never fires on ordinary slowness; 30 minutes is a generous ceiling. Omit
+`--timeout` for the old no-timeout (wait forever) behaviour on a manual
+`fleet start`/`fleet stop` invocation — it is opt-in everywhere except
+`fleet-boot.service`.
+
+`--retry-port-conflict` self-heals a **separate, distinct** failure mode
+from the hang guard above: even run one instance at a time, some instances'
+`ddev start` **FAST-FAILs** on a Docker port-allocation race — the db
+container's host port hasn't been released by the kernel yet, e.g.:
+
+```
+failed to set up container networking: driver failed programming external connectivity on endpoint ddev-<id>-db ...
+Bind for 127.0.0.1:32839 failed: port is already allocated
+```
+
+— leaving the web container Up-but-unhealthy. Because it fails almost
+instantly, `--timeout` never sees it. The proven manual fix is a clean
+`fleet stop <id>` then `fleet start <id>` (releases and reallocates the
+host ports). With `--retry-port-conflict`, `fleet start` does exactly that
+automatically — ONE `ddev stop` + `ddev start` — before giving up on that
+instance; a still-failing retry (or any other kind of failure) still just
+fails that instance and the sequential batch continues, as before. It is
+opt-in (default off, no behaviour change) everywhere except
+`fleet-boot.service`, which always passes it.
+
+Check it after a reboot:
+
+```bash
+systemctl status fleet-boot.service
+journalctl -u fleet-boot.service -b
+```
+
+**NOTE:** it starts **every** existing instance, including ones you had
+deliberately stopped before the reboot to save RAM — there is no persisted
+"was running" state yet, so a deliberately-stopped instance will be woken
+back up too.
 
 ### Deploying multiple instances at once
 

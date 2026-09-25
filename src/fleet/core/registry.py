@@ -7,6 +7,8 @@ commands, etc.); `branch` and the instance `label` are resolved per-deploy,
 never stored in the registry.
 """
 
+import ipaddress
+import logging
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -15,6 +17,8 @@ from ruamel.yaml import YAML
 
 from fleet.core.errors import RegistryError, ValidationError
 from fleet.core.naming import instance_id, slugify, validate_part
+
+logger = logging.getLogger(__name__)
 
 _yaml = YAML()
 _yaml.preserve_quotes = True
@@ -41,6 +45,9 @@ class ResolvedInstance:
     # `post_deploy` despite the "place after post_deploy" framing upstream.
     tty1: list[str] = field(default_factory=list)
     tty2: list[str] = field(default_factory=list)
+    # `drupal_env` from the template, or None when the template does not set
+    # one — None means "leave the project's own .env alone".
+    drupal_env: str | None = None
 
 
 @dataclass(frozen=True)
@@ -53,21 +60,84 @@ class PortProfile:
 _TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
 
 
+def _load_host_domain(host_config_path: Path) -> str | None:
+    """Read the per-host `domain` override from `host_config_path` (a
+    `host.yml` — see `FleetPaths.host_config` / docs/configuration.md's
+    "per-host domain" section), or `None` if the file doesn't exist or
+    carries no `domain` key. `host.yml`'s schema is deliberately a small,
+    open mapping (more host-level keys may be added later) — unknown keys
+    are ignored here, not rejected.
+
+    Raises RegistryError if the file exists but isn't a mapping, or if
+    `domain` is present but not a bare hostname (non-empty string, no
+    scheme, no slashes — it is composed straight into instance FQDNs and
+    Caddy site blocks, so a URL-shaped value would silently break both)."""
+    if not host_config_path.exists():
+        return None
+    with open(host_config_path, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh)
+    if data is None:
+        return None
+    if not isinstance(data, dict):
+        raise RegistryError(f"{host_config_path}: host config must be a mapping")
+    if "domain" not in data:
+        return None
+    value = data["domain"]
+    if not isinstance(value, str) or not value.strip():
+        raise RegistryError(f"{host_config_path}: 'domain' must be a non-empty string")
+    if "://" in value or "/" in value:
+        raise RegistryError(
+            f"{host_config_path}: 'domain' must be a bare hostname — no scheme or "
+            f"slashes — got {value!r}"
+        )
+    return value
+
+
 class Registry:
-    def __init__(self, data, path: Path) -> None:
+    def __init__(self, data, path: Path, *, host_domain: str | None = None) -> None:
         self._data = data
         self._path = path
+        # The per-host `host.yml` domain override, already read and
+        # validated by `load()` — `None` means no override, so `domain`
+        # falls back to `fleet.domain` in fleet.yml as before.
+        self._host_domain = host_domain
 
     @classmethod
-    def load(cls, path: Path) -> "Registry":
+    def load(cls, path: Path, *, host_config_path: Path | None = None) -> "Registry":
+        """Load and validate `fleet.yml` at `path`.
+
+        `host_config_path`, when given, is checked for a per-host `domain`
+        override (`host.yml` — see `_load_host_domain`): several fleet
+        servers can then share ONE `fleet.yml` (via the shared config repo)
+        while each keeps its own `fleet.domain`. When `host_config_path` is
+        omitted (the default), behaviour is unchanged from before this
+        existed — `fleet.domain` in `path` is the only source, and it is
+        REQUIRED. Prefer `fleet.core.instances.load_registry(paths)` over
+        calling this directly wherever a `FleetPaths` is already in hand —
+        it's the one call site that can never forget to pass
+        `host_config_path`.
+        """
         if not path.exists():
             raise RegistryError(f"{path}: registry not found; run 'fleet init' first")
         with open(path, "r", encoding="utf-8") as fh:
             data = _yaml.load(fh)
         if data is None:
             raise RegistryError(f"{path}: empty or invalid registry file")
-        registry = cls(data, path)
-        registry._validate()
+
+        host_domain = _load_host_domain(host_config_path) if host_config_path is not None else None
+
+        fleet_block = data.get("fleet") or {}
+        fleet_yml_domain = fleet_block.get("domain")
+        if host_domain is not None and fleet_yml_domain and str(fleet_yml_domain) != host_domain:
+            logger.debug(
+                "domain override: host.yml (%s) wins over fleet.yml's fleet.domain "
+                "(%s) — this is expected when fleet.yml is shared across hosts",
+                host_domain,
+                fleet_yml_domain,
+            )
+
+        registry = cls(data, path, host_domain=host_domain)
+        registry._validate(host_config_path=host_config_path)
         return registry
 
     def _validate_fleet_ports(self, fleet_block: dict) -> dict:
@@ -121,15 +191,21 @@ class Registry:
             seen_router[router] = name
         return fleet_ports
 
-    def _validate(self) -> None:
+    def _validate(self, *, host_config_path: Path | None = None) -> None:
         data = self._data
         if "fleet" not in data:
             raise RegistryError("missing top-level key 'fleet'")
         fleet_block = data["fleet"] or {}
-        if "domain" not in fleet_block:
-            raise RegistryError("missing key 'fleet.domain'")
+        # `fleet.domain` is only required when NO host.yml override resolved
+        # it (see `load()`/`_load_host_domain`) — a shared fleet.yml across
+        # several hosts may legitimately omit it entirely once every host
+        # carries its own host.yml.
+        if "domain" not in fleet_block and self._host_domain is None:
+            where = f" or in {host_config_path}" if host_config_path is not None else ""
+            raise RegistryError(f"missing key 'fleet.domain' in {self._path}{where}")
 
         fleet_ports = self._validate_fleet_ports(fleet_block)
+        self._validate_auth_bypass(fleet_block)
 
         projects = data.get("projects") or {}
         for project_key, project_block in projects.items():
@@ -175,6 +251,17 @@ class Registry:
                         f"projects.{project_key}.templates.{template_key}.branch: not "
                         "allowed — branch is resolved per-deploy, never stored in a template"
                     )
+                if template_block and "drupal_env" in template_block:
+                    value = template_block["drupal_env"]
+                    # Written verbatim as a shell-style `DRUPAL_ENV=<value>`
+                    # line in the instance's .env, so it must be a plain
+                    # single-token word — no quoting/escaping is applied.
+                    if not isinstance(value, str) or not value or any(c.isspace() for c in value):
+                        raise RegistryError(
+                            f"projects.{project_key}.templates.{template_key}.drupal_env: "
+                            "must be a non-empty single-word string (e.g. dev, staging)"
+                        )
+
                 if template_block:
                     for tty_key in _TTY_KEYS:
                         if tty_key not in template_block:
@@ -196,6 +283,25 @@ class Registry:
                                 "allowed — only tty1 and tty2 are supported"
                             )
 
+            for hostname in project_block.get("additional_hostnames") or []:
+                # Each entry becomes the `<h>` half of a flattened alias
+                # FQDN, `<h>-<instance-id>.<domain>` (core/instances.py's
+                # `alias_fqdns`) — so it must itself be a bare DNS label: no
+                # dots (an alias host is single-label, matching Caddy's
+                # `*.{{ fleet_domain }}` site block), lowercase only. Same
+                # pattern/error shape as `validate_part(project_key)` above.
+                if not isinstance(hostname, str):
+                    raise RegistryError(
+                        f"projects.{project_key}.additional_hostnames: entries must be "
+                        f"strings, got {hostname!r}"
+                    )
+                try:
+                    validate_part(hostname)
+                except ValidationError as exc:
+                    raise RegistryError(
+                        f"projects.{project_key}.additional_hostnames.{hostname}: {exc.message}"
+                    ) from exc
+
             for port_name in project_block.get("ports") or []:
                 if port_name not in fleet_ports:
                     raise RegistryError(
@@ -203,9 +309,51 @@ class Registry:
                         "(not defined in fleet.ports)"
                     )
 
+    def _validate_auth_bypass(self, fleet_block: dict) -> None:
+        """Validate `fleet.auth_bypass_cidrs` (optional): a list of IPv4/IPv6
+        addresses or CIDR ranges whose visitors skip per-instance basic auth."""
+        raw = fleet_block.get("auth_bypass_cidrs")
+        if raw is None:
+            return
+        if not isinstance(raw, list):
+            raise RegistryError(
+                "fleet.auth_bypass_cidrs: must be a list of IP addresses/CIDR ranges"
+            )
+        for entry in raw:
+            try:
+                ipaddress.ip_network(str(entry), strict=False)
+            except ValueError as exc:
+                raise RegistryError(f"fleet.auth_bypass_cidrs: invalid entry {entry!r} — {exc}")
+
     @property
     def domain(self) -> str:
+        """The fleet's wildcard domain. `host.yml`'s `domain` (per-host,
+        see `load()`) wins when present, even if `fleet.yml`'s own
+        `fleet.domain` also has a value — that's the whole point of sharing
+        one `fleet.yml` across hosts with different domains."""
+        if self._host_domain is not None:
+            return self._host_domain
         return str(self._data["fleet"]["domain"])
+
+    @property
+    def auth_bypass_cidrs(self) -> list[str]:
+        """Networks whose visitors are NOT prompted for per-instance basic
+        auth (`fleet.auth_bypass_cidrs` in fleet.yml — per fleet server).
+
+        Entries are normalised to canonical CIDR form (host bits masked off,
+        so `10.0.0.5/29` becomes `10.0.0.0/29`) and de-duplicated, preserving
+        first-seen order: the list is written verbatim into every instance's
+        Caddy snippet as `not remote_ip ...`, and hand-maintained allow-lists
+        routinely carry both duplicates and un-masked prefixes. A bare address
+        normalises to a /32 (or /128), which is what Caddy expects.
+
+        Anything NOT matching one of these falls through to the basic-auth
+        prompt — there is no explicit deny entry; the default IS deny."""
+        raw = (self._data.get("fleet") or {}).get("auth_bypass_cidrs") or []
+        seen: dict[str, None] = {}
+        for entry in raw:
+            seen.setdefault(str(ipaddress.ip_network(str(entry), strict=False)), None)
+        return list(seen)
 
     def git_bot(self, project: str | None = None) -> tuple[str, str] | None:
         """Resolve the git commit identity injected into an instance's
@@ -356,6 +504,8 @@ class Registry:
 
         template_block = templates[template] or {}
         post_deploy = [str(c) for c in (template_block.get("post_deploy") or [])]
+        drupal_env = template_block.get("drupal_env")
+        drupal_env = str(drupal_env) if drupal_env is not None else None
         tty1 = [str(c) for c in (template_block.get("tty1") or [])]
         tty2 = [str(c) for c in (template_block.get("tty2") or [])]
 
@@ -376,4 +526,5 @@ class Registry:
             instance_id=inst_id,
             tty1=tty1,
             tty2=tty2,
+            drupal_env=drupal_env,
         )

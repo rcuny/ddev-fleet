@@ -1,0 +1,55 @@
+{# Shared TLS snippet — the full `tls { ... }` directive, imported by a
+   LITERAL (non-glob) path from:
+     - the `*.{{ fleet_domain }}` site block (Caddyfile.j2)
+     - every fleet-owned named-port snippet, IF ITS OWN import already
+       exists on disk (fleet.core.caddyports)
+   A literal import is a hard Caddy validate/reload error if this file is
+   missing, which is intentional for the *.{{ fleet_domain }} site — Ansible
+   (this role) always renders it before deploying the Caddyfile, in the
+   same run, so it exists by the time that import is ever reached.
+
+   Named-port snippets are more cautious: `fleet.core.caddyports.
+   render_port_snippet()` only emits the `import` once this file already
+   exists on disk; on a host whose `caddy` role hasn't been re-run yet
+   (e.g. right after a plain code-only rollout — `push-product`'s git-pull +
+   `systemctl restart fleet`, no Ansible involved — reconciles port
+   snippets on daemon startup), it inlines the legacy `tls { on_demand }`
+   block instead, so an un-migrated on_demand server never ends up
+   importing a file that doesn't exist yet. Once this role HAS run and
+   created this file, the next `fleet refresh-ports` (or daemon restart)
+   flips existing snippets over to the import — see docs/installation.md
+   "Switching TLS mode".
+
+   Rendered per `fleet_tls_mode` (group_vars/all.yml; asserted to be
+   `on_demand` or `ovh_dns` before this template is ever rendered — see
+   roles/caddy/tasks/main.yml). MUST stay multi-line: a single-line
+   `tls { on_demand }` is invalid Caddyfile syntax (proven against a real
+   `caddy validate` v2.11, 2026-07-25 — "Unexpected next token after '{' on
+   same line").
+
+   In ovh_dns mode this is the ONE wildcard cert (*.{{ fleet_domain }})
+   shared by the :443 site and every named-port site — same cert name in
+   Caddy's storage, since they all import this identical block. #}
+{#
+   `{env.OVH_*}` are RUNTIME placeholders, resolved by the caddy-dns/ovh
+   module's Provision() from caddy.service's environment (EnvironmentFile
+   /etc/caddy/ovh.env). Do NOT switch to parse-time `{$OVH_*}`: those are
+   substituted while the Caddyfile is read, so every `caddy validate` —
+   including the fleet daemon's own, run as the `fleet` user, which can't
+   read ovh.env — would see empty values and fail. This file holds no
+   secrets, so it is world-readable within its fleet:caddy 2750 directory.
+#}
+{% if fleet_tls_mode == 'ovh_dns' %}
+tls {
+    dns ovh {
+        endpoint {env.OVH_ENDPOINT}
+        application_key {env.OVH_APPLICATION_KEY}
+        application_secret {env.OVH_APPLICATION_SECRET}
+        consumer_key {env.OVH_CONSUMER_KEY}
+    }
+}
+{% else %}
+tls {
+    on_demand
+}
+{% endif %}

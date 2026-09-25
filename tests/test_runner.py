@@ -1,3 +1,7 @@
+import os
+import subprocess
+import time
+
 import pytest
 
 from fleet.core.errors import FleetError
@@ -93,3 +97,115 @@ def test_run_streamed_pipes_input_text_to_stdin():
     result = run_streamed(["cat"], input_text="hello stdin\n", echo=False)
     assert result.returncode == 0
     assert result.lines == ["hello stdin"]
+
+
+def test_run_streamed_without_timeout_waits_for_slow_command():
+    # No timeout given (default None) — today's behaviour, preserved: a
+    # command slower than any of the timeouts used elsewhere in this test
+    # file must still be waited out in full.
+    result = run_streamed(["sleep", "0.3"], echo=False)
+    assert result.returncode == 0
+
+
+def test_run_streamed_raises_timeout_expired_when_command_hangs():
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_streamed(["sleep", "5"], echo=False, timeout=0.2)
+    elapsed = time.monotonic() - start
+    # Generous ceiling — just proving it didn't wait out the full 5s sleep.
+    assert elapsed < 3
+
+
+def test_run_streamed_kills_the_child_process_on_timeout():
+    process_holder = {}
+    orig_popen = subprocess.Popen
+
+    def spying_popen(*args, **kwargs):
+        proc = orig_popen(*args, **kwargs)
+        process_holder["proc"] = proc
+        return proc
+
+    import fleet.core.runner as runner_mod
+
+    orig = runner_mod.subprocess.Popen
+    runner_mod.subprocess.Popen = spying_popen
+    try:
+        with pytest.raises(subprocess.TimeoutExpired):
+            run_streamed(["sleep", "5"], echo=False, timeout=0.2)
+    finally:
+        runner_mod.subprocess.Popen = orig
+
+    proc = process_holder["proc"]
+    # Give the killed child a moment to actually exit.
+    proc.wait(timeout=5)
+    assert proc.returncode is not None
+    assert proc.returncode != 0
+
+
+def test_run_streamed_completes_normally_within_a_generous_timeout():
+    result = run_streamed(["echo", "hello"], echo=False, timeout=10)
+    assert result.returncode == 0
+    assert result.lines == ["hello"]
+
+
+def test_run_streamed_returns_promptly_when_grandchild_holds_stdout_open(tmp_path):
+    # Regression test for the ddev2 `fleet list` hang: a direct child that
+    # exits (or is killed) can still leave a *grandchild* holding the write
+    # end of the stdout pipe open, so the reader thread's
+    # `for raw_line in process.stdout` never unblocks just because the
+    # direct child was killed. `sleep 30 & wait` backgrounds a grandchild
+    # (detached from the direct `sh` child once killed) that inherits the
+    # pipe and outlives it.
+    pidfile = tmp_path / "grandchild.pid"
+    start = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_streamed(
+            ["/bin/sh", "-c", f"sleep 30 & echo $! > {pidfile}; wait"],
+            echo=False,
+            timeout=1.0,
+        )
+    elapsed = time.monotonic() - start
+    assert elapsed < 10
+
+    # The grandchild must not survive as an orphan.
+    deadline = time.monotonic() + 5
+    grandchild_pid = None
+    while time.monotonic() < deadline:
+        if pidfile.exists():
+            content = pidfile.read_text().strip()
+            if content:
+                grandchild_pid = int(content)
+                break
+        time.sleep(0.05)
+    assert grandchild_pid is not None, "grandchild never wrote its pid"
+
+    deadline = time.monotonic() + 5
+    alive = True
+    while time.monotonic() < deadline:
+        try:
+            os.kill(grandchild_pid, 0)
+        except ProcessLookupError:
+            alive = False
+            break
+        time.sleep(0.1)
+    assert not alive, f"grandchild pid {grandchild_pid} is still alive"
+
+
+def test_run_streamed_uses_new_session_only_when_timeout_given(monkeypatch):
+    captured_kwargs = []
+    orig_popen = subprocess.Popen
+
+    def spying_popen(*args, **kwargs):
+        captured_kwargs.append(kwargs)
+        return orig_popen(*args, **kwargs)
+
+    import fleet.core.runner as runner_mod
+
+    monkeypatch.setattr(runner_mod.subprocess, "Popen", spying_popen)
+
+    run_streamed(["echo", "hello"], echo=False)
+    run_streamed(["echo", "hello"], echo=False, timeout=10)
+
+    assert len(captured_kwargs) == 2
+    assert not captured_kwargs[0].get("start_new_session")
+    assert captured_kwargs[1].get("start_new_session") is True

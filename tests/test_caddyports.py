@@ -7,9 +7,33 @@ from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
 
 
-def test_render_port_snippet_shape():
+def test_render_port_snippet_shape_when_tls_conf_exists():
     out = caddyports.render_port_snippet(
-        "fleet.example.test", PortProfile(name="playwright", public=9324, router=8323)
+        "fleet.example.test",
+        PortProfile(name="playwright", public=9324, router=8323),
+        snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR,
+        tls_snippet_exists=True,
+    )
+    assert out == (
+        "*.fleet.example.test:9324 {\n"
+        "    reverse_proxy 127.0.0.1:8323\n"
+        f"    import {caddyports.DEFAULT_PORTS_SNIPPET_DIR.parent / 'tls.conf'}\n"
+        "}\n"
+    )
+
+
+def test_render_port_snippet_falls_back_to_legacy_inline_tls_when_tls_conf_missing():
+    """Upgrade-safety fallback: on a host whose `caddy` role hasn't been
+    re-run yet, tls.conf doesn't exist — rewriting a snippet to `import` it
+    would make `caddy validate` fail on Caddy's next restart, taking every
+    instance down. render_port_snippet() must inline the legacy multi-line
+    `tls { on_demand }` block instead (byte-for-byte the pre-feature
+    behaviour) whenever tls.conf is missing."""
+    out = caddyports.render_port_snippet(
+        "fleet.example.test",
+        PortProfile(name="playwright", public=9324, router=8323),
+        snippet_dir=caddyports.DEFAULT_PORTS_SNIPPET_DIR,
+        tls_snippet_exists=False,
     )
     assert out == (
         "*.fleet.example.test:9324 {\n"
@@ -19,6 +43,45 @@ def test_render_port_snippet_shape():
         "    }\n"
         "}\n"
     )
+    assert "import" not in out
+
+
+def test_render_port_snippet_default_checks_the_real_filesystem(tmp_path):
+    """With tls_snippet_exists left as the default (None), the function
+    checks the real filesystem — both branches, driven by whether tls.conf
+    actually exists under snippet_dir's parent."""
+    snippet_dir = tmp_path / "fleet" / "ports"
+    profile = PortProfile(name="playwright", public=9324, router=8323)
+
+    missing = caddyports.render_port_snippet("fleet.example.test", profile, snippet_dir=snippet_dir)
+    assert "tls {\n        on_demand\n    }\n" in missing
+    assert "import" not in missing
+
+    tls_path = caddyports.tls_snippet_path(snippet_dir=snippet_dir)
+    tls_path.parent.mkdir(parents=True, exist_ok=True)
+    tls_path.write_text("tls {\n    on_demand\n}\n", encoding="utf-8")
+
+    present = caddyports.render_port_snippet("fleet.example.test", profile, snippet_dir=snippet_dir)
+    assert f"import {tls_path}\n" in present
+
+
+def test_render_port_snippet_imports_tls_conf_relative_to_snippet_dir(tmp_path):
+    """The imported tls.conf path tracks whatever snippet_dir is passed in
+    (tests/local runs use a tmp dir, not the real /etc/caddy/fleet/ports) —
+    it is always snippet_dir's PARENT, never a hardcoded absolute path."""
+    snippet_dir = tmp_path / "fleet" / "ports"
+    out = caddyports.render_port_snippet(
+        "fleet.example.test",
+        PortProfile(name="playwright", public=9324, router=8323),
+        snippet_dir=snippet_dir,
+        tls_snippet_exists=True,
+    )
+    assert f"import {tmp_path / 'fleet' / 'tls.conf'}\n" in out
+
+
+def test_tls_snippet_path_is_parent_of_snippet_dir(tmp_path):
+    snippet_dir = tmp_path / "fleet" / "ports"
+    assert caddyports.tls_snippet_path(snippet_dir=snippet_dir) == tmp_path / "fleet" / "tls.conf"
 
 
 def test_write_port_snippet_is_atomic_leaves_no_tmp_file_behind(tmp_path):
@@ -44,7 +107,7 @@ def test_write_port_snippet_creates_parent_directory(tmp_path):
     assert path.exists()
     assert path == snippet_dir / "playwright.conf"
     assert path.read_text(encoding="utf-8") == caddyports.render_port_snippet(
-        "fleet.example.test", profile
+        "fleet.example.test", profile, snippet_dir=snippet_dir
     )
 
 
@@ -110,6 +173,48 @@ def test_sync_writes_new_subscribers_snippet(tmp_path):
     assert result.removed == []
     assert (snippet_dir / "playwright.conf").exists()
     assert [c["cmd"][0:2] for c in fake.calls] == [["caddy", "validate"], ["caddy", "reload"]]
+    # tls.conf does not exist in this tmp dir (no Ansible caddy role has
+    # ever "run" against it) — sync() must fall back to the legacy inline
+    # block, never write an import to a file that isn't there.
+    written_content = (snippet_dir / "playwright.conf").read_text(encoding="utf-8")
+    assert "tls {\n        on_demand\n    }\n" in written_content
+    assert "import" not in written_content
+
+
+def test_sync_imports_tls_conf_once_it_exists_on_disk(tmp_path):
+    """The other half of the upgrade-safety fallback: once tls.conf has been
+    provisioned (e.g. by ansible/caddy-only.yml), the NEXT sync() — as
+    `fleet refresh-ports` or a daemon restart would run — rewrites the
+    snippet to import it instead of inlining the legacy block."""
+    snippet_dir = tmp_path / "ports"
+    caddyfile_path = tmp_path / "Caddyfile"
+    registry = _StubRegistry(
+        "fleet.example.test", [PortProfile(name="playwright", public=9324, router=8323)]
+    )
+
+    caddyports.sync(
+        registry,
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=FakeRunner(default=RunResult(returncode=0, lines=[])),
+    )
+    before = (snippet_dir / "playwright.conf").read_text(encoding="utf-8")
+    assert "import" not in before
+
+    tls_path = caddyports.tls_snippet_path(snippet_dir=snippet_dir)
+    tls_path.write_text("tls {\n    on_demand\n}\n", encoding="utf-8")
+
+    result = caddyports.sync(
+        registry,
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=FakeRunner(default=RunResult(returncode=0, lines=[])),
+    )
+
+    assert result.written == ["playwright"]
+    after = (snippet_dir / "playwright.conf").read_text(encoding="utf-8")
+    assert f"import {tls_path}\n" in after
+    assert "on_demand" not in after
 
 
 def test_sync_removes_orphaned_snippet(tmp_path):
@@ -549,3 +654,28 @@ def test_sync_raises_caddy_ports_error_naming_both_failures_when_rollback_itself
     assert "validat" in message
     assert "rollback" in message
     assert isinstance(excinfo.value.__cause__, OSError)
+
+
+def test_sync_refuses_managed_snippet_dir_without_setgid(tmp_path, monkeypatch):
+    """A provisioned dir that lost its setgid bit must abort the port sync as
+    a CaddyPortsError (callers catch only that), never be silently written to
+    — snippets there are unreadable by Caddy. See caddyauth.ensure_snippet_dir."""
+    monkeypatch.setattr(caddyauth, "MANAGED_SNIPPET_ROOT", tmp_path)
+    snippet_dir = tmp_path / "fleet" / "ports"
+    snippet_dir.mkdir(parents=True)
+    snippet_dir.chmod(0o750)
+    fake = FakeRunner(default=RunResult(returncode=0, lines=[]))
+    registry = _StubRegistry(
+        "fleet.example.test", [PortProfile(name="playwright", public=9324, router=8323)]
+    )
+
+    with pytest.raises(CaddyPortsError) as exc:
+        caddyports.sync(
+            registry,
+            snippet_dir=snippet_dir,
+            caddyfile_path=tmp_path / "Caddyfile",
+            runner=fake,
+        )
+
+    assert "setgid" in str(exc.value)
+    assert fake.calls == []

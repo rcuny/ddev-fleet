@@ -61,7 +61,11 @@ grep -n -A 30 "^  <project>:" /srv/fleet/config/fleet.yml
 ```
 
 to see that project's `templates.<template>.post_deploy` list, `git_bot`,
-and `additional_hostnames`. Use this to (a) show which exact `post_deploy`
+and `additional_hostnames` (Domain Access alias hosts — each `h` resolves
+to `<h>-<instance-id>.<domain>`, e.g. `news-oak--main.fleet.example.com`;
+these are also covered by the instance's basic-auth matcher and each has
+its own Let's Encrypt cert — see `docs/networking.md` §7). Use this to (a)
+show which exact `post_deploy`
 command was running when the log stopped (count command outputs from the
 `deploy start` line, matching the registry's `post_deploy` list order), and
 (b) flag config-shaped causes — e.g. a `post_deploy` command referencing a

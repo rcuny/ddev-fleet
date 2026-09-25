@@ -23,8 +23,7 @@ from starlette.requests import Request
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, naming, sysinfo
 from fleet.core import instances as instances_mod
-from fleet.core.errors import CaddyPortsError, FleetError
-from fleet.core.registry import Registry
+from fleet.core.errors import CaddyPortsError, DeployError, FleetError
 from fleet.jobs import JobManager
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -136,7 +135,7 @@ def _job_ws_token(secret: bytes, job) -> str | None:
 def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -> FastAPI:
     def _paths_and_registry():
         paths = instances_mod.FleetPaths.from_home(fleet_home)
-        registry = Registry.load(paths.registry)
+        registry = instances_mod.load_registry(paths)
         return paths, registry
 
     @asynccontextmanager
@@ -161,8 +160,9 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             except CaddyPortsError as exc:
                 logger.warning("startup port sync failed: %s", exc.message)
             except Exception:
-                # `sync()` performs `snippet_dir.mkdir()`/`.glob()` before its
-                # own try/except wrapping (core/caddyports.py), so a bare
+                # `sync()` probes the snippet dir (ensure_snippet_dir) and
+                # `.glob()`s it before its own try/except wrapping
+                # (core/caddyports.py), so a bare
                 # PermissionError/OSError (or anything else unanticipated)
                 # can escape uncaught. Startup must NEVER be blocked by a
                 # broken port sync — a fleet manager that refuses to boot
@@ -202,6 +202,13 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     @app.get("/api/tls-authorize")
     def tls_authorize(domain: str = Query(...)):
+        # Authorizes on-demand TLS issuance for Caddy (Caddyfile.j2's
+        # `on_demand_tls.ask`). Deliberately narrow: only a bare known
+        # instance id, or a label matching one of THAT instance's project's
+        # registered `additional_hostnames` aliases — never a generic
+        # `*-<instance_id>` suffix match (removed 2026-09-22; it would have
+        # let anyone mint a cert for an unregistered `foo-<instance_id>`
+        # hostname pointed at a real instance).
         paths, registry = _paths_and_registry()
         suffix = f".{registry.domain}"
         if not domain.endswith(suffix):
@@ -216,8 +223,24 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             return JSONResponse(status_code=404, content={"authorized": False})
 
         known_ids = {p.name for p in instances_path.iterdir() if p.is_dir()}
+        if label in known_ids:
+            return JSONResponse(status_code=200, content={"authorized": True})
+
         for instance_id in known_ids:
-            if label == instance_id or label.endswith(f"-{instance_id}"):
+            project = instances_mod.project_for_instance(instances_path / instance_id, instance_id)
+            if not registry.has_project(project):
+                # Deployed from a project since removed from the registry —
+                # only the bare instance label above authorizes; no aliases.
+                continue
+            try:
+                aliases = instances_mod.alias_fqdns(registry, project, instance_id)
+            except DeployError:
+                # A misconfigured additional_hostnames entry for SOME OTHER
+                # instance must never block TLS issuance for this request —
+                # deploy()/refresh-instance-config are what surface that
+                # loudly; this endpoint just skips it.
+                continue
+            if domain in aliases:
                 return JSONResponse(status_code=200, content={"authorized": True})
         return JSONResponse(status_code=404, content={"authorized": False})
 
@@ -413,6 +436,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         naming.validate_part(project)
         if not (0 <= count <= 20):
             raise FleetError(f"--count must be between 0 and 20 (got {count})")
+        auth_password = auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD
+        if auth:
+            # Synchronous 400 rather than a failed background job — the
+            # credential doubles as the basic-auth username.
+            caddyauth.validate_instance_credential(auth_password)
         paths, registry = _paths_and_registry()
 
         if count == 1:
@@ -438,7 +466,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                     # would make "unchecked" indistinguishable from "field never
                     # sent" and always resolve to ON, which is the classic bug.
                     auth_enabled=bool(auth),
-                    auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
+                    auth_password=auth_password,
                 )
 
             job = await app.state.jobs.submit("deploy", inst_id, run_deploy, log_path=log_path)
@@ -472,7 +500,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 label=label or None,
                 count=count,
                 auth_enabled=bool(auth),
-                auth_password=auth_password or caddyauth.DEFAULT_INSTANCE_PASSWORD,
+                auth_password=auth_password,
                 skip_disk_check=True,  # already checked synchronously above
                 on_progress=on_progress,
             )
