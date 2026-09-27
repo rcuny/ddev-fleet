@@ -13,7 +13,7 @@
 
 - name: Download the Authelia apt signing key
   ansible.builtin.get_url:
-    url: https://apt.authelia.com/apt.authelia.com.gpg.key
+    url: https://www.authelia.com/keys/authelia-security.gpg
     dest: /etc/apt/keyrings/authelia-security.gpg
     owner: root
     group: root
