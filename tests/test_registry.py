@@ -1057,6 +1057,14 @@ def test_auth_mode_rejects_unknown_value(fleet_home, sample_registry_text):
         Registry.load(registry_path, host_config_path=host_config_path)
 
 
+def test_auth_mode_defaults_to_basic_when_host_yml_key_is_blank(fleet_home, sample_registry_text):
+    registry_path = _write(fleet_home / "fleet.yml", sample_registry_text)
+    host_config_path = fleet_home / "host.yml"
+    host_config_path.write_text("auth_mode:\n", encoding="utf-8")
+    registry = Registry.load(registry_path, host_config_path=host_config_path)
+    assert registry.auth_mode == "basic"
+
+
 # --- fleet.yml projects.<project>.users (Authelia mode) ---
 
 _USERS_REGISTRY = """\
@@ -1092,7 +1100,9 @@ def test_users_alias_project_shares_the_same_users_and_gets_its_own_group(fleet_
 
 def test_users_rejects_invalid_charset(fleet_home):
     bad = _USERS_REGISTRY.replace(
-        "name: fleet\n        password: fleet", "name: Fleet!\n        password: fleet"
+        "name: fleet\n        password: fleet",
+        "name: Fleet!\n        password: fleet",
+        1,
     )
     with pytest.raises(RegistryError, match="users"):
         Registry.load(_write(fleet_home / "fleet.yml", bad))
@@ -1100,7 +1110,9 @@ def test_users_rejects_invalid_charset(fleet_home):
 
 def test_users_rejects_empty_password(fleet_home):
     bad = _USERS_REGISTRY.replace(
-        "name: fleet\n        password: fleet", "name: fleet\n        password: ''"
+        "name: fleet\n        password: fleet",
+        "name: fleet\n        password: ''",
+        1,
     )
     with pytest.raises(RegistryError, match="password"):
         Registry.load(_write(fleet_home / "fleet.yml", bad))

@@ -118,6 +118,8 @@ def _load_host_auth_mode(host_config_path: Path) -> str:
     if data is None or not isinstance(data, dict) or "auth_mode" not in data:
         return "basic"
     value = data["auth_mode"]
+    if value is None:
+        return "basic"
     if value not in _VALID_AUTH_MODES:
         raise RegistryError(
             f"{host_config_path}: 'auth_mode' must be one of {sorted(_VALID_AUTH_MODES)}, "
