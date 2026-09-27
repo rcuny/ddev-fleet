@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-25
+Last updated: 2026-09-27
 Type: documentation
 ---
 
@@ -86,9 +86,12 @@ overridden with `--auth-password` or disabled with `--no-auth`. The
 credential is symmetric: `--auth-password=fern` gives user `fern` /
 password `fern`. Where a network's own policy blocks HTTP basic auth
 outright (it looks like a server error to the client, not a login
-prompt), `fleet.auth_bypass_cidrs` in `fleet.yml` lists CIDR ranges that
-skip the prompt entirely — everyone else still gets it; see
-`docs/configuration.md`. Rotate the
+prompt), a server can instead run in **Authelia auth mode**
+(`auth_mode: authelia` in `host.yml`) — a cookie-based login portal with
+per-project users defined in `fleet.yml`'s `users:` key, authorized by
+Caddy per instance. See `docs/README-authelia.md` for the full design and
+setup. (The older `fleet.auth_bypass_cidrs` CIDR whitelist is deprecated —
+see `docs/configuration.md`.) Rotate the
 dashboard password any time, with no Ansible run required:
 
 ```bash

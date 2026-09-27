@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-22
+Last updated: 2026-09-27
 Type: documentation
 ---
 
@@ -57,12 +57,26 @@ prompt:
    writes or reads back this file's contents** — only checks that all
    four required keys are present.
 
-## 2. DNS
+## 2. Choosing an auth mode
+
+The installer also asks how each deployed instance should authenticate
+visitors — the `FLEET_AUTH_MODE` prompt, persisted per host in
+`/etc/ddev-fleet/local-vars.yml` as `fleet_auth_mode`:
+
+| Mode | How it works | Choose it when |
+|---|---|---|
+| **`basic`** (default) | Per-instance HTTP basic auth, credential symmetric (`--auth-password`), on by default on every deploy. | The default — no extra moving parts, works everywhere HTTP basic auth itself works. |
+| **`authelia`** | A cookie-based login portal (Authelia, systemd service on `127.0.0.1:9091`); Caddy authorizes each instance against it per project, using users defined in `fleet.yml`'s `users:` key. | A network's own policy blocks HTTP basic auth outright (it looks like a server error to the client, not a login prompt), or you want named per-user logins instead of one shared instance credential. |
+
+Full design, `fleet.yml` schema, and how to switch an already-provisioned
+server's mode later: `docs/README-authelia.md`.
+
+## 3. DNS
 
 Create the DNS record(s) from the table above before running the
 installer.
 
-## 3. Run the installer
+## 4. Run the installer
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo bash
@@ -84,12 +98,14 @@ The installer will:
    `FLEET_ACME_EMAIL` (Let's Encrypt contact, required), `FLEET_ADMIN_PASSWORD`
    (optional — a strong one is generated and printed once if you don't
    supply it), a **TLS certificate mode** choice (`FLEET_TLS_MODE`,
-   `on_demand` or `ovh_dns` — see "Choosing a TLS mode" below),
-   `FLEET_REPO_VERSION` (optional, defaults to `main`), and two
-   Yes-by-default hardening prompts (`FLEET_NETWORK_HARDENING`,
-   `FLEET_SECURITY_HARDENING` — see the sibling hardening documentation
-   once that work lands). Every value can be supplied as an env var to
-   skip its prompt entirely (useful for unattended installs):
+   `on_demand` or `ovh_dns` — see "Choosing a TLS mode" below), an
+   **auth mode** choice (`FLEET_AUTH_MODE`, `basic` (default) or
+   `authelia` — see "Choosing an auth mode" below), `FLEET_REPO_VERSION`
+   (optional, defaults to `main`), and two Yes-by-default hardening prompts
+   (`FLEET_NETWORK_HARDENING`, `FLEET_SECURITY_HARDENING` — see the sibling
+   hardening documentation once that work lands). Every value can be
+   supplied as an env var to skip its prompt entirely (useful for
+   unattended installs):
 
    ```bash
    sudo env FLEET_DOMAIN=fleet.example.com FLEET_ACME_EMAIL=you@example.com bash bootstrap.sh
@@ -137,7 +153,7 @@ bare `curl | bash` one-liner is auth-gated. Two options:
 detached (`nohup … &` to a logfile, then poll) rather than holding an SSH
 session open.
 
-## 4. Add the deploy key to each forge
+## 5. Add the deploy key to each forge
 
 ```bash
 cat /srv/fleet/fleet-deploy-key.pub
@@ -146,7 +162,7 @@ cat /srv/fleet/fleet-deploy-key.pub
 Add it as a **read-only** deploy key on every forge hosting a project
 you'll register in `/srv/fleet/config/fleet.yml`.
 
-## 5. `fleet init` — create the registry and mint the Claude Code token
+## 6. `fleet init` — create the registry and mint the Claude Code token
 
 ```bash
 sudo -u fleet -i
@@ -183,14 +199,14 @@ fleet has been provisioned (and thus has its own `host.yml`). See
 `docs/configuration.md`'s "Per-host domain" section for the full precedence
 rules and schema.
 
-## 6. Start the fleet daemon
+## 7. Start the fleet daemon
 
 ```bash
 sudo systemctl start fleet.service
 sudo systemctl status fleet.service
 ```
 
-## 7. First deploy
+## 8. First deploy
 
 The installer seeds a bundled **`demo`** project (a generic `type: php` DDEV
 app with no database, built into a local repo at `/srv/fleet/_demo.git`), so
@@ -214,7 +230,7 @@ fleet deploy <project> <template> --branch <ref>
 
 Browse to the printed instance URL.
 
-## 8. Web UI first-run check
+## 9. Web UI first-run check
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/api/jobs/nonexistent
@@ -272,6 +288,8 @@ either way) but leaves snippets on the inline block until the next
   rotation, the verification checklist as a repeatable template.
 - `docs/networking.md` — TLS termination points and every port in one
   table, including the `fleet_tls_mode` mechanics.
+- `docs/README-authelia.md` — full design, `fleet.yml` `users:` schema, and
+  how to switch an existing server's `auth_mode` later.
 - `fleet.yml.dist` — the `fleet.yml` registry schema, with the full set
   of optional keys (named ports, Typesense, additional hostnames)
   commented out as examples.
