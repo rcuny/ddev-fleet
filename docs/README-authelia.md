@@ -12,8 +12,9 @@ cookie-based login portal ([Authelia](https://www.authelia.com/)) that
 works on networks that block basic auth outright, with users defined per
 project in `fleet.yml`.
 
-**Status:** implemented, code-only — not yet rolled out to any live server
-(see "Rollout" below).
+**Status:** implemented and rolled out to one live server (ddev2, Debian
+13, Authelia 4.39.28 apt package, `User=authelia Group=authelia`) — see
+"Rollout" below for the fixes that first live run required.
 
 ## How it works
 
@@ -56,7 +57,57 @@ project in `fleet.yml`.
   `AUTHELIA_SESSION_SECRET_FILE`, and `AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE`
   environment variables (a systemd drop-in) — plain `AUTHELIA_` prefix, not
   `X_AUTHELIA_` (that prefix is reserved for a small fixed set of
-  meta/behavioural vars and is never read for secrets by Authelia 4.39).
+  meta/behavioural vars and is never read for secrets by Authelia 4.39). The
+  role's own `authelia config validate` task sets the same three env vars
+  (from the single `authelia_secret_env` mapping in
+  `ansible/roles/authelia/vars/main.yml`, shared with the systemd drop-in) —
+  without them, validation fails with `storage: option 'encryption_key' is
+  required` even though the service itself starts fine once the drop-in is
+  in place.
+
+## File layout
+
+| Path | Owner:group | Mode | Written by | Contents |
+|---|---|---|---|---|
+| `/etc/authelia/configuration.yml` | `<authelia svc user>:<authelia svc group>` | `0640` | Ansible (`authelia` role, static) | Server/session/access-control config — no secrets, no state |
+| `/etc/authelia/secrets/*` | `root:<authelia svc group>` | `0640` | Ansible (generated once) | The three secret values, loaded via `AUTHELIA_*_FILE` env vars |
+| `/srv/fleet/authelia/` | `<fleet user>:<authelia svc group>` | `2750` (setgid) | Ansible creates the dir; `users.yml` is written by `fleet.core.authelia` (never Ansible) | `users.yml` only — Authelia has **group-read only** here by design; it must never write into this tree |
+| `/var/lib/authelia/` | `<authelia svc user>:<authelia svc group>` | `0750` | Ansible creates the dir (before Authelia starts); Authelia writes into it at runtime | `db.sqlite3` (storage backend) + `notification.txt` (filesystem notifier) — Authelia's own writable state |
+
+**Why the DB/notifier moved out of `/srv/fleet/authelia`**: the first live
+rollout (ddev2) pointed `storage.local.path` and
+`notifier.filesystem.filename` at `/srv/fleet/authelia/db.sqlite3` /
+`notification.txt`. That directory is intentionally `2750`
+`<fleet user>:<authelia group>` — group-**read** only for Authelia, since
+`fleet.core.authelia` is the only writer allowed there (`users.yml`).
+Authelia failed to start with `unable to open database file: permission
+denied`. The fix is `/var/lib/authelia`, a separate directory the role
+creates as `<authelia service user>:<authelia service group>` mode `0750`
+— writable by Authelia, with no risk of collateral write access into the
+fleet-owned `users.yml` tree.
+
+## The `/srv/fleet` traverse ACL
+
+The same rollout also hit `stat /srv/fleet/authelia: permission denied`:
+`/srv/fleet` itself is `drwxr-x--- fleet:fleet`, and the Authelia service
+account is a member of neither. Even though `/srv/fleet/authelia` grants
+Authelia's group read access, a process can't reach a subdirectory it
+can't first traverse into.
+
+The fix, applied live as a hotfix and now encoded in the role:
+
+```bash
+apt-get install acl
+setfacl -m u:authelia:x /srv/fleet
+```
+
+This grants **traverse-only** (`x`, no `r`) access on `/srv/fleet` itself
+to the Authelia service user — it can `cd`/`stat` through the directory
+but never `ls` it or read anything else living there (config repo
+checkouts, other projects' assets, etc.). The role applies this
+idempotently, guarded by a `getfacl` read-back so it only reports
+`changed` the first time, and only when the service doesn't already run
+as root (root needs no ACL to traverse anything).
 
 ## `fleet.yml` schema
 
@@ -141,8 +192,9 @@ order written.
 
 ## Rollout
 
-Not yet applied to any live server (spec §9). The order, once it happens,
-is:
+Applied to one live server so far (ddev2, 2026-09-27) — that run exposed
+the three bugs fixed in "File layout" and "The `/srv/fleet` traverse ACL"
+above, plus the validate-task secrets gap covered in "Secrets". The order:
 
 ```bash
 pip install argon2-cffi   # into the venv, BEFORE the code that imports it
@@ -202,3 +254,19 @@ sudo -u fleet fleet refresh-auth
   Caddy snippet wraps its sequence in `route @matcher { ... }` — a bare
   sequence loses `Remote-Groups` to Caddy's directive reordering (see
   above).
+- **Authelia fails to start with `unable to open database file: permission
+  denied`**: `storage.local.path`/`notifier.filesystem.filename` in
+  `/etc/authelia/configuration.yml` must point under `/var/lib/authelia`,
+  never `/srv/fleet/authelia` (see "File layout" above). Confirm
+  `/var/lib/authelia` exists and is owned `<authelia svc user>:<authelia
+  svc group>` mode `0750`; re-run `ansible/authelia.yml` if not.
+- **`authelia config validate` fails with `stat /srv/fleet/authelia:
+  permission denied`** (running it by hand, outside the role): the
+  Authelia service user needs the traverse ACL on `/srv/fleet` — see "The
+  `/srv/fleet` traverse ACL" above. `getfacl /srv/fleet` should show a
+  `user:<authelia svc user>:--x` (or wider) entry.
+- **`authelia config validate` fails with `storage: option
+  'encryption_key' is required'`** when run by hand: it needs the same
+  `AUTHELIA_*_FILE` env vars the systemd drop-in supplies — the role's own
+  validate task now sets them (see "Secrets" above); running the command
+  manually still requires exporting them yourself.

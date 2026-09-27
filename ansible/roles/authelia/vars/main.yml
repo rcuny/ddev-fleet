@@ -1,0 +1,23 @@
+---
+# Authelia's writable state dir (SQLite DB + filesystem notifier). Deliberately
+# NOT under {{ fleet_srv_dir }}/authelia — that directory is 2750 <fleet
+# user>:<authelia group>, i.e. group-READ only for the Authelia service
+# account by design (fleet writes users.yml there; Authelia must never write
+# there). Live rollout (ddev2, Debian 13, Authelia 4.39.28 apt package)
+# confirmed this the hard way: "unable to open database file: permission
+# denied" the first time storage.local.path pointed under {{ fleet_srv_dir }}.
+authelia_state_dir: /var/lib/authelia
+
+# Single source of truth for the three AUTHELIA_*_FILE secret env vars —
+# consumed by BOTH the systemd drop-in (secrets.conf) and the
+# `authelia config validate` task's own `environment:`, so they can never
+# drift apart again. The live rollout also exposed that `authelia config
+# validate` fails outright ("storage: option 'encryption_key' is required")
+# when run without these — only the systemd drop-in supplied them before,
+# the Ansible task itself did not.
+authelia_secrets_dir: /etc/authelia/secrets
+
+authelia_secret_env:
+  AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE: "{{ authelia_secrets_dir }}/reset_password_jwt_secret"
+  AUTHELIA_SESSION_SECRET_FILE: "{{ authelia_secrets_dir }}/session_secret"
+  AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE: "{{ authelia_secrets_dir }}/storage_encryption_key"

@@ -33,8 +33,25 @@ from ruamel.yaml import YAML
 ROLE_DIR = Path(__file__).resolve().parents[1] / "ansible" / "roles" / "authelia"
 TEMPLATE_DIR = ROLE_DIR / "templates"
 TASKS_FILE = ROLE_DIR / "tasks" / "main.yml"
+VARS_FILE = ROLE_DIR / "vars" / "main.yml"
 
 _yaml = YAML(typ="safe")
+
+
+def _role_vars() -> dict:
+    return _yaml.load(VARS_FILE.read_text(encoding="utf-8"))
+
+
+def _rendered_secret_env() -> dict:
+    """The role's authelia_secret_env, with its own {{ authelia_secrets_dir }}
+    self-reference resolved — mirrors what Ansible's own templating of role
+    vars would produce."""
+    role_vars = _role_vars()
+    secrets_dir = role_vars["authelia_secrets_dir"]
+    return {
+        k: v.replace("{{ authelia_secrets_dir }}", secrets_dir)
+        for k, v in role_vars["authelia_secret_env"].items()
+    }
 
 
 def _render_configuration_yml() -> str:
@@ -49,9 +66,11 @@ def _render_configuration_yml() -> str:
         undefined=StrictUndefined,
         keep_trailing_newline=True,
     )
+    role_vars = _role_vars()
     return env.get_template("configuration.yml.j2").render(
         fleet_srv_dir="/srv/fleet",
         fleet_domain="fleet.example.test",
+        authelia_state_dir=role_vars["authelia_state_dir"],
     )
 
 
@@ -68,7 +87,8 @@ def test_configuration_yml_renders_and_parses_as_valid_yaml():
     assert data["authentication_backend"]["file"]["watch"] is True
     assert data["session"]["cookies"][0]["domain"] == "fleet.example.test"
     assert data["session"]["cookies"][0]["authelia_url"] == "https://auth.fleet.example.test"
-    assert data["storage"]["local"]["path"] == "/srv/fleet/authelia/db.sqlite3"
+    assert data["storage"]["local"]["path"] == "/var/lib/authelia/db.sqlite3"
+    assert data["notifier"]["filesystem"]["filename"] == "/var/lib/authelia/notification.txt"
     assert data["access_control"]["default_policy"] == "deny"
 
     # The secrets fix (bug 2) is a sibling concern to this file: confirm
@@ -122,13 +142,111 @@ def test_secrets_conf_env_vars_use_authelia_prefix_not_x_authelia():
     for line in env_lines:
         assert re.match(r"^Environment=AUTHELIA_[A-Z_]+_FILE=", line), line
 
-    expected = {
-        "Environment=AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE="
-        "/etc/authelia/secrets/reset_password_jwt_secret",
-        "Environment=AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret",
-        "Environment=AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key",
+    # Each line's value is a Jinja reference into vars/main.yml's
+    # authelia_secret_env (see test_drop_in_and_validate_share_the_same_secret_env_mapping),
+    # not a hardcoded literal path — that's the DRY fix for the ddev2 rollout's
+    # `authelia config validate` failure below.
+    referenced_keys = {
+        re.match(
+            r"^Environment=([A-Z_]+_FILE)=\{\{ authelia_secret_env\.([A-Z_]+) \}\}$", line
+        ).groups()
+        for line in env_lines
     }
-    assert set(env_lines) == expected
+    assert all(env_var == key for env_var, key in referenced_keys), referenced_keys
+    assert {env_var for env_var, _ in referenced_keys} == set(_rendered_secret_env().keys())
+
+
+def test_state_dir_and_config_paths_point_under_var_lib_authelia():
+    """Bug 1 regression: storage.local.path and notifier.filesystem.filename
+    must NOT live under {{ fleet_srv_dir }}/authelia — that directory is
+    2750 <fleet user>:<authelia group> (group-READ only for Authelia by
+    design; fleet writes users.yml there). The live rollout failed to start
+    Authelia with "unable to open database file: permission denied" until
+    both paths moved to /var/lib/authelia, which the role now creates as
+    <service user>:<service group> 0750 before Authelia starts."""
+    role_vars = _role_vars()
+    assert role_vars["authelia_state_dir"] == "/var/lib/authelia"
+
+    rendered = _render_configuration_yml()
+    data = _yaml.load(rendered)
+    assert data["storage"]["local"]["path"].startswith(role_vars["authelia_state_dir"])
+    assert data["notifier"]["filesystem"]["filename"].startswith(role_vars["authelia_state_dir"])
+    # users.yml stays under fleet_srv_dir/authelia — Ansible never writes there.
+    assert data["authentication_backend"]["file"]["path"] == "/srv/fleet/authelia/users.yml"
+
+
+def _find_task(name: str) -> dict:
+    tasks = _yaml.load(TASKS_FILE.read_text(encoding="utf-8"))
+    for task in tasks:
+        if task.get("name") == name:
+            return task
+    raise AssertionError(f"could not find task {name!r} in {TASKS_FILE}")
+
+
+def test_validate_task_has_the_three_secret_env_vars():
+    """Bug 3 regression: `authelia config validate` failed live with
+    "storage: option 'encryption_key' is required" because the task ran
+    with none of the AUTHELIA_*_FILE secret env vars the systemd drop-in
+    normally supplies. The validate task must set `environment:` to the
+    exact same mapping the drop-in uses."""
+    task = _find_task("Validate the rendered Authelia configuration")
+    assert task["environment"] == "{{ authelia_secret_env }}"
+
+
+def test_drop_in_and_validate_share_the_same_secret_env_mapping():
+    """DRY requirement: both the systemd drop-in and the validate task must
+    derive their secret env vars from the SAME single mapping
+    (vars/main.yml's authelia_secret_env), not two independently-maintained
+    lists that can drift apart (which is exactly how bug 3 happened)."""
+    validate_task = _find_task("Validate the rendered Authelia configuration")
+    assert validate_task["environment"] == "{{ authelia_secret_env }}"
+
+    drop_in_content = _secrets_conf_content()
+    referenced_keys = set(re.findall(r"authelia_secret_env\.([A-Z_]+)", drop_in_content))
+
+    role_vars = _role_vars()
+    expected_keys = set(role_vars["authelia_secret_env"].keys())
+    assert expected_keys == {
+        "AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE",
+        "AUTHELIA_SESSION_SECRET_FILE",
+        "AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE",
+    }
+    assert referenced_keys == expected_keys
+
+
+def test_state_dir_and_acl_tasks_run_before_validate_and_start():
+    """Ordering requirement: /var/lib/authelia and the /srv/fleet traverse
+    ACL must exist before Authelia is validated/started, or the live
+    failures this fix addresses (permission denied opening the DB;
+    permission denied stat'ing /srv/fleet/authelia) reappear."""
+    tasks = _yaml.load(TASKS_FILE.read_text(encoding="utf-8"))
+    names = [t.get("name") for t in tasks]
+
+    state_dir_idx = names.index(
+        "Ensure the Authelia state directory exists (SQLite DB + filesystem notifier)"
+    )
+    acl_grant_idx = names.index(
+        "Grant the Authelia service user traverse-only (execute) access on {{ fleet_srv_dir }}"
+    )
+    validate_idx = names.index("Validate the rendered Authelia configuration")
+    start_idx = names.index("Ensure authelia.service is enabled and started")
+
+    assert state_dir_idx < validate_idx < start_idx
+    assert acl_grant_idx < validate_idx < start_idx
+
+
+def test_acl_package_and_setfacl_are_guarded_to_non_root_service_user():
+    """The setfacl/getfacl tasks (and the acl package install) must only
+    run when the Authelia service does NOT run as root — root needs no ACL
+    to traverse anything it already owns."""
+    for task_name in (
+        "Ensure the acl package is installed",
+        "Grant the Authelia service user traverse-only (execute) access on {{ fleet_srv_dir }}",
+    ):
+        task = _find_task(task_name)
+        when = task["when"]
+        when_list = when if isinstance(when, list) else [when]
+        assert "authelia_service_user != ''" in when_list
 
 
 def _find_authelia_bin() -> str | None:
@@ -153,6 +271,7 @@ def test_configuration_yml_validates_against_real_authelia_with_authelia_prefixe
         tmp_path = Path(tmp)
         (tmp_path / "srv" / "authelia").mkdir(parents=True)
         (tmp_path / "srv" / "authelia" / "users.yml").write_text("users: {}\n", encoding="utf-8")
+        (tmp_path / "lib" / "authelia").mkdir(parents=True)
 
         secrets_dir = tmp_path / "secrets"
         secrets_dir.mkdir()
@@ -167,8 +286,11 @@ def test_configuration_yml_validates_against_real_authelia_with_authelia_prefixe
         config_path = tmp_path / "configuration.yml"
         # Point the rendered config's paths at this tempdir instead of the
         # real /srv/fleet, so the check is fully self-contained.
+        role_vars = _role_vars()
         config_path.write_text(
-            rendered.replace("/srv/fleet/authelia", str(tmp_path / "srv" / "authelia")),
+            rendered.replace("/srv/fleet/authelia", str(tmp_path / "srv" / "authelia")).replace(
+                role_vars["authelia_state_dir"], str(tmp_path / "lib" / "authelia")
+            ),
             encoding="utf-8",
         )
 
