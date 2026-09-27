@@ -118,6 +118,16 @@ fleet_repo_version: main
 # when it is run with FLEET_SKIP_FETCH=1.
 fleet_skip_fetch: false
 
+# --- Auth mode (docs/README-authelia.md) -----------------------------------
+# basic (default): today's per-instance HTTP basic auth, symmetric
+# username==password, rotatable without Ansible (fleet.core.caddyauth).
+# authelia: a cookie-based login portal (Authelia, systemd service) that
+# works on networks blocking basic auth outright; per-project users come
+# from fleet.yml's users: (fleet.core.authelia). See
+# docs/README-authelia.md for the full design and how to switch modes on
+# an existing server (ansible/authelia.yml).
+fleet_auth_mode: basic
+
 # --- Package repos (pinned upstream URLs; package versions float to latest
 # stable at apply time, per spec §3 — no version pinning requirement) ------
 # Vendor segment derived from the running distro (debian|ubuntu) — docker-ce

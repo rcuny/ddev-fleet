@@ -1,3 +1,4 @@
+{% set fleet_auth_mode = fleet_auth_mode | default('basic') %}
 # Global options block — MUST be first in the Caddyfile (spec §9.3).
 {
     email {{ acme_email }}
@@ -7,10 +8,37 @@
 }
 
 {{ fleet_domain }} {
-    # Everything except the deploy-log WebSocket sits behind basic-auth.
+    # Everything except the deploy-log WebSocket sits behind auth.
     # Browsers do not send basic-auth credentials on a WebSocket handshake,
     # so /ws/* is exempted here; the daemon authenticates it instead with a
     # short-lived, instance-scoped token in the query string.
+{% if fleet_auth_mode == 'authelia' %}
+    # Authelia mode: the dashboard requires the `admins` group only (spec
+    # D3). Client-supplied Remote-* headers are stripped before
+    # forward_auth, same anti-spoofing rule as every instance's snippet
+    # (fleet.core.caddyauth.write_instance_authelia_snippet). The whole
+    # sequence MUST be wrapped in a `route` block — Caddy reorders bare
+    # top-level directives by a fixed precedence list (running
+    # request_header AFTER forward_auth otherwise), which would silently
+    # strip the very Remote-Groups header forward_auth's copy_headers just
+    # set and deny every authenticated user, admins included — confirmed
+    # against a real Caddy v2.11.4 + Authelia v4.39 instance (see
+    # caddyauth.py's write_instance_authelia_snippet docstring). /ws/*
+    # keeps its existing token-based exemption, unprotected here as before.
+    @protected not path /ws/*
+    route @protected {
+        request_header -Remote-User
+        request_header -Remote-Groups
+        request_header -Remote-Name
+        request_header -Remote-Email
+        forward_auth 127.0.0.1:9091 {
+            uri /api/authz/forward-auth
+            copy_headers Remote-User Remote-Groups Remote-Name Remote-Email
+        }
+        @denied not header_regexp Remote-Groups "(^|,)\s*admins\s*(,|$)"
+        respond @denied 403
+    }
+{% else %}
     @protected not path /ws/*
     basic_auth @protected {
         # Fleet-owned and rotatable WITHOUT Ansible (fleet.core.caddyauth +
@@ -24,9 +52,20 @@
         # Caddyfile.
         import {{ fleet_caddy_snippet_dir }}/admin-auth.conf
     }
+{% endif %}
     reverse_proxy 127.0.0.1:{{ fleet_daemon_port }}
 }
 
+{% if fleet_auth_mode == 'authelia' %}
+auth.{{ fleet_domain }} {
+    # Authelia's own login portal. Covered by the *.{{ fleet_domain }}
+    # wildcard cert in ovh_dns mode (tls.conf); in on_demand mode,
+    # /api/tls-authorize special-cases this exact hostname (daemon.py).
+    reverse_proxy 127.0.0.1:9091
+    import {{ fleet_caddy_snippet_dir }}/tls.conf
+}
+
+{% endif %}
 *.{{ fleet_domain }} {
     # Caddy terminates the client TLS (per-hostname on-demand cert, or a
     # single shared *.{{ fleet_domain }} wildcard cert — see the tls.conf

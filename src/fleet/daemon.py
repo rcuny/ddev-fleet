@@ -210,6 +210,15 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         # let anyone mint a cert for an unregistered `foo-<instance_id>`
         # hostname pointed at a real instance).
         paths, registry = _paths_and_registry()
+
+        # Authelia's fixed portal hostname (auth.<domain>) is not a
+        # per-instance label and never will be one — authorize it directly
+        # when the server is actually running in Authelia mode, so the
+        # `on_demand` TLS mode's ask endpoint can issue it a certificate
+        # the same way it does for every instance host.
+        if registry.auth_mode == "authelia" and domain == f"auth.{registry.domain}":
+            return JSONResponse(status_code=200, content={"authorized": True})
+
         suffix = f".{registry.domain}"
         if not domain.endswith(suffix):
             return JSONResponse(status_code=404, content={"authorized": False})

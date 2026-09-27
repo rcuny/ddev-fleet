@@ -1,5 +1,9 @@
+import os
+import subprocess
+import tempfile
 from pathlib import Path
 
+import pytest
 from jinja2 import Environment, FileSystemLoader
 
 TEMPLATE_DIR = Path(__file__).resolve().parents[1] / "ansible" / "roles" / "caddy" / "templates"
@@ -15,6 +19,41 @@ def _render() -> str:
         ddev_router_http_port=8080,
         ddev_router_https_port=8443,
     )
+
+
+def _render_authelia() -> str:
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)), keep_trailing_newline=True)
+    return env.get_template("Caddyfile.j2").render(
+        acme_email="admin@example.test",
+        fleet_domain="fleet.example.test",
+        fleet_daemon_port=8765,
+        fleet_caddy_snippet_dir="/etc/caddy/fleet",
+        ddev_router_http_port=8080,
+        ddev_router_https_port=8443,
+        fleet_auth_mode="authelia",
+    )
+
+
+def test_caddyfile_authelia_mode_adds_auth_portal_site():
+    out = _render_authelia()
+    assert "auth.fleet.example.test {" in out
+    assert "reverse_proxy 127.0.0.1:9091" in out
+
+
+def test_caddyfile_authelia_mode_dashboard_uses_forward_auth_not_basic_auth():
+    out = _render_authelia()
+    site_start = out.index("fleet.example.test {")
+    site_end = out.index("\n}", site_start)
+    site_block = out[site_start:site_end]
+    assert "forward_auth 127.0.0.1:9091" in site_block
+    assert "basic_auth" not in site_block
+    assert "admins" in site_block
+
+
+def test_caddyfile_basic_mode_unchanged_when_fleet_auth_mode_omitted():
+    out = _render()  # default call, no fleet_auth_mode kwarg
+    assert "auth.fleet.example.test" not in out
+    assert "import /etc/caddy/fleet/admin-auth.conf" in out
 
 
 def test_caddyfile_no_longer_exposes_typesense_path_route():
@@ -88,3 +127,36 @@ def test_caddyfile_instances_import_uses_wildcard_not_a_single_literal_file():
     out = _render()
     assert "*.conf" in out
     assert "import /etc/caddy/fleet/instances/admin-auth.conf" not in out
+
+
+@pytest.mark.skipif(
+    not os.environ.get("FLEET_TEST_CADDY_BIN"),
+    reason="FLEET_TEST_CADDY_BIN not set — no local caddy binary to validate against",
+)
+def test_caddyfile_authelia_mode_validates_against_real_caddy():
+    """End-to-end check that the authelia-mode render is not just
+    string-plausible but actually valid Caddyfile syntax, using the real
+    `caddy` binary pinned by the local e2e verification
+    (.claude/user/tmp/authelia-e2e/findings.md in the companion repo, v2.11.4
+    there) when `FLEET_TEST_CADDY_BIN` points at one. Skipped entirely
+    otherwise — this is not part of the default gate."""
+    caddy_bin = os.environ["FLEET_TEST_CADDY_BIN"]
+    out = _render_authelia()
+    with tempfile.TemporaryDirectory() as tmp:
+        snippet_dir = Path(tmp) / "fleet"
+        (snippet_dir / "instances").mkdir(parents=True)
+        (snippet_dir / "ports").mkdir(parents=True)
+        (snippet_dir / "tls.conf").write_text("tls {\n    on_demand\n}\n", encoding="utf-8")
+        (snippet_dir / "admin-auth.conf").write_text("admin fake-hash\n", encoding="utf-8")
+
+        rendered = out.replace("/etc/caddy/fleet", str(snippet_dir))
+        caddyfile = Path(tmp) / "Caddyfile"
+        caddyfile.write_text(rendered, encoding="utf-8")
+
+        result = subprocess.run(
+            [caddy_bin, "validate", "--config", str(caddyfile), "--adapter", "caddyfile"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert result.returncode == 0, result.stdout + result.stderr

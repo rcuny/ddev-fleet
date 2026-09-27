@@ -224,6 +224,41 @@ case "${FLEET_TLS_MODE}" in
     ;;
 esac
 
+# Auth mode (docs/README-authelia.md / spec `fleet_auth_mode`): how
+# visitors authenticate to instances and the dashboard. `1`/`basic`
+# (default) is today's per-instance HTTP basic auth; `2`/`authelia` adds a
+# cookie-based login portal for networks that block basic auth outright.
+FLEET_AUTH_MODE="${FLEET_AUTH_MODE:-}"
+if [ -z "${FLEET_AUTH_MODE}" ]; then
+  FLEET_AUTH_MODE="$(_persisted_value fleet_auth_mode)"
+  [ -n "${FLEET_AUTH_MODE}" ] && echo "==> fleet_auth_mode already set in ${FLEET_LOCAL_VARS} — using existing value, not re-prompting"
+fi
+if [ -z "${FLEET_AUTH_MODE}" ]; then
+  if _tty_openable; then
+    echo "Auth mode:"
+    echo "  1) Basic auth (default) — today's per-instance HTTP basic auth"
+    echo "  2) Authelia — cookie-based login portal; works on networks that block basic auth"
+    read -r -p "Choose [1]: " _fleet_auth_choice < /dev/tty || _fleet_auth_choice=""
+  else
+    _fleet_auth_choice=""
+  fi
+  case "${_fleet_auth_choice}" in
+    2) FLEET_AUTH_MODE="authelia" ;;
+    ""|1) FLEET_AUTH_MODE="basic" ;;
+    *)
+      echo "ERROR: unrecognised auth mode choice '${_fleet_auth_choice}' (expected 1 or 2)." >&2
+      exit 1
+      ;;
+  esac
+fi
+case "${FLEET_AUTH_MODE}" in
+  basic|authelia) ;;
+  *)
+    echo "ERROR: FLEET_AUTH_MODE '${FLEET_AUTH_MODE}' is not valid (expected 'basic' or 'authelia')." >&2
+    exit 1
+    ;;
+esac
+
 # ovh_dns credentials: /etc/caddy/ovh.env, mode 0600 root:root (the caddy
 # Ansible role later re-owns it 0640 root:caddy once the `caddy` group
 # exists — apt hasn't installed the package yet at this point in the
@@ -455,6 +490,7 @@ _persist_if_absent() {
 _persist_if_absent fleet_domain "\"${FLEET_DOMAIN}\""
 _persist_if_absent acme_email "\"${FLEET_ACME_EMAIL}\""
 _persist_if_absent fleet_tls_mode "\"${FLEET_TLS_MODE}\""
+_persist_if_absent fleet_auth_mode "\"${FLEET_AUTH_MODE}\""
 _persist_if_absent fleet_network_hardening_enabled "$([ "${FLEET_NETWORK_HARDENING}" = "1" ] && echo true || echo false)"
 _persist_if_absent fleet_security_hardening_enabled "$([ "${FLEET_SECURITY_HARDENING}" = "1" ] && echo true || echo false)"
 
@@ -505,9 +541,9 @@ echo "==> Running the provisioning playbook"
 if [ -n "${FLEET_SKIP_FETCH}" ]; then
   # Also tell the playbook not to git-fetch the product repo (fleet_service
   # role) — the code is already on disk, delivered out-of-band.
-  ansible-playbook -c local -e fleet_skip_fetch=true "${FLEET_OPT_DIR}/ansible/site.yml"
+  ansible-playbook -c local -e fleet_skip_fetch=true -e fleet_auth_mode="${FLEET_AUTH_MODE}" "${FLEET_OPT_DIR}/ansible/site.yml"
 else
-  ansible-playbook -c local "${FLEET_OPT_DIR}/ansible/site.yml"
+  ansible-playbook -c local -e fleet_auth_mode="${FLEET_AUTH_MODE}" "${FLEET_OPT_DIR}/ansible/site.yml"
 fi
 
 echo

@@ -1,0 +1,46 @@
+# Managed by Ansible (authelia role) — spec §3/D1: this file is STATIC.
+# Only users.yml (below) is ever rewritten after first provisioning, by
+# fleet.core.authelia (fleet CLI/daemon), never Ansible — a change here
+# needs a restart (see the "Restart authelia" handler), which logs
+# everyone out; a users.yml change never does.
+#
+# Secrets (identity_validation.reset_password.jwt_secret, session.secret,
+# storage.encryption_key) are deliberately OMITTED from this file and
+# supplied instead via the X_AUTHELIA_*_FILE environment variables (systemd
+# drop-in secrets.conf, this role) — Authelia's file-based secrets loading
+# reads the value straight from the file at startup with no corresponding
+# key needed here. This is the more stable of the two mechanisms Authelia
+# supports; per the local e2e verification
+# (.claude/user/tmp/authelia-e2e/findings.md in the companion repo, not
+# shipped here), the config-templating form (`{{ secret "path" }}`) is
+# version-sensitive and unverified against 4.39 — if a future need arises
+# to inline it instead, confirm with `authelia config validate` first.
+server:
+  address: 'tcp://127.0.0.1:9091/'
+log:
+  level: info
+authentication_backend:
+  password_reset:
+    disable: true
+  file:
+    path: {{ fleet_srv_dir }}/authelia/users.yml
+    watch: true
+session:
+  cookies:
+    - domain: '{{ fleet_domain }}'
+      authelia_url: 'https://auth.{{ fleet_domain }}'
+storage:
+  local:
+    path: {{ fleet_srv_dir }}/authelia/db.sqlite3
+notifier:
+  filesystem:
+    filename: {{ fleet_srv_dir }}/authelia/notification.txt
+access_control:
+  default_policy: deny
+  rules:
+    - domain: 'auth.{{ fleet_domain }}'
+      policy: bypass
+    - domain: '*.{{ fleet_domain }}'
+      policy: one_factor
+    - domain: '{{ fleet_domain }}'
+      policy: one_factor

@@ -1,0 +1,42 @@
+---
+# Scoped playbook: switch an existing server's auth mode without a full
+# site.yml run (which would rewrite /opt/ddev-fleet's git remote — see
+# caddy-only.yml's own header comment for why that must never happen on a
+# live host). Assumes the host was already provisioned by site.yml at least
+# once (the fleet CLI venv at {{ fleet_opt_dir }}/venv already exists — the
+# authelia role's `fleet set-admin-password`/`fleet refresh-auth` tasks
+# depend on it, same as site.yml's own authelia role placement after
+# fleet_service).
+#
+# Usage: set fleet_auth_mode: authelia in /etc/ddev-fleet/local-vars.yml,
+# then:
+#   cd /opt/ddev-fleet/ansible
+#   sudo ansible-playbook authelia.yml --check --diff   # preview
+#   sudo ansible-playbook authelia.yml
+# The authelia role's own tasks already run `fleet refresh-auth` on every
+# apply, so users.yml and every instance's snippet are current once this
+# playbook finishes — no extra manual step. See docs/README-authelia.md
+# "Switching modes".
+- name: Switch auth mode (Authelia role + Caddy re-render + host.yml)
+  hosts: localhost
+  become: true
+  force_handlers: true
+  pre_tasks:
+    - name: Check for host-local variable overrides
+      ansible.builtin.stat:
+        path: /etc/ddev-fleet/local-vars.yml
+      register: _fleet_local_vars
+    - name: Load host-local variable overrides if present
+      ansible.builtin.include_vars: /etc/ddev-fleet/local-vars.yml
+      when: _fleet_local_vars.stat.exists
+  roles:
+    # caddy MUST run first: it writes host.yml's `auth_mode` (from
+    # `fleet_auth_mode`), which the authelia role's `fleet
+    # set-admin-password`/`fleet refresh-auth` calls read to decide how to
+    # apply the admin password and render users.yml. Reversed, those calls
+    # would still see the OLD auth_mode and take the wrong branch. Caddy's
+    # own dashboard forward_auth briefly targets an Authelia that isn't up
+    # yet until the authelia role's last task starts it — a normal,
+    # momentary gap during a mode switch, not a steady-state condition.
+    - caddy
+    - authelia

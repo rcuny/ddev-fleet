@@ -1,0 +1,168 @@
+---
+- name: Skip the authelia role entirely when not in authelia mode
+  ansible.builtin.meta: end_host
+  when: fleet_auth_mode != 'authelia'
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the Authelia apt signing key
+  ansible.builtin.get_url:
+    url: https://apt.authelia.com/apt.authelia.com.gpg.key
+    dest: /etc/apt/keyrings/authelia-security.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Authelia apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/authelia-security.gpg] https://apt.authelia.com stable main"
+    filename: authelia
+    state: present
+    update_cache: true
+
+- name: Install the authelia package
+  ansible.builtin.apt:
+    name: authelia
+    state: present
+
+- name: Ensure /srv/fleet/authelia exists (fleet-owned, never Ansible-written past this)
+  # admin.yml/users.yml are written by fleet.core.authelia (fleet CLI/
+  # daemon), never by Ansible — same "provision the dir, own the writes"
+  # split as the Caddy snippet dirs (roles/caddy/tasks/main.yml). Group
+  # read (not just owner) so the authelia system user (added to the fleet
+  # group below) can read users.yml for its file-backend watch.
+  ansible.builtin.file:
+    path: "{{ fleet_srv_dir }}/authelia"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0750"
+
+- name: Add the authelia system user to the fleet group (read access to users.yml)
+  # The apt package creates its own 'authelia' system user/group. It needs
+  # group-read on {{ fleet_srv_dir }}/authelia (owned fleet:fleet, 0750) to
+  # watch users.yml — added here rather than assumed, since the exact
+  # service-user name is package-defined and this is idempotent either way.
+  ansible.builtin.user:
+    name: authelia
+    groups: "{{ fleet_group }}"
+    append: true
+
+- name: Ensure the Authelia secrets directory exists
+  ansible.builtin.file:
+    path: /etc/authelia/secrets
+    state: directory
+    owner: root
+    group: root
+    mode: "0700"
+
+- name: Check whether the Authelia secrets already exist
+  ansible.builtin.stat:
+    path: /etc/authelia/secrets/session_secret
+  register: authelia_session_secret_stat
+
+- name: Generate the Authelia secrets (first provisioning only — never regenerated)
+  # Regenerating any of these on a later run would invalidate every live
+  # session (session secret) or make existing stored data unreadable
+  # (storage encryption key) — generate ONCE, guarded by the stat above.
+  ansible.builtin.copy:
+    dest: "/etc/authelia/secrets/{{ item }}"
+    owner: root
+    group: root
+    mode: "0600"
+    content: "{{ lookup('ansible.builtin.password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+  loop:
+    - session_secret
+    - storage_encryption_key
+    - reset_password_jwt_secret
+  when: not authelia_session_secret_stat.stat.exists
+
+- name: Render the Authelia configuration.yml (static — spec §3/D1)
+  ansible.builtin.template:
+    src: configuration.yml.j2
+    dest: /etc/authelia/configuration.yml
+    owner: root
+    group: root
+    mode: "0640"
+  notify: Restart authelia
+
+- name: Ensure the authelia.service systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/authelia.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Point authelia.service at the secrets directory
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/authelia.service.d/secrets.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Service]
+      Environment=X_AUTHELIA_JWT_SECRET_FILE=/etc/authelia/secrets/reset_password_jwt_secret
+      Environment=X_AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret
+      Environment=X_AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key
+  notify:
+    - Reload systemd daemon
+    - Restart authelia
+
+- name: Seed the admin account + render users.yml (first provisioning only)
+  # Uses the fleet CLI (core/authelia.py argon2 hashing), never Ansible —
+  # spec D5. host.yml's auth_mode: authelia has already been written by the
+  # caddy role, which runs BEFORE this one in both site.yml and
+  # authelia.yml, so `fleet set-admin-password` reads the right mode.
+  # `fleet refresh-auth`
+  # (below) then renders users.yml from fleet.yml's per-project users: plus
+  # this admin — both must exist before authelia.service starts, or its
+  # file backend has nothing to watch.
+  ansible.builtin.command:
+    argv:
+      - "{{ fleet_opt_dir }}/venv/bin/fleet"
+      - set-admin-password
+      - "{{ fleet_admin_default_password }}"
+  become: true
+  become_user: "{{ fleet_user }}"
+  environment:
+    FLEET_HOME: "{{ fleet_srv_dir }}"
+  register: authelia_seed_admin
+  changed_when: authelia_seed_admin.rc == 0
+  when:
+    - not authelia_session_secret_stat.stat.exists
+    - fleet_admin_default_password is defined
+    - fleet_admin_default_password | length > 0
+
+- name: Render users.yml and every instance's Authelia snippet (fleet refresh-auth)
+  # Ruling (task-7 brief override 2 / spec §4.7): the authelia role MUST run
+  # this so users.yml and every instance snippet exist before Authelia
+  # starts — not just on first provisioning, since `fleet refresh-auth` is
+  # also how a later fleet.yml/host.yml auth edit gets applied on a re-run.
+  ansible.builtin.command:
+    argv:
+      - "{{ fleet_opt_dir }}/venv/bin/fleet"
+      - refresh-auth
+  become: true
+  become_user: "{{ fleet_user }}"
+  environment:
+    FLEET_HOME: "{{ fleet_srv_dir }}"
+  register: authelia_refresh_auth
+  changed_when: authelia_refresh_auth.rc == 0
+
+- name: Validate the rendered Authelia configuration
+  ansible.builtin.command: authelia config validate --config /etc/authelia/configuration.yml
+  changed_when: false
+
+- name: Ensure authelia.service is enabled and started
+  ansible.builtin.systemd:
+    name: authelia
+    enabled: true
+    state: started
+    daemon_reload: true

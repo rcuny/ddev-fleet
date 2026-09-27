@@ -1,0 +1,9 @@
+---
+- name: Reload systemd daemon
+  ansible.builtin.systemd:
+    daemon_reload: true
+
+- name: Restart authelia
+  ansible.builtin.systemd:
+    name: authelia
+    state: restarted
