@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from argon2 import PasswordHasher
-from argon2.exceptions import InvalidHashError, VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerificationError
 from ruamel.yaml import YAML
 
 from fleet.core.errors import AutheliaError
@@ -47,7 +47,7 @@ def hash_password(password: str) -> str:
 def _verify(password: str, existing_hash: str) -> bool:
     try:
         return _hasher.verify(existing_hash, password)
-    except (VerifyMismatchError, InvalidHashError):
+    except (VerificationError, InvalidHashError):
         return False
 
 

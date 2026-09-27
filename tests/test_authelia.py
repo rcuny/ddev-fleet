@@ -45,6 +45,18 @@ def test_hash_password_is_nondeterministic_but_both_verify():
     assert authelia._verify("s3cret", b)
 
 
+def test_verify_rejects_argon2i_foreign_hash_variant():
+    # Different variant (argon2i instead of argon2id) should return False
+    argon2i_hash = "$argon2i$v=19$m=65536,t=3,p=4$x$y"
+    assert authelia._verify("password", argon2i_hash) is False
+
+
+def test_verify_rejects_junk_string():
+    # Completely invalid hash format should return False
+    assert authelia._verify("password", "not-a-hash") is False
+    assert authelia._verify("password", "") is False
+
+
 def test_set_admin_password_then_load_admin_roundtrips(tmp_path):
     path = tmp_path / "authelia" / "admin.yml"
     authelia.set_admin_password("admin", "adminpass", path=path)
