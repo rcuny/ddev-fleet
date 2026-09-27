@@ -30,6 +30,8 @@ _MIN_PORT = 1
 _MAX_PORT = 65535
 _TTY_KEYS = ("tty1", "tty2")
 _TTY_KEY_RE = re.compile(r"^tty\d+$")
+_USER_NAME_RE = re.compile(r"^[a-z0-9._-]+$")
+_VALID_AUTH_MODES = frozenset({"basic", "authelia"})
 
 
 @dataclass
@@ -58,6 +60,17 @@ class PortProfile:
 
 
 _TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
+
+
+@dataclass(frozen=True)
+class UserRecord:
+    """One Authelia user, merged across every project that lists it —
+    `groups` is every project key that declared this name in its `users:`
+    (spec §4.2). Consumed by `fleet.core.authelia.render_users()`."""
+
+    name: str
+    password: str
+    groups: tuple[str, ...]
 
 
 def _load_host_domain(host_config_path: Path) -> str | None:
@@ -93,14 +106,42 @@ def _load_host_domain(host_config_path: Path) -> str | None:
     return value
 
 
+def _load_host_auth_mode(host_config_path: Path) -> str:
+    """Read the per-host `auth_mode` from `host_config_path` (`host.yml`) —
+    see `_load_host_domain`'s docstring for the file's schema. Absent file,
+    absent key, or a `None` value all mean `"basic"` (spec §2 D2 — "absent
+    = basic"). Raises RegistryError for any other value."""
+    if not host_config_path.exists():
+        return "basic"
+    with open(host_config_path, "r", encoding="utf-8") as fh:
+        data = _yaml.load(fh)
+    if data is None or not isinstance(data, dict) or "auth_mode" not in data:
+        return "basic"
+    value = data["auth_mode"]
+    if value not in _VALID_AUTH_MODES:
+        raise RegistryError(
+            f"{host_config_path}: 'auth_mode' must be one of {sorted(_VALID_AUTH_MODES)}, "
+            f"got {value!r}"
+        )
+    return str(value)
+
+
 class Registry:
-    def __init__(self, data, path: Path, *, host_domain: str | None = None) -> None:
+    def __init__(
+        self,
+        data,
+        path: Path,
+        *,
+        host_domain: str | None = None,
+        auth_mode: str = "basic",
+    ) -> None:
         self._data = data
         self._path = path
         # The per-host `host.yml` domain override, already read and
         # validated by `load()` — `None` means no override, so `domain`
         # falls back to `fleet.domain` in fleet.yml as before.
         self._host_domain = host_domain
+        self._auth_mode = auth_mode
 
     @classmethod
     def load(cls, path: Path, *, host_config_path: Path | None = None) -> "Registry":
@@ -125,6 +166,9 @@ class Registry:
             raise RegistryError(f"{path}: empty or invalid registry file")
 
         host_domain = _load_host_domain(host_config_path) if host_config_path is not None else None
+        auth_mode = (
+            _load_host_auth_mode(host_config_path) if host_config_path is not None else "basic"
+        )
 
         fleet_block = data.get("fleet") or {}
         fleet_yml_domain = fleet_block.get("domain")
@@ -136,7 +180,7 @@ class Registry:
                 fleet_yml_domain,
             )
 
-        registry = cls(data, path, host_domain=host_domain)
+        registry = cls(data, path, host_domain=host_domain, auth_mode=auth_mode)
         registry._validate(host_config_path=host_config_path)
         return registry
 
@@ -205,9 +249,10 @@ class Registry:
             raise RegistryError(f"missing key 'fleet.domain' in {self._path}{where}")
 
         fleet_ports = self._validate_fleet_ports(fleet_block)
-        self._validate_auth_bypass(fleet_block)
+        self._warn_auth_bypass_deprecated(fleet_block)
 
         projects = data.get("projects") or {}
+        self._validate_users(projects)
         for project_key, project_block in projects.items():
             try:
                 validate_part(project_key)
@@ -309,21 +354,71 @@ class Registry:
                         "(not defined in fleet.ports)"
                     )
 
-    def _validate_auth_bypass(self, fleet_block: dict) -> None:
-        """Validate `fleet.auth_bypass_cidrs` (optional): a list of IPv4/IPv6
-        addresses or CIDR ranges whose visitors skip per-instance basic auth."""
-        raw = fleet_block.get("auth_bypass_cidrs")
-        if raw is None:
-            return
-        if not isinstance(raw, list):
-            raise RegistryError(
-                "fleet.auth_bypass_cidrs: must be a list of IP addresses/CIDR ranges"
+    def _validate_users(self, projects: dict) -> None:
+        """Validate every project's `users:` list (spec §4.2): charset,
+        non-empty password, no duplicate name within one project, `admins`
+        reserved, and — across ALL projects — the same user name must carry
+        the same password everywhere it appears (Authelia has exactly one
+        password per username; two projects disagreeing is a fleet.yml
+        authoring error, not something to silently pick a winner for)."""
+        seen_passwords: dict[str, tuple[str, str]] = {}
+        for project_key, project_block in projects.items():
+            project_block = project_block or {}
+            raw_users = project_block.get("users")
+            if raw_users is None:
+                continue
+            if not isinstance(raw_users, list):
+                raise RegistryError(f"projects.{project_key}.users: must be a list")
+            seen_names: set[str] = set()
+            for idx, entry in enumerate(raw_users):
+                path = f"projects.{project_key}.users[{idx}]"
+                if not isinstance(entry, dict) or "name" not in entry or "password" not in entry:
+                    raise RegistryError(f"{path}: must be a mapping with 'name' and 'password'")
+                name = entry["name"]
+                password = entry["password"]
+                if not isinstance(name, str) or not _USER_NAME_RE.match(name):
+                    raise RegistryError(
+                        f"{path}.name: must match {_USER_NAME_RE.pattern!r}, got {name!r}"
+                    )
+                if name == "admins":
+                    raise RegistryError(
+                        f"{path}.name: 'admins' is reserved for the installer admin group"
+                    )
+                if not isinstance(password, str) or not password:
+                    raise RegistryError(f"{path}.password: must be a non-empty string")
+                if name in seen_names:
+                    raise RegistryError(
+                        f"projects.{project_key}.users: duplicate user {name!r} in the "
+                        "same project"
+                    )
+                seen_names.add(name)
+                if name in seen_passwords:
+                    other_password, other_project = seen_passwords[name]
+                    if other_password != password:
+                        raise RegistryError(
+                            f"user {name!r} has different passwords in projects "
+                            f"{other_project!r} and {project_key!r} — must match"
+                        )
+                else:
+                    seen_passwords[name] = (password, project_key)
+
+    def _warn_auth_bypass_deprecated(self, fleet_block: dict) -> None:
+        """`fleet.auth_bypass_cidrs` (IP whitelisting) is deprecated:
+        Authelia's per-project `users:` (auth_mode: authelia) replaces it
+        entirely — see spec decision D7,
+        2026-09-25-fleet-authelia-design.md. Accepted and IGNORED, never
+        raised: the primary server's fleet.yml keeps this key until BOTH
+        servers have switched to Authelia (removing it earlier would break
+        the still-on-basic-auth server, since fleet.yml is shared).  Logged
+        once per registry load; never removed even once every consumer of
+        the VALUE is gone (see registry.auth_bypass_cidrs's own docstring
+        for what "consumer" means here)."""
+        if "auth_bypass_cidrs" in fleet_block:
+            logger.warning(
+                "fleet.auth_bypass_cidrs is deprecated and ignored — IP whitelisting "
+                "was replaced by Authelia (host.yml's auth_mode: authelia); remove it "
+                "from fleet.yml once every fleet server has switched"
             )
-        for entry in raw:
-            try:
-                ipaddress.ip_network(str(entry), strict=False)
-            except ValueError as exc:
-                raise RegistryError(f"fleet.auth_bypass_cidrs: invalid entry {entry!r} — {exc}")
 
     @property
     def domain(self) -> str:
@@ -336,23 +431,31 @@ class Registry:
         return str(self._data["fleet"]["domain"])
 
     @property
+    def auth_mode(self) -> str:
+        """`"basic"` (default) or `"authelia"` — server-level, from
+        `host.yml`'s `auth_mode` (see `_load_host_auth_mode`). Never comes
+        from `fleet.yml` — a shared registry must be able to run in
+        different modes on different hosts."""
+        return self._auth_mode
+
+    @property
     def auth_bypass_cidrs(self) -> list[str]:
-        """Networks whose visitors are NOT prompted for per-instance basic
-        auth (`fleet.auth_bypass_cidrs` in fleet.yml — per fleet server).
-
-        Entries are normalised to canonical CIDR form (host bits masked off,
-        so `10.0.0.5/29` becomes `10.0.0.0/29`) and de-duplicated, preserving
-        first-seen order: the list is written verbatim into every instance's
-        Caddy snippet as `not remote_ip ...`, and hand-maintained allow-lists
-        routinely carry both duplicates and un-masked prefixes. A bare address
-        normalises to a /32 (or /128), which is what Caddy expects.
-
-        Anything NOT matching one of these falls through to the basic-auth
-        prompt — there is no explicit deny entry; the default IS deny."""
-        raw = (self._data.get("fleet") or {}).get("auth_bypass_cidrs") or []
+        """DEPRECATED (spec D7) — kept only until Task 5 of the Authelia
+        plan removes its last consumers in `core/instances.py`/`cli.py`.
+        Because the registry no longer VALIDATES this key (see
+        `_warn_auth_bypass_deprecated`), this property is now tolerant of
+        malformed entries — it skips them rather than raising, since a bad
+        entry in an already-deprecated, already-ignored-in-spirit key must
+        never fail a registry load."""
+        raw = (self._data.get("fleet") or {}).get("auth_bypass_cidrs")
+        if not isinstance(raw, list):
+            return []
         seen: dict[str, None] = {}
         for entry in raw:
-            seen.setdefault(str(ipaddress.ip_network(str(entry), strict=False)), None)
+            try:
+                seen.setdefault(str(ipaddress.ip_network(str(entry), strict=False)), None)
+            except ValueError:
+                continue
         return list(seen)
 
     def git_bot(self, project: str | None = None) -> tuple[str, str] | None:
@@ -427,6 +530,33 @@ class Registry:
     def additional_hostnames(self, project: str) -> list[str]:
         block = self._project_block(project)
         return [str(h) for h in (block.get("additional_hostnames") or [])]
+
+    def project_users(self, project: str) -> list[tuple[str, str]]:
+        """`(name, password)` pairs from `projects.<project>.users`, in
+        declared order. `[]` if the project declares none."""
+        block = self._project_block(project)
+        return [(str(u["name"]), str(u["password"])) for u in (block.get("users") or [])]
+
+    def all_users(self) -> list[UserRecord]:
+        """Every user declared by any project, merged by name with the set
+        of projects (groups) that declared it — the input
+        `fleet.core.authelia.render_users()` renders into Authelia's
+        `users.yml`. Password consistency across projects sharing a name is
+        already enforced by `_validate_users` at load time, so any one
+        project's recorded password is authoritative here. A YAML alias
+        project (e.g. `oak: *fern`) is its own group even though it shares
+        the same underlying users list — each project key is iterated
+        independently."""
+        merged: dict[str, str] = {}
+        groups: dict[str, list[str]] = {}
+        for project in self.project_keys():
+            for name, password in self.project_users(project):
+                merged[name] = password
+                groups.setdefault(name, []).append(project)
+        return [
+            UserRecord(name=name, password=merged[name], groups=tuple(sorted(groups[name])))
+            for name in merged
+        ]
 
     def typesense_enabled(self, project: str) -> bool:
         block = self._project_block(project)
