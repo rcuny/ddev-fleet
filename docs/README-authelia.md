@@ -167,6 +167,27 @@ that server to Authelia mode in the *same* maintenance step, not a later
 one, so the whitelisted network gets Authelia's cookie-based login instead
 of an unexpected basic-auth prompt.
 
+## Directory ownership and the setgid bit
+
+`/srv/fleet/authelia` is created by the `authelia` Ansible role as
+`fleet:<authelia group>` with mode `2750` (the leading `2` is the setgid
+bit). The setgid bit is critical: when the `fleet` user writes `users.yml`
+(mode `0640`) into this directory, the file automatically inherits the
+Authelia service group as its group owner, so Authelia can read it without
+needing `fleet` in the Authelia group. If the directory loses its setgid
+bit — for example, after a manual `chown`, `chmod`, or filesystem restore —
+newly written `users.yml` files become unreadable to Authelia and logins
+fail silently.
+
+**Fix:** Re-run the scoped `ansible/authelia.yml` playbook, or restore the
+directory permissions manually and re-run `fleet refresh-auth`:
+
+```bash
+sudo chmod 2750 /srv/fleet/authelia
+sudo chgrp <authelia-group> /srv/fleet/authelia   # verify from 'systemctl show -p Group authelia'
+sudo -u fleet fleet refresh-auth
+```
+
 ## Troubleshooting
 
 - **Every protected host returns 502**: Authelia is down —
