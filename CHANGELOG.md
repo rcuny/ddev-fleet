@@ -8,6 +8,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Added
+- **Authelia auth mode** as an alternative to per-instance basic auth
+  (`auth_mode: authelia` in `host.yml`, default remains `basic`): a
+  cookie-based login portal for networks that block basic auth outright,
+  with per-project users defined in `fleet.yml`'s new `users:` key and
+  authorized per-instance by Caddy's `forward_auth` against Authelia
+  (`fleet.core.authelia`, `fleet.core.caddyauth`). Editing `users:` never
+  restarts Authelia — only its hot-reloaded `users.yml` changes. The old
+  `fleet.auth_bypass_cidrs` IP whitelist is removed: it is now accepted
+  with a deprecation warning and otherwise ignored. See
+  `docs/README-authelia.md`.
 - **Bounded timeouts on `fleet list`'s read-only status calls** so a
   stalled `docker`/`ddev`/`git` process degrades the table instead of
   hanging the whole command forever (observed once on ddev2, 2026-09-22:

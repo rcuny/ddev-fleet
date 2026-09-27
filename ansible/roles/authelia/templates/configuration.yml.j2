@@ -1,0 +1,54 @@
+# Managed by Ansible (authelia role) — spec §3/D1: this file is STATIC.
+# Only users.yml (below) is ever rewritten after first provisioning, by
+# fleet.core.authelia (fleet CLI/daemon), never Ansible — a change here
+# needs a restart (see the "Restart authelia" handler), which logs
+# everyone out; a users.yml change never does.
+#
+# Secrets (identity_validation.reset_password.jwt_secret, session.secret,
+# storage.encryption_key) are deliberately OMITTED from this file and
+# supplied instead via the AUTHELIA_*_FILE environment variables (systemd
+# drop-in secrets.conf, this role) - Authelia's generic KEY_PATH_FILE
+# secrets-loading mechanism reads the value straight from the file at
+# startup with no corresponding key needed here. This is the more stable
+# of the two mechanisms Authelia supports; per the local e2e/integration
+# verification (.claude/user/tmp/authelia-e2e/findings.md and
+# .claude/user/tmp/authelia-integration/results.md in the companion repo,
+# not shipped here), Authelia's OWN in-config-templating secret-loading
+# form is version-sensitive and unverified against 4.39 - if a future need
+# arises to inline it instead, confirm with the authelia CLI's own config
+# validation command first. NOTE FOR ANY FUTURE EDIT OF THIS COMMENT
+# BLOCK: never write a literal double-open-brace (Jinja's own delimiter)
+# anywhere in this file, even inside a plain YAML "#" comment - Jinja
+# parses this file before Authelia ever sees it and a bare double-brace
+# breaks that parse just as readily inside a comment as inside real YAML
+# (this exact mistake broke this file once already - see the fix report
+# in the companion repo's task-7 tmp directory for the full incident).
+server:
+  address: 'tcp://127.0.0.1:9091/'
+log:
+  level: info
+authentication_backend:
+  password_reset:
+    disable: true
+  file:
+    path: {{ fleet_srv_dir }}/authelia/users.yml
+    watch: true
+session:
+  cookies:
+    - domain: '{{ fleet_domain }}'
+      authelia_url: 'https://auth.{{ fleet_domain }}'
+storage:
+  local:
+    path: {{ fleet_srv_dir }}/authelia/db.sqlite3
+notifier:
+  filesystem:
+    filename: {{ fleet_srv_dir }}/authelia/notification.txt
+access_control:
+  default_policy: deny
+  rules:
+    - domain: 'auth.{{ fleet_domain }}'
+      policy: bypass
+    - domain: '*.{{ fleet_domain }}'
+      policy: one_factor
+    - domain: '{{ fleet_domain }}'
+      policy: one_factor

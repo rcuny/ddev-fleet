@@ -277,6 +277,8 @@ def test_list_instances_missing_instances_dir_returns_empty_early(fleet_home):
         locks=base_paths.locks,
         push_key_dir=base_paths.push_key_dir,
         host_config=base_paths.host_config,
+        authelia_admin=base_paths.authelia_admin,
+        authelia_users=base_paths.authelia_users,
     )
 
     assert not nonexistent.exists()

@@ -12,10 +12,12 @@ from ruamel.yaml import YAML
 
 from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
+from fleet.core import authelia as authelia_mod
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, ddev, fleetconfig, ttycmds
 from fleet.core import instances as instances_mod
 from fleet.core import reboot as reboot_mod
+from fleet.core import registry as registry_mod
 from fleet.core import shell as shell_mod
 from fleet.core import tmux as tmux_mod
 from fleet.core.errors import FleetError
@@ -104,10 +106,11 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     deploy_parser.add_argument(
         "--auth-password",
-        default=caddyauth.DEFAULT_INSTANCE_PASSWORD,
+        default=None,
         help=(
             "basic auth credential for this instance, used as BOTH username and password "
-            f"(default: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r})"
+            f"(default in basic mode: {caddyauth.DEFAULT_INSTANCE_PASSWORD!r}; rejected in "
+            "Authelia mode — manage users in fleet.yml's users: instead)"
         ),
     )
     deploy_parser.add_argument("--count", "-n", type=int, default=1)
@@ -127,7 +130,10 @@ def _build_parser() -> argparse.ArgumentParser:
     redeploy_parser.add_argument(
         "--auth-password",
         default=None,
-        help="override the recorded basic-auth password (default: reuse what was recorded)",
+        help=(
+            "override the recorded basic-auth password (default: reuse what was recorded; "
+            "rejected in Authelia mode)"
+        ),
     )
     redeploy_parser.add_argument("--force", action="store_true")
     redeploy_parser.add_argument("--yes", action="store_true")
@@ -408,9 +414,25 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
             )
 
 
+def _reject_auth_password_in_authelia_mode(registry, auth_password: str | None) -> None:
+    """Refuse an explicit `--auth-password` on `deploy`/`redeploy` when the
+    server is running in Authelia mode — per-instance basic-auth
+    credentials have no meaning there (auth is Authelia's job; authorization
+    is per-project `users:` groups), so accepting the flag would silently do
+    nothing. `None` (the flag wasn't passed at all) is always fine."""
+    if auth_password is not None and registry.auth_mode == "authelia":
+        raise FleetError("auth passwords are managed in fleet.yml users: (Authelia mode)")
+
+
 def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = instances_mod.load_registry(paths)
+    _reject_auth_password_in_authelia_mode(registry, args.auth_password)
+    auth_password = (
+        args.auth_password
+        if args.auth_password is not None
+        else caddyauth.DEFAULT_INSTANCE_PASSWORD
+    )
 
     if args.count == 1:
         url = instances_mod.deploy(
@@ -422,7 +444,7 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
             label=args.label,
             force=args.force,
             auth_enabled=args.auth,
-            auth_password=args.auth_password,
+            auth_password=auth_password,
         )
         print(url)
         return 0
@@ -441,7 +463,7 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
         count=args.count,
         force=args.force,
         auth_enabled=args.auth,
-        auth_password=args.auth_password,
+        auth_password=auth_password,
         skip_disk_check=args.skip_disk_check,
     )
     for result in outcome.results:
@@ -527,6 +549,7 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
     mid-batch (same reasoning as multi_deploy())."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = instances_mod.load_registry(paths)
+    _reject_auth_password_in_authelia_mode(registry, args.auth_password)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
@@ -827,20 +850,56 @@ def _propagate_claude_token(fleet_home: Path, token: str, *, runner, restart: bo
 def _cmd_set_admin_password(
     fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed
 ) -> None:
-    """Set an explicit dashboard admin password: hash it, write the
-    fleet-owned Caddy snippet, validate, and reload — no Ansible run."""
-    caddyauth.rotate(caddyauth.DEFAULT_ADMIN_USERNAME, args.password, runner=runner)
-    print("Dashboard admin password updated; Caddy reloaded.")
+    """Set an explicit dashboard admin password. Basic mode: hash it, write
+    the fleet-owned Caddy snippet, validate, and reload (unchanged).
+    Authelia mode: hash it into admin.yml and re-render users.yml — no
+    Caddy validate/reload needed, since Authelia's file backend
+    (`watch: true`) hot-reloads users.yml on its own, so nobody is logged
+    out and no restart happens.
+
+    This is a break-glass command — it must keep working in BASIC mode even
+    when `fleet.yml` is missing or invalid, so it reads ONLY `host.yml`'s
+    `auth_mode` (`registry_mod.load_host_auth_mode`) up front and loads the
+    full `Registry` (which requires a valid `fleet.yml`) only inside the
+    Authelia branch, where `render_users` actually needs it."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    auth_mode = registry_mod.load_host_auth_mode(paths.host_config)
+    if auth_mode == "authelia":
+        registry = instances_mod.load_registry(paths)
+        authelia_mod.set_admin_password(
+            caddyauth.DEFAULT_ADMIN_USERNAME, args.password, path=paths.authelia_admin
+        )
+        admin = authelia_mod.load_admin(path=paths.authelia_admin)
+        users_data = authelia_mod.render_users(registry, admin, existing_path=paths.authelia_users)
+        authelia_mod.write_users(users_data, path=paths.authelia_users)
+        print("Dashboard admin password updated (Authelia mode; no restart needed).")
+    else:
+        caddyauth.rotate(caddyauth.DEFAULT_ADMIN_USERNAME, args.password, runner=runner)
+        print("Dashboard admin password updated; Caddy reloaded.")
 
 
 def _cmd_rotate_admin_password(
     fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed
 ) -> None:
-    """Generate a strong random dashboard admin password, apply it, and
-    print it exactly once — it is never stored in the clear anywhere."""
+    """Generate a strong random dashboard admin password, apply it (mode-
+    aware, see `_cmd_set_admin_password`), and print it exactly once — it
+    is never stored in the clear anywhere. Same break-glass basic-mode
+    guarantee as `_cmd_set_admin_password` — see its docstring."""
     password = _stdlib_secrets.token_urlsafe(18)
-    caddyauth.rotate(caddyauth.DEFAULT_ADMIN_USERNAME, password, runner=runner)
-    print("Dashboard admin password rotated; Caddy reloaded.")
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    auth_mode = registry_mod.load_host_auth_mode(paths.host_config)
+    if auth_mode == "authelia":
+        registry = instances_mod.load_registry(paths)
+        authelia_mod.set_admin_password(
+            caddyauth.DEFAULT_ADMIN_USERNAME, password, path=paths.authelia_admin
+        )
+        admin = authelia_mod.load_admin(path=paths.authelia_admin)
+        users_data = authelia_mod.render_users(registry, admin, existing_path=paths.authelia_users)
+        authelia_mod.write_users(users_data, path=paths.authelia_users)
+        print("Dashboard admin password rotated (Authelia mode; no restart needed).")
+    else:
+        caddyauth.rotate(caddyauth.DEFAULT_ADMIN_USERNAME, password, runner=runner)
+        print("Dashboard admin password rotated; Caddy reloaded.")
     print(f"New password: {password}")
     print("Save this now — it will not be shown again.")
 
@@ -901,18 +960,19 @@ def _cmd_refresh_instance_config(fleet_home: Path, args: argparse.Namespace) -> 
 
 
 def _cmd_refresh_auth(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:
-    """Re-apply per-instance basic auth to every deployed instance from
-    fleet.yml's current `fleet.auth_bypass_cidrs` — the "apply my whitelist
-    edit now" command, so editing the bypass list never requires redeploying
-    live instances."""
+    """Re-apply the current auth configuration to every deployed instance
+    without redeploying — the "apply my fleet.yml/host.yml auth edits now"
+    command, and the mechanism a server uses to switch auth_mode."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = instances_mod.load_registry(paths)
 
-    bypass = registry.auth_bypass_cidrs
-    if bypass:
-        print(f"auth bypass: {len(bypass)} network(s) skip basic auth ({bypass[0]}, …)")
+    if registry.auth_mode == "authelia":
+        print(
+            "auth mode: authelia — re-rendering users.yml and every "
+            "instance's forward_auth snippet"
+        )
     else:
-        print("auth bypass: none configured — every visitor gets the basic-auth prompt")
+        print("auth mode: basic — re-rendering every instance's basic_auth snippet")
 
     result = instances_mod.sync_instance_auth(paths, registry, runner=runner)
     for inst_id in result.written:

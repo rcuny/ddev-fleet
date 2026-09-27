@@ -35,5 +35,11 @@
     - claude_cli
     - caddy
     - fleet_service
+    # authelia MUST come after fleet_service: its tasks shell out to
+    # {{ fleet_opt_dir }}/venv/bin/fleet (set-admin-password, refresh-auth),
+    # which fleet_service is what installs on a fresh host — placed earlier
+    # (immediately after caddy, as this plan's brief originally specified)
+    # it would fail on first provisioning with the venv not yet existing.
+    - authelia             # no-op unless fleet_auth_mode == 'authelia'
     - network_hardening   # no-op unless fleet_network_hardening_enabled
     - security_hardening  # no-op unless fleet_security_hardening_enabled

@@ -52,9 +52,18 @@ letters/digits/hyphens, there is no hyphen-doubling restriction. The
 name can never begin with a digit, even though `fleet.core.naming` already
 guarantees instance ids never contain `--` except as the project/label
 separator.
+
+Two per-instance snippet writers share that one path per instance id:
+`write_instance_auth_snippet` (basic mode, `basic_auth`) and
+`write_instance_authelia_snippet` (Authelia mode, `forward_auth` +
+Remote-Groups authorization) — `enable_instance_auth`'s `auth_mode` kwarg
+picks which one runs. The two are never both written for the same server:
+`auth_mode` is a server-wide setting (`Registry.auth_mode`), not a
+per-instance choice.
 """
 
 import os
+import re
 import stat
 import tempfile
 from collections.abc import Sequence
@@ -223,53 +232,108 @@ def write_instance_auth_snippet(
     username: str,
     bcrypt_hash: str,
     *,
-    bypass_cidrs: Sequence[str] = (),
     alias_fqdns: Sequence[str] = (),
     snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
 ) -> Path:
-    """Atomically write `instance_id`'s own auth snippet: a named matcher
-    scoped to `fqdn` (plus any `alias_fqdns`) via `host`, plus a
+    """Atomically write `instance_id`'s own BASIC-AUTH snippet: a named
+    matcher scoped to `fqdn` (plus any `alias_fqdns`) via `host`, plus a
     `basic_auth` block guarded by that matcher. Returns the path written.
     Imported by the `*.{{ fleet_domain }}` site in Caddyfile.j2 via a glob —
-    see the module docstring.
+    see the module docstring. For Authelia mode, see
+    `write_instance_authelia_snippet` instead — the two write the SAME
+    path (one snippet per instance) but never both at once, since a given
+    server only ever runs in one auth_mode.
 
-    `alias_fqdns` (from `core.instances.alias_fqdns()`, the instance's
-    Domain-Access alias hosts) are listed alongside `fqdn` in the SAME
-    `host` matcher — Caddy's `host` matcher accepts multiple space-separated
-    hosts and matches if any one of them matches. Without this, an alias
-    host would be a different `host` than the one the matcher guards and
-    would bypass basic auth entirely — that was a real gap the alias
-    feature would otherwise have opened.
-
-    `bypass_cidrs` (from `fleet.auth_bypass_cidrs`, see
-    `Registry.auth_bypass_cidrs`) narrows the matcher with `not remote_ip
-    <ranges>`, so visitors from those networks are never prompted. The
-    matcher is what guards `basic_auth`, so a non-match simply means "no
-    auth for this request" — traffic is never blocked by this snippet, and
-    everyone outside the list still gets the prompt (the implicit default
-    IS the prompt; there is no deny entry). Emitted as a multi-line matcher
-    block only when there is a bypass list, so an empty list keeps the
-    original one-line `@m host <fqdn> [alias ...]` form.
-
-    Caddy's `remote_ip` matches the DIRECT peer address, deliberately not
-    `X-Forwarded-For` (which would need the `forwarded` keyword and a
-    trusted-proxy config). Caddy is the edge here — it terminates TLS for
-    `*.{{ fleet_domain }}` straight from the client — so the direct peer IS
-    the visitor. If a CDN/proxy is ever put in front of Caddy, every request
-    will appear to come from that proxy and this list must be revisited."""
+    `alias_fqdns` (from `core.instances.alias_fqdns()`) are listed alongside
+    `fqdn` in the SAME `host` matcher — Caddy's `host` matcher accepts
+    multiple space-separated hosts and matches if any one matches. Without
+    this, an alias host would bypass basic auth entirely."""
     snippet_path = instance_snippet_path(instance_id, snippet_dir=snippet_dir)
     matcher = instance_matcher_name(instance_id)
     hosts = " ".join((fqdn, *alias_fqdns))
-    if bypass_cidrs:
-        header = (
-            f"@{matcher} {{\n"
-            f"    host {hosts}\n"
-            f"    not remote_ip {' '.join(bypass_cidrs)}\n"
-            f"}}\n"
-        )
-    else:
-        header = f"@{matcher} host {hosts}\n"
-    content = header + f"basic_auth @{matcher} {{\n    {username} {bcrypt_hash}\n}}\n"
+    content = (
+        f"@{matcher} host {hosts}\n" f"basic_auth @{matcher} {{\n    {username} {bcrypt_hash}\n}}\n"
+    )
+    _atomic_write(snippet_path, content, prefix=f".{instance_id}-auth-")
+    return snippet_path
+
+
+DEFAULT_AUTHELIA_ADDR = "127.0.0.1:9091"
+
+
+def _groups_regex(project: str) -> str:
+    """Compose the `header_regexp` pattern that matches `project` (or
+    `admins`) as a WHOLE comma-delimited element of Authelia's
+    `Remote-Groups` header, never a substring. `Remote-Groups` arrives with
+    no space around commas (e.g. `demo,fern`), but the pattern still
+    tolerates optional whitespace around each element defensively.
+    `project` is `re.escape`d so a project name containing regex
+    metacharacters (`.`, `-`, etc.) matches itself literally, never as a
+    pattern fragment — e.g. project `my.proj-1` must not also match
+    `myxproj-1` (a literal `.` would otherwise mean "any character")."""
+    return rf"(^|,)\s*({re.escape(project)}|admins)\s*(,|$)"
+
+
+def write_instance_authelia_snippet(
+    instance_id: str,
+    fqdn: str,
+    project: str,
+    *,
+    alias_fqdns: Sequence[str] = (),
+    snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
+    authelia_addr: str = DEFAULT_AUTHELIA_ADDR,
+) -> Path:
+    """Atomically write `instance_id`'s AUTHELIA-MODE snippet: strip any
+    client-supplied `Remote-*` headers (anti-spoofing — Authelia's
+    forward-auth response is the only legitimate source of these),
+    `forward_auth` to Authelia's forward-auth endpoint, then require the
+    visitor's `Remote-Groups` to contain `project` or `admins` — else 403.
+    Writes to the SAME path `write_instance_auth_snippet` would (one
+    snippet per instance id); the two are never both written for the same
+    server, since `auth_mode` is server-wide.
+
+    Syntax pinned by the local e2e verification
+    (`.claude/user/tmp/authelia-e2e/findings.md` in the companion repo, not
+    shipped here): Caddy does NOT execute directives in source order inside
+    a plain site block — it reorders them by a fixed internal
+    directive-precedence list, which sorts bare `request_header` directives
+    to run AFTER `forward_auth`. That silently deletes the very
+    `Remote-Groups` header `forward_auth`'s `copy_headers` just set,
+    so the group matcher below would see an empty header on every request
+    and reject every authenticated visitor, admins included. The fix,
+    confirmed against a real Caddy v2.11.4 + Authelia v4.39 instance, is to
+    wrap the whole header-strip + forward_auth + group-matcher sequence in a
+    single `route @matcher { ... }` block — `route` disables the automatic
+    reordering and runs its directives in the literal order written. The
+    shared `reverse_proxy` for `*.{{ fleet_domain }}` (Caddyfile.j2) still
+    applies afterwards for any request this route doesn't terminate with a
+    403, exactly like the basic_auth snippet's `@protected`/`basic_auth`
+    pairing already relies on.
+
+    `Remote-Groups` arrives from Authelia as a comma-separated list with NO
+    space (e.g. `demo,fern`) — the group-matcher regexp below matches
+    `project` (or `admins`) as a whole comma-delimited element, not a
+    substring, so `fern` does not also match a project literally named
+    `ubuntu-fern-2`."""
+    snippet_path = instance_snippet_path(instance_id, snippet_dir=snippet_dir)
+    matcher = instance_matcher_name(instance_id)
+    hosts = " ".join((fqdn, *alias_fqdns))
+    group_pattern = _groups_regex(project)
+    content = (
+        f"@{matcher} host {hosts}\n"
+        f"route @{matcher} {{\n"
+        "    request_header -Remote-User\n"
+        "    request_header -Remote-Groups\n"
+        "    request_header -Remote-Name\n"
+        "    request_header -Remote-Email\n"
+        f"    forward_auth {authelia_addr} {{\n"
+        "        uri /api/authz/forward-auth\n"
+        "        copy_headers Remote-User Remote-Groups Remote-Name Remote-Email\n"
+        "    }\n"
+        f'    @denied not header_regexp Remote-Groups "{group_pattern}"\n'
+        "    respond @denied 403\n"
+        "}\n"
+    )
     _atomic_write(snippet_path, content, prefix=f".{instance_id}-auth-")
     return snippet_path
 
@@ -375,38 +439,50 @@ def enable_instance_auth(
     fqdn: str,
     password: str,
     *,
+    auth_mode: str = "basic",
+    project: str | None = None,
     username: str | None = None,
-    bypass_cidrs: Sequence[str] = (),
     alias_fqdns: Sequence[str] = (),
     snippet_dir: Path = DEFAULT_INSTANCE_SNIPPET_DIR,
     caddyfile_path: Path = DEFAULT_CADDYFILE_PATH,
     runner=run_streamed,
 ) -> None:
-    """Full per-instance enable pipeline: hash `password`, write
-    `instance_id`'s snippet atomically, validate the Caddyfile, then reload
-    Caddy. Called by `fleet.core.instances.deploy()`. Raises CaddyAuthError
-    (a FleetError) on any failure — same never-half-applied-undetectably
-    contract as `rotate()`: if validation or reload fails, the snippet is
-    already on disk but Caddy has NOT been reloaded, so it is not yet
-    protecting anything live.
+    """Full per-instance enable pipeline, mode-aware. Basic mode (default,
+    unchanged): hash `password`, write the basic_auth snippet, validate,
+    reload. Authelia mode (`auth_mode="authelia"`): write the forward_auth
+    snippet naming `project` as the required group — no hashing, no
+    per-instance credential at all (Authelia already authenticated the
+    visitor; this only decides authorization). Called by
+    `fleet.core.instances.deploy()`. Raises CaddyAuthError on any failure
+    — same never-half-applied-undetectably contract as `rotate()`.
 
     `username` defaults to `password` — per-instance credentials are
-    symmetric (see DEFAULT_INSTANCE_PASSWORD). `alias_fqdns` — the
-    instance's Domain-Access alias hosts (`core.instances.alias_fqdns()`) —
-    are folded into the SAME matcher as `fqdn`; see
-    `write_instance_auth_snippet` for why that matters."""
-    if username is None:
-        username = password
-    bcrypt_hash = hash_password(password, runner=runner)
-    write_instance_auth_snippet(
-        instance_id,
-        fqdn,
-        username,
-        bcrypt_hash,
-        bypass_cidrs=bypass_cidrs,
-        alias_fqdns=alias_fqdns,
-        snippet_dir=snippet_dir,
-    )
+    symmetric (see DEFAULT_INSTANCE_PASSWORD); only meaningful in basic
+    mode. `alias_fqdns` — the instance's Domain-Access alias hosts
+    (`core.instances.alias_fqdns()`) — are folded into the SAME matcher as
+    `fqdn` in both modes; see `write_instance_auth_snippet` for why that
+    matters."""
+    if auth_mode == "authelia":
+        if not project:
+            raise CaddyAuthError(
+                "enable_instance_auth(auth_mode='authelia') requires 'project' to "
+                "compose the required Remote-Groups membership"
+            )
+        write_instance_authelia_snippet(
+            instance_id, fqdn, project, alias_fqdns=alias_fqdns, snippet_dir=snippet_dir
+        )
+    else:
+        if username is None:
+            username = password
+        bcrypt_hash = hash_password(password, runner=runner)
+        write_instance_auth_snippet(
+            instance_id,
+            fqdn,
+            username,
+            bcrypt_hash,
+            alias_fqdns=alias_fqdns,
+            snippet_dir=snippet_dir,
+        )
     validate_caddyfile(caddyfile_path=caddyfile_path, runner=runner)
     reload_caddy(caddyfile_path=caddyfile_path, runner=runner)
 

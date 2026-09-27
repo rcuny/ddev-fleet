@@ -1,9 +1,32 @@
+import os
+import re
+import shutil
+import subprocess
+
 import pytest
 
 from fleet.core import caddyauth
 from fleet.core.errors import CaddyAuthError, ValidationError
 from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
+
+# Optional real-`caddy` validation of the rendered snippets — skipped when no
+# `caddy` binary is reachable. Looks on PATH first (`shutil.which`), then the
+# env var `FLEET_TEST_CADDY_BIN` (an explicit local path to a `caddy` binary,
+# e.g. a scratch download outside this repo — never hardcode a path here,
+# this is the public product repo). Neither present -> skip.
+_CADDY_BIN = shutil.which("caddy") or os.environ.get("FLEET_TEST_CADDY_BIN") or None
+if _CADDY_BIN is not None and not (os.path.isfile(_CADDY_BIN) and os.access(_CADDY_BIN, os.X_OK)):
+    _CADDY_BIN = None
+
+
+def _caddy_validate(caddyfile_path):
+    result = subprocess.run(
+        [_CADDY_BIN, "validate", "--config", str(caddyfile_path), "--adapter", "caddyfile"],
+        capture_output=True,
+        text=True,
+    )
+    return result
 
 
 def test_hash_password_invokes_caddy_hash_password_with_plaintext_flag():
@@ -370,77 +393,224 @@ def test_validate_instance_credential_accepts_single_words(good):
     caddyauth.validate_instance_credential(good)
 
 
-# --- auth bypass whitelist (fleet.auth_bypass_cidrs -> `not remote_ip`) ---
+# --- Authelia mode (mode-aware enable_instance_auth + the forward_auth
+# snippet) ---
 
 
-def test_instance_snippet_with_bypass_cidrs_guards_matcher_with_not_remote_ip(tmp_path):
+def test_write_instance_authelia_snippet_strips_client_headers_and_forwards(tmp_path):
     snippet_dir = tmp_path / "instances"
 
-    caddyauth.write_instance_auth_snippet(
-        "oak--main",
-        "oak--main.fleet.example.test",
-        "fern",
-        "$2a$14$hash",
-        bypass_cidrs=["203.0.113.31/32", "203.0.113.80/29"],
-        snippet_dir=snippet_dir,
+    caddyauth.write_instance_authelia_snippet(
+        "demo--main", "demo--main.fleet.example.test", "demo", snippet_dir=snippet_dir
     )
 
-    assert (snippet_dir / "oak--main.conf").read_text(encoding="utf-8") == (
-        "@auth-oak--main {\n"
-        "    host oak--main.fleet.example.test\n"
-        "    not remote_ip 203.0.113.31/32 203.0.113.80/29\n"
-        "}\n"
-        "basic_auth @auth-oak--main {\n"
-        "    fern $2a$14$hash\n"
-        "}\n"
-    )
+    content = (snippet_dir / "demo--main.conf").read_text(encoding="utf-8")
+    assert "request_header -Remote-User" in content
+    assert "request_header -Remote-Groups" in content
+    assert "request_header -Remote-Name" in content
+    assert "request_header -Remote-Email" in content
+    assert "forward_auth 127.0.0.1:9091 {" in content
+    assert "uri /api/authz/forward-auth" in content
+    assert "copy_headers Remote-User Remote-Groups Remote-Name Remote-Email" in content
 
 
-def test_instance_snippet_without_bypass_cidrs_keeps_single_line_matcher(tmp_path):
+def test_write_instance_authelia_snippet_wraps_sequence_in_a_route_block_in_order(tmp_path):
+    """Per findings.md: Caddy reorders bare top-level directives by
+    precedence, which runs the header strips AFTER forward_auth and
+    silently deletes the Remote-Groups header forward_auth just set. The
+    whole sequence must be wrapped in `route @matcher { ... }`, with the
+    strip directives appearing (in source order, which `route` preserves)
+    before `forward_auth`."""
     snippet_dir = tmp_path / "instances"
 
-    caddyauth.write_instance_auth_snippet(
+    caddyauth.write_instance_authelia_snippet(
+        "demo--main", "demo--main.fleet.example.test", "demo", snippet_dir=snippet_dir
+    )
+
+    content = (snippet_dir / "demo--main.conf").read_text(encoding="utf-8")
+    assert "route @auth-demo--main {" in content
+    strip_pos = content.index("request_header -Remote-Groups")
+    forward_auth_pos = content.index("forward_auth")
+    assert strip_pos < forward_auth_pos
+
+
+def test_write_instance_authelia_snippet_requires_project_or_admins_group(tmp_path):
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_authelia_snippet(
+        "fern--main", "fern--main.fleet.example.test", "fern", snippet_dir=snippet_dir
+    )
+
+    content = (snippet_dir / "fern--main.conf").read_text(encoding="utf-8")
+    assert "Remote-Groups" in content
+    assert "fern" in content
+    assert "admins" in content
+    assert "403" in content
+
+
+def test_groups_regex_matches_whole_element_only_for_project_fern():
+    """The named risk this snippet exists to close: a substring match would
+    let `fern-old` (or `xfern`) satisfy a matcher meant only for `fern`, and
+    `Remote-Groups` is a comma-joined list with NO surrounding space
+    (`demo,fern`) — the pattern must treat each comma-delimited element as
+    a whole token, anchored at start/end or a comma on both sides."""
+    pattern = re.compile(caddyauth._groups_regex("fern"))
+
+    for value in ("fern", "demo,fern", "fern,demo", "admins", "demo,admins"):
+        assert pattern.search(value), f"expected a match for {value!r}"
+
+    for value in ("fern-old", "xfern", "demo,fern-old", "adminsx", ""):
+        assert not pattern.search(value), f"expected NO match for {value!r}"
+
+
+def test_groups_regex_escapes_project_name_metacharacters():
+    """A project name containing regex metacharacters (`.`, `-`) must match
+    itself literally — an unescaped `.` would otherwise mean "any
+    character" and let `myxproj-1` satisfy a matcher meant only for
+    `my.proj-1`."""
+    pattern = re.compile(caddyauth._groups_regex("my.proj-1"))
+
+    assert pattern.search("my.proj-1")
+    assert pattern.search("demo,my.proj-1")
+    assert not pattern.search("myxproj-1")
+    assert not pattern.search("my.proj-1x")
+
+
+def test_write_instance_authelia_snippet_scopes_host_matcher_and_aliases(tmp_path):
+    snippet_dir = tmp_path / "instances"
+
+    caddyauth.write_instance_authelia_snippet(
         "oak--main",
         "oak--main.fleet.example.test",
-        "fleet",
-        "$2a$14$hash",
+        "oak",
+        alias_fqdns=["es-oak--main.fleet.example.test"],
         snippet_dir=snippet_dir,
     )
 
     content = (snippet_dir / "oak--main.conf").read_text(encoding="utf-8")
-    assert content.startswith("@auth-oak--main host oak--main.fleet.example.test\n")
-    assert "remote_ip" not in content
+    assert "oak--main.fleet.example.test" in content
+    assert "es-oak--main.fleet.example.test" in content
 
 
-def test_enable_instance_auth_passes_bypass_cidrs_through(tmp_path):
+def test_enable_instance_auth_basic_mode_is_unchanged_default(tmp_path):
     snippet_dir = tmp_path / "instances"
     caddyfile_path = tmp_path / "Caddyfile"
     scripted = {
-        "caddy hash-password --plaintext fern": RunResult(returncode=0, lines=["$2a$14$fernhash"]),
+        "caddy hash-password --plaintext fleet": RunResult(returncode=0, lines=["$2a$14$hash"]),
         f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
             returncode=0, lines=[]
         ),
         f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
     }
-
     caddyauth.enable_instance_auth(
-        "oak--main",
-        "oak--main.fleet.example.test",
-        "fern",
-        bypass_cidrs=["10.0.0.0/8"],
+        "demo--main",
+        "demo--main.fleet.example.test",
+        "fleet",
         snippet_dir=snippet_dir,
         caddyfile_path=caddyfile_path,
         runner=FakeRunner(scripted=scripted),
     )
+    content = (snippet_dir / "demo--main.conf").read_text(encoding="utf-8")
+    assert "basic_auth" in content
+    assert "forward_auth" not in content
 
-    assert "not remote_ip 10.0.0.0/8" in (snippet_dir / "oak--main.conf").read_text(
-        encoding="utf-8"
+
+def test_enable_instance_auth_authelia_mode_writes_forward_auth_snippet_no_hashing(tmp_path):
+    snippet_dir = tmp_path / "instances"
+    caddyfile_path = tmp_path / "Caddyfile"
+    scripted = {
+        f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
+            returncode=0, lines=[]
+        ),
+        f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
+    }
+    fake = FakeRunner(scripted=scripted)
+
+    caddyauth.enable_instance_auth(
+        "demo--main",
+        "demo--main.fleet.example.test",
+        "",
+        auth_mode="authelia",
+        project="demo",
+        snippet_dir=snippet_dir,
+        caddyfile_path=caddyfile_path,
+        runner=fake,
     )
+
+    content = (snippet_dir / "demo--main.conf").read_text(encoding="utf-8")
+    assert "forward_auth" in content
+    assert "basic_auth" not in content
+    # never shells out to hash a password in authelia mode
+    hash_calls = [c for c in fake.calls if c["cmd"][:2] == ["caddy", "hash-password"]]
+    assert hash_calls == []
+    assert [c["cmd"][0:2] for c in fake.calls] == [["caddy", "validate"], ["caddy", "reload"]]
+
+
+def test_enable_instance_auth_authelia_mode_requires_project():
+    with pytest.raises(CaddyAuthError, match="project"):
+        caddyauth.enable_instance_auth(
+            "demo--main", "demo--main.fleet.example.test", "", auth_mode="authelia"
+        )
+
+
+@pytest.mark.skipif(_CADDY_BIN is None, reason="no 'caddy' binary reachable")
+def test_write_instance_authelia_snippet_validates_with_real_caddy(tmp_path):
+    """Adapt/validate the rendered snippet inside a Caddyfile shaped like the
+    real `*.{{ fleet_domain }}` site (Caddyfile.j2) — proves the exact
+    `route @matcher { ... }` syntax findings.md pins is still accepted by a
+    real `caddy validate`, not just plausible-looking text."""
+    snippet_dir = tmp_path / "instances"
+    caddyauth.write_instance_authelia_snippet(
+        "demo--main",
+        "demo--main.fleet.example.test",
+        "demo",
+        alias_fqdns=["es-demo--main.fleet.example.test"],
+        snippet_dir=snippet_dir,
+    )
+
+    caddyfile_path = tmp_path / "Caddyfile"
+    caddyfile_path.write_text(
+        "{\n    admin off\n}\n\n"
+        "*.fleet.example.test {\n"
+        f"    import {snippet_dir}/*.conf\n"
+        "    reverse_proxy 127.0.0.1:8080\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = _caddy_validate(caddyfile_path)
+    assert result.returncode == 0, result.stderr
+
+
+@pytest.mark.skipif(_CADDY_BIN is None, reason="no 'caddy' binary reachable")
+def test_write_instance_auth_snippet_basic_mode_validates_with_real_caddy(tmp_path):
+    """Same real-`caddy` validation for the basic-auth snippet, so a
+    regression in either mode's syntax is caught the same way."""
+    snippet_dir = tmp_path / "instances"
+    caddyauth.write_instance_auth_snippet(
+        "demo--main",
+        "demo--main.fleet.example.test",
+        "fleet",
+        "$2a$14$fakehash",
+        snippet_dir=snippet_dir,
+    )
+
+    caddyfile_path = tmp_path / "Caddyfile"
+    caddyfile_path.write_text(
+        "{\n    admin off\n}\n\n"
+        "*.fleet.example.test {\n"
+        f"    import {snippet_dir}/*.conf\n"
+        "    reverse_proxy 127.0.0.1:8080\n"
+        "}\n",
+        encoding="utf-8",
+    )
+
+    result = _caddy_validate(caddyfile_path)
+    assert result.returncode == 0, result.stderr
 
 
 # --- alias hosts (additional_hostnames) must be covered by the SAME
-# matcher as the bare instance FQDN, in both the one-line and the
-# bypass-cidrs multi-line matcher forms ---
+# matcher as the bare instance FQDN ---
 
 
 def test_instance_snippet_one_line_form_lists_alias_hosts(tmp_path):
@@ -460,33 +630,6 @@ def test_instance_snippet_one_line_form_lists_alias_hosts(tmp_path):
         "es-oak--main.fleet.example.test news-oak--main.fleet.example.test\n"
         "basic_auth @auth-oak--main {\n"
         "    fleet $2a$14$hash\n"
-        "}\n"
-    )
-
-
-def test_instance_snippet_multi_line_form_lists_alias_hosts(tmp_path):
-    """Same alias-host coverage when `bypass_cidrs` is also set — the
-    multi-line matcher block form must list `host` and `not remote_ip` as
-    separate lines, both fully populated."""
-    snippet_dir = tmp_path / "instances"
-
-    caddyauth.write_instance_auth_snippet(
-        "oak--main",
-        "oak--main.fleet.example.test",
-        "fern",
-        "$2a$14$hash",
-        bypass_cidrs=["203.0.113.31/32"],
-        alias_fqdns=["es-oak--main.fleet.example.test"],
-        snippet_dir=snippet_dir,
-    )
-
-    assert (snippet_dir / "oak--main.conf").read_text(encoding="utf-8") == (
-        "@auth-oak--main {\n"
-        "    host oak--main.fleet.example.test es-oak--main.fleet.example.test\n"
-        "    not remote_ip 203.0.113.31/32\n"
-        "}\n"
-        "basic_auth @auth-oak--main {\n"
-        "    fern $2a$14$hash\n"
         "}\n"
     )
 

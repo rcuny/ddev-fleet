@@ -1346,6 +1346,42 @@ def test_deploy_records_auth_disabled_in_instance_yaml(fleet_home, git_repo):
     assert "auth-enabled: false" in content
 
 
+def test_deploy_authelia_mode_writes_forward_auth_snippet_not_basic_auth(fleet_home, git_repo):
+    """In Authelia mode, deploy()'s auth branch must write a forward_auth
+    snippet (project as the required Remote-Groups membership), never the
+    basic_auth snippet basic mode writes."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    (fleet_home / "host.yml").write_text("auth_mode: authelia\n", encoding="utf-8")
+    registry = Registry.load(paths.registry, host_config_path=fleet_home / "host.yml")
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    snippet_path = caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR / "demo--develop.conf"
+    content = snippet_path.read_text(encoding="utf-8")
+    assert "forward_auth" in content
+    assert "basic_auth" not in content
+
+
+def test_deploy_authelia_mode_records_no_auth_password_in_instance_yml(fleet_home, git_repo):
+    """Authelia mode never records a plaintext auth-password in
+    .fleet/instance.yml for a new deploy (spec §4.5)."""
+    import ruamel.yaml
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    (fleet_home / "host.yml").write_text("auth_mode: authelia\n", encoding="utf-8")
+    registry = Registry.load(paths.registry, host_config_path=fleet_home / "host.yml")
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    info_path = paths.instances / "demo--develop" / ".fleet" / "instance.yml"
+    data = ruamel.yaml.YAML().load(info_path.read_text(encoding="utf-8"))
+    assert data["auth-password"] is None
+
+
 def test_deploy_raises_deploy_error_when_caddy_validate_fails(fleet_home, git_repo):
     """If the auth-snippet's Caddyfile validation fails, deploy() must fail
     loudly with an actionable DeployError — never continue on to ddev start
