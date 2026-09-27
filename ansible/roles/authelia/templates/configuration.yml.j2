@@ -6,15 +6,23 @@
 #
 # Secrets (identity_validation.reset_password.jwt_secret, session.secret,
 # storage.encryption_key) are deliberately OMITTED from this file and
-# supplied instead via the X_AUTHELIA_*_FILE environment variables (systemd
-# drop-in secrets.conf, this role) — Authelia's file-based secrets loading
-# reads the value straight from the file at startup with no corresponding
-# key needed here. This is the more stable of the two mechanisms Authelia
-# supports; per the local e2e verification
-# (.claude/user/tmp/authelia-e2e/findings.md in the companion repo, not
-# shipped here), the config-templating form (`{{ secret "path" }}`) is
-# version-sensitive and unverified against 4.39 — if a future need arises
-# to inline it instead, confirm with `authelia config validate` first.
+# supplied instead via the AUTHELIA_*_FILE environment variables (systemd
+# drop-in secrets.conf, this role) - Authelia's generic KEY_PATH_FILE
+# secrets-loading mechanism reads the value straight from the file at
+# startup with no corresponding key needed here. This is the more stable
+# of the two mechanisms Authelia supports; per the local e2e/integration
+# verification (.claude/user/tmp/authelia-e2e/findings.md and
+# .claude/user/tmp/authelia-integration/results.md in the companion repo,
+# not shipped here), Authelia's OWN in-config-templating secret-loading
+# form is version-sensitive and unverified against 4.39 - if a future need
+# arises to inline it instead, confirm with the authelia CLI's own config
+# validation command first. NOTE FOR ANY FUTURE EDIT OF THIS COMMENT
+# BLOCK: never write a literal double-open-brace (Jinja's own delimiter)
+# anywhere in this file, even inside a plain YAML "#" comment - Jinja
+# parses this file before Authelia ever sees it and a bare double-brace
+# breaks that parse just as readily inside a comment as inside real YAML
+# (this exact mistake broke this file once already - see the fix report
+# in the companion repo's task-7 tmp directory for the full incident).
 server:
   address: 'tcp://127.0.0.1:9091/'
 log:

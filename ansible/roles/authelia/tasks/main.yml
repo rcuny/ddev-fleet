@@ -165,6 +165,19 @@
     mode: "0755"
 
 - name: Point authelia.service at the secrets directory
+  # Plain AUTHELIA_ prefix (NOT X_AUTHELIA_) — verified directly against
+  # the real authelia v4.39.28 binary (`authelia config validate`, see
+  # .claude/user/tmp/authelia-integration/results.md in the companion
+  # repo): X_AUTHELIA_ is reserved for a small, fixed set of
+  # meta/behavioural env vars (X_AUTHELIA_CONFIG, ..._HEALTHCHECK*) baked
+  # into the binary as literal strings, none of them secret-related.
+  # Generic <KEY_PATH>_FILE secret-loading (what these three lines need)
+  # uses the plain AUTHELIA_ prefix, one segment per config key path —
+  # e.g. `storage.encryption_key` -> AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE.
+  # With the old X_ prefix, `storage.encryption_key` (which has no default
+  # and is always required) came back unset and Authelia refused to start
+  # every time — reproduced and fixed against the real binary before this
+  # comment was written.
   ansible.builtin.copy:
     dest: /etc/systemd/system/authelia.service.d/secrets.conf
     owner: root
@@ -172,9 +185,9 @@
     mode: "0644"
     content: |
       [Service]
-      Environment=X_AUTHELIA_JWT_SECRET_FILE=/etc/authelia/secrets/reset_password_jwt_secret
-      Environment=X_AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret
-      Environment=X_AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key
+      Environment=AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/etc/authelia/secrets/reset_password_jwt_secret
+      Environment=AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret
+      Environment=AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key
   notify:
     - Reload systemd daemon
     - Restart authelia
