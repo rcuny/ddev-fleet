@@ -935,3 +935,28 @@ def test_index_initial_template_select_shows_first_project_templates_only(fleet_
     assert "oak-default" in template_select
     assert "oak-other" in template_select
     assert "acme-only" not in template_select
+
+
+def test_index_page_renders_authelia_deploy_form_without_password_field(fleet_home):
+    from fleet.core.instances import FleetPaths
+
+    _setup_fleet_home(fleet_home)
+    paths = FleetPaths.from_home(fleet_home)
+    paths.host_config.write_text("auth_mode: authelia\n", encoding="utf-8")
+
+    client = TestClient(create_app(fleet_home))
+    body = client.get("/").text
+
+    assert "Basic auth with Authelia" in body
+    assert '<input type="checkbox" name="auth" value="true" checked>' in body
+    assert 'name="auth_password"' not in body
+
+
+def test_index_page_basic_mode_still_renders_password_field(fleet_home):
+    _setup_fleet_home(fleet_home)
+
+    client = TestClient(create_app(fleet_home))
+    body = client.get("/").text
+
+    assert 'name="auth_password" value="fleet"' in body
+    assert "Basic auth with Authelia" not in body

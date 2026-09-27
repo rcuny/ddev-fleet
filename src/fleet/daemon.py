@@ -349,6 +349,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 "project_templates": project_templates,
                 "template_options": initial_templates,
                 "sys_stats": sys_stats.display(),
+                "auth_mode": registry.auth_mode,
             },
         )
 
