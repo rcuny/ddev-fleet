@@ -48,5 +48,10 @@ class CaddyPortsError(FleetError):
     exposure snippet failed (fleet.core.caddyports)."""
 
 
+class AutheliaError(FleetError):
+    """Hashing/rendering/writing Authelia's admin account or users.yml
+    failed (fleet.core.authelia)."""
+
+
 class DiskSpaceError(FleetError):
     """Insufficient free disk space to proceed with a bulk deploy."""
