@@ -548,7 +548,6 @@ def deploy(
                     inst_id,
                     f"{inst_id}.{registry.domain}",
                     auth_password,
-                    bypass_cidrs=registry.auth_bypass_cidrs,
                     alias_fqdns=alias_hosts,
                     snippet_dir=snippet_dir,
                     caddyfile_path=caddyfile_path,
@@ -902,7 +901,6 @@ def sync_instance_auth(
     resolved_caddyfile = (
         caddyfile_path if caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
-    bypass_cidrs = registry.auth_bypass_cidrs
 
     written: list[str] = []
     removed: list[str] = []
@@ -950,7 +948,6 @@ def sync_instance_auth(
             f"{inst_id}.{registry.domain}",
             password,
             bcrypt_hash,
-            bypass_cidrs=bypass_cidrs,
             alias_fqdns=alias_hosts,
             snippet_dir=resolved_snippet_dir,
         )

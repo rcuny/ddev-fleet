@@ -74,11 +74,7 @@ def test_sync_rewrites_every_instance_with_current_bypass_list_and_reloads_once(
     assert result.removed == []
     assert result.reloaded is True
     client = (snippet_dir / "demo--client.conf").read_text(encoding="utf-8")
-    assert "not remote_ip 203.0.113.31/32" in client
     assert "fern $2a$14$fernhash" in client
-    assert "not remote_ip 203.0.113.31/32" in (snippet_dir / "demo--main.conf").read_text(
-        encoding="utf-8"
-    )
     # ONE validate + ONE reload for the whole fleet, not one per instance.
     assert [c["cmd"][0:2] for c in fake.calls].count(["caddy", "reload"]) == 1
     assert [c["cmd"][0:2] for c in fake.calls].count(["caddy", "validate"]) == 1
