@@ -19,7 +19,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from argon2 import PasswordHasher
-from argon2.exceptions import VerifyMismatchError
+from argon2.exceptions import InvalidHashError, VerifyMismatchError
 from ruamel.yaml import YAML
 
 from fleet.core.errors import AutheliaError
@@ -47,9 +47,7 @@ def hash_password(password: str) -> str:
 def _verify(password: str, existing_hash: str) -> bool:
     try:
         return _hasher.verify(existing_hash, password)
-    except VerifyMismatchError:
-        return False
-    except Exception:  # noqa: BLE001 - a malformed/foreign hash also means "no match"
+    except (VerifyMismatchError, InvalidHashError):
         return False
 
 
@@ -80,7 +78,7 @@ def _atomic_write_yaml(path: Path, data: dict, *, mode: int = 0o640) -> None:
         raise
 
 
-def load_admin(path: Path = DEFAULT_ADMIN_PATH) -> AdminAccount | None:
+def load_admin(*, path: Path) -> AdminAccount | None:
     """Read the installer admin from `path` (`admin.yml`), or `None` if the
     file is missing/empty/incomplete — callers (`fleet refresh-auth`) turn
     that into an actionable "run fleet set-admin-password first" error."""
@@ -95,7 +93,7 @@ def load_admin(path: Path = DEFAULT_ADMIN_PATH) -> AdminAccount | None:
     return AdminAccount(name=str(name), password_hash=str(password_hash))
 
 
-def set_admin_password(name: str, plaintext: str, *, path: Path = DEFAULT_ADMIN_PATH) -> None:
+def set_admin_password(name: str, plaintext: str, *, path: Path) -> None:
     """Hash `plaintext` and atomically write `path` (`admin.yml`, mode
     0640). Does NOT touch `users.yml` or Caddy/Authelia — call
     `render_users`/`write_users` (and, in basic mode, `caddyauth.rotate`)
@@ -131,7 +129,7 @@ def render_users(
     registry: Registry,
     admin: AdminAccount,
     *,
-    existing_path: Path = DEFAULT_USERS_PATH,
+    existing_path: Path,
 ) -> dict:
     """Build the full `users.yml` document (Authelia file-backend shape:
     `{"users": {<name>: {displayname, password, groups}}}`) from every
@@ -162,7 +160,7 @@ def render_users(
     return {"users": users_block}
 
 
-def write_users(data: dict, *, path: Path = DEFAULT_USERS_PATH) -> bool:
+def write_users(data: dict, *, path: Path) -> bool:
     """Atomically write `data` to `path` (`users.yml`, mode 0640) UNLESS
     its current on-disk content already matches — Authelia's file backend
     `watch: true` re-reads on every write, so skipping a no-op write avoids

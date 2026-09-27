@@ -49,7 +49,7 @@ def test_set_admin_password_then_load_admin_roundtrips(tmp_path):
     path = tmp_path / "authelia" / "admin.yml"
     authelia.set_admin_password("admin", "adminpass", path=path)
 
-    admin = authelia.load_admin(path)
+    admin = authelia.load_admin(path=path)
 
     assert admin.name == "admin"
     assert admin.password_hash.startswith("$argon2id$")
@@ -57,7 +57,7 @@ def test_set_admin_password_then_load_admin_roundtrips(tmp_path):
 
 
 def test_load_admin_returns_none_when_file_missing(tmp_path):
-    assert authelia.load_admin(tmp_path / "does-not-exist.yml") is None
+    assert authelia.load_admin(path=tmp_path / "does-not-exist.yml") is None
 
 
 def test_render_users_includes_every_project_user_with_correct_groups(fleet_home):
