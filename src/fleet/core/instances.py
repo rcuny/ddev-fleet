@@ -12,7 +12,17 @@ from pathlib import Path
 from ruamel.yaml import YAML
 
 from fleet.core import assets as assets_mod
-from fleet.core import caddyauth, caddyports, ddev, gitops, naming, tmux, ttycmds, typesense
+from fleet.core import (
+    authelia,
+    caddyauth,
+    caddyports,
+    ddev,
+    gitops,
+    naming,
+    tmux,
+    ttycmds,
+    typesense,
+)
 from fleet.core.errors import (
     CaddyAuthError,
     CaddyPortsError,
@@ -53,6 +63,8 @@ class FleetPaths:
     locks: Path
     push_key_dir: Path
     host_config: Path
+    authelia_admin: Path
+    authelia_users: Path
 
     @classmethod
     def from_home(cls, home: Path) -> "FleetPaths":
@@ -78,6 +90,10 @@ class FleetPaths:
             # "per-host domain" section) and must never live inside a repo
             # that gets committed/shared across hosts.
             host_config=home / "host.yml",
+            # Authelia's admin account + rendered users.yml (spec §4.3) —
+            # server-local, never part of the shared config_dir/ registry.
+            authelia_admin=home / "authelia" / "admin.yml",
+            authelia_users=home / "authelia" / "users.yml",
         )
 
 
@@ -108,7 +124,7 @@ def _write_instance_yaml(
     template: str,
     branch: str,
     auth_enabled: bool,
-    auth_password: str,
+    auth_password: str | None,
 ) -> None:
     fleet_dir = instance_dir / ".fleet"
     fleet_dir.mkdir(parents=True, exist_ok=True)
@@ -544,16 +560,34 @@ def deploy(
         # `host` than the one the matcher guards).
         try:
             if auth_enabled:
-                caddyauth.enable_instance_auth(
-                    inst_id,
-                    f"{inst_id}.{registry.domain}",
-                    auth_password,
-                    alias_fqdns=alias_hosts,
-                    snippet_dir=snippet_dir,
-                    caddyfile_path=caddyfile_path,
-                    runner=runner,
-                )
-                _append_log(deploy_log, f"basic auth enabled for {inst_id}.{registry.domain}")
+                if registry.auth_mode == "authelia":
+                    caddyauth.enable_instance_auth(
+                        inst_id,
+                        f"{inst_id}.{registry.domain}",
+                        "",
+                        auth_mode="authelia",
+                        project=project,
+                        alias_fqdns=alias_hosts,
+                        snippet_dir=snippet_dir,
+                        caddyfile_path=caddyfile_path,
+                        runner=runner,
+                    )
+                    _append_log(
+                        deploy_log,
+                        f"authelia forward_auth enabled for {inst_id}.{registry.domain} "
+                        f"(group: {project!r} or admins)",
+                    )
+                else:
+                    caddyauth.enable_instance_auth(
+                        inst_id,
+                        f"{inst_id}.{registry.domain}",
+                        auth_password,
+                        alias_fqdns=alias_hosts,
+                        snippet_dir=snippet_dir,
+                        caddyfile_path=caddyfile_path,
+                        runner=runner,
+                    )
+                    _append_log(deploy_log, f"basic auth enabled for {inst_id}.{registry.domain}")
             else:
                 caddyauth.disable_instance_auth(
                     inst_id, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=runner
@@ -701,6 +735,7 @@ def deploy(
                     f"post_deploy command {command!r} failed with exit code {result.returncode}"
                 )
 
+        recorded_auth_password = None if registry.auth_mode == "authelia" else auth_password
         _write_instance_yaml(
             instance_dir,
             project,
@@ -708,7 +743,7 @@ def deploy(
             resolved.template,
             resolved.branch,
             auth_enabled,
-            auth_password,
+            recorded_auth_password,
         )
         _append_log(deploy_log, "deploy complete")
 
@@ -878,22 +913,22 @@ def sync_instance_auth(
     caddyfile_path: Path | None = None,
     runner=run_streamed,
 ) -> AuthSyncResult:
-    """Re-render EVERY deployed instance's Caddy basic-auth snippet from its
-    recorded `.fleet/instance.yml` settings plus the registry's CURRENT
-    `fleet.auth_bypass_cidrs`, then validate and reload Caddy ONCE.
-
-    This is the "apply my whitelist edit now" command (`fleet refresh-auth`),
-    the auth counterpart to `refresh_instance_config`/`caddyports.sync`: the
-    bypass list is fleet-wide and lives in fleet.yml, so editing it must not
-    require redeploying every live instance. Instances whose recorded
-    `auth-enabled` is false get their snippet removed instead (keeping this
-    command a true reconcile, not just a rewrite).
+    """Re-render EVERY deployed instance's Caddy auth snippet from its
+    current mode, then validate and reload Caddy ONCE — the "apply my
+    fleet.yml auth edits now" command (`fleet refresh-auth`), and the
+    mechanism a server uses to SWITCH auth_mode (edit host.yml, then run
+    this). Basic mode: unchanged behaviour (re-hash each instance's
+    recorded password). Authelia mode: also (re)renders and writes
+    users.yml from the registry's current users: + the recorded admin
+    account BEFORE touching any instance snippet, so a stale users.yml
+    never outlives a fleet.yml edit; raises FleetError naming
+    'fleet set-admin-password' if no admin account is recorded yet.
 
     Deliberately NOT per-instance validate+reload: a fleet with dozens of
     instances would otherwise reload Caddy dozens of times, and a mid-way
     failure would leave a partially-reloaded config. Writes are atomic per
     snippet; the single validate at the end is what gates the reload, so a
-    bad whitelist means Caddy keeps serving the OLD config (the new snippets
+    bad config means Caddy keeps serving the OLD config (the new snippets
     sit on disk, unloaded) and the error names what to fix."""
     resolved_snippet_dir = (
         snippet_dir if snippet_dir is not None else caddyauth.DEFAULT_INSTANCE_SNIPPET_DIR
@@ -901,6 +936,16 @@ def sync_instance_auth(
     resolved_caddyfile = (
         caddyfile_path if caddyfile_path is not None else caddyauth.DEFAULT_CADDYFILE_PATH
     )
+
+    if registry.auth_mode == "authelia":
+        admin = authelia.load_admin(path=paths.authelia_admin)
+        if admin is None:
+            raise FleetError(
+                f"no Authelia admin account recorded at {paths.authelia_admin} — "
+                "run 'fleet set-admin-password <password>' first"
+            )
+        users_data = authelia.render_users(registry, admin, existing_path=paths.authelia_users)
+        authelia.write_users(users_data, path=paths.authelia_users)
 
     written: list[str] = []
     removed: list[str] = []
@@ -920,10 +965,6 @@ def sync_instance_auth(
         # instances deployed before those fields were recorded.
         recorded_enabled = data.get("auth-enabled")
         auth_enabled = True if recorded_enabled is None else bool(recorded_enabled)
-        recorded_password = data.get("auth-password")
-        password = (
-            str(recorded_password) if recorded_password else caddyauth.DEFAULT_INSTANCE_PASSWORD
-        )
 
         if not auth_enabled:
             if caddyauth.remove_instance_auth_snippet(inst_id, snippet_dir=resolved_snippet_dir):
@@ -941,16 +982,29 @@ def sync_instance_auth(
             alias_fqdns(registry, project, inst_id) if registry.has_project(project) else []
         )
 
-        caddyauth.validate_instance_credential(password)
-        bcrypt_hash = caddyauth.hash_password(password, runner=runner)
-        caddyauth.write_instance_auth_snippet(
-            inst_id,
-            f"{inst_id}.{registry.domain}",
-            password,
-            bcrypt_hash,
-            alias_fqdns=alias_hosts,
-            snippet_dir=resolved_snippet_dir,
-        )
+        if registry.auth_mode == "authelia":
+            caddyauth.write_instance_authelia_snippet(
+                inst_id,
+                f"{inst_id}.{registry.domain}",
+                project,
+                alias_fqdns=alias_hosts,
+                snippet_dir=resolved_snippet_dir,
+            )
+        else:
+            recorded_password = data.get("auth-password")
+            password = (
+                str(recorded_password) if recorded_password else caddyauth.DEFAULT_INSTANCE_PASSWORD
+            )
+            caddyauth.validate_instance_credential(password)
+            bcrypt_hash = caddyauth.hash_password(password, runner=runner)
+            caddyauth.write_instance_auth_snippet(
+                inst_id,
+                f"{inst_id}.{registry.domain}",
+                password,
+                bcrypt_hash,
+                alias_fqdns=alias_hosts,
+                snippet_dir=resolved_snippet_dir,
+            )
         written.append(inst_id)
 
     if not written and not removed:

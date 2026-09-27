@@ -121,6 +121,36 @@ def test_deploy_no_auth_flag_disables_auth(fleet_home, monkeypatch, capsys):
     assert captured["auth_enabled"] is False
 
 
+def _write_authelia_registry(fleet_home):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "host.yml").write_text("auth_mode: authelia\n", encoding="utf-8")
+
+
+def test_deploy_rejects_auth_password_in_authelia_mode(fleet_home, capsys):
+    _write_authelia_registry(fleet_home)
+
+    rc = cli.main(["--fleet-home", str(fleet_home), "deploy", "demo", "--auth-password", "secret"])
+
+    assert rc == 1
+    assert "Authelia mode" in capsys.readouterr().err
+
+
+def test_redeploy_rejects_auth_password_in_authelia_mode(fleet_home, capsys):
+    _write_authelia_registry(fleet_home)
+    instance_dir = fleet_home / "instances" / "demo--main"
+    (instance_dir / ".fleet").mkdir(parents=True)
+    (instance_dir / ".fleet" / "instance.yml").write_text(
+        "project: demo\nbranch: main\ntemplate: default\n", encoding="utf-8"
+    )
+
+    rc = cli.main(
+        ["--fleet-home", str(fleet_home), "redeploy", "demo--main", "--auth-password", "secret"]
+    )
+
+    assert rc == 1
+    assert "Authelia mode" in capsys.readouterr().err
+
+
 def test_deploy_auth_password_flag_overrides_default(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
     captured = {}
@@ -1222,6 +1252,7 @@ def _stub_caddyauth_rotate(monkeypatch, recorder):
 
 
 def test_set_admin_password_calls_rotate_with_given_password(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
     recorder = []
     _stub_caddyauth_rotate(monkeypatch, recorder)
 
@@ -1237,6 +1268,8 @@ def test_set_admin_password_calls_rotate_with_given_password(fleet_home, monkeyp
 def test_set_admin_password_propagates_caddy_auth_error(fleet_home, monkeypatch, capsys):
     from fleet.core.errors import CaddyAuthError
 
+    _write_minimal_registry(fleet_home)
+
     def raising_rotate(username, password, *, runner=None):
         raise CaddyAuthError("caddy validate failed")
 
@@ -1249,6 +1282,7 @@ def test_set_admin_password_propagates_caddy_auth_error(fleet_home, monkeypatch,
 
 
 def test_rotate_admin_password_generates_and_prints_password_once(fleet_home, monkeypatch, capsys):
+    _write_minimal_registry(fleet_home)
     recorder = []
     _stub_caddyauth_rotate(monkeypatch, recorder)
 
@@ -1267,6 +1301,7 @@ def test_rotate_admin_password_generates_and_prints_password_once(fleet_home, mo
 
 
 def test_rotate_admin_password_generates_different_password_each_call(fleet_home, monkeypatch):
+    _write_minimal_registry(fleet_home)
     recorder = []
     _stub_caddyauth_rotate(monkeypatch, recorder)
 
@@ -1278,6 +1313,8 @@ def test_rotate_admin_password_generates_different_password_each_call(fleet_home
 
 def test_rotate_admin_password_propagates_caddy_auth_error(fleet_home, monkeypatch, capsys):
     from fleet.core.errors import CaddyAuthError
+
+    _write_minimal_registry(fleet_home)
 
     def raising_rotate(username, password, *, runner=None):
         raise CaddyAuthError("caddy reload failed")

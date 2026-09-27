@@ -200,6 +200,69 @@ def test_sync_with_no_instances_does_not_touch_caddy(setup, tmp_path):
     assert fake.calls == []
 
 
+def test_sync_authelia_mode_writes_users_yml_and_forward_auth_snippets(tmp_path):
+    from fleet.core import authelia
+
+    paths = instances_mod.FleetPaths.from_home(tmp_path / "fleet-home")
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    users:
+      - name: fleet
+        password: fleet
+""",
+        encoding="utf-8",
+    )
+    host_config = tmp_path / "fleet-home" / "host.yml"
+    host_config.write_text("auth_mode: authelia\n", encoding="utf-8")
+    registry = Registry.load(paths.registry, host_config_path=host_config)
+    authelia.set_admin_password("admin", "adminpass", path=paths.authelia_admin)
+    _make_instance(paths, "demo--main")
+    snippet_dir = tmp_path / "instances"
+    caddyfile_path = tmp_path / "Caddyfile"
+    fake = FakeRunner(
+        scripted={
+            f"caddy validate --config {caddyfile_path} --adapter caddyfile": RunResult(
+                returncode=0, lines=[]
+            ),
+            f"caddy reload --config {caddyfile_path}": RunResult(returncode=0, lines=[]),
+        }
+    )
+
+    result = instances_mod.sync_instance_auth(
+        paths, registry, snippet_dir=snippet_dir, caddyfile_path=caddyfile_path, runner=fake
+    )
+
+    assert result.written == ["demo--main"]
+    content = (snippet_dir / "demo--main.conf").read_text(encoding="utf-8")
+    assert "forward_auth" in content
+    users_data = authelia._load_existing_hashes(paths.authelia_users)
+    assert "fleet" in users_data
+    assert "admin" in users_data
+
+
+def test_sync_authelia_mode_fails_loudly_with_no_admin_account(tmp_path):
+    paths = instances_mod.FleetPaths.from_home(tmp_path / "fleet-home")
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        "fleet:\n  domain: fleet.example.test\n\n"
+        "projects:\n  demo:\n    git: git@example.test:org/demo.git\n",
+        encoding="utf-8",
+    )
+    host_config = tmp_path / "fleet-home" / "host.yml"
+    host_config.write_text("auth_mode: authelia\n", encoding="utf-8")
+    registry = Registry.load(paths.registry, host_config_path=host_config)
+
+    with pytest.raises(FleetError, match="set-admin-password"):
+        instances_mod.sync_instance_auth(paths, registry)
+
+
 def test_sync_does_not_reload_when_validate_fails(setup, tmp_path):
     paths, registry = setup
     _make_instance(paths, "demo--main")
