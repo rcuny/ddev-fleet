@@ -261,6 +261,19 @@ def write_instance_auth_snippet(
 DEFAULT_AUTHELIA_ADDR = "127.0.0.1:9091"
 
 
+def _groups_regex(project: str) -> str:
+    """Compose the `header_regexp` pattern that matches `project` (or
+    `admins`) as a WHOLE comma-delimited element of Authelia's
+    `Remote-Groups` header, never a substring. `Remote-Groups` arrives with
+    no space around commas (e.g. `demo,fern`), but the pattern still
+    tolerates optional whitespace around each element defensively.
+    `project` is `re.escape`d so a project name containing regex
+    metacharacters (`.`, `-`, etc.) matches itself literally, never as a
+    pattern fragment — e.g. project `my.proj-1` must not also match
+    `myxproj-1` (a literal `.` would otherwise mean "any character")."""
+    return rf"(^|,)\s*({re.escape(project)}|admins)\s*(,|$)"
+
+
 def write_instance_authelia_snippet(
     instance_id: str,
     fqdn: str,
@@ -305,7 +318,7 @@ def write_instance_authelia_snippet(
     snippet_path = instance_snippet_path(instance_id, snippet_dir=snippet_dir)
     matcher = instance_matcher_name(instance_id)
     hosts = " ".join((fqdn, *alias_fqdns))
-    group_pattern = rf"(^|,)\s*({re.escape(project)}|admins)\s*(,|$)"
+    group_pattern = _groups_regex(project)
     content = (
         f"@{matcher} host {hosts}\n"
         f"route @{matcher} {{\n"

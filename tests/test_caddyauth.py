@@ -1,4 +1,5 @@
 import os
+import re
 import shutil
 import subprocess
 
@@ -10,18 +11,13 @@ from fleet.core.runner import RunResult
 from tests.conftest import FakeRunner
 
 # Optional real-`caddy` validation of the rendered snippets — skipped when no
-# `caddy` binary is reachable (CI/dev boxes without it). Looks on PATH first,
-# then the local e2e scratch dir a prior session verified against
-# (`.claude/user/tmp/authelia-e2e/caddy`, v2.11.4) — see findings.md in that
-# directory for the syntax this pins.
-_CADDY_BIN = shutil.which("caddy") or next(
-    (
-        p
-        for p in ("/var/www/html/.claude/user/tmp/authelia-e2e/caddy",)
-        if os.path.isfile(p) and os.access(p, os.X_OK)
-    ),
-    None,
-)
+# `caddy` binary is reachable. Looks on PATH first (`shutil.which`), then the
+# env var `FLEET_TEST_CADDY_BIN` (an explicit local path to a `caddy` binary,
+# e.g. a scratch download outside this repo — never hardcode a path here,
+# this is the public product repo). Neither present -> skip.
+_CADDY_BIN = shutil.which("caddy") or os.environ.get("FLEET_TEST_CADDY_BIN") or None
+if _CADDY_BIN is not None and not (os.path.isfile(_CADDY_BIN) and os.access(_CADDY_BIN, os.X_OK)):
+    _CADDY_BIN = None
 
 
 def _caddy_validate(caddyfile_path):
@@ -450,6 +446,34 @@ def test_write_instance_authelia_snippet_requires_project_or_admins_group(tmp_pa
     assert "fern" in content
     assert "admins" in content
     assert "403" in content
+
+
+def test_groups_regex_matches_whole_element_only_for_project_fern():
+    """The named risk this snippet exists to close: a substring match would
+    let `fern-old` (or `xfern`) satisfy a matcher meant only for `fern`, and
+    `Remote-Groups` is a comma-joined list with NO surrounding space
+    (`demo,fern`) — the pattern must treat each comma-delimited element as
+    a whole token, anchored at start/end or a comma on both sides."""
+    pattern = re.compile(caddyauth._groups_regex("fern"))
+
+    for value in ("fern", "demo,fern", "fern,demo", "admins", "demo,admins"):
+        assert pattern.search(value), f"expected a match for {value!r}"
+
+    for value in ("fern-old", "xfern", "demo,fern-old", "adminsx", ""):
+        assert not pattern.search(value), f"expected NO match for {value!r}"
+
+
+def test_groups_regex_escapes_project_name_metacharacters():
+    """A project name containing regex metacharacters (`.`, `-`) must match
+    itself literally — an unescaped `.` would otherwise mean "any
+    character" and let `myxproj-1` satisfy a matcher meant only for
+    `my.proj-1`."""
+    pattern = re.compile(caddyauth._groups_regex("my.proj-1"))
+
+    assert pattern.search("my.proj-1")
+    assert pattern.search("demo,my.proj-1")
+    assert not pattern.search("myxproj-1")
+    assert not pattern.search("my.proj-1x")
 
 
 def test_write_instance_authelia_snippet_scopes_host_matcher_and_aliases(tmp_path):
