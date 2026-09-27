@@ -17,6 +17,7 @@ from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, ddev, fleetconfig, ttycmds
 from fleet.core import instances as instances_mod
 from fleet.core import reboot as reboot_mod
+from fleet.core import registry as registry_mod
 from fleet.core import shell as shell_mod
 from fleet.core import tmux as tmux_mod
 from fleet.core.errors import FleetError
@@ -420,10 +421,7 @@ def _reject_auth_password_in_authelia_mode(registry, auth_password: str | None) 
     is per-project `users:` groups), so accepting the flag would silently do
     nothing. `None` (the flag wasn't passed at all) is always fine."""
     if auth_password is not None and registry.auth_mode == "authelia":
-        raise FleetError(
-            "auth passwords are managed in fleet.yml's users: (Authelia mode) — "
-            "remove --auth-password"
-        )
+        raise FleetError("auth passwords are managed in fleet.yml users: (Authelia mode)")
 
 
 def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
@@ -551,6 +549,7 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
     mid-batch (same reasoning as multi_deploy())."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     registry = instances_mod.load_registry(paths)
+    _reject_auth_password_in_authelia_mode(registry, args.auth_password)
     target_ids = _resolve_bulk_targets(paths, registry, args)
 
     if not target_ids:
@@ -558,7 +557,6 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
         return 0
 
     if len(args.instance_id) == 1:
-        _reject_auth_password_in_authelia_mode(registry, args.auth_password)
         url = instances_mod.redeploy(
             paths,
             registry,
@@ -584,8 +582,6 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
         )
         if answer.strip() != str(len(target_ids)):
             raise FleetError("confirmation did not match; aborted, nothing redeployed")
-
-    _reject_auth_password_in_authelia_mode(registry, args.auth_password)
 
     # --template/--auth-password (when given) apply to every target in the
     # selection — a bound closure over `args`, matching how ui_deploy's
@@ -859,10 +855,17 @@ def _cmd_set_admin_password(
     Authelia mode: hash it into admin.yml and re-render users.yml — no
     Caddy validate/reload needed, since Authelia's file backend
     (`watch: true`) hot-reloads users.yml on its own, so nobody is logged
-    out and no restart happens."""
+    out and no restart happens.
+
+    This is a break-glass command — it must keep working in BASIC mode even
+    when `fleet.yml` is missing or invalid, so it reads ONLY `host.yml`'s
+    `auth_mode` (`registry_mod.load_host_auth_mode`) up front and loads the
+    full `Registry` (which requires a valid `fleet.yml`) only inside the
+    Authelia branch, where `render_users` actually needs it."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = instances_mod.load_registry(paths)
-    if registry.auth_mode == "authelia":
+    auth_mode = registry_mod.load_host_auth_mode(paths.host_config)
+    if auth_mode == "authelia":
+        registry = instances_mod.load_registry(paths)
         authelia_mod.set_admin_password(
             caddyauth.DEFAULT_ADMIN_USERNAME, args.password, path=paths.authelia_admin
         )
@@ -880,11 +883,13 @@ def _cmd_rotate_admin_password(
 ) -> None:
     """Generate a strong random dashboard admin password, apply it (mode-
     aware, see `_cmd_set_admin_password`), and print it exactly once — it
-    is never stored in the clear anywhere."""
+    is never stored in the clear anywhere. Same break-glass basic-mode
+    guarantee as `_cmd_set_admin_password` — see its docstring."""
     password = _stdlib_secrets.token_urlsafe(18)
     paths = instances_mod.FleetPaths.from_home(fleet_home)
-    registry = instances_mod.load_registry(paths)
-    if registry.auth_mode == "authelia":
+    auth_mode = registry_mod.load_host_auth_mode(paths.host_config)
+    if auth_mode == "authelia":
+        registry = instances_mod.load_registry(paths)
         authelia_mod.set_admin_password(
             caddyauth.DEFAULT_ADMIN_USERNAME, password, path=paths.authelia_admin
         )

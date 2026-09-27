@@ -128,6 +128,19 @@ def _load_host_auth_mode(host_config_path: Path) -> str:
     return str(value)
 
 
+def load_host_auth_mode(host_config_path: Path) -> str:
+    """Public wrapper around `_load_host_auth_mode` — reads ONLY `host.yml`'s
+    `auth_mode`, without loading/validating `fleet.yml` at all. Lets
+    break-glass commands that don't otherwise need the registry (`fleet
+    set-admin-password`/`rotate-admin-password` in basic mode) determine
+    the auth mode even when `fleet.yml` is missing or invalid — see
+    `cli.py`'s mode-aware admin-password commands, which only call
+    `load_registry()` (and thus require a valid `fleet.yml`) inside the
+    Authelia branch, where `render_users` actually needs the registry's
+    users."""
+    return _load_host_auth_mode(host_config_path)
+
+
 class Registry:
     def __init__(
         self,

@@ -1065,6 +1065,43 @@ def test_auth_mode_defaults_to_basic_when_host_yml_key_is_blank(fleet_home, samp
     assert registry.auth_mode == "basic"
 
 
+# --- load_host_auth_mode() — reads ONLY host.yml, no fleet.yml required ---
+
+
+def test_load_host_auth_mode_defaults_to_basic_with_no_host_config(fleet_home):
+    from fleet.core.registry import load_host_auth_mode
+
+    assert load_host_auth_mode(fleet_home / "host.yml") == "basic"
+
+
+def test_load_host_auth_mode_reads_authelia_from_host_yml(fleet_home):
+    from fleet.core.registry import load_host_auth_mode
+
+    host_config_path = fleet_home / "host.yml"
+    host_config_path.write_text("auth_mode: authelia\n", encoding="utf-8")
+    assert load_host_auth_mode(host_config_path) == "authelia"
+
+
+def test_load_host_auth_mode_rejects_unknown_value(fleet_home):
+    from fleet.core.registry import load_host_auth_mode
+
+    host_config_path = fleet_home / "host.yml"
+    host_config_path.write_text("auth_mode: ldap\n", encoding="utf-8")
+    with pytest.raises(RegistryError, match="auth_mode"):
+        load_host_auth_mode(host_config_path)
+
+
+def test_load_host_auth_mode_never_touches_fleet_yml(fleet_home):
+    """No fleet.yml at all — load_host_auth_mode must not need or read
+    one (the whole point: it backs break-glass admin-password commands)."""
+    from fleet.core.registry import load_host_auth_mode
+
+    assert not (fleet_home / "fleet.yml").exists()
+    host_config_path = fleet_home / "host.yml"
+    host_config_path.write_text("auth_mode: authelia\n", encoding="utf-8")
+    assert load_host_auth_mode(host_config_path) == "authelia"
+
+
 # --- fleet.yml projects.<project>.users (Authelia mode) ---
 
 _USERS_REGISTRY = """\
