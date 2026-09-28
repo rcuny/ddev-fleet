@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -93,7 +93,14 @@ modes — it isn't a wildcard-eligible hostname.
 
 Switching an existing server's mode: `ansible/caddy-only.yml` (a scoped
 playbook, mirroring `ddev-only.yml`) reapplies just the `caddy` role — see
-`docs/installation.md` "Switching TLS mode on an existing server".
+`docs/installation.md` "Switching TLS mode on an existing server", which
+also covers the OVH token gotchas learned rolling this out to two live
+servers: tokens can be **IP-restricted** (one token per server, or list
+every server's IP on a shared token), the required rights are
+`GET`/`POST`/`PUT`/`DELETE` on `/domain/zone/<zone>/*`, test a token with
+a throwaway TXT record before pointing a live domain at it, and any
+hand-edit of `/etc/caddy/ovh.env` needs its own `systemctl restart caddy`
+(a `reload` does not re-read the `EnvironmentFile=`).
 
 **`auth.<domain>` (Authelia mode only).** When `host.yml`'s `auth_mode` is
 `authelia` (`docs/README-authelia.md`), Caddy also serves Authelia's login

@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -47,15 +47,34 @@ prompt:
 2. Grant these rights, scoped to your registered zone (e.g. `example.com`):
    - `GET /domain/zone/<zone>/*`
    - `POST /domain/zone/<zone>/*`
+   - `PUT /domain/zone/<zone>/*`
    - `DELETE /domain/zone/<zone>/*`
-3. Optionally restrict the token to this server's IP address.
-4. Note the **Application Key**, **Application Secret**, and **Consumer
+3. **If you restrict the token to an IP address, it is a hard restriction,
+   not a hint**: a token scoped to server A's IP fails on server B with
+   `403 "This call has not been granted"` on every DNS-01 call, even
+   though the token itself is otherwise valid. Running more than one
+   fleet host with `ovh_dns`? Either create **one token per server**, or
+   list **all** their IPs on a single token — there is no way to widen an
+   existing single-IP token after the fact from the UI, only recreate it.
+4. **Test the token before switching a live domain to `ovh_dns`.** A
+   throwaway DNS-01 exchange (or a manual signed `POST` + `DELETE` of a
+   temporary `_acme-challenge` TXT record via the OVH API) confirms the
+   token/rights/IP restriction all actually work. Don't find this out by
+   switching the domain and watching the wildcard cert fail — the old
+   `on_demand` certs and DNS records are gone the moment `caddy-only.yml`
+   applies, so a bad token means every instance is unreachable until you
+   roll back.
+5. Note the **Application Key**, **Application Secret**, and **Consumer
    Key** it gives you — the installer prompts for these (application
    secret and consumer key are read silently, never echoed) and writes
    them to `/etc/caddy/ovh.env` (`0600 root:root`, then re-owned
    `0640 root:caddy` once the `caddy` role has run). **Ansible never
    writes or reads back this file's contents** — only checks that all
    four required keys are present.
+6. **After hand-editing `/etc/caddy/ovh.env`** (e.g. swapping in a
+   corrected token), `systemctl restart caddy` — a `reload` does **not**
+   re-read the `EnvironmentFile=` a systemd drop-in supplies, so a plain
+   reload keeps running with the old (or missing) credentials.
 
 ## 2. Choosing an auth mode
 
@@ -251,8 +270,14 @@ No need to re-run the full installer. From the server:
 2. If switching **to** `ovh_dns`, create `/etc/caddy/ovh.env` (`0600
    root:root`) with `OVH_ENDPOINT`, `OVH_APPLICATION_KEY`,
    `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` — see "Choosing a TLS
-   mode" above for the token-creation steps. Skip this if switching back
-   to `on_demand`.
+   mode" above for the token-creation steps, **including testing the
+   token first** — a token that works fine on one OVH-scoped server can
+   be IP-restricted to a different one and fail with `403 "This call has
+   not been granted"` only once you're mid-switch. Skip this step if
+   switching back to `on_demand`. If you hand-edit an already-deployed
+   `/etc/caddy/ovh.env` outside of step 3 below (e.g. swapping in a
+   corrected token), `systemctl restart caddy` yourself — nothing else
+   will pick it up.
 3. Re-apply just the `caddy` role:
    ```bash
    cd /opt/ddev-fleet/ansible

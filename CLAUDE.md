@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -84,7 +84,7 @@ don't assume they're the same). From `/opt/ddev-fleet` on the server, or
 this repo's checkout locally:
 
 ```bash
-.venv/bin/pytest -q          # 951 tests as of 2026-09-23
+.venv/bin/pytest -q          # 1009 passed, 4 skipped as of 2026-09-28
 .venv/bin/ruff check .
 .venv/bin/black --check .
 ```
@@ -210,6 +210,10 @@ it. Neither role has a `core/` Python module of its own.
   admin password, deploy keys, Claude token mint, live-verification items).
 - `docs/operations.md` — the ongoing code-update procedure, rollback, and
   admin-password rotation.
+- `docs/runbook-server-rollout.md` — the routine rollout precondition
+  (`/opt/ddev-fleet` must be a clean checkout) and the domain-change
+  procedure for existing instances (`refresh-instance-config` per
+  instance, and its `settings.local.php` gap/workaround).
 - `docs/README-typesense.md` — the Typesense browser-search exposure design
   in full (topology, keys, env vars, reindexing, reachability caveat).
 - `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing
