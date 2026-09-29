@@ -131,6 +131,68 @@ mode") is already done — this section is specifically about the
    their own hostname string and are easy to miss in a spot check of only
    the primary instance URLs.
 
+## 3. Secrets on an additional server (replicate from an existing one)
+
+A freshly provisioned server can pass `bootstrap.sh`, start `fleet.service`,
+and serve its dashboard — and still **fail every instance deploy** if it
+lacks the secrets an already-running fleet server has. This bit a real
+rollout: `ddev4`/`ddev3` provisioned cleanly, but the first
+`fleet deploy fern ...` on the new host failed with
+`unresolved token(s): [[jira-claude-token]]` purely because secrets had
+never been copied over — nothing else was wrong.
+
+There are two independent kinds of secret, and they fail differently:
+
+- **Per-project secrets** — `/srv/fleet/secrets/<project>.env`
+  (`KEY=VALUE`, `0600`, owned by `fleet`; see this repo's
+  `CLAUDE.md` "Per-project secrets model"). A project's asset `.env` (or
+  any other asset file) references these as `[[token]]`, where the token
+  name is the `KEY` lower-cased with underscores turned to dashes (e.g.
+  `JIRA_CLAUDE_TOKEN` → `[[jira-claude-token]]`, per
+  `core/secrets.py:secret_tokens`). **A missing required project secret is
+  a FATAL deploy error** — `core/tokens.py` raises
+  `unresolved token(s): [[…]]` and the deploy aborts. This is by design,
+  not a bug: a token substitution pass that silently left a placeholder in
+  a live config file would be worse.
+- **Fleet-wide secret** — `CLAUDE_CODE_OAUTH_TOKEN` in `/srv/fleet/.secrets`.
+  Its absence is only a **non-fatal WARNING**: the deploy proceeds, it just
+  doesn't inject a Claude token into the instance's `.ddev/config.fleet.yaml`.
+
+Don't confuse the two when triage-reading a failed deploy's log: an
+`unresolved token(s)` failure almost always means a missing **per-project**
+secret, not the fleet-wide Claude token (see also `docs/installation.md`
+§6's clarification on when you actually need to mint a new Claude token).
+
+**Replicate everything from an existing server in one shot.** Secret
+values never touch the terminal — the tar stream is piped server to
+server:
+
+```bash
+ssh <existing-host> 'sudo tar czf - -C /srv/fleet secrets .secrets' \
+  | ssh <new-host> 'sudo tar xzf - -C /srv/fleet \
+      && sudo chown -R fleet:fleet /srv/fleet/secrets /srv/fleet/.secrets \
+      && sudo chmod 600 /srv/fleet/.secrets'
+```
+
+Or set secrets individually on the new host:
+
+```bash
+fleet secret set <project> KEY VALUE   # per-project, writes secrets/<project>.env
+fleet set-claude-token <token>         # fleet-wide, writes .secrets
+```
+
+For a **first deploy** on the new server, nothing else is needed once
+secrets are in place — `deploy()` reads them fresh. If you're instead
+fixing secrets for instances that are **already deployed and running**,
+re-inject the new values with:
+
+```bash
+fleet refresh-instance-config <instance-id> [--restart]
+```
+
+(see `docs/cli.md` for its full flag reference — the same command used in
+§2 above for a domain change).
+
 ## See also
 
 - `docs/operations.md` — the plain code/config update loop, rollback, and
@@ -143,3 +205,8 @@ mode") is already done — this section is specifically about the
 - `docs/cli.md` — `fleet refresh-instance-config`'s full flag reference
   and the `settings.local.php` limitation noted in step 3 above.
 - `docs/networking.md` — alias hostnames, TLS certificate modes.
+- `docs/installation.md` — §6, minting vs. copying the fleet-wide Claude
+  token, and the deploy-blocking-token clarification referenced in §3 above.
+- This repo's `CLAUDE.md` — "Per-project secrets model" section, the
+  canonical description of the `[[token]]` substitution mechanism used in
+  §3 above.

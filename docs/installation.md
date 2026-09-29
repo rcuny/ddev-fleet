@@ -236,6 +236,21 @@ your real registry + assets instead. `fleet init` never overwrites an
 existing `fleet.yml` or re-clones an existing `config/` checkout — safe
 to re-run.
 
+**Minting vs. copying the Claude token.** `claude setup-token` (the
+interactive OAuth flow, run as the `fleet` user) is only for *minting* a
+brand-new `CLAUDE_CODE_OAUTH_TOKEN` — you need it exactly once, the first
+time no fleet server anywhere has a valid token yet. If you're adding
+another server to a fleet that already has one, do **not** re-mint —
+copy the existing token instead: `fleet set-claude-token <existing-token>`,
+or replicate `/srv/fleet/.secrets` wholesale (see
+`docs/runbook-server-rollout.md` §3). This is also the more common
+source of deploy-blocking token errors than people expect: a
+`fleet deploy` failing with `unresolved token(s): [[…]]` is almost always
+a missing **per-project** secret (`/srv/fleet/secrets/<project>.env`), not
+this fleet-wide Claude token — the Claude token's absence only produces a
+non-fatal warning. See `docs/runbook-server-rollout.md` §3 for the full
+picture of secrets on a newly provisioned server.
+
 ### Multi-server: one config repo, per-host domain
 
 The private-config-repo pattern above extends naturally to running
