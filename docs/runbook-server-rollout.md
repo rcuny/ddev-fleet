@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 Type: documentation
 ---
 
@@ -14,6 +14,16 @@ server side). **§2** is the rarer, higher-risk procedure for moving an
 existing server (and its already-deployed instances) to a new domain
 and/or a new TLS/auth mode — written up here because it has real gotchas
 that a plain code update never hits.
+
+> **SSH-lockout warning.** Neither procedure below runs the full
+> `bootstrap.sh` / `ansible-playbook site.yml` (§1 is a plain `git pull` +
+> restart; §2 uses scoped playbooks) — but if a rollout ever *does* require
+> re-running the full installer on a live host, be aware that a
+> detached/root run with no controlling `sudo` session (`$SUDO_USER`
+> unset) can lock your SSH login user out via `security_hardening`'s
+> `AllowUsers`. Run it via `sudo` from your login shell, or set
+> `FLEET_SSH_ALLOW_USERS="debian root"` explicitly — see
+> `docs/installation.md` §4.
 
 ## 1. Routine rollout (code + config)
 

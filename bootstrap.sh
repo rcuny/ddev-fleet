@@ -358,6 +358,107 @@ case "${FLEET_SECURITY_HARDENING}" in
   0|1) ;;
   *) FLEET_SECURITY_HARDENING="$(_prompt_yes_default 'Enable security hardening (auto-updates, SSH lockdown, fail2ban, Docker robustness)? [Y/n] ')" ;;
 esac
+
+# fleet_ssh_allow_users (security_hardening's sshd `AllowUsers`) — THE
+# LOCKOUT FOOTGUN: that role's own default is
+# `[ansible_env.SUDO_USER | default(ansible_user_id, true)] | select | list`
+# (ansible/roles/security_hardening/defaults/main.yml). Run this installer
+# DETACHED as root with no controlling sudo session (e.g. wrapped in
+# `systemd-run`, or any invocation where `$SUDO_USER` is unset) and that
+# default resolves to `root`, so sshd gets `AllowUsers root` and the real
+# login user (e.g. `debian`) is locked out of SSH — this actually happened
+# and bricked SSH access to a server. Computed here (not left to the
+# Ansible default) regardless of whether FLEET_SECURITY_HARDENING is on
+# THIS run: persisting a safe value now, while we can still see who is
+# really logged in, means a LATER run that enables hardening (possibly
+# itself detached, possibly with no SUDO_USER) reuses this value instead of
+# recomputing under exactly the conditions that caused the original bug.
+_validate_ssh_username() {
+  # $1=value — mirrors _validate_domain's minimal-but-real-enough check;
+  # values land in a double-quoted YAML list item in local-vars.yml.
+  case "$1" in
+    *'"'*|*[![:alnum:]._-]*)
+      echo "ERROR: FLEET_SSH_ALLOW_USERS entry '$1' is not a valid username" >&2
+      echo "       (only letters, digits, '.', '_', '-' allowed; no quotes" >&2
+      echo "       or whitespace)." >&2
+      exit 1
+      ;;
+  esac
+}
+
+_compute_safe_ssh_allow_users() {
+  # Prints a de-duplicated, order-preserving list (one per line): the
+  # invoking user (if determinable) + every UID>=1000 account with a
+  # NON-EMPTY ~/.ssh/authorized_keys + root — always, unconditionally
+  # appended last. Never empty. This guarantees whoever can already SSH in
+  # today (they must have an authorized_keys to do so) stays in
+  # AllowUsers even when SUDO_USER is unset.
+  local invoking_user="" seen=" " candidate uid home_dir keys_file
+  invoking_user="${SUDO_USER:-}"
+  if [ -z "${invoking_user}" ]; then
+    invoking_user="$(logname 2>/dev/null)" || invoking_user=""
+  fi
+  if [ -n "${invoking_user}" ]; then
+    printf '%s\n' "${invoking_user}"
+    seen="${seen}${invoking_user} "
+  fi
+
+  while IFS=: read -r candidate _pw uid _gid _gecos home_dir _shell; do
+    [ "${uid}" -ge 1000 ] 2>/dev/null || continue
+    case "${seen}" in *" ${candidate} "*) continue ;; esac
+    keys_file="${home_dir}/.ssh/authorized_keys"
+    if [ -s "${keys_file}" ]; then
+      printf '%s\n' "${candidate}"
+      seen="${seen}${candidate} "
+    fi
+  done < /etc/passwd
+
+  case "${seen}" in
+    *" root "*) ;;
+    *) printf '%s\n' "root" ;;
+  esac
+}
+
+_yaml_list_persisted() {
+  # $1=yaml key -> prints each already-persisted list item (one per line,
+  # unquoted) for a `key:` / `  - "item"` block written by
+  # _persist_list_if_absent (below), or nothing if the key isn't present.
+  awk -v key="$1" '
+    $0 == key ":" { found=1; next }
+    found && /^[[:space:]]*-[[:space:]]/ {
+      line=$0
+      sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+      gsub(/^"|"$/, "", line)
+      print line
+      next
+    }
+    found { exit }
+  ' "${FLEET_LOCAL_VARS}" 2>/dev/null
+}
+
+FLEET_SSH_ALLOW_USERS="${FLEET_SSH_ALLOW_USERS:-}"
+if [ -n "${FLEET_SSH_ALLOW_USERS}" ]; then
+  # Accept space- or comma-separated.
+  _fleet_ssh_allow_users_list="$(printf '%s' "${FLEET_SSH_ALLOW_USERS}" | tr ',' ' ')"
+  for _u in ${_fleet_ssh_allow_users_list}; do
+    _validate_ssh_username "${_u}"
+  done
+elif grep -q '^fleet_ssh_allow_users:' "${FLEET_LOCAL_VARS}" 2>/dev/null; then
+  _fleet_ssh_allow_users_list="$(_yaml_list_persisted fleet_ssh_allow_users | tr '\n' ' ')"
+  echo "==> fleet_ssh_allow_users already set in ${FLEET_LOCAL_VARS} — using existing value, not re-prompting"
+else
+  if [ -z "${SUDO_USER:-}" ]; then
+    echo "WARNING: SUDO_USER is empty (a detached/root run — e.g. systemd-run" >&2
+    echo "         or a cron job with no controlling sudo session). Falling" >&2
+    echo "         back to a scan of every account with a non-empty" >&2
+    echo "         ~/.ssh/authorized_keys to keep your SSH login user in" >&2
+    echo "         fleet_ssh_allow_users. Set FLEET_SSH_ALLOW_USERS explicitly" >&2
+    echo "         to override, e.g. FLEET_SSH_ALLOW_USERS=\"debian root\"." >&2
+  fi
+  _fleet_ssh_allow_users_list="$(_compute_safe_ssh_allow_users | tr '\n' ' ')"
+fi
+echo "==> fleet_ssh_allow_users will be: ${_fleet_ssh_allow_users_list}"
+
 # msmtp relay (reboot-required email channel) — asked only when security
 # hardening is enabled; entirely optional even then (blank host disables
 # just this channel, never blocks the install). Interfaces: env overrides
@@ -487,12 +588,35 @@ _persist_if_absent() {
   fi
 }
 
+_persist_list_if_absent() {
+  # $1=yaml key $2...=list items (already yaml-safe, unquoted) -> writes
+  #   key:
+  #     - "item1"
+  #     - "item2"
+  # into FLEET_LOCAL_VARS unless the key is already present. List-valued
+  # sibling of _persist_if_absent, same "never overwrite" contract.
+  local _key="$1"
+  shift
+  if grep -q "^${_key}:" "${FLEET_LOCAL_VARS}" 2>/dev/null; then
+    echo "==> ${_key} already set in ${FLEET_LOCAL_VARS} — using existing value, not re-prompting"
+    return
+  fi
+  {
+    echo "${_key}:"
+    for _item in "$@"; do
+      echo "  - \"${_item}\""
+    done
+  } >> "${FLEET_LOCAL_VARS}"
+}
+
 _persist_if_absent fleet_domain "\"${FLEET_DOMAIN}\""
 _persist_if_absent acme_email "\"${FLEET_ACME_EMAIL}\""
 _persist_if_absent fleet_tls_mode "\"${FLEET_TLS_MODE}\""
 _persist_if_absent fleet_auth_mode "\"${FLEET_AUTH_MODE}\""
 _persist_if_absent fleet_network_hardening_enabled "$([ "${FLEET_NETWORK_HARDENING}" = "1" ] && echo true || echo false)"
 _persist_if_absent fleet_security_hardening_enabled "$([ "${FLEET_SECURITY_HARDENING}" = "1" ] && echo true || echo false)"
+# shellcheck disable=SC2086  # _fleet_ssh_allow_users_list is an intentionally word-split, space-separated list
+_persist_list_if_absent fleet_ssh_allow_users ${_fleet_ssh_allow_users_list}
 
 if [ -n "${FLEET_MSMTP_HOST}" ]; then
   _persist_if_absent fleet_msmtp_host "\"${FLEET_MSMTP_HOST}\""

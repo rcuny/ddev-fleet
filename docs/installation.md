@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-09-29
 Type: documentation
 ---
 
@@ -129,6 +129,29 @@ The installer will:
    ```bash
    sudo env FLEET_DOMAIN=fleet.example.com FLEET_ACME_EMAIL=you@example.com bash bootstrap.sh
    ```
+
+   Also configurable: `FLEET_SSH_ALLOW_USERS` — space- or comma-separated
+   usernames for `security_hardening`'s sshd `AllowUsers` (only takes
+   effect when `FLEET_SECURITY_HARDENING` is on). If unset, the installer
+   auto-computes a safe default and persists it — see the warning below.
+
+   > **SSH-lockout warning.** Running the installer **detached as root
+   > with no controlling `sudo` session** (e.g. wrapped in `systemd-run`,
+   > or any invocation where `$SUDO_USER` is unset) can lock your SSH
+   > login user out of the server. `security_hardening`'s `AllowUsers`
+   > normally defaults to whoever invoked `sudo` (`$SUDO_USER`) — with no
+   > `SUDO_USER`, that default falls back to `root`, so sshd ends up with
+   > `AllowUsers root` and the real login account (e.g. `debian`) can no
+   > longer SSH in. This actually happened and bricked SSH access to a
+   > server. `bootstrap.sh` now guards against it (falling back to a scan
+   > of every account with a non-empty `~/.ssh/authorized_keys`, plus
+   > `root`), but the simplest fix is still to **run it via `sudo` from
+   > your actual login shell** (preserves `$SUDO_USER`), or set
+   > `FLEET_SSH_ALLOW_USERS` explicitly:
+   > ```bash
+   > sudo env FLEET_SSH_ALLOW_USERS="debian root" bash bootstrap.sh
+   > ```
+   > See `ansible/roles/security_hardening/defaults/main.yml`.
 4. Install git + Ansible, clone (or pull) the code, install the required
    Ansible Galaxy collections, persist your answers to
    `/etc/ddev-fleet/local-vars.yml`, and run the provisioning playbook
@@ -136,6 +159,16 @@ The installer will:
    systemd unit — enabled but not started yet).
 5. Print the fleet deploy public key, the generated admin password (if
    one was generated), and a "next steps" list.
+6. If `FLEET_NETWORK_HARDENING` is enabled, arm a **UFW dead-man's
+   switch**: once the firewall comes up, you have
+   `fleet_ufw_deadman_grace_minutes` (default 10) to confirm you still
+   have SSH access. From a **second** SSH session (don't close the first
+   one — if it turns out you're locked out, you want it as a fallback):
+   ```bash
+   sudo /usr/local/sbin/fleet-firewall-confirm
+   ```
+   If the grace window elapses with no confirmation, UFW is disabled
+   automatically (fail-open) rather than leaving you locked out.
 
 **Re-running the installer** (e.g. to pick up a new `FLEET_REPO_VERSION`)
 is safe: any key already present in `/etc/ddev-fleet/local-vars.yml` is

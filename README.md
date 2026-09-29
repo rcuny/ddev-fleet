@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-09-29
 Type: documentation
 ---
 
@@ -60,6 +60,14 @@ enables (but does not start) the `fleet.service` systemd unit. From
 there: DNS, adding the deploy key, `fleet init`, and the first deploy are
 covered end to end in **`docs/installation.md`** — start there for a new
 install. For updating an already-live host, see `docs/operations.md`.
+
+**SSH-lockout warning:** if you run `bootstrap.sh` **detached as root with
+no controlling `sudo` session** (e.g. wrapped in `systemd-run`), the
+optional `security_hardening` role's sshd `AllowUsers` can end up locking
+out your real SSH login user. Run it via `sudo` from your login shell
+(the one-liner above already does this correctly), or set
+`FLEET_SSH_ALLOW_USERS="debian root"` explicitly for an unattended run —
+see `docs/installation.md` §4.
 
 ## Network exposure
 
