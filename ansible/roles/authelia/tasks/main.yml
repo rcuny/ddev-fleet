@@ -165,6 +165,40 @@
     group: "{{ authelia_read_group }}"
     mode: "0750"
 
+- name: Mask the authelia package's tmpfiles.d rule that strips the secrets directory's execute bit
+  # The Debian authelia package (verified on v4.39.28) ships
+  # /usr/lib/tmpfiles.d/authelia.conf with `Z /etc/authelia/* 0640 authelia
+  # authelia`. systemd-tmpfiles-setup applies that RECURSIVE Z at every boot,
+  # turning /etc/authelia/secrets (root:<group> 0750, created above) into
+  # authelia:authelia 0640 — no execute bit, so the service can't open its
+  # secret files, refuses to start, and every Authelia-gated URL 502s.
+  # Latent until the first reboot after provisioning: it hit ddev4.fleet.example.com on
+  # its first reboot (2026-10-01, 502 on the dashboard).
+  # A same-basename file in /etc/tmpfiles.d masks the /usr/lib one entirely,
+  # so this installs ONLY the package's harmless `e /etc/authelia` directory
+  # rule. Deliberately NO `z` rules for the secrets dir/files: tmpfiles
+  # refuses them as an "unsafe path transition" (authelia-owned parent ->
+  # root-owned child) and just logs warnings at every boot. The separate
+  # /usr/lib/tmpfiles.d/authelia-config.conf (configuration.yml rules) is
+  # left alone.
+  # No notify/handler: tmpfiles only applies at boot, and this role already
+  # sets the correct perms for the current run.
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/authelia.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ddev-fleet (ansible/roles/authelia) — do not edit by hand.
+      #
+      # Masks the authelia package's /usr/lib/tmpfiles.d/authelia.conf (same
+      # basename in /etc wins). That file's `Z /etc/authelia/* 0640 authelia
+      # authelia` recursively chmods /etc/authelia/secrets to 0640 at every boot,
+      # stripping the directory's execute bit: the service can no longer open its
+      # secret files and refuses to start, so every Authelia-gated URL 502s.
+      # Only the package's harmless directory rule is kept.
+      e /etc/authelia 0755 authelia authelia -
+
 - name: Check whether the Authelia secrets already exist
   ansible.builtin.stat:
     path: /etc/authelia/secrets/session_secret
@@ -204,12 +238,14 @@
     mode: "0750"
 
 - name: Render the Authelia configuration.yml (static — spec §3/D1)
-  # Owner/group match what the package's OWN shipped tmpfiles.d fragments
-  # (verified in the real .deb: `Z /etc/authelia/* 0640 authelia authelia`,
-  # `f /etc/authelia/configuration.yml 0440 authelia authelia`) reassert on
-  # every boot regardless of what we set here — matching them up front
+  # Owner/group match what the package's shipped authelia-config.conf
+  # tmpfiles.d fragment (verified in the real .deb: `f
+  # /etc/authelia/configuration.yml 0440 authelia authelia`) reasserts on
+  # every boot regardless of what we set here — matching it up front
   # keeps Ansible's applied state and systemd-tmpfiles' periodic
   # reassertion from fighting each other / flapping "changed" on reruns.
+  # (The package's recursive `Z /etc/authelia/*` rule is NOT reasserted any
+  # more — the tmpfiles.d mask task above replaces it.)
   # Falls back to root:root when the unit runs as root (no service account
   # to match).
   ansible.builtin.template:

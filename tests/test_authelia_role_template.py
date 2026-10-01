@@ -249,6 +249,44 @@ def test_acl_package_and_setfacl_are_guarded_to_non_root_service_user():
         assert "authelia_service_user != ''" in when_list
 
 
+def test_tmpfiles_mask_keeps_only_the_e_rule_and_precedes_secret_generation():
+    """Reboot regression (ddev4.fleet.example.com, 2026-10-01): the Debian authelia
+    package's /usr/lib/tmpfiles.d/authelia.conf has `Z /etc/authelia/* 0640
+    authelia authelia`, which at every boot turned /etc/authelia/secrets
+    into 0640 (no execute bit) so Authelia couldn't open its secrets and
+    every gated URL 502'd. The role must mask it with a same-basename
+    /etc/tmpfiles.d/authelia.conf containing ONLY the harmless `e` rule —
+    never Z/z rules (z under an authelia-owned parent is refused as an
+    unsafe path transition) — written before the secrets are generated."""
+    tasks = _yaml.load(TASKS_FILE.read_text(encoding="utf-8"))
+
+    mask_idx = next(
+        i
+        for i, t in enumerate(tasks)
+        if t.get("ansible.builtin.copy", {}).get("dest") == "/etc/tmpfiles.d/authelia.conf"
+    )
+    mask_copy = tasks[mask_idx]["ansible.builtin.copy"]
+    assert mask_copy["owner"] == "root"
+    assert mask_copy["group"] == "root"
+    assert mask_copy["mode"] == "0644"
+
+    lines = mask_copy["content"].splitlines()
+    assert "e /etc/authelia 0755 authelia authelia -" in lines
+    assert not [
+        line for line in lines if line.startswith(("Z", "z"))
+    ], "tmpfiles Z/z rules must never be written (recursive chmod / unsafe path transition)"
+    # Only comments and the single `e` rule — nothing else sneaks in.
+    rules = [line for line in lines if line.strip() and not line.startswith("#")]
+    assert rules == ["e /etc/authelia 0755 authelia authelia -"]
+
+    secrets_idx = next(
+        i
+        for i, t in enumerate(tasks)
+        if t.get("ansible.builtin.copy", {}).get("dest") == "/etc/authelia/secrets/{{ item }}"
+    )
+    assert mask_idx < secrets_idx
+
+
 def _find_authelia_bin() -> str | None:
     return os.environ.get("FLEET_TEST_AUTHELIA_BIN") or shutil.which("authelia")
 
