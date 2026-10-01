@@ -39,10 +39,10 @@ session:
       authelia_url: 'https://auth.{{ fleet_domain }}'
 storage:
   local:
-    path: {{ fleet_srv_dir }}/authelia/db.sqlite3
+    path: {{ authelia_state_dir }}/db.sqlite3
 notifier:
   filesystem:
-    filename: {{ fleet_srv_dir }}/authelia/notification.txt
+    filename: {{ authelia_state_dir }}/notification.txt
 access_control:
   default_policy: deny
   rules:

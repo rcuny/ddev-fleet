@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-09-29
 Type: documentation
 ---
 
@@ -47,15 +47,34 @@ prompt:
 2. Grant these rights, scoped to your registered zone (e.g. `example.com`):
    - `GET /domain/zone/<zone>/*`
    - `POST /domain/zone/<zone>/*`
+   - `PUT /domain/zone/<zone>/*`
    - `DELETE /domain/zone/<zone>/*`
-3. Optionally restrict the token to this server's IP address.
-4. Note the **Application Key**, **Application Secret**, and **Consumer
+3. **If you restrict the token to an IP address, it is a hard restriction,
+   not a hint**: a token scoped to server A's IP fails on server B with
+   `403 "This call has not been granted"` on every DNS-01 call, even
+   though the token itself is otherwise valid. Running more than one
+   fleet host with `ovh_dns`? Either create **one token per server**, or
+   list **all** their IPs on a single token — there is no way to widen an
+   existing single-IP token after the fact from the UI, only recreate it.
+4. **Test the token before switching a live domain to `ovh_dns`.** A
+   throwaway DNS-01 exchange (or a manual signed `POST` + `DELETE` of a
+   temporary `_acme-challenge` TXT record via the OVH API) confirms the
+   token/rights/IP restriction all actually work. Don't find this out by
+   switching the domain and watching the wildcard cert fail — the old
+   `on_demand` certs and DNS records are gone the moment `caddy-only.yml`
+   applies, so a bad token means every instance is unreachable until you
+   roll back.
+5. Note the **Application Key**, **Application Secret**, and **Consumer
    Key** it gives you — the installer prompts for these (application
    secret and consumer key are read silently, never echoed) and writes
    them to `/etc/caddy/ovh.env` (`0600 root:root`, then re-owned
    `0640 root:caddy` once the `caddy` role has run). **Ansible never
    writes or reads back this file's contents** — only checks that all
    four required keys are present.
+6. **After hand-editing `/etc/caddy/ovh.env`** (e.g. swapping in a
+   corrected token), `systemctl restart caddy` — a `reload` does **not**
+   re-read the `EnvironmentFile=` a systemd drop-in supplies, so a plain
+   reload keeps running with the old (or missing) credentials.
 
 ## 2. Choosing an auth mode
 
@@ -110,6 +129,29 @@ The installer will:
    ```bash
    sudo env FLEET_DOMAIN=fleet.example.com FLEET_ACME_EMAIL=you@example.com bash bootstrap.sh
    ```
+
+   Also configurable: `FLEET_SSH_ALLOW_USERS` — space- or comma-separated
+   usernames for `security_hardening`'s sshd `AllowUsers` (only takes
+   effect when `FLEET_SECURITY_HARDENING` is on). If unset, the installer
+   auto-computes a safe default and persists it — see the warning below.
+
+   > **SSH-lockout warning.** Running the installer **detached as root
+   > with no controlling `sudo` session** (e.g. wrapped in `systemd-run`,
+   > or any invocation where `$SUDO_USER` is unset) can lock your SSH
+   > login user out of the server. `security_hardening`'s `AllowUsers`
+   > normally defaults to whoever invoked `sudo` (`$SUDO_USER`) — with no
+   > `SUDO_USER`, that default falls back to `root`, so sshd ends up with
+   > `AllowUsers root` and the real login account (e.g. `debian`) can no
+   > longer SSH in. This actually happened and bricked SSH access to a
+   > server. `bootstrap.sh` now guards against it (falling back to a scan
+   > of every account with a non-empty `~/.ssh/authorized_keys`, plus
+   > `root`), but the simplest fix is still to **run it via `sudo` from
+   > your actual login shell** (preserves `$SUDO_USER`), or set
+   > `FLEET_SSH_ALLOW_USERS` explicitly:
+   > ```bash
+   > sudo env FLEET_SSH_ALLOW_USERS="debian root" bash bootstrap.sh
+   > ```
+   > See `ansible/roles/security_hardening/defaults/main.yml`.
 4. Install git + Ansible, clone (or pull) the code, install the required
    Ansible Galaxy collections, persist your answers to
    `/etc/ddev-fleet/local-vars.yml`, and run the provisioning playbook
@@ -117,6 +159,16 @@ The installer will:
    systemd unit — enabled but not started yet).
 5. Print the fleet deploy public key, the generated admin password (if
    one was generated), and a "next steps" list.
+6. If `FLEET_NETWORK_HARDENING` is enabled, arm a **UFW dead-man's
+   switch**: once the firewall comes up, you have
+   `fleet_ufw_deadman_grace_minutes` (default 10) to confirm you still
+   have SSH access. From a **second** SSH session (don't close the first
+   one — if it turns out you're locked out, you want it as a fallback):
+   ```bash
+   sudo /usr/local/sbin/fleet-firewall-confirm
+   ```
+   If the grace window elapses with no confirmation, UFW is disabled
+   automatically (fail-open) rather than leaving you locked out.
 
 **Re-running the installer** (e.g. to pick up a new `FLEET_REPO_VERSION`)
 is safe: any key already present in `/etc/ddev-fleet/local-vars.yml` is
@@ -183,6 +235,21 @@ your real registry plus per-project assets), set
 your real registry + assets instead. `fleet init` never overwrites an
 existing `fleet.yml` or re-clones an existing `config/` checkout — safe
 to re-run.
+
+**Minting vs. copying the Claude token.** `claude setup-token` (the
+interactive OAuth flow, run as the `fleet` user) is only for *minting* a
+brand-new `CLAUDE_CODE_OAUTH_TOKEN` — you need it exactly once, the first
+time no fleet server anywhere has a valid token yet. If you're adding
+another server to a fleet that already has one, do **not** re-mint —
+copy the existing token instead: `fleet set-claude-token <existing-token>`,
+or replicate `/srv/fleet/.secrets` wholesale (see
+`docs/runbook-server-rollout.md` §3). This is also the more common
+source of deploy-blocking token errors than people expect: a
+`fleet deploy` failing with `unresolved token(s): [[…]]` is almost always
+a missing **per-project** secret (`/srv/fleet/secrets/<project>.env`), not
+this fleet-wide Claude token — the Claude token's absence only produces a
+non-fatal warning. See `docs/runbook-server-rollout.md` §3 for the full
+picture of secrets on a newly provisioned server.
 
 ### Multi-server: one config repo, per-host domain
 
@@ -251,8 +318,14 @@ No need to re-run the full installer. From the server:
 2. If switching **to** `ovh_dns`, create `/etc/caddy/ovh.env` (`0600
    root:root`) with `OVH_ENDPOINT`, `OVH_APPLICATION_KEY`,
    `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` — see "Choosing a TLS
-   mode" above for the token-creation steps. Skip this if switching back
-   to `on_demand`.
+   mode" above for the token-creation steps, **including testing the
+   token first** — a token that works fine on one OVH-scoped server can
+   be IP-restricted to a different one and fail with `403 "This call has
+   not been granted"` only once you're mid-switch. Skip this step if
+   switching back to `on_demand`. If you hand-edit an already-deployed
+   `/etc/caddy/ovh.env` outside of step 3 below (e.g. swapping in a
+   corrected token), `systemctl restart caddy` yourself — nothing else
+   will pick it up.
 3. Re-apply just the `caddy` role:
    ```bash
    cd /opt/ddev-fleet/ansible

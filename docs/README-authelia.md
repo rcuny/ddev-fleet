@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -12,8 +12,25 @@ cookie-based login portal ([Authelia](https://www.authelia.com/)) that
 works on networks that block basic auth outright, with users defined per
 project in `fleet.yml`.
 
-**Status:** implemented, code-only — not yet rolled out to any live server
-(see "Rollout" below).
+**Status:** implemented and rolled out to **two** live servers (ddev2 and
+the primary, both Debian 13, Authelia 4.39.28 apt package, `User=authelia
+Group=authelia`, both now on Authelia mode as of 2026-09-28) — see
+"Rollout" below for the fixes those live runs required.
+
+**Brute-force regulation is on by default.** Authelia's built-in
+`regulation` settings ship with sane defaults (observed: 3 failed logins
+→ a 5-minute ban on that username) — the role does not disable this, and
+you don't need to configure anything for it to apply. It has bitten
+testing more than once (an admin locked out mid-smoke-test after a few
+wrong-password attempts) — wait out the ban or fix the password, don't
+"fix" it by editing `configuration.yml` by hand (see next paragraph).
+
+Do **not** hand-edit `/etc/authelia/configuration.yml` to relax
+regulation for a one-off test — re-running `ansible/authelia.yml` (the
+normal way to apply any other change) re-renders the file from the role's
+template and silently restores the defaults, discarding the override with
+no warning. If you must disable it temporarily, know that it will not
+survive the next playbook run.
 
 ## How it works
 
@@ -56,7 +73,57 @@ project in `fleet.yml`.
   `AUTHELIA_SESSION_SECRET_FILE`, and `AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE`
   environment variables (a systemd drop-in) — plain `AUTHELIA_` prefix, not
   `X_AUTHELIA_` (that prefix is reserved for a small fixed set of
-  meta/behavioural vars and is never read for secrets by Authelia 4.39).
+  meta/behavioural vars and is never read for secrets by Authelia 4.39). The
+  role's own `authelia config validate` task sets the same three env vars
+  (from the single `authelia_secret_env` mapping in
+  `ansible/roles/authelia/vars/main.yml`, shared with the systemd drop-in) —
+  without them, validation fails with `storage: option 'encryption_key' is
+  required` even though the service itself starts fine once the drop-in is
+  in place.
+
+## File layout
+
+| Path | Owner:group | Mode | Written by | Contents |
+|---|---|---|---|---|
+| `/etc/authelia/configuration.yml` | `<authelia svc user>:<authelia svc group>` | `0640` | Ansible (`authelia` role, static) | Server/session/access-control config — no secrets, no state |
+| `/etc/authelia/secrets/*` | `root:<authelia svc group>` | `0640` | Ansible (generated once) | The three secret values, loaded via `AUTHELIA_*_FILE` env vars |
+| `/srv/fleet/authelia/` | `<fleet user>:<authelia svc group>` | `2750` (setgid) | Ansible creates the dir; `users.yml` is written by `fleet.core.authelia` (never Ansible) | `users.yml` only — Authelia has **group-read only** here by design; it must never write into this tree |
+| `/var/lib/authelia/` | `<authelia svc user>:<authelia svc group>` | `0750` | Ansible creates the dir (before Authelia starts); Authelia writes into it at runtime | `db.sqlite3` (storage backend) + `notification.txt` (filesystem notifier) — Authelia's own writable state |
+
+**Why the DB/notifier moved out of `/srv/fleet/authelia`**: the first live
+rollout (ddev2) pointed `storage.local.path` and
+`notifier.filesystem.filename` at `/srv/fleet/authelia/db.sqlite3` /
+`notification.txt`. That directory is intentionally `2750`
+`<fleet user>:<authelia group>` — group-**read** only for Authelia, since
+`fleet.core.authelia` is the only writer allowed there (`users.yml`).
+Authelia failed to start with `unable to open database file: permission
+denied`. The fix is `/var/lib/authelia`, a separate directory the role
+creates as `<authelia service user>:<authelia service group>` mode `0750`
+— writable by Authelia, with no risk of collateral write access into the
+fleet-owned `users.yml` tree.
+
+## The `/srv/fleet` traverse ACL
+
+The same rollout also hit `stat /srv/fleet/authelia: permission denied`:
+`/srv/fleet` itself is `drwxr-x--- fleet:fleet`, and the Authelia service
+account is a member of neither. Even though `/srv/fleet/authelia` grants
+Authelia's group read access, a process can't reach a subdirectory it
+can't first traverse into.
+
+The fix, applied live as a hotfix and now encoded in the role:
+
+```bash
+apt-get install acl
+setfacl -m u:authelia:x /srv/fleet
+```
+
+This grants **traverse-only** (`x`, no `r`) access on `/srv/fleet` itself
+to the Authelia service user — it can `cd`/`stat` through the directory
+but never `ls` it or read anything else living there (config repo
+checkouts, other projects' assets, etc.). The role applies this
+idempotently, guarded by a `getfacl` read-back so it only reports
+`changed` the first time, and only when the service doesn't already run
+as root (root needs no ACL to traverse anything).
 
 ## `fleet.yml` schema
 
@@ -141,8 +208,12 @@ order written.
 
 ## Rollout
 
-Not yet applied to any live server (spec §9). The order, once it happens,
-is:
+Applied to two live servers so far — ddev2 (2026-09-27) and the primary
+(2026-09-28). The ddev2 run exposed the apt signing key 404, the three
+bugs fixed in "File layout" and "The `/srv/fleet` traverse ACL" above,
+and the validate-task secrets gap covered in "Secrets" — all fixed in the
+role before the primary's run, which needed no further code changes. The
+order:
 
 ```bash
 pip install argon2-cffi   # into the venv, BEFORE the code that imports it
@@ -158,6 +229,20 @@ that imports it, or every `fleet` CLI invocation fails at import time.
 `push-config` now runs `fleet refresh-auth` automatically after pulling
 the config repo, so a `fleet.yml` `users:` edit takes effect as soon as
 config is pulled.
+
+**`ansible/authelia.yml --check --diff` always stops at "Install the
+authelia package"** and reports the play as failed/incomplete from there
+— check mode can't actually add the apt repo + install the package, so
+every later task that depends on Authelia being installed (config
+validate, service management) never runs in check mode. This is expected,
+not a bug: check mode is only useful here to preview the rendered
+`configuration.yml`/`users.yml` diff up to that point; run the play for
+real to see the rest.
+
+**Authelia takes ~9 seconds to fully start** after `systemctl restart
+authelia` (or the role restarting it). A `502` from any Authelia-fronted
+host in that window is normal — wait it out before treating it as a
+failure.
 
 **Warning for a server switching FROM basic mode with an IP whitelist**:
 once this code runs in basic mode, the old `fleet.auth_bypass_cidrs` IP
@@ -202,3 +287,19 @@ sudo -u fleet fleet refresh-auth
   Caddy snippet wraps its sequence in `route @matcher { ... }` — a bare
   sequence loses `Remote-Groups` to Caddy's directive reordering (see
   above).
+- **Authelia fails to start with `unable to open database file: permission
+  denied`**: `storage.local.path`/`notifier.filesystem.filename` in
+  `/etc/authelia/configuration.yml` must point under `/var/lib/authelia`,
+  never `/srv/fleet/authelia` (see "File layout" above). Confirm
+  `/var/lib/authelia` exists and is owned `<authelia svc user>:<authelia
+  svc group>` mode `0750`; re-run `ansible/authelia.yml` if not.
+- **`authelia config validate` fails with `stat /srv/fleet/authelia:
+  permission denied`** (running it by hand, outside the role): the
+  Authelia service user needs the traverse ACL on `/srv/fleet` — see "The
+  `/srv/fleet` traverse ACL" above. `getfacl /srv/fleet` should show a
+  `user:<authelia svc user>:--x` (or wider) entry.
+- **`authelia config validate` fails with `storage: option
+  'encryption_key' is required'`** when run by hand: it needs the same
+  `AUTHELIA_*_FILE` env vars the systemd drop-in supplies — the role's own
+  validate task now sets them (see "Secrets" above); running the command
+  manually still requires exporting them yourself.

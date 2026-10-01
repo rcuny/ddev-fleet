@@ -18,6 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `fleet.auth_bypass_cidrs` IP whitelist is removed: it is now accepted
   with a deprecation warning and otherwise ignored. See
   `docs/README-authelia.md`.
+  - **Fixed (first live rollout, ddev2, 2026-09-27):** the role's apt
+    signing key URL 404'd (`a3cd4f6`) — corrected to
+    `https://www.authelia.com/keys/authelia-security.gpg`, gpgv-verified
+    against the repo's `InRelease` like every other apt source in this
+    project. Then three more bugs the `authelia` role only hit on a real
+    server (`da1641e`). `storage.local.path` and
+    `notifier.filesystem.filename` moved from `/srv/fleet/authelia`
+    (Authelia has group-read only there, by design — "unable to open
+    database file: permission denied") to a new, Authelia-writable
+    `/var/lib/authelia`. The role now also grants the Authelia service
+    user a traverse-only (`x`) ACL entry on `/srv/fleet` itself (via
+    `setfacl`, guarded by a `getfacl` read-back), since it previously
+    couldn't even `stat` into `/srv/fleet/authelia`. And the role's own
+    `authelia config validate` task now gets the same
+    `AUTHELIA_*_FILE` secret env vars the systemd drop-in supplies
+    (both derive from one `authelia_secret_env` mapping in
+    `ansible/roles/authelia/vars/main.yml`) — it previously failed with
+    `storage: option 'encryption_key' is required`. See
+    `docs/README-authelia.md`.
 - **Bounded timeouts on `fleet list`'s read-only status calls** so a
   stalled `docker`/`ddev`/`git` process degrades the table instead of
   hanging the whole command forever (observed once on ddev2, 2026-09-22:

@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -188,7 +188,7 @@ registry load with an actionable message naming the bad key.
 | `fleet set-admin-password <password>` | — | Mode-aware (reads only `host.yml`'s `auth_mode` — a break-glass guarantee that still works with a broken/missing `fleet.yml` in basic mode). Basic mode: hashes it, atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run. Authelia mode: writes `admin.yml` and re-renders `users.yml` — no restart needed (hot-reloaded) |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same mode-aware way, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull); no-op message if `config/` isn't a git checkout |
-| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it |
+| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it. Does NOT rewrite `settings.local.php` — see `docs/runbook-server-rollout.md` for the domain-change workaround |
 | `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
 | `fleet refresh-auth` | — | Re-applies the current auth config to every deployed instance — the "apply my auth edits now" command, and how a server switches `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from its recorded `auth-enabled`/`auth-password` (`fleet.auth_bypass_cidrs` is deprecated and no longer applied). Authelia mode: re-renders `users.yml` from `fleet.yml`'s `users:` + the admin account, plus every instance's `forward_auth` snippet. Either way: ONE `caddy validate` + `caddy reload` |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
