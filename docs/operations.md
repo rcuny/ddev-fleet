@@ -121,7 +121,7 @@ DDEV instances do **not** auto-start on their own when the host reboots —
 Docker restarts containers per its own restart policy, but `ddev start`'s
 project-level bookkeeping (router registration, `ddev-ssh-agent`, etc.)
 still needs to run per instance. The `fleet_service` Ansible role installs
-`fleet-boot.service`, a `Type=oneshot` systemd unit enabled at boot
+`fleet-boot.service`, a `Type=exec` systemd unit enabled at boot
 (`WantedBy=multi-user.target`, ordered `After=docker.service`) that runs:
 
 ```bash
@@ -132,8 +132,16 @@ fleet start --all --sequential --timeout 1800 --retry-port-conflict
 alphabetical instance-id order `fleet list` shows, instead of the default
 2-at-a-time `run_concurrent` bulk path — running many `ddev start`s at once
 right after a reboot causes CPU spikes and `ddev-ssh-agent` registration
-races. `TimeoutStartSec=0` on the unit means systemd will not kill it
-partway through a long batch.
+races. systemd does not kill the unit partway through a long batch.
+
+The unit is `Type=exec`, **not** `oneshot`, so it does not hold up
+`multi-user.target`: the dashboard, Caddy and the Authelia portal are
+reachable right after boot while instances are still starting one by one in
+the background (with `Type=oneshot` the Authelia unit, ordered
+`After=multi-user.target`, waited for the whole batch and every public URL
+502'd meanwhile — FLE-4). `RemainAfterExit=no`: the unit goes inactive once
+the batch ends, and shows `failed` if `fleet start --all` exited non-zero
+(some instance failed to start); the log stays in the journal.
 
 `--timeout 1800` is a **per-instance hang guard**, not a slowness limit: if
 a single `ddev start` doesn't finish within 30 minutes — e.g. an
@@ -169,8 +177,8 @@ opt-in (default off, no behaviour change) everywhere except
 Check it after a reboot:
 
 ```bash
-systemctl status fleet-boot.service
-journalctl -u fleet-boot.service -b
+systemctl status fleet-boot.service     # active (running) while the batch runs
+journalctl -u fleet-boot.service -b -f  # follow per-instance progress
 ```
 
 **NOTE:** it starts **every** existing instance, including ones you had
