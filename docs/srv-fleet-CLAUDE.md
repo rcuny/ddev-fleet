@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-22
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -31,6 +31,10 @@ call site loads via `fleet.core.instances.load_registry(paths)`, which
 always passes `host.yml` through — never call `Registry.load()` directly.
 Full detail: `docs/configuration.md`.
 
+`host.yml` also carries `auth_mode: basic | authelia` (absent means
+`basic`), letting one shared `fleet.yml` run different auth modes on
+different hosts — see "Auth modes" below and `docs/README-authelia.md`.
+
 ## Registry (`/srv/fleet/config/fleet.yml`)
 
 ```yaml
@@ -58,6 +62,9 @@ projects:
     # git_bot: false                  #   ...or `false` to inject NO git identity (project's own
     #                                 #   `git config` / config.claude-code.local.yaml hook wins)
     issue_id_regexp: <string>         # OPTIONAL — derives [[issue-id]]/FLEET_ISSUE_ID (see below)
+    users:                             # OPTIONAL — only meaningful in `authelia` auth mode
+      - name: <string>                 #   ^[a-z0-9._-]+$, "admins" reserved
+        password: <string>             #   plaintext here; hashed (argon2id) only when rendering users.yml
     templates:
       <template-name>:
         post_deploy: [<string>, ...]  # OPTIONAL — commands run after deploy for this template
@@ -122,6 +129,20 @@ Access config can build these same alias patterns in PHP:
 `"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full reference:
 `docs/networking.md` §7, `docs/configuration.md`.
 
+**Auth modes (`host.yml`'s `auth_mode`, project `users:`).** Basic mode
+(default): per-instance HTTP basic auth, credential symmetric
+(`--auth-password`), on by default. Authelia mode: a cookie-based login
+portal (systemd `authelia.service`, `127.0.0.1:9091`, STATIC config —
+never restarted for a routine edit); Caddy authorizes each instance via
+`forward_auth` + `Remote-Groups` against the project name or `admins`.
+Each project's `users:` becomes its Authelia group; `--auth-password` is
+rejected in this mode. Apply a `users:`/`auth_mode` edit with
+`fleet refresh-auth` (re-renders `users.yml` — hot-reloaded, no restart —
+and every instance's snippet). The old `fleet.auth_bypass_cidrs` IP
+whitelist is deprecated: accepted with a warning, otherwise ignored in
+both modes. Full reference: `docs/README-authelia.md`,
+`docs/configuration.md`.
+
 **git identity injection.** The fleet injects `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
 into each instance's `config.fleet.yaml` `web_environment` so commits made
 inside a container are attributed to a known identity. **Those env vars override
@@ -152,8 +173,8 @@ registry load with an actionable message naming the bad key.
 | Command | Arguments | Behavior |
 |---|---|---|
 | `fleet init` | `[--domain=...] [--skip-claude]` | Interactive: fleet domain, registry creation (local-file mode by default, or clones `FLEET_CONFIG_REPO` if set), `claude setup-token`, writes `.secrets` |
-| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n>] [--skip-disk-check]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. **Never reuses an existing instance id** — if the resolved id is taken, `-1`/`-2`/… is appended until one is free. Per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default credential, used as BOTH username and password (e.g. `--auth-password=fern` → `fern`/`fern`). `--count`/`-n` (default 1) bulk-deploys N labelled instances at once, gated by a disk-headroom check (`--skip-disk-check` to bypass); prints per-instance OK/FAILED + summary and a 0/1/2 exit code for N>1, same as the bulk commands below |
-| `fleet redeploy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--template=<name>] [--auth-password=<pw>] [--force] [--yes]` | Destroys and rebuilds an instance **in place, same id**, from the project/template/branch/label/auth recorded in `.fleet/instance.yml`. Refuses if no `template` was recorded, unless `--template` is given. Confirmation and bulk targeting match `destroy` exactly; bulk redeploy runs sequentially. This is now the only way to rebuild an instance in place — `deploy` never does |
+| `fleet deploy <project> [<template>] --branch <ref>` | `[--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n>] [--skip-disk-check]` | Full deploy pipeline; running instance is named `<project>--<label>` (label defaults to the slugified branch); `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted; refuses a dirty/unpushed worktree update without `--force`. **Never reuses an existing instance id** — if the resolved id is taken, `-1`/`-2`/… is appended until one is free. Basic mode (default): per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default credential, used as BOTH username and password (e.g. `--auth-password=fern` → `fern`/`fern`). Authelia mode: `--auth-password` is **rejected** (users are managed in `fleet.yml`'s `users:` instead — see "Auth modes" above). `--count`/`-n` (default 1) bulk-deploys N labelled instances at once, gated by a disk-headroom check (`--skip-disk-check` to bypass); prints per-instance OK/FAILED + summary and a 0/1/2 exit code for N>1, same as the bulk commands below |
+| `fleet redeploy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--template=<name>] [--auth-password=<pw>] [--force] [--yes]` | Destroys and rebuilds an instance **in place, same id**, from the project/template/branch/label/auth recorded in `.fleet/instance.yml`. Refuses if no `template` was recorded, unless `--template` is given. `--auth-password` rejected in Authelia mode, same as `deploy`. Confirmation and bulk targeting match `destroy` exactly; bulk redeploy runs sequentially. This is now the only way to rebuild an instance in place — `deploy` never does |
 | `fleet destroy [<id>...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes instance dir + lock file. A single explicit id destroys immediately (no prompt, backward-compat); a selector or multiple ids always confirms (type the count, or pass `--yes`) |
 | `fleet start [<id>...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev start` on one or more existing, stopped instances |
 | `fleet stop [<id>...] \| --all \| --project=<p> \| --state=<s>` | — | `ddev stop` — frees RAM, keeps disk |
@@ -164,12 +185,12 @@ registry load with an actionable message naming the bad key.
 | `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | `ddev export-db --gzip=false` into the project's asset tree; refuses to write `dumps/default.sql` |
 | `fleet refresh-claude-token` | `[--restart]` | Rotates `CLAUDE_CODE_OAUTH_TOKEN` fleet-wide, rewrites every instance's `config.fleet.yaml`; restarts running instances only if `--restart` |
 | `fleet set-claude-token <token>` | `[--restart]` | Same propagation as `refresh-claude-token` for a token you already have, instead of running `claude setup-token` |
-| `fleet set-admin-password <password>` | — | Sets the dashboard `basic_auth` password to an explicit value: hashes it, atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run |
-| `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same way, and prints it once |
+| `fleet set-admin-password <password>` | — | Mode-aware (reads only `host.yml`'s `auth_mode` — a break-glass guarantee that still works with a broken/missing `fleet.yml` in basic mode). Basic mode: hashes it, atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run. Authelia mode: writes `admin.yml` and re-renders `users.yml` — no restart needed (hot-reloaded) |
+| `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same mode-aware way, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull); no-op message if `config/` isn't a git checkout |
-| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it |
+| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it. Does NOT rewrite `settings.local.php` — see `docs/runbook-server-rollout.md` for the domain-change workaround |
 | `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
-| `fleet refresh-auth` | — | Re-applies per-instance basic auth to every deployed instance from `fleet.auth_bypass_cidrs` + each instance's recorded `auth-enabled`/`auth-password` — the "apply my auth-whitelist edit now" command; rewrites every `/etc/caddy/fleet/instances/*.conf`, then ONE `caddy validate` + `caddy reload` |
+| `fleet refresh-auth` | — | Re-applies the current auth config to every deployed instance — the "apply my auth edits now" command, and how a server switches `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from its recorded `auth-enabled`/`auth-password` (`fleet.auth_bypass_cidrs` is deprecated and no longer applied). Authelia mode: re-renders `users.yml` from `fleet.yml`'s `users:` + the admin account, plus every instance's `forward_auth` snippet. Either way: ONE `caddy validate` + `caddy reload` |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
 | `fleet ddev [<instance-id>] [-- args]` | — | Runs `ddev <args>` inside an instance's directory |
 | `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach — a newly-created instance window has its template's `tty1`/`tty2` commands typed into its two bash panes |
@@ -216,9 +237,13 @@ Full detail + examples: `docs/cli.md`.
 - **Rotate the Claude Code token fleet-wide (e.g. before the ~1 year expiry):** `fleet refresh-claude-token` — safe to re-run; only running instances are restarted (with `--restart`).
 - **Rotate the dashboard admin password:** `fleet rotate-admin-password` (generated) or `fleet set-admin-password <password>` (explicit) — never requires an Ansible run.
 - **Pull the latest registry/assets after someone else edits `fleet.yml`:** `fleet refresh-config`.
-- **Let a network skip the basic-auth prompt:** add its CIDR to
-  `fleet.auth_bypass_cidrs` in `fleet.yml`, then `fleet refresh-auth` — no
-  redeploy, no Ansible run. Unlisted visitors still get the prompt.
+- **Let a network that blocks basic auth outright reach an instance:**
+  switch the server to Authelia mode (`fleet_auth_mode: authelia`, see
+  `docs/README-authelia.md`) rather than the deprecated
+  `fleet.auth_bypass_cidrs` whitelist, which is now ignored.
+- **Add/edit a project user (Authelia mode):** edit that project's
+  `users:` in `fleet.yml`, then `fleet refresh-auth` — no redeploy, no
+  Ansible run, nobody is logged out.
 - **Expose a new port for a project (e.g. Typesense, a Playwright report port):** add it to `fleet.ports` and the project's `ports:` list in `fleet.yml`, then `fleet refresh-ports` — no Ansible run, no redeploy needed.
 - **Check for a pending host reboot and notify:** `fleet reboot-notify` (normally run on a timer); `--test` to verify the mail relay works.
 - **Recovery when the daemon/web UI is down:** every command above works from the CLI directly against `fleet.core` — the daemon is not a dependency of the CLI.

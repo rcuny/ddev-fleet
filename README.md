@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-25
+Last updated: 2026-09-29
 Type: documentation
 ---
 
@@ -61,6 +61,14 @@ there: DNS, adding the deploy key, `fleet init`, and the first deploy are
 covered end to end in **`docs/installation.md`** — start there for a new
 install. For updating an already-live host, see `docs/operations.md`.
 
+**SSH-lockout warning:** if you run `bootstrap.sh` **detached as root with
+no controlling `sudo` session** (e.g. wrapped in `systemd-run`), the
+optional `security_hardening` role's sshd `AllowUsers` can end up locking
+out your real SSH login user. Run it via `sudo` from your login shell
+(the one-liner above already does this correctly), or set
+`FLEET_SSH_ALLOW_USERS="debian root"` explicitly for an unattended run —
+see `docs/installation.md` §4.
+
 ## Network exposure
 
 Public traffic reaches every instance through Caddy, the only
@@ -86,9 +94,12 @@ overridden with `--auth-password` or disabled with `--no-auth`. The
 credential is symmetric: `--auth-password=fern` gives user `fern` /
 password `fern`. Where a network's own policy blocks HTTP basic auth
 outright (it looks like a server error to the client, not a login
-prompt), `fleet.auth_bypass_cidrs` in `fleet.yml` lists CIDR ranges that
-skip the prompt entirely — everyone else still gets it; see
-`docs/configuration.md`. Rotate the
+prompt), a server can instead run in **Authelia auth mode**
+(`auth_mode: authelia` in `host.yml`) — a cookie-based login portal with
+per-project users defined in `fleet.yml`'s `users:` key, authorized by
+Caddy per instance. See `docs/README-authelia.md` for the full design and
+setup. (The older `fleet.auth_bypass_cidrs` CIDR whitelist is deprecated —
+see `docs/configuration.md`.) Rotate the
 dashboard password any time, with no Ansible run required:
 
 ```bash

@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.7.0] - 2026-10-05
+
+### Added
+- **Authelia auth mode** as an alternative to per-instance basic auth
+  (`auth_mode: authelia` in `host.yml`, default remains `basic`): a
+  cookie-based login portal for networks that block basic auth outright,
+  with per-project users defined in `fleet.yml`'s new `users:` key and
+  authorized per-instance by Caddy's `forward_auth` against Authelia
+  (`fleet.core.authelia`, `fleet.core.caddyauth`). Editing `users:` never
+  restarts Authelia — only its hot-reloaded `users.yml` changes. The old
+  `fleet.auth_bypass_cidrs` IP whitelist is removed: it is now accepted
+  with a deprecation warning and otherwise ignored. See
+  `docs/README-authelia.md`.
+  - **Fixed (first live rollout, ddev2, 2026-09-27):** the role's apt
+    signing key URL 404'd (`ff461cc`) — corrected to
+    `https://www.authelia.com/keys/authelia-security.gpg`, gpgv-verified
+    against the repo's `InRelease` like every other apt source in this
+    project. Then three more bugs the `authelia` role only hit on a real
+    server (`5b75ce9`). `storage.local.path` and
+    `notifier.filesystem.filename` moved from `/srv/fleet/authelia`
+    (Authelia has group-read only there, by design — "unable to open
+    database file: permission denied") to a new, Authelia-writable
+    `/var/lib/authelia`. The role now also grants the Authelia service
+    user a traverse-only (`x`) ACL entry on `/srv/fleet` itself (via
+    `setfacl`, guarded by a `getfacl` read-back), since it previously
+    couldn't even `stat` into `/srv/fleet/authelia`. And the role's own
+    `authelia config validate` task now gets the same
+    `AUTHELIA_*_FILE` secret env vars the systemd drop-in supplies
+    (both derive from one `authelia_secret_env` mapping in
+    `ansible/roles/authelia/vars/main.yml`) — it previously failed with
+    `storage: option 'encryption_key' is required`. See
+    `docs/README-authelia.md`.
+
+## [0.6.0] - 2026-09-25
+
 ### Added
 - **Bounded timeouts on `fleet list`'s read-only status calls** so a
   stalled `docker`/`ddev`/`git` process degrades the table instead of
@@ -129,6 +166,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Existing instances keep their old `fleet`/<password> credentials until
   redeployed.
 
+## [0.5.0] - 2026-07-27
+
+Backfilled summary — this release's larger features predate the detailed entries below: named-port exposure (`fleet.ports`, per-port Caddy snippets, `fleet refresh-ports`); bulk start/stop/destroy and multi-deploy (`deploy --count`) in CLI and web UI; reboot-required notifications (msmtp email, UI badge, tmux banner, `fleet reboot-notify`); the `network_hardening` (UFW + dead-man's switch) and `security_hardening` (SSH, fail2ban, sysctl, auditd, needrestart, Docker `daemon.json`) Ansible roles; the four fleet-management Claude skills; the bundled `demo` project.
+
 ### Added
 - `fleet redeploy <instance-id>... [--all|--project=P|--state=S] [--template T] [--auth-password P] [--force] [--yes]`,
   plus a per-row Redeploy button and a bulk "Redeploy selected" action in the
@@ -195,6 +236,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   fixed default.
 - The old server-rollout runbook (content split, see Changed).
 
+## [0.4.0] - 2026-07-23
+
+Operator workspace release (backfilled): per-project secret injection via `[[token]]` substitution; Typesense exposure reworked to port-based browser access with search-only keys; `fleet set-claude-token` with non-destructive propagation; `fleet shell` / `fleet ddev`; per-instance HTTP basic auth and a rotatable dashboard password; deploy logs kept after destroy; shared per-project DB dumps (hard links); server shell profile and Claude first-run onboarding; `fleet refresh-instance-config`; the `fleet tmux` workspace (instance tabs, live sidebar showing the checked-out branch, pane layouts, `tmux-reset`); per-project `git_bot` override; web UI footer with free memory/disk; mkcert local CA for the fleet user.
+
 ## [0.3.0] - 2026-07-15
 
 Typesense edge exposure: port-based browser access to a project's
@@ -215,7 +260,11 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/rcuny/ddev-fleet/compare/v0.6.0...v0.7.0
+[0.6.0]: https://github.com/rcuny/ddev-fleet/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/rcuny/ddev-fleet/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/rcuny/ddev-fleet/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/rcuny/ddev-fleet/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/rcuny/ddev-fleet/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/rcuny/ddev-fleet/releases/tag/v0.1.0

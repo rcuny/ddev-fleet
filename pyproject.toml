@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ddev-fleet"
-version = "0.1.0"
+version = "0.7.0"
 description = "Fleet manager for many DDEV-based projects on one host"
 requires-python = ">=3.11"
 dependencies = [
@@ -14,6 +14,7 @@ dependencies = [
     "jinja2>=3.1",
     "python-multipart>=0.0.9",
     "rich>=13",
+    "argon2-cffi>=23.1",
 ]
 
 [project.optional-dependencies]

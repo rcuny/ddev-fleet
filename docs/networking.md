@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-22
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -93,7 +93,24 @@ modes — it isn't a wildcard-eligible hostname.
 
 Switching an existing server's mode: `ansible/caddy-only.yml` (a scoped
 playbook, mirroring `ddev-only.yml`) reapplies just the `caddy` role — see
-`docs/installation.md` "Switching TLS mode on an existing server".
+`docs/installation.md` "Switching TLS mode on an existing server", which
+also covers the OVH token gotchas learned rolling this out to two live
+servers: tokens can be **IP-restricted** (one token per server, or list
+every server's IP on a shared token), the required rights are
+`GET`/`POST`/`PUT`/`DELETE` on `/domain/zone/<zone>/*`, test a token with
+a throwaway TXT record before pointing a live domain at it, and any
+hand-edit of `/etc/caddy/ovh.env` needs its own `systemctl restart caddy`
+(a `reload` does not re-read the `EnvironmentFile=`).
+
+**`auth.<domain>` (Authelia mode only).** When `host.yml`'s `auth_mode` is
+`authelia` (`docs/README-authelia.md`), Caddy also serves Authelia's login
+portal at `auth.{{ fleet_domain }}` — a single-label subdomain like any
+instance hostname, so it is covered by the exact same certificate handling
+as every other `*.{{ fleet_domain }}` host: an individual on-demand cert in
+`on_demand` mode, or the shared wildcard cert in `ovh_dns` mode. It exists
+only when this Caddyfile block is rendered (basic mode omits it entirely)
+and is otherwise unauthenticated — Authelia is what authenticates
+everything else.
 
 ## 5. Host-header routing
 
@@ -161,10 +178,11 @@ sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
   deploy time (naming the hostname and the resulting length) if it doesn't
   fit — a long project/label/hostname combination can hit this even though
   the bare instance id was already within the limit on its own.
-- **Basic auth covers alias hosts too.** The per-instance Caddy snippet's
-  `@auth-<instance-id>` matcher (`core/caddyauth.py`) lists the instance
-  FQDN *and* every alias FQDN in the same `host` clause, so an alias can
-  never bypass the dashboard's basic-auth prompt.
+- **Auth covers alias hosts too, in either mode.** The per-instance Caddy
+  snippet's `@auth-<instance-id>` matcher (`core/caddyauth.py`) lists the
+  instance FQDN *and* every alias FQDN in the same `host` clause, whether
+  it's a basic-auth snippet or an Authelia `forward_auth` one
+  (`docs/README-authelia.md`), so an alias can never bypass auth.
 - **`FLEET_INSTANCE_HOST`** — injected into every instance's
   `web_environment` (`core/fleetconfig.py`) as `<instance-id>.<domain>` (no
   scheme). A project's Domain Access config builds its own alias-matching
@@ -192,5 +210,7 @@ sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
   (companion repo) — the UFW/`fleet-ufw-sync` side of `fleet refresh-ports`,
   and the `DOCKER-USER` firewall guard referenced in §2 above.
 - `core/caddyauth.py` — the sibling fleet-owned-snippet mechanism (per-
-  instance/dashboard `basic_auth`), same write/validate/reload shape as
-  `core/caddyports.py`.
+  instance/dashboard `basic_auth`, or `forward_auth` in Authelia mode),
+  same write/validate/reload shape as `core/caddyports.py`.
+- `docs/README-authelia.md` — the Authelia auth mode design (server-level
+  `auth_mode`, `auth.<domain>` portal, per-project `users:`).

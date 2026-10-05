@@ -45,6 +45,28 @@ def test_exact_label_match_returns_200(fleet_home):
     assert response.status_code == 200
 
 
+def test_tls_authorize_allows_auth_subdomain_in_authelia_mode(fleet_home):
+    _setup_fleet_home(fleet_home)
+    FleetPaths.from_home(fleet_home).host_config.write_text(
+        "auth_mode: authelia\n", encoding="utf-8"
+    )
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get("/api/tls-authorize", params={"domain": "auth.fleet.example.test"})
+
+    assert response.status_code == 200
+    assert response.json() == {"authorized": True}
+
+
+def test_tls_authorize_rejects_auth_subdomain_in_basic_mode(fleet_home):
+    _setup_fleet_home(fleet_home)
+    client = TestClient(create_app(fleet_home))
+
+    response = client.get("/api/tls-authorize", params={"domain": "auth.fleet.example.test"})
+
+    assert response.status_code == 404
+
+
 def test_unregistered_alias_prefix_returns_404(fleet_home):
     """A `<prefix>-<instance_id>` label is NOT authorized unless `prefix` is
     one of that instance's project's registered `additional_hostnames` —

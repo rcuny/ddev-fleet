@@ -1,0 +1,369 @@
+---
+- name: Skip the authelia role entirely when not in authelia mode
+  ansible.builtin.meta: end_host
+  when: fleet_auth_mode != 'authelia'
+
+- name: Ensure /etc/apt/keyrings exists
+  ansible.builtin.file:
+    path: /etc/apt/keyrings
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Download the Authelia apt signing key
+  ansible.builtin.get_url:
+    url: https://www.authelia.com/keys/authelia-security.gpg
+    dest: /etc/apt/keyrings/authelia-security.gpg
+    owner: root
+    group: root
+    mode: "0644"
+
+- name: Add the Authelia apt repository
+  ansible.builtin.apt_repository:
+    repo: "deb [signed-by=/etc/apt/keyrings/authelia-security.gpg] https://apt.authelia.com stable main"
+    filename: authelia
+    state: present
+    update_cache: true
+
+- name: Install the authelia package
+  ansible.builtin.apt:
+    name: authelia
+    state: present
+
+# --- Discover the REAL service account — never assume, never create -------
+# The apt package's own postinst (verified by extracting the real .deb —
+# authelia_4.39.28-1_arm64.deb, apt.authelia.com/GitHub releases, into
+# .claude/user/tmp/authelia-e2e/deb-extract/ in the companion repo) runs
+# `systemd-sysusers` against its shipped sysusers.d fragment, which is what
+# actually creates the service account — declaratively, as a normal part of
+# installing the package, NOT something this role should ever do itself.
+# `systemctl show` reads the INSTALLED unit's static User=/Group=, so this
+# stays correct even if a future Authelia package release changes them.
+- name: Determine the Authelia service account from the installed unit
+  # noqa: command-instead-of-module — reading an arbitrary static unit
+  # property (User=) has no ansible.builtin.systemd equivalent; that module
+  # only manages service state (start/stop/enable), it doesn't query
+  # properties. `systemctl show` is the standard way to read one.
+  ansible.builtin.command: systemctl show -p User --value authelia.service
+  register: authelia_svc_user_raw
+  changed_when: false
+
+- name: Determine the Authelia service group from the installed unit
+  # noqa: command-instead-of-module — see the task above.
+  ansible.builtin.command: systemctl show -p Group --value authelia.service
+  register: authelia_svc_group_raw
+  changed_when: false
+
+- name: Record the resolved Authelia service account
+  # systemd prints an empty string for User=/Group= when the unit doesn't
+  # set them (i.e. it runs as root) — anything non-empty names an account
+  # the package's postinst must already have created.
+  ansible.builtin.set_fact:
+    authelia_service_user: "{{ authelia_svc_user_raw.stdout | trim }}"
+    authelia_service_group: "{{ authelia_svc_group_raw.stdout | trim }}"
+
+- name: Fail fast if the unit names a service user that does not actually exist
+  # NEVER create the account ourselves — getent fails the task outright if
+  # the key is missing, which is exactly what we want here: a wrong
+  # assumption about the account must be a loud provisioning failure, not a
+  # silently-created, wrong local user (the bug in the previous revision of
+  # this role, which used `ansible.builtin.user: ... append: true` — that
+  # module CREATES an account by default if one doesn't already exist).
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ authelia_service_user }}"
+  when: authelia_service_user != ''
+
+- name: Fail fast if the unit names a service group that does not actually exist
+  ansible.builtin.getent:
+    database: group
+    key: "{{ authelia_service_group }}"
+  when: authelia_service_group != ''
+
+- name: Resolve the group granted read access to secrets/config/users.yml
+  # Falls back to 'root' only in the (currently unobserved) case where the
+  # unit runs as root — nothing extra to grant then, root already reads
+  # everything root owns.
+  ansible.builtin.set_fact:
+    authelia_read_group: "{{ authelia_service_group if authelia_service_group != '' else 'root' }}"
+
+- name: Ensure the acl package is installed
+  # Needed for the setfacl task below. ansible.posix (which ships a
+  # ansible.posix.acl module) is NOT a declared dependency of this
+  # repo (see ansible/requirements.yml — only community.crypto and
+  # community.general are), so this uses the plain `acl` package + the
+  # `setfacl`/`getfacl` binaries rather than assuming that collection is
+  # present.
+  ansible.builtin.apt:
+    name: acl
+    state: present
+  when: authelia_service_user != ''
+
+- name: Check whether {{ fleet_srv_dir }} already grants the Authelia service user traverse access
+  # noqa: command-instead-of-module — no ACL module is guaranteed available
+  # (see the acl-package task above); `getfacl` is the standard way to read
+  # an ACL back. Read-only, so changed_when: false, same pattern as the
+  # systemctl show reads above.
+  ansible.builtin.command: "getfacl --absolute-names {{ fleet_srv_dir }}"
+  register: authelia_srv_dir_acl
+  changed_when: false
+  when: authelia_service_user != ''
+
+- name: Determine whether the Authelia service user already has an execute ACL entry on {{ fleet_srv_dir }}
+  ansible.builtin.set_fact:
+    authelia_srv_dir_has_x_acl: >-
+      {{
+        authelia_service_user != '' and (
+          ('user:' + authelia_service_user + ':--x') in authelia_srv_dir_acl.stdout
+          or ('user:' + authelia_service_user + ':r-x') in authelia_srv_dir_acl.stdout
+          or ('user:' + authelia_service_user + ':rwx') in authelia_srv_dir_acl.stdout
+        )
+      }}
+  when: authelia_service_user != ''
+
+- name: Grant the Authelia service user traverse-only (execute) access on {{ fleet_srv_dir }}
+  # Live rollout finding: /srv/fleet is drwxr-x--- fleet:fleet, so the
+  # Authelia service account — in neither the fleet user nor fleet group —
+  # got "stat /srv/fleet/authelia: permission denied" even though
+  # /srv/fleet/authelia itself grants it group-read via the 2750 setgid dir
+  # below. This grants bare traverse (x) on /srv/fleet itself, never
+  # read/list — the 2750 on /srv/fleet/authelia still governs what's
+  # visible inside it. Only relevant when the service doesn't already run
+  # as root (root needs no ACL to traverse anything).
+  # noqa: command-instead-of-module — see the getfacl check above.
+  ansible.builtin.command: "setfacl -m u:{{ authelia_service_user }}:x {{ fleet_srv_dir }}"
+  when:
+    - authelia_service_user != ''
+    - not authelia_srv_dir_has_x_acl
+
+- name: Ensure /srv/fleet/authelia exists (fleet-owned, never Ansible-written past this)
+  # admin.yml/users.yml are written by fleet.core.authelia (fleet CLI/
+  # daemon), never by Ansible — same "provision the dir, own the writes"
+  # split as the Caddy snippet dirs (roles/caddy/tasks/main.yml). setgid
+  # (the leading "2" in mode 2750) makes every file the fleet user writes
+  # here inherit this directory's group (the REAL Authelia service group,
+  # resolved above) automatically, so the service can read users.yml for
+  # its file-backend watch without ever touching either account's group
+  # membership — same pattern the Caddy snippet dirs already use for the
+  # fleet/caddy split.
+  ansible.builtin.file:
+    path: "{{ fleet_srv_dir }}/authelia"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ authelia_read_group }}"
+    mode: "2750"
+
+- name: Ensure the Authelia secrets directory exists
+  # root:<service group> 0750 — root (Ansible) owns/writes these, the real
+  # service group (resolved above) can read via the group bit. Never
+  # world-readable.
+  ansible.builtin.file:
+    path: /etc/authelia/secrets
+    state: directory
+    owner: root
+    group: "{{ authelia_read_group }}"
+    mode: "0750"
+
+- name: Mask the authelia package's tmpfiles.d rule that strips the secrets directory's execute bit
+  # The Debian authelia package (verified on v4.39.28) ships
+  # /usr/lib/tmpfiles.d/authelia.conf with `Z /etc/authelia/* 0640 authelia
+  # authelia`. systemd-tmpfiles-setup applies that RECURSIVE Z at every boot,
+  # turning /etc/authelia/secrets (root:<group> 0750, created above) into
+  # authelia:authelia 0640 — no execute bit, so the service can't open its
+  # secret files, refuses to start, and every Authelia-gated URL 502s.
+  # Latent until the first reboot after provisioning: it hit ddev4.fleet.example.com on
+  # its first reboot (2026-10-01, 502 on the dashboard).
+  # A same-basename file in /etc/tmpfiles.d masks the /usr/lib one entirely,
+  # so this installs ONLY the package's harmless `e /etc/authelia` directory
+  # rule. Deliberately NO `z` rules for the secrets dir/files: tmpfiles
+  # refuses them as an "unsafe path transition" (authelia-owned parent ->
+  # root-owned child) and just logs warnings at every boot. The separate
+  # /usr/lib/tmpfiles.d/authelia-config.conf (configuration.yml rules) is
+  # left alone.
+  # No notify/handler: tmpfiles only applies at boot, and this role already
+  # sets the correct perms for the current run.
+  ansible.builtin.copy:
+    dest: /etc/tmpfiles.d/authelia.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      # Managed by ddev-fleet (ansible/roles/authelia) — do not edit by hand.
+      #
+      # Masks the authelia package's /usr/lib/tmpfiles.d/authelia.conf (same
+      # basename in /etc wins). That file's `Z /etc/authelia/* 0640 authelia
+      # authelia` recursively chmods /etc/authelia/secrets to 0640 at every boot,
+      # stripping the directory's execute bit: the service can no longer open its
+      # secret files and refuses to start, so every Authelia-gated URL 502s.
+      # Only the package's harmless directory rule is kept.
+      e /etc/authelia 0755 authelia authelia -
+
+- name: Check whether the Authelia secrets already exist
+  ansible.builtin.stat:
+    path: /etc/authelia/secrets/session_secret
+  register: authelia_session_secret_stat
+
+- name: Generate the Authelia secrets (first provisioning only — never regenerated)
+  # Regenerating any of these on a later run would invalidate every live
+  # session (session secret) or make existing stored data unreadable
+  # (storage encryption key) — generate ONCE, guarded by the stat above.
+  # root:<service group> 0640 so the service can read them via the group
+  # bit (see the secrets-directory task above).
+  ansible.builtin.copy:
+    dest: "/etc/authelia/secrets/{{ item }}"
+    owner: root
+    group: "{{ authelia_read_group }}"
+    mode: "0640"
+    content: "{{ lookup('ansible.builtin.password', '/dev/null length=64 chars=ascii_letters,digits') }}"
+  loop:
+    - session_secret
+    - storage_encryption_key
+    - reset_password_jwt_secret
+  when: not authelia_session_secret_stat.stat.exists
+
+- name: Ensure the Authelia state directory exists (SQLite DB + filesystem notifier)
+  # <service user>:<service group> 0750 — Authelia must be able to WRITE
+  # here (unlike /srv/fleet/authelia, which is read-only to it by design).
+  # Live rollout finding: pointing storage.local.path/notifier.filesystem.
+  # filename under /srv/fleet/authelia failed with "unable to open database
+  # file: permission denied" — that directory is 2750 fleet:<authelia
+  # group>, group-READ only. Falls back to root:root when the unit runs as
+  # root (no service account to match).
+  ansible.builtin.file:
+    path: "{{ authelia_state_dir }}"
+    state: directory
+    owner: "{{ authelia_service_user if authelia_service_user != '' else 'root' }}"
+    group: "{{ authelia_service_group if authelia_service_group != '' else 'root' }}"
+    mode: "0750"
+
+- name: Render the Authelia configuration.yml (static — spec §3/D1)
+  # Owner/group match what the package's shipped authelia-config.conf
+  # tmpfiles.d fragment (verified in the real .deb: `f
+  # /etc/authelia/configuration.yml 0440 authelia authelia`) reasserts on
+  # every boot regardless of what we set here — matching it up front
+  # keeps Ansible's applied state and systemd-tmpfiles' periodic
+  # reassertion from fighting each other / flapping "changed" on reruns.
+  # (The package's recursive `Z /etc/authelia/*` rule is NOT reasserted any
+  # more — the tmpfiles.d mask task above replaces it.)
+  # Falls back to root:root when the unit runs as root (no service account
+  # to match).
+  ansible.builtin.template:
+    src: configuration.yml.j2
+    dest: /etc/authelia/configuration.yml
+    owner: "{{ authelia_service_user if authelia_service_user != '' else 'root' }}"
+    group: "{{ authelia_read_group }}"
+    mode: "0640"
+  notify: Restart authelia
+
+- name: Ensure the authelia.service systemd drop-in directory exists
+  ansible.builtin.file:
+    path: /etc/systemd/system/authelia.service.d
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+
+- name: Point authelia.service at the secrets directory
+  # Plain AUTHELIA_ prefix (NOT X_AUTHELIA_) — verified directly against
+  # the real authelia v4.39.28 binary (`authelia config validate`, see
+  # .claude/user/tmp/authelia-integration/results.md in the companion
+  # repo): X_AUTHELIA_ is reserved for a small, fixed set of
+  # meta/behavioural env vars (X_AUTHELIA_CONFIG, ..._HEALTHCHECK*) baked
+  # into the binary as literal strings, none of them secret-related.
+  # Generic <KEY_PATH>_FILE secret-loading (what these three lines need)
+  # uses the plain AUTHELIA_ prefix, one segment per config key path —
+  # e.g. `storage.encryption_key` -> AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE.
+  # With the old X_ prefix, `storage.encryption_key` (which has no default
+  # and is always required) came back unset and Authelia refused to start
+  # every time — reproduced and fixed against the real binary before this
+  # comment was written.
+  # The three env vars come from vars/main.yml's authelia_secret_env — the
+  # SAME mapping the "Validate the rendered Authelia configuration" task
+  # below passes as its own `environment:`, so the drop-in and the
+  # validate task can never drift apart on names/paths again (live rollout
+  # bug: `authelia config validate` failed with "storage: option
+  # 'encryption_key' is required" because it ran with none of these set).
+  ansible.builtin.copy:
+    dest: /etc/systemd/system/authelia.service.d/secrets.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Service]
+      Environment=AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE={{ authelia_secret_env.AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE }}
+      Environment=AUTHELIA_SESSION_SECRET_FILE={{ authelia_secret_env.AUTHELIA_SESSION_SECRET_FILE }}
+      Environment=AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE={{ authelia_secret_env.AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE }}
+  notify:
+    - Reload systemd daemon
+    - Restart authelia
+
+- name: Seed the admin account + render users.yml (first provisioning only)
+  # Uses the fleet CLI (core/authelia.py argon2 hashing), never Ansible —
+  # spec D5. host.yml's auth_mode: authelia has already been written by the
+  # caddy role, which runs BEFORE this one in both site.yml and
+  # authelia.yml, so `fleet set-admin-password` reads the right mode.
+  # `fleet refresh-auth`
+  # (below) then renders users.yml from fleet.yml's per-project users: plus
+  # this admin — both must exist before authelia.service starts, or its
+  # file backend has nothing to watch.
+  ansible.builtin.command:
+    argv:
+      - "{{ fleet_opt_dir }}/venv/bin/fleet"
+      - set-admin-password
+      - "{{ fleet_admin_default_password }}"
+  become: true
+  become_user: "{{ fleet_user }}"
+  environment:
+    FLEET_HOME: "{{ fleet_srv_dir }}"
+  register: authelia_seed_admin
+  # `is defined` guards two edge cases where `.rc` would not exist on the
+  # registered result: this task being skipped (the `when:` below — a
+  # skipped task's changed_when is never evaluated, but this keeps the
+  # expression itself safe against reordering) and `--check` mode, where
+  # `command` does not actually execute and the register carries no `rc`.
+  changed_when: authelia_seed_admin.rc is defined and authelia_seed_admin.rc == 0
+  when:
+    - not authelia_session_secret_stat.stat.exists
+    - fleet_admin_default_password is defined
+    - fleet_admin_default_password | length > 0
+
+- name: Render users.yml and every instance's Authelia snippet (fleet refresh-auth)
+  # Ruling (task-7 brief override 2 / spec §4.7): the authelia role MUST run
+  # this so users.yml and every instance snippet exist before Authelia
+  # starts — not just on first provisioning, since `fleet refresh-auth` is
+  # also how a later fleet.yml/host.yml auth edit gets applied on a re-run.
+  ansible.builtin.command:
+    argv:
+      - "{{ fleet_opt_dir }}/venv/bin/fleet"
+      - refresh-auth
+  become: true
+  become_user: "{{ fleet_user }}"
+  environment:
+    FLEET_HOME: "{{ fleet_srv_dir }}"
+  register: authelia_refresh_auth
+  # Left as a coarse rc==0-means-changed check (see the admin-seed task
+  # above for the `is defined` reasoning, applied the same way here) —
+  # cheaply detecting whether refresh-auth's render was actually a no-op
+  # is a deeper problem (core/authelia.py's write_users already skips an
+  # unchanged write; surfacing that distinction here isn't cheap) and is
+  # left for later, not part of this fix.
+  changed_when: authelia_refresh_auth.rc is defined and authelia_refresh_auth.rc == 0
+
+- name: Validate the rendered Authelia configuration
+  # Live rollout bug: without the secret-file env vars (normally supplied
+  # only by the systemd drop-in, which this bare `command` invocation never
+  # sees), validation failed with "storage: option 'encryption_key' is
+  # required" every time. `environment:` here is the SAME
+  # authelia_secret_env mapping (vars/main.yml) the drop-in above renders
+  # from, so the two can't drift apart.
+  ansible.builtin.command: authelia config validate --config /etc/authelia/configuration.yml
+  environment: "{{ authelia_secret_env }}"
+  changed_when: false
+
+- name: Ensure authelia.service is enabled and started
+  ansible.builtin.systemd:
+    name: authelia
+    enabled: true
+    state: started
+    daemon_reload: true

@@ -89,6 +89,9 @@
           git: file://{{ fleet_srv_dir }}/_demo.git
           default_branch: main
           default_template: default
+          users:
+            - name: fleet
+              password: fleet
           templates:
             default:
               post_deploy: [ddev start]

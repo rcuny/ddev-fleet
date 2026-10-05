@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-07
+Last updated: 2026-09-29
 Type: documentation
 ---
 
@@ -40,6 +40,13 @@ reapplying (e.g. after touching `Caddyfile.j2` or a port variable),
 apply the `caddy` role alone via a scoped one-off playbook, not the full
 `site.yml`. Rotating the dashboard admin password is NOT one of these
 cases — see below, it never touches Ansible.
+
+Also — if you do run the full installer, run it via `sudo` from your
+actual login shell, not detached as root with no controlling `sudo`
+session (e.g. `systemd-run`). With no `$SUDO_USER`, the optional
+`security_hardening` role's sshd `AllowUsers` can lock out your real SSH
+login user; see `docs/installation.md` §4's SSH-lockout warning and
+`FLEET_SSH_ALLOW_USERS`.
 
 ### Rollback
 

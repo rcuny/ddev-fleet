@@ -121,6 +121,75 @@ def test_deploy_no_auth_flag_disables_auth(fleet_home, monkeypatch, capsys):
     assert captured["auth_enabled"] is False
 
 
+def _write_authelia_registry(fleet_home):
+    _write_minimal_registry(fleet_home)
+    (fleet_home / "host.yml").write_text("auth_mode: authelia\n", encoding="utf-8")
+
+
+_AUTH_PASSWORD_REJECTED_MESSAGE = "auth passwords are managed in fleet.yml users: (Authelia mode)"
+
+
+def test_deploy_rejects_auth_password_in_authelia_mode(fleet_home, capsys):
+    _write_authelia_registry(fleet_home)
+
+    rc = cli.main(["--fleet-home", str(fleet_home), "deploy", "demo", "--auth-password", "secret"])
+
+    assert rc == 1
+    assert capsys.readouterr().err.strip() == _AUTH_PASSWORD_REJECTED_MESSAGE
+
+
+def test_redeploy_rejects_auth_password_in_authelia_mode(fleet_home, capsys):
+    _write_authelia_registry(fleet_home)
+    instance_dir = fleet_home / "instances" / "demo--main"
+    (instance_dir / ".fleet").mkdir(parents=True)
+    (instance_dir / ".fleet" / "instance.yml").write_text(
+        "project: demo\nbranch: main\ntemplate: default\n", encoding="utf-8"
+    )
+
+    rc = cli.main(
+        ["--fleet-home", str(fleet_home), "redeploy", "demo--main", "--auth-password", "secret"]
+    )
+
+    assert rc == 1
+    assert capsys.readouterr().err.strip() == _AUTH_PASSWORD_REJECTED_MESSAGE
+
+
+def test_bulk_redeploy_rejects_auth_password_in_authelia_mode_before_confirmation(
+    fleet_home, capsys, monkeypatch
+):
+    """The reject check must fire BEFORE the multi-target confirmation
+    prompt (spec: no --yes, no stdin needed to hit the rejection) — a
+    non-interactive run must never hang on `input()` first and only then
+    fail for an unrelated reason."""
+    _write_authelia_registry(fleet_home)
+    for label in ("one", "two"):
+        instance_dir = fleet_home / "instances" / f"demo--{label}"
+        (instance_dir / ".fleet").mkdir(parents=True)
+        (instance_dir / ".fleet" / "instance.yml").write_text(
+            "project: demo\nbranch: main\ntemplate: default\n", encoding="utf-8"
+        )
+
+    def _boom(*args, **kwargs):
+        raise AssertionError("input() must not be reached — reject happens first")
+
+    monkeypatch.setattr("builtins.input", _boom)
+
+    rc = cli.main(
+        [
+            "--fleet-home",
+            str(fleet_home),
+            "redeploy",
+            "demo--one",
+            "demo--two",
+            "--auth-password",
+            "secret",
+        ]
+    )
+
+    assert rc == 1
+    assert capsys.readouterr().err.strip() == _AUTH_PASSWORD_REJECTED_MESSAGE
+
+
 def test_deploy_auth_password_flag_overrides_default(fleet_home, monkeypatch, capsys):
     _write_minimal_registry(fleet_home)
     captured = {}
@@ -1222,6 +1291,11 @@ def _stub_caddyauth_rotate(monkeypatch, recorder):
 
 
 def test_set_admin_password_calls_rotate_with_given_password(fleet_home, monkeypatch, capsys):
+    """Break-glass regression guard: `set-admin-password` must keep working
+    in basic mode with NO fleet.yml/config dir present at all — it must
+    never call `load_registry()` (which would raise RegistryError) outside
+    the Authelia branch."""
+    assert not (fleet_home / "config" / "fleet.yml").exists()
     recorder = []
     _stub_caddyauth_rotate(monkeypatch, recorder)
 
@@ -1288,6 +1362,55 @@ def test_rotate_admin_password_propagates_caddy_auth_error(fleet_home, monkeypat
 
     assert exit_code == 1
     assert "reload failed" in capsys.readouterr().err
+
+
+def test_set_admin_password_authelia_mode_writes_admin_and_users_yml_no_caddy_rotate(
+    fleet_home, monkeypatch, capsys
+):
+    """In Authelia mode, set-admin-password must write admin.yml + re-render
+    users.yml and must NEVER call caddyauth.rotate (no Caddy snippet, no
+    reload — Authelia's file watcher picks up users.yml on its own)."""
+    _write_authelia_registry(fleet_home)
+
+    def _unexpected_rotate(*args, **kwargs):
+        raise AssertionError("caddyauth.rotate must not be called in Authelia mode")
+
+    monkeypatch.setattr(cli.caddyauth, "rotate", _unexpected_rotate)
+
+    exit_code = cli.main(
+        ["--fleet-home", str(fleet_home), "set-admin-password", "correct-horse-battery"]
+    )
+
+    assert exit_code == 0
+    assert "Authelia mode" in capsys.readouterr().out
+
+    from fleet.core import authelia
+    from fleet.core import instances as instances_mod_real
+
+    paths = instances_mod_real.FleetPaths.from_home(fleet_home)
+    admin = authelia.load_admin(path=paths.authelia_admin)
+    assert admin is not None
+    assert admin.name == "admin"
+    users_data = authelia._load_existing_hashes(paths.authelia_users)
+    assert "admin" in users_data
+
+
+def test_rotate_admin_password_authelia_mode_writes_admin_and_users_yml_no_caddy_rotate(
+    fleet_home, monkeypatch, capsys
+):
+    _write_authelia_registry(fleet_home)
+
+    def _unexpected_rotate(*args, **kwargs):
+        raise AssertionError("caddyauth.rotate must not be called in Authelia mode")
+
+    monkeypatch.setattr(cli.caddyauth, "rotate", _unexpected_rotate)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "rotate-admin-password"])
+
+    assert exit_code == 0
+    out = capsys.readouterr().out
+    assert "Authelia mode" in out
+    assert "will not be shown again" in out
 
 
 # --- refresh-instance-config dispatch ---

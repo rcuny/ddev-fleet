@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-22
+Last updated: 2026-09-27
 Type: documentation
 ---
 
@@ -50,6 +50,11 @@ rendered by the `caddy` Ansible role from its own `fleet_domain` variable
 fleet user, mode `0644`. It is intentionally an open schema — unknown keys
 are ignored, so more host-level settings can be added later without a
 migration.
+
+`host.yml` also carries `auth_mode: basic | authelia` — see "Auth modes
+and `users:`" below — the same per-host rationale applies: one shared
+`fleet.yml` can still run basic auth on one server and Authelia on
+another.
 
 **Precedence:** `host.yml`'s `domain` wins whenever the file exists and sets
 it — even if `fleet.yml`'s own `fleet.domain` also has a (different) value;
@@ -421,7 +426,7 @@ server to pull the update (a plain `git fetch --quiet && git pull
 i.e. you're still on local-file mode). `fleet init` never re-clones an
 existing `config/` checkout and never overwrites an existing `fleet.yml` —
 both modes are safe to re-run. Full first-run walkthrough, including this
-mode: `docs/installation.md` §4.
+mode: `docs/installation.md` §6.
 
 ## See also
 
@@ -435,34 +440,44 @@ mode: `docs/installation.md` §4.
   the git-identity-injection mechanism in more depth.
 
 
-## `fleet.auth_bypass_cidrs` — skip basic auth for known networks
+## Auth modes and `users:` — Authelia as an alternative to basic auth
 
-Optional, top-level under `fleet:` — a per-server list of IP addresses / CIDR
-ranges whose visitors are **not** prompted for per-instance basic auth:
+Full design, install/switch instructions, and troubleshooting:
+`docs/README-authelia.md`. Summary of the registry-facing pieces:
 
-```yaml
-fleet:
-  domain: fleet.example.com
-  auth_bypass_cidrs:
-    - 203.0.113.31/32      # office egress
-    - 203.0.113.80/29     # branch office range
-    - 9.9.9.9              # bare address == /32
-```
+- **`host.yml`'s `auth_mode: basic | authelia`** (server-level, see above)
+  picks which per-instance auth mechanism Caddy enforces. Absent means
+  `basic` — today's default behaviour, unchanged.
+- **`users:`** — a per-project list, only meaningful in `authelia` mode:
 
-| Rule | Behaviour |
-|---|---|
-| Not listed | Basic auth prompt, as before. **The prompt is the default** — no deny entry is needed or supported. |
-| Listed | No prompt for any instance on this fleet. |
-| Instance deployed `--no-auth` | No prompt for anyone; the whitelist is irrelevant. |
-| Invalid entry | `fleet.yml` fails to load with a `RegistryError` naming the entry. |
+  ```yaml
+  projects:
+    myproject:
+      users:
+        - name: alice
+          password: some-plaintext-password   # hashed (argon2id) only when rendering users.yml
+        - name: bob
+          password: another-password
+  ```
 
-Entries are normalised to canonical CIDR (`198.51.100.191/29` →
-`198.51.100.184/29`) and de-duplicated. The list is written into every
-instance's Caddy snippet as `not remote_ip …`, which matches the **direct
-peer address** — correct here because Caddy is the edge, but wrong if a CDN
-is ever placed in front of it.
+  Names match `^[a-z0-9._-]+$`; `admins` is reserved (it's the dashboard's
+  own required group); the same name must carry the same password in
+  every project that lists it — `fleet.yml` fails to load with a
+  `RegistryError` naming the conflict otherwise. Each project's `users:`
+  becomes that project's Authelia group; a user reaches an instance when
+  their groups contain that instance's project name or `admins`.
+- Apply a `users:` edit with **`fleet refresh-auth`** — re-renders
+  `users.yml` (hot-reloaded by Authelia's file backend, `watch: true` — no
+  restart, nobody is logged out) and every instance's Caddy snippet, then
+  one `caddy validate` + `caddy reload`.
 
-The list is fleet-wide, so a new instance picks it up at deploy time and
-existing instances pick it up with **`fleet refresh-auth`** (rewrites every
-instance snippet, then one `caddy validate` + `caddy reload`). A failed
-validate means Caddy keeps serving the previous config.
+## `fleet.auth_bypass_cidrs` — deprecated, see `docs/README-authelia.md`
+
+**Deprecated.** This per-server CIDR whitelist used to let known networks
+skip the per-instance basic-auth prompt entirely. It is now accepted in
+`fleet.yml` only for backward compatibility — `Registry.load` logs a
+deprecation warning naming the key and otherwise **ignores it entirely**:
+no code path enforces it any more, in either auth mode. Networks that need
+to bypass HTTP basic auth outright should switch the server to **Authelia
+auth mode** instead (`docs/README-authelia.md`), which replaces the
+whole-fleet IP whitelist with per-project login.

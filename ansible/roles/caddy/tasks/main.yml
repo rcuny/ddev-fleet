@@ -49,9 +49,10 @@
     group: "{{ fleet_group }}"
     mode: "0644"
     content: |
-      # managed by Ansible (caddy role) from fleet_domain — per-host; do not
-      # put this in the shared config repo
+      # managed by Ansible (caddy role) from fleet_domain/fleet_auth_mode —
+      # per-host; do not put this in the shared config repo
       domain: {{ fleet_domain }}
+      auth_mode: {{ fleet_auth_mode }}
 
 - name: Ensure the fleet-owned Caddy credential snippet directory exists
   # setgid (the leading "2" in mode 2750): Caddy runs as User=caddy and

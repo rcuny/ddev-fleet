@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-25
+Last updated: 2026-09-28
 Type: documentation
 ---
 
@@ -43,7 +43,8 @@ shell's own (unrelated) DDEV setup.
 | `core/ttycmds.py` | Resolves an instance's `tty1`/`tty2` template commands into a `TtyPlan` (substituted commands + skip reasons for any left unresolved) — the one implementation shared by `deploy()`'s tmux hook (already knows project/label/branch/template) and `fleet tmux`'s `reconcile()` (recovers them from `.fleet/instance.yml`'s `template:` field, written at deploy time). Keeps `core/tmux.py` registry-agnostic — it only ever sees plain command lists |
 | `core/secrets.py` | Read/write `KEY=VALUE` files (0600) — both the fleet-wide `.secrets` and per-project `secrets/<project>.env` |
 | `core/typesense.py` | Generates/persists per-project Typesense admin+search-only keys, registers the search-only key against a running instance's Typesense admin API |
-| `core/caddyauth.py` | Rotates the Caddy dashboard `basic_auth` password WITHOUT Ansible: hashes via `caddy hash-password`, atomically rewrites the fleet-owned snippet `/etc/caddy/fleet/admin-auth.conf` (imported by `Caddyfile.j2`, seeded once by the `caddy` Ansible role), `caddy validate`s, then reloads Caddy via `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019 — no sudo, no privilege escalation, works under `fleet.service`'s `NoNewPrivileges=yes` sandbox). Backs `fleet set-admin-password` / `fleet rotate-admin-password` | Per-instance snippets additionally carry the fleet-wide `fleet.auth_bypass_cidrs` whitelist as a `not remote_ip …` clause inside the `@auth-<id>` matcher, so listed networks are never prompted (the matcher guards `basic_auth` only — it never denies). `instances.sync_instance_auth()` (CLI `fleet refresh-auth`) re-renders every instance snippet from that list + each instance's recorded auth settings, with a single validate/reload for the whole fleet. `ensure_snippet_dir()` guards every snippet write: under `MANAGED_SNIPPET_ROOT` (`/etc/caddy`) the directory must already exist AND keep its setgid bit, else the write is refused with the repair command — a plain mkdir there loses setgid and makes every later snippet unreadable by Caddy (silent until Caddy restarts; cost ddev2 a week of downtime). `core/caddyports.py` re-raises that as `CaddyPortsError`
+| `core/authelia.py` | Authelia admin account + `users.yml` management (spec §4.3): argon2id hashing (`hash_password`/`_verify`), atomic writes, and `render_users()` builds the file-backend `users.yml` from the registry's per-project `users:` plus the installer admin (always sole member of the `admins` group). Reuses an existing hash whenever the plaintext hasn't changed, so an unrelated `fleet.yml` edit doesn't churn `users.yml` (and thus doesn't trigger Authelia's file-watcher) for untouched users. Never touches Caddy or systemd — that's `core/caddyauth.py`'s and Ansible's job. Raises `AutheliaError` |
+| `core/caddyauth.py` | Rotates the Caddy dashboard `basic_auth` password WITHOUT Ansible: hashes via `caddy hash-password`, atomically rewrites the fleet-owned snippet `/etc/caddy/fleet/admin-auth.conf` (imported by `Caddyfile.j2`, seeded once by the `caddy` Ansible role), `caddy validate`s, then reloads Caddy via `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019 — no sudo, no privilege escalation, works under `fleet.service`'s `NoNewPrivileges=yes` sandbox). Backs `fleet set-admin-password` / `fleet rotate-admin-password`. **Mode-aware, no more CIDR whitelist**: `enable_instance_auth(..., auth_mode=)` picks between `write_instance_auth_snippet` (basic mode, `basic_auth`, unchanged) and `write_instance_authelia_snippet` (Authelia mode: strips client `Remote-*` headers, `forward_auth`s to Authelia, then requires `Remote-Groups` to contain the instance's project or `admins`, all inside a `route` block — Caddy's directive reordering otherwise strips the very header the group check needs). The two are never both written for the same server — `auth_mode` is server-wide (`Registry.auth_mode`), not per-instance. The old `fleet.auth_bypass_cidrs` `not remote_ip …` clause is gone; the key is now accepted with a deprecation warning and otherwise ignored (see `core/registry.py`). `instances.sync_instance_auth()` (CLI `fleet refresh-auth`) re-renders every instance snippet (mode-appropriate) from the registry + each instance's recorded auth settings, with a single validate/reload for the whole fleet. `ensure_snippet_dir()` guards every snippet write: under `MANAGED_SNIPPET_ROOT` (`/etc/caddy`) the directory must already exist AND keep its setgid bit, else the write is refused with the repair command — a plain mkdir there loses setgid and makes every later snippet unreadable by Caddy (silent until Caddy restarts; cost ddev2 a week of downtime). `core/caddyports.py` re-raises that as `CaddyPortsError`
 | `core/caddyports.py` | Reconciles fleet-owned Caddy named-port exposure snippets (`/etc/caddy/fleet/ports/<name>.conf`) to `Registry.all_port_profiles()` — one snippet per port NAME with ≥1 subscribing project (Typesense, Playwright reports, etc.), imported by `Caddyfile.j2` via a glob. Mirrors `caddyauth.py`'s write/validate/reload pattern (`sync()`: atomic write → `caddy validate` → `caddy reload`, one batch per call) but raises the sibling `CaddyPortsError`, not `CaddyAuthError`. Called from `core/instances.py`'s `deploy()`/`destroy()`, the `fleet refresh-ports` CLI command, and once at daemon startup as a safety net |
 | `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race. Also owns the shared `ALLOCATION_LOCK_ID = "_multideploy"` constant — the same on-disk lock file `core/bulk.py`'s `multi_deploy()` and `core/instances.py:deploy()`'s own label-allocation step both take, so a single deploy and a bulk deploy can never allocate the same id |
 | `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe). Two label allocators, deliberately not merged: `allocate_multi_deploy_labels()` (batch of N, always suffixed `-1`, `-2`, … — a batch has no single "the" instance to give the bare name to) for `deploy --count`/`multi_deploy()`, and `allocate_free_label()` (single free label, returns the BARE base when free) for a plain `deploy()`'s never-overwrite behavior |
@@ -83,7 +84,7 @@ don't assume they're the same). From `/opt/ddev-fleet` on the server, or
 this repo's checkout locally:
 
 ```bash
-.venv/bin/pytest -q          # 951 tests as of 2026-09-23
+.venv/bin/pytest -q          # 1009 passed, 4 skipped as of 2026-09-28
 .venv/bin/ruff check .
 .venv/bin/black --check .
 ```
@@ -209,6 +210,10 @@ it. Neither role has a `core/` Python module of its own.
   admin password, deploy keys, Claude token mint, live-verification items).
 - `docs/operations.md` — the ongoing code-update procedure, rollback, and
   admin-password rotation.
+- `docs/runbook-server-rollout.md` — the routine rollout precondition
+  (`/opt/ddev-fleet` must be a clean checkout) and the domain-change
+  procedure for existing instances (`refresh-instance-config` per
+  instance, and its `settings.local.php` gap/workaround).
 - `docs/README-typesense.md` — the Typesense browser-search exposure design
   in full (topology, keys, env vars, reindexing, reachability caveat).
 - `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing
