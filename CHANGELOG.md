@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.7.2] - 2026-10-05
+
+### Fixed
+- **FLE-5: in-container `git push` failed on every instance after a reboot.** DDEV's ssh-agent is shared by all projects and starts empty after a reboot, and `start()` (`fleet start`, `fleet start --all`, `fleet-boot.service`) never loaded the read-write push key — only `deploy()` did — so a project pre-start hook could leave just the read-only deploy key in the agent. `start()` now clears the shared agent and loads only the push key after a successful `ddev start` (including after the port-conflict stop+start retry), via a helper shared with `deploy()`. A push-key problem only warns and never fails a start; a server with no push-key directory skips the step.
+
 ## [0.7.1] - 2026-10-05
 
 ### Fixed
@@ -265,7 +270,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.7.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.7.2...HEAD
+[0.7.2]: https://github.com/rcuny/ddev-fleet/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rcuny/ddev-fleet/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rcuny/ddev-fleet/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rcuny/ddev-fleet/compare/v0.5.0...v0.6.0
