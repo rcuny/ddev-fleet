@@ -10,13 +10,28 @@ Requires=docker.service
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+# Type=exec (NOT oneshot) is deliberate. systemd considers a Type=exec unit
+# started as soon as ExecStart has been exec'd, so multi-user.target completes
+# immediately and the sequential batch keeps running in the background. With
+# Type=oneshot, multi-user.target (which this unit is WantedBy) would not
+# complete until the whole `fleet start --all` batch finished — and the
+# Authelia .deb unit has After=multi-user.target, so Authelia (and with it
+# Caddy's forward_auth, i.e. every public URL) 502'd for the full duration of
+# the batch after a reboot (FLE-4). The vendor After= cannot be reset from a
+# drop-in, so the fix lives here. Do NOT add Before=/After= ordering against
+# multi-user.target or authelia.service: it would re-create the blocking.
+Type=exec
+# RemainAfterExit=no: the unit goes inactive when the batch ends; the
+# progress/result log stays in the journal (`journalctl -u fleet-boot -b`).
+# If `fleet start --all` exits non-zero (some instance failed) the unit is
+# marked `failed` — intentional, it makes a partial boot failure visible in
+# `systemctl --failed`.
 RemainAfterExit=no
-# Starting every instance sequentially can take many minutes on a fleet with
-# a large instance count (one `ddev start` at a time, deliberately — see
-# ExecStart comment below). Do NOT let systemd's default 90s start timeout
-# kill this mid-batch.
-TimeoutStartSec=0
+# No TimeoutStartSec=0 any more: under Type=exec the start phase ends as soon
+# as the process is exec'd, so the start timeout no longer bounds the batch
+# (and there is no RuntimeMaxSec, so a long batch is never killed by systemd).
+# Starting every instance sequentially can take many minutes on a big fleet
+# (one `ddev start` at a time, deliberately — see ExecStart comment below).
 # Same identity/venv/env pattern as fleet.service.j2 (User={{ fleet_user }},
 # WorkingDirectory={{ fleet_opt_dir }}, EnvironmentFile from .secrets) —
 # invoking the venv's `fleet` entrypoint directly, NOT the /usr/local/bin/fleet
@@ -31,8 +46,7 @@ TimeoutStartSec=0
 # (e.g. an ssh-agent passphrase prompt blocking forever in this
 # non-interactive boot context) it is killed and recorded as a failed
 # instance, and the batch moves on to the next one instead of stalling
-# forever — TimeoutStartSec=0 above still lets the whole batch legitimately
-# run long across many instances. --retry-port-conflict is a SEPARATE
+# forever — the whole batch is free to run long across many instances. --retry-port-conflict is a SEPARATE
 # self-heal for a different failure mode: even run one-at-a-time, some
 # instances' `ddev start` FAST-FAILs on a Docker port-allocation race (the
 # db container's host port hasn't been released by the kernel yet — error

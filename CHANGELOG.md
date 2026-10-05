@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Nothing yet.
 
+## [0.7.1] - 2026-10-05
+
+### Fixed
+- **FLE-4: every public URL returned 502 after a reboot until all instances had started.** `fleet-boot.service` is now `Type=exec` instead of `Type=oneshot`, so it no longer holds up `multi-user.target` (which the Authelia unit is ordered after); the dashboard and Authelia come up immediately while instances keep starting sequentially in the background.
+
 ## [0.7.0] - 2026-10-05
 
 ### Added
@@ -260,7 +265,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.7.1...HEAD
+[0.7.1]: https://github.com/rcuny/ddev-fleet/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rcuny/ddev-fleet/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/rcuny/ddev-fleet/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/rcuny/ddev-fleet/compare/v0.4.0...v0.5.0
