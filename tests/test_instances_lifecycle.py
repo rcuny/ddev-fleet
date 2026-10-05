@@ -288,6 +288,136 @@ def test_start_without_retry_flag_does_not_retry_port_conflict(fleet_home, git_r
     assert runner.calls == [["ddev", "start"]]
 
 
+# --- start() reloads the push key into the shared ddev ssh-agent (FLE-5) ---
+
+SSH_ADD_CLEAR = ["ddev", "exec", "ssh-add", "-D"]
+
+
+def _auth_ssh(paths):
+    return ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)]
+
+
+def test_start_loads_push_key_after_ddev_start(fleet_home, git_repo):
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    paths.push_key_dir.mkdir(parents=True)
+    runner = _make_counting_runner([(0, [])])
+
+    instances.start(paths, registry, "demo--develop", runner=runner)
+
+    assert runner.calls == [["ddev", "start"], SSH_ADD_CLEAR, _auth_ssh(paths)]
+
+
+def test_start_does_not_load_push_key_when_ddev_start_fails(fleet_home, git_repo):
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    paths.push_key_dir.mkdir(parents=True)
+    runner = _make_counting_runner([(1, ["some unrelated ddev start failure"])])
+
+    with pytest.raises(FleetError):
+        instances.start(paths, registry, "demo--develop", runner=runner)
+
+    assert runner.calls == [["ddev", "start"]]
+
+
+def test_start_loads_push_key_after_port_conflict_retry_succeeds(fleet_home, git_repo):
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    paths.push_key_dir.mkdir(parents=True)
+    runner = _make_counting_runner(
+        [
+            (1, ["Bind for 127.0.0.1:32839 failed: port is already allocated"]),
+            (0, []),  # ddev stop, ddev start (retry), ssh-add -D, ddev auth ssh
+        ]
+    )
+
+    instances.start(paths, registry, "demo--develop", retry_port_conflict=True, runner=runner)
+
+    assert runner.calls == [
+        ["ddev", "start"],
+        ["ddev", "stop"],
+        ["ddev", "start"],
+        SSH_ADD_CLEAR,
+        _auth_ssh(paths),
+    ]
+
+
+def test_start_does_not_load_push_key_when_retry_also_fails(fleet_home, git_repo):
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    paths.push_key_dir.mkdir(parents=True)
+    runner = _make_counting_runner(
+        [(1, ["port is already allocated"]), (0, []), (1, ["port is already allocated"])]
+    )
+
+    with pytest.raises(FleetError):
+        instances.start(paths, registry, "demo--develop", retry_port_conflict=True, runner=runner)
+
+    assert runner.calls == [["ddev", "start"], ["ddev", "stop"], ["ddev", "start"]]
+
+
+def test_start_push_key_auth_failure_warns_but_start_succeeds(fleet_home, git_repo, capsys):
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    paths.push_key_dir.mkdir(parents=True)
+    runner = _make_counting_runner([(0, []), (0, []), (1, ["no keys"])])
+
+    instances.start(paths, registry, "demo--develop", runner=runner)  # must not raise
+
+    assert runner.calls == [["ddev", "start"], SSH_ADD_CLEAR, _auth_ssh(paths)]
+    assert "WARNING: ddev auth ssh returned 1" in capsys.readouterr().out
+
+
+def test_start_push_key_runner_exception_warns_but_start_succeeds(fleet_home, git_repo, capsys):
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    paths.push_key_dir.mkdir(parents=True)
+    calls: list[list[str]] = []
+
+    def runner(cmd, *, cwd=None, env=None, log_path=None, echo=True, timeout=None):
+        calls.append(list(cmd))
+        if cmd[:2] == ["ddev", "exec"]:
+            raise FleetError("web container not running")
+        return RunResult(returncode=0, lines=[])
+
+    instances.start(paths, registry, "demo--develop", runner=runner)  # must not raise
+
+    assert calls == [["ddev", "start"], SSH_ADD_CLEAR]
+    assert "WARNING: push-key load failed" in capsys.readouterr().out
+
+
+def test_start_skips_push_key_when_push_key_dir_missing(fleet_home, git_repo, capsys):
+    """A server with no push key must keep starting instances exactly as before."""
+    paths, registry = _deploy_demo_develop(fleet_home, git_repo)
+    assert not paths.push_key_dir.exists()
+    runner = _make_counting_runner([(0, [])])
+
+    instances.start(paths, registry, "demo--develop", runner=runner)
+
+    assert runner.calls == [["ddev", "start"]]
+    assert "skipping push-key load" in capsys.readouterr().out
+
+
+def test_deploy_loads_push_key_exactly_once(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    cmds = [call["cmd"] for call in runner.calls]
+    assert cmds.count(SSH_ADD_CLEAR) == 1
+    assert cmds.count(_auth_ssh(paths)) == 1
+
+
+def test_deploy_still_loads_push_key_when_push_key_dir_missing(fleet_home, git_repo):
+    """deploy() keeps its pre-FLE-5 behaviour: it does not skip on a missing dir."""
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    assert not paths.push_key_dir.exists()
+    runner = HybridRunner()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    assert _auth_ssh(paths) in [call["cmd"] for call in runner.calls]
+
+
 # --- destroy() cleans up the per-instance Caddy auth snippet ---
 
 

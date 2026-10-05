@@ -5,6 +5,7 @@ import logging
 import os
 import shutil
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -357,6 +358,63 @@ def _preflight_rebuild(
             ) from exc
 
 
+def _load_push_key(
+    instance_dir: Path,
+    paths: FleetPaths,
+    runner,
+    *,
+    log: Callable[[str], None],
+    log_path: Path | None = None,
+    skip_if_missing: bool = False,
+) -> bool:
+    """Load ONLY the read-write push key into the shared ddev ssh-agent.
+
+    Must run AFTER a successful `ddev start` (it needs the web container for
+    `ddev exec`). DDEV uses ONE ssh-agent shared by every project, and it
+    starts empty after a host reboot — so this runs from deploy() AND from
+    start() (fleet start / fleet start --all / fleet-boot.service). Clear the
+    SHARED agent first, then load ONLY the push key — otherwise a read-only
+    deploy key lingering in it (e.g. loaded by a project's own pre-start hook)
+    is offered first and Bitbucket denies the in-container push. Idempotent.
+
+    Never raises on a failed `ddev auth ssh`: it warns via `log` and returns
+    False (the instance is up either way). With `skip_if_missing` a push-key
+    directory that doesn't exist is a logged no-op (servers without a push key
+    must keep starting); deploy() leaves it False to keep its old behaviour.
+    Returns True only when the push key was loaded."""
+    if skip_if_missing and not paths.push_key_dir.is_dir():
+        log(f"push key directory {paths.push_key_dir} not found; skipping push-key load")
+        return False
+    runner(["ddev", "exec", "ssh-add", "-D"], cwd=instance_dir, log_path=log_path)
+    auth_result = runner(
+        ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)],
+        cwd=instance_dir,
+        log_path=log_path,
+    )
+    if auth_result.returncode != 0:
+        log(
+            f"WARNING: ddev auth ssh returned {auth_result.returncode}; "
+            "in-container git push may fail"
+        )
+        return False
+    return True
+
+
+def _reload_push_key_after_start(
+    instance_id: str, instance_dir: Path, paths: FleetPaths, runner
+) -> None:
+    """Best-effort push-key reload for start(): a push-key problem must NEVER
+    fail an instance start (the instance is already up)."""
+
+    def log(message: str) -> None:
+        print(f"{instance_id}: {message}")
+
+    try:
+        _load_push_key(instance_dir, paths, runner, log=log, skip_if_missing=True)
+    except Exception as exc:  # noqa: BLE001 — warn-only by design
+        log(f"WARNING: push-key load failed: {exc}; in-container git push may fail")
+
+
 def deploy(
     paths: FleetPaths,
     registry: Registry,
@@ -697,22 +755,13 @@ def deploy(
                     "search may not work until it is re-registered",
                 )
 
-        # Push-key setup runs AFTER `ddev start` (it needs the web container for
-        # `ddev exec`). Clear the SHARED ddev ssh-agent first, then load ONLY the
-        # read-write push key — otherwise a read-only deploy key lingering in the
-        # shared agent is offered first and Bitbucket denies the in-container push.
-        runner(["ddev", "exec", "ssh-add", "-D"], cwd=instance_dir, log_path=deploy_log)
-        auth_result = runner(
-            ["ddev", "auth", "ssh", "-d", str(paths.push_key_dir)],
-            cwd=instance_dir,
+        _load_push_key(
+            instance_dir,
+            paths,
+            runner,
+            log=lambda message: _append_log(deploy_log, message),
             log_path=deploy_log,
         )
-        if auth_result.returncode != 0:
-            _append_log(
-                deploy_log,
-                f"WARNING: ddev auth ssh returned {auth_result.returncode}; "
-                "in-container git push may fail",
-            )
 
         env = env_vars(context)
         for command in resolved.post_deploy:
@@ -1254,10 +1303,12 @@ def start(
                     raise FleetError(
                         f"ddev start failed for {instance_id!r} with exit code {result.returncode}"
                     )
+                _reload_push_key_after_start(instance_id, instance_dir, paths, runner)
                 return
             raise FleetError(
                 f"ddev start failed for {instance_id!r} with exit code {result.returncode}"
             )
+        _reload_push_key_after_start(instance_id, instance_dir, paths, runner)
 
 
 def stop(
