@@ -1,0 +1,104 @@
+# Bitbucket Pipelines — the canonical CI for ddev-fleet (Bitbucket is the
+# source of truth; GitHub is a read-only public mirror published from here).
+#
+#   pull request (any branch)  -> gates (pytest, ruff, black)
+#   push to develop            -> gates, then mirror develop to GitHub
+#   tag v*  (release)          -> gates, then publish main + the tag to GitHub
+#   custom: renovate           -> dependency-update PRs against develop.
+#                                 When it runs is decided ONLY here in
+#                                 Bitbucket (Pipelines -> Schedules: branch
+#                                 develop, custom: renovate, daily) or by a
+#                                 manual run; renovate-config.json has no
+#                                 schedule of its own.
+#
+# Repository variables to configure (Repository settings -> Pipelines):
+#   GITHUB_MIRROR_URL  SSH URL of the GitHub mirror repo (git@github.com:...).
+#                      Unset/empty = the mirror steps skip, so forks stay inert.
+#   GITHUB_COM_TOKEN   (secured) read-only GitHub token; lets Renovate fetch
+#                      release notes without hitting anonymous rate limits.
+#   RENOVATE_USERNAME  (secured) Atlassian account email used by Renovate.
+#   RENOVATE_PASSWORD  (secured) Atlassian API token (repository read/write,
+#                      pull requests read/write) for that account.
+# Plus, under Repository settings -> Pipelines -> SSH keys: a key pair whose
+# public half is a GitHub deploy key WITH WRITE ACCESS on the mirror repo.
+# (github.com's host key is managed by Bitbucket itself: no "Known hosts"
+# entry is needed, and adding one is refused.)
+#
+# Mirror pushes are never forced: if GitHub has diverged, the step fails
+# loudly instead of rewriting public history.
+
+image: python:3.11 # full image on purpose: the tests run real `git`
+
+definitions:
+  steps:
+    - step: &gates
+        name: Gates (pytest, ruff, black)
+        caches:
+          - pip
+        script:
+          # rsync: core/assets.py shells out to it (asset injection tests)
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync > /dev/null
+          - pip install -q -e ".[dev]"
+          - pytest -q
+          - ruff check .
+          - black --check .
+
+pipelines:
+  pull-requests:
+    "**":
+      - step: *gates
+
+  branches:
+    develop:
+      - step: *gates
+      - step:
+          name: Mirror develop to GitHub
+          image: atlassian/default-image:5
+          clone:
+            depth: full
+          script:
+            - |
+              if [ -z "${GITHUB_MIRROR_URL:-}" ]; then
+                echo "GITHUB_MIRROR_URL not set, skipping mirror"
+                exit 0
+              fi
+              git fetch origin "+refs/heads/develop:refs/remotes/origin/develop"
+              if [ "$(git rev-parse origin/develop)" != "$BITBUCKET_COMMIT" ]; then
+                echo "newer develop exists, skipping (its own pipeline mirrors it)"
+                exit 0
+              fi
+              git push "$GITHUB_MIRROR_URL" "$BITBUCKET_COMMIT:refs/heads/develop"
+
+  tags:
+    "v*":
+      - step: *gates
+      - step:
+          name: Publish release to GitHub mirror
+          image: atlassian/default-image:5
+          clone:
+            depth: full
+          script:
+            - |
+              if [ -z "${GITHUB_MIRROR_URL:-}" ]; then
+                echo "GITHUB_MIRROR_URL not set, skipping mirror"
+                exit 0
+              fi
+              git fetch origin "+refs/heads/main:refs/remotes/origin/main" "+refs/tags/$BITBUCKET_TAG:refs/tags/$BITBUCKET_TAG"
+              # Releases are tagged on main. A tag on any other commit would
+              # fast-forward GitHub's main to it, and servers deploy main.
+              if [ "$(git rev-parse origin/main)" != "$BITBUCKET_COMMIT" ]; then
+                echo "ERROR: tag $BITBUCKET_TAG ($BITBUCKET_COMMIT) is not the tip of main; refusing to publish" >&2
+                exit 1
+              fi
+              git push "$GITHUB_MIRROR_URL" "$BITBUCKET_COMMIT:refs/heads/main" "refs/tags/$BITBUCKET_TAG"
+
+  custom:
+    renovate:
+      - step:
+          name: Renovate
+          # Renovate's own bitbucket-pipelines manager bumps this tag.
+          # No pipeline cache on purpose: a daily run on one small repo is
+          # cheap, and the image runs as a non-root user (cache dir ownership).
+          image: renovate/renovate:44
+          script:
+            - RENOVATE_CONFIG_FILE="$BITBUCKET_CLONE_DIR/renovate-config.json" RENOVATE_REPOSITORIES="$BITBUCKET_REPO_FULL_NAME" renovate

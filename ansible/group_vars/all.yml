@@ -28,6 +28,15 @@ fleet_opt_dir: /opt/ddev-fleet
 # --- fleet daemon (spec §3.4, §13) ------------------------------------------
 fleet_daemon_port: 8765
 
+# --- systemd sandboxing (FLE-1) ---------------------------------------------
+# Sandboxes fleet.service, fleet-boot.service, fleet-reboot-notify.service
+# (ProtectSystem=strict, syscall filter, no capabilities, ...) and adds a
+# Caddy drop-in (caddy.service.d/50-fleet-sandbox.conf). Validated on a live
+# server, incl. a full `ddev start`. Set false to fall back to the pre-FLE-1
+# units (the Caddy drop-in is then removed). See docs/operations.md
+# "systemd sandboxing". Templates read it with `| default(true)`.
+fleet_systemd_sandbox_enabled: true
+
 # --- DDEV router (spec §9.2) -------------------------------------------------
 ddev_router_http_port: 8080
 ddev_router_https_port: 8443

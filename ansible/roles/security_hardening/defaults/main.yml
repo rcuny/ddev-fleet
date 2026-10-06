@@ -23,3 +23,23 @@ fleet_msmtp_port: 587
 fleet_msmtp_tls: true
 fleet_msmtp_from: ""
 fleet_msmtp_to: ""
+
+# --- systemd security check (FLE-1) ------------------------------------------
+# At the end of harden.yml, score each installed unit below with
+# `systemd-analyze security` (0 = locked down ... 10 = no sandbox) and print a
+# summary, so a sandbox drop-in that silently stopped applying (renamed vendor
+# unit, typo, fleet_systemd_sandbox_enabled: false) shows up at provisioning
+# time. Units that are not installed (e.g. authelia in basic auth mode) are
+# skipped.
+fleet_systemd_security_check_enabled: true
+# Per-unit maximum acceptable exposure on systemd's 0-100 threshold scale
+# (25 = 2.5 on the 0-10 scale `systemd-analyze security` prints).
+fleet_systemd_security_thresholds:
+  fleet.service: 25
+  fleet-boot.service: 25
+  fleet-reboot-notify.service: 25
+  caddy.service: 25
+  authelia.service: 35
+# false (default): a unit over its threshold only logs a WARNING.
+# true: it fails the play.
+fleet_systemd_security_enforce: false

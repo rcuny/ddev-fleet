@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fleet.core.errors import RegistryError
-from fleet.core.registry import PortProfile, Registry
+from fleet.core.registry import JiraHookRule, PortProfile, Registry
 
 
 def _write(path: Path, text: str) -> Path:
@@ -941,6 +941,102 @@ projects:
 def test_issue_id_regexp_absent_returns_none(fleet_home, sample_registry_text):
     registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
     assert registry.issue_id_regexp("demo") is None
+
+
+def _jira_hooks_registry(fleet_home, hooks_yaml: str) -> Path:
+    """A one-project fleet.yml with a `jira-work` template and the given
+    `jira_hooks:` block (already indented under the project, or empty)."""
+    text = (
+        "fleet:\n"
+        "  domain: fleet.example.test\n"
+        "\n"
+        "projects:\n"
+        "  p:\n"
+        "    git: git@example.test:org/p.git\n"
+        "    templates:\n"
+        "      jira-work: {}\n" + hooks_yaml
+    )
+    return _write(fleet_home / "fleet.yml", text)
+
+
+def test_jira_hooks_valid(fleet_home):
+    path = _jira_hooks_registry(
+        fleet_home,
+        "    jira_hooks:\n"
+        "      - on_status: Dispatched\n"
+        "        action: deploy\n"
+        "        template: jira-work\n"
+        "      - on_status: Review\n"
+        "        action: deploy\n"
+        "        template: jira-work\n"
+        "        branch: develop\n",
+    )
+    registry = Registry.load(path)
+
+    assert registry.jira_hooks("p") == [
+        JiraHookRule("Dispatched", "deploy", "jira-work", None),
+        JiraHookRule("Review", "deploy", "jira-work", "develop"),
+    ]
+
+
+def test_jira_hooks_absent_is_empty(fleet_home):
+    registry = Registry.load(_jira_hooks_registry(fleet_home, ""))
+    assert registry.jira_hooks("p") == []
+
+
+def test_jira_hooks_unknown_project_raises(fleet_home):
+    registry = Registry.load(_jira_hooks_registry(fleet_home, ""))
+    with pytest.raises(RegistryError, match="unknown project"):
+        registry.jira_hooks("nope")
+
+
+@pytest.mark.parametrize(
+    "hooks_yaml",
+    [
+        pytest.param("    jira_hooks: {}\n", id="not-a-list"),
+        pytest.param("    jira_hooks: [x]\n", id="rule-not-a-mapping"),
+        pytest.param(
+            "    jira_hooks:\n      - {action: deploy, template: jira-work}\n",
+            id="missing-on-status",
+        ),
+        pytest.param(
+            '    jira_hooks:\n      - {on_status: "", action: deploy, template: jira-work}\n',
+            id="empty-on-status",
+        ),
+        pytest.param(
+            "    jira_hooks:\n      - {on_status: Done, action: destroy, template: jira-work}\n",
+            id="bad-action",
+        ),
+        pytest.param(
+            "    jira_hooks:\n      - {on_status: Done, action: deploy}\n",
+            id="missing-template",
+        ),
+        pytest.param(
+            "    jira_hooks:\n      - {on_status: Done, action: deploy, template: nope}\n",
+            id="unknown-template",
+        ),
+        pytest.param(
+            "    jira_hooks:\n"
+            "      - {on_status: Done, action: deploy, template: jira-work, when: x}\n",
+            id="unknown-key",
+        ),
+        pytest.param(
+            "    jira_hooks:\n"
+            "      - {on_status: Done, action: deploy, template: jira-work, branch: 3}\n",
+            id="branch-not-a-string",
+        ),
+        pytest.param(
+            "    jira_hooks:\n"
+            "      - {on_status: Dispatched, action: deploy, template: jira-work}\n"
+            "      - {on_status: dispatched, action: deploy, template: jira-work}\n",
+            id="duplicate-on-status-case-insensitive",
+        ),
+    ],
+)
+def test_jira_hooks_invalid(fleet_home, hooks_yaml):
+    path = _jira_hooks_registry(fleet_home, hooks_yaml)
+    with pytest.raises(RegistryError, match=r"projects\.p\.jira_hooks"):
+        Registry.load(path)
 
 
 def test_tty1_not_a_list_raises_with_full_path(fleet_home):

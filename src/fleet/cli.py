@@ -24,6 +24,7 @@ from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.core.runner import run_interactive, run_streamed
 from fleet.core.secrets import write_secret
+from fleet.core.webhooks import WebhookStore
 
 DEFAULT_FLEET_HOME = "/srv/fleet"
 
@@ -209,6 +210,19 @@ def _build_parser() -> argparse.ArgumentParser:
     secret_set_parser.add_argument("key")
     secret_set_parser.add_argument("value")
 
+    webhook_parser = subparsers.add_parser("webhook")
+    webhook_subparsers = webhook_parser.add_subparsers(dest="webhook_command", required=True)
+    webhook_secret_parser = webhook_subparsers.add_parser("secret")
+    webhook_secret_parser.add_argument("project")
+    webhook_secret_parser.add_argument(
+        "--rotate",
+        action="store_true",
+        help="replace an existing secret (Jira's Secret field must then be updated)",
+    )
+    webhook_log_parser = webhook_subparsers.add_parser("log")
+    webhook_log_parser.add_argument("--project", default=None)
+    webhook_log_parser.add_argument("-n", type=int, default=20, help="entries to show (default 20)")
+
     snapshot_parser = subparsers.add_parser("snapshot")
     snapshot_parser.add_argument("instance_id")
     snapshot_parser.add_argument(
@@ -323,6 +337,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_assets(fleet_home, args)
         elif args.command == "secret":
             _cmd_secret(fleet_home, args)
+        elif args.command == "webhook":
+            _cmd_webhook(fleet_home, args)
         elif args.command == "snapshot":
             _cmd_snapshot(fleet_home, args)
         elif args.command == "refresh-claude-token":
@@ -767,6 +783,49 @@ def _cmd_secret(fleet_home: Path, args: argparse.Namespace) -> None:
     if args.secret_command == "set":
         paths = instances_mod.FleetPaths.from_home(fleet_home)
         write_secret(paths.project_secrets / f"{args.project}.env", args.key, args.value)
+
+
+def _cmd_webhook(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    store = WebhookStore.from_paths(paths)
+    if args.webhook_command == "secret":
+        registry = instances_mod.load_registry(paths)
+        if not registry.has_project(args.project):
+            raise FleetError(f"unknown project {args.project!r}")
+        secret = store.create_secret(args.project, rotate=args.rotate)
+        # Secret alone on the first line so `fleet webhook secret p | head -1` works.
+        print(secret)
+        print(f"URL: https://{registry.domain}/hooks/jira/{args.project}")
+        print(
+            "Paste the secret into the Jira webhook's Secret field now. It is stored "
+            "server-side only (webhooks/secrets.env, mode 0600) and not shown again; "
+            "use --rotate to replace it."
+        )
+        if not registry.jira_hooks(args.project):
+            print(
+                f"warning: project {args.project!r} has no jira_hooks in fleet.yml yet, "
+                "so the route answers 404 until a rule is added."
+            )
+    elif args.webhook_command == "log":
+        entries = store.tail_log(args.n, project=args.project)
+        if not entries:
+            print("no webhook deliveries logged")
+            return
+        for entry in entries:
+            transition = f"{entry.get('from') or '-'}→{entry.get('to') or '-'}"
+            detail = entry.get("instance") or entry.get("reason") or "-"
+            print(
+                "  ".join(
+                    [
+                        str(entry.get("ts", "-")),
+                        str(entry.get("project", "-")),
+                        str(entry.get("issue") or "-"),
+                        transition,
+                        str(entry.get("result", "-")),
+                        str(detail),
+                    ]
+                )
+            )
 
 
 def _cmd_snapshot(fleet_home: Path, args: argparse.Namespace) -> None:

@@ -1,4 +1,5 @@
 import os
+import pathlib
 import subprocess
 import time
 
@@ -182,13 +183,27 @@ def test_run_streamed_returns_promptly_when_grandchild_holds_stdout_open(tmp_pat
     deadline = time.monotonic() + 5
     alive = True
     while time.monotonic() < deadline:
-        try:
-            os.kill(grandchild_pid, 0)
-        except ProcessLookupError:
+        if not _pid_alive(grandchild_pid):
             alive = False
             break
         time.sleep(0.1)
     assert not alive, f"grandchild pid {grandchild_pid} is still alive"
+
+
+def _pid_alive(pid):
+    # A killed orphan is re-parented to PID 1. In CI containers PID 1 is often
+    # a plain shell that never reaps it, so it lingers as a zombie: it has
+    # exited (and released the pipe), but os.kill(pid, 0) still succeeds.
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    try:
+        stat = pathlib.Path(f"/proc/{pid}/stat").read_text()
+    except OSError:
+        return True
+    # Field 3 (after the parenthesised comm, which may contain spaces) is the state.
+    return stat.rsplit(")", 1)[1].split()[0] != "Z"
 
 
 def test_run_streamed_uses_new_session_only_when_timeout_given(monkeypatch):
