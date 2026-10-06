@@ -54,6 +54,9 @@ PR with a red suite.
   non-blocking for now (see `.github/workflows/ci.yml`).
 - `docs/architecture.md` and `CLAUDE.md`'s module map should stay in sync
   with any new `core/*.py` module.
+- Add your entry under `## [Unreleased]` in `CHANGELOG.md` in the same
+  branch; the conventions are in
+  [`docs/RELEASING.md`](docs/RELEASING.md#3-changelog-conventions).
 
 ## CI, mirror and dependency updates
 
@@ -76,9 +79,13 @@ PR with a red suite.
   file re-downloaded — see that document.
 - Required repository variables and the GitHub deploy key are listed in the
   header of `bitbucket-pipelines.yml`.
+- **Releases and hotfixes** follow Gitflow (`develop` -> `release/X.Y.Z` ->
+  `main` + annotated tag); the full procedure, versioning rules and push
+  order are in [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## See also
 
 - `docs/architecture.md` — module map and design.
+- `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix steps.
 - `CLAUDE.md` — the AI-agent-facing contributor guide (same codebase,
   machine-readable framing).

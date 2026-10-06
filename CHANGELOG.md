@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-12:** `docs/RELEASING.md` — the release procedure (versioning, CHANGELOG conventions, release and hotfix steps, push order and recovery for the tag pipeline guard).
+
 ## [0.9.0] - 2026-10-06
 
 ### Added
