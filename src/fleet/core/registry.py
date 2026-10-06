@@ -64,6 +64,21 @@ class PortProfile:
     router: int
 
 
+@dataclass(frozen=True)
+class JiraHookRule:
+    """One `projects.<p>.jira_hooks` entry: when a Jira issue moves INTO
+    `on_status`, run `action` (v1: only "deploy") with `template`, on `branch`
+    (None = the project's default branch). Consumed by `core/webhooks.py`."""
+
+    on_status: str
+    action: str
+    template: str
+    branch: str | None = None
+
+
+_JIRA_HOOK_KEYS = frozenset({"on_status", "action", "template", "branch"})
+_JIRA_HOOK_ACTIONS = frozenset({"deploy"})
+
 _TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
 
 
@@ -255,6 +270,58 @@ class Registry:
             seen_router[router] = name
         return fleet_ports
 
+    @staticmethod
+    def _validate_jira_hooks(project_key: str, project_block: dict, templates: dict) -> None:
+        """Validate `projects.<p>.jira_hooks`. Trigger config decides what gets
+        deployed from an unauthenticated-looking HTTP call, so it is strict:
+        unknown keys and duplicate statuses fail loudly at load time rather
+        than silently misfiring on the first webhook."""
+        if "jira_hooks" not in project_block:
+            return
+        base = f"projects.{project_key}.jira_hooks"
+        hooks = project_block["jira_hooks"]
+        if hooks is None:
+            return
+        if not isinstance(hooks, list):
+            raise RegistryError(f"{base}: must be a list of rules")
+        seen: set[str] = set()
+        for i, rule in enumerate(hooks):
+            where = f"{base}[{i}]"
+            if not isinstance(rule, dict):
+                raise RegistryError(f"{where}: must be a mapping, got {rule!r}")
+            unknown = sorted(set(rule) - _JIRA_HOOK_KEYS)
+            if unknown:
+                raise RegistryError(
+                    f"{where}: unknown key(s) {', '.join(map(str, unknown))} "
+                    f"(allowed: {', '.join(sorted(_JIRA_HOOK_KEYS))})"
+                )
+            on_status = rule.get("on_status")
+            if not isinstance(on_status, str) or not on_status.strip():
+                raise RegistryError(f"{where}.on_status: must be a non-empty string")
+            # Jira status names are matched case-insensitively (core/webhooks.py),
+            # so two rules differing only in case would be ambiguous.
+            folded = on_status.strip().casefold()
+            if folded in seen:
+                raise RegistryError(
+                    f"{where}.on_status: duplicate status {on_status.strip()!r} "
+                    "(compared case-insensitively)"
+                )
+            seen.add(folded)
+            action = rule.get("action")
+            if action not in _JIRA_HOOK_ACTIONS:
+                raise RegistryError(
+                    f"{where}.action: must be one of {sorted(_JIRA_HOOK_ACTIONS)}, got {action!r}"
+                )
+            template = rule.get("template")
+            if not isinstance(template, str) or not template:
+                raise RegistryError(f"{where}.template: required for action 'deploy'")
+            if template not in templates:
+                raise RegistryError(
+                    f"{where}.template: {template!r} is not a template of project {project_key!r}"
+                )
+            if "branch" in rule and (not isinstance(rule["branch"], str) or not rule["branch"]):
+                raise RegistryError(f"{where}.branch: must be a non-empty string")
+
     def _validate(self, *, host_config_path: Path | None = None) -> None:
         data = self._data
         if "fleet" not in data:
@@ -304,6 +371,7 @@ class Registry:
                     ) from exc
 
             templates = project_block.get("templates") or {}
+            self._validate_jira_hooks(project_key, project_block, templates)
             for template_key, template_block in templates.items():
                 try:
                     validate_part(template_key)
@@ -633,6 +701,20 @@ class Registry:
         block = self._project_block(project)
         pattern = block.get("issue_id_regexp")
         return str(pattern) if pattern is not None else None
+
+    def jira_hooks(self, project: str) -> list[JiraHookRule]:
+        """The project's validated `jira_hooks` rules, in file order; `[]`
+        when it defines none (the webhook route then answers 404)."""
+        block = self._project_block(project)
+        return [
+            JiraHookRule(
+                on_status=str(rule["on_status"]).strip(),
+                action=str(rule["action"]),
+                template=str(rule["template"]),
+                branch=str(rule["branch"]) if rule.get("branch") is not None else None,
+            )
+            for rule in (block.get("jira_hooks") or [])
+        ]
 
     def port_profile(self, name: str) -> PortProfile:
         """Look up one `fleet.ports` entry by name. `'typesense'` falls back
