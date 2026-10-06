@@ -4,11 +4,12 @@
 #   pull request (any branch)  -> gates (pytest, ruff, black)
 #   push to develop            -> gates, then mirror develop to GitHub
 #   tag v*  (release)          -> gates, then publish main + the tag to GitHub
-#   custom: renovate           -> daily dependency-update PRs against develop
-#                                 (schedule it in Bitbucket: Pipelines ->
-#                                 Schedules -> branch develop, pipeline
-#                                 custom: renovate, daily ~03:00 UTC; nothing here
-#                                 triggers it automatically)
+#   custom: renovate           -> dependency-update PRs against develop.
+#                                 When it runs is decided ONLY here in
+#                                 Bitbucket (Pipelines -> Schedules: branch
+#                                 develop, custom: renovate, daily) or by a
+#                                 manual run; renovate-config.json has no
+#                                 schedule of its own.
 #
 # Repository variables to configure (Repository settings -> Pipelines):
 #   GITHUB_MIRROR_URL  SSH URL of the GitHub mirror repo (git@github.com:...).

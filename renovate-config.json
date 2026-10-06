@@ -9,10 +9,6 @@
   "baseBranchPatterns": [
     "develop"
   ],
-  "timezone": "Europe/Paris",
-  "schedule": [
-    "before 7am"
-  ],
   "labels": [
     "renovate"
   ],
