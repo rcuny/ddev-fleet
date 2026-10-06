@@ -6,6 +6,7 @@ Templates are rendered the way Ansible's template module does (trim_blocks).
 Where `systemd-analyze` exists the rendered units are scored offline; the
 sandbox must stay at or under 2.5 (systemd threshold 25)."""
 
+import os
 import re
 import shutil
 import subprocess
@@ -115,6 +116,16 @@ WantedBy=multi-user.target
 needs_analyze = pytest.mark.skipif(
     shutil.which("systemd-analyze") is None, reason="systemd-analyze not installed"
 )
+
+
+def test_systemd_analyze_is_present_when_the_pipeline_requires_it():
+    # The scoring tests below skip without systemd-analyze. CI (Debian 13 image
+    # with systemd) sets FLEET_REQUIRE_SYSTEMD_ANALYZE=1 so a missing binary
+    # fails the run instead of silently skipping the sandbox checks (FLE-8).
+    if os.environ.get("FLEET_REQUIRE_SYSTEMD_ANALYZE"):
+        assert shutil.which(
+            "systemd-analyze"
+        ), "FLEET_REQUIRE_SYSTEMD_ANALYZE is set but systemd-analyze is not installed"
 
 
 def _render(role_dir: Path, name: str, **overrides) -> str:

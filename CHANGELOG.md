@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-8: systemd security regression checks in Bitbucket Pipelines.** `ci/systemd_security.py` renders the sandboxed units (fleet, fleet-boot, fleet-reboot-notify, caddy with its drop-in), scores them with `systemd-analyze security --offline=yes`, compares them with the committed baseline `ci/systemd-security-baseline.json` (tolerance +0.1) and fails the pipeline on a regression, listing the directives whose exposure changed. Runs in the gates on every pull request, `develop` push and release tag; Markdown and JSON reports are published as pipeline artifacts (`reports/**`). Improvements and new/removed units are reported without failing. Baseline update procedure: `docs/README-ci.md`.
+- **FLE-8: live check.** A `custom: systemd-security-live` pipeline (weekly Bitbucket schedule) fetches `systemd-analyze security` scores from each server in the repository variable `SECURITY_PROBE_TARGETS` and compares them with that server's baseline. It skips when the variable is unset.
+- **FLE-8: `security_probe` Ansible role** and scoped playbook `ansible/security-probe.yml`: a no-sudo `fleet-probe` user whose SSH keys (`fleet_security_probe_authorized_keys`, set in `/etc/ddev-fleet/local-vars.yml`) are forced commands that can only print the JSON report (`/usr/local/bin/fleet-security-report`, stdlib-only Python). Inert until a key is configured; it never introduces the first `AllowUsers` line, only extends an existing one. Also listed in `site.yml` after `security_hardening`.
+- `docs/README-ci.md`: the pipelines, the baseline, regression handling and live-check setup.
+
+### Changed
+- **FLE-8: the GitHub Actions workflow is removed** (`.github/workflows/ci.yml`); Bitbucket Pipelines is the only CI. The ansible-lint/yamllint job moved to a non-blocking Bitbucket step that runs next to the gates on pull requests and `develop`. The Renovate rule for GitHub Actions is dropped with it.
+- The Bitbucket gates image is Debian 13 (`python:3.11-trixie`) with `systemd` installed, so `tests/test_systemd_sandbox.py` scores the units instead of skipping. With `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` (set in the pipeline) the tests fail when `systemd-analyze` is missing.
+
 ## [0.9.2] - 2026-10-06
 
 ### Dependencies
