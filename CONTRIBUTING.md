@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-25
+Last updated: 2026-10-06
 Type: documentation
 ---
 
@@ -54,6 +54,26 @@ PR with a red suite.
   non-blocking for now (see `.github/workflows/ci.yml`).
 - `docs/architecture.md` and `CLAUDE.md`'s module map should stay in sync
   with any new `core/*.py` module.
+
+## CI, mirror and dependency updates
+
+- **Bitbucket Pipelines is the canonical gate** (`bitbucket-pipelines.yml`):
+  pytest, ruff and black on every pull request, on `develop` and on `v*`
+  release tags. Bitbucket is the source of truth.
+- **GitHub is a read-only mirror**, published automatically: `develop` after
+  each green push, `main` plus the tag on each `v*` release tag. Nothing is
+  ever force-pushed, and a tag that is not the tip of `main` is refused.
+  Never push or merge on GitHub directly: GitHub pull requests are welcome,
+  but the maintainer applies them on Bitbucket and the mirror publishes the
+  result. The mirror steps skip unless
+  `GITHUB_MIRROR_URL` is set, so forks are unaffected.
+- **Renovate** (`renovate-config.json`, run by the scheduled `custom: renovate`
+  pipeline) opens weekly grouped dependency PRs against `develop`; review them
+  like any other PR. The Python interpreter version is never auto-bumped.
+  A bump of the vendored htmx in `docs/vendored-assets.md` also needs the
+  file re-downloaded — see that document.
+- Required repository variables and the GitHub deploy key are listed in the
+  header of `bitbucket-pipelines.yml`.
 
 ## See also
 

@@ -11,8 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FLE-1: systemd sandboxing.** `fleet.service`, `fleet-boot.service` and `fleet-reboot-notify.service` get a `systemd-analyze security` sandbox (`ProtectSystem=strict`, syscall filter, empty capability set, `PrivateDevices`, `MemoryDenyWriteExecute`, ...; exposure 8.7 / 9.2 / 9.0 down to 1.8 / 1.8 / 1.6). The two daemon units share one include (`fleet-sandbox.inc.j2`) so they cannot drift. The `caddy` role installs a drop-in `caddy.service.d/50-fleet-sandbox.conf` (8.8 down to 1.6). `fleet-tmux.service` stays unsandboxed on purpose.
 - `security_hardening` runs `systemd-analyze security` against fleet, fleet-boot, fleet-reboot-notify, caddy and authelia at the end of the role (skips units that are not installed) and prints one summary; a unit over its threshold logs a warning, or fails the play with `fleet_systemd_security_enforce: true`. Settings: `fleet_systemd_security_check_enabled`, `fleet_systemd_security_thresholds`, `fleet_systemd_security_enforce`.
 - `tests/test_systemd_sandbox.py`: renders the units and scores them offline with `systemd-analyze` (skipped when it is absent).
+- **FLE-2: Bitbucket Pipelines CI and GitHub auto-mirror.** `bitbucket-pipelines.yml` runs pytest, ruff and black on every pull request, on `develop` and on `v*` tags. Bitbucket is the source of truth: a green `develop` push is mirrored to the GitHub mirror, and a `v*` tag publishes `main` plus the tag (refused unless the tag is the tip of `main`). Pushes are never forced; the steps skip when `GITHUB_MIRROR_URL` is unset, so forks stay inert. See `CONTRIBUTING.md`.
+- **FLE-2: Renovate.** `renovate-config.json` plus a scheduled `custom: renovate` pipeline open weekly grouped dependency PRs against `develop` (Python, GitHub Actions, Ansible collections, vendored htmx via `docs/vendored-assets.md`). The Python interpreter version is never auto-bumped.
+- `docs/vendored-assets.md`: records the vendored htmx version and how to re-vendor it.
+- `tests/test_ci_config.py`: structure checks for the pipelines and the Renovate config.
 
 ### Changed
+- `bootstrap.sh` fresh installs clone with `--branch main` instead of the remote's default branch (now `develop` on Bitbucket).
 - `fleet.service` now runs with `ProtectSystem=strict`; the daemon can only write `fleet_srv_dir`, the Caddy snippet dir, the `fleet` user's home, `/tmp` and `/var/tmp`. Anything else fails with EROFS. Set `fleet_systemd_sandbox_enabled: false` to get the previous units back (and the Caddy drop-in removed). See `docs/operations.md`, "systemd sandboxing".
 
 ## [0.8.0] - 2026-10-06

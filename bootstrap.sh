@@ -569,7 +569,8 @@ elif [ -d "${FLEET_OPT_DIR}/.git" ]; then
   fi
 else
   echo "==> Cloning ${FLEET_REPO_URL} into ${FLEET_OPT_DIR}"
-  git clone "${FLEET_REPO_URL}" "${FLEET_OPT_DIR}"
+  # Explicit branch: a bare clone follows the remote's default branch (develop on Bitbucket).
+  git clone --branch main "${FLEET_REPO_URL}" "${FLEET_OPT_DIR}"
   if [ "${FLEET_REPO_VERSION}" != "main" ]; then
     git -C "${FLEET_OPT_DIR}" fetch --tags
     git -C "${FLEET_OPT_DIR}" checkout "${FLEET_REPO_VERSION}"
