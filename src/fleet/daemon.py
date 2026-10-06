@@ -36,6 +36,9 @@ _HEARTBEAT_EVERY = 15.0
 
 logger = logging.getLogger(__name__)
 
+# Max chars of caller-supplied webhook headers (delivery id, retry) we log.
+_HEADER_LOG_MAX = 64
+
 
 def _validate_instance_id(instance_id: str) -> None:
     if not _INSTANCE_ID_RE.match(instance_id):
@@ -277,12 +280,25 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         Order is part of the contract: 404 (project has no hooks/secret) ->
         413 -> 401 (signature) -> parse. Nothing is parsed or learned about
         the payload before the signature checks out, and an unauthenticated
-        caller only learns "this project has hooks". Every failure is a 4xx:
-        Jira retries 5xx, and a retry of a bad request can never succeed.
+        caller only learns "this project has hooks". Request failures are
+        4xx: Jira retries 5xx, and a retry of a bad request can never
+        succeed. The one deliberate 5xx is a registry that fails to load
+        (generic `internal error`, detail only in the journal): Jira's retry
+        is right once fleet.yml is fixed, and the message must not leak to
+        an unauthenticated caller. A rejected signature (401) is NOT written
+        to the delivery log (unauthenticated callers must not grow it): it
+        goes to the daemon journal as a warning (project + truncated
+        delivery id, never the body or signature). A delivery-log write
+        failure never changes the outcome. Logged `delivery_id`/`retry`
+        header values are truncated to 64 chars.
         Always answers JSON (including `FleetError`s, caught below) — Jira
         stores the response body in its webhook log, and
         `fleet_error_handler` may answer HTML."""
-        paths, registry = _paths_and_registry()
+        try:
+            paths, registry = _paths_and_registry()
+        except FleetError:
+            logger.exception("jira webhook for %r: cannot load the registry", project)
+            return JSONResponse(status_code=500, content={"error": "internal error"})
         store = webhooks_mod.WebhookStore.from_paths(paths)
         if not registry.has_project(project):
             return JSONResponse(status_code=404, content={"error": "not found"})
@@ -296,10 +312,12 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             return JSONResponse(status_code=413, content={"error": "payload too large"})
 
         delivery_id = request.headers.get("x-atlassian-webhook-identifier") or None
+        retry = request.headers.get("x-atlassian-webhook-retry") or None
         entry = {
             "project": project,
-            "delivery_id": delivery_id,
-            "retry": request.headers.get("x-atlassian-webhook-retry") or None,
+            # Header values are caller-controlled: bound what we persist.
+            "delivery_id": delivery_id[:_HEADER_LOG_MAX] if delivery_id else None,
+            "retry": retry[:_HEADER_LOG_MAX] if retry else None,
             "event": None,
             "issue": None,
             "from": None,
@@ -311,11 +329,22 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         }
 
         def respond(status: int, content: dict, *, result: str, reason: str | None = None):
-            store.append_log({**entry, "result": result, "reason": reason})
+            try:
+                store.append_log({**entry, "result": result, "reason": reason})
+            except OSError as exc:
+                # The outcome (esp. an already-submitted deploy) stands; a
+                # 500 here would make Jira retry into a "duplicate".
+                logger.warning("jira webhook for %r: delivery log write failed: %s", project, exc)
             return JSONResponse(status_code=status, content=content)
 
         if not webhooks_mod.verify_signature(secret, body, request.headers.get("x-hub-signature")):
-            return respond(401, {"error": "unauthorized"}, result="unauthorized")
+            # Journal only (rate-limited/rotated), never jira.jsonl.
+            logger.warning(
+                "jira webhook for %r: rejected signature (delivery %s)",
+                project,
+                entry["delivery_id"],
+            )
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
 
         try:
             event = webhooks_mod.parse_jira_event(json.loads(body))

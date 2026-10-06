@@ -24,7 +24,8 @@ Jira Cloud -- POST https://<fleet-domain>/hooks/jira/<project> --> Caddy --> fle
 ```
 
 - Caddy forwards `/hooks/*` to the daemon **without** Authelia / basic auth
-  (Jira cannot log in) and caps the body at 1MB. The daemon authenticates the
+  (Jira cannot log in) and caps the body at `max_size 1MB` (1,000,000 bytes;
+  Caddy answers 413). The daemon authenticates the
   request itself: HMAC-SHA256 of the raw body with the project's secret,
   compared in constant time against the `X-Hub-Signature: sha256=<hex>` header.
 - The match is on the status **transition** in Jira's changelog, not the
@@ -102,7 +103,7 @@ One webhook per (fleet project, server), each with its own secret.
 
 The checks run in this order, so an unauthenticated caller learns nothing
 beyond "this project has hooks". Jira only counts **200** as success and never
-retries a 4xx.
+retries a 4xx (it does retry 5xx).
 
 | Case | Code | Body |
 |---|---|---|
@@ -113,8 +114,16 @@ retries a 4xx.
 | Duplicate delivery | 200 | `{"result": "duplicate"}` |
 | Rule matched but the deploy target cannot be resolved | 422 | `{"error": "<reason>"}` |
 | Accepted | 200 | `{"result": "accepted", "instance": "...", "job": "..."}` |
+| `fleet.yml` fails to load | 500 | `{"error": "internal error"}` |
 
-Bodies over 1 MiB are rejected (Caddy answers 413 first).
+Body limits: Caddy rejects bodies over `max_size 1MB` (1,000,000 bytes) with a
+413 before they reach the daemon. The daemon enforces its own 1 MiB
+(1,048,576 bytes) cap as defence in depth, with the same 413
+`{"error": "payload too large"}`; in practice Caddy's lower limit always wins.
+
+The 500 is the one deliberate 5xx: the registry error is logged in the daemon
+journal only (never sent to the unauthenticated caller), and Jira's retry
+succeeds once `fleet.yml` is fixed.
 
 ## Deduplication and re-dispatch
 
@@ -128,8 +137,11 @@ Bodies over 1 MiB are rejected (Caddy answers 413 first).
 - **Re-dispatch.** Moving the same ticket into Dispatched a second time (a
   new, deliberate event with a new id) is **not** a duplicate: deploy's
   auto-suffix applies, so the first instance is `<project>--fle-3` and the
-  next `<project>--fle-3-1`. The response's `instance` is the *requested* id;
-  the actual id is in the job detail and the delivery log. Continuity of work
+  next `<project>--fle-3-1`. The response's `instance`, the delivery log's
+  `instance` and the job's `log_path` all refer to the *requested* id
+  (`<project>--fle-3`). When the suffix applies, the actual instance, and its
+  `deploy.log`, live under the suffixed id (`logs/<project>--fle-3-1/deploy.log`),
+  exactly as with a web-UI deploy. Continuity of work
   comes from git: the agent checks out the existing `feature/FLE-3-...` branch
   if the first run pushed it.
 
@@ -142,10 +154,16 @@ typed and no agent starts. Check with `systemctl status fleet-tmux`.
 
 ## Delivery log
 
-Every request that passed the 404 check appends one JSON line to
-`/srv/fleet/logs/webhooks/jira.jsonl` (no secrets, no bodies):
-`ts, project, delivery_id, retry, event, issue, from, to, result, reason,
-instance, job`. Read it with:
+Every authenticated request (one that passed the 404 and signature checks)
+appends one JSON line to `/srv/fleet/logs/webhooks/jira.jsonl` (no secrets, no
+bodies): `ts, project, delivery_id, retry, event, issue, from, to, result,
+reason, instance, job`. The `delivery_id` and `retry` header values are
+truncated to 64 characters. Requests rejected for a bad or missing signature
+(401) are **not** written there, so unauthenticated callers cannot grow the
+file; they are logged as a warning (project and truncated delivery id only) in
+the daemon journal: `journalctl -u fleet | grep 'jira webhook'`. A failed
+write to the delivery log is also only a journal warning; it never changes the
+response. Read the log with:
 
 ```bash
 fleet webhook log [--project <p>] [-n 20]

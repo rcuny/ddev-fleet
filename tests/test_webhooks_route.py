@@ -4,13 +4,15 @@ import hashlib
 import hmac
 import inspect
 import json
+import logging
 import time
 
 import pytest
 from fastapi.testclient import TestClient
 
 from fleet.core import instances as real_instances_mod
-from fleet.core.instances import FleetPaths
+from fleet.core.errors import RegistryError
+from fleet.core.instances import FleetPaths, load_registry
 from fleet.core.webhooks import MAX_BODY_BYTES, WebhookStore
 from fleet.daemon import create_app
 
@@ -121,21 +123,39 @@ def test_hook_no_secret_404(hook_env, fleet_home):
     assert store.tail_log() == []  # 404s are never logged
 
 
-def test_hook_bad_signature_401(hook_env):
+def test_hook_bad_signature_401(hook_env, caplog):
     client, store, _, calls = hook_env
-    resp = _post(client, "p", _issue_updated(), "wrong-secret")
+    with caplog.at_level(logging.WARNING, logger="fleet.daemon"):
+        resp = _post(client, "p", _issue_updated(), "wrong-secret")
     assert resp.status_code == 401
     assert resp.json() == {"error": "unauthorized"}
     assert not calls
-    assert store.tail_log()[-1]["result"] == "unauthorized"
+    # Unauthenticated callers must not grow jira.jsonl: journald only.
+    assert store.tail_log() == []
+    assert not store.log_path.exists()
+    warnings = [r.getMessage() for r in caplog.records if r.levelno == logging.WARNING]
+    assert any("p" in m and "d1" in m and "signature" in m for m in warnings)
 
 
-def test_hook_missing_signature_401(hook_env):
+def test_hook_missing_signature_401(hook_env, caplog):
     client, store, secrets, calls = hook_env
-    resp = _post(client, "p", _issue_updated(), secrets["p"], sign=False)
+    with caplog.at_level(logging.WARNING, logger="fleet.daemon"):
+        resp = _post(client, "p", _issue_updated(), secrets["p"], sign=False)
     assert resp.status_code == 401
     assert not calls
-    assert store.tail_log()[-1]["result"] == "unauthorized"
+    assert store.tail_log() == []
+    assert any(r.levelno == logging.WARNING for r in caplog.records)
+
+
+def test_hook_401_warning_truncates_delivery_id_and_hides_secrets(hook_env, caplog):
+    client, store, _, _ = hook_env
+    with caplog.at_level(logging.WARNING, logger="fleet.daemon"):
+        _post(client, "p", _issue_updated(), "wrong-secret", delivery_id="Z" * 500)
+    text = " ".join(r.getMessage() for r in caplog.records)
+    assert "Z" * 64 in text
+    assert "Z" * 65 not in text
+    assert "sha256=" not in text
+    assert "FLE-3" not in text  # no body content
 
 
 def test_hook_too_large_413(hook_env):
@@ -228,6 +248,52 @@ def test_hook_accepted_submits_deploy(hook_env):
         "ts", "project", "delivery_id", "retry", "event", "issue", "from", "to",
         "result", "reason", "instance", "job",
     }  # fmt: skip
+
+
+def test_hook_log_truncates_delivery_id_and_retry(hook_env):
+    client, store, secrets, _ = hook_env
+    resp = _post(
+        client,
+        "p",
+        _issue_updated(),
+        secrets["p"],
+        delivery_id="D" * 500,
+        headers={"X-Atlassian-Webhook-Retry": "R" * 500},
+    )
+    assert resp.json()["result"] == "accepted"
+    _wait_job(client, resp.json()["job"])
+    last = store.tail_log()[-1]
+    assert last["delivery_id"] == "D" * 64
+    assert last["retry"] == "R" * 64
+
+
+def test_hook_invalid_registry_500_no_leak(hook_env, fleet_home):
+    client, _, secrets, calls = hook_env
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.write_text("projects: not-a-mapping\n", encoding="utf-8")
+    with pytest.raises(RegistryError) as excinfo:  # sanity: this IS a registry error
+        load_registry(paths)
+    resp = _post(client, "p", _issue_updated(), secrets["p"])
+    assert resp.status_code == 500
+    assert resp.json() == {"error": "internal error"}
+    assert excinfo.value.message not in resp.text
+    assert not calls
+
+
+def test_hook_log_write_failure_does_not_change_outcome(hook_env, monkeypatch, caplog):
+    client, store, secrets, calls = hook_env
+
+    def boom(self, entry):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(WebhookStore, "append_log", boom)
+    with caplog.at_level(logging.WARNING, logger="fleet.daemon"):
+        resp = _post(client, "p", _issue_updated(), secrets["p"])
+    assert resp.status_code == 200
+    assert resp.json()["result"] == "accepted"
+    assert _wait_job(client, resp.json()["job"]) == "succeeded"
+    assert len(calls) == 1
+    assert any("disk full" in r.getMessage() for r in caplog.records)
 
 
 def test_hook_duplicate_delivery(hook_env):
