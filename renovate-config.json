@@ -9,9 +9,6 @@
   "baseBranchPatterns": [
     "develop"
   ],
-  "labels": [
-    "renovate"
-  ],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
   "dependencyDashboard": false,
@@ -20,6 +17,7 @@
     "groupName": "security fixes"
   },
   "rangeStrategy": "bump",
+  "commitMessagePrefix": "FLE-10",
   "packageRules": [
     {
       "description": "Python runtime dependencies: one grouped PR for minor/patch (pyproject.toml is extracted by the poetry and/or pep621 manager, so match on datasource + depType)",
@@ -60,15 +58,6 @@
         "ansible-galaxy"
       ],
       "groupName": "ansible collections"
-    },
-    {
-      "description": "Major bumps are flagged for a closer look",
-      "matchUpdateTypes": [
-        "major"
-      ],
-      "addLabels": [
-        "major"
-      ]
     },
     {
       "description": "The Python interpreter version is a deliberate decision: never auto-bump the python docker image (pipelines) or setup-python's python-version (github-releases datasource)",

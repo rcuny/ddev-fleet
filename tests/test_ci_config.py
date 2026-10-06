@@ -105,3 +105,8 @@ def test_htmx_regex_manager_matches_the_vendored_assets_marker():
     version = match.group("currentValue")
     assert f"htmx.org@{version}/dist/htmx.min.js" in doc
     assert f'version:"{version}"' in (ROOT / "src/fleet/static/htmx.min.js").read_text()
+
+
+def test_renovate_prefixes_commits_with_a_jira_key():
+    # Renovate commits/PR titles carry the standing "Dependency updates" ticket key
+    assert re.fullmatch(r"[A-Z][A-Z0-9]+-\d+", RENOVATE["commitMessagePrefix"])
