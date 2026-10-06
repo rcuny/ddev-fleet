@@ -316,3 +316,52 @@ branch: main
         instances.redeploy(paths, registry, "ghost--dev-13", runner=HybridRunner())
 
     assert "ghost" in str(excinfo.value)
+
+
+# --- FLE-6: redeploy re-types post_deploy.tty1/tty2 --------------------------
+
+
+def test_redeploy_types_tty_commands_again_and_forwards_create_tmux_session(
+    fleet_home, git_repo, monkeypatch
+):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    paths.registry.write_text(
+        _registry_text(str(git_repo["origin"])).replace(
+            "      default:\n        post_deploy:\n          - echo project-default\n",
+            "      default:\n        post_deploy:\n"
+            "          exec:\n            - echo project-default\n"
+            "          tty2:\n            - echo typed\n",
+        ),
+        encoding="utf-8",
+    )
+    registry = Registry.load(paths.registry)
+
+    typed = []
+    created_session = []
+    monkeypatch.setattr(instances.tmux, "session_exists", lambda *, runner=None: False)
+    monkeypatch.setattr(instances.tmux, "kill_instance_window", lambda *a, **k: None)
+    monkeypatch.setattr(
+        instances.tmux, "ensure_session", lambda home, *, runner=None: created_session.append(home)
+    )
+    monkeypatch.setattr(
+        instances.tmux,
+        "ensure_instance_window",
+        lambda iid, d, *, tty=None, runner=None: typed.append(tty) or True,
+    )
+
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="dev-13",
+        create_tmux_session=True,
+        runner=HybridRunner(),
+    )
+    instances.redeploy(
+        paths, registry, "demo--dev-13", create_tmux_session=True, runner=HybridRunner()
+    )
+
+    assert typed == [([], ["echo typed"])] * 2
+    assert len(created_session) == 2  # the (faked) session never came up between them

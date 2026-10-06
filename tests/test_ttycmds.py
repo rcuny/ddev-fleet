@@ -3,7 +3,7 @@ from pathlib import Path
 from fleet.core import instances
 from fleet.core.registry import Registry
 from fleet.core.secrets import write_secret
-from fleet.core.ttycmds import TtyPlan, plan_for_instance, plan_from_template
+from fleet.core.ttycmds import TtyPlan, plan_from_resolved
 
 REGISTRY_YAML = """\
 fleet:
@@ -16,22 +16,25 @@ projects:
     templates:
       jira-pull:
         post_deploy:
-          - echo hi
-        tty1:
-          - ddev exec claude "/jira pull [[issue-id]] --create-branch"
-          - ddev drush uli
-        tty2:
-          - ddev drush watchdog:tail
+          exec:
+            - echo hi
+          tty1:
+            - ddev exec claude "/jira pull [[issue-id]] --create-branch"
+            - ddev drush uli
+          tty2:
+            - ddev drush watchdog:tail
       no-tty:
         post_deploy:
           - echo hi
       with-secret:
-        tty1:
-          - echo [[slack-token]]
+        post_deploy:
+          tty1:
+            - echo [[slack-token]]
   other:
     git: git@example.test:org/other.git
     templates:
       jira-pull:
+        # deprecated template-level spelling must keep working
         tty1:
           - ddev exec claude "/jira pull [[issue-id]] --create-branch"
 """
@@ -51,7 +54,13 @@ def _paths(fleet_home):
     return instances.FleetPaths.from_home(fleet_home)
 
 
-# --- plan_from_template ------------------------------------------------
+def plan_from_template(registry, paths, project, label, branch, template):
+    """Resolve the template exactly as deploy() does, then plan it."""
+    resolved = registry.resolve(project, template, branch, label=label)
+    return plan_from_resolved(registry, paths, resolved)
+
+
+# --- plan_from_resolved --------------------------------------------------
 
 
 def test_plan_from_template_full_happy_path(fleet_home):
@@ -143,132 +152,17 @@ def test_plan_from_template_no_tty_keys_is_empty(fleet_home):
     assert plan.is_empty is True
 
 
-# --- plan_for_instance ---------------------------------------------------
-
-
-def _write_instance_yaml(paths, instance_id: str, text: str) -> None:
-    fleet_dir = paths.instances / instance_id / ".fleet"
-    fleet_dir.mkdir(parents=True, exist_ok=True)
-    (fleet_dir / "instance.yml").write_text(text, encoding="utf-8")
-
-
-def test_plan_for_instance_happy_path(fleet_home):
-    # instance:/label follows the same lowercase naming constraint noted in
-    # test_plan_from_template_full_happy_path above, and the recovered id is
-    # uppercased the same way.
+def test_plan_uses_the_resolved_object_not_the_live_registry(fleet_home):
+    """FLE-6: deploy-time resolution wins — editing fleet.yml afterwards
+    (here: a registry whose template changed) cannot alter an already
+    resolved instance's plan."""
     registry = _registry(fleet_home)
     paths = _paths(fleet_home)
-    _write_instance_yaml(
-        paths,
-        "oak--oaks-1781",
-        """\
-project: oak
-instance: oaks-1781
-branch: dev
-template: jira-pull
-""",
-    )
+    resolved = registry.resolve("oak", "jira-pull", "dev", label="oaks-1781")
+    resolved.tty1 = ["echo deploy-time"]
+    resolved.tty2 = []
 
-    plan = plan_for_instance(registry, paths, "oak--oaks-1781")
+    plan = plan_from_resolved(registry, paths, resolved)
 
-    assert plan.tty1 == [
-        'ddev exec claude "/jira pull OAKS-1781 --create-branch"',
-        "ddev drush uli",
-    ]
-    assert plan.tty2 == ["ddev drush watchdog:tail"]
-    assert plan.skipped == []
-
-
-def test_plan_for_instance_missing_instance_directory_is_empty(fleet_home):
-    registry = _registry(fleet_home)
-    paths = _paths(fleet_home)
-
-    plan = plan_for_instance(registry, paths, "oak--does-not-exist")
-
-    assert plan == TtyPlan.empty()
-
-
-def test_plan_for_instance_missing_instance_yaml_is_empty(fleet_home):
-    registry = _registry(fleet_home)
-    paths = _paths(fleet_home)
-    (paths.instances / "oak--OAKS-1781" / ".fleet").mkdir(parents=True)
-
-    plan = plan_for_instance(registry, paths, "oak--OAKS-1781")
-
-    assert plan.is_empty is True
-
-
-def test_plan_for_instance_without_template_key_is_empty_no_exception(fleet_home):
-    registry = _registry(fleet_home)
-    paths = _paths(fleet_home)
-    _write_instance_yaml(
-        paths,
-        "oak--OAKS-1781",
-        """\
-project: oak
-instance: OAKS-1781
-branch: dev
-""",
-    )
-
-    plan = plan_for_instance(registry, paths, "oak--OAKS-1781")
-
-    assert plan == TtyPlan.empty()
-
-
-def test_plan_for_instance_recorded_template_removed_from_registry_is_empty(fleet_home):
-    registry = _registry(fleet_home)
-    paths = _paths(fleet_home)
-    _write_instance_yaml(
-        paths,
-        "oak--OAKS-1781",
-        """\
-project: oak
-instance: OAKS-1781
-branch: dev
-template: this-template-no-longer-exists
-""",
-    )
-
-    plan = plan_for_instance(registry, paths, "oak--OAKS-1781")
-
-    assert plan == TtyPlan.empty()
-
-
-def test_plan_for_instance_recorded_project_removed_from_registry_is_empty(fleet_home):
-    registry = _registry(fleet_home)
-    paths = _paths(fleet_home)
-    _write_instance_yaml(
-        paths,
-        "ghost--OAKS-1781",
-        """\
-project: ghost
-instance: OAKS-1781
-branch: dev
-template: jira-pull
-""",
-    )
-
-    plan = plan_for_instance(registry, paths, "ghost--OAKS-1781")
-
-    assert plan == TtyPlan.empty()
-
-
-def test_plan_for_instance_malformed_yaml_is_empty_no_exception(fleet_home):
-    registry = _registry(fleet_home)
-    paths = _paths(fleet_home)
-    _write_instance_yaml(paths, "oak--OAKS-1781", "foo: [1, 2\n  bar: unterminated")
-
-    plan = plan_for_instance(registry, paths, "oak--OAKS-1781")
-
-    assert plan == TtyPlan.empty()
-
-
-def test_plan_for_instance_scalar_yaml_is_empty_no_exception(fleet_home):
-    registry = _registry(fleet_home)
-    paths = _paths(fleet_home)
-    _write_instance_yaml(paths, "oak--OAKS-1781", "just a plain string, not a mapping\n")
-
-    plan = plan_for_instance(registry, paths, "oak--OAKS-1781")
-
-    assert plan == TtyPlan.empty()
+    assert plan.tty1 == ["echo deploy-time"]
+    assert plan.tty2 == []

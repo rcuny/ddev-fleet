@@ -1028,6 +1028,130 @@ def test_resolve_with_no_tty_commands_gives_two_empty_lists(fleet_home, sample_r
     assert resolved.tty2 == []
 
 
+# --- FLE-6: post_deploy as list shorthand OR {exec, tty1, tty2} mapping -----
+
+
+def _template_registry(template_body: str) -> str:
+    return (
+        "fleet:\n  domain: fleet.example.test\n\nprojects:\n  oak:\n"
+        "    git: git@example.test:org/oak.git\n    templates:\n      jira:\n"
+        + "".join(f"        {line}\n" for line in template_body.strip().splitlines())
+    )
+
+
+def test_post_deploy_list_shorthand_is_exec(fleet_home):
+    registry = Registry.load(
+        _write(fleet_home / "fleet.yml", _template_registry("post_deploy:\n  - echo a\n  - echo b"))
+    )
+    resolved = registry.resolve("oak", "jira", "main")
+
+    assert resolved.post_deploy == ["echo a", "echo b"]
+    assert resolved.tty1 == [] and resolved.tty2 == []
+
+
+def test_post_deploy_mapping_exec_tty1_tty2(fleet_home):
+    body = """
+post_deploy:
+  exec:
+    - ddev init --no-interactive
+  tty1:
+    - echo one
+  tty2:
+    - ddev exec claude "/jira work [[issue-id]]"
+    - echo two
+"""
+    registry = Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+    resolved = registry.resolve("oak", "jira", "main")
+
+    assert resolved.post_deploy == ["ddev init --no-interactive"]
+    assert resolved.tty1 == ["echo one"]
+    assert resolved.tty2 == ['ddev exec claude "/jira work [[issue-id]]"', "echo two"]
+
+
+def test_post_deploy_mapping_all_keys_optional(fleet_home):
+    registry = Registry.load(
+        _write(fleet_home / "fleet.yml", _template_registry("post_deploy:\n  tty2:\n    - echo x"))
+    )
+    resolved = registry.resolve("oak", "jira", "main")
+
+    assert resolved.post_deploy == []
+    assert resolved.tty1 == []
+    assert resolved.tty2 == ["echo x"]
+
+
+def test_post_deploy_mapping_unknown_key_raises_naming_the_template(fleet_home):
+    body = "post_deploy:\n  exec:\n    - echo a\n  tty3:\n    - echo b"
+    with pytest.raises(RegistryError, match=r"projects\.oak\.templates\.jira\.post_deploy\.tty3"):
+        Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+
+    body = "post_deploy:\n  after:\n    - echo b"
+    with pytest.raises(RegistryError, match=r"projects\.oak\.templates\.jira\.post_deploy\.after"):
+        Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+
+
+def test_post_deploy_mapping_values_must_be_string_lists(fleet_home):
+    body = "post_deploy:\n  tty1: echo not-a-list"
+    with pytest.raises(RegistryError, match=r"jira\.post_deploy\.tty1: must be a list of strings"):
+        Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+
+    body = "post_deploy:\n  exec:\n    - echo a\n    - 42"
+    with pytest.raises(RegistryError, match=r"jira\.post_deploy\.exec"):
+        Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+
+
+def test_post_deploy_scalar_raises(fleet_home):
+    with pytest.raises(RegistryError, match=r"jira\.post_deploy: must be a list of strings"):
+        Registry.load(_write(fleet_home / "fleet.yml", _template_registry("post_deploy: echo hi")))
+
+
+def test_legacy_template_level_tty_still_works_with_one_deprecation_warning(fleet_home, caplog):
+    body = """
+post_deploy:
+  - echo a
+tty1:
+  - echo one
+tty2:
+  - echo two
+"""
+    with caplog.at_level("WARNING"):
+        registry = Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+    resolved = registry.resolve("oak", "jira", "main")
+
+    assert resolved.post_deploy == ["echo a"]
+    assert resolved.tty1 == ["echo one"]
+    assert resolved.tty2 == ["echo two"]
+    deprecations = [r for r in caplog.records if "deprecated" in r.message and "tty" in r.message]
+    assert len(deprecations) == 1  # once per template, not per pane
+    assert "projects.oak.templates.jira" in deprecations[0].message
+
+
+def test_legacy_tty_alongside_mapping_post_deploy_for_other_pane_is_fine(fleet_home, caplog):
+    body = "post_deploy:\n  tty1:\n    - echo new\ntty2:\n  - echo old"
+    with caplog.at_level("WARNING"):
+        registry = Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+    resolved = registry.resolve("oak", "jira", "main")
+
+    assert resolved.tty1 == ["echo new"]
+    assert resolved.tty2 == ["echo old"]
+
+
+def test_new_syntax_emits_no_deprecation_warning(fleet_home, caplog):
+    with caplog.at_level("WARNING"):
+        Registry.load(
+            _write(
+                fleet_home / "fleet.yml", _template_registry("post_deploy:\n  tty1:\n    - echo x")
+            )
+        )
+    assert not [r for r in caplog.records if "tty" in r.message]
+
+
+def test_same_pane_at_template_level_and_under_post_deploy_is_an_error(fleet_home):
+    body = "post_deploy:\n  tty1:\n    - echo new\ntty1:\n  - echo old"
+    with pytest.raises(RegistryError, match=r"projects\.oak\.templates\.jira\.tty1") as exc_info:
+        Registry.load(_write(fleet_home / "fleet.yml", _template_registry(body)))
+    assert "post_deploy.tty1" in str(exc_info.value)
+
+
 def test_auth_mode_defaults_to_basic_with_no_host_config(fleet_home, sample_registry_text):
     registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
     assert registry.auth_mode == "basic"

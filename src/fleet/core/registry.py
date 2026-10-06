@@ -30,6 +30,11 @@ _MIN_PORT = 1
 _MAX_PORT = 65535
 _TTY_KEYS = ("tty1", "tty2")
 _TTY_KEY_RE = re.compile(r"^tty\d+$")
+# Keys allowed in the MAPPING form of a template's `post_deploy` (FLE-6):
+# `exec` is the host-side, strict, deploy-aborting command list (what the
+# legacy list form always was); `tty1`/`tty2` are typed once into the new
+# window's panes by deploy() after `exec` succeeded.
+_POST_DEPLOY_KEYS = ("exec", "tty1", "tty2")
 _USER_NAME_RE = re.compile(r"^[a-z0-9._-]+$")
 _VALID_AUTH_MODES = frozenset({"basic", "authelia"})
 
@@ -323,25 +328,7 @@ class Registry:
                         )
 
                 if template_block:
-                    for tty_key in _TTY_KEYS:
-                        if tty_key not in template_block:
-                            continue
-                        value = template_block[tty_key]
-                        if not isinstance(value, list) or not all(
-                            isinstance(item, str) for item in value
-                        ):
-                            raise RegistryError(
-                                f"projects.{project_key}.templates.{template_key}.{tty_key}: "
-                                "must be a list of strings"
-                            )
-                    for key in template_block:
-                        if key in _TTY_KEYS:
-                            continue
-                        if _TTY_KEY_RE.match(str(key)):
-                            raise RegistryError(
-                                f"projects.{project_key}.templates.{template_key}.{key}: not "
-                                "allowed — only tty1 and tty2 are supported"
-                            )
+                    self._validate_template_commands(project_key, template_key, template_block)
 
             for hostname in project_block.get("additional_hostnames") or []:
                 # Each entry becomes the `<h>` half of a flattened alias
@@ -368,6 +355,68 @@ class Registry:
                         f"projects.{project_key}.ports: unknown port name {port_name!r} "
                         "(not defined in fleet.ports)"
                     )
+
+    def _validate_template_commands(
+        self, project_key: str, template_key: str, template_block: dict
+    ) -> None:
+        """Validate a template's command lists: `post_deploy` (a legacy list
+        of strings == `exec:`, or a mapping with optional `exec`/`tty1`/`tty2`
+        lists of strings) and the DEPRECATED template-level `tty1`/`tty2`
+        (FLE-6: still accepted, with a one-time deprecation warning per
+        template; setting the same pane in BOTH places is an error — which
+        one wins would otherwise be a silent guess)."""
+        where = f"projects.{project_key}.templates.{template_key}"
+
+        post_deploy = template_block.get("post_deploy")
+        mapping_ttys: set[str] = set()
+        if isinstance(post_deploy, dict):
+            for key in post_deploy:
+                if key not in _POST_DEPLOY_KEYS:
+                    raise RegistryError(
+                        f"{where}.post_deploy.{key}: unknown key — a post_deploy mapping "
+                        f"only supports {', '.join(_POST_DEPLOY_KEYS)}"
+                    )
+            for key in _POST_DEPLOY_KEYS:
+                if post_deploy.get(key) is None:
+                    continue  # `exec:` / `tty1:` left empty == no commands
+                self._require_string_list(f"{where}.post_deploy.{key}", post_deploy[key])
+                if key in _TTY_KEYS:
+                    mapping_ttys.add(key)
+        elif post_deploy is not None:
+            self._require_string_list(f"{where}.post_deploy", post_deploy)
+
+        legacy_ttys: list[str] = []
+        for tty_key in _TTY_KEYS:
+            if tty_key not in template_block:
+                continue
+            self._require_string_list(f"{where}.{tty_key}", template_block[tty_key])
+            if tty_key in mapping_ttys:
+                raise RegistryError(
+                    f"{where}.{tty_key}: set both at template level (deprecated) and "
+                    f"under post_deploy.{tty_key} — keep only post_deploy.{tty_key}"
+                )
+            legacy_ttys.append(tty_key)
+        for key in template_block:
+            if key in _TTY_KEYS:
+                continue
+            if _TTY_KEY_RE.match(str(key)):
+                raise RegistryError(
+                    f"{where}.{key}: not allowed — only tty1 and tty2 are supported"
+                )
+
+        if legacy_ttys:
+            logger.warning(
+                "%s: template-level %s is deprecated — move it under post_deploy "
+                "(post_deploy: {exec: [...], %s: [...]}); still honoured for now",
+                where,
+                "/".join(legacy_ttys),
+                legacy_ttys[0],
+            )
+
+    @staticmethod
+    def _require_string_list(path: str, value) -> None:
+        if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+            raise RegistryError(f"{path}: must be a list of strings")
 
     def _validate_users(self, projects: dict) -> None:
         """Validate every project's `users:` list (spec §4.2): charset,
@@ -648,11 +697,20 @@ class Registry:
             raise RegistryError(f"branch is required to resolve project {project!r}")
 
         template_block = templates[template] or {}
-        post_deploy = [str(c) for c in (template_block.get("post_deploy") or [])]
+        raw_post_deploy = template_block.get("post_deploy")
+        if isinstance(raw_post_deploy, dict):
+            post_deploy_map = raw_post_deploy
+        else:
+            # Legacy list shorthand: `post_deploy: [cmd, ...]` == `exec: [...]`.
+            post_deploy_map = {"exec": raw_post_deploy}
+        post_deploy = [str(c) for c in (post_deploy_map.get("exec") or [])]
         drupal_env = template_block.get("drupal_env")
         drupal_env = str(drupal_env) if drupal_env is not None else None
-        tty1 = [str(c) for c in (template_block.get("tty1") or [])]
-        tty2 = [str(c) for c in (template_block.get("tty2") or [])]
+        # `post_deploy.tty1/2` is the canonical home; template-level `tty1/2`
+        # is the deprecated spelling (validation guarantees a pane is never
+        # set in both).
+        tty1 = [str(c) for c in (post_deploy_map.get("tty1") or template_block.get("tty1") or [])]
+        tty2 = [str(c) for c in (post_deploy_map.get("tty2") or template_block.get("tty2") or [])]
 
         try:
             resolved_label = slugify(label) if label else slugify(branch)

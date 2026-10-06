@@ -186,6 +186,50 @@ deliberately stopped before the reboot to save RAM — there is no persisted
 "was running" state yet, so a deliberately-stopped instance will be woken
 back up too.
 
+### The `fleet` tmux session after a reboot (`fleet-tmux.service`)
+
+tmux does not survive a reboot, and a tmux server started by the daemon would
+die on every `systemctl restart fleet`. The `fleet_service` Ansible role
+therefore installs `fleet-tmux.service` (`Type=oneshot` + `RemainAfterExit=yes`,
+`After=fleet.service`, `WantedBy=multi-user.target`), which owns the `fleet`
+tmux server **in its own cgroup**. It runs `fleet tmux --ensure` — create the
+session if missing, then a window per instance with sidebar + tty1 + tty2 as
+**plain shells** — and exits; the tmux server keeps running under the unit.
+It is deliberately *not* ordered after `fleet-boot.service` (it must not wait
+for the instance batch; a window is just a shell in the instance directory), and
+it applies no sandboxing (the panes are operator shells that need `sudo`, `ddev`
+and `git`).
+
+What this means after a reboot:
+
+- The session exists with plain shells; **no tty command is typed** (those are a
+  deploy action — `fleet deploy`/`fleet redeploy` only), so autonomous commands
+  such as `/jira work` are never relaunched by a reboot.
+- `fleet tmux` just attaches (and repairs layout); it types nothing.
+- `systemctl restart fleet` leaves the session and its panes alive.
+- A closed window is recreated as a plain shell by the next `fleet tmux`.
+
+| Event | tty1/tty2 |
+|---|---|
+| deploy / redeploy (CLI or web UI) | typed from the template resolved at deploy time |
+| reboot, `fleet tmux`, closed window recreated, `^b R` | plain shells |
+
+```bash
+systemctl status fleet-tmux.service      # active (exited) — the tmux server runs in its cgroup
+sudo systemctl start fleet-tmux          # (re)create the session if it is missing
+sudo systemctl stop fleet-tmux           # ends the fleet session and ALL its panes
+```
+
+If the service is missing or failed, a CLI deploy with tty commands creates the
+session itself (as `fleet tmux` does); a web-UI deploy only logs `fleet-tmux.service
+not running: tty commands not typed; start it with `sudo systemctl start fleet-tmux`
+and redeploy`. Rolling it out on an existing server: re-render
+`fleet-tmux.service.j2`, install it root:root 0644, `daemon-reload`, then
+`systemctl enable --now fleet-tmux`. If an operator-created `fleet` session
+already exists it is adopted as-is (reconcile only) but stays outside the unit's
+cgroup until the session is recreated. (`ansible-playbook … --tags fleet_tmux`
+applies only the two new role tasks.)
+
 ### Deploying multiple instances at once
 
 ```bash
