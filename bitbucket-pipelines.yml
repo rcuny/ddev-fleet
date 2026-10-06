@@ -19,8 +19,9 @@
 #   RENOVATE_PASSWORD  (secured) Atlassian API token (repository read/write,
 #                      pull requests read/write) for that account.
 # Plus, under Repository settings -> Pipelines -> SSH keys: a key pair whose
-# public half is a GitHub deploy key WITH WRITE ACCESS on the mirror repo,
-# and github.com added to "Known hosts" on the same page.
+# public half is a GitHub deploy key WITH WRITE ACCESS on the mirror repo.
+# (github.com's host key is managed by Bitbucket itself: no "Known hosts"
+# entry is needed, and adding one is refused.)
 #
 # Mirror pushes are never forced: if GitHub has diverged, the step fails
 # loudly instead of rewriting public history.
