@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.1] - 2026-10-06
+
 ### Added
 - **FLE-12:** `docs/RELEASING.md` — the release procedure (versioning, CHANGELOG conventions, release and hotfix steps, push order and recovery for the tag pipeline guard).
 
@@ -308,7 +310,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.9.1...HEAD
+[0.9.1]: https://github.com/rcuny/ddev-fleet/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/rcuny/ddev-fleet/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rcuny/ddev-fleet/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/rcuny/ddev-fleet/compare/v0.7.1...v0.7.2
