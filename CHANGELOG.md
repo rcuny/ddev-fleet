@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-14: branch indicator can follow a submodule.** New optional per-project `fleet.yml` key `display_submodule_branch: <relative submodule path>` (e.g. `ddev-fleet`). When set, `fleet list`, the web UI instance list and the tmux sidebar show the branch and short HEAD of the git checkout at `<instance dir>/<path>` instead of the instance's own, prefixed with the path (`ddev-fleet: feature/FLE-12-x`). A missing or uninitialised submodule falls back to the instance's own branch. Display only: deploy, redeploy and the recorded `branch` are unchanged. Validated at registry load (non-empty relative path, no `..`).
+
 ## [0.9.2] - 2026-10-06
 
 ### Dependencies
