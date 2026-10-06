@@ -66,10 +66,13 @@ class FleetPaths:
     host_config: Path
     authelia_admin: Path
     authelia_users: Path
+    webhooks: Path
+    webhook_log: Path
 
     @classmethod
     def from_home(cls, home: Path) -> "FleetPaths":
         config_dir = home / "config"
+        logs_dir = home / "logs"
         return cls(
             home=home,
             registry=config_dir / "fleet.yml",
@@ -79,7 +82,7 @@ class FleetPaths:
             # `fleet destroy`, which removes the whole instance directory
             # (see _destroy_locked -> _remove_instance_dir). One growing
             # file per instance under a central, destroy-proof location.
-            logs=home / "logs",
+            logs=logs_dir,
             secrets=home / ".secrets",
             project_secrets=home / "secrets",
             locks=home / "locks",
@@ -95,6 +98,12 @@ class FleetPaths:
             # server-local, never part of the shared config_dir/ registry.
             authelia_admin=home / "authelia" / "admin.yml",
             authelia_users=home / "authelia" / "users.yml",
+            # Jira webhook secrets + dedupe markers (spec FLE-3 §4.2). Not
+            # under secrets/ (holds `<project>.env`, so a project named
+            # `webhooks` would collide) and not in `.secrets` (fleet.service's
+            # EnvironmentFile: its keys would leak into every subprocess).
+            webhooks=home / "webhooks",
+            webhook_log=logs_dir / "webhooks" / "jira.jsonl",
         )
 
 
