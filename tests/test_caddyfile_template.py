@@ -129,6 +129,40 @@ def test_caddyfile_instances_import_uses_wildcard_not_a_single_literal_file():
     assert "import /etc/caddy/fleet/instances/admin-auth.conf" not in out
 
 
+def test_hooks_exempt_from_basic_auth():
+    out = _render()
+    assert "@protected not path /ws/* /hooks/*" in out
+    assert "basic_auth @protected {" in out
+    assert "max_size 1MB" in out
+
+
+def test_hooks_exempt_from_authelia():
+    out = _render_authelia()
+    assert "@protected not path /ws/* /hooks/*" in out
+    assert "route @protected {" in out
+    assert "forward_auth 127.0.0.1:9091" in out
+    assert '@denied not header_regexp Remote-Groups "(^|,)\\s*admins\\s*(,|$)"' in out
+    assert "max_size 1MB" in out
+
+
+@pytest.mark.parametrize("render", [_render, _render_authelia])
+def test_only_ws_and_hooks_exempt(render):
+    out = render()
+    defs = [ln.strip() for ln in out.splitlines() if ln.strip().startswith("@protected ")]
+    assert defs == ["@protected not path /ws/* /hooks/*"]
+
+
+@pytest.mark.parametrize("render", [_render, _render_authelia])
+def test_hooks_body_cap_is_scoped_and_precedes_reverse_proxy(render):
+    out = render()
+    site_start = out.index("fleet.example.test {")
+    site_end = out.index("\n}", site_start)
+    site_block = out[site_start:site_end]
+    assert "@hooks path /hooks/*" in site_block
+    assert "request_body @hooks {" in site_block
+    assert site_block.index("request_body @hooks") < site_block.index("reverse_proxy")
+
+
 @pytest.mark.skipif(
     not os.environ.get("FLEET_TEST_CADDY_BIN"),
     reason="FLEET_TEST_CADDY_BIN not set — no local caddy binary to validate against",
