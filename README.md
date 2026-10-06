@@ -135,6 +135,7 @@ Full detail (both credential types, the underlying mechanism): `docs/operations.
 | `docs/architecture.md` | Native-not-in-DDEV design, module map, the daemon/CLI split |
 | `docs/README-typesense.md` | The Typesense browser-search exposure worked example |
 | `CONTRIBUTING.md` | Dev setup, code style, and how to submit a change |
+| `docs/RELEASING.md` | Versioning, CHANGELOG conventions, and how a release or hotfix is cut |
 | `CHANGELOG.md` | Release history |
 
 Licence: [MIT](LICENSE).

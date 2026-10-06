@@ -214,6 +214,7 @@ it. Neither role has a `core/` Python module of its own.
   (`/opt/ddev-fleet` must be a clean checkout) and the domain-change
   procedure for existing instances (`refresh-instance-config` per
   instance, and its `settings.local.php` gap/workaround).
+- `docs/RELEASING.md` — versioning, CHANGELOG conventions, release/hotfix procedure and push order.
 - `docs/README-typesense.md` — the Typesense browser-search exposure design
   in full (topology, keys, env vars, reindexing, reachability caveat).
 - `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing
