@@ -1,6 +1,6 @@
 ---
 collections:
   - name: community.crypto
-    version: ">=2.26.9"
+    version: ">=3.5.0"
   - name: community.general
-    version: ">=12.6.6"
+    version: ">=13.5.0"
