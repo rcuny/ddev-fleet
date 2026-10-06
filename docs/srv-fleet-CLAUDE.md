@@ -67,9 +67,12 @@ projects:
         password: <string>             #   plaintext here; hashed (argon2id) only when rendering users.yml
     templates:
       <template-name>:
-        post_deploy: [<string>, ...]  # OPTIONAL — commands run after deploy for this template
-        tty1: [<string>, ...]         # OPTIONAL — typed into the instance window's MIDDLE bash pane
-        tty2: [<string>, ...]         # OPTIONAL — typed into the instance window's RIGHT bash pane
+        post_deploy: [<string>, ...]  # OPTIONAL — commands run after deploy (list == shorthand for `exec:`), OR:
+        # post_deploy:
+        #   exec: [<string>, ...]     #   host-side, strict — a failure aborts the deploy
+        #   tty1: [<string>, ...]     #   typed ONCE by the deploy into the window's MIDDLE bash pane
+        #   tty2: [<string>, ...]     #   typed ONCE by the deploy into the window's RIGHT bash pane
+        # (template-level tty1/tty2 are DEPRECATED: still accepted, with a warning)
 ```
 
 **`[[issue-id]]` and `tty1`/`tty2` (interactive tmux commands).** A
@@ -80,21 +83,24 @@ group 1 if the pattern has a capture group, else the whole match; a match
 outside `[A-Za-z0-9._/-]` is rejected. No match (or no `issue_id_regexp`) ⇒
 `[[issue-id]]` is simply absent. The resolved value is also exported as
 `FLEET_ISSUE_ID`. A template's `tty1`/`tty2` commands are `[[token]]`-
-substituted with the same context as `post_deploy`/assets, then typed via
-`tmux send-keys` into the instance's window — middle pane for `tty1`, right
-for `tty2` (sidebar is the fixed-width left pane) — the **first time that
-window is created**, never re-sent on a later `fleet tmux` attach; after a
-reboot (or any time the `fleet` session doesn't survive), `fleet tmux`
-recreates every window, so every instance's `tty1`/`tty2` fire again at
-once. Substitution is **strict** for `post_deploy` (an unresolved token
-raises `DeployError`, aborting the deploy) but **lenient** for `tty1`/`tty2`
-(that one command is dropped with a `WARNING: skipped ...` log line, pane
-left as plain bash — never fails a deploy). Which template an instance's
-window should use is recorded as `template:` in that instance's
-`.fleet/instance.yml`, written at deploy time (mode `0600` — the file also
-records `auth-enabled`/`auth-password`); instances deployed before this
-field existed simply get no `tty1`/`tty2` commands, and can't be rebuilt via
-`fleet redeploy` without an explicit `--template`. Full reference:
+substituted with the same context as `post_deploy.exec`/assets, then typed
+via `tmux send-keys` into the instance's window — middle pane for `tty1`,
+right for `tty2` (sidebar is the fixed-width left pane) — **by the deploy
+only** (`fleet deploy` and `fleet redeploy`, from the CLI and the web UI
+alike, from the template as resolved at deploy time). Nothing else types
+them: after a reboot `fleet-tmux.service` recreates the session with **plain
+shells**, and `fleet tmux`, a recreated/closed window and `^b R` also give
+plain shells. Substitution is **strict** for `post_deploy.exec` (an
+unresolved token raises `DeployError`, aborting the deploy) but **lenient**
+for `tty1`/`tty2` (that one command is dropped with a `WARNING: skipped ...`
+log line, pane left as plain bash — never fails a deploy). The resolved
+`template:` is recorded in the instance's `.fleet/instance.yml` (mode `0600` —
+the file also records `auth-enabled`/`auth-password`) so `fleet redeploy` can
+rebuild it; instances deployed before this field existed need an explicit
+`--template`. If no `fleet` session exists at deploy time the CLI creates it,
+while a web-UI deploy only logs `fleet-tmux.service not running: tty commands
+not typed` (start it with `sudo systemctl start fleet-tmux` and redeploy).
+Full reference:
 `docs/configuration.md`.
 
 **Named ports (`fleet.ports` / project `ports:`).** Each `fleet.ports`
@@ -155,7 +161,7 @@ The registry is declarative and read-only at runtime — `fleet.yml` lives in
 `/srv/fleet/config` (a git checkout kept in sync with `fleet refresh-config`,
 see below) and is edited by hand, never mutated by the `fleet` CLI/daemon.
 There is no per-instance `branch` field and no `instances:` block: a
-template is a reusable named `post_deploy`/`tty1`/`tty2` recipe, and both
+template is a reusable named `post_deploy` (`exec`/`tty1`/`tty2`) recipe, and both
 `branch` and the running instance's `label` are resolved per-deploy (`fleet
 deploy` args), never stored in the registry. Assets live alongside it at
 `/srv/fleet/config/assets`.
@@ -193,7 +199,7 @@ registry load with an actionable message naming the bad key.
 | `fleet refresh-auth` | — | Re-applies the current auth config to every deployed instance — the "apply my auth edits now" command, and how a server switches `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from its recorded `auth-enabled`/`auth-password` (`fleet.auth_bypass_cidrs` is deprecated and no longer applied). Authelia mode: re-renders `users.yml` from `fleet.yml`'s `users:` + the admin account, plus every instance's `forward_auth` snippet. Either way: ONE `caddy validate` + `caddy reload` |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
 | `fleet ddev [<instance-id>] [-- args]` | — | Runs `ddev <args>` inside an instance's directory |
-| `fleet tmux` | — | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach — a newly-created instance window has its template's `tty1`/`tty2` commands typed into its two bash panes |
+| `fleet tmux` | `[--ensure]` | Attach the persistent tmux session (general tab + a tab per instance, two bash panes each, with a vertical instance sidebar); reconciles tabs on attach; every window it creates is a **plain shell** (tty commands are typed by deploy only). `--ensure`: non-interactive — create the session if missing and reconcile, no attach (what `fleet-tmux.service` runs) |
 | `fleet tmux-sidebar` | `--window=<name> [--once]` | Internal: renders one tmux window's sidebar pane |
 | `fleet tmux-reset [<window>]` | — | Rebuild a tab's standard pane layout in place, without killing the window; bound to `^b R` inside the workspace |
 | `fleet reboot-notify` | `[--test]` | Checks Debian's reboot-required marker, sends an anti-spammed email if pending; `--test` forces a test send regardless |
@@ -277,12 +283,18 @@ Full detail + examples: `docs/cli.md`.
   branch inside an instance, the overview catches up within ~5 min (or press
   `^b R` to refresh that tab's sidebar immediately). `.fleet/instance.yml` still
   records the deploy-time branch and is not modified.
-- **`tty1`/`tty2` template commands fire once, on window creation, not on
-  `^b R`.** `^b R` (`fleet tmux-reset`) rebuilds a tab's pane layout in place
-  but never re-types a template's commands into a live pane. The only way to
-  get them typed again is a window that doesn't exist yet — which is exactly
-  what happens fleet-wide after a reboot, since `fleet tmux` then recreates
-  every instance window from scratch.
+- **`post_deploy.tty1`/`tty2` template commands are typed by deploy only
+  (FLE-6).** Not by `^b R` (`fleet tmux-reset` rebuilds a tab's pane layout in
+  place), not by `fleet tmux`, not after a reboot: `fleet-tmux.service`
+  recreates the `fleet` session at boot with a plain-shell window per
+  instance, and `fleet tmux` just attaches and repairs layout. The only ways to
+  get the commands typed are a `fleet deploy`/`fleet redeploy` (CLI or web UI).
+- **`fleet-tmux.service` owns the tmux server.** It runs `fleet tmux --ensure`
+  (create the session if missing, reconcile a plain window per instance, exit
+  — no attach) and keeps the server in its own cgroup, so `systemctl restart
+  fleet` never kills your panes. `systemctl status fleet-tmux` should say
+  `active (exited)`; `sudo systemctl stop fleet-tmux` ends the session and all
+  its panes.
 
 ## Reboot notifications
 

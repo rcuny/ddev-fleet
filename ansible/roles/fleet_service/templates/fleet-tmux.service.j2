@@ -1,0 +1,72 @@
+[Unit]
+Description=ddev-fleet: own the `fleet` tmux session (plain-shell window per instance)
+# FLE-6. This unit OWNS the tmux server of the `fleet` session, in its own
+# cgroup, so that `systemctl restart fleet` (the daemon) can never kill the
+# operators' panes: a tmux server forked by a process inherits that process's
+# cgroup, and fleet.service's cgroup is torn down on every restart. After a
+# reboot it recreates the session with one window per instance (sidebar +
+# tty1 + tty2) as PLAIN SHELLS — tty commands are a deploy action and are
+# never typed here. The daemon and the CLI only ADD windows to this session.
+#
+# Ordered After=fleet.service only — NOT after fleet-boot.service, docker or
+# the network. It must not wait for the (long) instance start batch, and a
+# window is just a shell in an instance directory: it needs no running
+# containers. Do NOT add Before=/After= against multi-user.target or
+# authelia.service (FLE-4 lesson, see fleet-boot.service.j2).
+After=fleet.service
+
+[Service]
+# Type=oneshot + RemainAfterExit=yes, chosen deliberately:
+#  * ExecStart is `fleet tmux --ensure`, a SHORT-LIVED client: it runs
+#    `tmux new-session -d`, which daemonises the tmux server, builds the
+#    windows and exits. The server (and every pane shell) stays in this
+#    unit's cgroup — cgroup membership is inherited across fork()/setsid().
+#  * RemainAfterExit=yes keeps the unit "active (exited)" after that client
+#    exits. Without it systemd would treat the exit as the end of the service
+#    and SIGTERM everything left in the cgroup — i.e. kill the tmux server we
+#    just created. (systemd.service(5): "RemainAfterExit= ... the service is
+#    considered active even when all its processes exited"; remaining
+#    processes are only killed when the unit is STOPPED.)
+#  * Type=forking was rejected: with no PIDFile, systemd must GUESS the main
+#    PID, and a cgroup holding a tmux server plus N pane shells and sidebar
+#    pythons makes that guess ambiguous. Type=simple/exec was rejected because
+#    `systemctl start` would return before the session exists, and a failed
+#    reconcile would surface late.
+#  * Unlike fleet-boot, nothing slow happens here (no `ddev start`): the
+#    reconcile is a few seconds of tmux calls even for dozens of instances, so
+#    the brief hold on multi-user.target that oneshot implies is acceptable;
+#    TimeoutStartSec bounds it. `systemctl start fleet-tmux` returning 0 means
+#    the session really exists, which the Ansible task and operators rely on.
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=120
+# Identity/venv/env pattern of fleet.service.j2 / fleet-boot.service.j2: run
+# the venv's `fleet` entrypoint directly (NOT the /usr/local/bin/fleet wrapper,
+# which would sudo again), as {{ fleet_user }}.
+User={{ fleet_user }}
+WorkingDirectory={{ fleet_opt_dir }}
+# Pane environment. The tmux server's global environment is what every pane
+# shell starts with. systemd already provides HOME/USER/LOGNAME/SHELL for
+# User={{ fleet_user }}, and the panes run an interactive bash that reads
+# ~{{ fleet_user }}/.bashrc — which exports the Claude token from .secrets
+# (`set -a; . .secrets`), exactly how panes of a hand-started `fleet tmux`
+# get it (see memory fleet-claude-token-flow). EnvironmentFile adds the same
+# variables directly so the panes have them even before .bashrc runs.
+# LANG is not inherited from any ssh client here, so set a UTF-8 locale for the
+# sidebar glyphs and for readline.
+Environment=LANG=C.UTF-8
+EnvironmentFile={{ fleet_srv_dir }}/.secrets
+ExecStart={{ fleet_opt_dir }}/venv/bin/fleet tmux --ensure
+# Clean shutdown: end the fleet session (the server exits with its last
+# session) before systemd's cgroup kill. The leading "-" tolerates "no server".
+ExecStop=-/usr/bin/tmux kill-session -t fleet
+TimeoutStopSec=30
+
+# NO sandboxing here (unlike fleet.service): the panes are operator shells
+# where `fleet deploy`, `ddev`, git and `sudo` (e.g. fleet-ufw-sync) must work.
+# NoNewPrivileges/ProtectSystem would be inherited by every pane and break them
+# (see memory fleet-daemon-systemd-sandbox). Likewise no PrivateTmp: the tmux
+# socket lives in /tmp/tmux-<uid>/default and operators/CLI must share it.
+
+[Install]
+WantedBy=multi-user.target

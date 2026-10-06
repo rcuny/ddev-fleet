@@ -51,7 +51,7 @@ port) see `docs/installation.md` and `docs/operations.md`; for the
 | `fleet refresh-auth` | — | Re-applies the current auth configuration to every deployed instance — the "apply my `fleet.yml`/`host.yml` auth edits now" command, and the mechanism a server uses when switching `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from each instance's recorded `auth-enabled`/`auth-password` (the old `fleet.auth_bypass_cidrs` whitelist is deprecated and no longer applied here — see `docs/README-authelia.md`). Authelia mode: re-renders `users.yml` from `fleet.yml`'s per-project `users:` plus the admin account, and every instance's `forward_auth` snippet. Either way: one `caddy validate` + `caddy reload` for the whole fleet. No redeploy, no Ansible run. |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Drops into an interactive shell in an instance's directory (or the fleet home if no id given). `--list`/`-l` prints the known instance ids instead of prompting. |
 | `fleet ddev [<instance-id>] [-- <ddev-args>...]` | — | Runs `ddev <ddev-args>` inside the given instance's directory (prompts for the instance if omitted). |
-| `fleet tmux` | — | Attaches the persistent tmux session (general tab + one tab per instance), reconciling tabs to the current instance list on every attach. |
+| `fleet tmux` | `[--ensure]` | Attaches the persistent tmux session (general tab + one tab per instance), reconciling tabs to the current instance list on every attach. Every window it creates is a **plain shell** — a template's `post_deploy.tty1`/`tty2` are typed by deploy/redeploy only. `--ensure` is the non-interactive form `fleet-tmux.service` runs: create the session if missing, reconcile, exit (no attach; exit 0 if the session already exists). |
 | `fleet tmux-sidebar` | `--window=<name> [--once]` | Internal: renders the tmux sidebar pane for one window; `--once` renders a single frame instead of looping (used by the pane's startup command). |
 | `fleet tmux-reset [<window>]` | — | Rebuilds a tab's standard pane layout in place (general = 1 bash + sidebar; instance = 2 bash + sidebar) without killing the window. Defaults to the currently attached window if omitted. |
 | `fleet reboot-notify` | `[--test]` | Checks Debian's reboot-required marker and sends an anti-spammed email notification (via `msmtp`, config at `$FLEET_HOME/reboot-notify.env` + `msmtprc`) if a reboot is pending and one hasn't been sent recently. `--test` forces a test email regardless of pending-reboot state, to verify the mail relay works. Exit `0` normally; with `--test`, exit `1` if the test send failed. |
@@ -232,7 +232,8 @@ id**, recovering the project/template/branch/label/auth it was originally
 deployed with from `<instance-dir>/.fleet/instance.yml` — see
 `docs/configuration.md` for that file's full field reference. The registry
 is re-read at rebuild time, so a redeploy picks up any edits made since the
-original deploy to the resolved template's `post_deploy`/`tty1`/`tty2` —
+original deploy to the resolved template's `post_deploy`
+(`exec`/`tty1`/`tty2`; a redeploy types the tty commands again) —
 "same parameters" means the same project/template/branch/label *identity*,
 not a frozen copy of the recipe.
 

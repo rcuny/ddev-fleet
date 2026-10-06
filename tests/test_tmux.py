@@ -744,54 +744,61 @@ def test_ensure_instance_window_tty_none_sends_nothing():
     assert not any(c.startswith("tmux send-keys") for c in _joined(fake))
 
 
-def test_reconcile_calls_tty_for_only_for_newly_created_windows(monkeypatch):
-    paths_instances = Path("/srv/fleet/instances")
+class _P:  # minimal FleetPaths stand-in
+    home = Path("/srv/fleet")
+    instances = Path("/srv/fleet/instances")
 
-    class P:  # minimal FleetPaths stand-in
-        home = Path("/srv/fleet")
-        instances = paths_instances
 
-    fake = FakeRunner(
-        default=RunResult(0, []),
-        scripted={
-            "tmux has-session -t fleet": RunResult(0, []),
-            "tmux list-windows -t fleet -F #{window_name}": RunResult(
-                0, ["general", "existing--a"]
-            ),
-            "tmux list-windows -t fleet -F #{window_name}\t#{@fleet_managed}": RunResult(
-                0, ["general\t", "existing--a\t1"]
-            ),
-            "tmux list-panes -t fleet:general -F #{@fleet_role}": RunResult(0, ["sidebar"]),
-            "tmux list-panes -t fleet:existing--a -F #{@fleet_role}": RunResult(0, ["sidebar"]),
-        },
+def _new_window_fake(win: str, *, session: bool = True, bash_panes: bool = True) -> FakeRunner:
+    """A FakeRunner for creating ONE new instance window `win`. When
+    `bash_panes`, the bash-pane listing is scripted so a (buggy) tty typing
+    would actually emit send-keys — letting tests assert that none happen."""
+    import sys as _sys
+
+    dir_ = _P.instances / win
+    sidebar_split = (
+        f"tmux split-window -hbf -l {tmux.SIDEBAR_WIDTH} -t fleet:{win} -d -P -F "
+        "#{pane_id} -- " + _sys.executable + f" -m fleet.cli tmux-sidebar --window {win}"
     )
-    created_windows = []
-    monkeypatch.setattr(
-        tmux,
-        "ensure_instance_window",
-        lambda instance_id, instance_dir, *, tty=None, runner=None: created_windows.append(
-            (instance_id, tty)
+    scripted = {
+        "tmux has-session -t fleet": RunResult(0 if session else 1, []),
+        "tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general"]),
+        "tmux list-windows -t fleet -F #{window_name}\t#{@fleet_managed}": RunResult(
+            0, ["general\t"]
         ),
-    )
-    tty_calls = []
+        "tmux list-panes -t fleet:general -F #{@fleet_role}": RunResult(0, ["sidebar"]),
+        f"tmux new-window -t fleet -n {win} -c {dir_} -P -F #{{pane_id}}": RunResult(0, ["%5"]),
+        f"tmux list-panes -t fleet:{win} -F #{{@fleet_role}}": RunResult(0, ["", ""]),
+        sidebar_split: RunResult(0, ["%9"]),
+    }
+    if bash_panes:
+        scripted[_bash_pane_list_key(win)] = RunResult(
+            0, ["%5\t0\t", "%6\t50\t", "%9\t-50\tsidebar"]
+        )
+    return FakeRunner(default=RunResult(0, []), scripted=scripted)
 
-    def tty_for(instance_id):
-        tty_calls.append(instance_id)
-        return (["cmd1"], [])
 
-    tmux.reconcile(P, ["existing--a", "new--b"], tty_for=tty_for, runner=fake)
-    assert tty_calls == ["new--b"]
-    assert ("new--b", (["cmd1"], [])) in created_windows
-    assert ("existing--a", None) in created_windows
+def test_reconcile_creates_new_windows_as_plain_shells_never_typing(monkeypatch):
+    """FLE-6: tty commands are a deploy action. reconcile (== `fleet tmux`,
+    `fleet tmux --ensure`, the boot reconcile) creates the window with
+    sidebar + 2 bash panes and types NOTHING."""
+    monkeypatch.setattr(tmux, "apply_pane_layout", lambda window, *, runner=None: None)
+    win = "new--b"
+    fake = _new_window_fake(win)
+
+    tmux.reconcile(_P, [win], runner=fake)
+
+    joined = _joined(fake)
+    assert any(c.startswith(f"tmux new-window -t fleet -n {win}") for c in joined)
+    assert not any(c.startswith("tmux send-keys") for c in joined)
 
 
-def test_reconcile_survives_raising_tty_for_and_still_creates_window(monkeypatch):
-    paths_instances = Path("/srv/fleet/instances")
+def test_reconcile_no_longer_accepts_a_tty_resolver():
+    with pytest.raises(TypeError):
+        tmux.reconcile(_P, [], tty_for=lambda instance_id: (["x"], []), runner=FakeRunner())
 
-    class P:  # minimal FleetPaths stand-in
-        home = Path("/srv/fleet")
-        instances = paths_instances
 
+def test_reconcile_passes_no_tty_to_ensure_instance_window(monkeypatch):
     fake = FakeRunner(
         default=RunResult(0, []),
         scripted={
@@ -803,20 +810,39 @@ def test_reconcile_survives_raising_tty_for_and_still_creates_window(monkeypatch
             "tmux list-panes -t fleet:general -F #{@fleet_role}": RunResult(0, ["sidebar"]),
         },
     )
-    created_windows = []
+    calls = []
     monkeypatch.setattr(
         tmux,
         "ensure_instance_window",
-        lambda instance_id, instance_dir, *, tty=None, runner=None: created_windows.append(
-            (instance_id, tty)
-        ),
+        lambda instance_id, instance_dir, **kw: calls.append((instance_id, kw)),
     )
+    tmux.reconcile(_P, ["new--b"], runner=fake)
+    assert calls == [("new--b", {"runner": fake})]
 
-    def tty_for(instance_id):
-        raise RuntimeError("boom")
 
-    tmux.reconcile(P, ["new--b"], tty_for=tty_for, runner=fake)
-    assert created_windows == [("new--b", None)]
+def test_ensure_instance_window_returns_true_when_created_false_when_present(monkeypatch):
+    monkeypatch.setattr(tmux, "apply_pane_layout", lambda window, *, runner=None: None)
+    win = "oak--click-3"
+    fake = _new_window_fake(win)
+    assert tmux.ensure_instance_window(win, _P.instances / win, runner=fake) is True
+
+    present = FakeRunner(
+        scripted={"tmux list-windows -t fleet -F #{window_name}": RunResult(0, ["general", win])}
+    )
+    assert tmux.ensure_instance_window(win, _P.instances / win, runner=present) is False
+
+
+def test_ensure_session_creates_when_missing_and_only_heals_when_present():
+    missing = FakeRunner(
+        default=RunResult(0, ["%9"]),
+        scripted={"tmux has-session -t fleet": RunResult(1, [])},
+    )
+    tmux.ensure_session(Path("/srv/fleet"), runner=missing)
+    assert "tmux new-session -d -s fleet -n general -c /srv/fleet" in _joined(missing)
+
+    present = FakeRunner(default=RunResult(0, ["%9"]))
+    tmux.ensure_session(Path("/srv/fleet"), runner=present)
+    assert not any(c.startswith("tmux new-session") for c in _joined(present))
 
 
 def test_reset_window_general_rebuilds_two_bash_panes():

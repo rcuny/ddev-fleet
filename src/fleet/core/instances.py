@@ -137,10 +137,10 @@ def _write_instance_yaml(
             existing = _yaml.load(fh) or {}
         created_at = existing.get("created-at", created_at)
 
-    # `template` is what lets a future `fleet tmux` recover this instance's
-    # tty1/tty2 commands from disk alone (core/ttycmds.py:plan_for_instance)
-    # — it reaches new deploys only; instances deployed before this field
-    # existed simply resolve to no tty commands (today's behaviour).
+    # `template` is what lets `redeploy()` rebuild this instance from the
+    # same template — it reaches new deploys only; instances deployed before
+    # this field existed need `--template` on redeploy. (tty commands are no
+    # longer recovered from it: they are typed by deploy() alone, FLE-6.)
     #
     # `auth-enabled`/`auth-password` record the basic-auth state THIS
     # deploy call configured, so a later `redeploy()` can reproduce it
@@ -429,9 +429,18 @@ def deploy(
     auth_password: str = caddyauth.DEFAULT_INSTANCE_PASSWORD,
     auth_snippet_dir: Path | None = None,
     auth_caddyfile_path: Path | None = None,
+    create_tmux_session: bool = False,
     runner=run_streamed,
 ) -> str:
     """Deploy `project`/`template`/`branch`/`label` to an instance.
+
+    `create_tmux_session` (FLE-6) says whether this caller may create the
+    `fleet` tmux session when none exists and the template has tty commands
+    to type. Only the CLI passes True (a tmux server started from the CLI
+    lives outside `fleet.service`'s cgroup); the daemon/web-UI leaves it
+    False — a server spawned by `fleet.service` would die on every
+    `systemctl restart fleet` — and logs a warning instead. The session is
+    normally owned by `fleet-tmux.service`.
 
     A plain deploy (`replace=False`, the default — every CLI/UI entry
     point and `multi_deploy()` reach this) NEVER reuses an existing
@@ -796,26 +805,83 @@ def deploy(
         )
         _append_log(deploy_log, "deploy complete")
 
+    _tmux_deploy_hook(
+        paths,
+        registry,
+        resolved,
+        instance_dir,
+        deploy_log,
+        create_tmux_session=create_tmux_session,
+        runner=runner,
+    )
+
+    return f"https://{inst_id}.{registry.domain}"
+
+
+def _tmux_deploy_hook(
+    paths: FleetPaths,
+    registry: Registry,
+    resolved: ResolvedInstance,
+    instance_dir: Path,
+    deploy_log: Path,
+    *,
+    create_tmux_session: bool,
+    runner,
+) -> None:
+    """Give a completed deploy its tmux window and type the template's
+    `post_deploy.tty1`/`tty2` commands into it (FLE-6: this is the ONLY place
+    tty commands are ever typed).
+
+    The commands come from `resolved` — the template as resolved at DEPLOY
+    time — never from a later re-read of the live `fleet.yml`.
+
+    Behaviour by session state:
+      * session exists          -> add the window (typing tty commands, if
+                                   any) — from the CLI and daemon alike;
+      * no session, no tty cmds -> nothing (no session is created for a plain
+                                   window);
+      * no session, tty cmds    -> CLI (`create_tmux_session=True`) creates it
+                                   as `fleet tmux` does; the daemon must NOT
+                                   (its cgroup would own the tmux server and
+                                   every `systemctl restart fleet` would kill
+                                   the operator's panes), so it only logs a
+                                   warning.
+
+    LENIENT substitution (decision 2 in the design doc): an unresolvable tty
+    command must not fail a deploy that otherwise completed — it's skipped,
+    with a WARNING in the deploy log, leaving that pane a plain shell. The
+    whole hook is best-effort: any failure only warns.
+    """
+    inst_id = resolved.instance_id
     try:
-        if tmux.session_exists(runner=runner):
-            # LENIENT substitution here (decision 2 in the design doc): an
-            # unresolvable tty command must not fail a deploy that otherwise
-            # completed — it's just skipped, with a WARNING in the deploy
-            # log, leaving that pane as a plain bash shell. Resolution itself
-            # (registry/secrets lookups included) stays inside this whole
-            # try/except, so any failure here — not just ensure_instance_window
-            # raising — only ever warns, never fails a completed deploy.
-            plan = ttycmds.plan_from_template(
-                registry, paths, project, resolved.label, resolved.branch, resolved.template
-            )
+        has_tty = bool(resolved.tty1 or resolved.tty2)
+        session = tmux.session_exists(runner=runner)
+        if not session and not has_tty:
+            return
+        tty = None
+        if has_tty:
+            plan = ttycmds.plan_from_resolved(registry, paths, resolved)
             for line in plan.skipped:
                 _append_log(deploy_log, f"WARNING: {line}")
             tty = None if plan.is_empty else (plan.tty1, plan.tty2)
-            tmux.ensure_instance_window(inst_id, instance_dir, tty=tty, runner=runner)
+        if not session:
+            if not create_tmux_session:
+                _append_log(
+                    deploy_log,
+                    "WARNING: fleet-tmux.service not running: tty commands not typed; "
+                    "start it with `sudo systemctl start fleet-tmux` and redeploy",
+                )
+                return
+            tmux.ensure_session(paths.home, runner=runner)
+        created = tmux.ensure_instance_window(inst_id, instance_dir, tty=tty, runner=runner)
+        if tty is not None and created is False:
+            _append_log(
+                deploy_log,
+                f"WARNING: tmux window {inst_id} already existed: tty commands not typed "
+                "(close the window and redeploy to type them)",
+            )
     except Exception as exc:  # noqa: BLE001 - tmux tab is best-effort
         _append_log(deploy_log, f"WARNING: tmux tab update failed: {exc}")
-
-    return f"https://{inst_id}.{registry.domain}"
 
 
 def redeploy(
@@ -826,6 +892,7 @@ def redeploy(
     template: str | None = None,
     auth_password: str | None = None,
     force: bool = False,
+    create_tmux_session: bool = False,
     runner=run_streamed,
 ) -> str:
     """Destroy-and-rebuild `instance_id` IN PLACE, recovering its original
@@ -844,16 +911,13 @@ def redeploy(
     IDENTITY, not a frozen copy of the recipe. Do not "fix" this into a
     literal replay of the original deploy; it is intentional.
 
-    Contrast with `core/ttycmds.py:plan_for_instance`, the OTHER reader of
-    this same `instance.yml` file: that function silently degrades to an
-    EMPTY plan on anything short of a perfect read, because it runs inside
-    `fleet tmux`, where one broken/legacy instance must never stop the rest
-    of the tmux workspace from coming up. `redeploy()` has the opposite
-    obligation — it is about to destroy real containers and disk, there is
-    no "fall back to doing nothing" available once that starts, so every
-    condition below that `plan_for_instance` would shrug off instead raises
-    a loud, actionable `FleetError`. Guessing what to rebuild is how you
-    destroy the wrong thing.
+    `redeploy()` is about to destroy real containers and disk, so there is
+    no "fall back to doing nothing" once that starts: every unreadable or
+    missing recorded parameter below raises a loud, actionable `FleetError`.
+    Guessing what to rebuild is how you destroy the wrong thing.
+
+    A redeploy types the template's `post_deploy.tty1`/`tty2` again (the old
+    window is killed by the destroy, the new one is created by `deploy()`).
     """
     instance_dir = paths.instances / instance_id
     if not instance_dir.exists():
@@ -939,6 +1003,7 @@ def redeploy(
         force=force,
         auth_enabled=resolved_auth_enabled,
         auth_password=resolved_auth_password,
+        create_tmux_session=create_tmux_session,
         runner=runner,
     )
 

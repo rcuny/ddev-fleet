@@ -7,7 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+- **FLE-6: `fleet-tmux.service`** (new systemd unit in the `fleet_service` Ansible role, tag `fleet_tmux`). It owns the `fleet` tmux server in its own cgroup, so `systemctl restart fleet` never kills operators' panes, and recreates the session after a reboot with a window per instance (sidebar + tty1 + tty2) as plain shells. `Type=oneshot` + `RemainAfterExit=yes`, `After=fleet.service` only (it does not wait for `fleet-boot.service`).
+- `fleet tmux --ensure`: non-interactive create-if-missing + reconcile, no attach — what the unit runs.
+- `post_deploy` may now be a mapping with optional `exec`, `tty1` and `tty2` lists; the list form stays valid as shorthand for `exec:`. Any other key is a validation error naming the template.
+
+### Changed
+- **FLE-6: tty1/tty2 commands are now a deploy action.** They are typed only by `fleet deploy` and `fleet redeploy` (CLI and web UI alike), from the template as resolved at deploy time. `fleet tmux`, reconcile, a recreated or closed window, `^b R` and the reboot reconcile always create plain shells, so a reboot no longer relaunches `/jira work` (with permissions skipped) on every templated instance.
+- Deploy with no `fleet` tmux session: the CLI creates the session as before; the daemon/web UI never does and logs `fleet-tmux.service not running: tty commands not typed; start it with sudo systemctl start fleet-tmux and redeploy`. If the instance's window already exists the commands are not typed into it (warning in the deploy log).
+- **Rollout order:** every server must run 0.8.0+ before `fleet.yml` uses the `post_deploy` mapping — older products cannot parse it and all servers share the config repo.
+
+### Deprecated
+- Template-level `tty1:`/`tty2:` (use `post_deploy.tty1`/`tty2`). Still accepted, with a deprecation warning once per template; setting the same pane in both places is a validation error.
+
+### Removed
+- `ttycmds.plan_for_instance` and the `tty_for` argument of `tmux.reconcile` (they re-derived tty commands from the live `fleet.yml` on every window creation).
 
 ## [0.7.2] - 2026-10-05
 

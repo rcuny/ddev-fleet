@@ -145,6 +145,7 @@ def multi_deploy(
     auth_enabled: bool = True,
     auth_password: str = DEFAULT_INSTANCE_PASSWORD,
     skip_disk_check: bool = False,
+    create_tmux_session: bool = False,
     on_progress: Callable[[dict], None] | None = None,
     runner=run_streamed,
 ) -> BulkOutcome:
@@ -201,6 +202,7 @@ def multi_deploy(
             force=force,
             auth_enabled=auth_enabled,
             auth_password=auth_password,
+            create_tmux_session=create_tmux_session,
             runner=runner,
         )
 
