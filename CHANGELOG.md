@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.8.0] - 2026-10-06
+
 ### Added
 - **FLE-6: `fleet-tmux.service`** (new systemd unit in the `fleet_service` Ansible role, tag `fleet_tmux`). It owns the `fleet` tmux server in its own cgroup, so `systemctl restart fleet` never kills operators' panes, and recreates the session after a reboot with a window per instance (sidebar + tty1 + tty2) as plain shells. `Type=oneshot` + `RemainAfterExit=yes`, `After=fleet.service` only (it does not wait for `fleet-boot.service`).
 - `fleet tmux --ensure`: non-interactive create-if-missing + reconcile, no attach — what the unit runs.
@@ -284,7 +288,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.7.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/rcuny/ddev-fleet/compare/v0.7.2...v0.8.0
 [0.7.2]: https://github.com/rcuny/ddev-fleet/compare/v0.7.1...v0.7.2
 [0.7.1]: https://github.com/rcuny/ddev-fleet/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/rcuny/ddev-fleet/compare/v0.6.0...v0.7.0
