@@ -20,6 +20,9 @@
   "prHourlyLimit": 0,
   "dependencyDashboard": false,
   "osvVulnerabilityAlerts": true,
+  "vulnerabilityAlerts": {
+    "groupName": "security fixes"
+  },
   "rangeStrategy": "bump",
   "packageRules": [
     {
