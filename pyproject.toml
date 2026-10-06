@@ -20,14 +20,14 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "ruff>=0.4",
+    "ruff>=0.16.10",
     "black>=24.0",
-    "httpx>=0.27",
+    "httpx>=0.28.1",
 ]
 infra = [
     "ansible-core>=2.16",
-    "ansible-lint>=24.2",
-    "yamllint>=1.35",
+    "ansible-lint>=24.12.2",
+    "yamllint>=1.38.0",
 ]
 
 [project.scripts]
