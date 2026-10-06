@@ -68,8 +68,10 @@ PR with a red suite.
   result. The mirror steps skip unless
   `GITHUB_MIRROR_URL` is set, so forks are unaffected.
 - **Renovate** (`renovate-config.json`, run by the scheduled `custom: renovate`
-  pipeline) opens weekly grouped dependency PRs against `develop`; review them
-  like any other PR. The Python interpreter version is never auto-bumped.
+  pipeline) opens daily grouped dependency PRs against `develop`; review them
+  like any other PR. Their commits and PR titles start with the standing
+  Jira key of the "Dependency updates (Renovate)" ticket. The Python
+  interpreter version is never auto-bumped.
   A bump of the vendored htmx in `docs/vendored-assets.md` also needs the
   file re-downloaded — see that document.
 - Required repository variables and the GitHub deploy key are listed in the
