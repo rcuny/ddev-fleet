@@ -1,0 +1,37 @@
+---
+# security_probe (FLE-8): lets the scheduled Bitbucket pipeline
+# (`custom: systemd-security-live`) read this host's `systemd-analyze security`
+# scores over SSH, with no shell and no sudo.
+#
+# A dedicated system user `fleet-probe` is created whose authorized_keys lines
+# are all `restrict,command="/usr/local/bin/fleet-security-report <units>"`:
+# whatever the client asks for, sshd runs that one read-only script and prints
+# its JSON report. No pty, no forwarding, no sudo, no group memberships.
+#
+# Inert until at least one public key is configured. Set the keys per host in
+# /etc/ddev-fleet/local-vars.yml (never in the repo), then apply with the
+# scoped playbook ansible/security-probe.yml (see docs/README-ci.md).
+
+# The probe account. Its shell must exist (sshd runs the forced command through
+# it) but nobody can log in with a password: the shadow entry is "*".
+fleet_security_probe_user: fleet-probe
+fleet_security_probe_home: /var/lib/fleet-probe
+
+# Public SSH keys allowed to fetch the report, one key per list item, e.g.
+#   - "ssh-ed25519 AAAA... bitbucket-pipelines"
+# The options (restrict, command=) are added by the role: list bare keys only.
+# Empty (default) = the role is disabled and removes everything it installed.
+fleet_security_probe_authorized_keys: []
+
+# The units the forced command reports on. Units that are not loaded on the
+# host (e.g. authelia.service in basic auth mode) are listed under "missing"
+# in the report rather than failing it.
+fleet_security_probe_units:
+  - fleet.service
+  - fleet-boot.service
+  - fleet-reboot-notify.service
+  - caddy.service
+  - authelia.service
+
+# Derived: the role only does anything when a key is configured.
+fleet_security_probe_enabled: "{{ fleet_security_probe_authorized_keys | length > 0 }}"
