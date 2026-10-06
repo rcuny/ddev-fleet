@@ -340,6 +340,75 @@ just once at first rollout:
   sudo cat /etc/caddy/fleet/admin-auth.conf   # "admin $2..." — a real hash
   ```
 
+## systemd sandboxing (FLE-1)
+
+Since FLE-1 the units fleet owns run with a systemd sandbox, scored with
+`systemd-analyze security` (0 = locked down, 10 = no sandbox):
+
+| Unit | Before | After | Where it comes from |
+|---|---|---|---|
+| `fleet.service` (daemon) | 8.7 | 1.8 | `fleet_service` role, `fleet.service.j2` + shared `fleet-sandbox.inc.j2` |
+| `fleet-boot.service` | 9.2 | 1.8 | same include, `fleet-boot.service.j2` |
+| `caddy.service` | 8.8 | 1.6 | `caddy` role drop-in `/etc/systemd/system/caddy.service.d/50-fleet-sandbox.conf` |
+| `fleet-reboot-notify.service` | 9.0 | 1.6 | `security_hardening` role, `fleet-reboot-notify.service.j2` |
+
+`fleet-tmux.service` is deliberately **not** sandboxed (its panes are operator
+shells that need `sudo`, `ddev` and `git`). The `fleet` user is in the `docker`
+group, which is root-equivalent: the daemon sandbox is defense in depth, not
+containment. The Caddy sandbox matters most, since Caddy is the internet-facing
+process.
+
+**The EROFS trap.** With `ProtectSystem=strict` the whole filesystem is
+read-only for the daemon except its `ReadWritePaths`: `fleet_srv_dir`, the Caddy
+snippet dir, the `fleet` user's home, `/tmp` and `/var/tmp`. A write anywhere
+else fails with `Errno 30` (EROFS) although `ls -l` shows correct ownership and
+the `fleet` user can write there from a shell. A CLI `fleet ...` run is not
+sandboxed, so test new daemon features through the web UI / API. If the daemon
+must write a new path, add it to `ReadWritePaths` in
+`ansible/roles/fleet_service/templates/fleet-sandbox.inc.j2`; do not weaken the
+sandbox.
+
+**Never add to the daemon units** (each breaks something): `PrivateTmp` (the
+tmux socket `/tmp/tmux-<uid>` is shared with `fleet-tmux` and operators),
+`ProcSubset=pid` (`core/sysinfo.py` reads `/proc/meminfo`), `PrivateUsers` (the
+`docker` group would be unmapped, so no Docker socket), `UMask=0027` (Caddy must
+read the snippets the daemon writes), `RemoveIPC` (the `fleet` uid is shared
+with the operator panes). If Caddy ever logs to files, add that directory to
+the drop-in's `ReadWritePaths`.
+
+Settings (Ansible variables, `ansible/group_vars/all.yml` and
+`ansible/roles/security_hardening/defaults/main.yml`):
+
+| Variable | Default | Effect |
+|---|---|---|
+| `fleet_systemd_sandbox_enabled` | `true` | `false` renders the pre-FLE-1 units and removes the Caddy drop-in |
+| `fleet_systemd_security_check_enabled` | `true` | run the check below at the end of `security_hardening` |
+| `fleet_systemd_security_thresholds` | fleet, fleet-boot, fleet-reboot-notify, caddy: `25`; authelia: `35` | max exposure per unit on systemd's 0-100 scale (25 = 2.5) |
+| `fleet_systemd_security_enforce` | `false` | `true` fails the play when a unit is over its threshold; otherwise it only prints a `WARNING` |
+
+The check (the last tasks of `security_hardening`, so only when
+`fleet_security_hardening_enabled` is on) skips units that are not installed
+(e.g. `authelia.service` in basic auth mode), runs
+`systemd-analyze security --threshold=N <unit>` for the rest and prints one
+summary line per unit. Expect a warning for every unit when
+`fleet_systemd_sandbox_enabled` is `false`. The same scores are asserted offline
+in `tests/test_systemd_sandbox.py` (skipped when `systemd-analyze` is absent).
+
+Check by hand:
+
+```bash
+sudo systemd-analyze security fleet.service fleet-boot.service caddy.service
+```
+
+Rolling it out to an existing server: do **not** run the full `site.yml`
+(see `CLAUDE.md`). For Caddy use `ansible-playbook caddy-only.yml` (it installs
+the drop-in, reloads systemd and restarts Caddy). For the fleet units, install
+the rendered `fleet.service` / `fleet-boot.service` / `fleet-reboot-notify.service`
+(root:root 0644), `systemctl daemon-reload`, then `systemctl restart fleet`.
+Verify with a web-UI deploy (the daemon path) and, for `fleet-boot`, a reboot.
+After a Caddy restart, watch `journalctl -u caddy` through the first certificate
+renewal.
+
 ## Regenerating the server-side Claude context
 
 Copy the CLI/registry reference doc into `/srv/fleet/` so `claude -p
