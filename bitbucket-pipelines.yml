@@ -35,6 +35,8 @@ definitions:
         caches:
           - pip
         script:
+          # rsync: core/assets.py shells out to it (asset injection tests)
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync > /dev/null
           - pip install -q -e ".[dev]"
           - pytest -q
           - ruff check .
