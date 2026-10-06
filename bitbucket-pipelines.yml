@@ -4,10 +4,10 @@
 #   pull request (any branch)  -> gates (pytest, ruff, black)
 #   push to develop            -> gates, then mirror develop to GitHub
 #   tag v*  (release)          -> gates, then publish main + the tag to GitHub
-#   custom: renovate           -> weekly dependency-update PRs against develop
+#   custom: renovate           -> daily dependency-update PRs against develop
 #                                 (schedule it in Bitbucket: Pipelines ->
 #                                 Schedules -> branch develop, pipeline
-#                                 custom: renovate, weekly; nothing here
+#                                 custom: renovate, daily ~03:00 UTC; nothing here
 #                                 triggers it automatically)
 #
 # Repository variables to configure (Repository settings -> Pipelines):
@@ -96,7 +96,7 @@ pipelines:
       - step:
           name: Renovate
           # Renovate's own bitbucket-pipelines manager bumps this tag.
-          # No pipeline cache on purpose: a weekly run on one small repo is
+          # No pipeline cache on purpose: a daily run on one small repo is
           # cheap, and the image runs as a non-root user (cache dir ownership).
           image: renovate/renovate:44
           script:

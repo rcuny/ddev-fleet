@@ -11,7 +11,7 @@
   ],
   "timezone": "Europe/Paris",
   "schedule": [
-    "before 7am on monday"
+    "before 7am"
   ],
   "labels": [
     "renovate"
@@ -23,7 +23,7 @@
   "rangeStrategy": "bump",
   "packageRules": [
     {
-      "description": "Python runtime dependencies: one weekly PR for minor/patch (pyproject.toml is extracted by the poetry and/or pep621 manager, so match on datasource + depType)",
+      "description": "Python runtime dependencies: one grouped PR for minor/patch (pyproject.toml is extracted by the poetry and/or pep621 manager, so match on datasource + depType)",
       "matchDatasources": [
         "pypi"
       ],
@@ -37,7 +37,7 @@
       "groupName": "python runtime"
     },
     {
-      "description": "Dev/infra extras and build backend: one weekly PR",
+      "description": "Dev/infra extras and build backend: one grouped PR",
       "matchDatasources": [
         "pypi"
       ],
@@ -48,7 +48,7 @@
       "groupName": "python tooling"
     },
     {
-      "description": "GitHub Actions: one weekly PR, tags not digest-pinned",
+      "description": "GitHub Actions: one grouped PR, tags not digest-pinned",
       "matchManagers": [
         "github-actions"
       ],
@@ -56,7 +56,7 @@
       "pinDigests": false
     },
     {
-      "description": "Ansible Galaxy collections: one weekly PR",
+      "description": "Ansible Galaxy collections: one grouped PR",
       "matchManagers": [
         "ansible-galaxy"
       ],
