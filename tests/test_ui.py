@@ -774,9 +774,9 @@ def test_ui_errors_js_swaps_4xx_bodies_via_before_swap_hook(fleet_home):
 
     body = client.get("/static/ui-errors.js").text
 
-    # htmx 1.9.12 (src/fleet/static/htmx.min.js) has no `htmx.config.
-    # responseHandling` (that's 2.x-only) — `htmx:beforeSwap` + shouldSwap/
-    # isError is the documented 1.x way to render a 4xx body into hx-target.
+    # `htmx:beforeSwap` + shouldSwap/isError is the documented way (valid in
+    # htmx 1.x and 2.x; src/fleet/static/htmx.min.js is 2.0.11) to render a
+    # 4xx body into hx-target.
     assert "htmx:beforeSwap" in body
     assert "shouldSwap" in body
     assert "isError" in body
@@ -791,7 +791,7 @@ def test_base_html_includes_ui_errors_js_script_tag(fleet_home):
     assert '<script src="/static/ui-errors.js" defer></script>' in body
 
 
-# --- Deploy-error visibility (htmx 1.9.12 doesn't swap non-2xx responses) ---
+# --- Deploy-error visibility (htmx doesn't swap non-2xx responses by default) ---
 
 
 def test_ui_deploy_normalises_a_non_dns_safe_label_instead_of_rejecting_it(fleet_home, monkeypatch):
