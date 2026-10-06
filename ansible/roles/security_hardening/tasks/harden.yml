@@ -305,3 +305,99 @@
     state: started
     daemon_reload: true
   when: fleet_reboot_notify_enabled
+
+# --- systemd security check (FLE-1) -----------------------------------------
+# Runs LAST (this role is last in site.yml), so every unit/drop-in this play
+# installed is already on disk. Scores each installed unit with
+# `systemd-analyze security` against its threshold and reports a compact
+# summary; warns (or fails with fleet_systemd_security_enforce) on regression.
+# A drop-in that silently stopped applying (renamed vendor unit, typo) shows
+# up here at provisioning time.
+- name: systemd security check (systemd-analyze security)
+  when: fleet_systemd_security_check_enabled | bool
+  block:
+    - name: Reload systemd so the check scores the units as they are on disk
+      # Handlers (daemon-reload) only run at the end of the play, i.e. AFTER
+      # this check; without this the first run would score the stale units.
+      ansible.builtin.systemd:
+        daemon_reload: true
+
+    - name: Detect which of the checked units are installed on this host
+      ansible.builtin.command:
+        cmd: "systemctl list-unit-files {{ item.key }} --no-legend"
+      loop: "{{ fleet_systemd_security_thresholds | dict2items }}"
+      loop_control:
+        label: "{{ item.key }}"
+      register: sh_secchk_present
+      changed_when: false
+      failed_when: false
+
+    - name: Score each installed unit with systemd-analyze security
+      ansible.builtin.command:
+        cmd: >-
+          systemd-analyze security --no-pager
+          --threshold={{ item.item.value }} {{ item.item.key }}
+      loop: "{{ sh_secchk_present.results }}"
+      loop_control:
+        label: "{{ item.item.key }}"
+      register: sh_secchk_run
+      changed_when: false
+      failed_when: false
+      when: item.stdout | default('') | trim | length > 0
+
+    - name: Collect the exposure scores
+      # Parses "Overall exposure level for <unit>: 1.8 OK". The threshold
+      # is on systemd's 0-100 scale (25 = 2.5); compare in that scale.
+      ansible.builtin.set_fact:
+        sh_secchk_rows: >-
+          {{ sh_secchk_rows | default([]) + [{
+            'unit': item.item.item.key,
+            'threshold': (item.item.item.value | int) / 10,
+            'score': _score,
+            'status': ('UNKNOWN' if _score == ''
+                       else ('OVER' if ((_score | float) * 10) | round(0) | int > (item.item.item.value | int)
+                             else 'OK'))
+          }] }}
+      vars:
+        _score: "{{ item.stdout | regex_findall('Overall exposure level for \\S+: ([0-9.]+)') | first | default('', true) }}"
+      loop: "{{ sh_secchk_run.results }}"
+      loop_control:
+        label: "{{ item.item.item.key }}"
+      when: item.skipped is not defined
+
+    - name: Summary of systemd exposure scores (0 = locked down, 10 = no sandbox)
+      ansible.builtin.debug:
+        msg: >-
+          {%- for r in sh_secchk_rows | default([]) -%}
+          {{ r.unit }}: {{ r.score | default('?', true) }} (max {{ r.threshold }}) {{ r.status }}{{ '; ' if not loop.last else '' }}
+          {%- else -%}
+          no checked unit is installed
+          {%- endfor -%}
+
+    - name: Work out which units are over their threshold
+      ansible.builtin.set_fact:
+        sh_secchk_over: >-
+          {{ sh_secchk_rows | default([])
+             | selectattr('status', 'eq', 'OVER') | map(attribute='unit') | list }}
+
+    - name: Fail on systemd exposure regressions (fleet_systemd_security_enforce)
+      ansible.builtin.fail:
+        msg: >-
+          systemd exposure over threshold for: {{ sh_secchk_over | join(', ') }}.
+          See the summary above; thresholds are in
+          fleet_systemd_security_thresholds.
+      when:
+        - fleet_systemd_security_enforce | bool
+        - sh_secchk_over | length > 0
+
+    - name: Warn about systemd exposure regressions
+      ansible.builtin.debug:
+        msg: >-
+          WARNING: systemd exposure over threshold for: {{ sh_secchk_over | join(', ') }}.
+          Expected when fleet_systemd_sandbox_enabled is false. Otherwise a
+          sandbox drop-in may not be applying (check
+          `systemctl cat <unit>` and `systemd-analyze security <unit>`).
+          Set fleet_systemd_security_enforce: true to make this fatal.
+      when:
+        - not (fleet_systemd_security_enforce | bool)
+        - sh_secchk_over | length > 0

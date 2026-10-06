@@ -11,9 +11,15 @@ ExecStart={{ fleet_opt_dir }}/venv/bin/uvicorn fleet.daemon:app --host 127.0.0.1
 Restart=always
 
 # Hardening — MUST NOT constrain container mounts managed by DDEV/Docker.
+{% if fleet_systemd_sandbox_enabled | default(true) %}
+{# the blank line below is deliberate: Ansible drops the include's trailing newline #}
+{% include 'fleet-sandbox.inc.j2' %}
+
+{% else %}
 NoNewPrivileges=yes
 ProtectSystem=full
 ReadWritePaths={{ fleet_srv_dir }} {{ fleet_caddy_snippet_dir }}
+{% endif %}
 
 [Install]
 WantedBy=multi-user.target

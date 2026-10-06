@@ -7,3 +7,36 @@ Type=oneshot
 User={{ fleet_user }}
 NoNewPrivileges=yes
 ExecStart={{ fleet_opt_dir }}/venv/bin/fleet reboot-notify --interval-hours {{ fleet_reboot_notify_interval_hours }}
+{% if fleet_systemd_sandbox_enabled | default(true) %}
+
+# systemd sandbox (FLE-1). Same base set as fleet.service (see the
+# fleet_service role's fleet-sandbox.inc.j2 — a role can't include another
+# role's templates, so tests/test_systemd_sandbox.py guards against drift).
+# This oneshot only reads /run/reboot-required (world-readable), reads
+# {{ fleet_srv_dir }}/msmtprc + reboot-notify.env, writes its cadence state
+# {{ fleet_srv_dir }}/reboot-notify-state.json, and spawns msmtp (SMTP over
+# AF_INET/AF_INET6 — no netlink needed). Hence a much smaller write set than
+# fleet.service, and PrivateTmp (no tmux use) is fine here.
+ProtectSystem=strict
+ReadWritePaths={{ fleet_srv_dir }}
+ProtectHome=read-only
+PrivateTmp=yes
+CapabilityBoundingSet=
+RestrictSUIDSGID=yes
+LockPersonality=yes
+RestrictRealtime=yes
+ProtectClock=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallErrorNumber=EPERM
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+MemoryDenyWriteExecute=yes
+PrivateDevices=yes
+ProtectProc=invisible
+{% endif %}
