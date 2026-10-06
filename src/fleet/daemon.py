@@ -21,7 +21,7 @@ from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
 from fleet.core import bulk as bulk_mod
-from fleet.core import caddyauth, caddyports, naming, sysinfo
+from fleet.core import caddyauth, caddyports, hostinfo, naming, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core import webhooks as webhooks_mod
 from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
@@ -184,6 +184,9 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
     templates.env.filters["bulk_progress"] = _parse_bulk_progress
+    # Neither can change without a daemon restart, so compute them once.
+    templates.env.globals["hostname"] = hostinfo.hostname()
+    templates.env.globals["fleet_version"] = hostinfo.fleet_version()
 
     @app.exception_handler(FleetError)
     async def fleet_error_handler(request: Request, exc: FleetError):

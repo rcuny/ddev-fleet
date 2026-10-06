@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-15:** the web UI shows the server hostname (`ddev-fleet (<hostname>)` as page title and heading) and the Fleet version it is running (from `git describe --tags`, falling back to the package version) in the footer next to the server stats.
+
 ## [0.9.2] - 2026-10-06
 
 ### Dependencies
