@@ -14,7 +14,7 @@ from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
 from fleet.core import authelia as authelia_mod
 from fleet.core import bulk as bulk_mod
-from fleet.core import caddyauth, caddyports, ddev, fleetconfig, ttycmds
+from fleet.core import caddyauth, caddyports, ddev, fleetconfig
 from fleet.core import instances as instances_mod
 from fleet.core import reboot as reboot_mod
 from fleet.core import registry as registry_mod
@@ -272,7 +272,16 @@ def _build_parser() -> argparse.ArgumentParser:
     ddev_parser.add_argument("instance_id", nargs="?", default=None)
     ddev_parser.add_argument("ddev_args", nargs=argparse.REMAINDER)
 
-    subparsers.add_parser("tmux")
+    tmux_parser = subparsers.add_parser("tmux")
+    tmux_parser.add_argument(
+        "--ensure",
+        action="store_true",
+        help=(
+            "non-interactive: create the `fleet` session if missing and reconcile a "
+            "plain-shell window per instance, then exit WITHOUT attaching "
+            "(what fleet-tmux.service runs)"
+        ),
+    )
 
     tmux_sidebar_parser = subparsers.add_parser("tmux-sidebar")
     tmux_sidebar_parser.add_argument("--window", required=True)
@@ -445,6 +454,10 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
             force=args.force,
             auth_enabled=args.auth,
             auth_password=auth_password,
+            # CLI (not the daemon) may create the `fleet` tmux session when
+            # none exists and the template has tty commands to type: a tmux
+            # server started here is outside fleet.service's cgroup.
+            create_tmux_session=True,
         )
         print(url)
         return 0
@@ -465,6 +478,7 @@ def _cmd_deploy(fleet_home: Path, args: argparse.Namespace) -> int:
         auth_enabled=args.auth,
         auth_password=auth_password,
         skip_disk_check=args.skip_disk_check,
+        create_tmux_session=True,
     )
     for result in outcome.results:
         if result.ok:
@@ -564,6 +578,7 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
             template=args.template,
             auth_password=args.auth_password,
             force=args.force,
+            create_tmux_session=True,
         )
         print(url)
         return 0
@@ -594,6 +609,7 @@ def _cmd_redeploy(fleet_home: Path, args: argparse.Namespace) -> int:
             template=args.template,
             auth_password=args.auth_password,
             force=args.force,
+            create_tmux_session=True,
             runner=runner,
         )
 
@@ -1020,38 +1036,19 @@ def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run
 
 
 def _cmd_tmux(fleet_home: Path, args: argparse.Namespace) -> None:
+    """`fleet tmux`: reconcile the `fleet` session (create it if missing, a
+    window per instance, prune stale ones), then attach. Every window created
+    here is a PLAIN shell — tty commands are typed by deploy only (FLE-6).
+
+    `--ensure` is the non-interactive form `fleet-tmux.service` runs at boot:
+    same create-and-reconcile, but no attach (there is no terminal), and a
+    no-op-ish exit 0 when the session already exists (it is only healed)."""
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     ids = shell_mod.list_instance_ids(paths)
-    tmux_mod.reconcile(paths, ids, tty_for=_tty_resolver(paths))
+    tmux_mod.reconcile(paths, ids)
+    if getattr(args, "ensure", False):
+        return
     tmux_mod.attach()
-
-
-def _tty_resolver(paths: instances_mod.FleetPaths):
-    """Build the `tty_for` callable `reconcile()` calls lazily, once per
-    newly-created window. A registry that fails to load (missing/malformed
-    fleet.yml) must not break `fleet tmux` — the whole point of the
-    workspace is to let the operator get IN and fix things — so this warns
-    and falls back to None (every window starts as a plain bash shell)
-    rather than raising."""
-    try:
-        registry = instances_mod.load_registry(paths)
-    except FleetError as exc:
-        print(
-            f"warning: fleet tmux could not load the registry ({exc.message}); "
-            "instance windows will start as plain shells",
-            file=sys.stderr,
-        )
-        return None
-
-    def tty_for(instance_id: str) -> tuple[list[str], list[str]] | None:
-        plan = ttycmds.plan_for_instance(registry, paths, instance_id)
-        for line in plan.skipped:
-            print(f"warning: {line}", file=sys.stderr)
-        if plan.is_empty:
-            return None
-        return (plan.tty1, plan.tty2)
-
-    return tty_for
 
 
 def _cmd_tmux_sidebar(fleet_home: Path, args: argparse.Namespace) -> None:

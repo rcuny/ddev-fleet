@@ -45,6 +45,7 @@ def test_deploy_happy_path_prints_url(fleet_home, monkeypatch, capsys):
         force=False,
         auth_enabled=True,
         auth_password="fleet",
+        create_tmux_session=False,
         runner=None,
     ):
         return "https://demo--develop.fleet.example.test"
@@ -1526,77 +1527,104 @@ def test_tmux_dispatch_reconciles_and_attaches(fleet_home, monkeypatch):
     assert seen["attached"] is True
 
 
-def test_tmux_dispatch_passes_a_tty_for_resolver(fleet_home, monkeypatch):
-    """`fleet tmux` must load the registry and pass a `tty_for` callable into
-    `reconcile()` — not None — when the registry loads fine."""
-    _write_minimal_registry(fleet_home)
+def test_tmux_dispatch_reconciles_without_any_tty_resolver(fleet_home, monkeypatch):
+    """FLE-6: `fleet tmux` never types tty commands, so it neither loads the
+    registry for them nor passes a `tty_for` into reconcile — and works even
+    with no fleet.yml at all (the workspace must always let you in)."""
+    # Deliberately no registry written.
+    seen = {}
+    monkeypatch.setattr(
+        cli.tmux_mod, "reconcile", lambda paths, ids, **kw: seen.update(kw=kw, ids=list(ids))
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+
+    assert exit_code == 0
+    assert seen["kw"] == {}
+    assert seen["attached"] is True
+
+
+def test_tmux_ensure_reconciles_without_attaching(fleet_home, monkeypatch):
     (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
     seen = {}
     monkeypatch.setattr(
-        cli.tmux_mod,
-        "reconcile",
-        lambda paths, ids, **kw: seen.setdefault("tty_for", kw.get("tty_for")),
+        cli.tmux_mod, "reconcile", lambda paths, ids, **kw: seen.setdefault("ids", sorted(ids))
     )
-    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
 
-    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+    def no_attach():
+        raise AssertionError("--ensure must never attach")
+
+    monkeypatch.setattr(cli.tmux_mod, "attach", no_attach)
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux", "--ensure"])
 
     assert exit_code == 0
-    assert callable(seen["tty_for"])
-    assert seen["attached"] is True
+    assert seen["ids"] == ["demo--develop"]
 
 
-def test_tmux_dispatch_tty_for_resolves_a_plan(fleet_home, monkeypatch):
-    """The `tty_for` resolver passed to `reconcile()` must actually resolve
-    an instance id to a `(tty1, tty2)` tuple via `ttycmds.plan_for_instance`,
-    and print any skipped-command warnings to stderr."""
+def test_tmux_ensure_creates_session_when_missing(fleet_home, monkeypatch):
+    from fleet.core.runner import RunResult
+    from tests.conftest import FakeRunner
+
+    fake = FakeRunner(
+        default=RunResult(0, ["%9"]), scripted={"tmux has-session -t fleet": RunResult(1, [])}
+    )
+    real_reconcile = cli.tmux_mod.reconcile
+    monkeypatch.setattr(
+        cli.tmux_mod, "reconcile", lambda paths, ids, **kw: real_reconcile(paths, ids, runner=fake)
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: (_ for _ in ()).throw(AssertionError()))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux", "--ensure"])
+
+    joined = [" ".join(str(c) for c in call["cmd"]) for call in fake.calls]
+    assert exit_code == 0
+    assert any(c.startswith("tmux new-session -d -s fleet") for c in joined)
+    assert not any(c.startswith("tmux send-keys") for c in joined)
+
+
+def test_tmux_ensure_is_a_noop_session_wise_when_it_already_exists(fleet_home, monkeypatch):
+    from fleet.core.runner import RunResult
+    from tests.conftest import FakeRunner
+
+    fake = FakeRunner(default=RunResult(0, ["%9"]))  # has-session -> 0: session exists
+    real_reconcile = cli.tmux_mod.reconcile
+    monkeypatch.setattr(
+        cli.tmux_mod, "reconcile", lambda paths, ids, **kw: real_reconcile(paths, ids, runner=fake)
+    )
+    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: (_ for _ in ()).throw(AssertionError()))
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux", "--ensure"])
+
+    joined = [" ".join(str(c) for c in call["cmd"]) for call in fake.calls]
+    assert exit_code == 0
+    assert not any(c.startswith("tmux new-session") for c in joined)
+
+
+def test_cli_deploy_and_redeploy_may_create_the_tmux_session(fleet_home, monkeypatch):
+    """The CLI (unlike the daemon) passes create_tmux_session=True so a
+    deploy with tty commands and no session can create it (outside
+    fleet.service's cgroup)."""
     _write_minimal_registry(fleet_home)
-    captured = {}
-    monkeypatch.setattr(
-        cli.tmux_mod,
-        "reconcile",
-        lambda paths, ids, **kw: captured.setdefault("tty_for", kw.get("tty_for")),
-    )
-    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: None)
-
-    from fleet.core.ttycmds import TtyPlan
-
-    monkeypatch.setattr(
-        cli.ttycmds,
-        "plan_for_instance",
-        lambda registry, paths, instance_id: TtyPlan(
-            tty1=["echo one"], tty2=[], skipped=["skipped tty2 (unresolved [[issue-id]]): echo"]
-        ),
-    )
-
-    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
-
-    assert exit_code == 0
-    result = captured["tty_for"]("demo--develop")
-    assert result == (["echo one"], [])
-
-
-def test_tmux_dispatch_survives_broken_registry(fleet_home, monkeypatch, capsys):
-    """A registry that fails to load (here: no fleet.yml at all, so
-    `Registry.load` raises `RegistryError`) must not break `fleet tmux` — it
-    should warn to stderr and fall back to tty_for=None, while still
-    reconciling and attaching."""
-    # Deliberately no _write_minimal_registry() call — paths.registry does
-    # not exist, so Registry.load() raises RegistryError (a FleetError).
     seen = {}
-    monkeypatch.setattr(
-        cli.tmux_mod,
-        "reconcile",
-        lambda paths, ids, **kw: seen.setdefault("tty_for", kw.get("tty_for")),
-    )
-    monkeypatch.setattr(cli.tmux_mod, "attach", lambda: seen.setdefault("attached", True))
 
-    exit_code = cli.main(["--fleet-home", str(fleet_home), "tmux"])
+    def fake_deploy(*a, **kw):
+        seen["deploy"] = kw.get("create_tmux_session")
+        return "https://demo--develop.fleet.example.test"
 
-    assert exit_code == 0
-    assert seen["tty_for"] is None
-    assert seen["attached"] is True
-    assert "warning" in capsys.readouterr().err.lower()
+    def fake_redeploy(*a, **kw):
+        seen["redeploy"] = kw.get("create_tmux_session")
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(cli.instances_mod, "deploy", fake_deploy)
+    monkeypatch.setattr(cli.instances_mod, "redeploy", fake_redeploy)
+    (fleet_home / "instances" / "demo--develop").mkdir(parents=True)
+
+    cli.main(["--fleet-home", str(fleet_home), "deploy", "demo", "default", "--branch=main"])
+    cli.main(["--fleet-home", str(fleet_home), "redeploy", "demo--develop"])
+
+    assert seen == {"deploy": True, "redeploy": True}
 
 
 def test_tmux_sidebar_dispatch(fleet_home, monkeypatch):

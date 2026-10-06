@@ -337,6 +337,32 @@ def test_multi_deploy_passes_replace_true_to_deploy_per_instance(fleet_home, mon
     assert captured_kwargs[0]["replace"] is True
 
 
+def test_multi_deploy_forwards_create_tmux_session(fleet_home, monkeypatch):
+    paths, registry = _make_paths_and_registry(fleet_home)
+    monkeypatch.setattr(bulk.sysinfo, "check_disk_headroom", lambda *a, **kw: None)
+    captured = []
+
+    def fake_deploy(paths, registry, project, template, **kw):
+        captured.append(kw["create_tmux_session"])
+        return "https://x"
+
+    monkeypatch.setattr(bulk.instances_mod, "deploy", fake_deploy)
+
+    bulk.multi_deploy(paths, registry, "demo", "default", branch="main", label="g", count=1)
+    bulk.multi_deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="h",
+        count=1,
+        create_tmux_session=True,
+    )
+
+    assert captured == [False, True]  # default is the daemon-safe False
+
+
 def test_multi_deploy_holds_multideploy_lock_during_allocation_and_dispatch(
     fleet_home, monkeypatch
 ):

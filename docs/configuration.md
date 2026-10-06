@@ -94,9 +94,12 @@ projects:
     templates:
       <template-name>:
         drupal_env: <word>                 # optional
-        post_deploy: [<string>, ...]       # optional
-        tty1: [<string>, ...]              # optional
-        tty2: [<string>, ...]              # optional
+        post_deploy: [<string>, ...]       # optional — list shorthand for `exec:`, OR the mapping:
+        # post_deploy:
+        #   exec: [<string>, ...]          #   host-side, strict, a failure aborts the deploy
+        #   tty1: [<string>, ...]          #   typed once into the new window's MIDDLE pane
+        #   tty2: [<string>, ...]          #   typed once into the new window's RIGHT pane
+        # tty1/tty2 directly under the template are DEPRECATED (still accepted, with a warning)
 ```
 
 ## The `fleet:` block
@@ -203,8 +206,29 @@ templates:
 |---|---|---|---|
 | `post_deploy` | list of strings | no (default `[]`) | Commands run, in order, after the instance is cloned/configured/started, each as `bash -c <command>` with the instance directory as cwd (so a command that itself needs the DDEV containers typically calls `ddev exec ...` or another `ddev` subcommand). `[[token]]` placeholders (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, `[[issue-id]]` when it resolves, per-project secret tokens, …) are substituted first — see `CLAUDE.md`'s "Per-project secrets model" for the token mechanism. This substitution is **strict**: a command left with an unresolved token raises `DeployError` naming the command and the token, and the deploy aborts — a `post_deploy` command is deploy-critical, so failing loudly beats silently skipping it. |
 | `drupal_env` | string (single word) | no | Written as `DRUPAL_ENV=<value>` into the instance's own root `.env` after asset injection, overriding whatever the project's `assets/<project>/.env` ships. Lets one codebase run a `staging` template (different modules/cache) alongside a `dev` one. Omit it and the `.env` is left exactly as the project shipped it — an absent key means "don't touch", never "write dev". Rejected at load time if it is empty, non-string, or contains whitespace: it is written verbatim, with no quoting. |
-| `tty1` | list of strings | no (default `[]`) | Commands typed into the **middle** bash pane of the instance's `fleet tmux` window, in order, the first time that window is created. See "`tty1`/`tty2`: interactive tmux commands" below. |
-| `tty2` | list of strings | no (default `[]`) | Same as `tty1`, for the **right** bash pane (the sidebar occupies the fixed-width left column). |
+| `post_deploy.exec` | list of strings | no (default `[]`) | The mapping form's name for the list above (`post_deploy: [a, b]` is shorthand for `post_deploy: {exec: [a, b]}`). |
+| `post_deploy.tty1` | list of strings | no (default `[]`) | Commands typed into the **middle** bash pane of the instance's `fleet tmux` window, in order, **once, by the deploy** that creates the window. See "`post_deploy.tty1`/`tty2`: interactive tmux commands" below. |
+| `post_deploy.tty2` | list of strings | no (default `[]`) | Same as `tty1`, for the **right** bash pane (the sidebar occupies the fixed-width left column). |
+| `tty1` / `tty2` (template level) | list of strings | no | **Deprecated** spelling of `post_deploy.tty1`/`tty2`: still honoured, with a deprecation warning (once per template, in the daemon/CLI log). Setting the same pane both at template level and under `post_deploy` is a validation error. |
+
+`post_deploy` is either a **list of strings** (legacy shorthand for `exec:`) or a
+**mapping** whose only allowed keys are `exec`, `tty1` and `tty2` (each a list
+of strings, each optional); any other key is a validation error naming the
+template.
+
+```yaml
+templates:
+  jira-work:
+    post_deploy:
+      exec:                       # host-side, cwd = instance dir, strict: failure aborts the deploy
+        - ddev init --no-interactive
+      tty2:                       # typed once into the new window's tty2 pane, after exec succeeded
+        - ddev exec claude "/jira work [[issue-id]]" --allow-dangerously-skip-permissions
+```
+
+> **Rollout order.** Every server shares the one config repo, and a product
+> older than 0.8.0 cannot parse a `post_deploy` mapping. Upgrade **every**
+> server to 0.8.0+ *before* switching `fleet.yml` to the mapping form.
 
 ### `[[issue-id]]` resolution
 
@@ -246,13 +270,13 @@ environment, and merged into the same deploy-time token context asset files
 get (alongside `[[project]]`, `[[branch]]`, secret tokens, …) — so an asset
 file can use `[[issue-id]]` too.
 
-### `tty1` / `tty2`: interactive tmux commands
+### `post_deploy.tty1` / `tty2`: interactive tmux commands
 
-A template's `tty1`/`tty2` commands are typed into a live bash shell inside
-the instance's `fleet tmux` window — via `tmux send-keys`, not spawned as
-the pane's argv — so the process owns a real TTY (an in-pane `claude`
-session renders and accepts input) and, when it exits, the operator is left
-with a shell rather than a dead pane. Pane mapping is fixed: sidebar
+A template's `post_deploy.tty1`/`tty2` commands are typed into a live bash
+shell inside the instance's `fleet tmux` window — via `tmux send-keys`, not
+spawned as the pane's argv — so the process owns a real TTY (an in-pane
+`claude` session renders and accepts input) and, when it exits, the operator
+is left with a shell rather than a dead pane. Pane mapping is fixed: sidebar
 (left) · `tty1` (middle) · `tty2` (right).
 
 ```yaml
@@ -263,47 +287,61 @@ projects:
     templates:
       jira-pull:
         post_deploy:
-          - ddev init --no-interactive
-        tty1:
-          - ddev exec claude "/jira pull [[issue-id]] --create-branch"
-        tty2:
-          - ddev drush watchdog:tail
+          exec:
+            - ddev init --no-interactive
+          tty1:
+            - ddev exec claude "/jira pull [[issue-id]] --create-branch"
+          tty2:
+            - ddev drush watchdog:tail
 ```
 
-**They fire once, on window creation, never on re-attach.** Concretely:
+**tty commands are a deploy action.** They are typed by `deploy()` — and so
+by `redeploy` — and by nothing else, from the template **as resolved at deploy
+time** (not re-read from a later `fleet.yml`), after the `exec` commands
+succeeded and the instance is recorded:
 
-- If a `fleet` tmux session is already running when `fleet deploy` finishes,
-  the commands are typed in immediately as part of that deploy.
-- Otherwise, they fire the next time `fleet tmux` creates that instance's
-  window (`reconcile()`). Re-running `fleet tmux` against an *existing*
-  window never re-sends them — the window-creation check is itself the
-  idempotency guard.
-- One consequence worth planning around: after a host reboot (or any time
-  the `fleet` tmux session doesn't survive), `fleet tmux` recreates every
-  instance window from scratch, so **every** instance's `tty1`/`tty2`
-  commands fire again, all at once.
-- The fleet daemon never creates a tmux session by itself — only `fleet tmux`
-  (run interactively by an operator) does. A tmux server spawned by
-  `fleet.service` would live in that unit's cgroup and be killed by the next
-  `systemctl restart fleet`, taking the operator's whole workspace with it.
+| Event | tty1/tty2 |
+|---|---|
+| `fleet deploy` / web-UI deploy | typed once into the new window |
+| `fleet redeploy` (CLI or web UI) | typed again (the old window is killed, the new one typed) |
+| Host reboot (`fleet-tmux.service` recreates the session) | **plain shells** — nothing typed |
+| `fleet tmux` / `fleet tmux --ensure` / reconcile | **plain shells** — nothing typed |
+| A closed window recreated by `fleet tmux` | **plain shells** — nothing typed |
+| `^b R` (`fleet tmux-reset`) | plain shells (panes rebuilt, nothing typed) |
 
-**Unresolved tokens are lenient here**, unlike `post_deploy`: a `tty1`/`tty2`
-command left with an unresolved `[[token]]` (most commonly `[[issue-id]]`
-when the project has no `issue_id_regexp`, or neither the label nor the
-branch matched it) is dropped — not typed in at all — and a
-`WARNING: skipped tty1 (unresolved [[issue-id]]): <original command>` line
-is appended to the deploy log (or, when triggered by `fleet tmux`, only
-shown to the operator running it). The pane is left as a plain bash shell;
-the deploy itself is never affected.
+Operationally this means a reboot can no longer relaunch autonomous commands
+(e.g. `/jira work`) on every templated instance; a redeploy is the explicit
+way to run them again.
 
-For `fleet tmux`'s `reconcile()` to know which commands to type into a
-window it's about to create for an already-deployed instance, each new
-deploy's resolved `template` name is recorded in `.fleet/instance.yml`. This
-reaches **new deploys only** — an instance deployed before this field
-existed simply resolves to no `tty1`/`tty2` commands (today's behaviour), and
-a template or project later removed from `fleet.yml` is treated the same way.
-Editing `fleet.yml` changes what a *future* window gets without a redeploy,
-since the template is looked up in the live registry each time.
+**Who owns the tmux session.** `fleet-tmux.service` (installed by the
+`fleet_service` Ansible role, `Type=oneshot` + `RemainAfterExit=yes`) owns the
+`fleet` tmux server in **its own cgroup**: at boot it creates the session and
+a window per instance (sidebar + tty1 + tty2, plain shells). The daemon and
+CLI only *add windows* to that session, and pane processes belong to the tmux
+server — so `systemctl restart fleet` leaves the session and its panes alive.
+If no session exists when a deploy has tty commands to type (service missing or
+failed):
+
+- **CLI** `fleet deploy`/`redeploy` creates the session as `fleet tmux` does
+  (a tmux server started from the CLI is outside `fleet.service`'s cgroup),
+  then types.
+- **Daemon / web UI** deploys must **not** create it (a tmux server spawned by
+  `fleet.service` would be killed by the next `systemctl restart fleet`); they
+  log `WARNING: fleet-tmux.service not running: tty commands not typed; start it
+  with `sudo systemctl start fleet-tmux` and redeploy` in the deploy log, and
+  the deploy still succeeds.
+
+If the instance's window already exists when the deploy reaches the tmux step
+(e.g. an operator ran `fleet tmux` mid-deploy), the commands are **not** typed
+into that live pane; the deploy log says so.
+
+**Unresolved tokens are lenient here**, unlike `post_deploy.exec`: a
+`tty1`/`tty2` command left with an unresolved `[[token]]` (most commonly
+`[[issue-id]]` when the project has no `issue_id_regexp`, or neither the label
+nor the branch matched it) is dropped — not typed in at all — and a
+`WARNING: skipped tty1 (unresolved [[issue-id]]): <original command>` line is
+appended to the deploy log. The pane is left as a plain bash shell; the deploy
+itself is never affected.
 
 ## `.fleet/instance.yml`: recorded deploy parameters
 
@@ -325,7 +363,7 @@ last-deployed-at: 2026-07-27T09:30:00+00:00
 |---|---|
 | `project` | The project key this instance was deployed from. |
 | `instance` | The instance's label (the part after `--` in `<project>--<label>`). |
-| `template` | The resolved template name — what lets `fleet tmux`'s `reconcile()` (and `fleet redeploy`, below) recover which `tty1`/`tty2`/deploy recipe to use, without needing it re-supplied. |
+| `template` | The resolved template name — what lets `fleet redeploy` (below) recover which deploy recipe to use, without needing it re-supplied. (It is no longer used to recover tty commands: those are typed by deploy only.) |
 | `branch` | The branch this instance tracks. |
 | `auth-enabled` | Whether per-instance basic auth was on for this deploy. |
 | `auth-password` | The basic-auth credential configured for this deploy, in plaintext. Used as BOTH username and password. |
@@ -352,7 +390,7 @@ with an actionable error naming `--template` rather than guessing a recipe
 to rebuild with. `--template`/`--auth-password` passed to `redeploy`
 override the recorded value for that one call; the registry itself is
 re-read at rebuild time, so a redeploy also picks up any edits made since
-the original deploy to the resolved template's `post_deploy`/`tty1`/`tty2`.
+the original deploy to the resolved template's `post_deploy` (`exec`/`tty1`/`tty2`), and types its tty commands again.
 
 ## Walkthrough: `fleet.yml.dist` field by field
 
@@ -383,9 +421,11 @@ projects:
       default:
         post_deploy: [ddev start]
       # jira-pull:                          # example template with interactive tmux commands (optional)
-      #   post_deploy: [ddev init --no-interactive]
-      #   tty1: ['ddev exec claude "/jira pull [[issue-id]] --create-branch"']  # typed into the middle pane
-      #   tty2: [ddev drush watchdog:tail]                                     # typed into the right pane
+      #   post_deploy:
+      #     exec: [ddev init --no-interactive]   # host-side, strict: a failure aborts the deploy
+      #     tty1: ['ddev exec claude "/jira pull [[issue-id]] --create-branch"']  # typed ONCE by the deploy
+      #                                          #   into the middle pane (never after a reboot)
+      #     tty2: [ddev drush watchdog:tail]      # typed once into the right pane
 ```
 
 - `fleet.domain` — the only value `fleet init` patches automatically (to
@@ -403,8 +443,8 @@ projects:
 - `issue_id_regexp` and the commented `jira-pull` template — both fully
   commented out, so a fresh `fleet init` registry stays minimal and valid;
   uncomment and adapt them to hand an issue-tracker key to an interactive
-  `tty1`/`tty2` command. See "`[[issue-id]]` resolution" and "`tty1`/`tty2`:
-  interactive tmux commands" above.
+  `post_deploy.tty1`/`tty2` command. See "`[[issue-id]]` resolution" and
+  "`post_deploy.tty1`/`tty2`: interactive tmux commands" above.
 
 ## Recommended for teams: `FLEET_CONFIG_REPO`
 

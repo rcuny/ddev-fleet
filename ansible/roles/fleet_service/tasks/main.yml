@@ -111,3 +111,37 @@
     enabled: true
     daemon_reload: true
   tags: [fleet_boot]
+
+- name: Deploy the fleet-tmux.service systemd unit (owns the `fleet` tmux session, FLE-6)
+  # Owns the tmux server of the `fleet` session in its OWN cgroup so
+  # `systemctl restart fleet` never kills operators' panes, and recreates the
+  # session (plain shells, no tty commands) after a reboot. Tagged separately
+  # like fleet_boot so it can be applied without the git-remote-rewriting
+  # clone/pip tasks above (see ddev-fleet/CLAUDE.md's "do NOT run the full
+  # site.yml casually" caveat).
+  ansible.builtin.template:
+    src: fleet-tmux.service.j2
+    dest: /etc/systemd/system/fleet-tmux.service
+    owner: root
+    group: root
+    mode: "0644"
+  tags: [fleet_tmux]
+  notify: Reload systemd daemon
+
+- name: Enable and start fleet-tmux.service
+  # Unlike fleet-boot (boot-only), this one is started now too, so the session
+  # exists without waiting for a reboot. `state: started` is idempotent and
+  # deliberately NOT `restarted`: stopping the unit (ExecStop) ends the `fleet`
+  # session and every pane in it, so a changed unit file must be picked up by
+  # the operator at a moment of their choosing, never by an Ansible run. If an
+  # operator-created `fleet` session already exists, `fleet tmux --ensure`
+  # adopts it as-is (reconcile only) — but that server is NOT in this unit's
+  # cgroup until the next time the unit recreates it. Like the other units
+  # this needs a real systemd PID 1: in the companion dev container only
+  # syntax-check + lint apply.
+  ansible.builtin.systemd:
+    name: fleet-tmux.service
+    enabled: true
+    state: started
+    daemon_reload: true
+  tags: [fleet_tmux]

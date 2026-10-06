@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Callable
 from pathlib import Path
 
 from fleet.core.errors import FleetError
@@ -72,25 +71,27 @@ def ensure_instance_window(
     *,
     tty: tuple[list[str], list[str]] | None = None,
     runner=run_streamed,
-) -> None:
+) -> bool:
     """Create the window (two bash panes + sidebar) if absent. Assumes the
-    `fleet` session already exists (callers guarantee this).
+    `fleet` session already exists (callers guarantee this). Returns True
+    when this call created the window, False when it already existed (and so
+    was left untouched).
 
     `tty`, when given as `(tty1_commands, tty2_commands)`, is typed into the
     two bash panes (via `send_tty_commands`) right after the layout is
-    applied, so a deploy template's `tty1`/`tty2` commands land in a real TTY
-    the operator can interact with. This module stays registry-agnostic —
-    `tty` is a plain tuple of command-string lists, never anything that knows
-    about `fleet.yml`/templates.
+    applied. ONLY `deploy()` passes it (FLE-6: tty commands are a deploy
+    action); every other window creation — `fleet tmux`, `reconcile`, the
+    `fleet-tmux.service` boot reconcile — leaves it `None`, so the panes are
+    plain shells. This module stays registry-agnostic — `tty` is a plain
+    tuple of command-string lists, never anything that knows about
+    `fleet.yml`/templates.
 
-    The early return above (when the window already exists) is the whole
-    idempotency mechanism for `tty`: a template's commands are only ever typed
-    once, at window creation, never re-sent into a live pane on a later
-    reconcile.
+    The early return (when the window already exists) means commands are
+    never re-sent into a live pane.
     """
     _assert_target_safe(instance_id)
     if window_exists(instance_id, runner=runner):
-        return
+        return False
     created = _run(
         runner,
         [
@@ -118,6 +119,7 @@ def ensure_instance_window(
     if tty is not None:
         send_tty_commands(instance_id, tty[0], tty[1], runner=runner)
     _run(runner, ["select-pane", "-t", main_pane])
+    return True
 
 
 def kill_instance_window(instance_id: str, *, runner=run_streamed) -> None:
@@ -227,33 +229,18 @@ def ensure_general_layout(home: Path, *, runner=run_streamed) -> None:
     apply_pane_layout(GENERAL_WINDOW, runner=runner)
 
 
-def reconcile(
-    paths,
-    instance_ids,
-    *,
-    tty_for: Callable[[str], tuple[list[str], list[str]] | None] | None = None,
-    runner=run_streamed,
-) -> None:
+def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
     """Reconcile the `fleet` session against `instance_ids`: create missing
     instance windows, prune stale managed ones, self-heal sidebars/layout.
 
-    `tty_for`, when given, resolves an instance id to its `(tty1, tty2)`
-    command tuple. It is called LAZILY — only for an instance whose window
-    does not already exist — so an already-up window never pays the
-    registry/secret-resolution cost `tty_for` implies. A `tty_for` that raises
-    must not break reconcile: the exception is swallowed and that instance's
-    window is created with `tty=None` (a plain bash pane), same as if no
-    resolver had been supplied."""
+    Windows created here are ALWAYS plain shells (sidebar + 2 bash panes).
+    tty commands are a deploy action (FLE-6) and are never typed from
+    reconcile — otherwise a reboot (or a closed-and-recreated window) would
+    re-launch every templated instance's commands."""
     ensure_session(paths.home, runner=runner)
     ensure_general_layout(paths.home, runner=runner)  # heal an already-running session
     for instance_id in sorted(instance_ids):
-        tty: tuple[list[str], list[str]] | None = None
-        if tty_for is not None and not window_exists(instance_id, runner=runner):
-            try:
-                tty = tty_for(instance_id)
-            except Exception:
-                tty = None
-        ensure_instance_window(instance_id, paths.instances / instance_id, tty=tty, runner=runner)
+        ensure_instance_window(instance_id, paths.instances / instance_id, runner=runner)
     for window in list_window_names(runner=runner):
         ensure_sidebar(window, runner=runner)  # self-heal
     for window in managed_window_names(runner=runner):

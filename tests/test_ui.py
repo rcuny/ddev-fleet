@@ -264,6 +264,34 @@ def test_ui_deploy_call_args_match_real_deploy_signature(fleet_home, monkeypatch
     assert "succeeded" in panel.text
 
 
+def test_ui_deploy_never_lets_the_daemon_create_the_tmux_session(fleet_home, monkeypatch):
+    """FLE-6: a tmux server spawned by fleet.service would die on every
+    `systemctl restart fleet`, so the web-UI deploy must not ask for it."""
+    _setup_fleet_home(fleet_home)
+    from fleet import daemon as daemon_mod
+
+    seen = {}
+
+    def fake_deploy(*args, **kwargs):
+        seen.update(kwargs)
+        return "https://demo--develop.fleet.example.test"
+
+    monkeypatch.setattr(daemon_mod.instances_mod, "deploy", fake_deploy)
+
+    client = TestClient(create_app(fleet_home))
+    response = client.post(
+        "/ui/deploy",
+        data={"project": "demo", "template": "default", "branch": "main", "label": "develop"},
+    )
+    assert response.status_code == 200
+    for _ in range(50):
+        if seen:
+            break
+        time.sleep(0.05)
+
+    assert not seen.get("create_tmux_session", False)
+
+
 def test_ui_deploy_checkbox_checked_enables_auth_with_given_password(fleet_home, monkeypatch):
     _setup_fleet_home(fleet_home)
     from fleet import daemon as daemon_mod
