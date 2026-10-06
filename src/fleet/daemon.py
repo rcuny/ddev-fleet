@@ -23,7 +23,8 @@ from starlette.requests import Request
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, naming, sysinfo
 from fleet.core import instances as instances_mod
-from fleet.core.errors import CaddyPortsError, DeployError, FleetError
+from fleet.core import webhooks as webhooks_mod
+from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
 from fleet.jobs import JobManager
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -34,6 +35,9 @@ _INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 _HEARTBEAT_EVERY = 15.0
 
 logger = logging.getLogger(__name__)
+
+# Max chars of caller-supplied webhook headers (delivery id, retry) we log.
+_HEADER_LOG_MAX = 64
 
 
 def _validate_instance_id(instance_id: str) -> None:
@@ -266,6 +270,156 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             "detail": job.detail,
             "log_path": job.log_path,
         }
+
+    @app.post("/hooks/jira/{project}")
+    async def jira_hook(project: str, request: Request):
+        """Jira admin webhook -> deploy, per the project's `jira_hooks` rules
+        (spec FLE-3 §3/§5). Caddy exempts `/hooks/*` from interactive auth, so
+        the HMAC signature is the only authentication here.
+
+        Order is part of the contract: 404 (project has no hooks/secret) ->
+        413 -> 401 (signature) -> parse. Nothing is parsed or learned about
+        the payload before the signature checks out, and an unauthenticated
+        caller only learns "this project has hooks". Request failures are
+        4xx: Jira retries 5xx, and a retry of a bad request can never
+        succeed. The one deliberate 5xx is a registry that fails to load
+        (generic `internal error`, detail only in the journal): Jira's retry
+        is right once fleet.yml is fixed, and the message must not leak to
+        an unauthenticated caller. A rejected signature (401) is NOT written
+        to the delivery log (unauthenticated callers must not grow it): it
+        goes to the daemon journal as a warning (project + truncated
+        delivery id, never the body or signature). A delivery-log write
+        failure never changes the outcome. Logged `delivery_id`/`retry`
+        header values are truncated to 64 chars.
+        Always answers JSON (including `FleetError`s, caught below) — Jira
+        stores the response body in its webhook log, and
+        `fleet_error_handler` may answer HTML."""
+        try:
+            paths, registry = _paths_and_registry()
+        except FleetError:
+            logger.exception("jira webhook for %r: cannot load the registry", project)
+            return JSONResponse(status_code=500, content={"error": "internal error"})
+        store = webhooks_mod.WebhookStore.from_paths(paths)
+        if not registry.has_project(project):
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        rules = registry.jira_hooks(project)
+        secret = store.read_secret(project) if rules else None
+        if secret is None:
+            return JSONResponse(status_code=404, content={"error": "not found"})
+
+        body = await request.body()
+        if len(body) > webhooks_mod.MAX_BODY_BYTES:
+            return JSONResponse(status_code=413, content={"error": "payload too large"})
+
+        delivery_id = request.headers.get("x-atlassian-webhook-identifier") or None
+        retry = request.headers.get("x-atlassian-webhook-retry") or None
+        entry = {
+            "project": project,
+            # Header values are caller-controlled: bound what we persist.
+            "delivery_id": delivery_id[:_HEADER_LOG_MAX] if delivery_id else None,
+            "retry": retry[:_HEADER_LOG_MAX] if retry else None,
+            "event": None,
+            "issue": None,
+            "from": None,
+            "to": None,
+            "result": None,
+            "reason": None,
+            "instance": None,
+            "job": None,
+        }
+
+        def respond(status: int, content: dict, *, result: str, reason: str | None = None):
+            try:
+                store.append_log({**entry, "result": result, "reason": reason})
+            except OSError as exc:
+                # The outcome (esp. an already-submitted deploy) stands; a
+                # 500 here would make Jira retry into a "duplicate".
+                logger.warning("jira webhook for %r: delivery log write failed: %s", project, exc)
+            return JSONResponse(status_code=status, content=content)
+
+        if not webhooks_mod.verify_signature(secret, body, request.headers.get("x-hub-signature")):
+            # Journal only (rate-limited/rotated), never jira.jsonl.
+            logger.warning(
+                "jira webhook for %r: rejected signature (delivery %s)",
+                project,
+                entry["delivery_id"],
+            )
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+
+        try:
+            event = webhooks_mod.parse_jira_event(json.loads(body))
+        except (ValueError, RecursionError):
+            # ValueError covers JSONDecodeError and UnicodeDecodeError;
+            # RecursionError is a hostile, deeply nested (but < 1 MiB) body.
+            reason = "body is not valid JSON"
+            return respond(400, {"error": reason}, result="bad_request", reason=reason)
+        except ValidationError as exc:
+            return respond(400, {"error": exc.message}, result="bad_request", reason=exc.message)
+
+        entry.update(
+            {
+                "event": event.event,
+                "issue": event.issue_key,
+                "from": event.from_status,
+                "to": event.to_status,
+            }
+        )
+
+        def ignored(reason: str):
+            return respond(
+                200, {"result": "ignored", "reason": reason}, result="ignored", reason=reason
+            )
+
+        if event.event != "jira:issue_updated":
+            return ignored(f"event {event.event}")
+        if event.to_status is None:
+            return ignored("no status change")
+        pattern = registry.issue_id_regexp(project)
+        if pattern and not re.fullmatch(pattern, event.issue_key, re.IGNORECASE):
+            return ignored("issue key does not match issue_id_regexp")
+        rule = webhooks_mod.match_rule(rules, event.to_status)
+        if rule is None:
+            return ignored(f"no rule for status {event.to_status}")
+
+        # Resolve BEFORE claiming the delivery id: a config error (e.g. no
+        # default_branch) must not burn the id, so Jira's retry succeeds once
+        # the config is fixed.
+        try:
+            resolved = instances_mod.resolve_target(
+                registry, project, rule.template, rule.branch, event.issue_key
+            )
+        except FleetError as exc:
+            return respond(422, {"error": exc.message}, result="error", reason=exc.message)
+
+        if delivery_id is not None:
+            if not store.claim_delivery(project, delivery_id):
+                return respond(200, {"result": "duplicate"}, result="duplicate")
+            store.prune_seen()
+
+        def run_deploy():
+            # Same call as a web-UI deploy with auth on (default password).
+            return instances_mod.deploy(
+                paths,
+                registry,
+                project,
+                rule.template,
+                branch=rule.branch,
+                label=event.issue_key,
+                auth_enabled=True,
+            )
+
+        job = await app.state.jobs.submit(
+            "deploy",
+            resolved.instance_id,
+            run_deploy,
+            log_path=str(paths.logs / resolved.instance_id / "deploy.log"),
+        )
+        entry.update({"instance": resolved.instance_id, "job": job.id})
+        return respond(
+            200,
+            {"result": "accepted", "instance": resolved.instance_id, "job": job.id},
+            result="accepted",
+        )
 
     @app.websocket("/ws/instances/{instance_id}/log")
     async def ws_instance_log(websocket: WebSocket, instance_id: str):

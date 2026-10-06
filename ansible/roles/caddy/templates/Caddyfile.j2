@@ -8,10 +8,15 @@
 }
 
 {{ fleet_domain }} {
-    # Everything except the deploy-log WebSocket sits behind auth.
-    # Browsers do not send basic-auth credentials on a WebSocket handshake,
-    # so /ws/* is exempted here; the daemon authenticates it instead with a
-    # short-lived, instance-scoped token in the query string.
+    # Everything except the deploy-log WebSocket and the Jira webhooks sits
+    # behind auth. Browsers do not send basic-auth credentials on a WebSocket
+    # handshake, so /ws/* is exempted here; the daemon authenticates it
+    # instead with a short-lived, instance-scoped token in the query string.
+    # /hooks/* is exempted because Jira's servers cannot log in
+    # interactively (neither basic auth nor an Authelia session); the daemon
+    # authenticates each request with a per-project HMAC signature instead
+    # (see docs/README-webhooks.md). Being unauthenticated at this layer, it
+    # also gets a body cap below, applied before the daemon reads anything.
 {% if fleet_auth_mode == 'authelia' %}
     # Authelia mode: the dashboard requires the `admins` group only (spec
     # D3). Client-supplied Remote-* headers are stripped before
@@ -23,9 +28,9 @@
     # strip the very Remote-Groups header forward_auth's copy_headers just
     # set and deny every authenticated user, admins included — confirmed
     # against a real Caddy v2.11.4 + Authelia v4.39 instance (see
-    # caddyauth.py's write_instance_authelia_snippet docstring). /ws/*
-    # keeps its existing token-based exemption, unprotected here as before.
-    @protected not path /ws/*
+    # caddyauth.py's write_instance_authelia_snippet docstring). /ws/* (token)
+    # and /hooks/* (HMAC) stay exempt from this block, as above.
+    @protected not path /ws/* /hooks/*
     route @protected {
         request_header -Remote-User
         request_header -Remote-Groups
@@ -39,7 +44,7 @@
         respond @denied 403
     }
 {% else %}
-    @protected not path /ws/*
+    @protected not path /ws/* /hooks/*
     basic_auth @protected {
         # Fleet-owned and rotatable WITHOUT Ansible (fleet.core.caddyauth +
         # `fleet set-admin-password` / `fleet rotate-admin-password`) — this
@@ -53,6 +58,10 @@
         import {{ fleet_caddy_snippet_dir }}/admin-auth.conf
     }
 {% endif %}
+    @hooks path /hooks/*
+    request_body @hooks {
+        max_size 1MB
+    }
     reverse_proxy 127.0.0.1:{{ fleet_daemon_port }}
 }
 

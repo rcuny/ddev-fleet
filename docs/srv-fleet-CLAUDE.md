@@ -188,6 +188,8 @@ registry load with an actionable message naming the bad key.
 | `fleet ssh-key` | — | Prints the fleet deploy public key |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
 | `fleet secret set <project> <key> <value>` | — | Writes `KEY=VALUE` into `secrets/<project>.env` (0600), available at deploy as `[[key-with-dashes]]` |
+| `fleet webhook secret <project>` | `[--rotate]` | Creates/rotates the project's Jira webhook secret (`webhooks/secrets.env`, 0600), printed once with the hook URL; see `docs/README-webhooks.md` |
+| `fleet webhook log` | `[--project=<p>] [-n=20]` | Last N Jira webhook deliveries from `logs/webhooks/jira.jsonl` |
 | `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | `ddev export-db --gzip=false` into the project's asset tree; refuses to write `dumps/default.sql` |
 | `fleet refresh-claude-token` | `[--restart]` | Rotates `CLAUDE_CODE_OAUTH_TOKEN` fleet-wide, rewrites every instance's `config.fleet.yaml`; restarts running instances only if `--restart` |
 | `fleet set-claude-token <token>` | `[--restart]` | Same propagation as `refresh-claude-token` for a token you already have, instead of running `claude setup-token` |

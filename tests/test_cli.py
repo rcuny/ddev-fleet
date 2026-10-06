@@ -1697,3 +1697,79 @@ def test_cmd_reboot_notify_threads_interval_hours_through(tmp_path, monkeypatch)
     rc = cli._cmd_reboot_notify(tmp_path, args)
     assert rc == 0
     assert captured["interval_hours"] == 6.0
+
+
+def test_webhook_secret_prints_once_and_refuses(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+    base = ["--fleet-home", str(fleet_home), "webhook", "secret", "demo"]
+
+    assert cli.main(base) == 0
+    first = capsys.readouterr().out
+    assert "URL: https://fleet.example.test/hooks/jira/demo" in first
+    secret = first.splitlines()[0]
+    assert len(secret) >= 32
+    # demo has no jira_hooks: the secret is still made, but the operator is told.
+    assert "no jira_hooks" in first
+
+    assert cli.main(base) == 1
+    captured = capsys.readouterr()
+    assert "--rotate" in captured.err + captured.out
+    assert secret not in captured.err + captured.out
+
+    assert cli.main([*base, "--rotate"]) == 0
+    rotated = capsys.readouterr().out.splitlines()[0]
+    assert rotated != secret
+
+
+def test_webhook_secret_unknown_project(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+    rc = cli.main(["--fleet-home", str(fleet_home), "webhook", "secret", "nope"])
+    assert rc == 1
+    assert "nope" in capsys.readouterr().err
+
+
+def test_webhook_log_empty_and_entries(fleet_home, capsys):
+    from fleet.core.webhooks import WebhookStore
+
+    _write_minimal_registry(fleet_home)
+    base = ["--fleet-home", str(fleet_home), "webhook", "log"]
+
+    assert cli.main(base) == 0
+    assert "no webhook deliveries logged" in capsys.readouterr().out
+
+    store = WebhookStore.from_paths(FleetPaths.from_home(fleet_home))
+    store.append_log(
+        {
+            "project": "demo",
+            "issue": "FLE-1",
+            "from": "To Do",
+            "to": "Dispatched",
+            "result": "accepted",
+            "instance": "demo--fle-1",
+        }
+    )
+    store.append_log(
+        {
+            "project": "other",
+            "issue": "FLE-2",
+            "from": "To Do",
+            "to": "Done",
+            "result": "ignored",
+            "reason": "no matching rule",
+        }
+    )
+
+    assert cli.main(base) == 0
+    out = capsys.readouterr().out
+    assert "FLE-1" in out and "FLE-2" in out
+    assert "To Do→Dispatched" in out
+    assert "demo--fle-1" in out
+    assert "no matching rule" in out
+
+    assert cli.main([*base, "--project", "demo"]) == 0
+    out = capsys.readouterr().out
+    assert "FLE-1" in out and "FLE-2" not in out
+
+    assert cli.main([*base, "-n", "1"]) == 0
+    out = capsys.readouterr().out
+    assert "FLE-2" in out and "FLE-1" not in out

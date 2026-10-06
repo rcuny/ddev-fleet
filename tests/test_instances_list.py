@@ -279,6 +279,8 @@ def test_list_instances_missing_instances_dir_returns_empty_early(fleet_home):
         host_config=base_paths.host_config,
         authelia_admin=base_paths.authelia_admin,
         authelia_users=base_paths.authelia_users,
+        webhooks=base_paths.webhooks,
+        webhook_log=base_paths.webhook_log,
     )
 
     assert not nonexistent.exists()
