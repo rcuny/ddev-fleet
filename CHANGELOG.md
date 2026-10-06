@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-10-06
+
+### Dependencies
+- `argon2-cffi` >= 25.1.0 (was >= 23.1) (#10).
+- `rich` >= 15.0.0 (was >= 13.9.4) (#12).
+- Dev: `ansible-lint` >= 26.9.0 (was >= 24.12.2) (#9).
+- CI (GitHub workflow): `actions/checkout` v4 → v7, `actions/setup-python` v5 → v7 (#13).
+
 ## [0.9.1] - 2026-10-06
 
 ### Added
@@ -310,7 +318,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.9.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.9.2...HEAD
+[0.9.2]: https://github.com/rcuny/ddev-fleet/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/rcuny/ddev-fleet/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/rcuny/ddev-fleet/compare/v0.8.0...v0.9.0
 [0.8.0]: https://github.com/rcuny/ddev-fleet/compare/v0.7.2...v0.8.0
