@@ -8,12 +8,12 @@ version = "0.8.0"
 description = "Fleet manager for many DDEV-based projects on one host"
 requires-python = ">=3.11"
 dependencies = [
-    "ruamel.yaml>=0.18",
-    "fastapi>=0.110",
-    "uvicorn[standard]>=0.30",
+    "ruamel.yaml>=0.19.1",
+    "fastapi>=0.142.2",
+    "uvicorn[standard]>=0.54.0",
     "jinja2>=3.1.6",
     "python-multipart>=0.0.32",
-    "rich>=13",
+    "rich>=13.9.4",
     "argon2-cffi>=23.1",
 ]
 
