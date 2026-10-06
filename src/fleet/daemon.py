@@ -23,7 +23,8 @@ from starlette.requests import Request
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, naming, sysinfo
 from fleet.core import instances as instances_mod
-from fleet.core.errors import CaddyPortsError, DeployError, FleetError
+from fleet.core import webhooks as webhooks_mod
+from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
 from fleet.jobs import JobManager
 
 _STATIC_DIR = Path(__file__).parent / "static"
@@ -266,6 +267,130 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             "detail": job.detail,
             "log_path": job.log_path,
         }
+
+    @app.post("/hooks/jira/{project}")
+    async def jira_hook(project: str, request: Request):
+        """Jira admin webhook -> deploy, per the project's `jira_hooks` rules
+        (spec FLE-3 §3/§5). Caddy exempts `/hooks/*` from interactive auth, so
+        the HMAC signature is the only authentication here.
+
+        Order is part of the contract: 404 (project has no hooks/secret) ->
+        413 -> 401 (signature) -> parse. Nothing is parsed or learned about
+        the payload before the signature checks out, and an unauthenticated
+        caller only learns "this project has hooks". Every failure is a 4xx:
+        Jira retries 5xx, and a retry of a bad request can never succeed.
+        Always answers JSON (including `FleetError`s, caught below) — Jira
+        stores the response body in its webhook log, and
+        `fleet_error_handler` may answer HTML."""
+        paths, registry = _paths_and_registry()
+        store = webhooks_mod.WebhookStore.from_paths(paths)
+        if not registry.has_project(project):
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        rules = registry.jira_hooks(project)
+        secret = store.read_secret(project) if rules else None
+        if secret is None:
+            return JSONResponse(status_code=404, content={"error": "not found"})
+
+        body = await request.body()
+        if len(body) > webhooks_mod.MAX_BODY_BYTES:
+            return JSONResponse(status_code=413, content={"error": "payload too large"})
+
+        delivery_id = request.headers.get("x-atlassian-webhook-identifier") or None
+        entry = {
+            "project": project,
+            "delivery_id": delivery_id,
+            "retry": request.headers.get("x-atlassian-webhook-retry") or None,
+            "event": None,
+            "issue": None,
+            "from": None,
+            "to": None,
+            "result": None,
+            "reason": None,
+            "instance": None,
+            "job": None,
+        }
+
+        def respond(status: int, content: dict, *, result: str, reason: str | None = None):
+            store.append_log({**entry, "result": result, "reason": reason})
+            return JSONResponse(status_code=status, content=content)
+
+        if not webhooks_mod.verify_signature(secret, body, request.headers.get("x-hub-signature")):
+            return respond(401, {"error": "unauthorized"}, result="unauthorized")
+
+        try:
+            event = webhooks_mod.parse_jira_event(json.loads(body))
+        except (ValueError, RecursionError):
+            # ValueError covers JSONDecodeError and UnicodeDecodeError;
+            # RecursionError is a hostile, deeply nested (but < 1 MiB) body.
+            reason = "body is not valid JSON"
+            return respond(400, {"error": reason}, result="bad_request", reason=reason)
+        except ValidationError as exc:
+            return respond(400, {"error": exc.message}, result="bad_request", reason=exc.message)
+
+        entry.update(
+            {
+                "event": event.event,
+                "issue": event.issue_key,
+                "from": event.from_status,
+                "to": event.to_status,
+            }
+        )
+
+        def ignored(reason: str):
+            return respond(
+                200, {"result": "ignored", "reason": reason}, result="ignored", reason=reason
+            )
+
+        if event.event != "jira:issue_updated":
+            return ignored(f"event {event.event}")
+        if event.to_status is None:
+            return ignored("no status change")
+        pattern = registry.issue_id_regexp(project)
+        if pattern and not re.fullmatch(pattern, event.issue_key, re.IGNORECASE):
+            return ignored("issue key does not match issue_id_regexp")
+        rule = webhooks_mod.match_rule(rules, event.to_status)
+        if rule is None:
+            return ignored(f"no rule for status {event.to_status}")
+
+        # Resolve BEFORE claiming the delivery id: a config error (e.g. no
+        # default_branch) must not burn the id, so Jira's retry succeeds once
+        # the config is fixed.
+        try:
+            resolved = instances_mod.resolve_target(
+                registry, project, rule.template, rule.branch, event.issue_key
+            )
+        except FleetError as exc:
+            return respond(422, {"error": exc.message}, result="error", reason=exc.message)
+
+        if delivery_id is not None:
+            if not store.claim_delivery(project, delivery_id):
+                return respond(200, {"result": "duplicate"}, result="duplicate")
+            store.prune_seen()
+
+        def run_deploy():
+            # Same call as a web-UI deploy with auth on (default password).
+            return instances_mod.deploy(
+                paths,
+                registry,
+                project,
+                rule.template,
+                branch=rule.branch,
+                label=event.issue_key,
+                auth_enabled=True,
+            )
+
+        job = await app.state.jobs.submit(
+            "deploy",
+            resolved.instance_id,
+            run_deploy,
+            log_path=str(paths.logs / resolved.instance_id / "deploy.log"),
+        )
+        entry.update({"instance": resolved.instance_id, "job": job.id})
+        return respond(
+            200,
+            {"result": "accepted", "instance": resolved.instance_id, "job": job.id},
+            result="accepted",
+        )
 
     @app.websocket("/ws/instances/{instance_id}/log")
     async def ws_instance_log(websocket: WebSocket, instance_id: str):
