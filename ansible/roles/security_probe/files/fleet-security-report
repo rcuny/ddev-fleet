@@ -1,0 +1,167 @@
+#!/usr/bin/env python3
+"""Print a JSON systemd exposure report for the fleet's sandboxed units.
+
+Installed by the security_probe Ansible role as /usr/local/bin/fleet-security-report
+and used two ways:
+
+* as the SSH *forced command* of the read-only `fleet-probe` user: the scheduled
+  Bitbucket pipeline (`custom: systemd-security-live`) connects, this script runs
+  (whatever command the client asked for is ignored: SSH_ORIGINAL_COMMAND is
+  never read) and the JSON goes to stdout;
+* imported by ci/systemd_security.py (via SourceFileLoader) so the offline CI
+  check and the live check share one collection logic.
+
+Standard library only (it runs on a bare Debian host). No privileges needed:
+`systemd-analyze security` and `systemctl show` are readable by any user.
+
+Environment overrides (used by the tests): SYSTEMD_ANALYZE, SYSTEMCTL.
+"""
+
+from __future__ import annotations
+
+import datetime
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+from collections.abc import Sequence
+
+SCHEMA = 1
+DEFAULT_UNITS = (
+    "fleet.service",
+    "fleet-boot.service",
+    "fleet-reboot-notify.service",
+    "caddy.service",
+    "authelia.service",
+)
+SYSTEMD_ANALYZE = "systemd-analyze"
+SYSTEMCTL = "systemctl"
+TIMEOUT = 120
+
+_SCORE_RE = re.compile(r"Overall exposure level for \S+: ([0-9.]+)")
+_ROW_RE = re.compile(r"^\W*(\S+\.\w+)\s+([0-9.]+)\s+\S+")
+
+
+class AnalyzeError(RuntimeError):
+    """systemd-analyze could not score a unit."""
+
+
+def _analyze_bin() -> str:
+    return os.environ.get("SYSTEMD_ANALYZE", SYSTEMD_ANALYZE)
+
+
+def _systemctl_bin() -> str:
+    return os.environ.get("SYSTEMCTL", SYSTEMCTL)
+
+
+def _run(cmd: list[str]) -> subprocess.CompletedProcess:
+    try:
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=TIMEOUT)
+    except FileNotFoundError as exc:
+        raise AnalyzeError(f"{cmd[0]}: command not found") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise AnalyzeError(f"{' '.join(cmd)}: timed out") from exc
+
+
+def analyze_unit(unit: str, extra_args: Sequence[str] = ()) -> dict:
+    """Score one unit: {"score": float, "directives": {json_field: exposure}}.
+
+    `directives` keeps only the settings that contribute exposure (> 0); a
+    missing directive means 0. `unit` is a unit name or, with
+    `--offline=yes`, a path to a unit file."""
+    base = [_analyze_bin(), "security", "--no-pager", *extra_args]
+    text = _run([*base, unit])
+    match = _SCORE_RE.search(text.stdout)
+    if text.returncode != 0 or not match:
+        raise AnalyzeError(f"cannot score {unit}: {(text.stderr or text.stdout).strip()[:300]}")
+    detail = _run([*base, "--json=short", unit])
+    if detail.returncode != 0:
+        raise AnalyzeError(f"cannot read {unit} details: {detail.stderr.strip()[:300]}")
+    try:
+        rows = json.loads(detail.stdout)
+    except json.JSONDecodeError as exc:
+        raise AnalyzeError(f"{unit}: systemd-analyze printed invalid JSON") from exc
+    directives: dict[str, float] = {}
+    for row in rows:
+        try:
+            exposure = float(row.get("exposure") or 0)
+        except (TypeError, ValueError):
+            continue
+        if exposure > 0:
+            field = str(row["json_field"])
+            directives[field] = round(directives.get(field, 0.0) + exposure, 2)
+    return {"score": float(match.group(1)), "directives": directives}
+
+
+def overview() -> dict[str, float]:
+    """Parse `systemd-analyze security` (no unit): {unit: exposure}."""
+    result = _run([_analyze_bin(), "security", "--no-pager"])
+    if result.returncode != 0:
+        raise AnalyzeError(f"cannot list units: {(result.stderr or result.stdout).strip()[:300]}")
+    scores: dict[str, float] = {}
+    for line in result.stdout.splitlines():
+        if line.lstrip().startswith("UNIT"):
+            continue
+        row = _ROW_RE.match(line)
+        if row:
+            scores[row.group(1)] = float(row.group(2))
+    return scores
+
+
+def systemd_version() -> str:
+    """Major systemd version, from `systemd-analyze --version` ("systemd 257 (...)")."""
+    try:
+        result = _run([_analyze_bin(), "--version"])
+    except AnalyzeError:
+        return "unknown"
+    first = (result.stdout.splitlines() or [""])[0]
+    match = re.match(r"systemd (\d+)", first)
+    return match.group(1) if match else "unknown"
+
+
+def is_loaded(unit: str) -> bool:
+    try:
+        result = _run([_systemctl_bin(), "show", "-p", "LoadState", "--value", unit])
+    except AnalyzeError:
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "loaded"
+
+
+def build_report(units: Sequence[str], *, host: str | None = None) -> dict:
+    scored: dict[str, dict] = {}
+    missing: list[str] = []
+    for unit in units:
+        if not is_loaded(unit):
+            missing.append(unit)
+            continue
+        try:
+            scored[unit] = analyze_unit(unit)
+        except AnalyzeError:
+            missing.append(unit)
+    try:
+        listing = overview()
+    except AnalyzeError:
+        listing = {}
+    return {
+        "schema": SCHEMA,
+        "host": host or socket.gethostname(),
+        "systemd": systemd_version(),
+        "generated": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "overview": dict(sorted(listing.items())),
+        "units": dict(sorted(scored.items())),
+        "missing": sorted(missing),
+    }
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    # SSH_ORIGINAL_COMMAND is deliberately ignored: whatever the client asked
+    # for, the forced command reports on the units configured in authorized_keys.
+    units = list(sys.argv[1:] if argv is None else argv) or list(DEFAULT_UNITS)
+    print(json.dumps(build_report(units), indent=2, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

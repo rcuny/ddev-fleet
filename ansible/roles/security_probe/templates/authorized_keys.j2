@@ -1,0 +1,5 @@
+# Managed by the security_probe Ansible role (FLE-8). Do not edit by hand.
+# Every key is locked to the read-only report: no pty, no forwarding, no shell.
+{% for key in fleet_security_probe_authorized_keys %}
+restrict,command="/usr/local/bin/fleet-security-report {{ fleet_security_probe_units | join(' ') }}" {{ key | trim }}
+{% endfor %}

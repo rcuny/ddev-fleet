@@ -51,7 +51,8 @@ PR with a red suite.
 - Describe *why*, not just *what*, in the PR description.
 - If your change touches `ansible/`, note whether you've run
   `ansible-lint`/`yamllint` locally (`infra` extra) — CI runs them
-  non-blocking for now (see `.github/workflows/ci.yml`).
+  non-blocking for now (a separate Bitbucket Pipelines step,
+  see `bitbucket-pipelines.yml`).
 - `docs/architecture.md` and `CLAUDE.md`'s module map should stay in sync
   with any new `core/*.py` module.
 - Add your entry under `## [Unreleased]` in `CHANGELOG.md` in the same
@@ -60,9 +61,14 @@ PR with a red suite.
 
 ## CI, mirror and dependency updates
 
-- **Bitbucket Pipelines is the canonical gate** (`bitbucket-pipelines.yml`):
-  pytest, ruff and black on every pull request, on `develop` and on `v*`
-  release tags. Bitbucket is the source of truth.
+- **Bitbucket Pipelines is the canonical (and only) CI** (`bitbucket-pipelines.yml`):
+  pytest, ruff, black and an offline systemd security check on every pull
+  request, on `develop` and on `v*` release tags, plus a non-blocking
+  ansible-lint/yamllint step on pull requests and `develop`. Bitbucket is the
+  source of truth; there is no GitHub Actions workflow. If your change makes a
+  unit's `systemd-analyze security` score worse the pipeline fails; an
+  intended change means re-recording the baseline (see
+  [`docs/README-ci.md`](docs/README-ci.md)).
 - **GitHub is a read-only mirror**, published automatically: `develop` after
   each green push, `main` plus the tag on each `v*` release tag. Nothing is
   ever force-pushed, and a tag that is not the tip of `main` is refused.
@@ -89,5 +95,6 @@ PR with a red suite.
 
 - `docs/architecture.md` — module map and design.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix steps.
+- `docs/README-ci.md` — the pipelines, the systemd security check and its baseline.
 - `CLAUDE.md` — the AI-agent-facing contributor guide (same codebase,
   machine-readable framing).

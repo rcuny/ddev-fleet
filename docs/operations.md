@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-29
+Last updated: 2026-10-06
 Type: documentation
 ---
 
@@ -392,7 +392,16 @@ The check (the last tasks of `security_hardening`, so only when
 `systemd-analyze security --threshold=N <unit>` for the rest and prints one
 summary line per unit. Expect a warning for every unit when
 `fleet_systemd_sandbox_enabled` is `false`. The same scores are asserted offline
-in `tests/test_systemd_sandbox.py` (skipped when `systemd-analyze` is absent).
+in `tests/test_systemd_sandbox.py` (skipped when `systemd-analyze` is absent,
+but never in Bitbucket Pipelines, where the Debian 13 image has systemd).
+
+**Regression checks (FLE-8).** Bitbucket Pipelines scores every sandboxed unit
+on each pull request / `develop` push / release tag and compares it with a
+committed baseline, and a weekly scheduled pipeline does the same for the real
+units on `ddev3` through a no-sudo, forced-command `fleet-probe` user
+(`ansible/security-probe.yml`, role `security_probe`). A unit whose exposure
+rises by more than 0.1 fails the pipeline. How it works, how to record a new
+baseline and how to set up the live check: [`docs/README-ci.md`](README-ci.md).
 
 Check by hand:
 

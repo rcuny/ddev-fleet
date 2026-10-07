@@ -1,0 +1,197 @@
+---
+# Enabled: a no-sudo `fleet-probe` user whose every SSH key is a forced command
+# printing the JSON report. Disabled (no keys configured): everything below is
+# removed again, so deleting the keys from local-vars.yml closes the door.
+
+- name: Install the security probe (forced-command report user)
+  when: fleet_security_probe_enabled | bool
+  block:
+    - name: Refuse unit names and keys that could break out of the forced command
+      # Both end up inside `command="..."` in authorized_keys. They come from
+      # operator-owned variables, but a stray quote or newline would silently
+      # turn a restricted key into an unrestricted one.
+      ansible.builtin.assert:
+        that:
+          - fleet_security_probe_units | length > 0
+          - >-
+            fleet_security_probe_units | select('match', '^[A-Za-z0-9@_.:-]+$')
+            | list | length == fleet_security_probe_units | length
+          - >-
+            fleet_security_probe_authorized_keys
+            | select('match', '^(ssh-|ecdsa-sha2-|sk-)[^ ]+ [^ ]+')
+            | list | length == fleet_security_probe_authorized_keys | length
+          - >-
+            fleet_security_probe_authorized_keys | select('search', '[\r\n]')
+            | list | length == 0
+        fail_msg: >-
+          fleet_security_probe_units must be plain unit names, and every entry
+          of fleet_security_probe_authorized_keys must be ONE bare public key
+          line ("ssh-ed25519 AAAA... comment") without options or newlines.
+        success_msg: Probe units and keys look sane
+
+    - name: Create the probe user (no sudo, no password, no groups)
+      # system: true -> no aging, uid from the system range. The password "*"
+      # is not a hash anyone can match, and (unlike "!") does not count as a
+      # locked account for sshd, so key logins work with or without UsePAM.
+      # The shell is needed: sshd runs the forced command as `$SHELL -c`.
+      ansible.builtin.user:
+        name: "{{ fleet_security_probe_user }}"
+        system: true
+        shell: /bin/sh
+        home: "{{ fleet_security_probe_home }}"
+        create_home: true
+        password: "*"
+        comment: fleet security probe (read-only report)
+
+    - name: Install the report script
+      ansible.builtin.copy:
+        src: fleet-security-report
+        dest: /usr/local/bin/fleet-security-report
+        owner: root
+        group: root
+        mode: "0755"
+
+    - name: Create the probe user's ~/.ssh
+      ansible.builtin.file:
+        path: "{{ fleet_security_probe_home }}/.ssh"
+        state: directory
+        owner: "{{ fleet_security_probe_user }}"
+        group: "{{ fleet_security_probe_user }}"
+        mode: "0700"
+
+    - name: Install the forced-command authorized_keys
+      ansible.builtin.template:
+        src: authorized_keys.j2
+        dest: "{{ fleet_security_probe_home }}/.ssh/authorized_keys"
+        owner: "{{ fleet_security_probe_user }}"
+        group: "{{ fleet_security_probe_user }}"
+        mode: "0600"
+
+    - name: Look for an AllowUsers line that is already in effect
+      # sshd ACCUMULATES AllowUsers lines across files, so a second line extends
+      # the list. But adding one where there was none would RESTRICT ssh to that
+      # single user and lock everyone else out. So this role only ever extends
+      # an existing list, and never introduces the first one. Our own snippet
+      # is excluded so that its presence cannot count as "existing".
+      ansible.builtin.command:
+        argv:
+          - grep
+          - -rhiE
+          - --exclude=53fleet-security-probe.conf
+          - '^[[:space:]]*AllowUsers[[:space:]]'
+          - /etc/ssh/sshd_config
+          - /etc/ssh/sshd_config.d
+      register: sp_existing_allowusers
+      changed_when: false
+      failed_when: sp_existing_allowusers.rc > 1
+      check_mode: false
+
+    - name: Let the probe user in alongside the existing AllowUsers list
+      # Validated against Ansible's staged temp copy BEFORE it replaces the
+      # drop-in (same approach as security_hardening's SSH drop-in): a bad file
+      # never reaches /etc/ssh/sshd_config.d/, so the reload handler is never
+      # notified for an invalid config, even with force_handlers.
+      ansible.builtin.copy:
+        content: |
+          # Managed by the security_probe Ansible role (FLE-8).
+          # sshd accumulates AllowUsers lines: this ADDS the probe user to the
+          # list security_hardening wrote. The role removes this file again when
+          # no other AllowUsers line exists (it must never be the first one).
+          AllowUsers {{ fleet_security_probe_user }}
+        dest: /etc/ssh/sshd_config.d/53fleet-security-probe.conf
+        owner: root
+        group: root
+        mode: "0644"
+        validate: "sshd -t -f %s"
+      when: sp_existing_allowusers.rc == 0
+      notify: Reload sshd (security_probe)
+
+    - name: Drop the AllowUsers snippet when no other AllowUsers line exists
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/53fleet-security-probe.conf
+        state: absent
+      when: sp_existing_allowusers.rc != 0
+      notify: Reload sshd (security_probe)
+
+    - name: Read the effective sshd configuration
+      ansible.builtin.command:
+        cmd: sshd -T
+      register: sp_sshd_effective
+      changed_when: false
+      check_mode: false
+
+    - name: Work out who the effective AllowUsers list admits
+      ansible.builtin.set_fact:
+        sp_allowed_users: >-
+          {{ sp_sshd_effective.stdout_lines
+             | select('match', '^allowusers ')
+             | map('regex_replace', '^allowusers ', '')
+             | list }}
+        sp_real_operator: "{{ ansible_env.SUDO_USER | default(ansible_user_id, true) }}"
+
+    - name: Assert the probe user is admitted and nobody else got locked out
+      # Only meaningful when AllowUsers is in effect. It must then name the
+      # probe user (else the key can never log in) AND every operator the
+      # security_hardening role listed, including whoever is running this play.
+      # Our snippet only ever adds a name, so a failure here points at a
+      # pre-existing lockout or a config sshd reads differently than expected.
+      ansible.builtin.assert:
+        that:
+          - fleet_security_probe_user in sp_allowed_users
+          - sp_real_operator in sp_allowed_users
+          - fleet_ssh_allow_users | default([]) | difference(sp_allowed_users) | length == 0
+        fail_msg: >-
+          Effective AllowUsers is {{ sp_allowed_users }}: it must contain the
+          probe user ({{ fleet_security_probe_user }}), the current operator
+          ({{ sp_real_operator }}) and every entry of fleet_ssh_allow_users.
+      when: sp_allowed_users | length > 0
+
+    - name: Smoke test, run the report as the probe user (no sudo)
+      # runuser, not `become`: it proves the report works for an unprivileged
+      # account without Ansible's become machinery in between.
+      ansible.builtin.command:
+        cmd: >-
+          runuser -u {{ fleet_security_probe_user }} --
+          /usr/local/bin/fleet-security-report
+          {{ fleet_security_probe_units | join(' ') }}
+      register: sp_smoke
+      changed_when: false
+      check_mode: false
+      when: not ansible_check_mode  # the user may not exist yet in a dry run
+
+    - name: Assert the report parses and covers at least one unit
+      ansible.builtin.assert:
+        that:
+          - (sp_smoke.stdout | from_json).schema == 1
+          - ((sp_smoke.stdout | from_json).units | length) > 0
+        fail_msg: >-
+          The report covers none of {{ fleet_security_probe_units | join(', ') }}:
+          {{ sp_smoke.stdout | from_json }}. Are the units installed, and does
+          systemd-analyze work for a non-root user?
+      when: not ansible_check_mode
+
+- name: Remove the security probe (no key configured)
+  when: not (fleet_security_probe_enabled | bool)
+  block:
+    - name: Remove the probe's AllowUsers snippet
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/53fleet-security-probe.conf
+        state: absent
+      notify: Reload sshd (security_probe)
+
+    - name: Remove the probe's authorized_keys
+      ansible.builtin.file:
+        path: "{{ fleet_security_probe_home }}/.ssh/authorized_keys"
+        state: absent
+
+    - name: Remove the probe user and its home
+      ansible.builtin.user:
+        name: "{{ fleet_security_probe_user }}"
+        state: absent
+        remove: true
+        force: true
+
+    - name: Remove the report script
+      ansible.builtin.file:
+        path: /usr/local/bin/fleet-security-report
+        state: absent

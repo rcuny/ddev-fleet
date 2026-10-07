@@ -95,6 +95,13 @@ dependency groups. `ruff` selects `E,F,I`, line length 100 (`black` matches).
 `pytest` filters a known `httpx`/`starlette.testclient` deprecation warning
 (see `[tool.pytest.ini_options]`).
 
+CI is Bitbucket Pipelines only (`bitbucket-pipelines.yml`, Debian 13 image;
+there is no GitHub Actions workflow, GitHub is a read-only mirror). Besides the
+three gates it scores the rendered systemd units with `systemd-analyze
+security` and fails when an exposure score rises against
+`ci/systemd-security-baseline.json` (FLE-8). If you change a sandboxed unit on
+purpose, re-record the baseline: `docs/README-ci.md`.
+
 ## Deploy model — shipping a code change to the live host
 
 Full details: `docs/operations.md`. Summary:
@@ -215,6 +222,8 @@ it. Neither role has a `core/` Python module of its own.
   procedure for existing instances (`refresh-instance-config` per
   instance, and its `settings.local.php` gap/workaround).
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release/hotfix procedure and push order.
+- `docs/README-ci.md` — the Bitbucket pipelines, the systemd security check
+  (offline + live), the baseline and how to update it, live-check setup.
 - `docs/README-typesense.md` — the Typesense browser-search exposure design
   in full (topology, keys, env vars, reindexing, reachability caveat).
 - `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing

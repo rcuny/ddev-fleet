@@ -1,0 +1,93 @@
+{
+  "environments": {
+    "offline": {
+      "overview": {
+        "caddy.service": 1.6,
+        "fleet-boot.service": 1.8,
+        "fleet-reboot-notify.service": 1.6,
+        "fleet.service": 1.8
+      },
+      "recorded": "2026-10-06",
+      "systemd": "257",
+      "units": {
+        "caddy.service": {
+          "directives": {
+            "AmbientCapabilities": 0.1,
+            "CapabilityBoundingSet_CAP_NET_ADMIN": 0.2,
+            "CapabilityBoundingSet_CAP_NET_BIND_SERVICE_BROADCAST_RAW)": 0.1,
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "UMask": 0.1
+          },
+          "score": 1.6
+        },
+        "fleet-boot.service": {
+          "directives": {
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateTmp": 0.2,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectHome": 0.1,
+            "RemoveIPC": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "UMask": 0.1
+          },
+          "score": 1.8
+        },
+        "fleet-reboot-notify.service": {
+          "directives": {
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectHome": 0.1,
+            "RemoveIPC": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "UMask": 0.1
+          },
+          "score": 1.6
+        },
+        "fleet.service": {
+          "directives": {
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateTmp": 0.2,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectHome": 0.1,
+            "RemoveIPC": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "UMask": 0.1
+          },
+          "score": 1.8
+        }
+      }
+    }
+  },
+  "tolerance": 0.1
+}

@@ -1,8 +1,11 @@
 # Bitbucket Pipelines — the canonical CI for ddev-fleet (Bitbucket is the
 # source of truth; GitHub is a read-only public mirror published from here).
 #
-#   pull request (any branch)  -> gates (pytest, ruff, black)
-#   push to develop            -> gates, then mirror develop to GitHub
+#   pull request (any branch)  -> gates (pytest, ruff, black, offline systemd
+#                                 security check) in parallel with a
+#                                 non-blocking ansible-lint/yamllint step
+#   push to develop            -> the same parallel pair, then mirror develop
+#                                 to GitHub
 #   tag v*  (release)          -> gates, then publish main + the tag to GitHub
 #   custom: renovate           -> dependency-update PRs against develop.
 #                                 When it runs is decided ONLY here in
@@ -10,6 +13,20 @@
 #                                 develop, custom: renovate, daily) or by a
 #                                 manual run; renovate-config.json has no
 #                                 schedule of its own.
+#   custom: systemd-security-live
+#                              -> reads each host's systemd-analyze security
+#                                 scores over SSH (forced-command user, see the
+#                                 security_probe Ansible role) and fails on a
+#                                 regression against ci/systemd-security-baseline.json.
+#                                 Scheduled weekly (Pipelines -> Schedules:
+#                                 branch develop, custom: systemd-security-live,
+#                                 weekly); the failure email is the alert.
+#
+# The gates image is Debian 13 (trixie) with systemd installed on purpose: the
+# systemd sandbox tests and `ci/systemd_security.py offline` score the rendered
+# units with systemd-analyze (same systemd 257 as the servers) and must not be
+# skipped (FLEET_REQUIRE_SYSTEMD_ANALYZE=1). Reports land in reports/** as
+# artifacts. Procedure and baseline updates: docs/README-ci.md.
 #   custom: renovate-merge     -> merges ONE approved, green, up-to-date Renovate
 #                                 PR into develop (scripts/renovate_merge.py),
 #                                 then runs Renovate again so the remaining PRs
@@ -33,38 +50,77 @@
 #                      optional: comma-separated Bitbucket account ids whose
 #                      Approve or "/merge" comment lets a PR merge. Default:
 #                      the account behind RENOVATE_PASSWORD.
+#   SECURITY_PROBE_TARGETS
+#                      Space-separated name=user@host entries for the live
+#                      systemd check, e.g. ddev3=fleet-probe@ddev3.fleet.pm.
+#                      Unset/empty = the live pipeline skips.
 # Plus, under Repository settings -> Pipelines -> SSH keys: a key pair whose
 # public half is a GitHub deploy key WITH WRITE ACCESS on the mirror repo.
 # (github.com's host key is managed by Bitbucket itself: no "Known hosts"
 # entry is needed, and adding one is refused.)
+# The same key pair is what the live systemd check logs in with: its public
+# half goes into fleet_security_probe_authorized_keys on the server (forced
+# command, it can only print the report), and the server's host key must be
+# added under Repository settings -> Pipelines -> SSH keys -> Known hosts.
 #
 # Mirror pushes are never forced: if GitHub has diverged, the step fails
 # loudly instead of rewriting public history.
 
-image: python:3.11 # full image on purpose: the tests run real `git`
+image: python:3.11-trixie # full Debian 13 image on purpose: the tests run real `git`
 
 definitions:
   steps:
     - step: &gates
-        name: Gates (pytest, ruff, black)
+        name: Gates (pytest, ruff, black, systemd security)
         caches:
           - pip
         script:
+          # Bitbucket runners default to umask 000; systemd-analyze warns about
+          # world-writable unit files, which the scoring tests treat as failure.
+          - umask 022
           # rsync: core/assets.py shells out to it (asset injection tests)
-          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync > /dev/null
+          # systemd: systemd-analyze scores the rendered units (FLE-8)
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync systemd > /dev/null
+          # The systemd scoring tests fail instead of skipping when systemd-analyze is missing.
+          - export FLEET_REQUIRE_SYSTEMD_ANALYZE=1
           - pip install -q -e ".[dev]"
           - pytest -q
           - ruff check .
           - black --check .
+          - python ci/systemd_security.py offline --out reports/offline.json
+          - >-
+            python ci/systemd_security.py compare --env offline --current reports/offline.json
+            --report-md reports/systemd-security-offline.md
+            --report-json reports/systemd-security-offline.json
+        artifacts:
+          - reports/**
+    # Replaces the GitHub Actions lint-ansible job. Non-blocking for now: the
+    # cost/signal is not yet measured (open question,
+    # 2026-07-24-fleet-open-source-release-design.md section 10); promote it to
+    # a hard gate by dropping the `|| echo` once it is clean.
+    - step: &ansible-lint
+        name: Ansible lint (non-blocking)
+        # The [infra] extra pins ansible-core >= 2.21, which needs Python >= 3.12.
+        image: python:3.13-trixie
+        caches:
+          - pip
+        script:
+          - pip install -q -e ".[infra]" || { echo "could not install the [infra] extra (non-blocking)"; exit 0; }
+          - ansible-lint ansible/ || echo "ansible-lint reported findings (non-blocking)"
+          - yamllint ansible/ || echo "yamllint reported findings (non-blocking)"
 
 pipelines:
   pull-requests:
     "**":
-      - step: *gates
+      - parallel:
+          - step: *gates
+          - step: *ansible-lint
 
   branches:
     develop:
-      - step: *gates
+      - parallel:
+          - step: *gates
+          - step: *ansible-lint
       - step:
           name: Mirror develop to GitHub
           image: atlassian/default-image:5
@@ -141,3 +197,16 @@ pipelines:
               fi
               echo "Renovate requested ($(cat renovate-requested.flag)); running it to recreate the PRs on the current develop"
               RENOVATE_CONFIG_FILE="$BITBUCKET_CLONE_DIR/renovate-config.json" RENOVATE_REPOSITORIES="$BITBUCKET_REPO_FULL_NAME" renovate
+
+    # Live check of the servers' real units (weekly schedule, see the header).
+    # The logic lives in ci/systemd-security-live.sh; it skips when
+    # SECURITY_PROBE_TARGETS is unset and checks every target before failing.
+    systemd-security-live:
+      - step:
+          name: Live systemd security check
+          image: python:3.11-slim-trixie
+          script:
+            - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client > /dev/null
+            - bash ci/systemd-security-live.sh
+          artifacts:
+            - reports/**
