@@ -7,7 +7,7 @@ release exists; the file itself must then be re-downloaded by hand.
 
 | Asset | npm package | Version | Path | Download URL |
 |-------|-------------|---------|------|--------------|
-| htmx.min.js | htmx.org | 1.9.12 | `src/fleet/static/htmx.min.js` | https://unpkg.com/htmx.org@1.9.12/dist/htmx.min.js |
+| htmx.min.js | htmx.org | 2.0.11 | `src/fleet/static/htmx.min.js` | https://unpkg.com/htmx.org@2.0.11/dist/htmx.min.js |
 
 ## Re-vendoring when Renovate bumps a version
 
