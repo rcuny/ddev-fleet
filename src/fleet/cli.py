@@ -2,6 +2,7 @@
 
 import argparse
 import functools
+import getpass
 import os
 import re
 import secrets as _stdlib_secrets
@@ -217,11 +218,25 @@ def _build_parser() -> argparse.ArgumentParser:
     webhook_secret_parser.add_argument(
         "--rotate",
         action="store_true",
-        help="replace an existing secret (Jira's Secret field must then be updated)",
+        help="replace an existing secret (the Jira/Bitbucket Secret field must then be updated)",
     )
+    webhook_secret_parser.add_argument(
+        "--source",
+        choices=["jira", "bitbucket"],
+        default="jira",
+        help="which webhook the secret is for (default: jira)",
+    )
+    webhook_token_parser = webhook_subparsers.add_parser("bitbucket-token")
+    webhook_token_parser.add_argument("project")
     webhook_log_parser = webhook_subparsers.add_parser("log")
     webhook_log_parser.add_argument("--project", default=None)
     webhook_log_parser.add_argument("-n", type=int, default=20, help="entries to show (default 20)")
+    webhook_log_parser.add_argument(
+        "--source",
+        choices=["jira", "bitbucket"],
+        default="jira",
+        help="which webhook's delivery log to show (default: jira)",
+    )
 
     snapshot_parser = subparsers.add_parser("snapshot")
     snapshot_parser.add_argument("instance_id")
@@ -788,7 +803,29 @@ def _cmd_secret(fleet_home: Path, args: argparse.Namespace) -> None:
 def _cmd_webhook(fleet_home: Path, args: argparse.Namespace) -> None:
     paths = instances_mod.FleetPaths.from_home(fleet_home)
     store = WebhookStore.from_paths(paths)
-    if args.webhook_command == "secret":
+    if args.webhook_command == "secret" and args.source == "bitbucket":
+        registry = instances_mod.load_registry(paths)
+        if not registry.has_project(args.project):
+            raise FleetError(f"unknown project {args.project!r}")
+        secret = store.create_secret(args.project, rotate=args.rotate, source="bitbucket")
+        print(secret)
+        print(f"URL: https://{registry.domain}/hooks/bitbucket/{args.project}")
+        print(
+            "Paste the secret into the Bitbucket webhook's Secret field now. It is stored "
+            "server-side only (webhooks/secrets.env, mode 0600) and not shown again; "
+            "use --rotate to replace it."
+        )
+        if not registry.bitbucket_hooks(args.project):
+            print(
+                f"warning: project {args.project!r} has no bitbucket_hooks in fleet.yml yet, "
+                "so the route answers 404 until a rule is added."
+            )
+        if store.read_pipeline_token(args.project) is None:
+            print(
+                "warning: no Bitbucket token stored yet; run "
+                f"`fleet webhook bitbucket-token {args.project}` or matched events answer 422."
+            )
+    elif args.webhook_command == "secret":
         registry = instances_mod.load_registry(paths)
         if not registry.has_project(args.project):
             raise FleetError(f"unknown project {args.project!r}")
@@ -806,12 +843,46 @@ def _cmd_webhook(fleet_home: Path, args: argparse.Namespace) -> None:
                 f"warning: project {args.project!r} has no jira_hooks in fleet.yml yet, "
                 "so the route answers 404 until a rule is added."
             )
+    elif args.webhook_command == "bitbucket-token":
+        registry = instances_mod.load_registry(paths)
+        if not registry.has_project(args.project):
+            raise FleetError(f"unknown project {args.project!r}")
+        # Never from argv (shell history, `ps`): piped stdin, or a hidden prompt.
+        if sys.stdin.isatty():
+            token = getpass.getpass("Bitbucket access token (pipeline:write only): ")
+        else:
+            token = sys.stdin.readline()
+        store.write_pipeline_token(args.project, token.strip())
+        print(
+            f"Bitbucket token stored for {args.project!r} "
+            "(webhooks/secrets.env, mode 0600); it is not shown again."
+        )
+        if not registry.bitbucket_hooks(args.project):
+            print(
+                f"warning: project {args.project!r} has no bitbucket_hooks in fleet.yml yet, "
+                "so the token is unused until a rule is added."
+            )
     elif args.webhook_command == "log":
-        entries = store.tail_log(args.n, project=args.project)
+        entries = store.tail_log(args.n, project=args.project, source=args.source)
         if not entries:
             print("no webhook deliveries logged")
             return
         for entry in entries:
+            if args.source == "bitbucket":
+                print(
+                    "  ".join(
+                        [
+                            str(entry.get("ts", "-")),
+                            str(entry.get("project", "-")),
+                            str(entry.get("event") or "-"),
+                            f"{entry.get('repo') or '-'}#{entry.get('pr') or '-'}",
+                            str(entry.get("branch") or "-"),
+                            str(entry.get("result", "-")),
+                            str(entry.get("pipeline") or entry.get("reason") or "-"),
+                        ]
+                    )
+                )
+                continue
             transition = f"{entry.get('from') or '-'}→{entry.get('to') or '-'}"
             detail = entry.get("instance") or entry.get("reason") or "-"
             print(

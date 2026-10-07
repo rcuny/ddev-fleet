@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 Type: documentation
 ---
 
@@ -13,6 +13,9 @@ receives the event and deploys an instance for that issue, exactly as if you
 had submitted the web UI's deploy form. The instance's template decides what
 runs next (a template whose `tty2` types `claude "/jira work FLE-3"` starts an
 agent on the ticket).
+
+(Bitbucket webhooks, which start a pipeline instead, are covered in
+[Bitbucket webhooks](#bitbucket-webhooks) at the end.)
 
 v1 supports one action, `deploy`. Webhooks are **off by default**: a server
 needs both a `jira_hooks` rule in `fleet.yml` and a webhook secret.
@@ -187,3 +190,167 @@ sudo ansible-playbook caddy-only.yml
 
 Until then Caddy still puts Authelia / basic auth in front of the route and
 Jira's deliveries are redirected to a login page.
+
+# Bitbucket webhooks
+
+FLE-11. A Bitbucket Cloud webhook can start a **custom pipeline** of the
+product repo. The use case is the hands-off Renovate workflow: when the
+maintainer approves a Renovate PR, or comments `/merge` on it, or when a
+Renovate PR's build turns green, the fleet server starts the
+`renovate-merge` custom pipeline, which merges the next eligible PR and
+re-runs Renovate (see `docs/README-renovate.md`). Bitbucket pipelines cannot
+be triggered by a PR approval or comment on their own, so the daemon relays
+the event.
+
+The relay is generic (any custom pipeline, any of the events below) and holds
+no merge power: its Bitbucket token has the `pipeline:write` scope only, so it
+can start pipelines but cannot push or merge. Like Jira webhooks, it is **off
+by default**: a server needs a `bitbucket_hooks` rule in `fleet.yml`, a webhook
+secret and a pipeline token, all per project.
+
+## How it works
+
+```
+Bitbucket Cloud -- POST https://<fleet-domain>/hooks/bitbucket/<project> --> Caddy --> fleet daemon
+                                                                              |
+Bitbucket Pipelines  <-- POST /2.0/repositories/<repo>/pipelines/  <----------+
+ (custom: renovate-merge)       Authorization: Bearer <pipeline:write token>
+```
+
+- Caddy forwards `/hooks/*` (so `/hooks/bitbucket/*` as well) without Authelia /
+  basic auth and caps the body at 1MB: the existing Jira exemption covers it,
+  no Caddy change is needed.
+- Bitbucket signs the raw body exactly like Jira: `X-Hub-Signature:
+  sha256=<hex HMAC-SHA256(secret, body)>`. The daemon checks it with the
+  project's **Bitbucket** secret, which is separate from the Jira one (a Jira
+  secret does not open this route).
+- The event comes from the `X-Event-Key` header. The delivery id is
+  `X-Request-UUID` (unique per delivery, reused by Bitbucket's retries);
+  `X-Attempt-Number` is logged.
+
+## Configure the rules (`fleet.yml`)
+
+```yaml
+projects:
+  example-project:
+    git: git@bitbucket.org:org/example-project.git
+    bitbucket_hooks:
+      - {on_event: "pullrequest:approved", repo: renaud_cuny/ddev-fleet, branch: "renovate/*", action: run-pipeline, pattern: renovate-merge, ref: develop}
+      - {on_event: "pullrequest:comment_created", repo: renaud_cuny/ddev-fleet, branch: "renovate/*", comment: "/merge", action: run-pipeline, pattern: renovate-merge, ref: develop}
+      - {on_event: "repo:commit_status_updated", repo: renaud_cuny/ddev-fleet, branch: "renovate/*", state: SUCCESSFUL, action: run-pipeline, pattern: renovate-merge, ref: develop}
+```
+
+| Key | Required | Meaning |
+|---|---|---|
+| `on_event` | yes | Bitbucket event key: `pullrequest:<x>` or `repo:<x>` (e.g. `pullrequest:approved`, `pullrequest:comment_created`, `repo:commit_status_updated`). |
+| `repo` | yes | `workspace/slug`. The payload's `repository.full_name` must equal it (case-insensitive), else the event is ignored. It is also the repo the pipeline is started on. |
+| `branch` | no | `fnmatch` glob (case-sensitive) against the PR's source branch, or a commit status's `refname`. A rule with `branch` never matches an event that has no branch (a commit status whose `refname` is null). |
+| `state` | no | Commit-status events only (`repo:commit_status_*`): the status `state`, case-insensitive (`SUCCESSFUL`, `FAILED`, ...). |
+| `comment` | no | `pullrequest:comment_*` events only: matches when any line of the comment (stripped, case-insensitive) equals it, e.g. `/merge`. |
+| `action` | yes | `run-pipeline` (the only action). |
+| `pattern` | yes | The custom pipeline's name in `bitbucket-pipelines.yml` (`custom:` key), e.g. `renovate-merge`. |
+| `ref` | yes | The branch to run the pipeline on, e.g. `develop`. |
+
+The first matching rule wins. Validation is strict and fails at load time with
+a `projects.<p>.bitbucket_hooks[i]...` message: unknown keys, a malformed
+`on_event` or `repo`, a missing `action` / `pattern` / `ref`, an empty
+`branch` / `state` / `comment`, and `state` / `comment` on the wrong kind of
+event. As with `jira_hooks`, servers on an older release ignore the unknown
+`bitbucket_hooks` key, and a rule alone enables nothing: each server also needs
+its own secret and token.
+
+## Create the token and the secret
+
+1. **Pipeline token.** In the Bitbucket repo: **Repository settings -> Access
+   tokens -> Create Repository Access Token**. Give it the scope **Pipelines:
+   Write** and nothing else (no repository write, no pull-request write), so it
+   cannot push or merge.
+2. On the server, as the `fleet` user, store it. It is read from a piped stdin
+   or a hidden prompt, never from the command line, and never printed:
+
+   ```bash
+   fleet webhook bitbucket-token example-project          # hidden prompt
+   printf '%s' "$TOKEN" | fleet webhook bitbucket-token example-project
+   ```
+
+   Running it again replaces the token (use this when the token is rotated).
+3. Create the webhook secret:
+
+   ```bash
+   fleet webhook secret example-project --source bitbucket
+   ```
+
+   The output has the same shape as the Jira one: the secret on its own line,
+   then `URL: https://<fleet-domain>/hooks/bitbucket/example-project`, shown
+   once. A second run is refused; `--rotate` replaces it (and then the
+   Bitbucket webhook's Secret must be updated). Warnings say when the project has
+   no `bitbucket_hooks` yet, or no token is stored yet.
+
+Both go into `/srv/fleet/webhooks/secrets.env` (`0600`) next to the Jira
+secrets, under distinct keys (`bitbucket:<project>` for the secret,
+`bitbucket-token:<project>` for the token; the Jira secret keeps its bare
+`<project>` key, so existing files work unchanged). The daemon reads the file
+per request, so no restart is needed.
+
+## Bitbucket webhook setup
+
+In the Bitbucket repo: **Repository settings -> Webhooks -> Add webhook**.
+
+| Field | Value |
+|---|---|
+| URL | the `URL:` line printed above, e.g. `https://ddev1.example.com/hooks/bitbucket/example-project` |
+| Secret | the printed secret |
+| Triggers | Choose from a full list: Pull request **Approved**, Pull request **Comment created**, Repository **Build status created** and **Build status updated** |
+
+Trigger only what your rules use. One webhook per (repo, server), each with
+its own secret.
+
+## Responses
+
+Same order and contract as the Jira route: an unauthenticated caller learns
+nothing beyond "this project has hooks", and every response is JSON.
+
+| Case | Code | Body |
+|---|---|---|
+| Unknown project, no `bitbucket_hooks`, or no Bitbucket secret configured | 404 | `{"error": "not found"}` |
+| Body over the limit (Caddy's 1MB first; the daemon's own 1 MiB cap) | 413 | `{"error": "payload too large"}` |
+| Missing / malformed / wrong signature | 401 | `{"error": "unauthorized"}` |
+| Body not JSON or not an object, no `X-Event-Key`, or a required field missing (`repository.full_name`, `pullrequest.id`, `comment.content.raw`, `commit_status.state`) | 400 | `{"error": "<reason>"}` |
+| Ignored (other event, or no rule matches the repo / branch / state / comment) | 200 | `{"result": "ignored", "reason": "..."}` |
+| Duplicate delivery (same `X-Request-UUID`) | 200 | `{"result": "duplicate"}` |
+| Rule matched but no Bitbucket token is stored | 422 | `{"error": "<reason>"}` |
+| Pipeline started | 200 | `{"result": "triggered", "pipeline": <build number>}` |
+| Bitbucket refused the call, timed out or is unreachable (8 s timeout), or the call failed in any other way | 502 | `{"error": "pipeline trigger failed"}` |
+| `fleet.yml` fails to load | 500 | `{"error": "internal error"}` |
+
+The 502 and 500 are 5xx on purpose: Bitbucket retries them. The 502 log entry
+and journal line carry the upstream HTTP status code only, never the token or
+any response content. `pipeline` is the new pipeline's build number (its uuid
+if the response has none).
+
+## Deduplication
+
+The daemon claims the delivery id (per project, in its own namespace under
+`/srv/fleet/webhooks/seen/`, so it cannot collide with a Jira id) before it
+starts the pipeline, and releases the claim again if the start fails for any reason. A
+Bitbucket retry after a 502 therefore starts the pipeline, while a retry of a
+delivery that did start one answers `duplicate`. A 422 never consumes the id.
+A delivery without `X-Request-UUID` is processed without dedupe. Different
+events for the same PR (approve, then the green build) are different
+deliveries and each starts a pipeline: the `renovate-merge` pipeline is
+written to be idempotent.
+
+## Delivery log
+
+Every authenticated request (one that passed the 404 and signature checks)
+appends one JSON line to `/srv/fleet/logs/webhooks/bitbucket.jsonl`, next to the
+Jira log (no secrets, no bodies): `ts, project, delivery_id, attempt, event,
+repo, pr, branch, state, result, reason, pipeline`. Header values are truncated
+to 64 characters. 401s go to the daemon journal only
+(`journalctl -u fleet | grep 'bitbucket webhook'`). Read it with:
+
+```bash
+fleet webhook log --source bitbucket [--project <p>] [-n 20]
+```
+
+One line per entry: `ts  project  event  repo#pr  branch  result  pipeline-or-reason`.

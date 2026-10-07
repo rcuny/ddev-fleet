@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-11: Bitbucket webhooks start a custom pipeline.** New route `POST /hooks/bitbucket/{project}` verifies Bitbucket Cloud's `X-Hub-Signature` HMAC-SHA256 with a per-project secret (separate from the Jira one). When an event matches one of the project's new `bitbucket_hooks` rules in `fleet.yml` (`on_event`, `repo`, optional `branch` glob, `state`, `comment`, `action: run-pipeline`, `pattern`, `ref`), it starts that custom pipeline through the Bitbucket API, using a per-project access token that only needs the `pipeline:write` scope. Deliveries are deduplicated on `X-Request-UUID`, and a failed trigger releases the claim so Bitbucket's retry can still succeed. New CLI: `fleet webhook secret <p> --source bitbucket`, `fleet webhook bitbucket-token <p>` (reads stdin or a hidden prompt), and `fleet webhook log --source bitbucket`. See `docs/README-webhooks.md`.
+- **FLE-11: hands-off Renovate merges.** New custom pipeline `renovate-merge`, backed by `scripts/renovate_merge.py`. It merges (merge commit) at most one open `renovate/*` PR per run, and only one that the maintainer has accepted (an Approve or a `/merge` comment), that has green gates on its current head, and that is up to date with `develop`. It then runs Renovate to recreate the other PRs on the new `develop`. An approved PR with red gates gets one "needs a human" comment. Renovate now uses `rebaseWhen: behind-base-branch`. See `docs/README-renovate.md`.
+
 ## [0.9.2] - 2026-10-06
 
 ### Dependencies
