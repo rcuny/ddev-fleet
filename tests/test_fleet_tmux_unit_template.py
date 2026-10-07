@@ -101,6 +101,8 @@ def test_systemd_analyze_verify_accepts_the_rendered_unit(tmp_path):
     (srv / ".secrets").write_text("")
     unit = tmp_path / "fleet-tmux.service"
     unit.write_text(_render(fleet_user="root", fleet_opt_dir=str(opt), fleet_srv_dir=str(srv)))
+    # CI runners may use umask 000; systemd warns (on stderr) about world-writable units.
+    unit.chmod(0o644)
 
     result = subprocess.run(
         ["systemd-analyze", "verify", str(unit)], capture_output=True, text=True, timeout=60

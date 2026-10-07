@@ -1,0 +1,39 @@
+---
+# Scoped playbook: the read-only security probe (forced-command report user).
+#
+# Use this instead of site.yml to apply the probe to a live host. site.yml's
+# fleet_service role rewrites /opt/ddev-fleet's git remote to https, which
+# breaks the SSH-key `git pull` the whole rollout flow depends on, so it must
+# never be run against the live server. This playbook touches only the
+# security_probe role: the `fleet-probe` user, its forced-command
+# authorized_keys, the /usr/local/bin/fleet-security-report script and (when an
+# AllowUsers list is already in effect) one sshd drop-in.
+#
+# The role is inert until /etc/ddev-fleet/local-vars.yml lists at least one
+# key under fleet_security_probe_authorized_keys, and removes everything it
+# installed when that list is emptied again. See docs/README-ci.md.
+#
+# It must live beside site.yml: group_vars/ resolves relative to the playbook's
+# directory, so a copy in /tmp silently runs with fleet_ssh_allow_users
+# undefined.
+#
+#   cd /opt/ddev-fleet/ansible
+#   sudo ansible-playbook security-probe.yml --check --diff   # preview
+#   sudo ansible-playbook security-probe.yml
+#
+# pre_tasks mirror site.yml so /etc/ddev-fleet/local-vars.yml still overrides
+# the committed group_vars and the role defaults.
+- name: Configure the read-only systemd security probe
+  hosts: localhost
+  become: true
+  force_handlers: true
+  pre_tasks:
+    - name: Check for host-local variable overrides
+      ansible.builtin.stat:
+        path: /etc/ddev-fleet/local-vars.yml
+      register: _fleet_local_vars
+    - name: Load host-local variable overrides if present
+      ansible.builtin.include_vars: /etc/ddev-fleet/local-vars.yml
+      when: _fleet_local_vars.stat.exists
+  roles:
+    - security_probe

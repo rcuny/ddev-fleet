@@ -43,3 +43,4 @@
     - authelia             # no-op unless fleet_auth_mode == 'authelia'
     - network_hardening   # no-op unless fleet_network_hardening_enabled
     - security_hardening  # no-op unless fleet_security_hardening_enabled
+    - security_probe      # no-op unless fleet_security_probe_authorized_keys is set

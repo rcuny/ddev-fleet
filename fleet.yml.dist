@@ -25,6 +25,14 @@ projects:
     # issue_id_regexp: 'ABC-[0-9]+'         # optional — derives [[issue-id]]/FLEET_ISSUE_ID from the
     #                                       # instance label (checked first) or branch (fallback);
     #                                       # matched case-insensitively, result uppercased.
+    # bitbucket_hooks:                      # optional — Bitbucket webhook -> start a custom pipeline (FLE-11,
+    #                                       # see docs/README-webhooks.md; also needs `fleet webhook secret --source bitbucket`
+    #                                       # and `fleet webhook bitbucket-token`). First matching rule wins.
+    #   - {on_event: "pullrequest:approved", repo: workspace/slug, branch: "renovate/*", action: run-pipeline, pattern: renovate-merge, ref: develop}
+    #   - {on_event: "pullrequest:comment_created", repo: workspace/slug, branch: "renovate/*", comment: "/merge", action: run-pipeline, pattern: renovate-merge, ref: develop}
+    #   - {on_event: "repo:commit_status_updated", repo: workspace/slug, branch: "renovate/*", state: SUCCESSFUL, action: run-pipeline, pattern: renovate-merge, ref: develop}
+    # jira_hooks:                           # optional — Jira status change -> deploy (FLE-3, same doc)
+    #   - {on_status: Dispatched, action: deploy, template: jira-pull}
     templates:
       default:
         post_deploy: [ddev start]

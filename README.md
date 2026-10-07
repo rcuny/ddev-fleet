@@ -136,6 +136,7 @@ Full detail (both credential types, the underlying mechanism): `docs/operations.
 | `docs/README-typesense.md` | The Typesense browser-search exposure worked example |
 | `CONTRIBUTING.md` | Dev setup, code style, and how to submit a change |
 | `docs/RELEASING.md` | Versioning, CHANGELOG conventions, and how a release or hotfix is cut |
+| `docs/README-ci.md` | Bitbucket Pipelines: gates, ansible-lint, the systemd security check (offline + live), baseline updates |
 | `CHANGELOG.md` | Release history |
 
 Licence: [MIT](LICENSE).

@@ -1728,6 +1728,150 @@ def test_webhook_secret_unknown_project(fleet_home, capsys):
     assert "nope" in capsys.readouterr().err
 
 
+def _write_registry_with_bitbucket_rule(fleet_home):
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {}
+    bitbucket_hooks:
+      - {on_event: "pullrequest:approved", repo: acme/demo, action: run-pipeline, pattern: renovate-merge, ref: develop}
+""",  # noqa: E501
+        encoding="utf-8",
+    )
+
+
+def test_webhook_secret_bitbucket_prints_once_and_refuses(fleet_home, capsys):
+    from fleet.core.webhooks import WebhookStore
+
+    _write_minimal_registry(fleet_home)
+    store = WebhookStore.from_paths(FleetPaths.from_home(fleet_home))
+    jira_secret = store.create_secret("demo")
+    base = ["--fleet-home", str(fleet_home), "webhook", "secret", "demo", "--source", "bitbucket"]
+
+    assert cli.main(base) == 0
+    first = capsys.readouterr().out
+    assert "URL: https://fleet.example.test/hooks/bitbucket/demo" in first
+    secret = first.splitlines()[0]
+    assert len(secret) >= 32 and secret != jira_secret
+    assert "no bitbucket_hooks" in first
+    assert "bitbucket-token demo" in first  # no pipeline token stored yet
+    assert store.read_secret("demo", "bitbucket") == secret
+    assert store.read_secret("demo") == jira_secret  # Jira secret untouched
+
+    assert cli.main(base) == 1
+    captured = capsys.readouterr()
+    assert "--rotate" in captured.err + captured.out
+    assert secret not in captured.err + captured.out
+
+    assert cli.main([*base, "--rotate"]) == 0
+    assert capsys.readouterr().out.splitlines()[0] != secret
+    assert store.read_secret("demo") == jira_secret
+
+
+def test_webhook_secret_default_source_is_jira(fleet_home, capsys):
+    from fleet.core.webhooks import WebhookStore
+
+    _write_minimal_registry(fleet_home)
+    assert cli.main(["--fleet-home", str(fleet_home), "webhook", "secret", "demo"]) == 0
+    out = capsys.readouterr().out
+    assert "/hooks/jira/demo" in out and "bitbucket" not in out
+    store = WebhookStore.from_paths(FleetPaths.from_home(fleet_home))
+    assert store.read_secret("demo", "bitbucket") is None
+
+
+def test_webhook_bitbucket_token_from_stdin_is_not_echoed(fleet_home, capsys, monkeypatch):
+    import io
+
+    from fleet.core.webhooks import WebhookStore
+
+    _write_registry_with_bitbucket_rule(fleet_home)
+    monkeypatch.setattr("sys.stdin", io.StringIO("  ATCTT-secret-token  \n"))
+    rc = cli.main(["--fleet-home", str(fleet_home), "webhook", "bitbucket-token", "demo"])
+    assert rc == 0
+    captured = capsys.readouterr()
+    assert "ATCTT-secret-token" not in captured.out + captured.err
+    assert "stored" in captured.out
+    assert "no bitbucket_hooks" not in captured.out  # the project has a rule
+    store = WebhookStore.from_paths(FleetPaths.from_home(fleet_home))
+    assert store.read_pipeline_token("demo") == "ATCTT-secret-token"
+    path = FleetPaths.from_home(fleet_home).webhooks / "secrets.env"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_webhook_bitbucket_token_tty_uses_hidden_prompt(fleet_home, capsys, monkeypatch):
+    from fleet.core.webhooks import WebhookStore
+
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr("sys.stdin", type("Tty", (), {"isatty": lambda self: True})())
+    prompts = []
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: prompts.append(prompt) or "tok-1")
+    rc = cli.main(["--fleet-home", str(fleet_home), "webhook", "bitbucket-token", "demo"])
+    assert rc == 0
+    assert len(prompts) == 1
+    out = capsys.readouterr().out
+    assert "tok-1" not in out
+    assert "no bitbucket_hooks" in out  # warned: the token is unused for now
+    store = WebhookStore.from_paths(FleetPaths.from_home(fleet_home))
+    assert store.read_pipeline_token("demo") == "tok-1"
+
+
+def test_webhook_bitbucket_token_rejects_empty_and_unknown_project(fleet_home, capsys, monkeypatch):
+    import io
+
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+    assert cli.main(["--fleet-home", str(fleet_home), "webhook", "bitbucket-token", "demo"]) == 1
+    assert "non-empty" in capsys.readouterr().err
+    assert cli.main(["--fleet-home", str(fleet_home), "webhook", "bitbucket-token", "nope"]) == 1
+    assert "nope" in capsys.readouterr().err
+
+
+def test_webhook_bitbucket_token_not_accepted_on_argv(fleet_home, capsys):
+    import pytest
+
+    _write_minimal_registry(fleet_home)
+    with pytest.raises(SystemExit):
+        cli.main(["--fleet-home", str(fleet_home), "webhook", "bitbucket-token", "demo", "tok"])
+
+
+def test_webhook_log_bitbucket_source(fleet_home, capsys):
+    from fleet.core.webhooks import WebhookStore
+
+    _write_minimal_registry(fleet_home)
+    base = ["--fleet-home", str(fleet_home), "webhook", "log", "--source", "bitbucket"]
+    assert cli.main(base) == 0
+    assert "no webhook deliveries logged" in capsys.readouterr().out
+
+    store = WebhookStore.from_paths(FleetPaths.from_home(fleet_home))
+    store.append_log(
+        {
+            "project": "demo",
+            "event": "pullrequest:approved",
+            "repo": "acme/demo",
+            "pr": 7,
+            "branch": "renovate/x",
+            "result": "triggered",
+            "pipeline": 17,
+        },
+        "bitbucket",
+    )
+    assert cli.main(base) == 0
+    line = capsys.readouterr().out.strip()
+    assert "pullrequest:approved" in line and "acme/demo#7" in line and "triggered" in line
+    assert line.endswith("17")
+    # The default (Jira) log stays empty.
+    assert cli.main(["--fleet-home", str(fleet_home), "webhook", "log"]) == 0
+    assert "no webhook deliveries logged" in capsys.readouterr().out
+
+
 def test_webhook_log_empty_and_entries(fleet_home, capsys):
     from fleet.core.webhooks import WebhookStore
 

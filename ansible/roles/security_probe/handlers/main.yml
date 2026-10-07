@@ -1,0 +1,5 @@
+---
+- name: Reload sshd (security_probe)
+  ansible.builtin.systemd:
+    name: ssh
+    state: reloaded

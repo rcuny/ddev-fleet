@@ -1562,6 +1562,59 @@ def read_instance_git_head(
     return "\n".join(result.lines).strip()
 
 
+def read_instance_project(instance_dir: Path) -> str:
+    """The instance's project: `.fleet/instance.yml` first, else the id prefix
+    (the same fallback `list_instances` uses for dirs without an instance.yml).
+    Cheap and best-effort (no ddev/docker, never raises) for the sidebar's fast
+    refresh loop."""
+    try:
+        with open(instance_dir / ".fleet" / "instance.yml", "r", encoding="utf-8") as fh:
+            data = _yaml.load(fh) or {}
+        project = str(data.get("project", ""))
+        if project:
+            return project
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        pass
+    return instance_dir.name.split("--", 1)[0]
+
+
+def display_submodule_for(registry, project: str) -> str | None:
+    """The project's `display_submodule_branch` (see
+    `Registry.display_submodule_branch`), or None when it is unset, the project
+    is unknown to the registry (e.g. removed from fleet.yml but its instance is
+    still on disk), or there is no registry at all. Never raises: the display
+    helpers must keep working when the registry can't answer."""
+    if registry is None or not project:
+        return None
+    try:
+        return registry.display_submodule_branch(project)
+    except Exception:  # noqa: BLE001 - best-effort display helper
+        return None
+
+
+def display_checkout(instance_dir: Path, submodule: str | None) -> tuple[Path, str]:
+    """Pick the checkout whose branch/HEAD an instance's indicator shows, as
+    `(dir, prefix)`. With `submodule` set and a real git checkout there, that is
+    `<instance_dir>/<submodule>` and the prefix is `"<submodule>: "` so the
+    indicator says it is the submodule; otherwise the instance itself with an
+    empty prefix.
+
+    The `.git` check is what makes the fallback safe: an uninitialised
+    submodule is an EMPTY directory inside the instance repo, and
+    `git -C <empty dir>` would walk up and silently report the PARENT's branch
+    under the submodule's name. The resolve() check keeps a symlinked path from
+    pointing the indicator at a repo outside the instance."""
+    if not submodule:
+        return instance_dir, ""
+    sub_dir = instance_dir / submodule
+    try:
+        if (sub_dir / ".git").exists() and sub_dir.resolve().is_relative_to(instance_dir.resolve()):
+            return sub_dir, f"{submodule}: "
+    except OSError:
+        pass
+    return instance_dir, ""
+
+
 @dataclass
 class InstanceStatus:
     instance_id: str
@@ -1624,11 +1677,16 @@ def list_instances(
             instance = parts[1] if len(parts) > 1 else ""
             branch = ""
 
-        live_branch = read_instance_git_branch(entry, timeout=GIT_READ_TIMEOUT, runner=runner)
+        # `display_submodule_branch` swaps which checkout the indicator reads
+        # (display only — `.fleet/instance.yml`'s recorded branch, deploy and
+        # redeploy never see this). Both `branch` and `head` are consumed purely
+        # for display by `fleet list` and the web UI, so no separate field.
+        shown_dir, prefix = display_checkout(entry, display_submodule_for(registry, project))
+        live_branch = read_instance_git_branch(shown_dir, timeout=GIT_READ_TIMEOUT, runner=runner)
         if live_branch:
-            branch = live_branch
+            branch = f"{prefix}{live_branch}"
 
-        head = read_instance_git_head(entry, timeout=GIT_READ_TIMEOUT, runner=runner)
+        head = read_instance_git_head(shown_dir, timeout=GIT_READ_TIMEOUT, runner=runner)
 
         if current_id in running_ids:
             state = "running"

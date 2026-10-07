@@ -11,7 +11,7 @@ import ipaddress
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from ruamel.yaml import YAML
 
@@ -78,6 +78,34 @@ class JiraHookRule:
 
 _JIRA_HOOK_KEYS = frozenset({"on_status", "action", "template", "branch"})
 _JIRA_HOOK_ACTIONS = frozenset({"deploy"})
+
+
+@dataclass(frozen=True)
+class BitbucketHookRule:
+    """One `projects.<p>.bitbucket_hooks` entry: when a Bitbucket Cloud event
+    `on_event` arrives for `repo` (and passes the optional `branch` glob,
+    commit-status `state` and PR `comment` filters), run `action` (v1: only
+    "run-pipeline") = start the custom pipeline `pattern` on branch `ref`.
+    Consumed by `core/webhooks.py` (spec FLE-11 §4)."""
+
+    on_event: str
+    repo: str
+    action: str
+    pattern: str
+    ref: str
+    branch: str | None = None
+    state: str | None = None
+    comment: str | None = None
+
+
+_BITBUCKET_HOOK_KEYS = frozenset(
+    {"on_event", "repo", "branch", "state", "comment", "action", "pattern", "ref"}
+)
+_BITBUCKET_HOOK_ACTIONS = frozenset({"run-pipeline"})
+_BITBUCKET_EVENT_RE = re.compile(r"(pullrequest|repo):[a-z_]+")
+# `workspace/slug`: also what the pipeline-trigger URL is built from, so keep
+# it to characters Bitbucket allows in both parts.
+_BITBUCKET_REPO_RE = re.compile(r"[A-Za-z0-9._~-]+/[A-Za-z0-9._~-]+")
 
 _TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
 
@@ -322,6 +350,68 @@ class Registry:
             if "branch" in rule and (not isinstance(rule["branch"], str) or not rule["branch"]):
                 raise RegistryError(f"{where}.branch: must be a non-empty string")
 
+    @staticmethod
+    def _validate_bitbucket_hooks(project_key: str, project_block: dict) -> None:
+        """Validate `projects.<p>.bitbucket_hooks`. Same strictness as
+        `jira_hooks`: a rule decides which pipeline an unauthenticated-looking
+        HTTP call starts, so unknown keys and malformed values fail at load
+        time. Servers on an older release never read this key."""
+        if "bitbucket_hooks" not in project_block:
+            return
+        base = f"projects.{project_key}.bitbucket_hooks"
+        hooks = project_block["bitbucket_hooks"]
+        if hooks is None:
+            return
+        if not isinstance(hooks, list):
+            raise RegistryError(f"{base}: must be a list of rules")
+        for i, rule in enumerate(hooks):
+            where = f"{base}[{i}]"
+            if not isinstance(rule, dict):
+                raise RegistryError(f"{where}: must be a mapping, got {rule!r}")
+            unknown = sorted(set(rule) - _BITBUCKET_HOOK_KEYS)
+            if unknown:
+                raise RegistryError(
+                    f"{where}: unknown key(s) {', '.join(map(str, unknown))} "
+                    f"(allowed: {', '.join(sorted(_BITBUCKET_HOOK_KEYS))})"
+                )
+            on_event = rule.get("on_event")
+            if not isinstance(on_event, str) or not _BITBUCKET_EVENT_RE.fullmatch(on_event):
+                raise RegistryError(
+                    f"{where}.on_event: must look like 'pullrequest:<event>' or "
+                    f"'repo:<event>' (e.g. 'pullrequest:approved'), got {on_event!r}"
+                )
+            repo = rule.get("repo")
+            if not isinstance(repo, str) or not _BITBUCKET_REPO_RE.fullmatch(repo):
+                raise RegistryError(
+                    f"{where}.repo: must be 'workspace/slug' (e.g. 'acme/website'), got {repo!r}"
+                )
+            action = rule.get("action")
+            if action not in _BITBUCKET_HOOK_ACTIONS:
+                raise RegistryError(
+                    f"{where}.action: must be one of {sorted(_BITBUCKET_HOOK_ACTIONS)}, "
+                    f"got {action!r}"
+                )
+            for key in ("pattern", "ref"):
+                value = rule.get(key)
+                if not isinstance(value, str) or not value.strip():
+                    raise RegistryError(f"{where}.{key}: required for action 'run-pipeline'")
+            if "branch" in rule and (not isinstance(rule["branch"], str) or not rule["branch"]):
+                raise RegistryError(f"{where}.branch: must be a non-empty string")
+            if "state" in rule:
+                if not isinstance(rule["state"], str) or not rule["state"].strip():
+                    raise RegistryError(f"{where}.state: must be a non-empty string")
+                if not on_event.startswith("repo:commit_status_"):
+                    raise RegistryError(
+                        f"{where}.state: only valid for 'repo:commit_status_*' events"
+                    )
+            if "comment" in rule:
+                if not isinstance(rule["comment"], str) or not rule["comment"].strip():
+                    raise RegistryError(f"{where}.comment: must be a non-empty string")
+                if not on_event.startswith("pullrequest:comment_"):
+                    raise RegistryError(
+                        f"{where}.comment: only valid for 'pullrequest:comment_*' events"
+                    )
+
     def _validate(self, *, host_config_path: Path | None = None) -> None:
         data = self._data
         if "fleet" not in data:
@@ -370,8 +460,26 @@ class Registry:
                         f"projects.{project_key}.issue_id_regexp: invalid regexp — {exc}"
                     ) from exc
 
+            if "display_submodule_branch" in project_block:
+                where = f"projects.{project_key}.display_submodule_branch"
+                sub = project_block["display_submodule_branch"]
+                if not isinstance(sub, str) or not sub.strip():
+                    raise RegistryError(
+                        f"{where}: must be a non-empty string (a submodule path "
+                        "relative to the instance checkout)"
+                    )
+                # Joined onto the instance dir and handed to `git -C`, so it must
+                # not be able to point outside that checkout.
+                sub_path = PurePosixPath(sub)
+                if sub_path.is_absolute() or ".." in sub_path.parts:
+                    raise RegistryError(
+                        f"{where}: must be a relative path inside the instance "
+                        "checkout (no leading '/', no '..' segments)"
+                    )
+
             templates = project_block.get("templates") or {}
             self._validate_jira_hooks(project_key, project_block, templates)
+            self._validate_bitbucket_hooks(project_key, project_block)
             for template_key, template_block in templates.items():
                 try:
                     validate_part(template_key)
@@ -702,6 +810,15 @@ class Registry:
         pattern = block.get("issue_id_regexp")
         return str(pattern) if pattern is not None else None
 
+    def display_submodule_branch(self, project: str) -> str | None:
+        """Path (relative to an instance checkout) of the submodule whose branch
+        and short HEAD `fleet list`, the web UI and the tmux sidebar display in
+        place of the instance's own, or None when the project defines none.
+        Display only — deploy/redeploy never read it."""
+        block = self._project_block(project)
+        path = block.get("display_submodule_branch")
+        return str(path) if path is not None else None
+
     def jira_hooks(self, project: str) -> list[JiraHookRule]:
         """The project's validated `jira_hooks` rules, in file order; `[]`
         when it defines none (the webhook route then answers 404)."""
@@ -714,6 +831,28 @@ class Registry:
                 branch=str(rule["branch"]) if rule.get("branch") is not None else None,
             )
             for rule in (block.get("jira_hooks") or [])
+        ]
+
+    def bitbucket_hooks(self, project: str) -> list[BitbucketHookRule]:
+        """The project's validated `bitbucket_hooks` rules, in file order;
+        `[]` when it defines none (the webhook route then answers 404)."""
+        block = self._project_block(project)
+
+        def opt(rule: dict, key: str) -> str | None:
+            return str(rule[key]).strip() if rule.get(key) is not None else None
+
+        return [
+            BitbucketHookRule(
+                on_event=str(rule["on_event"]),
+                repo=str(rule["repo"]),
+                action=str(rule["action"]),
+                pattern=str(rule["pattern"]).strip(),
+                ref=str(rule["ref"]).strip(),
+                branch=str(rule["branch"]) if rule.get("branch") is not None else None,
+                state=opt(rule, "state"),
+                comment=opt(rule, "comment"),
+            )
+            for rule in (block.get("bitbucket_hooks") or [])
         ]
 
     def port_profile(self, name: str) -> PortProfile:
