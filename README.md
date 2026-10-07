@@ -1,13 +1,14 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-29
+Last updated: 2026-10-07
 Type: documentation
 ---
 
 # ddev-fleet
 
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
+[![systemd security: weekly report](https://img.shields.io/badge/systemd%20security-weekly%20report-blue)](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md)
 
 A fleet manager for running many independent DDEV-based projects (mainly
 Drupal, not exclusively) in parallel on one bare-metal host, with minimal
@@ -137,6 +138,7 @@ Full detail (both credential types, the underlying mechanism): `docs/operations.
 | `CONTRIBUTING.md` | Dev setup, code style, and how to submit a change |
 | `docs/RELEASING.md` | Versioning, CHANGELOG conventions, and how a release or hotfix is cut |
 | `docs/README-ci.md` | Bitbucket Pipelines: gates, ansible-lint, the systemd security check (offline + live), baseline updates |
+| [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md) | The weekly systemd security report: exposure scores of the live servers' units and of the unit files this repo ships |
 | `CHANGELOG.md` | Release history |
 
 Licence: [MIT](LICENSE).

@@ -123,10 +123,23 @@ def test_ansible_lint_is_a_non_blocking_parallel_step_next_to_the_gates():
 
 def test_live_systemd_security_pipeline_is_a_custom_pipeline_using_the_script():
     (step,) = _steps(PIPELINES["pipelines"]["custom"]["systemd-security-live"])
-    assert step["image"] == "python:3.11-slim-trixie"
+    # FLE-16: the full image has git (the report is committed); systemd scores the units offline.
+    assert step["image"] == "python:3.11-trixie"
     script = _script(step)
-    assert "openssh-client" in script and "bash ci/systemd-security-live.sh" in script
+    assert "openssh-client systemd" in script and "pip install -q -e ." in script
+    assert script.index("umask 022") < script.index("bash ci/systemd-security-live.sh")
+    assert "bash ci/systemd-security-live.sh" in script
     assert step["artifacts"] == ["reports/**"]
+
+
+def test_the_report_commit_cannot_loop_back_into_the_live_check():
+    # The report commit lands on develop and is NOT [skip ci]: the develop push pipeline must
+    # not run the live check, or every weekly run would trigger the next one.
+    for pipeline in (
+        PIPELINES["pipelines"]["branches"]["develop"],
+        PIPELINES["pipelines"]["tags"]["v*"],
+    ):
+        assert "systemd-security-live" not in json.dumps(pipeline)
 
 
 def test_github_actions_workflow_is_gone():

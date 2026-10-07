@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-06
+Last updated: 2026-10-07
 Type: documentation
 ---
 
@@ -20,7 +20,7 @@ same systemd (257) as the servers.
 | Push to `develop` | the same parallel pair, then **mirror develop** to GitHub |
 | Tag `v*` (release) | **gates**, then **publish main + the tag** to GitHub |
 | Custom `renovate` | Renovate (daily schedule): dependency-update PRs against `develop` |
-| Custom `systemd-security-live` | the live systemd security check (weekly schedule) |
+| Custom `systemd-security-live` | the live systemd security check, the published report and the Jira alert (weekly schedule) |
 
 - **Gates**: `pytest -q`, `ruff check .`, `black --check .`, then the offline
   systemd security check (below). The image has `systemd` installed and
@@ -33,7 +33,8 @@ same systemd (257) as the servers.
   `bitbucket-pipelines.yml` (`GITHUB_MIRROR_URL`, the deploy key).
 - **Renovate**: `renovate-config.json`; see `CONTRIBUTING.md`.
 
-Alerts are Bitbucket's built-in "pipeline failed" email. Nothing else notifies.
+Alerts are Bitbucket's built-in "pipeline failed" email and, for the live check, a Jira comment
+(see "The published report and the Jira alert" below).
 
 ## The systemd security check (FLE-8)
 
@@ -137,6 +138,96 @@ Always on a feature branch and in a pull request, so the change is reviewed.
 `update-baseline` replaces only the named environment and keeps the others and
 the tolerance. `compare --tolerance X` overrides the tolerance for a single run.
 
+## The published report and the Jira alert (FLE-16)
+
+After checking the hosts, `ci/systemd-security-live.sh` also scores the shipped
+unit files offline (informational only: the gates enforce that baseline) and
+builds the page [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md)
+with `python ci/systemd_security.py publish-report --hosts "ddev3 ..."`. The page
+has the explanation of the score, one status line per host (`OK`, `N
+regression(s)` or `could not be fetched`), the product's units first (fleet,
+fleet-boot, fleet-reboot-notify, caddy, authelia), the full host overview in a
+`<details>` block and the offline scores. The output is sorted, so the weekly
+diff is the date plus whatever moved. It also runs locally, without any
+Bitbucket variable. The file is called `SYSTEMD-SECURITY-REPORT.md`, not
+`SECURITY.md`, which GitHub reserves for the vulnerability-disclosure policy.
+The README links to the absolute `develop` URL: GitHub opens on `main`, which
+only moves on releases.
+
+### When it is committed
+
+`ci/systemd_security.py should-publish` says yes when `BITBUCKET_BRANCH` is
+`develop`, or when the pipeline variable `PUBLISH_REPORT=1` is set. Any other run
+(for example an acceptance check on a throwaway branch) builds the page as an
+artifact (`reports/SYSTEMD-SECURITY-REPORT.md`) and commits nothing.
+
+- The commit is `chore(security): systemd security report <YYYY-MM-DD>` by
+  `ddev-fleet security check <security-check@noreply.fleet.pm>`, and only when
+  the file changed. There is no `[skip ci]`: the `develop` pipeline is what
+  mirrors the commit to GitHub. That cannot loop, because the `develop` push
+  pipeline does not run the live check (pinned by `tests/test_ci_config.py`).
+- It is committed **even when a host regressed**; the step then still fails. A
+  host that cannot be fetched is listed as such and the other hosts are
+  published.
+- The push goes back to `origin` (Bitbucket's default clone origin) as
+  `HEAD:refs/heads/<branch>`. If it is rejected (the branch moved during the
+  run) the script fetches, rebases the one report commit onto the branch and
+  pushes once more. It never forces. A publish failure fails the step, but the
+  Jira alert is still sent.
+- **Branch restrictions on `develop` must allow the pipeline's push** (for
+  example "Write access" for Bitbucket Pipelines, or no "merge via pull request
+  only"). If they do not, the push fails and the step reports it; decide the
+  exception rather than loosening the rule silently.
+
+To test on a feature branch, push it and run the custom pipeline with the
+switch, either from the CLI:
+
+```bash
+bitbucket run systemd-security-live --branch=<branch> --var PUBLISH_REPORT=1
+```
+
+or in Bitbucket's UI: Pipelines > Run pipeline > pick the branch > Custom:
+`systemd-security-live`, add the variable `PUBLISH_REPORT` with the value `1`.
+The report is committed to that branch.
+
+### The Jira alert
+
+When a host regressed or could not be fetched (on any branch, so a throwaway
+branch can prove it), `ci/systemd_security.py jira-alert` posts one comment on
+`JIRA_ALERT_ISSUE`. It starts with a real @mention (an Atlassian Document Format
+`mention` node: plain `@email` text notifies nobody), then names each affected
+host with its regressed units (baseline -> current, delta) and the directives
+that changed, the branch, and links to the pipeline run and the committed
+report. Repository variables (Repository settings > Pipelines > Repository
+variables); if any of the first five is unset or empty the script prints `Jira
+alert not configured, skipping` and carries on, so forks stay inert:
+
+| Variable | Value |
+|---|---|
+| `JIRA_ALERT_SITE` | the Jira Cloud site name, `renaudcuny` for `renaudcuny.atlassian.net` |
+| `JIRA_ALERT_EMAIL` | the e-mail of the Jira account that **posts** the comment |
+| `JIRA_ALERT_TOKEN` | **secured**; that account's API token |
+| `JIRA_ALERT_ISSUE` | the issue to comment on, e.g. `FLE-17` |
+| `JIRA_ALERT_MENTION` | the Atlassian account id of the person to mention |
+| `JIRA_ALERT_CLOUD_ID` | optional; the site's cloud id (see below) |
+
+- **Use a different account to post.** Jira does not notify anyone of their own
+  actions: if the token belonged to the mentioned person, the mention would send
+  no e-mail. Post with a bot account and mention the maintainer.
+- **Scoped token.** A scoped API token (only the classic scope
+  `write:jira-work` is needed) is not accepted by `<site>.atlassian.net`: it goes
+  through the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/...`.
+  Set `JIRA_ALERT_CLOUD_ID` and the script uses that URL; unset, it uses
+  `https://<site>.atlassian.net/rest/api/3/...` (an unscoped token). Basic
+  authentication (e-mail and token) is the same either way. Symptom of a scoped
+  token without `JIRA_ALERT_CLOUD_ID`: `WARNING: Jira alert failed: HTTPError:
+  HTTP Error 404: Not Found` (seen in pipeline #61; the same token posted through
+  the gateway in #62).
+- **Another ticket.** Change `JIRA_ALERT_ISSUE`; nothing else refers to FLE-17.
+- A failed post (HTTP error, network error, timeout) prints `WARNING: Jira alert
+  failed: ...` on stderr and never changes the step's result: that stays the
+  regression result. The token is never printed.
+
 ## Setting up the live check
 
 No credential is stored in the repository.
@@ -183,6 +274,8 @@ No credential is stored in the repository.
    baseline environment. Unset or empty: the pipeline skips and succeeds.
 5. **Schedule** (Pipelines > Schedules): branch `develop`, custom pipeline
    `systemd-security-live`, weekly.
+6. **Jira alert** (optional): the `JIRA_ALERT_*` variables in "The published
+   report and the Jira alert" above.
 
 Try it first with a manual run of the custom pipeline (Run pipeline > Custom:
 `systemd-security-live`). Test by hand, from a machine holding the key:
