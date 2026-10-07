@@ -465,15 +465,27 @@ def live_env(tmp_path):
     ssh = bin_dir / "ssh"
     ssh.write_text(FAKE_SSH)
     ssh.chmod(0o755)
-    (bin_dir / "python").symlink_to(sys.executable)
+    python = bin_dir / "python"  # a wrapper, not a symlink: the venv is found next to argv[0]
+    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
+    python.chmod(0o755)
     report = _write(tmp_path / "report.json", _report({"fleet.service": _unit(1.8)}))
+    # Never the real baseline file: it changes whenever a real baseline is recorded.
+    baseline = _baseline(tmp_path, ddev3=_report({"fleet.service": _unit(1.8)}))
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "FAKE_SSH_LOG": str(tmp_path / "ssh.log"),
         "FAKE_SSH_REPORT": str(report),
+        "SYSTEMD_SECURITY_BASELINE": str(baseline),
+        # a missing systemd-analyze skips the (slow, informational) offline step
+        "SYSTEMD_ANALYZE": str(tmp_path / "no-such-systemd-analyze"),
     }
-    env.pop("SECURITY_PROBE_TARGETS", None)
+    for name in os.environ:
+        if name.startswith(("BITBUCKET_", "JIRA_ALERT_")) or name in (
+            "SECURITY_PROBE_TARGETS",
+            "PUBLISH_REPORT",
+        ):
+            env.pop(name)
     return work, env
 
 
@@ -502,17 +514,18 @@ def test_live_check_fetches_compares_and_still_checks_every_target_on_failure(li
     done = _live(
         work,
         env,
-        SECURITY_PROBE_TARGETS="down=fleet-probe@broken.example ddev3=fleet-probe@ddev3.example",
+        SECURITY_PROBE_TARGETS="down=fleet-probe@broken.example fresh=fleet-probe@fresh.example",
     )
     assert done.returncode == 1  # the unreachable host fails the run ...
-    assert (work / "reports" / "ddev3.json").exists()  # ... but the other one was still checked
-    assert (work / "reports" / "systemd-security-ddev3.md").exists()
-    assert "NEW" in done.stdout  # no ddev3 baseline recorded yet: reported, not failed
+    assert (work / "reports" / "fresh.json").exists()  # ... but the other one was still checked
+    assert (work / "reports" / "systemd-security-fresh.md").exists()
+    assert "NEW" in done.stdout  # a host with no baseline yet: reported, not failed
+    # ("fresh" has no baseline in the fixture baseline file)
     assert "could not fetch the security report from down" in done.stderr
     log = (Path(env["FAKE_SSH_LOG"])).read_text()
     for opt in ("-T", "BatchMode=yes", "StrictHostKeyChecking=yes", "ConnectTimeout=20"):
         assert opt in log
-    assert "fleet-probe@ddev3.example" in log
+    assert "fleet-probe@fresh.example" in log
 
 
 def test_live_check_succeeds_when_every_target_is_fine(live_env):

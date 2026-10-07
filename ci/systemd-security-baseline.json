@@ -1,5 +1,153 @@
 {
   "environments": {
+    "ddev3": {
+      "overview": {
+        "auditd.service": 8.9,
+        "authelia.service": 2.8,
+        "caddy.service": 1.6,
+        "cloud-init-main.service": 9.5,
+        "containerd.service": 9.6,
+        "dbus.service": 9.3,
+        "dm-event.service": 9.5,
+        "docker.service": 9.6,
+        "emergency.service": 9.5,
+        "fail2ban.service": 9.6,
+        "fleet-boot.service": 1.8,
+        "fleet.service": 1.8,
+        "getty@tty1.service": 9.6,
+        "lvm2-lvmpolld.service": 9.5,
+        "mdmonitor-oneshot.service": 9.6,
+        "mdmonitor.service": 9.5,
+        "rc-local.service": 9.6,
+        "rescue.service": 9.5,
+        "serial-getty@ttyS1.service": 9.6,
+        "ssh.service": 9.6,
+        "sshd@sshd-keygen.service": 9.6,
+        "systemd-ask-password-console.service": 9.4,
+        "systemd-ask-password-wall.service": 9.4,
+        "systemd-bsod.service": 9.5,
+        "systemd-hostnamed.service": 1.7,
+        "systemd-initctl.service": 9.4,
+        "systemd-journald.service": 4.9,
+        "systemd-logind.service": 2.8,
+        "systemd-networkd.service": 2.9,
+        "systemd-resolved.service": 2.2,
+        "systemd-rfkill.service": 9.4,
+        "systemd-timesyncd.service": 2.1,
+        "systemd-udevd.service": 7.1,
+        "unattended-upgrades.service": 9.6,
+        "user@1000.service": 9.4,
+        "uuidd.service": 5.8
+      },
+      "recorded": "2026-10-07",
+      "systemd": "257",
+      "units": {
+        "authelia.service": {
+          "directives": {
+            "IPAddressDeny": 0.2,
+            "LockPersonality": 0.1,
+            "MemoryDenyWriteExecute": 0.1,
+            "PrivateNetwork": 0.5,
+            "PrivateTmp": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectClock": 0.2,
+            "ProtectHostname": 0.1,
+            "ProtectKernelLogs": 0.2,
+            "ProtectProc": 0.2,
+            "ProtectSystem": 0.2,
+            "RemoveIPC": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_PACKET": 0.2,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RestrictAddressFamilies_OTHER": 0.3,
+            "RestrictRealtime": 0.1,
+            "RestrictSUIDSGID": 0.2,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "UMask": 0.1
+          },
+          "score": 2.8
+        },
+        "caddy.service": {
+          "directives": {
+            "AmbientCapabilities": 0.1,
+            "CapabilityBoundingSet_CAP_NET_ADMIN": 0.2,
+            "CapabilityBoundingSet_CAP_NET_BIND_SERVICE_BROADCAST_RAW)": 0.1,
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "UMask": 0.1
+          },
+          "score": 1.6
+        },
+        "fleet-boot.service": {
+          "directives": {
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateTmp": 0.2,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectHome": 0.1,
+            "RemoveIPC": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "UMask": 0.1
+          },
+          "score": 1.8
+        },
+        "fleet-reboot-notify.service": {
+          "directives": {
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectHome": 0.1,
+            "RemoveIPC": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "UMask": 0.1
+          },
+          "score": 1.6
+        },
+        "fleet.service": {
+          "directives": {
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateTmp": 0.2,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectHome": 0.1,
+            "RemoveIPC": 0.1,
+            "RestrictAddressFamilies_AF_INET_INET6": 0.3,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "UMask": 0.1
+          },
+          "score": 1.8
+        }
+      }
+    },
     "offline": {
       "overview": {
         "caddy.service": 1.6,

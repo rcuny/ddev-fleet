@@ -10,6 +10,12 @@ Subcommands (see docs/README-ci.md):
                    forced command printed) with the committed baseline; print a
                    Markdown report, exit 1 on any regression.
   update-baseline  record a report as one environment's baseline.
+  publish-report   (FLE-16) turn the compare JSONs of the live hosts (and the offline
+                   one) into the Markdown page SYSTEMD-SECURITY-REPORT.md.
+  should-publish   exit 0 when this run should commit that page (develop, or
+                   PUBLISH_REPORT=1), 1 when not.
+  jira-alert       post one Jira comment (with a real @mention) when a host regressed
+                   or could not be fetched; configured by JIRA_ALERT_* variables.
 
 Report schema (also what ansible/roles/security_probe/files/fleet-security-report
 prints):
@@ -24,6 +30,7 @@ render the templates the way Ansible's template module does.
 from __future__ import annotations
 
 import argparse
+import base64
 import datetime
 import importlib.machinery
 import importlib.util
@@ -32,6 +39,9 @@ import os
 import shutil
 import sys
 import tempfile
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from types import ModuleType
 
@@ -297,6 +307,40 @@ def _delta(value: float | None) -> str:
     return "-" if value is None else f"{value:+.1f}" if abs(value) > 1e-9 else "0.0"
 
 
+def _unit_table(rows: list[dict]) -> list[str]:
+    """Unit | Score | Baseline | Delta | Status, one line per row as given."""
+    out = ["| Unit | Score | Baseline | Delta | Status |", "|---|---|---|---|---|"]
+    for r in rows:
+        status = f"**{r['status']}**" if r["status"] == "REGRESSION" else r["status"]
+        out.append(
+            f"| `{r['unit']}` | {_num(r['current'])} | {_num(r['baseline'])} | "
+            f"{_delta(r['delta'])} | {status} |"
+        )
+    return out
+
+
+def _regression_details(rows: list[dict]) -> list[str]:
+    """One heading plus the per-directive table for every regressed unit."""
+    out: list[str] = []
+    for r in (r for r in rows if r["status"] == "REGRESSION"):
+        out.append(
+            f"### Regression: `{r['unit']}` {_num(r['baseline'])} -> {_num(r['current'])} "
+            f"({_delta(r['delta'])})"
+        )
+        out.append("")
+        if r["directives"]:
+            out += ["| Directive | Baseline | Current | Delta |", "|---|---|---|---|"]
+            for c in r["directives"]:
+                out.append(
+                    f"| `{c['directive']}` | {c['baseline']:.1f} | {c['current']:.1f} | "
+                    f"{_delta(c['delta'])} |"
+                )
+        else:
+            out.append("No per-directive detail in the baseline for this unit.")
+        out.append("")
+    return out
+
+
 def render_markdown(
     env_name: str, rows: list[dict], current: dict, env: dict | None, tolerance: float
 ) -> str:
@@ -333,22 +377,7 @@ def render_markdown(
             f"{_delta(r['delta'])} | {status} |"
         )
     out.append("")
-    for r in (r for r in rows if r["status"] == "REGRESSION"):
-        out.append(
-            f"### Regression: `{r['unit']}` {_num(r['baseline'])} -> {_num(r['current'])} "
-            f"({_delta(r['delta'])})"
-        )
-        out.append("")
-        if r["directives"]:
-            out += ["| Directive | Baseline | Current | Delta |", "|---|---|---|---|"]
-            for c in r["directives"]:
-                out.append(
-                    f"| `{c['directive']}` | {c['baseline']:.1f} | {c['current']:.1f} | "
-                    f"{_delta(c['delta'])} |"
-                )
-        else:
-            out.append("No per-directive detail in the baseline for this unit.")
-        out.append("")
+    out += _regression_details(rows)
     improved = sum(1 for r in rows if r["status"] == "IMPROVED")
     if improved:
         out += [
@@ -405,6 +434,372 @@ def cmd_compare(args: argparse.Namespace) -> int:
     return 1 if regressions else 0
 
 
+# --- publish-report, should-publish, jira-alert (FLE-16) ----------------------
+
+
+REPORT_NAME = "SYSTEMD-SECURITY-REPORT.md"
+# The units the product owns, in the order the report lists them.
+PRODUCT_UNITS = (
+    "fleet.service",
+    "fleet-boot.service",
+    "fleet-reboot-notify.service",
+    "caddy.service",
+    "authelia.service",
+)
+ALERT_VARS = (
+    "JIRA_ALERT_SITE",
+    "JIRA_ALERT_EMAIL",
+    "JIRA_ALERT_TOKEN",
+    "JIRA_ALERT_ISSUE",
+    "JIRA_ALERT_MENTION",
+)
+ALERT_TIMEOUT = 30
+ALERT_MAX_DIRECTIVES = 8
+
+
+def parse_hosts(value: str) -> list[str]:
+    hosts = sorted(set(value.split()))
+    if not hosts:
+        raise CiError("--hosts is empty (expected space-separated host names)")
+    return hosts
+
+
+def pipeline_url(environ: dict[str, str] | os._Environ = os.environ) -> str | None:
+    """Link to this Bitbucket pipeline run, or None outside Bitbucket."""
+    origin = environ.get("BITBUCKET_GIT_HTTP_ORIGIN")
+    build = environ.get("BITBUCKET_BUILD_NUMBER")
+    if not origin or not build:
+        return None
+    if origin.startswith("http://"):
+        origin = "https://" + origin[len("http://") :]
+    return f"{origin.rstrip('/')}/pipelines/results/{build}"
+
+
+def load_compare(reports_dir: Path, name: str) -> dict | None:
+    """The compare JSON of one environment, or None when the run did not produce one."""
+    path = reports_dir / f"systemd-security-{name}.json"
+    return load_json(path) if path.exists() else None
+
+
+def regressions_of(data: dict) -> list[dict]:
+    return [r for r in data["rows"] if r["status"] == "REGRESSION"]
+
+
+def has_no_baseline(data: dict) -> bool:
+    rows = data["rows"]
+    return data.get("baseline_systemd") is None or (
+        bool(rows) and all(r["status"] == "NEW" for r in rows)
+    )
+
+
+def status_label(data: dict | None) -> str:
+    if data is None:
+        return "**could not be fetched**"
+    count = len(regressions_of(data))
+    if count:
+        return f"**{count} regression(s)**"
+    return "OK (no baseline yet)" if has_no_baseline(data) else "OK"
+
+
+def _product_rows(rows: list[dict]) -> list[dict]:
+    by_unit = {r["unit"]: r for r in rows}
+    absent = {"baseline": None, "current": None, "delta": None, "status": "not loaded"}
+    return [by_unit.get(u) or {"unit": u, **absent} for u in PRODUCT_UNITS]
+
+
+def _host_section(name: str, data: dict | None) -> list[str]:
+    out = [f"## {name}", ""]
+    if data is None:
+        return out + [
+            f"Status: {status_label(data)}. No comparison was produced for this host in this "
+            "run: the SSH fetch failed (see the pipeline log).",
+            "",
+        ]
+    out.append(
+        f"Status: {status_label(data)}. systemd {data.get('current_systemd') or '?'}, "
+        f"report generated {data.get('generated') or '?'}."
+    )
+    out.append("")
+    baseline_systemd = data.get("baseline_systemd")
+    if baseline_systemd and baseline_systemd != data.get("current_systemd"):
+        out += [
+            f"**Warning:** systemd {data.get('current_systemd')} here, baseline recorded with "
+            f"systemd {baseline_systemd}: scores can move without any code change.",
+            "",
+        ]
+    if has_no_baseline(data):
+        out += [
+            f"No baseline is recorded for `{name}` yet, so nothing can regress "
+            "(see docs/README-ci.md to record one).",
+            "",
+        ]
+    missing = data.get("missing") or []
+    if missing:
+        out += [f"Not loaded on this host: {', '.join(f'`{u}`' for u in missing)}.", ""]
+    out += ["The units the product owns:", ""]
+    out += _unit_table(_product_rows(data["rows"]))
+    out.append("")
+    out += _regression_details(data["rows"])
+    rows = sorted(data["rows"], key=lambda r: r["unit"])
+    out += [
+        f"<details><summary>All {len(rows)} units on {name}</summary>",
+        "",
+        *_unit_table(rows),
+        "",
+        "</details>",
+        "",
+    ]
+    return out
+
+
+def _offline_section(data: dict | None) -> list[str]:
+    out = ["## Offline: the unit files the product ships", ""]
+    if data is None:
+        return out + [
+            "Offline scores were not produced in this run (`systemd-analyze` is missing in the "
+            "pipeline image, or the offline run failed).",
+            "",
+        ]
+    out += [
+        "The units rendered from the Ansible templates and scored with "
+        f"`systemd-analyze security --offline=yes`, systemd {data.get('current_systemd') or '?'}. "
+        f"Status: {status_label(data)}.",
+        "",
+        *_unit_table(sorted(data["rows"], key=lambda r: r["unit"])),
+        "",
+        *_regression_details(data["rows"]),
+    ]
+    return out
+
+
+def render_report(
+    hosts: dict[str, dict | None],
+    offline: dict | None,
+    *,
+    when: str,
+    branch: str | None,
+    run_url: str | None,
+) -> str:
+    """The published page. `hosts` maps host name -> compare JSON (None = not fetched)."""
+    names = sorted(hosts)
+    tolerance = next((d["tolerance"] for d in (*hosts.values(), offline) if d), DEFAULT_TOLERANCE)
+    out = [
+        "# systemd security report",
+        "",
+        "`systemd-analyze security` scores how much of the system a service's sandbox leaves "
+        "exposed to it, on a scale from 0 (best: locked down) to 10 (worst: no sandbox at all). "
+        "The weekly live check reads these scores from each server and the offline check scores "
+        "the unit files this repository ships.",
+        "",
+        "Every score is compared with the committed baseline "
+        "`ci/systemd-security-baseline.json`. A unit counts as a regression only when its score "
+        f"rises by more than the tolerance (+{tolerance:g}) over that baseline.",
+        "",
+    ]
+    run = [f"**Run:** {when}"]
+    if branch:
+        run.append(f"branch `{branch}`")
+    if run_url:
+        run.append(f"[pipeline run]({run_url})")
+    out += [", ".join(run), ""]
+    out += ["| Host | systemd | Status |", "|---|---|---|"]
+    for name in names:
+        data = hosts[name]
+        version = (data or {}).get("current_systemd") or "-"
+        out.append(f"| [{name}](#{name.lower()}) | {version} | {status_label(data)} |")
+    out.append("")
+    for name in names:
+        out += _host_section(name, hosts[name])
+    out += _offline_section(offline)
+    out += [
+        "---",
+        "",
+        "How the check works, the baseline and how to update it: "
+        "[docs/README-ci.md](docs/README-ci.md).",
+    ]
+    return "\n".join(out) + "\n"
+
+
+def cmd_publish_report(args: argparse.Namespace) -> int:
+    reports = Path(args.reports_dir)
+    hosts = {name: load_compare(reports, name) for name in parse_hosts(args.hosts)}
+    when = args.date or datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
+    text = render_report(
+        hosts,
+        load_compare(reports, "offline"),
+        when=when,
+        branch=os.environ.get("BITBUCKET_BRANCH") or None,
+        run_url=pipeline_url(),
+    )
+    out = Path(args.out)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(text, encoding="utf-8")
+    print(out)
+    return 0
+
+
+def publish_wanted(branch: str | None, flag: str | None) -> bool:
+    """Commit the report on develop, or on any branch run with PUBLISH_REPORT=1 (testing)."""
+    return branch == "develop" or flag == "1"
+
+
+def cmd_should_publish(args: argparse.Namespace) -> int:
+    branch = os.environ.get("BITBUCKET_BRANCH") or None
+    flag = os.environ.get("PUBLISH_REPORT")
+    if not publish_wanted(branch, flag):
+        print(
+            f"not publishing: branch {branch or '(none)'} is not develop "
+            "and PUBLISH_REPORT=1 is not set"
+        )
+        return 1
+    why = "branch develop" if branch == "develop" else "PUBLISH_REPORT=1"
+    print(f"publishing the report ({why})")
+    return 0
+
+
+# Jira alert: a comment with a real mention node (plain "@email" text notifies nobody).
+
+
+def _adf_text(text: str, *marks: dict) -> dict:
+    node: dict = {"type": "text", "text": text}
+    if marks:
+        node["marks"] = list(marks)
+    return node
+
+
+def _adf_link(label: str, href: str) -> dict:
+    return _adf_text(label, {"type": "link", "attrs": {"href": href}})
+
+
+def _adf_paragraph(*content: dict) -> dict:
+    return {"type": "paragraph", "content": list(content)}
+
+
+def alert_findings(reports: Path, hosts: list[str]) -> list[tuple[str, list[dict] | None]]:
+    """(host, regressed rows) for each host that needs an alert; None = report not fetched."""
+    findings: list[tuple[str, list[dict] | None]] = []
+    for name in hosts:
+        data = load_compare(reports, name)
+        if data is None:
+            findings.append((name, None))
+        elif regressions_of(data):
+            findings.append((name, regressions_of(data)))
+    return findings
+
+
+def _regression_item(row: dict) -> dict:
+    parts = [
+        _adf_text(row["unit"], {"type": "code"}),
+        _adf_text(f" {_num(row['baseline'])} -> {_num(row['current'])} ({_delta(row['delta'])})"),
+    ]
+    changes = row.get("directives") or []
+    if changes:
+        shown = [
+            f"{c['directive']} {c['baseline']:.1f} -> {c['current']:.1f}"
+            for c in changes[:ALERT_MAX_DIRECTIVES]
+        ]
+        more = len(changes) - len(shown)
+        text = ", changed directives: " + ", ".join(shown)
+        parts.append(_adf_text(text + (f" and {more} more" if more > 0 else "")))
+    return {"type": "listItem", "content": [_adf_paragraph(*parts)]}
+
+
+def build_alert_adf(
+    account_id: str,
+    findings: list[tuple[str, list[dict] | None]],
+    *,
+    branch: str | None,
+    run_url: str | None,
+    report_url: str | None,
+) -> dict:
+    """The comment body (Atlassian Document Format): mention first, then one block per host."""
+    content = [
+        _adf_paragraph(
+            {"type": "mention", "attrs": {"id": account_id, "text": "@maintainer"}},
+            _adf_text(" systemd security check failed"),
+        )
+    ]
+    for name, rows in findings:
+        if rows is None:
+            content.append(
+                _adf_paragraph(
+                    _adf_text(name, {"type": "strong"}),
+                    _adf_text(": could not fetch the report (SSH failed or timed out)."),
+                )
+            )
+            continue
+        content.append(
+            _adf_paragraph(
+                _adf_text(name, {"type": "strong"}), _adf_text(f": {len(rows)} regression(s)")
+            )
+        )
+        content.append({"type": "bulletList", "content": [_regression_item(row) for row in rows]})
+    content.append(_adf_paragraph(_adf_text(f"Branch: {branch or 'local'}")))
+    where = [_adf_text("Pipeline run: ")]
+    where.append(_adf_link(run_url, run_url) if run_url else _adf_text("not available"))
+    content.append(_adf_paragraph(*where))
+    if report_url:
+        report = [_adf_text("Report: "), _adf_link(report_url, report_url)]
+    else:
+        report = [_adf_text("Report: in the pipeline run's artifacts, under reports/")]
+    content.append(_adf_paragraph(*report))
+    return {"type": "doc", "version": 1, "content": content}
+
+
+def post_jira_comment(url: str, email: str, token: str, adf: dict, opener=None) -> None:
+    """POST the comment; raises urllib.error.URLError / OSError on any failure."""
+    credentials = base64.b64encode(f"{email}:{token}".encode()).decode()
+    request = urllib.request.Request(
+        url,
+        data=json.dumps({"body": adf}).encode("utf-8"),
+        method="POST",
+        headers={
+            "Authorization": f"Basic {credentials}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+        },
+    )
+    with (opener or urllib.request.urlopen)(request, timeout=ALERT_TIMEOUT) as response:
+        response.read()
+
+
+def alert_url(environ: dict[str, str] | os._Environ, issue: str) -> str:
+    """Comment endpoint: the api.atlassian.com gateway for a scoped token, else the site."""
+    cloud_id = (environ.get("JIRA_ALERT_CLOUD_ID") or "").strip()
+    if cloud_id:
+        base = f"https://api.atlassian.com/ex/jira/{cloud_id}"
+    else:
+        base = f"https://{environ['JIRA_ALERT_SITE']}.atlassian.net"
+    return f"{base}/rest/api/3/issue/{urllib.parse.quote(issue, safe='')}/comment"
+
+
+def cmd_jira_alert(args: argparse.Namespace) -> int:
+    config = {name: os.environ.get(name, "").strip() for name in ALERT_VARS}
+    if not all(config.values()):
+        print("Jira alert not configured, skipping")
+        return 0
+    findings = alert_findings(Path(args.reports_dir), parse_hosts(args.hosts))
+    if not findings:
+        print("no regression and every host fetched: no Jira alert needed")
+        return 0
+    adf = build_alert_adf(
+        config["JIRA_ALERT_MENTION"],
+        findings,
+        branch=os.environ.get("BITBUCKET_BRANCH") or None,
+        run_url=pipeline_url(),
+        report_url=args.report_url,
+    )
+    issue = config["JIRA_ALERT_ISSUE"]
+    try:
+        url = alert_url({**os.environ, **config}, issue)
+        post_jira_comment(url, config["JIRA_ALERT_EMAIL"], config["JIRA_ALERT_TOKEN"], adf)
+    except Exception as exc:  # a failed post must never change the step's result
+        print(f"WARNING: Jira alert failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 0
+    print(f"Jira alert posted on {issue}")
+    return 0
+
+
 # --- CLI --------------------------------------------------------------------
 
 
@@ -431,6 +826,24 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--env", required=True)
     p.add_argument("--current", required=True)
     p.set_defaults(func=cmd_update_baseline)
+
+    p = sub.add_parser(
+        "publish-report", help=f"write the {REPORT_NAME} page from the compare JSONs"
+    )
+    p.add_argument("--hosts", required=True, help="space-separated live host names")
+    p.add_argument("--reports-dir", default="reports")
+    p.add_argument("--out", default=f"reports/{REPORT_NAME}")
+    p.add_argument("--date", help="run date to print (default: now, UTC)")
+    p.set_defaults(func=cmd_publish_report)
+
+    p = sub.add_parser("should-publish", help="exit 0 when this run should commit the report")
+    p.set_defaults(func=cmd_should_publish)
+
+    p = sub.add_parser("jira-alert", help="comment on a Jira issue when a host regressed")
+    p.add_argument("--hosts", required=True, help="space-separated live host names")
+    p.add_argument("--reports-dir", default="reports")
+    p.add_argument("--report-url", help="where the committed report can be read")
+    p.set_defaults(func=cmd_jira_alert)
     return parser
 
 

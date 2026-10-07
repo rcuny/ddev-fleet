@@ -21,6 +21,17 @@
 #                                 Scheduled weekly (Pipelines -> Schedules:
 #                                 branch develop, custom: systemd-security-live,
 #                                 weekly); the failure email is the alert.
+#                                 FLE-16: it also builds SYSTEMD-SECURITY-REPORT.md
+#                                 (live + offline) and, on develop or with the
+#                                 pipeline variable PUBLISH_REPORT=1, commits it
+#                                 to the branch it runs on (a push-back over the
+#                                 default clone origin; never forced, one rebase
+#                                 retry). That push starts the normal develop
+#                                 pipeline (gates, GitHub mirror); there is no
+#                                 loop, because the develop push pipeline does
+#                                 not run the live check. A regression, or a host
+#                                 that cannot be fetched, also posts a Jira
+#                                 comment with an @mention (JIRA_ALERT_*).
 #
 # The gates image is Debian 13 (trixie) with systemd installed on purpose: the
 # systemd sandbox tests and `ci/systemd_security.py offline` score the rendered
@@ -54,6 +65,22 @@
 #                      Space-separated name=user@host entries for the live
 #                      systemd check, e.g. ddev3=fleet-probe@ddev3.fleet.pm.
 #                      Unset/empty = the live pipeline skips.
+#   JIRA_ALERT_SITE    Jira Cloud site name (renaudcuny for renaudcuny.atlassian.net).
+#   JIRA_ALERT_EMAIL   e-mail of the Jira account that POSTS the comment. Not the
+#                      mentioned person: Jira never notifies you of your own actions.
+#   JIRA_ALERT_TOKEN   (secured) API token of that account (a scoped token needs
+#                      only write:jira-work).
+#   JIRA_ALERT_CLOUD_ID
+#                      optional: the site's cloud id. Set = the comment goes to
+#                      https://api.atlassian.com/ex/jira/<id> (required by a scoped
+#                      token); unset = https://<site>.atlassian.net (classic token).
+#   JIRA_ALERT_ISSUE   issue to comment on (FLE-17).
+#   JIRA_ALERT_MENTION Atlassian account id of the person to @mention.
+#                      Any JIRA_ALERT_* of SITE/EMAIL/TOKEN/ISSUE/MENTION unset =
+#                      no alert ("Jira alert not configured, skipping").
+# Pipeline variable (set when starting a run, not stored):
+#   PUBLISH_REPORT=1   commit SYSTEMD-SECURITY-REPORT.md on a branch other than
+#                      develop too (testing the live check on a feature branch).
 # Plus, under Repository settings -> Pipelines -> SSH keys: a key pair whose
 # public half is a GitHub deploy key WITH WRITE ACCESS on the mirror repo.
 # (github.com's host key is managed by Bitbucket itself: no "Known hosts"
@@ -201,12 +228,20 @@ pipelines:
     # Live check of the servers' real units (weekly schedule, see the header).
     # The logic lives in ci/systemd-security-live.sh; it skips when
     # SECURITY_PROBE_TARGETS is unset and checks every target before failing.
+    # The full image has git (the report is committed) and, with systemd, scores
+    # the shipped units offline for the report; jinja2 renders their templates.
     systemd-security-live:
       - step:
           name: Live systemd security check
-          image: python:3.11-slim-trixie
+          image: python:3.11-trixie
+          caches:
+            - pip
           script:
-            - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client > /dev/null
+            # systemd-analyze warns about world-writable unit files (Bitbucket's
+            # default umask is 000), see the gates.
+            - umask 022
+            - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client systemd > /dev/null
+            - pip install -q -e .
             - bash ci/systemd-security-live.sh
           artifacts:
             - reports/**
