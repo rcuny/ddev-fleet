@@ -61,6 +61,9 @@ definitions:
         caches:
           - pip
         script:
+          # Bitbucket runners default to umask 000; systemd-analyze warns about
+          # world-writable unit files, which the scoring tests treat as failure.
+          - umask 022
           # rsync: core/assets.py shells out to it (asset injection tests)
           # systemd: systemd-analyze scores the rendered units (FLE-8)
           - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync systemd > /dev/null
@@ -83,10 +86,12 @@ definitions:
     # a hard gate by dropping the `|| echo` once it is clean.
     - step: &ansible-lint
         name: Ansible lint (non-blocking)
+        # The [infra] extra pins ansible-core >= 2.21, which needs Python >= 3.12.
+        image: python:3.13-trixie
         caches:
           - pip
         script:
-          - pip install -q -e ".[infra]"
+          - pip install -q -e ".[infra]" || { echo "could not install the [infra] extra (non-blocking)"; exit 0; }
           - ansible-lint ansible/ || echo "ansible-lint reported findings (non-blocking)"
           - yamllint ansible/ || echo "yamllint reported findings (non-blocking)"
 
