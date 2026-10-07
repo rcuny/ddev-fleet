@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-07
+
 ### Added
 - **FLE-8: systemd security regression checks in Bitbucket Pipelines.** `ci/systemd_security.py` renders the sandboxed units (fleet, fleet-boot, fleet-reboot-notify, caddy with its drop-in), scores them with `systemd-analyze security --offline=yes`, compares them with the committed baseline `ci/systemd-security-baseline.json` (tolerance +0.1) and fails the pipeline on a regression, listing the directives whose exposure changed. Runs in the gates on every pull request, `develop` push and release tag; Markdown and JSON reports are published as pipeline artifacts (`reports/**`). Improvements and new/removed units are reported without failing. Baseline update procedure: `docs/README-ci.md`.
 - **FLE-8: live check.** A `custom: systemd-security-live` pipeline (weekly Bitbucket schedule) fetches `systemd-analyze security` scores from each server in the repository variable `SECURITY_PROBE_TARGETS` and compares them with that server's baseline. It skips when the variable is unset.
@@ -21,6 +23,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - **FLE-8: the GitHub Actions workflow is removed** (`.github/workflows/ci.yml`); Bitbucket Pipelines is the only CI. The ansible-lint/yamllint job moved to a non-blocking Bitbucket step that runs next to the gates on pull requests and `develop`. The Renovate rule for GitHub Actions is dropped with it.
 - The Bitbucket gates image is Debian 13 (`python:3.11-trixie`) with `systemd` installed, so `tests/test_systemd_sandbox.py` scores the units instead of skipping. With `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` (set in the pipeline) the tests fail when `systemd-analyze` is missing.
+
+### Dependencies
+- FLE-10: vendored htmx 2.0.11 (was 1.9.12; supersedes Renovate PR #11). No breaking change applies to the UI; behaviour verified identical in a headless-browser run (#15).
 
 ## [0.9.2] - 2026-10-06
 
@@ -333,7 +338,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.9.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/rcuny/ddev-fleet/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/rcuny/ddev-fleet/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/rcuny/ddev-fleet/compare/v0.9.0...v0.9.1
 [0.9.0]: https://github.com/rcuny/ddev-fleet/compare/v0.8.0...v0.9.0
