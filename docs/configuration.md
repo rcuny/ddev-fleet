@@ -91,6 +91,7 @@ projects:
     ports: [<port-name>, ...]              # optional
     git_bot: {name: <string>, email: <string>} | false   # optional
     issue_id_regexp: <string>              # optional
+    display_submodule_branch: <path>       # optional — submodule whose branch the indicator shows
     templates:
       <template-name>:
         drupal_env: <word>                 # optional
@@ -183,6 +184,7 @@ labels)`).
 | `ports` | list of strings | no | `[]` | The general mechanism superseding `typesense: true` — names must each exist as a key in `fleet.ports` (validated: `Registry._validate` raises if a project references an undeclared port name). |
 | `git_bot` | mapping `{name, email}` or `false` | no | (inherits the fleet-level default) | Per-project override of the injected git commit identity. A mapping overrides `name`/`email` individually (either key may be omitted, falling back to the fleet default for that field). `false` disables identity injection for this project only, letting the project's own `git config` (e.g. a post-start hook) win — note the injected `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars otherwise take precedence over `git config user.*`. |
 | `issue_id_regexp` | string | no | (none — `[[issue-id]]` and `FLEET_ISSUE_ID` are simply absent) | A Python `re` pattern used to derive the `[[issue-id]]` token for this project's deploys — see "`[[issue-id]]` resolution" below. Validated at registry load: must be a string that `re.compile()`s (`RegistryError` otherwise). |
+| `display_submodule_branch` | string (relative path) | no | (none — the indicator shows the instance checkout's own branch) | Path of a git submodule inside the instance checkout (e.g. `ddev-fleet`) whose branch and short HEAD `fleet list`, the web UI instance list and the tmux sidebar show **instead of** the instance's own — for projects whose real work happens in a submodule while the parent checkout sits on `main`. Displayed prefixed with the path so it is clearly the submodule: `ddev-fleet: feature/FLE-12-x` (sidebar: `ddev-fleet: feature/FLE-12-x (abc1234)`); a detached submodule HEAD shows the short SHA. If `<instance dir>/<path>` is missing or not a git checkout (submodule not initialised, deploy in progress) the indicator falls back to the instance's own branch, unprefixed. **Display only:** the deploy branch, `.fleet/instance.yml`'s recorded `branch`, `[[issue-id]]` resolution and redeploy are unaffected. Validated at registry load: a non-empty relative path with no `..` segments (`RegistryError` otherwise). |
 | `templates` | mapping | no | `{}` | See below. |
 
 ### `templates.<name>`

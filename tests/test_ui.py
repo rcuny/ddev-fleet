@@ -105,6 +105,23 @@ def test_index_footer_shows_server_memory_and_disk(fleet_home):
     assert re.search(r"disk free.*(GiB|TiB|MiB|KiB|B)", body)
 
 
+def test_index_shows_hostname_in_title_and_heading_and_version_in_footer(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    from fleet.core import hostinfo
+
+    monkeypatch.setattr(hostinfo, "hostname", lambda: "ddev9")
+    monkeypatch.setattr(hostinfo, "fleet_version", lambda: "v1.2.3")
+    client = TestClient(create_app(fleet_home))
+
+    body = client.get("/").text
+
+    assert "<title>ddev-fleet (ddev9)</title>" in body
+    assert "<h1>ddev-fleet (ddev9)</h1>" in body
+    footer = re.search(r'<footer class="sys-stats">.*?</footer>', body, re.DOTALL)
+    assert footer is not None
+    assert "Fleet v1.2.3" in footer.group(0)
+
+
 def test_index_shows_reboot_badge_when_pending(fleet_home, monkeypatch):
     _setup_fleet_home(fleet_home)
     from fleet.core import sysinfo
@@ -774,9 +791,9 @@ def test_ui_errors_js_swaps_4xx_bodies_via_before_swap_hook(fleet_home):
 
     body = client.get("/static/ui-errors.js").text
 
-    # htmx 1.9.12 (src/fleet/static/htmx.min.js) has no `htmx.config.
-    # responseHandling` (that's 2.x-only) — `htmx:beforeSwap` + shouldSwap/
-    # isError is the documented 1.x way to render a 4xx body into hx-target.
+    # `htmx:beforeSwap` + shouldSwap/isError is the documented way (valid in
+    # htmx 1.x and 2.x; src/fleet/static/htmx.min.js is 2.0.11) to render a
+    # 4xx body into hx-target.
     assert "htmx:beforeSwap" in body
     assert "shouldSwap" in body
     assert "isError" in body
@@ -791,7 +808,7 @@ def test_base_html_includes_ui_errors_js_script_tag(fleet_home):
     assert '<script src="/static/ui-errors.js" defer></script>' in body
 
 
-# --- Deploy-error visibility (htmx 1.9.12 doesn't swap non-2xx responses) ---
+# --- Deploy-error visibility (htmx doesn't swap non-2xx responses by default) ---
 
 
 def test_ui_deploy_normalises_a_non_dns_safe_label_instead_of_rejecting_it(fleet_home, monkeypatch):

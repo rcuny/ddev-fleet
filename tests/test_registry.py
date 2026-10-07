@@ -943,6 +943,39 @@ def test_issue_id_regexp_absent_returns_none(fleet_home, sample_registry_text):
     assert registry.issue_id_regexp("demo") is None
 
 
+def _display_submodule_registry(fleet_home, value_yaml: str | None) -> Path:
+    """A one-project fleet.yml, optionally carrying `display_submodule_branch:`
+    with the given raw YAML value."""
+    line = f"    display_submodule_branch: {value_yaml}\n" if value_yaml is not None else ""
+    text = (
+        "fleet:\n  domain: fleet.example.test\n\n"
+        "projects:\n  oak:\n    git: git@example.test:org/oak.git\n"
+        f"{line}"
+        "    templates:\n      default: {}\n"
+    )
+    return _write(fleet_home / "fleet.yml", text)
+
+
+def test_display_submodule_branch_valid_is_returned(fleet_home):
+    registry = Registry.load(_display_submodule_registry(fleet_home, "libs/core"))
+    assert registry.display_submodule_branch("oak") == "libs/core"
+
+
+def test_display_submodule_branch_absent_returns_none(fleet_home):
+    registry = Registry.load(_display_submodule_registry(fleet_home, None))
+    assert registry.display_submodule_branch("oak") is None
+
+
+@pytest.mark.parametrize(
+    "value_yaml",
+    ['"/etc"', '"../sibling"', '"libs/../../x"', '"a/.."', '""', '"  "', "12345", "[core]"],
+)
+def test_display_submodule_branch_invalid_raises_naming_the_project(fleet_home, value_yaml):
+    path = _display_submodule_registry(fleet_home, value_yaml)
+    with pytest.raises(RegistryError, match=r"projects\.oak\.display_submodule_branch"):
+        Registry.load(path)
+
+
 def _jira_hooks_registry(fleet_home, hooks_yaml: str) -> Path:
     """A one-project fleet.yml with a `jira-work` template and the given
     `jira_hooks:` block (already indented under the project, or empty)."""

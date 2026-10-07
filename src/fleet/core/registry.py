@@ -11,7 +11,7 @@ import ipaddress
 import logging
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from ruamel.yaml import YAML
 
@@ -460,6 +460,23 @@ class Registry:
                         f"projects.{project_key}.issue_id_regexp: invalid regexp — {exc}"
                     ) from exc
 
+            if "display_submodule_branch" in project_block:
+                where = f"projects.{project_key}.display_submodule_branch"
+                sub = project_block["display_submodule_branch"]
+                if not isinstance(sub, str) or not sub.strip():
+                    raise RegistryError(
+                        f"{where}: must be a non-empty string (a submodule path "
+                        "relative to the instance checkout)"
+                    )
+                # Joined onto the instance dir and handed to `git -C`, so it must
+                # not be able to point outside that checkout.
+                sub_path = PurePosixPath(sub)
+                if sub_path.is_absolute() or ".." in sub_path.parts:
+                    raise RegistryError(
+                        f"{where}: must be a relative path inside the instance "
+                        "checkout (no leading '/', no '..' segments)"
+                    )
+
             templates = project_block.get("templates") or {}
             self._validate_jira_hooks(project_key, project_block, templates)
             self._validate_bitbucket_hooks(project_key, project_block)
@@ -792,6 +809,15 @@ class Registry:
         block = self._project_block(project)
         pattern = block.get("issue_id_regexp")
         return str(pattern) if pattern is not None else None
+
+    def display_submodule_branch(self, project: str) -> str | None:
+        """Path (relative to an instance checkout) of the submodule whose branch
+        and short HEAD `fleet list`, the web UI and the tmux sidebar display in
+        place of the instance's own, or None when the project defines none.
+        Display only — deploy/redeploy never read it."""
+        block = self._project_block(project)
+        path = block.get("display_submodule_branch")
+        return str(path) if path is not None else None
 
     def jira_hooks(self, project: str) -> list[JiraHookRule]:
         """The project's validated `jira_hooks` rules, in file order; `[]`
