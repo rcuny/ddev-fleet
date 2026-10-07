@@ -20,8 +20,9 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from fleet.core import bitbucket as bitbucket_mod
 from fleet.core import bulk as bulk_mod
-from fleet.core import caddyauth, caddyports, naming, sysinfo
+from fleet.core import caddyauth, caddyports, hostinfo, naming, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core import webhooks as webhooks_mod
 from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
@@ -184,10 +185,13 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
     templates.env.filters["bulk_progress"] = _parse_bulk_progress
+    # Neither can change without a daemon restart, so compute them once.
+    templates.env.globals["hostname"] = hostinfo.hostname()
+    templates.env.globals["fleet_version"] = hostinfo.fleet_version()
 
     @app.exception_handler(FleetError)
     async def fleet_error_handler(request: Request, exc: FleetError):
-        # htmx 1.9.12 does NOT swap non-2xx responses into hx-target by
+        # htmx (1.x and 2.x) does NOT swap non-2xx responses into hx-target by
         # default — it only fires `htmx:responseError`, which nothing
         # handled for the deploy form (bulk.js's old handler only covered
         # `/ui/bulk/*`). Before ui-errors.js's generic `htmx:beforeSwap`
@@ -420,6 +424,154 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             {"result": "accepted", "instance": resolved.instance_id, "job": job.id},
             result="accepted",
         )
+
+    @app.post("/hooks/bitbucket/{project}")
+    async def bitbucket_hook(project: str, request: Request):
+        """Bitbucket Cloud webhook -> start a custom pipeline, per the
+        project's `bitbucket_hooks` rules (spec FLE-11 §4). Same contract and
+        ordering as `jira_hook`: 404 (project has no rules/secret) -> 413 ->
+        401 (signature) -> parse (400) -> match (200 ignored). Bitbucket signs
+        like Jira (`X-Hub-Signature`), but with its OWN per-project secret.
+
+        After a match: no stored pipeline token -> 422 (config error, logged);
+        otherwise the delivery id (`X-Request-UUID`, unique per delivery and
+        reused by Bitbucket's retries) is claimed, then the pipeline is
+        started off the event loop. A failed start (HTTP error / timeout)
+        releases the claim again and answers 502, so Bitbucket's retry can
+        still succeed; the log keeps only the status code, never the token or
+        any response content. A repeat of a claimed id answers `duplicate`.
+        Rejected signatures go to the journal only, a delivery-log write
+        failure never changes the outcome, and everything answers JSON."""
+        try:
+            paths, registry = _paths_and_registry()
+        except FleetError:
+            logger.exception("bitbucket webhook for %r: cannot load the registry", project)
+            return JSONResponse(status_code=500, content={"error": "internal error"})
+        store = webhooks_mod.WebhookStore.from_paths(paths)
+        if not registry.has_project(project):
+            return JSONResponse(status_code=404, content={"error": "not found"})
+        rules = registry.bitbucket_hooks(project)
+        secret = store.read_secret(project, webhooks_mod.SOURCE_BITBUCKET) if rules else None
+        if secret is None:
+            return JSONResponse(status_code=404, content={"error": "not found"})
+
+        body = await request.body()
+        if len(body) > webhooks_mod.MAX_BODY_BYTES:
+            return JSONResponse(status_code=413, content={"error": "payload too large"})
+
+        delivery_id = request.headers.get("x-request-uuid") or None
+        attempt = request.headers.get("x-attempt-number") or None
+        entry = {
+            "project": project,
+            # Header values are caller-controlled: bound what we persist.
+            "delivery_id": delivery_id[:_HEADER_LOG_MAX] if delivery_id else None,
+            "attempt": attempt[:_HEADER_LOG_MAX] if attempt else None,
+            "event": None,
+            "repo": None,
+            "pr": None,
+            "branch": None,
+            "state": None,
+            "result": None,
+            "reason": None,
+            "pipeline": None,
+        }
+
+        def respond(status: int, content: dict, *, result: str, reason: str | None = None):
+            try:
+                store.append_log(
+                    {**entry, "result": result, "reason": reason}, webhooks_mod.SOURCE_BITBUCKET
+                )
+            except OSError as exc:
+                logger.warning(
+                    "bitbucket webhook for %r: delivery log write failed: %s", project, exc
+                )
+            return JSONResponse(status_code=status, content=content)
+
+        if not webhooks_mod.verify_signature(secret, body, request.headers.get("x-hub-signature")):
+            # Journal only (rate-limited/rotated), never bitbucket.jsonl.
+            logger.warning(
+                "bitbucket webhook for %r: rejected signature (delivery %s)",
+                project,
+                entry["delivery_id"],
+            )
+            return JSONResponse(status_code=401, content={"error": "unauthorized"})
+
+        try:
+            event = webhooks_mod.parse_bitbucket_event(
+                request.headers.get("x-event-key"), json.loads(body)
+            )
+        except (ValueError, RecursionError):
+            reason = "body is not valid JSON"
+            return respond(400, {"error": reason}, result="bad_request", reason=reason)
+        except ValidationError as exc:
+            return respond(400, {"error": exc.message}, result="bad_request", reason=exc.message)
+
+        entry.update(
+            {
+                "event": event.event,
+                "repo": event.repo,
+                "pr": event.pr_id,
+                "branch": event.branch,
+                "state": event.state,
+            }
+        )
+
+        def ignored(reason: str):
+            return respond(
+                200, {"result": "ignored", "reason": reason}, result="ignored", reason=reason
+            )
+
+        rule = webhooks_mod.match_bitbucket_rule(rules, event)
+        if rule is None:
+            if not any(r.on_event == event.event for r in rules):
+                return ignored(f"event {event.event}")
+            return ignored("no matching rule")
+
+        # A missing token is a config error: do not claim the delivery, so
+        # Bitbucket's retry succeeds once `fleet webhook bitbucket-token` ran.
+        token = store.read_pipeline_token(project)
+        if token is None:
+            reason = f"no Bitbucket token stored for {project!r}"
+            return respond(422, {"error": reason}, result="error", reason=reason)
+
+        claimed = False
+        if delivery_id is not None:
+            if not store.claim_delivery(project, delivery_id, webhooks_mod.SOURCE_BITBUCKET):
+                return respond(200, {"result": "duplicate"}, result="duplicate")
+            claimed = True
+            try:
+                store.prune_seen()
+            except OSError as exc:  # housekeeping must not fail an accepted delivery
+                logger.warning("bitbucket webhook for %r: pruning dedupe markers: %s", project, exc)
+
+        try:
+            pipeline = await asyncio.to_thread(
+                bitbucket_mod.trigger_pipeline, rule.repo, token, rule.ref, rule.pattern
+            )
+        except Exception as exc:
+            # ANY failure after the claim releases it (an unexpected exception
+            # type must not turn Bitbucket's retry into a "duplicate" that
+            # never started a pipeline).
+            if claimed:
+                store.release_delivery(project, delivery_id, webhooks_mod.SOURCE_BITBUCKET)
+            # BitbucketError.message holds the status code only (never the
+            # token or a response); for anything else keep just the type name.
+            detail = (
+                exc.message if isinstance(exc, bitbucket_mod.BitbucketError) else type(exc).__name__
+            )
+            logger.warning("bitbucket webhook for %r: pipeline trigger failed: %s", project, detail)
+            return respond(
+                502,
+                {"error": "pipeline trigger failed"},
+                result="error",
+                reason=f"pipeline trigger failed: {detail}",
+            )
+        except asyncio.CancelledError:
+            if claimed:
+                store.release_delivery(project, delivery_id, webhooks_mod.SOURCE_BITBUCKET)
+            raise
+        entry["pipeline"] = pipeline
+        return respond(200, {"result": "triggered", "pipeline": pipeline}, result="triggered")
 
     @app.websocket("/ws/instances/{instance_id}/log")
     async def ws_instance_log(websocket: WebSocket, instance_id: str):

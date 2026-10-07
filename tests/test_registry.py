@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from fleet.core.errors import RegistryError
-from fleet.core.registry import JiraHookRule, PortProfile, Registry
+from fleet.core.registry import BitbucketHookRule, JiraHookRule, PortProfile, Registry
 
 
 def _write(path: Path, text: str) -> Path:
@@ -1070,6 +1070,149 @@ def test_jira_hooks_invalid(fleet_home, hooks_yaml):
     path = _jira_hooks_registry(fleet_home, hooks_yaml)
     with pytest.raises(RegistryError, match=r"projects\.p\.jira_hooks"):
         Registry.load(path)
+
+
+def _bb_registry(fleet_home, hooks_yaml: str) -> Path:
+    """A one-project fleet.yml with the given `bitbucket_hooks:` block."""
+    text = (
+        "fleet:\n"
+        "  domain: fleet.example.test\n"
+        "\n"
+        "projects:\n"
+        "  p:\n"
+        "    git: git@example.test:org/p.git\n"
+        "    templates:\n"
+        "      default: {}\n" + hooks_yaml
+    )
+    return _write(fleet_home / "fleet.yml", text)
+
+
+_BB_BASE = "action: run-pipeline, pattern: renovate-merge, ref: develop"
+
+
+def test_bitbucket_hooks_valid(fleet_home):
+    path = _bb_registry(
+        fleet_home,
+        "    bitbucket_hooks:\n"
+        f"      - {{on_event: 'pullrequest:approved', repo: acme/web, {_BB_BASE}}}\n"
+        "      - {on_event: 'pullrequest:comment_created', repo: acme/web,\n"
+        f"         branch: 'renovate/*', comment: ' /merge ', {_BB_BASE}}}\n"
+        "      - {on_event: 'repo:commit_status_updated', repo: acme/web,\n"
+        f"         branch: 'renovate/*', state: SUCCESSFUL, {_BB_BASE}}}\n",
+    )
+    registry = Registry.load(path)
+
+    assert registry.bitbucket_hooks("p") == [
+        BitbucketHookRule(
+            "pullrequest:approved", "acme/web", "run-pipeline", "renovate-merge", "develop"
+        ),
+        BitbucketHookRule(
+            "pullrequest:comment_created",
+            "acme/web",
+            "run-pipeline",
+            "renovate-merge",
+            "develop",
+            branch="renovate/*",
+            comment="/merge",
+        ),
+        BitbucketHookRule(
+            "repo:commit_status_updated",
+            "acme/web",
+            "run-pipeline",
+            "renovate-merge",
+            "develop",
+            branch="renovate/*",
+            state="SUCCESSFUL",
+        ),
+    ]
+
+
+def test_bitbucket_hooks_absent_is_empty(fleet_home):
+    registry = Registry.load(_bb_registry(fleet_home, ""))
+    assert registry.bitbucket_hooks("p") == []
+
+
+def test_bitbucket_hooks_unknown_project_raises(fleet_home):
+    registry = Registry.load(_bb_registry(fleet_home, ""))
+    with pytest.raises(RegistryError, match="unknown project"):
+        registry.bitbucket_hooks("nope")
+
+
+@pytest.mark.parametrize(
+    "rule",
+    [
+        pytest.param(f"{{repo: a/b, {_BB_BASE}}}", id="missing-on-event"),
+        pytest.param(f"{{on_event: 'approved', repo: a/b, {_BB_BASE}}}", id="on-event-no-prefix"),
+        pytest.param(f"{{on_event: 'issue:created', repo: a/b, {_BB_BASE}}}", id="on-event-family"),
+        pytest.param(f"{{on_event: 'pullrequest:approved', {_BB_BASE}}}", id="missing-repo"),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: justaslug, {_BB_BASE}}}", id="repo-no-slash"
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b/c, {_BB_BASE}}}", id="repo-too-deep"
+        ),
+        pytest.param(
+            "{on_event: 'pullrequest:approved', repo: a/b, action: merge,"
+            " pattern: x, ref: develop}",
+            id="bad-action",
+        ),
+        pytest.param(
+            "{on_event: 'pullrequest:approved', repo: a/b, pattern: x, ref: develop}",
+            id="missing-action",
+        ),
+        pytest.param(
+            "{on_event: 'pullrequest:approved', repo: a/b, action: run-pipeline, ref: develop}",
+            id="missing-pattern",
+        ),
+        pytest.param(
+            "{on_event: 'pullrequest:approved', repo: a/b, action: run-pipeline,"
+            " pattern: '', ref: develop}",
+            id="empty-pattern",
+        ),
+        pytest.param(
+            "{on_event: 'pullrequest:approved', repo: a/b, action: run-pipeline, pattern: x}",
+            id="missing-ref",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b, when: x, {_BB_BASE}}}",
+            id="unknown-key",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b, branch: 3, {_BB_BASE}}}",
+            id="branch-not-a-string",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b, branch: '', {_BB_BASE}}}",
+            id="branch-empty",
+        ),
+        pytest.param(
+            f"{{on_event: 'repo:commit_status_updated', repo: a/b, state: '', {_BB_BASE}}}",
+            id="state-empty",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b, state: SUCCESSFUL, {_BB_BASE}}}",
+            id="state-on-non-status-event",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:comment_created', repo: a/b, comment: '', {_BB_BASE}}}",
+            id="comment-empty",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b, comment: /merge, {_BB_BASE}}}",
+            id="comment-on-non-comment-event",
+        ),
+        pytest.param("x", id="rule-not-a-mapping"),
+    ],
+)
+def test_bitbucket_hooks_invalid_rule(fleet_home, rule):
+    path = _bb_registry(fleet_home, f"    bitbucket_hooks:\n      - {rule}\n")
+    with pytest.raises(RegistryError, match=r"projects\.p\.bitbucket_hooks\[0\]"):
+        Registry.load(path)
+
+
+def test_bitbucket_hooks_not_a_list(fleet_home):
+    with pytest.raises(RegistryError, match=r"projects\.p\.bitbucket_hooks: must be a list"):
+        Registry.load(_bb_registry(fleet_home, "    bitbucket_hooks: {}\n"))
 
 
 def test_tty1_not_a_list_raises_with_full_path(fleet_home):

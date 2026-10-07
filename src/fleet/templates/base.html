@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <title>ddev-fleet</title>
+  <title>ddev-fleet ({{ hostname }})</title>
   <script src="/static/htmx.min.js"></script>
   <script src="/static/ws-log.js" defer></script>
   <script src="/static/bulk.js" defer></script>
@@ -30,7 +30,7 @@
   </style>
 </head>
 <body>
-  <h1>ddev-fleet</h1>
+  <h1>ddev-fleet ({{ hostname }})</h1>
   {% block content %}{% endblock %}
   {% if sys_stats %}
   <footer class="sys-stats">
@@ -42,6 +42,7 @@
     Server: {{ sys_stats.mem_free }} RAM free / {{ sys_stats.mem_total }} total
     &middot; {{ sys_stats.disk_free }} disk free / {{ sys_stats.disk_total }} total
     <span class="mount">on {{ sys_stats.mount }}</span>
+    &middot; <span class="version">Fleet {{ fleet_version }}</span>
   </footer>
   {% endif %}
 </body>

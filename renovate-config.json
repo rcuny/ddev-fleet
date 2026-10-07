@@ -11,6 +11,7 @@
   ],
   "prConcurrentLimit": 5,
   "prHourlyLimit": 0,
+  "rebaseWhen": "behind-base-branch",
   "dependencyDashboard": false,
   "osvVulnerabilityAlerts": true,
   "vulnerabilityAlerts": {
