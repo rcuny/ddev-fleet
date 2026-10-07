@@ -110,3 +110,26 @@ def test_htmx_regex_manager_matches_the_vendored_assets_marker():
 def test_renovate_prefixes_commits_with_a_jira_key():
     # Renovate commits/PR titles carry the standing "Dependency updates" ticket key
     assert re.fullmatch(r"[A-Z][A-Z0-9]+-\d+", RENOVATE["commitMessagePrefix"])
+
+
+def test_renovate_recreates_every_pr_that_is_behind_develop():
+    # FLE-11: each PR is tested on the latest develop before it can be merged
+    assert RENOVATE["rebaseWhen"] == "behind-base-branch"
+    assert not RENOVATE.get("automerge")
+
+
+def test_renovate_merge_pipeline_runs_renovate_only_when_requested():
+    merge, after = _steps(PIPELINES["pipelines"]["custom"]["renovate-merge"])
+    assert "scripts/renovate_merge.py" in _script(merge)
+    assert "--renovate-flag renovate-requested.flag" in _script(merge)
+    assert merge["artifacts"] == ["renovate-requested.flag"]
+    assert after["image"].startswith("renovate/renovate:")
+    script = _script(after)
+    assert script.index("renovate-requested.flag") < script.index("renovate\n")
+    assert 'RENOVATE_REPOSITORIES="$BITBUCKET_REPO_FULL_NAME"' in script
+
+
+def test_renovate_merge_pipeline_holds_no_secret():
+    text = (ROOT / "bitbucket-pipelines.yml").read_text()
+    section = text[text.index("renovate-merge:\n") :]
+    assert "RENOVATE_PASSWORD" not in section and "Authorization" not in section

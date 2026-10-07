@@ -8,11 +8,11 @@
 }
 
 {{ fleet_domain }} {
-    # Everything except the deploy-log WebSocket and the Jira webhooks sits
+    # Everything except the deploy-log WebSocket and the Jira/Bitbucket webhooks sits
     # behind auth. Browsers do not send basic-auth credentials on a WebSocket
     # handshake, so /ws/* is exempted here; the daemon authenticates it
     # instead with a short-lived, instance-scoped token in the query string.
-    # /hooks/* is exempted because Jira's servers cannot log in
+    # /hooks/* is exempted because Jira's and Bitbucket's servers cannot log in
     # interactively (neither basic auth nor an Authelia session); the daemon
     # authenticates each request with a per-project HMAC signature instead
     # (see docs/README-webhooks.md). Being unauthenticated at this layer, it

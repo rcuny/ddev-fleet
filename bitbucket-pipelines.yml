@@ -10,6 +10,15 @@
 #                                 develop, custom: renovate, daily) or by a
 #                                 manual run; renovate-config.json has no
 #                                 schedule of its own.
+#   custom: renovate-merge     -> merges ONE approved, green, up-to-date Renovate
+#                                 PR into develop (scripts/renovate_merge.py),
+#                                 then runs Renovate again so the remaining PRs
+#                                 are recreated on the new develop. Renovate also
+#                                 runs when nothing merged but an approved PR is
+#                                 behind develop (FLE-11).
+#                                 Started by hand or by the fleet daemon's
+#                                 Bitbucket webhook relay; see
+#                                 docs/README-renovate.md.
 #
 # Repository variables to configure (Repository settings -> Pipelines):
 #   GITHUB_MIRROR_URL  SSH URL of the GitHub mirror repo (git@github.com:...).
@@ -18,7 +27,12 @@
 #                      release notes without hitting anonymous rate limits.
 #   RENOVATE_USERNAME  (secured) Atlassian account email used by Renovate.
 #   RENOVATE_PASSWORD  (secured) Atlassian API token (repository read/write,
-#                      pull requests read/write) for that account.
+#                      pull requests read/write, read:user) for that account.
+#                      custom: renovate-merge reuses both to merge the PR.
+#   RENOVATE_MERGE_APPROVERS
+#                      optional: comma-separated Bitbucket account ids whose
+#                      Approve or "/merge" comment lets a PR merge. Default:
+#                      the account behind RENOVATE_PASSWORD.
 # Plus, under Repository settings -> Pipelines -> SSH keys: a key pair whose
 # public half is a GitHub deploy key WITH WRITE ACCESS on the mirror repo.
 # (github.com's host key is managed by Bitbucket itself: no "Known hosts"
@@ -102,3 +116,28 @@ pipelines:
           image: renovate/renovate:44
           script:
             - RENOVATE_CONFIG_FILE="$BITBUCKET_CLONE_DIR/renovate-config.json" RENOVATE_REPOSITORIES="$BITBUCKET_REPO_FULL_NAME" renovate
+
+    renovate-merge:
+      - step:
+          name: Merge an approved Renovate PR
+          # One run at a time: a second run waits (FIFO) and then re-reads
+          # develop, so two runs cannot merge two PRs onto the same head.
+          concurrency-group: renovate-merge
+          script:
+            # Merges at most one PR. Writes the flag file (content = reason) only
+            # when Renovate should run next: a PR was merged, or an approved PR
+            # is behind develop and needs recreating.
+            - python3 scripts/renovate_merge.py --renovate-flag renovate-requested.flag
+          artifacts:
+            - renovate-requested.flag
+      - step:
+          name: Renovate (when requested)
+          image: renovate/renovate:44
+          script:
+            - |
+              if [ ! -f renovate-requested.flag ]; then
+                echo "Renovate not requested (no PR merged, no approved PR behind develop), skipping"
+                exit 0
+              fi
+              echo "Renovate requested ($(cat renovate-requested.flag)); running it to recreate the PRs on the current develop"
+              RENOVATE_CONFIG_FILE="$BITBUCKET_CLONE_DIR/renovate-config.json" RENOVATE_REPOSITORIES="$BITBUCKET_REPO_FULL_NAME" renovate

@@ -74,7 +74,9 @@ PR with a red suite.
   pipeline) opens daily grouped dependency PRs against `develop`; review them
   like any other PR. Their commits and PR titles start with the standing
   Jira key of the "Dependency updates (Renovate)" ticket. The Python
-  interpreter version is never auto-bumped.
+  interpreter version is never auto-bumped. Approve a PR (or comment `/merge`)
+  and the `custom: renovate-merge` pipeline merges it once its gates are green;
+  see [`docs/README-renovate.md`](docs/README-renovate.md).
   A bump of the vendored htmx in `docs/vendored-assets.md` also needs the
   file re-downloaded — see that document.
 - Required repository variables and the GitHub deploy key are listed in the
