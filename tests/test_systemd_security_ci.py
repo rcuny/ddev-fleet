@@ -502,17 +502,18 @@ def test_live_check_fetches_compares_and_still_checks_every_target_on_failure(li
     done = _live(
         work,
         env,
-        SECURITY_PROBE_TARGETS="down=fleet-probe@broken.example ddev3=fleet-probe@ddev3.example",
+        SECURITY_PROBE_TARGETS="down=fleet-probe@broken.example fresh=fleet-probe@fresh.example",
     )
     assert done.returncode == 1  # the unreachable host fails the run ...
-    assert (work / "reports" / "ddev3.json").exists()  # ... but the other one was still checked
-    assert (work / "reports" / "systemd-security-ddev3.md").exists()
-    assert "NEW" in done.stdout  # no ddev3 baseline recorded yet: reported, not failed
+    assert (work / "reports" / "fresh.json").exists()  # ... but the other one was still checked
+    assert (work / "reports" / "systemd-security-fresh.md").exists()
+    assert "NEW" in done.stdout  # a host with no baseline yet: reported, not failed
+    # ("fresh" never gets a baseline; the live check reads the real baseline file)
     assert "could not fetch the security report from down" in done.stderr
     log = (Path(env["FAKE_SSH_LOG"])).read_text()
     for opt in ("-T", "BatchMode=yes", "StrictHostKeyChecking=yes", "ConnectTimeout=20"):
         assert opt in log
-    assert "fleet-probe@ddev3.example" in log
+    assert "fleet-probe@fresh.example" in log
 
 
 def test_live_check_succeeds_when_every_target_is_fine(live_env):
