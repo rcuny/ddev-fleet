@@ -100,7 +100,10 @@ there is no GitHub Actions workflow, GitHub is a read-only mirror). Besides the
 three gates it scores the rendered systemd units with `systemd-analyze
 security` and fails when an exposure score rises against
 `ci/systemd-security-baseline.json` (FLE-8). If you change a sandboxed unit on
-purpose, re-record the baseline: `docs/README-ci.md`.
+purpose, re-record the baseline: `docs/README-ci.md`. The weekly live run on
+`develop` commits `SYSTEMD-SECURITY-REPORT.md` (bot commit
+`chore(security): …`, linked from the README) and posts a Jira @mention alert
+on a regression (FLE-16, `JIRA_ALERT_*` variables).
 
 ## Deploy model — shipping a code change to the live host
 
