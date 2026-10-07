@@ -57,6 +57,7 @@ caddy-only.yml` reapplies just that role on a live host.
 | `core/locks.py` | Per-instance `flock`-based locking |
 | `core/naming.py` | Validates project/template/label parts, composes `<project>--<label>` instance ids |
 | `core/sysinfo.py` | Host stats for the web UI footer |
+| `core/hostinfo.py` | Server hostname (web UI title/heading) and Fleet version from `git describe --tags` (web UI footer) |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
 
 ## The daemon/CLI split
