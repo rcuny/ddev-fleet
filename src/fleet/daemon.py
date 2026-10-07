@@ -190,7 +190,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     @app.exception_handler(FleetError)
     async def fleet_error_handler(request: Request, exc: FleetError):
-        # htmx 1.9.12 does NOT swap non-2xx responses into hx-target by
+        # htmx (1.x and 2.x) does NOT swap non-2xx responses into hx-target by
         # default — it only fires `htmx:responseError`, which nothing
         # handled for the deploy form (bulk.js's old handler only covered
         # `/ui/bulk/*`). Before ui-errors.js's generic `htmx:beforeSwap`

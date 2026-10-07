@@ -6,7 +6,9 @@ window's row. Read-only: it does not switch windows (that stays native tmux).
 
 from __future__ import annotations
 
+import logging
 import time
+from contextlib import contextmanager
 
 from rich.console import Console
 from rich.text import Text
@@ -14,8 +16,12 @@ from rich.text import Text
 from fleet.core import ddev, shell, tmux
 from fleet.core.instances import (
     FleetPaths,
+    display_checkout,
+    display_submodule_for,
+    load_registry,
     read_instance_git_branch,
     read_instance_git_head,
+    read_instance_project,
 )
 from fleet.core.reboot import RebootStatus, format_duration_since, read_reboot_status
 
@@ -66,21 +72,54 @@ def build_rows(instance_ids, statuses, current, branches=None) -> list[tuple[str
     return rows
 
 
-def _branches(paths: FleetPaths, ids: list[str]) -> dict[str, str]:
+@contextmanager
+def _registry_warnings_silenced():
+    """Mute the `fleet.core.registry` logger for the duration of the block.
+    `Registry.load` logs deprecation warnings; with no logging configured the
+    stdlib's last-resort handler prints them to stderr, i.e. into the sidebar's
+    tmux pane, garbling the rich display on every reload. Scoped to that one
+    logger and restored afterwards, so the CLI/daemon (which load the registry
+    themselves) keep their warnings."""
+    reg_logger = logging.getLogger("fleet.core.registry")
+    previous = reg_logger.level
+    reg_logger.setLevel(logging.CRITICAL + 1)
+    try:
+        yield
+    finally:
+        reg_logger.setLevel(previous)
+
+
+def _branches(paths: FleetPaths, ids: list[str], registry=None) -> dict[str, str]:
     # The dim line under each instance shows "branch (shorthead)", e.g.
     # "feature/OAKS-1688-seo-geo-improvements (9201b89b53)". The short HEAD makes
-    # it obvious which commit an instance is actually running.
+    # it obvious which commit an instance is actually running. A project with
+    # `display_submodule_branch` shows that submodule's instead, e.g.
+    # "ddev-fleet: feature/FLE-12-x (abc1234)".
+    if registry is None:
+        # Re-read on every branch tick (every few minutes) so a fleet.yml edit
+        # is picked up without restarting the sidebar. An unloadable registry
+        # must never kill the refresh loop: just show the instances' own branch.
+        try:
+            with _registry_warnings_silenced():
+                registry = load_registry(paths)
+        except Exception:  # noqa: BLE001 - best-effort display helper
+            registry = None
     out: dict[str, str] = {}
     for i in ids:
         instance_dir = paths.instances / i
-        branch = read_instance_git_branch(instance_dir)
-        head = read_instance_git_head(instance_dir)
+        shown_dir, prefix = display_checkout(
+            instance_dir, display_submodule_for(registry, read_instance_project(instance_dir))
+        )
+        branch = read_instance_git_branch(shown_dir)
+        head = read_instance_git_head(shown_dir)
+        if branch:
+            branch = f"{prefix}{branch}"
         if branch and head:
             out[i] = f"{branch} ({head})"
         elif branch:
             out[i] = branch
         elif head:
-            out[i] = f"({head})"
+            out[i] = f"{prefix}({head})"
     return out
 
 
