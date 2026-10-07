@@ -77,6 +77,27 @@ authored by the same account.
   two variables below in your environment). `--renovate-flag <file>` is the
   option the pipeline uses to request the Renovate step.
 
+## Testing the hands-off merge end to end
+
+`renovate_merge.py` checks the source branch prefix (`renovate/`), not the PR
+author. So the whole chain (webhook -> daemon -> `renovate-merge` -> merge ->
+Renovate) can be exercised without waiting for a real update:
+
+1. Cut a branch `renovate/<something>-test` off the latest `develop`, with a
+   change that is fine to land (it **will** be merged), and push it.
+2. Open a PR into `develop`. Its PR pipeline runs the gates.
+3. Approve it, or comment `/merge`. If the gates are still running, the
+   approval starts a `renovate-merge` run that waits ("not green yet"). The
+   green build status then fires the webhook again, and that run merges it.
+4. Check:
+   - the fleet daemon's delivery log (`fleet webhook log --source bitbucket`)
+     shows `triggered` with a build number;
+   - that `renovate-merge` run merged the PR (merge commit, branch closed);
+   - its Renovate step ran.
+
+This is how FLE-11 was first verified live (this section came in through such a
+test PR).
+
 ## Repository variables
 
 `RENOVATE_USERNAME` (Atlassian email) and `RENOVATE_PASSWORD` (Atlassian API
