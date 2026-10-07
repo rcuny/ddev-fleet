@@ -34,7 +34,9 @@ Environment (secrets come from secured repository variables, never printed):
   read/write pullrequest, read:user
 * ``BITBUCKET_REPO_FULL_NAME``  ``workspace/slug`` (set by Pipelines; ``--repo``)
 * ``RENOVATE_MERGE_APPROVERS``  optional, comma-separated Bitbucket account ids;
-  default is the token's own account (the maintainer)
+  default is the token's own account. Set it to the maintainer's account id
+  whenever the Renovate token belongs to another (bot) account, otherwise the
+  maintainer's Approve / ``/merge`` is ignored
 
 Exit status: 0 on a normal run (including "nothing to merge"), 1 on missing
 configuration, an API/auth error or a merge that did not complete.
@@ -226,12 +228,20 @@ def decide(accepted: bool, statuses: list[str], up_to_date: bool) -> tuple[str, 
 
 
 def candidate_prs(client, repo: str, base: str, prefix: str) -> list[dict]:
-    """Open PRs into ``base`` from ``<prefix>*`` branches, oldest (lowest id) first."""
+    """Open PRs into ``base`` from ``<prefix>*`` branches, oldest (lowest id) first.
+
+    The state goes INTO ``q``: Bitbucket ignores the ``state`` query parameter
+    when ``q`` is present and then lists MERGED and DECLINED PRs too (seen live
+    2026-10-07, pipeline #71). The client-side ``state`` check is a second guard."""
     prs = client.paginate(
         f"/repositories/{repo}/pullrequests",
-        {"state": "OPEN", "q": f'destination.branch.name="{base}"', "pagelen": 50},
+        {"q": f'state="OPEN" AND destination.branch.name="{base}"', "pagelen": 50},
     )
-    kept = [p for p in prs if p["source"]["branch"]["name"].startswith(prefix)]
+    kept = [
+        p
+        for p in prs
+        if p.get("state", "OPEN") == "OPEN" and p["source"]["branch"]["name"].startswith(prefix)
+    ]
     return sorted(kept, key=lambda p: p["id"])
 
 

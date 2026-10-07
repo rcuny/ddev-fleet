@@ -51,6 +51,7 @@ class FakeClient:
         statuses=("SUCCESSFUL",),
         up_to_date=True,
         short=True,
+        state="OPEN",
     ):
         full = head(pr_id)
         self.prs[pr_id] = {
@@ -61,6 +62,7 @@ class FakeClient:
             "comments": list(comments),
             "statuses": [{"state": s} for s in statuses],
             "merge_base": self.develop if up_to_date else "o" * 40,
+            "state": state,
         }
 
     # -- the client interface used by the script
@@ -89,10 +91,12 @@ class FakeClient:
             return self.pages[path]
         base = f"/repositories/{REPO}/"
         if path == base + "pullrequests":
-            assert params["state"] == "OPEN" and params["q"] == 'destination.branch.name="develop"'
+            assert "state" not in params  # ignored by Bitbucket next to q
+            assert params["q"] == 'state="OPEN" AND destination.branch.name="develop"'
             return [
                 {
                     "id": i,
+                    "state": pr["state"],
                     "source": {
                         "branch": {"name": pr["branch"]},
                         "commit": {"hash": pr["short"]},
@@ -262,6 +266,17 @@ def test_candidates_are_filtered_by_prefix_and_sorted_oldest_first():
     client.add_pr(5, branch="renovate/a")
     got = rm.candidate_prs(client, REPO, "develop", "renovate/")
     assert [p["id"] for p in got] == [5, 9]
+
+
+def test_candidates_drop_merged_and_declined_prs_even_if_the_api_returns_them():
+    # Live 2026-10-07 (#71): with `q`, Bitbucket ignored state=OPEN and listed
+    # merged/declined renovate/* PRs, which then showed up as "behind, wait".
+    client = FakeClient()
+    client.add_pr(3, state="MERGED", approved_by=[ME])
+    client.add_pr(11, state="DECLINED", approved_by=[ME])
+    client.add_pr(22, approved_by=[ME])
+    got = rm.candidate_prs(client, REPO, "develop", "renovate/")
+    assert [p["id"] for p in got] == [22]
 
 
 # --- full runs ---------------------------------------------------------------

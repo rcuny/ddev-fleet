@@ -12,6 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FLE-16: published systemd security report.** The weekly `systemd-security-live` run now builds `SYSTEMD-SECURITY-REPORT.md` (`ci/systemd_security.py publish-report`): what the exposure score means, a status line per host, the product's units first (fleet, fleet-boot, fleet-reboot-notify, caddy, authelia) with score, baseline and delta, the full host overview, and the offline scores of the shipped unit files. On `develop` (or any branch run with `PUBLISH_REPORT=1`) the pipeline commits it, even when a unit regressed, and pushes it back (never forced, one rebase retry); the README links to it on GitHub. The step image is now `python:3.11-trixie` with `systemd` and `openssh-client`.
 - **FLE-16: Jira alert on a regression.** When a host regressed or could not be fetched, `ci/systemd_security.py jira-alert` posts one comment on the issue in `JIRA_ALERT_ISSUE` with a real @mention (the account id in `JIRA_ALERT_MENTION`), naming the host, the regressed units, the changed directives, the branch and links to the pipeline run and the report. Stdlib only; a scoped token goes through the `api.atlassian.com` gateway when `JIRA_ALERT_CLOUD_ID` is set. Unset variables skip it, and a failed post only warns. See `docs/README-ci.md`.
 
+### Fixed
+- **FLE-11: `renovate-merge` only considers open PRs.** Bitbucket ignored `state=OPEN` next to the `q` filter, so merged and declined `renovate/*` PRs were listed as candidates (shown as "behind", requesting needless Renovate runs). The state is now part of `q` and checked again client-side. Docs: `RENOVATE_MERGE_APPROVERS` must hold the maintainer's account id when the Renovate token belongs to a bot account.
+
 ## [0.10.0] - 2026-10-07
 
 ### Added

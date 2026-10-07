@@ -102,8 +102,13 @@ test PR).
 
 `RENOVATE_USERNAME` (Atlassian email) and `RENOVATE_PASSWORD` (Atlassian API
 token) are the existing secured variables. The token needs repository
-read/write, pull request read/write and `read:user`. Optional:
-`RENOVATE_MERGE_APPROVERS`, comma-separated Bitbucket account ids.
+read/write, pull request read/write and `read:user`.
+`RENOVATE_MERGE_APPROVERS` (comma-separated Bitbucket account ids) defaults to
+the token's own account. **Set it to the maintainer's account id when Renovate
+runs on another account** (a bot), otherwise the maintainer's Approve or
+`/merge` is logged as "not approved ... from an allowed approver" and nothing
+merges. An account id is visible on a PR's participants in the API, or in the
+Atlassian profile URL.
 `BITBUCKET_REPO_FULL_NAME` is set by Pipelines. No token is written in the YAML.
 
 ## Accepted trade-off
