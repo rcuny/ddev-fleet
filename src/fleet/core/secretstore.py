@@ -192,7 +192,8 @@ class SecretStore:
         """Browser path: store a message that was encrypted client-side.
         `pgp.inspect_message` runs first and is structural only (it never
         decrypts), so it checks that this is a single armored message for this
-        host's key, not that it will decrypt; X"""
+        host's key, not that it will decrypt. The message is stored as given (a trailing
+        newline is added if missing)."""
         validate_key(key)
         self._project_dir(project)
         if not self.encrypted():
