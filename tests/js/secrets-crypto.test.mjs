@@ -16,8 +16,9 @@ async function decryptWithFixtureKey(armoredMessage) {
   const { data } = await openpgp.decrypt({
     message: await openpgp.readMessage({ armoredMessage }),
     decryptionKeys: await openpgp.readPrivateKey({ armoredKey: secretKey }),
+    format: "binary",
   });
-  return data;
+  return new TextDecoder().decode(data);
 }
 
 test("returns an armored PGP message that does not contain the plaintext", async () => {
@@ -34,7 +35,7 @@ test("the host private key decrypts it back to the exact plaintext", async () =>
 });
 
 test("multi-line values keep their newlines", async () => {
-  const value = "line1\nline2\n  indented ";
+  const value = "a\nb\r\nc\n  indented ";
   assert.equal(await decryptWithFixtureKey(await encryptSecret(publicKey, value)), value);
 });
 

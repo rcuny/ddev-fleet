@@ -24,7 +24,9 @@ export async function encryptSecret(armoredPublicKey, plaintext) {
   if (versions.some((v) => v !== SUPPORTED_KEY_VERSION)) {
     throw new Error("Unsupported host key: GnuPG needs an OpenPGP version 4 key.");
   }
-  const message = await createMessage({ text: plaintext });
+  // Binary, not text: text mode canonicalises line endings to CRLF inside the
+  // packet, and gpg --decrypt returns packet bytes as-is. Encrypt the exact UTF-8 bytes.
+  const message = await createMessage({ binary: new TextEncoder().encode(plaintext) });
   return encrypt({
     message,
     encryptionKeys: key,
