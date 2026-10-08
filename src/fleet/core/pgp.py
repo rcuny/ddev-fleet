@@ -198,3 +198,77 @@ def init_host_key(gnupghome: Path, uid: str, *, gpg: GpgRunner = run_gpg) -> Hos
             f"the key was generated but has no usable encryption subkey; inspect {gnupghome}"
         )
     return key
+
+
+def encrypt(gnupghome: Path, plaintext: str, *, gpg: GpgRunner = run_gpg) -> str:
+    """Encrypt `plaintext` to the host key; returns the armored message. The
+    plaintext goes to gpg on stdin only."""
+    ids = _host_ids(gnupghome, gpg)
+    if ids is None:
+        raise PgpError(_NO_KEY)
+    fingerprint, _ = ids
+    result = _checked(
+        gpg(
+            ["--trust-model", "always", "--armor", "--encrypt", "--recipient", fingerprint],
+            gnupghome=gnupghome,
+            input_bytes=plaintext.encode("utf-8"),
+        ),
+        "encryption",
+    )
+    armored = result.stdout.decode("ascii", "replace")
+    if not armored.startswith(_ARMOR_BEGIN):
+        raise PgpError("gpg produced no armored message")
+    return armored
+
+
+def decrypt(gnupghome: Path, armored: str, *, gpg: GpgRunner = run_gpg) -> str:
+    """Decrypt an armored message with the host key. Plaintext comes from
+    gpg's stdout only; error text is built from gpg's stderr and never
+    contains the plaintext or the armored input."""
+    result = _checked(
+        gpg(["--decrypt"], gnupghome=gnupghome, input_bytes=armored.encode("utf-8")),
+        "decryption",
+    )
+    try:
+        return result.stdout.decode("utf-8")
+    except UnicodeDecodeError:
+        raise PgpError("the decrypted secret is not valid UTF-8") from None
+
+
+def inspect_message(gnupghome: Path, armored: str, *, gpg: GpgRunner = run_gpg) -> None:
+    """Accept `armored` only if it is a single armored PGP MESSAGE (at most
+    MAX_MESSAGE_BYTES) that is encrypted to this host's encryption subkey and
+    contains nothing else: no password-only (SKESK) packet, no extra packets.
+    Uses `--list-only --list-packets`, which never decrypts. The error text
+    never echoes `armored`."""
+    try:
+        raw = armored.encode("utf-8")
+    except UnicodeEncodeError:
+        raise PgpError("not an ASCII-armored PGP MESSAGE") from None
+    if len(raw) > MAX_MESSAGE_BYTES:
+        raise PgpError(f"the encrypted message is larger than {MAX_MESSAGE_BYTES} bytes")
+    text = armored.strip()
+    if (
+        not text.startswith(_ARMOR_BEGIN)
+        or not text.endswith(_ARMOR_END)
+        or text.count(_ARMOR_BEGIN) != 1
+    ):
+        raise PgpError("not an ASCII-armored PGP MESSAGE")
+    ids = _host_ids(gnupghome, gpg)
+    if ids is None:
+        raise PgpError(_NO_KEY)
+    _, subkey_id = ids
+    result = gpg(["--list-only", "--list-packets"], gnupghome=gnupghome, input_bytes=raw)
+    if result.returncode != 0:
+        raise PgpError("not a valid OpenPGP message")
+    listing = result.stdout.decode("utf-8", "replace")
+    tags = [int(tag) for tag in _PACKET_TAG_RE.findall(listing)]
+    if _TAG_SKESK in tags:
+        raise PgpError("the message is password-encrypted; it must be encrypted to the host key")
+    if not tags or any(tag not in (_TAG_PKESK, _TAG_SEIPD) for tag in tags):
+        raise PgpError("the message contains unexpected packets")
+    if tags.count(_TAG_SEIPD) != 1 or tags[-1] != _TAG_SEIPD:
+        raise PgpError("the message contains unexpected packets")
+    recipients = {keyid.upper() for keyid in _PKESK_RE.findall(listing)}
+    if subkey_id not in recipients:
+        raise PgpError("the message is not encrypted to this host's key")
