@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 - **FLE-21:** project secrets can rest as ciphertext on disk once a host key exists; no plaintext value in argv when the prompt or stdin is used (the deprecated positional value still lands in argv), in logs, error messages or command output, and gpg is run with separate stdout/stderr rather than the merged streaming runner. Run `fleet secret migrate --all` after `fleet keys init`, then rotate secrets that were ever stored in plaintext. The host key has no passphrase; it is protected by file permissions only (see the threat notes in `docs/operations.md`).
+- **FLE-23: strict Content-Security-Policy on the dashboard.** Every HTML response (pages and htmx fragments) now carries `default-src 'self'; script-src 'self'; style-src 'self'; ...; frame-ancestors 'none'`, plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. The inline `<style>` and `style=` moved to `static/fleet.css`, and htmx runs with `includeIndicatorStyles` and `allowEval` off. A test fails if a template reintroduces inline script, style or event handlers.
+- **FLE-23: cross-origin writes to `/ui/*` are refused (HTTP 403).** A state-changing UI request must be `Sec-Fetch-Site: same-origin` or carry an `Origin` equal to the request `Host`; `cross-site`, `same-site` (a DDEV instance on a sibling subdomain) and `Origin: null` are rejected. Requests sending neither header (curl, scripts) still work. `/hooks/*`, `/api/*` and the WebSocket are unaffected.
 
 ## [0.11.0] - 2026-10-07
 

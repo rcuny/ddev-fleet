@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-22
+Last updated: 2026-10-08
 Type: documentation
 ---
 
@@ -43,6 +43,7 @@ caddy-only.yml` reapplies just that role on a live host.
 |---|---|
 | `cli.py` | Thin argparse CLI (`fleet …`); calls straight into `fleet.core`, never depends on the daemon |
 | `daemon.py` | FastAPI app: `/api/tls-authorize` (Caddy on-demand TLS callback), `/api/jobs/{id}`, `/ws/instances/{id}/log` (HMAC-token-gated WebSocket), `/` + `/ui/*` HTMX routes for the web UI |
+| `websecurity.py` | Pure helpers for the dashboard's strict Content-Security-Policy and the same-origin check on `/ui/*` writes (wired in by a middleware in `daemon.py`) |
 | `jobs.py` | In-memory `JobManager` backing the web UI's async deploy jobs |
 | `core/registry.py` | Loads/validates `fleet.yml` (`Registry`), resolves `(project, template, branch, label)` → `ResolvedInstance` |
 | `core/instances.py` | Orchestrates `deploy`/`destroy`/`start`/`stop`/`list_instances`/`snapshot`; `FleetPaths` maps `FLEET_HOME` to all on-disk paths |
@@ -59,6 +60,38 @@ caddy-only.yml` reapplies just that role on a live host.
 | `core/sysinfo.py` | Host stats for the web UI footer |
 | `core/hostinfo.py` | Server hostname (web UI title/heading) and Fleet version from `git describe --tags` (web UI footer) |
 | `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
+
+## Web UI hardening: CSP and same-origin check
+
+The dashboard sits behind Caddy (basic auth or Authelia), so it is protected
+against the *browser* of an authenticated admin being tricked, not just
+against anonymous callers. One HTTP middleware in `daemon.py` (policy in
+`websecurity.py`) does two things:
+
+**Headers on every `text/html` response** (pages, htmx fragments, error
+fragments): `Content-Security-Policy: default-src 'self'; script-src 'self';
+style-src 'self'; img-src 'self' data:; connect-src 'self' wss://<host>;
+object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action
+'self'`, plus `X-Content-Type-Options: nosniff` and `Referrer-Policy:
+no-referrer`. `<host>` is the request's `Host` (only if it is a plain
+host[:port]). JSON, static files and plain-text logs are not HTML and get none
+of them. The consequence for templates: **no inline `<script>`, `<style>`,
+`style=`, `on*=` handlers or `hx-on`** — styles live in `static/fleet.css`,
+scripts in `static/*.js`, and `base.html` carries `<meta name="htmx-config"
+content='{"includeIndicatorStyles":false,"allowEval":false}'>` so htmx neither
+injects a `<style>` nor evaluates strings. `tests/test_csp_templates.py` fails
+the build if a template reintroduces any of them.
+
+**Same-origin rule for state-changing `/ui/*` requests** (every method except
+GET/HEAD/OPTIONS): if `Sec-Fetch-Site` is sent, only `same-origin` passes
+(`same-site` is refused on purpose: DDEV instances on `*.<domain>` are
+same-site siblings running third-party code); otherwise, if `Origin` is sent,
+its host[:port] must equal `Host` (`Origin: null` or a malformed `Origin` is refused); a request with
+neither header is not a browser cross-site request and is allowed. A refusal is
+HTTP 403 — as a renderable error fragment for htmx requests, JSON otherwise.
+`/hooks/*` (HMAC-authenticated webhooks), `/api/*`, `/static/*` and the
+WebSocket are never subject to this check. Behind a reverse proxy the proxy
+must keep the original `Host` (Caddy's `reverse_proxy` does by default).
 
 ## The daemon/CLI split
 

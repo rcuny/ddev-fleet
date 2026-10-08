@@ -20,6 +20,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from starlette.requests import Request
 
+from fleet import websecurity
 from fleet.core import bitbucket as bitbucket_mod
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, hostinfo, naming, sysinfo
@@ -188,6 +189,37 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     # Neither can change without a daemon restart, so compute them once.
     templates.env.globals["hostname"] = hostinfo.hostname()
     templates.env.globals["fleet_version"] = hostinfo.fleet_version()
+
+    @app.middleware("http")
+    async def web_security_middleware(request: Request, call_next):
+        """FLE-23: refuse cross-origin writes to `/ui/*`, and put the strict
+        CSP (+ nosniff, no-referrer) on every HTML response — pages, htmx
+        fragments and error fragments alike. `/api/*`, `/hooks/*` (HMAC
+        webhooks), `/static/*` and the WebSocket are not HTML / not `/ui/`
+        and pass through untouched (see `fleet.websecurity` for the policy)."""
+        if websecurity.is_cross_origin_ui_write(request.method, request.url.path, request.headers):
+            logger.warning(
+                "refused cross-origin %s %s (sec-fetch-site=%r origin=%r)",
+                request.method,
+                request.url.path,
+                (request.headers.get("sec-fetch-site") or "")[:_HEADER_LOG_MAX],
+                (request.headers.get("origin") or "")[:_HEADER_LOG_MAX],
+            )
+            message = "cross-origin request refused: reload the dashboard and try again"
+            if request.headers.get("hx-request", "").lower() == "true":
+                response = templates.TemplateResponse(
+                    request, "partials/error.html", {"message": message}, status_code=403
+                )
+            else:
+                response = JSONResponse(status_code=403, content={"error": message})
+        else:
+            response = await call_next(request)
+        if websecurity.is_html(response.headers.get("content-type")):
+            for name, value in websecurity.html_security_headers(
+                request.headers.get("host")
+            ).items():
+                response.headers[name] = value
+        return response
 
     @app.exception_handler(FleetError)
     async def fleet_error_handler(request: Request, exc: FleetError):
