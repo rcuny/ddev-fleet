@@ -4,7 +4,11 @@ Fixtures are added incrementally as later tasks need them:
 task 6 adds ``FakeRunner``/``git_repo``.
 """
 
+import os
+import shutil
 import subprocess
+import tempfile
+from pathlib import Path
 
 import pytest
 
@@ -120,3 +124,81 @@ def git_repo(tmp_path):
     _run_git(["git", "push", "-u", "origin", "main"], cwd=work)
 
     return {"origin": origin, "work": work}
+
+
+def require_tool(name: str) -> None:
+    """Skip when `name` is not installed; fail instead when
+    FLEET_REQUIRE_PGP_TOOLS=1 (CI), so a missing tool cannot silently turn a
+    security test into a skip. Mirrors FLEET_REQUIRE_SYSTEMD_ANALYZE."""
+    if shutil.which(name):
+        return
+    if os.environ.get("FLEET_REQUIRE_PGP_TOOLS") == "1":
+        pytest.fail(f"FLEET_REQUIRE_PGP_TOOLS=1 but {name!r} is not installed")
+    pytest.skip(f"{name} is not installed")
+
+
+@pytest.fixture
+def requires_gpg():
+    require_tool("gpg")
+
+
+@pytest.fixture
+def requires_node():
+    require_tool("node")
+
+
+def _short_tmp_root() -> str | None:
+    # gpg-agent sockets live in GNUPGHOME and unix socket paths are limited to
+    # about 100 characters; pytest's tmp_path can be longer than that.
+    return "/tmp" if os.path.isdir("/tmp") else None
+
+
+def _kill_gpg_agent(gnupghome: Path) -> None:
+    if not gnupghome.is_dir():
+        return
+    try:
+        subprocess.run(
+            ["gpgconf", "--kill", "gpg-agent"],
+            env={**os.environ, "GNUPGHOME": str(gnupghome)},
+            capture_output=True,
+            check=False,
+            timeout=30,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        pass
+
+
+@pytest.fixture
+def gpg_home_factory(requires_gpg):
+    """Callable returning a fresh, short, throwaway GNUPGHOME (0700). Agents
+    are killed and the directories removed on teardown."""
+    created: list[Path] = []
+
+    def make() -> Path:
+        home = Path(tempfile.mkdtemp(prefix="fgpg-", dir=_short_tmp_root()))
+        created.append(home)
+        return home
+
+    yield make
+    for home in created:
+        _kill_gpg_agent(home)
+        shutil.rmtree(home, ignore_errors=True)
+
+
+@pytest.fixture
+def gpg_home(gpg_home_factory) -> Path:
+    return gpg_home_factory()
+
+
+@pytest.fixture
+def gpg_fleet_home(requires_gpg):
+    """Like `fleet_home` but short enough for a gpg-agent socket under
+    `<home>/gnupg`. Use for tests that run the real gpg through FleetPaths."""
+    home = Path(tempfile.mkdtemp(prefix="fl-", dir=_short_tmp_root()))
+    (home / "config" / "assets").mkdir(parents=True)
+    (home / "instances").mkdir()
+    (home / "logs").mkdir()
+    (home / "locks").mkdir()
+    yield home
+    _kill_gpg_agent(home / "gnupg")
+    shutil.rmtree(home, ignore_errors=True)

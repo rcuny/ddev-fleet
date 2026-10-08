@@ -144,7 +144,9 @@ never been copied over — nothing else was wrong.
 There are two independent kinds of secret, and they fail differently:
 
 - **Per-project secrets** — `/srv/fleet/secrets/<project>.env`
-  (`KEY=VALUE`, `0600`, owned by `fleet`; see this repo's
+  (`KEY=VALUE`, `0600`, owned by `fleet`; legacy plaintext, with a host key they are
+  `/srv/fleet/secrets/<project>/<KEY>.asc` ciphertexts, see `docs/operations.md`
+  "Encrypted project secrets"; see this repo's
   `CLAUDE.md` "Per-project secrets model"). A project's asset `.env` (or
   any other asset file) references these as `[[token]]`, where the token
   name is the `KEY` lower-cased with underscores turned to dashes (e.g.
@@ -174,10 +176,18 @@ ssh <existing-host> 'sudo tar czf - -C /srv/fleet secrets .secrets' \
       && sudo chmod 600 /srv/fleet/.secrets'
 ```
 
+**Warning (encrypted secrets, FLE-21):** if the source host has a host key
+(`fleet keys show` works), its `secrets/<project>/*.asc` files are encrypted to
+that host's key, so the new host cannot decrypt them (and `gnupg/` must never
+be copied). In that case do not copy `secrets/`: run `fleet keys init` on the
+new host and re-enter each secret with `fleet secret set`. Alternatively copy
+only the legacy plaintext `secrets/*.env` files and run
+`fleet secret migrate --all` on the new host.
+
 Or set secrets individually on the new host:
 
 ```bash
-fleet secret set <project> KEY VALUE   # per-project, writes secrets/<project>.env
+printf '%s' "$VALUE" | fleet secret set <project> KEY   # per-project; encrypted once `fleet keys init` has run
 fleet set-claude-token <token>         # fleet-wide, writes .secrets
 ```
 

@@ -17,7 +17,7 @@ from ruamel.yaml import YAML
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINES = YAML(typ="safe").load((ROOT / "bitbucket-pipelines.yml").read_text())
 RENOVATE = json.loads((ROOT / "renovate-config.json").read_text())
-GATES = ["pytest -q", "ruff check .", "black --check ."]
+GATES = ["pytest -q", "ruff check .", "black --check .", "node --test tests/js/*.test.mjs"]
 
 
 def _steps(pipeline):
@@ -96,7 +96,11 @@ def test_gates_run_on_debian_13_with_systemd_and_require_systemd_analyze():
     script = _script(gates)
     assert re.search(r"apt-get install .*\brsync systemd\b", script)
     assert script.index("FLEET_REQUIRE_SYSTEMD_ANALYZE=1") < script.index("pytest -q")
-    assert script.index("black --check .") < script.index("systemd_security.py offline")
+    assert re.search(r"apt-get install .*\bgnupg\b.*\bnodejs\b", script)
+    assert script.index("FLEET_REQUIRE_PGP_TOOLS=1") < script.index("pytest -q")
+    node_gate = script.index("node --test tests/js/*.test.mjs")
+    assert script.index("black --check .") < node_gate
+    assert node_gate < script.index("systemd_security.py offline")
     assert script.index("systemd_security.py offline") < script.index("systemd_security.py compare")
     assert gates["artifacts"] == ["reports/**"]
 
@@ -165,17 +169,30 @@ def test_renovate_never_bumps_the_python_interpreter():
     assert any(r.get("matchDepNames") == ["python"] for r in rules)
 
 
-def test_htmx_regex_manager_matches_the_vendored_assets_marker():
-    (manager,) = RENOVATE["customManagers"]
+def _vendored_version(dep_name: str) -> str:
+    (manager,) = [m for m in RENOVATE["customManagers"] if m["depNameTemplate"] == dep_name]
     assert manager["managerFilePatterns"] == ["/^docs/vendored-assets\\.md$/"]
+    assert manager["datasourceTemplate"] == "npm"
     # JS named groups (?<x>...) -> Python (?P<x>...)
     pattern = re.compile(manager["matchStrings"][0].replace("(?<", "(?P<"))
+    match = pattern.search((ROOT / "docs" / "vendored-assets.md").read_text())
+    assert match, f"{dep_name} marker row not matched"
+    return match.group("currentValue")
+
+
+def test_htmx_regex_manager_matches_the_vendored_assets_marker():
+    version = _vendored_version("htmx.org")
     doc = (ROOT / "docs" / "vendored-assets.md").read_text()
-    match = pattern.search(doc)
-    assert match, "htmx marker line not matched"
-    version = match.group("currentValue")
     assert f"htmx.org@{version}/dist/htmx.min.js" in doc
     assert f'version:"{version}"' in (ROOT / "src/fleet/static/htmx.min.js").read_text()
+
+
+def test_openpgp_regex_manager_matches_the_vendored_assets_marker():
+    version = _vendored_version("openpgp")
+    doc = (ROOT / "docs" / "vendored-assets.md").read_text()
+    assert f"openpgp@{version}/dist/openpgp.min.mjs" in doc
+    header = (ROOT / "src/fleet/static/openpgp.min.mjs").read_text(encoding="utf-8")[:200]
+    assert f"OpenPGP.js v{version}" in header
 
 
 def test_renovate_prefixes_commits_with_a_jira_key():

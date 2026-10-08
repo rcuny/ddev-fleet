@@ -22,10 +22,13 @@ same systemd (257) as the servers.
 | Custom `renovate` | Renovate (daily schedule): dependency-update PRs against `develop` |
 | Custom `systemd-security-live` | the live systemd security check, the published report and the Jira alert (weekly schedule) |
 
-- **Gates**: `pytest -q`, `ruff check .`, `black --check .`, then the offline
-  systemd security check (below). The image has `systemd` installed and
-  `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
-  instead of skipping if `systemd-analyze` is ever missing.
+- **Gates**: `pytest -q`, `ruff check .`, `black --check .`,
+  `node --test tests/js/*.test.mjs` (the OpenPGP.js browser-crypto tests), then
+  the offline systemd security check (below). The image has `systemd` installed
+  and `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
+  instead of skipping if `systemd-analyze` is ever missing. The image also gets
+  `gnupg` and `nodejs`, and `FLEET_REQUIRE_PGP_TOOLS=1` is set so the gpg/node
+  interop tests fail instead of skipping if either tool is missing.
 - **Ansible lint (non-blocking)**: `ansible-lint ansible/` and `yamllint
   ansible/` (the `infra` extra). Findings are printed but never fail the run;
   drop the `|| echo` in the step to promote it to a hard gate.
@@ -294,4 +297,8 @@ python ci/systemd_security.py offline --out /tmp/offline.json   # needs systemd-
 ```
 
 `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` turns "systemd-analyze missing" from a skip
-into a failure, as in the pipeline.
+into a failure, as in the pipeline. Likewise `FLEET_REQUIRE_PGP_TOOLS=1` turns a
+missing `gpg` or `node` into a failure instead of a skip for the OpenPGP interop
+tests (`tests/test_pgp_interop.py`, `tests/test_secrets_ui.py`,
+`tests/test_vendored_openpgp.py`); run `node --test tests/js/*.test.mjs` for the
+browser-crypto tests.

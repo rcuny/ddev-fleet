@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-08
+
+### Added
+- **FLE-21: encrypted per-project secret store.** `fleet keys init|show` creates and shows a GnuPG host key (ed25519 + cv25519, no passphrase) in `$FLEET_HOME/gnupg`. With a key, `fleet secret set` stores `secrets/<project>/<KEY>.asc` (OpenPGP, 0600) and deploy, tty commands and Typesense key handling decrypt through the new `SecretStore`; `.asc` wins over a legacy `secrets/<project>.env`, which is still read. New `fleet secret list|unset|migrate (<project>|--all)`; `migrate` encrypts, verifies by decrypting, then deletes the plaintext file. The Ansible `fleet_user` role creates `/srv/fleet/secrets` and `/srv/fleet/gnupg` (0700). See `docs/operations.md` "Encrypted project secrets".
+- **FLE-22: Secrets screen.** New dashboard page `/secrets`: choose a project, type a name and a value, and the value is encrypted in the browser with OpenPGP.js (vendored 6.3.2, LGPL-3.0-or-later, sha256-pinned) to the host's GnuPG public key before anything is sent. The server only validates the ciphertext (packet inspection, never a decrypt) and stores it as `secrets/<project>/<KEY>.asc`; values are never shown again. Without a host key the page explains `fleet keys init`. Routes: `GET /secrets`, `GET|POST /ui/secrets/{project}`, `POST /ui/secrets/{project}/{key}/delete`. Existing legacy plaintext names are listed as such.
+- **FLE-22: browser-to-GnuPG interop tests.** `node --test tests/js/*.test.mjs` (new gate) covers the browser crypto; `tests/test_pgp_interop.py` encrypts with Node and the vendored file and decrypts with the real `gpg` (plus a committed OpenPGP.js ciphertext fixture). They skip when `gpg`/`node` are missing unless `FLEET_REQUIRE_PGP_TOOLS=1`.
+- `docs/client-side-encryption.md`: data flow, key management and the threat model of client-side secret encryption.
+
+### Changed
+- **FLE-21: `fleet secret set <project> <key>`** reads the value from a hidden prompt or stdin; the positional `<value>` still works but is deprecated and prints a warning to stderr. The project must exist in `fleet.yml`, and the key must match `^[A-Z][A-Z0-9_]{0,63}$`. `fleet init` now also creates an empty `gnupg/` directory.
+- **FLE-22:** the Bitbucket gates image installs `gnupg` and `nodejs`, sets `FLEET_REQUIRE_PGP_TOOLS=1` and runs `node --test tests/js/*.test.mjs`. `.mjs` files are served as `text/javascript`. Renovate now also tracks the vendored OpenPGP.js version in `docs/vendored-assets.md`.
+- **Rollout:** encryption is opt-in per server. Nothing changes until `sudo -u fleet fleet keys init` creates the host key; then optionally run `sudo -u fleet fleet secret migrate --all` to encrypt the existing plaintext secret files, and check that gpg-agent works under the systemd sandbox (`docs/operations.md`). The new `/srv/fleet/secrets` and `/srv/fleet/gnupg` directories (0700) are created by `fleet init` / `fleet keys init`, or by the `fleet_user` role through a scoped playbook (never the full `site.yml`).
+
+### Security
+- **FLE-21:** project secrets can rest as ciphertext on disk once a host key exists; no plaintext value in argv when the prompt or stdin is used (the deprecated positional value still lands in argv), in logs, error messages or command output, and gpg is run with separate stdout/stderr rather than the merged streaming runner. Run `fleet secret migrate --all` after `fleet keys init`, then rotate secrets that were ever stored in plaintext. The host key has no passphrase; it is protected by file permissions only (see the threat notes in `docs/operations.md`).
+- **FLE-23: strict Content-Security-Policy on the dashboard.** Every HTML response (pages and htmx fragments) now carries `default-src 'self'; script-src 'self'; style-src 'self'; ...; frame-ancestors 'none'`, plus `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referrer`. The inline `<style>` and `style=` moved to `static/fleet.css`, and htmx runs with `includeIndicatorStyles` and `allowEval` off. A test fails if a template reintroduces inline script, style or event handlers.
+- **FLE-23: cross-origin writes to `/ui/*` are refused (HTTP 403).** A state-changing UI request must be `Sec-Fetch-Site: same-origin` or carry an `Origin` equal to the request `Host`; `cross-site`, `same-site` (a DDEV instance on a sibling subdomain) and `Origin: null` are rejected. Requests sending neither header (curl, scripts) still work. `/hooks/*`, `/api/*` and the WebSocket are unaffected.
+- **FLE-22:** a secret entered in the web UI never crosses the network or touches the host's disk as plaintext (from the browser to the stored `.asc`; decrypted deploy-time use is unchanged): the value input is unnamed (it cannot be submitted), is cleared once encrypted, and the server rejects anything that is not an OpenPGP message addressed to the host key. The limits (root on the host, the unpassphrased host key readable by the fleet user, a compromised dashboard page) are documented in `docs/client-side-encryption.md`.
+
+### Dependencies
+- FLE-10: `fastapi>=0.142.4` (was `>=0.142.2`), Renovate #24.
+
 ## [0.11.0] - 2026-10-07
 
 ### Added
@@ -351,7 +373,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/rcuny/ddev-fleet/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/rcuny/ddev-fleet/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/rcuny/ddev-fleet/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/rcuny/ddev-fleet/compare/v0.9.1...v0.9.2

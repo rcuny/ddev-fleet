@@ -1,0 +1,41 @@
+body { font-family: system-ui, sans-serif; margin: 2rem; color: #1a1a1a; }
+table { border-collapse: collapse; width: 100%; }
+th, td { text-align: left; padding: 0.4rem 0.8rem; border-bottom: 1px solid #ddd; }
+form.deploy-form { margin: 1.5rem 0; display: flex; gap: 0.5rem; align-items: end; }
+.job-panel { margin-top: 1rem; border: 1px solid #ccc; padding: 0.8rem; }
+.error-panel {
+  margin-top: 1rem; border: 1px solid #b00; padding: 0.8rem; color: #b00;
+  background: #fff0f0;
+}
+.job-log {
+  background: #111; color: #0f0; font-family: monospace; padding: 0.6rem;
+  height: 12rem; overflow-y: auto; white-space: pre-wrap;
+}
+button.destroy { color: #b00; }
+footer.sys-stats {
+  margin-top: 2rem; padding-top: 0.8rem; border-top: 1px solid #ddd;
+  color: #666; font-size: 0.85rem;
+}
+footer.sys-stats .mount { color: #999; }
+.reboot-badge {
+  display: inline-block; background: #b00020; color: #fff; padding: 0.2rem 0.6rem;
+  border-radius: 3px; font-weight: 600; margin-bottom: 0.4rem;
+}
+
+/* htmx's own indicator rules. base.html sets includeIndicatorStyles:false
+   (htmx would otherwise inject an inline <style>, which style-src 'self'
+   blocks), so they live here. */
+.htmx-indicator { opacity: 0; }
+.htmx-request .htmx-indicator, .htmx-request.htmx-indicator {
+  opacity: 1; transition: opacity 200ms ease-in;
+}
+
+/* Secrets screen (FLE-22) */
+.main-nav { margin: 0 0 1rem; }
+.main-nav a { margin-right: 1rem; }
+.inline-form { margin: 1rem 0; }
+form.secret-form { margin: 1rem 0; display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; }
+.secret-table { max-width: 44rem; }
+.secret-notice { color: #060; }
+.secret-client-error { color: #b00; flex-basis: 100%; margin: 0; }
+.fingerprint { font-family: monospace; }

@@ -18,7 +18,7 @@ def test_validate_part_accepts_valid_values(value):
 
 @pytest.mark.parametrize(
     "value",
-    ["ABC", "Abc", "abc_def", "abc def", "abc--def", "", "abc.def", "-abc", "abc-"],
+    ["ABC", "Abc", "abc_def", "abc def", "abc--def", "", "abc.def", "-abc", "abc-", "demo\n"],
 )
 def test_validate_part_rejects_invalid_values(value):
     with pytest.raises(ValidationError):

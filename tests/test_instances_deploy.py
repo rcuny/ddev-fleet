@@ -1,10 +1,11 @@
 import pytest
 
-from fleet.core import caddyauth, instances
-from fleet.core.errors import DeployError, TokenError
+from fleet.core import caddyauth, instances, pgp
+from fleet.core.errors import DeployError, FleetError, TokenError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult, run_streamed
 from fleet.core.secrets import read_secrets, write_secret
+from fleet.core.secretstore import SecretStore
 
 
 class HybridRunner:
@@ -1597,3 +1598,48 @@ def test_deploy_git_excludes_the_env_file_it_wrote(fleet_home, git_repo):
         encoding="utf-8"
     )
     assert ".env" in exclude.splitlines()
+
+
+def test_deploy_decrypts_an_encrypted_project_secret_into_the_asset(gpg_fleet_home, git_repo):
+    """FLE-21: with a host key, `fleet secret set` stores an .asc; deploy
+    decrypts it for [[token]] substitution exactly like the legacy .env."""
+    paths, registry = _make_paths_and_registry(gpg_fleet_home, str(git_repo["origin"]))
+    slack_dir = paths.assets / "demo" / ".ddev" / "slack"
+    slack_dir.mkdir(parents=True, exist_ok=True)
+    (slack_dir / ".env").write_text("SLACK_BOT_TOKEN=[[slack-bot-token]]\n", encoding="utf-8")
+    pgp.init_host_key(paths.gnupg, "ddev-fleet test host")
+    assert SecretStore(paths).set("demo", "SLACK_BOT_TOKEN", "xoxb-from-gpg") == "encrypted"
+    assert not (paths.project_secrets / "demo.env").exists()
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    injected = paths.instances / "demo--develop" / ".ddev" / "slack" / ".env"
+    assert injected.read_text(encoding="utf-8") == "SLACK_BOT_TOKEN=xoxb-from-gpg\n"
+    deploy_log = (paths.logs / "demo--develop" / "deploy.log").read_text(encoding="utf-8")
+    assert "xoxb-from-gpg" not in deploy_log
+
+
+def test_deploy_fails_loudly_on_a_corrupt_encrypted_secret(gpg_fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(gpg_fleet_home, str(git_repo["origin"]))
+    pgp.init_host_key(paths.gnupg, "ddev-fleet test host")
+    SecretStore(paths).set("demo", "SLACK_BOT_TOKEN", "xoxb-from-gpg")
+    asc = paths.project_secrets / "demo" / "SLACK_BOT_TOKEN.asc"
+    asc.write_text(
+        "-----BEGIN PGP MESSAGE-----\n\nbroken-payload\n-----END PGP MESSAGE-----\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(FleetError) as excinfo:
+        instances.deploy(
+            paths,
+            registry,
+            "demo",
+            "default",
+            branch="main",
+            label="develop",
+            runner=HybridRunner(),
+        )
+
+    assert "broken-payload" not in str(excinfo.value)

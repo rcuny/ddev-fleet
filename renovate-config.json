@@ -83,6 +83,18 @@
       ],
       "depNameTemplate": "htmx.org",
       "datasourceTemplate": "npm"
+    },
+    {
+      "customType": "regex",
+      "description": "Vendored OpenPGP.js: Renovate bumps the version in docs/vendored-assets.md, a human re-vendors the file (see that doc)",
+      "managerFilePatterns": [
+        "/^docs/vendored-assets\\.md$/"
+      ],
+      "matchStrings": [
+        "\\|\\s*openpgp\\.min\\.mjs\\s*\\|\\s*openpgp\\s*\\|\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*\\|"
+      ],
+      "depNameTemplate": "openpgp",
+      "datasourceTemplate": "npm"
     }
   ]
 }
