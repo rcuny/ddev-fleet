@@ -187,7 +187,7 @@ registry load with an actionable message naming the bad key.
 | `fleet list` | — | Table: id, project, branch, state, RAM, URL |
 | `fleet ssh-key` | — | Prints the fleet deploy public key |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
-| `fleet secret set <project> <key> <value>` | — | Writes `KEY=VALUE` into `secrets/<project>.env` (0600), available at deploy as `[[key-with-dashes]]` |
+| `fleet secret set <project> <key>` | — | Stores one secret (value from a hidden prompt or stdin, never argv; positional value is deprecated). Encrypted to the host key as `secrets/<project>/<KEY>.asc` once `fleet keys init` has run, else legacy plaintext `secrets/<project>.env` (0600). Available at deploy as `[[key-with-dashes]]`. Companions: `fleet secret list|unset|migrate`, `fleet keys init|show`. |
 | `fleet webhook secret <project>` | `[--rotate] [--source=jira\|bitbucket]` | Creates/rotates the project's Jira webhook secret (`webhooks/secrets.env`, 0600), printed once with the hook URL; see `docs/README-webhooks.md` |
 | `fleet webhook bitbucket-token <project>` | (token via stdin / hidden prompt) | Stores the Bitbucket `pipeline:write` token for `bitbucket_hooks` rules |
 | `fleet webhook log` | `[--project=<p>] [-n=20] [--source=jira\|bitbucket]` | Last N webhook deliveries from `logs/webhooks/jira.jsonl` (or `bitbucket.jsonl`) |
@@ -336,7 +336,7 @@ playbook (roles: `shell_profile`, `claude_cli`) — never the full `site.yml`.
 reversible `fleet`/`ddev` commands are allow-tier (`fleet list`, `fleet
 deploy *`, `fleet start/stop/snapshot`, read-only `ddev`/`git`/`grep`/`find`/
 `df`/`free` commands). Credential and fleet-wide-restart commands
-(`fleet secret set`, `fleet {set,refresh,rotate}-*-token`,
+(`fleet secret set|unset|migrate`, `fleet keys init`, `fleet {set,refresh,rotate}-*-token`,
 `fleet {set,rotate}-admin-password`, bulk selector forms `fleet start/stop
 --*`) ask. `fleet destroy` (any single- or multi-id form) is deliberately
 absent from allow and instead sits in ask, so the harness always prompts
