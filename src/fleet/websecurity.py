@@ -37,7 +37,7 @@ def csp_value(host: str | None) -> str:
     is a plain host[:port].
     """
     connect = "'self'"
-    if host and _HOST_RE.match(host):
+    if host and _HOST_RE.fullmatch(host):
         connect += f" wss://{host}"
     directives = [
         "default-src 'self'",
@@ -79,4 +79,9 @@ def is_cross_origin_ui_write(method: str, path: str, headers: Mapping[str, str])
     if origin is None:
         return False
     host = (headers.get("host") or "").strip().lower()
-    return not host or urlsplit(origin).netloc.lower() != host
+    if not host:
+        return True
+    try:
+        return urlsplit(origin).netloc.lower() != host
+    except ValueError:  # malformed Origin, e.g. an unbalanced IPv6 bracket
+        return True

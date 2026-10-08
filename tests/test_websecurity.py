@@ -34,6 +34,7 @@ def test_csp_value_keeps_port():
         "[::1]:8765",
         "host:99999999",
         "-leading.example",
+        "good.example\n",
     ],
 )
 def test_csp_value_omits_unsafe_host(host):
@@ -87,6 +88,8 @@ def _blocked(method, path, **headers):
         {"Origin": "https://sibling.fleet.example.test"},
         {"Origin": "https://fleet.example.test:8443"},  # port differs from the Host
         {"Origin": "not a url"},
+        {"Origin": "http://[::1"},
+        {"Origin": "http://[x]"},
         {"Sec-Fetch-Site": "cross-site", "Origin": "https://fleet.example.test"},
     ],
 )
