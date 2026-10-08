@@ -29,3 +29,13 @@ footer.sys-stats .mount { color: #999; }
 .htmx-request .htmx-indicator, .htmx-request.htmx-indicator {
   opacity: 1; transition: opacity 200ms ease-in;
 }
+
+/* Secrets screen (FLE-22) */
+.main-nav { margin: 0 0 1rem; }
+.main-nav a { margin-right: 1rem; }
+.inline-form { margin: 1rem 0; }
+form.secret-form { margin: 1rem 0; display: flex; gap: 0.5rem; align-items: end; flex-wrap: wrap; }
+.secret-table { max-width: 44rem; }
+.secret-notice { color: #060; }
+.secret-client-error { color: #b00; flex-basis: 100%; margin: 0; }
+.fingerprint { font-family: monospace; }
