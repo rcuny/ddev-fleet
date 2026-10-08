@@ -12,6 +12,7 @@ from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult
 from fleet.core.secrets import write_secret
+from fleet.core.secretstore import SecretStore
 from fleet.core.typesense import ensure_project_keys
 
 PLAIN_REGISTRY = """\
@@ -106,7 +107,7 @@ def test_refresh_instance_config_rewrites_config_with_hook_token_and_typesense(f
     instance_dir = _write_instance_dir(fleet_home, "demo--develop")
 
     # Pre-seed typesense keys the way a prior deploy would have.
-    admin_key, search_key = ensure_project_keys(paths.project_secrets / "demo.env")
+    admin_key, search_key = ensure_project_keys(SecretStore(paths), "demo")
 
     instances.refresh_instance_config(paths, registry, "demo--develop")
 

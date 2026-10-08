@@ -6,10 +6,12 @@ edge exposure)."""
 import json
 import secrets as _stdlib_secrets
 import urllib.request
-from pathlib import Path
+from typing import TYPE_CHECKING
 
 from fleet.core.errors import TypesenseError
-from fleet.core.secrets import read_secrets, write_secret
+
+if TYPE_CHECKING:
+    from fleet.core.secretstore import SecretStore
 
 _SEARCH_KEY_DESCRIPTION = "fleet-search-only"
 
@@ -19,22 +21,23 @@ def generate_key() -> str:
     return _stdlib_secrets.token_hex(24)
 
 
-def ensure_project_keys(secrets_path: Path) -> tuple[str, str]:
-    """Read the per-project secrets file at `secrets_path`; generate and
-    persist `TYPESENSE_API_KEY` (admin) and `FLEET_TYPESENSE_SEARCH_KEY`
-    (search-only) if either is missing. Idempotent — existing keys are
-    preserved, never rotated. Returns `(admin_key, search_key)`."""
-    existing = read_secrets(secrets_path)
+def ensure_project_keys(store: "SecretStore", project: str) -> tuple[str, str]:
+    """Read `project`'s secrets through `store`; generate and persist
+    `TYPESENSE_API_KEY` (admin) and `FLEET_TYPESENSE_SEARCH_KEY` (search-only)
+    if either is missing — encrypted when the host has a key, legacy
+    plaintext otherwise. Idempotent: existing keys are preserved, never
+    rotated. Returns `(admin_key, search_key)`."""
+    existing = store.read_all(project)
 
     admin_key = existing.get("TYPESENSE_API_KEY")
     if not admin_key:
         admin_key = generate_key()
-        write_secret(secrets_path, "TYPESENSE_API_KEY", admin_key)
+        store.set(project, "TYPESENSE_API_KEY", admin_key)
 
     search_key = existing.get("FLEET_TYPESENSE_SEARCH_KEY")
     if not search_key:
         search_key = generate_key()
-        write_secret(secrets_path, "FLEET_TYPESENSE_SEARCH_KEY", search_key)
+        store.set(project, "FLEET_TYPESENSE_SEARCH_KEY", search_key)
 
     return admin_key, search_key
 
