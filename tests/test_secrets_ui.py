@@ -216,17 +216,20 @@ def test_valid_ciphertext_is_stored_listed_and_never_rendered(client, paths, hos
 def test_rejected_bodies_return_400_store_nothing_and_are_never_echoed(
     client, paths, host_key, foreign_home
 ):
+    not_armored = "not an ASCII-armored PGP MESSAGE"
     bodies = {
-        "plaintext": SENTINEL,
-        "public key block": host_key.armored_public_key,
-        "truncated armor": "-----BEGIN PGP MESSAGE-----\n\nwV4D",
-        "wrong recipient": pgp.encrypt(foreign_home, SENTINEL),
-        "password only": _symmetric_message(foreign_home),
+        "plaintext": (SENTINEL, not_armored),
+        "public key block": (host_key.armored_public_key, not_armored),
+        "truncated armor": ("-----BEGIN PGP MESSAGE-----\n\nwV4D", not_armored),
+        "wrong recipient": (pgp.encrypt(foreign_home, SENTINEL), "not encrypted to this host"),
+        "password only": (_symmetric_message(foreign_home), "password-encrypted"),
     }
-    for label, armored in bodies.items():
+    for label, (armored, reason) in bodies.items():
         response = _post(client, armored)
         assert response.status_code == 400, label
         assert 'class="error-panel"' in response.text, label
+        assert reason in response.text, label
+        assert "BEGIN PGP MESSAGE" not in response.text, label
         assert SENTINEL not in response.text, label
         assert "wV4D" not in response.text, label
         assert "BEGIN PGP PUBLIC KEY BLOCK" not in response.text, label

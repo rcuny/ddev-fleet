@@ -32,9 +32,22 @@ function fakeForm({ value, hostKeyText = publicKey, withHostKey = true }) {
   return { elements, querySelector: (selector) => elements[selector] ?? null };
 }
 
+// `trigger` snapshots the form's fields at call time: htmx reads the form when the
+// event fires, so the plaintext must already be cleared and the ciphertext set then.
 function fakeHtmx() {
   const calls = [];
-  return { calls, trigger: (elt, name) => calls.push([elt, name]) };
+  const atTrigger = [];
+  return {
+    calls,
+    atTrigger,
+    trigger: (elt, name) => {
+      calls.push([elt, name]);
+      atTrigger.push({
+        plain: elt.elements["#secret-value"].value,
+        armored: elt.elements["#secret-armored"].value,
+      });
+    },
+  };
 }
 
 test("success: ciphertext in the hidden field, plaintext cleared, event fired", async () => {
@@ -49,6 +62,9 @@ test("success: ciphertext in the hidden field, plaintext cleared, event fired", 
   assert.equal(form.elements["#secret-value"].value, "");
   assert.equal(form.elements["#secret-client-error"].hidden, true);
   assert.deepEqual(htmx.calls, [[form, "fleet:encrypted"]]);
+  assert.equal(htmx.atTrigger.length, 1);
+  assert.equal(htmx.atTrigger[0].plain, "", "plaintext must be cleared before the request fires");
+  assert.match(htmx.atTrigger[0].armored, /^-----BEGIN PGP MESSAGE-----/);
 });
 
 test("an empty value shows an error and sends nothing", async () => {

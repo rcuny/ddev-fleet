@@ -59,7 +59,7 @@ def test_mjs_is_registered_as_javascript():
 
 def test_static_modules_are_served_with_a_javascript_content_type(fleet_home):
     client = TestClient(create_app(fleet_home))
-    for name in ("openpgp.min.mjs",):
+    for name in ("openpgp.min.mjs", "secrets-crypto.mjs", "secrets-form.mjs", "secrets.js"):
         response = client.get(f"/static/{name}")
         assert response.status_code == 200, name
         assert response.headers["content-type"].startswith("text/javascript"), name
@@ -69,3 +69,4 @@ def test_static_modules_are_served_with_a_javascript_content_type(fleet_home):
 def test_every_static_file_is_top_level_so_the_package_data_glob_ships_it():
     # pyproject: package-data fleet = ["static/*", ...] does not recurse.
     assert [p for p in STATIC.iterdir() if p.is_dir()] == []
+
