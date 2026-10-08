@@ -63,7 +63,6 @@ test("success: ciphertext in the hidden field, plaintext cleared, event fired", 
   assert.equal(form.elements["#secret-client-error"].hidden, true);
   assert.deepEqual(htmx.calls, [[form, "fleet:encrypted"]]);
   assert.equal(htmx.atTrigger.length, 1);
-  assert.equal(htmx.atTrigger[0].plain, "", "plaintext must be cleared before the request fires");
   assert.match(htmx.atTrigger[0].armored, /^-----BEGIN PGP MESSAGE-----/);
 });
 

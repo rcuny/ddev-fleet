@@ -103,7 +103,12 @@ Details worth knowing:
   refuses any key or subkey that is not version 4 and pins `aeadProtect: false`, so
   what it produces is a v3 PKESK + SEIPDv1 message that GnuPG 2.1 or newer (so 2.2 and 2.4) reads.
   `tests/test_pgp_interop.py` proves this against a real `gpg`, including a committed
-  OpenPGP.js ciphertext.
+  OpenPGP.js ciphertext. `tests/js/secrets-form.test.mjs` covers the form logic against a
+  fake htmx, and `tests/e2e/test_secrets_page.py` drives the real page in headless
+  Chromium (CSP enforced, real htmx and OpenPGP.js) against a real daemon: save, empty
+  value, invalid name, delete and the no-host-key page, ending with `gpg` decrypting what
+  the browser encrypted. Both exist because the fake-htmx test alone missed FLE-24 (an
+  emptied `required` field made htmx drop the request silently).
 - **No passphrase** is deliberate: deploys run unattended (daemon, webhooks,
   `fleet redeploy`), so nobody is there to type one. The key is protected by file
   permissions only; see the threat model.
