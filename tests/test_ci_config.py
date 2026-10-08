@@ -98,11 +98,24 @@ def test_gates_run_on_debian_13_with_systemd_and_require_systemd_analyze():
     assert script.index("FLEET_REQUIRE_SYSTEMD_ANALYZE=1") < script.index("pytest -q")
     assert re.search(r"apt-get install .*\bgnupg\b.*\bnodejs\b", script)
     assert script.index("FLEET_REQUIRE_PGP_TOOLS=1") < script.index("pytest -q")
+    assert script.index("FLEET_REQUIRE_E2E=1") < script.index("pytest -q")
+    install = script.index('pip install -q -e ".[dev]"')
+    browser = script.index("python -m playwright install --with-deps --only-shell chromium")
+    assert install < browser < script.index("pytest -q")
     node_gate = script.index("node --test tests/js/*.test.mjs")
     assert script.index("black --check .") < node_gate
     assert node_gate < script.index("systemd_security.py offline")
     assert script.index("systemd_security.py offline") < script.index("systemd_security.py compare")
     assert gates["artifacts"] == ["reports/**"]
+
+
+def test_playwright_is_a_pinned_dev_dependency():
+    # FLE-24: the browser E2E suite. The pin must equal the companion's
+    # test/playwright/package.json (the Chromium build comes from the Playwright version).
+    pyproject = (ROOT / "pyproject.toml").read_text()
+    assert re.search(r'"playwright==\d+\.\d+\.\d+"', pyproject)
+    dev = pyproject[pyproject.index("dev = [") : pyproject.index("infra = [")]
+    assert '"playwright==' in dev
 
 
 def test_ansible_lint_is_a_non_blocking_parallel_step_next_to_the_gates():

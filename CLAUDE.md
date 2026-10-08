@@ -88,9 +88,18 @@ this repo's checkout locally:
 .venv/bin/ruff check .
 .venv/bin/black --check .
 node --test tests/js/*.test.mjs   # browser-crypto tests (OpenPGP.js, FLE-22); needs Node
+.venv/bin/pytest tests/e2e        # browser E2E (FLE-24): real daemon + headless Chromium via Playwright
 ```
 
-`pyproject.toml` declares `dev` extras (`pytest`, `ruff`, `black`, `httpx`)
+`tests/e2e` is part of `pytest -q`; it skips when Playwright or Chromium is missing
+(install: `.venv/bin/python -m playwright install --only-shell chromium`) and fails
+instead under `FLEET_REQUIRE_E2E=1` (CI sets it). **Any change to a UI page, template,
+or the JS it loads needs an E2E test** in `tests/e2e/`: unit tests with a fake htmx or
+the ASGI test client cannot see htmx form validation, the CSP or module loading
+(FLE-24 shipped broken for exactly that reason). The `browser_page` fixture fails the
+test on any console error, page error or CSP violation.
+
+`pyproject.toml` declares `dev` extras (`pytest`, `ruff`, `black`, `httpx`, `playwright`)
 and `infra` extras (`ansible-core`, `ansible-lint`, `yamllint`) as optional
 dependency groups. `ruff` selects `E,F,I`, line length 100 (`black` matches).
 `pytest` filters a known `httpx`/`starlette.testclient` deprecation warning

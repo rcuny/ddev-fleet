@@ -114,7 +114,12 @@ definitions:
           - export FLEET_REQUIRE_SYSTEMD_ANALYZE=1
           # Likewise the gpg/node interop tests fail instead of skipping (FLE-22).
           - export FLEET_REQUIRE_PGP_TOOLS=1
+          # And the browser E2E suite (tests/e2e, FLE-24) fails instead of skipping when
+          # Playwright or Chromium is unavailable.
+          - export FLEET_REQUIRE_E2E=1
           - pip install -q -e ".[dev]"
+          # Headless Chromium for tests/e2e, plus the system libraries it needs (apt, as root).
+          - python -m playwright install --with-deps --only-shell chromium
           - pytest -q
           - ruff check .
           - black --check .

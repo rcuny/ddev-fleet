@@ -29,6 +29,11 @@ same systemd (257) as the servers.
   instead of skipping if `systemd-analyze` is ever missing. The image also gets
   `gnupg` and `nodejs`, and `FLEET_REQUIRE_PGP_TOOLS=1` is set so the gpg/node
   interop tests fail instead of skipping if either tool is missing.
+  `pytest -q` also runs the browser E2E suite (`tests/e2e`, Playwright driving a
+  real daemon in headless Chromium with the CSP enforced). The step installs the
+  browser with `python -m playwright install --with-deps --only-shell chromium`
+  and sets `FLEET_REQUIRE_E2E=1`, so a missing Playwright or a Chromium that
+  cannot launch fails the run instead of skipping the E2E tests.
 - **Ansible lint (non-blocking)**: `ansible-lint ansible/` and `yamllint
   ansible/` (the `infra` extra). Findings are printed but never fail the run;
   drop the `|| echo` in the step to promote it to a hard gate.
@@ -301,4 +306,9 @@ into a failure, as in the pipeline. Likewise `FLEET_REQUIRE_PGP_TOOLS=1` turns a
 missing `gpg` or `node` into a failure instead of a skip for the OpenPGP interop
 tests (`tests/test_pgp_interop.py`, `tests/test_secrets_ui.py`,
 `tests/test_vendored_openpgp.py`); run `node --test tests/js/*.test.mjs` for the
-browser-crypto tests.
+browser-crypto tests. `FLEET_REQUIRE_E2E=1` does the same for the browser E2E
+suite (`tests/e2e`): without it, a missing Playwright or Chromium skips those
+tests. Locally, install the browser once with
+`.venv/bin/python -m playwright install --only-shell chromium` (add
+`--with-deps` or run `playwright install-deps chromium` with root for the system
+libraries), then run `.venv/bin/pytest tests/e2e`.

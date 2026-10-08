@@ -23,6 +23,7 @@ dev = [
     "ruff>=0.16.10",
     "black>=26.10.0",
     "httpx>=0.28.1",
+    "playwright==1.63.0",
 ]
 infra = [
     "ansible-core>=2.21.5",
