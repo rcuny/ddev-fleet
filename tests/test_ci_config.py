@@ -165,17 +165,30 @@ def test_renovate_never_bumps_the_python_interpreter():
     assert any(r.get("matchDepNames") == ["python"] for r in rules)
 
 
-def test_htmx_regex_manager_matches_the_vendored_assets_marker():
-    (manager,) = RENOVATE["customManagers"]
+def _vendored_version(dep_name: str) -> str:
+    (manager,) = [m for m in RENOVATE["customManagers"] if m["depNameTemplate"] == dep_name]
     assert manager["managerFilePatterns"] == ["/^docs/vendored-assets\\.md$/"]
+    assert manager["datasourceTemplate"] == "npm"
     # JS named groups (?<x>...) -> Python (?P<x>...)
     pattern = re.compile(manager["matchStrings"][0].replace("(?<", "(?P<"))
+    match = pattern.search((ROOT / "docs" / "vendored-assets.md").read_text())
+    assert match, f"{dep_name} marker row not matched"
+    return match.group("currentValue")
+
+
+def test_htmx_regex_manager_matches_the_vendored_assets_marker():
+    version = _vendored_version("htmx.org")
     doc = (ROOT / "docs" / "vendored-assets.md").read_text()
-    match = pattern.search(doc)
-    assert match, "htmx marker line not matched"
-    version = match.group("currentValue")
     assert f"htmx.org@{version}/dist/htmx.min.js" in doc
     assert f'version:"{version}"' in (ROOT / "src/fleet/static/htmx.min.js").read_text()
+
+
+def test_openpgp_regex_manager_matches_the_vendored_assets_marker():
+    version = _vendored_version("openpgp")
+    doc = (ROOT / "docs" / "vendored-assets.md").read_text()
+    assert f"openpgp@{version}/dist/openpgp.min.mjs" in doc
+    header = (ROOT / "src/fleet/static/openpgp.min.mjs").read_text(encoding="utf-8")[:200]
+    assert f"OpenPGP.js v{version}" in header
 
 
 def test_renovate_prefixes_commits_with_a_jira_key():

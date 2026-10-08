@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import mimetypes
 import os
 import re
 import time
@@ -31,6 +32,10 @@ from fleet.jobs import JobManager
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# Python 3.11's MIME table has no ".mjs": StaticFiles would serve the ES modules
+# as application/octet-stream and browsers refuse to run those as module scripts.
+mimetypes.add_type("text/javascript", ".mjs")
 
 _INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
