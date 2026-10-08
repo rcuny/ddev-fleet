@@ -285,7 +285,7 @@ there's nothing to pull — edit `fleet.yml` in place instead.
 
 ```bash
 fleet assets push <project> <src> <dest-rel>    # copy a local file into assets/<project>/<dest-rel>
-fleet secret set <project> <key> <value>        # write KEY=VALUE into secrets/<project>.env (0600)
+fleet secret set <project> <key>               # value from a hidden prompt or stdin; stored encrypted once a host key exists
 fleet snapshot <instance-id> [--dest-rel=...]    # ddev export-db --gzip=false into the project's asset tree
 ```
 
@@ -298,6 +298,82 @@ explicitly (e.g. `fleet assets push`) once you've verified it. Secret
 values written with `fleet secret set` become available at deploy time
 as `[[key-with-dashes]]` tokens (e.g. `SLACK_BOT_TOKEN` →
 `[[slack-bot-token]]`).
+
+## Encrypted project secrets (FLE-21)
+
+Project secrets (`SLACK_BOT_TOKEN`, API keys, ...) can rest as OpenPGP
+ciphertext instead of plaintext. One GnuPG **host key** per server encrypts
+them; the deploy pipeline decrypts them with `gpg` and substitutes them as
+`[[token]]`s exactly as before. A server without a host key keeps working
+unchanged (legacy plaintext `secrets/<project>.env`), so rolling this out is
+opt-in per server.
+
+```bash
+sudo -u fleet fleet keys init            # once per server; prints the fingerprint
+sudo -u fleet fleet keys show            # fingerprint, subkey id, public-key path (also rewrites host-public-key.asc)
+sudo -u fleet fleet secret list <project>
+printf '%s' "$TOKEN" | sudo -u fleet fleet secret set <project> SLACK_BOT_TOKEN
+```
+
+Layout: `/srv/fleet/gnupg/` is `GNUPGHOME` (0700, owner `fleet`);
+`/srv/fleet/secrets/<project>/<KEY>.asc` are the ciphertexts (dir 0700, files
+0600). The `fleet_user` Ansible role creates both directories.
+
+### Migrating existing plaintext secrets
+
+1. `sudo -u fleet fleet keys init` (skip if `fleet keys show` already works).
+2. `sudo -u fleet fleet secret migrate --all` (or one `<project>`). Each value
+   is encrypted, **verified by decrypting it**, and only then is
+   `secrets/<project>.env` deleted. It is all-or-nothing per project, safe to
+   re-run, and refuses (changing nothing) if a legacy name is not
+   `^[A-Z][A-Z0-9_]{0,63}$`: rename it in the `.env` and retry. If an `.asc`
+   already exists for a key, migrate keeps the encrypted value and discards the
+   legacy one, so before rotating a secret check `fleet secret list` and a
+   deploy to see which value is live. `migrate` on a project with no `.env` is
+   a no-op, and it does not require the project to be registered in `fleet.yml`.
+3. `sudo -u fleet fleet secret list <project>` should show every name as
+   `encrypted`; `ls /srv/fleet/secrets/*.env` should find nothing.
+4. The deleted plaintext can still exist in disk blocks and in earlier
+   backups or snapshots. **Rotate any secret that mattered.**
+5. Redeploy an instance that uses a secret and check it still receives it.
+
+### What this does and does not protect
+
+Protected: the stored secret files and their backups (ciphertext only).
+Not protected: anyone who is root on the host or can read
+`/srv/fleet/gnupg/` (the host private key has **no passphrase**, because
+deploys are unattended; it is protected by file permissions only), and the
+decrypted values that deploy writes into each instance's asset files and tty
+commands, as before.
+
+### Back up and loss of the host key
+
+Back up `/srv/fleet/gnupg/` **separately from** `/srv/fleet/secrets/` (a
+backup holding both defeats the encryption). If the host key is lost, every
+`.asc` becomes unreadable: deploys that need them fail with a decryption error
+and you must `fleet secret set` the values again. Deleting the key on purpose
+(`rm -r /srv/fleet/gnupg`, then `fleet keys init`) is the same operation, so
+re-create the secrets afterwards.
+
+### Checking gpg-agent under the systemd sandbox (manual, per server)
+
+`gpg` starts a `gpg-agent` whose socket lives in `GNUPGHOME`. The daemon runs
+under `fleet-sandbox.inc.j2` (`MemoryDenyWriteExecute`, `SystemCallFilter`),
+which gpg children inherit. After enabling encrypted secrets on a server,
+verify once, approximating the service sandbox (see `fleet-sandbox.inc.j2` for the full set):
+
+```bash
+sudo systemd-run --pipe --wait -p User=fleet -p NoNewPrivileges=yes \
+  -p MemoryDenyWriteExecute=yes -p SystemCallFilter=@system-service \
+  -p ReadWritePaths=/srv/fleet -p ProtectSystem=strict \
+  env GNUPGHOME=/srv/fleet/gnupg sh -c 'echo ok | gpg --batch --no-tty --armor --encrypt \
+  --trust-model always -r "$(fleet keys show | awk "/^fingerprint/{print \$2}")" | gpg --batch --no-tty --decrypt'
+```
+
+Expected output: `ok` (gpg's own stderr lines may appear before it). Then deploy an instance that uses a secret and check the
+journal (`journalctl -u fleet -n 50`) for `gpg` or seccomp denials. If the
+sandbox blocks gpg, widen the minimum in `fleet-sandbox.inc.j2`; do not drop
+the sandbox.
 
 ## Verification checklist (repeatable template)
 

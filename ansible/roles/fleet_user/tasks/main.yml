@@ -32,6 +32,20 @@
     modification_time: preserve
     access_time: preserve
 
+- name: Create the encrypted secret store directories (per-project .asc files and GNUPGHOME)
+  # FLE-21. 0700, unlike the 0750 tree above: `secrets/` holds the per-project
+  # ciphertexts (and legacy plaintext until `fleet secret migrate`), `gnupg/`
+  # holds the unpassphrased host private key created by `fleet keys init`.
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_group }}"
+    mode: "0700"
+  loop:
+    - "{{ fleet_srv_dir }}/secrets"
+    - "{{ fleet_srv_dir }}/gnupg"
+
 # Bundled demo project: turn the repo's demo/ source into a local bare git repo
 # so `fleet deploy demo` works on a fresh install with no private config repo and
 # no network. Staged from the playbook checkout; the bare repo is built once

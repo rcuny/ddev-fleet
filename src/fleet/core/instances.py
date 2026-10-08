@@ -44,6 +44,7 @@ from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock
 from fleet.core.registry import Registry, ResolvedInstance
 from fleet.core.runner import run_streamed
 from fleet.core.secrets import read_secrets, secret_tokens
+from fleet.core.secretstore import SecretStore
 from fleet.core.tokens import build_context, env_vars, extract_issue_id, substitute_text
 
 logger = logging.getLogger(__name__)
@@ -61,6 +62,7 @@ class FleetPaths:
     logs: Path
     secrets: Path
     project_secrets: Path
+    gnupg: Path
     locks: Path
     push_key_dir: Path
     host_config: Path
@@ -85,6 +87,10 @@ class FleetPaths:
             logs=logs_dir,
             secrets=home / ".secrets",
             project_secrets=home / "secrets",
+            # GNUPGHOME of the host key that encrypts project secrets (FLE-21).
+            # 0700; holds the unpassphrased private key — never back it up
+            # next to the ciphertexts it protects.
+            gnupg=home / "gnupg",
             locks=home / "locks",
             push_key_dir=home / ".push-key",
             # Deliberately OUTSIDE config_dir/ — config_dir is the shared,
@@ -674,12 +680,13 @@ def deploy(
                 f"failed to configure basic auth for instance {inst_id!r}: {exc.message}"
             ) from exc
 
+        secret_store = SecretStore(paths)
         typesense_enabled = registry.typesense_enabled(project)
         typesense_admin_key = None
         typesense_search_key = None
         if typesense_enabled:
             typesense_admin_key, typesense_search_key = typesense.ensure_project_keys(
-                paths.project_secrets / f"{project}.env"
+                secret_store, project
             )
 
         # Reconcile the WHOLE registry's Caddy port snippets (not just this
@@ -736,7 +743,7 @@ def deploy(
                 registry.issue_id_regexp(project), resolved.label, resolved.branch
             ),
         )
-        project_secrets = read_secrets(paths.project_secrets / f"{project}.env")
+        project_secrets = secret_store.read_all(project)
         context.update(secret_tokens(project_secrets))
         copied = assets_mod.inject(paths.assets / project, instance_dir, context, runner=runner)
         ensure_git_exclude(instance_dir, [str(path.relative_to(instance_dir)) for path in copied])
@@ -1320,7 +1327,7 @@ def refresh_instance_config(
         typesense_search_key = None
         if typesense_enabled:
             typesense_admin_key, typesense_search_key = typesense.ensure_project_keys(
-                paths.project_secrets / f"{project}.env"
+                SecretStore(paths), project
             )
 
         write_fleet_config(

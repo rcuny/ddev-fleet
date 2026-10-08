@@ -3,12 +3,15 @@ import json
 import pytest
 
 from fleet.core.errors import TypesenseError
+from fleet.core.instances import FleetPaths
 from fleet.core.secrets import read_secrets
+from fleet.core.secretstore import SecretStore
 from fleet.core.typesense import (
     ensure_project_keys,
     generate_key,
     register_search_key,
 )
+from tests.fakegpg import FakeGpg
 
 
 def test_generate_key_returns_hex_string_of_expected_length():
@@ -22,38 +25,58 @@ def test_generate_key_returns_different_keys_each_call():
     assert generate_key() != generate_key()
 
 
-def test_ensure_project_keys_generates_and_persists_keys(tmp_path):
-    secrets_path = tmp_path / "demo.env"
+def _store(tmp_path, gpg=None):
+    paths = FleetPaths.from_home(tmp_path / "home")
+    return paths, SecretStore(paths, gpg=gpg or FakeGpg())
 
-    admin_key, search_key = ensure_project_keys(secrets_path)
+
+def test_ensure_project_keys_generates_and_persists_keys(tmp_path):
+    paths, store = _store(tmp_path)
+
+    admin_key, search_key = ensure_project_keys(store, "demo")
 
     assert admin_key
     assert search_key
     assert admin_key != search_key
 
-    persisted = read_secrets(secrets_path)
+    persisted = read_secrets(paths.project_secrets / "demo.env")
     assert persisted["TYPESENSE_API_KEY"] == admin_key
     assert persisted["FLEET_TYPESENSE_SEARCH_KEY"] == search_key
 
 
 def test_ensure_project_keys_is_idempotent(tmp_path):
-    secrets_path = tmp_path / "demo.env"
+    _, store = _store(tmp_path)
 
-    first_admin, first_search = ensure_project_keys(secrets_path)
-    second_admin, second_search = ensure_project_keys(secrets_path)
+    first_admin, first_search = ensure_project_keys(store, "demo")
+    second_admin, second_search = ensure_project_keys(store, "demo")
 
     assert first_admin == second_admin
     assert first_search == second_search
 
 
 def test_ensure_project_keys_preserves_other_secrets(tmp_path):
-    secrets_path = tmp_path / "demo.env"
-    secrets_path.write_text("SLACK_BOT_TOKEN=xoxb-test\n", encoding="utf-8")
+    paths, store = _store(tmp_path)
+    store.set("demo", "SLACK_BOT_TOKEN", "xoxb-test")
 
-    ensure_project_keys(secrets_path)
+    ensure_project_keys(store, "demo")
 
-    persisted = read_secrets(secrets_path)
-    assert persisted["SLACK_BOT_TOKEN"] == "xoxb-test"
+    assert read_secrets(paths.project_secrets / "demo.env")["SLACK_BOT_TOKEN"] == "xoxb-test"
+
+
+def test_ensure_project_keys_writes_encrypted_when_a_host_key_exists(tmp_path):
+    paths = FleetPaths.from_home(tmp_path / "home")
+    gpg = FakeGpg()
+    gpg.install_key(paths.gnupg)
+    store = SecretStore(paths, gpg=gpg)
+
+    admin_key, search_key = ensure_project_keys(store, "demo")
+
+    assert not (paths.project_secrets / "demo.env").exists()
+    assert store.names("demo") == [
+        ("FLEET_TYPESENSE_SEARCH_KEY", "encrypted"),
+        ("TYPESENSE_API_KEY", "encrypted"),
+    ]
+    assert ensure_project_keys(store, "demo") == (admin_key, search_key)
 
 
 class _FakeResponse:

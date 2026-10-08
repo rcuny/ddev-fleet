@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-21: encrypted per-project secret store.** `fleet keys init|show` creates and shows a GnuPG host key (ed25519 + cv25519, no passphrase) in `$FLEET_HOME/gnupg`. With a key, `fleet secret set` stores `secrets/<project>/<KEY>.asc` (OpenPGP, 0600) and deploy, tty commands and Typesense key handling decrypt through the new `SecretStore`; `.asc` wins over a legacy `secrets/<project>.env`, which is still read. New `fleet secret list|unset|migrate (<project>|--all)`; `migrate` encrypts, verifies by decrypting, then deletes the plaintext file. The Ansible `fleet_user` role creates `/srv/fleet/secrets` and `/srv/fleet/gnupg` (0700). See `docs/operations.md` "Encrypted project secrets".
+
+### Changed
+- **FLE-21: `fleet secret set <project> <key>`** reads the value from a hidden prompt or stdin; the positional `<value>` still works but is deprecated and prints a warning to stderr. The project must exist in `fleet.yml`, and the key must match `^[A-Z][A-Z0-9_]{0,63}$`. `fleet init` now also creates an empty `gnupg/` directory.
+
+### Security
+- **FLE-21:** project secrets can rest as ciphertext on disk once a host key exists; no plaintext value in argv when the prompt or stdin is used (the deprecated positional value still lands in argv), in logs, error messages or command output, and gpg is run with separate stdout/stderr rather than the merged streaming runner. Run `fleet secret migrate --all` after `fleet keys init`, then rotate secrets that were ever stored in plaintext. The host key has no passphrase; it is protected by file permissions only (see the threat notes in `docs/operations.md`).
+
 ## [0.11.0] - 2026-10-07
 
 ### Added

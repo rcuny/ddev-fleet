@@ -17,6 +17,7 @@ from fleet.core import authelia as authelia_mod
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, ddev, fleetconfig
 from fleet.core import instances as instances_mod
+from fleet.core import pgp as pgp_mod
 from fleet.core import reboot as reboot_mod
 from fleet.core import registry as registry_mod
 from fleet.core import shell as shell_mod
@@ -25,9 +26,22 @@ from fleet.core.errors import FleetError
 from fleet.core.registry import Registry
 from fleet.core.runner import run_interactive, run_streamed
 from fleet.core.secrets import write_secret
+from fleet.core.secretstore import SecretStore, validate_key
 from fleet.core.webhooks import WebhookStore
 
 DEFAULT_FLEET_HOME = "/srv/fleet"
+
+DEFAULT_HOST_KEY_UID = "ddev-fleet host key"
+HOST_PUBLIC_KEY_NAME = "host-public-key.asc"
+_SECRET_VALUE_DEPRECATION = (
+    "warning: passing the secret value on the command line is deprecated (it lands in shell "
+    "history and `ps`); omit it to be prompted, or pipe it on stdin. It will be removed in a "
+    "future release."
+)
+_PLAINTEXT_SECRET_WARNING = (
+    "warning: no host key yet, so the secret was stored as PLAINTEXT. Run `fleet keys init`, "
+    "then `fleet secret migrate --all` to encrypt it."
+)
 
 _FLEET_UFW_SYNC_HELPER = Path("/usr/local/sbin/fleet-ufw-sync")
 
@@ -209,7 +223,30 @@ def _build_parser() -> argparse.ArgumentParser:
     secret_set_parser = secret_subparsers.add_parser("set")
     secret_set_parser.add_argument("project")
     secret_set_parser.add_argument("key")
-    secret_set_parser.add_argument("value")
+    secret_set_parser.add_argument(
+        "value",
+        nargs="?",
+        default=None,
+        help="DEPRECATED: omit it; the value is read from a hidden prompt or from stdin",
+    )
+    secret_list_parser = secret_subparsers.add_parser("list")
+    secret_list_parser.add_argument("project")
+    secret_unset_parser = secret_subparsers.add_parser("unset")
+    secret_unset_parser.add_argument("project")
+    secret_unset_parser.add_argument("key")
+    secret_migrate_parser = secret_subparsers.add_parser("migrate")
+    secret_migrate_parser.add_argument("project", nargs="?", default=None)
+    secret_migrate_parser.add_argument(
+        "--all", action="store_true", help="migrate every project that has a plaintext .env"
+    )
+
+    keys_parser = subparsers.add_parser("keys")
+    keys_subparsers = keys_parser.add_subparsers(dest="keys_command", required=True)
+    keys_init_parser = keys_subparsers.add_parser("init")
+    keys_init_parser.add_argument(
+        "--uid", default=DEFAULT_HOST_KEY_UID, help="user id of the host key"
+    )
+    keys_subparsers.add_parser("show")
 
     webhook_parser = subparsers.add_parser("webhook")
     webhook_subparsers = webhook_parser.add_subparsers(dest="webhook_command", required=True)
@@ -352,6 +389,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_assets(fleet_home, args)
         elif args.command == "secret":
             _cmd_secret(fleet_home, args)
+        elif args.command == "keys":
+            _cmd_keys(fleet_home, args)
         elif args.command == "webhook":
             _cmd_webhook(fleet_home, args)
         elif args.command == "snapshot":
@@ -427,6 +466,7 @@ def _cmd_init(fleet_home: Path, args: argparse.Namespace) -> None:
     paths.logs.mkdir(exist_ok=True)
     paths.locks.mkdir(exist_ok=True)
     paths.project_secrets.mkdir(mode=0o700, exist_ok=True)
+    paths.gnupg.mkdir(mode=0o700, exist_ok=True)
 
     domain = args.domain
     if not domain:
@@ -794,10 +834,94 @@ def _cmd_assets(fleet_home: Path, args: argparse.Namespace) -> None:
         print(dest)
 
 
+def _read_secret_value(prompt: str) -> str:
+    """Never from argv: a hidden prompt on a TTY, else stdin (one trailing
+    newline stripped). Same pattern as `webhook bitbucket-token`."""
+    if sys.stdin.isatty():
+        value = getpass.getpass(prompt)
+    else:
+        value = sys.stdin.read()
+        if value.endswith("\r\n"):
+            value = value[:-2]
+        elif value.endswith("\n"):
+            value = value[:-1]
+    if not value:
+        raise FleetError("empty secret value; nothing stored")
+    return value
+
+
 def _cmd_secret(fleet_home: Path, args: argparse.Namespace) -> None:
-    if args.secret_command == "set":
-        paths = instances_mod.FleetPaths.from_home(fleet_home)
-        write_secret(paths.project_secrets / f"{args.project}.env", args.key, args.value)
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    store = SecretStore(paths)
+    command = args.secret_command
+
+    if command == "migrate":
+        if args.all == bool(args.project):
+            raise FleetError("give a project or --all (not both)")
+        projects = store.legacy_projects() if args.all else [args.project]
+        if not projects:
+            print("no plaintext secret files to migrate")
+            return
+        for project in projects:
+            print(f"{project}: migrated {store.migrate(project)} secret(s)")
+        print(
+            "The plaintext files were deleted, but their old contents may remain in disk "
+            "blocks and backups: rotate any secret that mattered.",
+            file=sys.stderr,
+        )
+        return
+
+    registry = instances_mod.load_registry(paths)
+    if not registry.has_project(args.project):
+        raise FleetError(f"unknown project {args.project!r}")
+
+    if command == "set":
+        validate_key(args.key)  # before prompting
+        if args.value is not None:
+            print(_SECRET_VALUE_DEPRECATION, file=sys.stderr)
+            value = args.value
+        else:
+            value = _read_secret_value(f"Value for {args.key} ({args.project}): ")
+        mode = store.set(args.project, args.key, value)
+        print(f"stored {args.key} for {args.project} ({mode})")
+        if mode == "plaintext":
+            print(_PLAINTEXT_SECRET_WARNING, file=sys.stderr)
+    elif command == "list":
+        rows = store.names(args.project)
+        if not rows:
+            print(f"no secrets stored for {args.project}")
+            return
+        width = max(len(key) for key, _ in rows)
+        for key, kind in rows:
+            print(f"{key.ljust(width)}  {kind}")
+    elif command == "unset":
+        if not store.unset(args.project, args.key):
+            raise FleetError(f"no secret {args.key!r} stored for {args.project!r}")
+        print(f"removed {args.key} from {args.project}")
+
+
+def _print_host_key(paths: "instances_mod.FleetPaths", key: "pgp_mod.HostKey") -> None:
+    public_path = paths.home / HOST_PUBLIC_KEY_NAME
+    public_path.parent.mkdir(parents=True, exist_ok=True)
+    public_path.write_text(key.armored_public_key, encoding="utf-8")
+    os.chmod(public_path, 0o644)
+    print(f"fingerprint:        {key.fingerprint}")
+    print(f"encryption subkey:  {key.encryption_subkey_id}")
+    print("algorithms:         ed25519 (sign, certify) + cv25519 (encrypt)")
+    print(f"public key:         {public_path}")
+
+
+def _cmd_keys(fleet_home: Path, args: argparse.Namespace) -> None:
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    if args.keys_command == "init":
+        key = pgp_mod.init_host_key(paths.gnupg, args.uid)
+        print("host key created")
+        _print_host_key(paths, key)
+    elif args.keys_command == "show":
+        key = SecretStore(paths).host_key()
+        if key is None:
+            raise FleetError("no host key yet: run `fleet keys init` first")
+        _print_host_key(paths, key)
 
 
 def _cmd_webhook(fleet_home: Path, args: argparse.Namespace) -> None:
