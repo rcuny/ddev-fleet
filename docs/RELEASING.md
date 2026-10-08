@@ -119,6 +119,7 @@ the dev venv set up (`CONTRIBUTING.md`).
    .venv/bin/pytest -q
    .venv/bin/ruff check .
    .venv/bin/black --check .
+   node --test tests/js/*.test.mjs
    ```
 
 4. **Merge to `main` and tag.**

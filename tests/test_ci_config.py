@@ -17,7 +17,7 @@ from ruamel.yaml import YAML
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINES = YAML(typ="safe").load((ROOT / "bitbucket-pipelines.yml").read_text())
 RENOVATE = json.loads((ROOT / "renovate-config.json").read_text())
-GATES = ["pytest -q", "ruff check .", "black --check ."]
+GATES = ["pytest -q", "ruff check .", "black --check .", "node --test tests/js/*.test.mjs"]
 
 
 def _steps(pipeline):
@@ -96,7 +96,11 @@ def test_gates_run_on_debian_13_with_systemd_and_require_systemd_analyze():
     script = _script(gates)
     assert re.search(r"apt-get install .*\brsync systemd\b", script)
     assert script.index("FLEET_REQUIRE_SYSTEMD_ANALYZE=1") < script.index("pytest -q")
-    assert script.index("black --check .") < script.index("systemd_security.py offline")
+    assert re.search(r"apt-get install .*\bgnupg\b.*\bnodejs\b", script)
+    assert script.index("FLEET_REQUIRE_PGP_TOOLS=1") < script.index("pytest -q")
+    node_gate = script.index("node --test tests/js/*.test.mjs")
+    assert script.index("black --check .") < node_gate
+    assert node_gate < script.index("systemd_security.py offline")
     assert script.index("systemd_security.py offline") < script.index("systemd_security.py compare")
     assert gates["artifacts"] == ["reports/**"]
 

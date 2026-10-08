@@ -107,13 +107,19 @@ definitions:
           - umask 022
           # rsync: core/assets.py shells out to it (asset injection tests)
           # systemd: systemd-analyze scores the rendered units (FLE-8)
-          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync systemd > /dev/null
+          # gnupg + nodejs: the secrets tests run the real gpg and a real node against the
+          #   vendored OpenPGP.js (FLE-22); Debian 13's node 20 is enough.
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync systemd gnupg nodejs > /dev/null
           # The systemd scoring tests fail instead of skipping when systemd-analyze is missing.
           - export FLEET_REQUIRE_SYSTEMD_ANALYZE=1
+          # Likewise the gpg/node interop tests fail instead of skipping (FLE-22).
+          - export FLEET_REQUIRE_PGP_TOOLS=1
           - pip install -q -e ".[dev]"
           - pytest -q
           - ruff check .
           - black --check .
+          # Glob form: `node --test tests/js/` (a directory) fails on Node 22.
+          - node --test tests/js/*.test.mjs
           - python ci/systemd_security.py offline --out reports/offline.json
           - >-
             python ci/systemd_security.py compare --env offline --current reports/offline.json
