@@ -1,8 +1,9 @@
 from pathlib import Path
 
-from fleet.core import instances
+from fleet.core import instances, pgp
 from fleet.core.registry import Registry
 from fleet.core.secrets import write_secret
+from fleet.core.secretstore import SecretStore
 from fleet.core.ttycmds import TtyPlan, plan_from_resolved
 
 REGISTRY_YAML = """\
@@ -166,3 +167,15 @@ def test_plan_uses_the_resolved_object_not_the_live_registry(fleet_home):
 
     assert plan.tty1 == ["echo deploy-time"]
     assert plan.tty2 == []
+
+
+def test_plan_from_template_resolves_an_encrypted_secret(gpg_fleet_home):
+    registry = _registry(gpg_fleet_home)
+    paths = _paths(gpg_fleet_home)
+    pgp.init_host_key(paths.gnupg, "ddev-fleet test host")
+    SecretStore(paths).set("oak", "SLACK_TOKEN", "xoxb-encrypted")
+
+    plan = plan_from_template(registry, paths, "oak", "oaks-1781", "dev", "with-secret")
+
+    assert plan.tty1 == ["echo xoxb-encrypted"]
+    assert plan.skipped == []

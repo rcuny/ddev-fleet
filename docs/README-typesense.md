@@ -77,7 +77,7 @@ Instance's Typesense (internal :8108)
 ## The two keys, and why
 
 `src/fleet/core/typesense.py:ensure_project_keys()` generates and persists,
-once per project, into `/srv/fleet/secrets/<project>.env`:
+once per project, through the secret store (`/srv/fleet/secrets/<project>.env`, or encrypted `.asc` files once the host has a key; see `docs/operations.md`):
 
 | Key | Purpose | Ever sent to the browser? |
 |---|---|---|

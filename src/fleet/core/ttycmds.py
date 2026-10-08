@@ -16,7 +16,8 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from fleet.core.registry import Registry, ResolvedInstance
-from fleet.core.secrets import read_secrets, secret_tokens
+from fleet.core.secrets import secret_tokens
+from fleet.core.secretstore import SecretStore
 from fleet.core.tokens import build_context, extract_issue_id, substitute_lenient
 
 
@@ -67,7 +68,7 @@ def plan_from_resolved(registry: Registry, paths: Any, resolved: ResolvedInstanc
         registry.domain,
         issue_id=extract_issue_id(registry.issue_id_regexp(project), label, branch),
     )
-    context.update(secret_tokens(read_secrets(paths.project_secrets / f"{project}.env")))
+    context.update(secret_tokens(SecretStore(paths).read_all(project)))
 
     tty1, skipped1 = _substitute_commands("tty1", resolved.tty1, context)
     tty2, skipped2 = _substitute_commands("tty2", resolved.tty2, context)

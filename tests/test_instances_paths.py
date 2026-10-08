@@ -12,6 +12,7 @@ def test_from_home_derives_srv_fleet_config_layout():
     assert paths.instances == Path("/srv/fleet/instances")
     assert paths.secrets == Path("/srv/fleet/.secrets")
     assert paths.project_secrets == Path("/srv/fleet/secrets")
+    assert paths.gnupg == Path("/srv/fleet/gnupg")
     assert paths.locks == Path("/srv/fleet/locks")
     assert paths.push_key_dir == Path("/srv/fleet/.push-key")
     # host.yml is per-host — deliberately a SIBLING of config/ (the shared,
