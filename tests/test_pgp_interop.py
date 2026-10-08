@@ -104,10 +104,11 @@ def test_node_encrypted_value_for_another_host_is_rejected_by_inspection(
     host, other_host, tmp_path
 ):
     home, _ = host
-    _, other_key = other_host
+    other_home, other_key = other_host
     armored = node_encrypt(other_key.armored_public_key, "for-someone-else", tmp_path)
 
-    with pytest.raises(pgp.PgpError):
+    pgp.inspect_message(other_home, armored)  # positive control: the intended host accepts it
+    with pytest.raises(pgp.PgpError, match="not encrypted to this host"):
         pgp.inspect_message(home, armored)
 
 
