@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from fleet.core import pgp
-from fleet.core.errors import FleetError
+from fleet.core.errors import FleetError, ValidationError
 from fleet.core.naming import validate_part
 from fleet.core.pgp import GpgRunner, HostKey, run_gpg
 from fleet.core.secrets import read_secrets, write_secret
@@ -180,3 +180,67 @@ class SecretStore:
         if self._drop_legacy(project, {key}):
             removed = True
         return removed
+
+    def set_armored(self, project: str, key: str, armored: str) -> None:
+        """Browser path: store a message that was encrypted client-side.
+        `pgp.inspect_message` runs first and is structural only (it never
+        decrypts), so it checks that this is a single armored message for this
+        host's key, not that it will decrypt; the message is stored byte for
+        byte."""
+        validate_key(key)
+        self._project_dir(project)
+        if not self.encrypted():
+            raise self._no_key_error()
+        pgp.inspect_message(self._paths.gnupg, armored, gpg=self._gpg)
+        self._write_asc(project, key, armored)
+        self._drop_legacy(project, {key})
+
+    def legacy_projects(self) -> list[str]:
+        """Projects that still have a plaintext `secrets/<project>.env`."""
+        root = self._paths.project_secrets
+        if not root.is_dir():
+            return []
+        names: list[str] = []
+        for path in sorted(root.glob("*.env")):
+            if not path.is_file():
+                continue
+            try:
+                validate_part(path.stem)
+            except ValidationError:
+                continue
+            names.append(path.stem)
+        return names
+
+    def migrate(self, project: str) -> int:
+        """Encrypt every legacy key of `project`, verify each by decrypting it,
+        then delete `<project>.env`. All-or-nothing and re-runnable; returns
+        the number of keys newly encrypted. A key that already has an `.asc`
+        keeps the encrypted value (the stale legacy one is dropped with the
+        file). Old plaintext may linger in disk blocks and backups: rotate."""
+        legacy = self._legacy_path(project)
+        if not legacy.exists():
+            return 0
+        if not self.encrypted():
+            raise self._no_key_error()
+        values = read_secrets(legacy)
+        invalid = sorted(key for key in values if not KEY_RE.fullmatch(key))
+        if invalid:
+            raise SecretStoreError(
+                f"cannot migrate {project!r}: legacy names that are not valid secret names "
+                f"({', '.join(invalid)}); rename or remove them in {legacy} first"
+            )
+        already = set(self._asc_keys(project))
+        prepared: dict[str, str] = {}
+        for key, value in values.items():
+            if key in already:
+                continue
+            armored = pgp.encrypt(self._paths.gnupg, value, gpg=self._gpg)
+            if pgp.decrypt(self._paths.gnupg, armored, gpg=self._gpg) != value:
+                raise SecretStoreError(
+                    f"verification failed while migrating {key}; nothing was changed"
+                )
+            prepared[key] = armored
+        for key, armored in prepared.items():
+            self._write_asc(project, key, armored)
+        legacy.unlink()
+        return len(prepared)

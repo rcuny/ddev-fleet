@@ -9,7 +9,7 @@ from fleet.core.instances import FleetPaths
 from fleet.core.pgp import PgpError
 from fleet.core.secrets import read_secrets, write_secret
 from fleet.core.secretstore import SecretStore, SecretStoreError
-from tests.fakegpg import FakeGpg
+from tests.fakegpg import FakeGpg, fake_armor, packets_output
 
 
 @pytest.fixture
@@ -248,3 +248,155 @@ def test_read_all_non_utf8_asc_raises_pgp_error_naming_only_the_key(paths):
     (paths.project_secrets / "demo" / "A.asc").write_bytes(b"\xff\xfe\x00bad")
     with pytest.raises(PgpError, match="unreadable encrypted secret A"):
         store.read_all("demo")
+
+
+# --- set_armored (the browser path) -----------------------------------------
+
+
+def test_set_armored_stores_the_inspected_message_as_is(paths):
+    store, gpg = _keyed(paths)
+    armored = fake_armor("browser-secret")
+
+    store.set_armored("demo", "API_TOKEN", armored)
+
+    asc = paths.project_secrets / "demo" / "API_TOKEN.asc"
+    assert asc.read_text(encoding="utf-8") == armored
+    assert _mode(asc) == 0o600
+    assert any("--list-packets" in call for call in gpg.calls)
+    assert store.read_all("demo") == {"API_TOKEN": "browser-secret"}
+
+
+def test_set_armored_rejects_and_writes_nothing(paths):
+    gpg = FakeGpg(packets=packets_output(keyids=("1111111111111111",)))
+    gpg.install_key(paths.gnupg)
+    store = SecretStore(paths, gpg=gpg)
+
+    with pytest.raises(PgpError, match="not encrypted to this host"):
+        store.set_armored("demo", "API_TOKEN", fake_armor("x"))
+
+    assert not (paths.project_secrets / "demo").exists()
+
+
+def test_set_armored_without_a_host_key_points_at_keys_init(paths):
+    store = SecretStore(paths, gpg=FakeGpg())
+    with pytest.raises(SecretStoreError, match="fleet keys init"):
+        store.set_armored("demo", "API_TOKEN", fake_armor("x"))
+
+
+def test_set_armored_validates_the_key_name(paths):
+    store, _ = _keyed(paths)
+    with pytest.raises(SecretStoreError):
+        store.set_armored("demo", "bad-name", fake_armor("x"))
+
+
+def test_set_armored_replaces_a_legacy_plaintext_key(paths):
+    SecretStore(paths, gpg=FakeGpg()).set("demo", "API_TOKEN", "old-plain")
+    store, _ = _keyed(paths)
+    store.set_armored("demo", "API_TOKEN", fake_armor("new"))
+    assert not (paths.project_secrets / "demo.env").exists()
+    assert store.read_all("demo") == {"API_TOKEN": "new"}
+
+
+# --- migrate ------------------------------------------------------------------
+
+
+def _legacy(paths, project="demo", **values):
+    plain = SecretStore(paths, gpg=FakeGpg())
+    for key, value in values.items():
+        plain.set(project, key, value)
+
+
+def test_migrate_encrypts_every_legacy_key_and_removes_the_env(paths):
+    _legacy(paths, A="one", B="two")
+    store, _ = _keyed(paths)
+
+    assert store.migrate("demo") == 2
+
+    assert not (paths.project_secrets / "demo.env").exists()
+    assert store.names("demo") == [("A", "encrypted"), ("B", "encrypted")]
+    assert store.read_all("demo") == {"A": "one", "B": "two"}
+
+
+def test_migrate_without_a_legacy_file_is_a_noop(paths):
+    store, gpg = _keyed(paths)
+    assert store.migrate("demo") == 0
+    assert not any("--encrypt" in call for call in gpg.calls)
+
+
+def test_migrate_without_a_host_key_leaves_the_env_untouched(paths):
+    _legacy(paths, A="one")
+    store = SecretStore(paths, gpg=FakeGpg())
+    with pytest.raises(SecretStoreError, match="fleet keys init"):
+        store.migrate("demo")
+    assert read_secrets(paths.project_secrets / "demo.env") == {"A": "one"}
+
+
+def test_migrate_refuses_invalid_legacy_names_and_changes_nothing(paths):
+    env = paths.project_secrets / "demo.env"
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text("GOOD=1\nlower_case=2\n", encoding="utf-8")
+    store, _ = _keyed(paths)
+
+    with pytest.raises(SecretStoreError, match="lower_case"):
+        store.migrate("demo")
+
+    assert env.read_text(encoding="utf-8") == "GOOD=1\nlower_case=2\n"
+    assert not (paths.project_secrets / "demo").exists()
+
+
+def test_migrate_verifies_by_decrypting_and_aborts_before_writing(paths):
+    _legacy(paths, A="one")
+    gpg = FakeGpg(decrypt_result="WRONG")
+    gpg.install_key(paths.gnupg)
+    store = SecretStore(paths, gpg=gpg)
+
+    with pytest.raises(SecretStoreError, match="verification failed"):
+        store.migrate("demo")
+
+    assert read_secrets(paths.project_secrets / "demo.env") == {"A": "one"}
+    assert not (paths.project_secrets / "demo").exists()
+
+
+def test_migrate_does_not_overwrite_an_existing_asc_with_an_older_legacy_value(paths):
+    store, _ = _keyed(paths)
+    store.set("demo", "A", "new-encrypted")
+    write_secret(paths.project_secrets / "demo.env", "A", "old-legacy")
+    write_secret(paths.project_secrets / "demo.env", "B", "legacy-b")
+
+    assert store.migrate("demo") == 1  # only B was newly encrypted
+
+    assert store.read_all("demo") == {"A": "new-encrypted", "B": "legacy-b"}
+    assert not (paths.project_secrets / "demo.env").exists()
+
+
+def test_migrate_twice_is_idempotent(paths):
+    _legacy(paths, A="one")
+    store, _ = _keyed(paths)
+    assert store.migrate("demo") == 1
+    assert store.migrate("demo") == 0
+    assert store.read_all("demo") == {"A": "one"}
+
+
+def test_legacy_projects_lists_valid_named_env_files_sorted(paths):
+    root = paths.project_secrets
+    root.mkdir(parents=True, exist_ok=True)
+    for name in ("zeta.env", "alpha.env", "Bad_Name.env", "notes.txt"):
+        (root / name).write_text("A=1\n", encoding="utf-8")
+    (root / "dir.env").mkdir()
+    (root / "alpha").mkdir()
+    store, _ = _keyed(paths)
+    assert store.legacy_projects() == ["alpha", "zeta"]
+
+
+def test_real_gpg_migrate_normalises_quoted_values(gpg_fleet_home):
+    paths = FleetPaths.from_home(gpg_fleet_home)
+    pgp.init_host_key(paths.gnupg, "ddev-fleet test host")
+    env = paths.project_secrets / "demo.env"
+    env.parent.mkdir(parents=True, exist_ok=True)
+    env.write_text('QUOTED="abc"\nPLAIN=def\n', encoding="utf-8")
+    store = SecretStore(paths)
+
+    assert store.migrate("demo") == 2
+
+    assert store.read_all("demo") == {"QUOTED": "abc", "PLAIN": "def"}
+    assert not env.exists()
