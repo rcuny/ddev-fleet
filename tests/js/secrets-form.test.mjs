@@ -5,7 +5,7 @@ import test from "node:test";
 import { fileURLToPath } from "node:url";
 
 import * as openpgp from "../../src/fleet/static/openpgp.min.mjs";
-import { encryptForm } from "../../src/fleet/static/secrets-form.mjs";
+import { encryptForm, shouldResetForm } from "../../src/fleet/static/secrets-form.mjs";
 
 const fixtures = join(dirname(fileURLToPath(import.meta.url)), "..", "fixtures", "pgp");
 const publicKey = readFileSync(join(fixtures, "test-host-public.asc"), "utf8");
@@ -120,4 +120,21 @@ test("on success the plaintext survives in no property of any form element", asy
       );
     }
   }
+});
+
+test("shouldResetForm is true only for a real 2xx status", () => {
+  for (const status of [200, 201, 204, 299]) {
+    assert.equal(shouldResetForm({ xhr: { status }, successful: true }), true, String(status));
+  }
+  for (const status of [0, 199, 300, 302, 400, 404, 422, 500]) {
+    // successful: true mimics htmx after ui-errors.js clears isError for 4xx.
+    assert.equal(shouldResetForm({ xhr: { status }, successful: true }), false, String(status));
+  }
+});
+
+test("shouldResetForm is false when detail or xhr is missing", () => {
+  assert.equal(shouldResetForm(undefined), false);
+  assert.equal(shouldResetForm(null), false);
+  assert.equal(shouldResetForm({}), false);
+  assert.equal(shouldResetForm({ successful: true }), false);
 });

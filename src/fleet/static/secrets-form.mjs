@@ -28,3 +28,11 @@ export async function encryptForm(form, htmxApi) {
     return false;
   }
 }
+
+// Reset the form only after a real 2xx. htmx's `detail.successful` is true for
+// 4xx too (ui-errors.js clears isError so the error panel is swapped in), and
+// a rejected submission must keep the user's input for correction.
+export function shouldResetForm(detail) {
+  const status = detail && detail.xhr ? detail.xhr.status : 0;
+  return status >= 200 && status < 300;
+}
