@@ -61,6 +61,7 @@ class FleetPaths:
     logs: Path
     secrets: Path
     project_secrets: Path
+    gnupg: Path
     locks: Path
     push_key_dir: Path
     host_config: Path
@@ -85,6 +86,10 @@ class FleetPaths:
             logs=logs_dir,
             secrets=home / ".secrets",
             project_secrets=home / "secrets",
+            # GNUPGHOME of the host key that encrypts project secrets (FLE-21).
+            # 0700; holds the unpassphrased private key — never back it up
+            # next to the ciphertexts it protects.
+            gnupg=home / "gnupg",
             locks=home / "locks",
             push_key_dir=home / ".push-key",
             # Deliberately OUTSIDE config_dir/ — config_dir is the shared,
