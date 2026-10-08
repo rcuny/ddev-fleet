@@ -33,7 +33,7 @@ which keeps that boundary clean. Never edit, re-minify or concatenate it.
    changed defaults and event names): read the upgrade guide and exercise
    the web UI before accepting it; close the PR if it is not worth it yet.
 4. Update the Download URL cell to the new version, run the gates
-   (`pytest -q`, `ruff check .`, `black --check .`), and commit the file
+   (`pytest -q`, `ruff check .`, `black --check .`, `node --test tests/js/*.test.mjs`), and commit the file
    and this table together.
 
 ### OpenPGP.js

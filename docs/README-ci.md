@@ -297,4 +297,8 @@ python ci/systemd_security.py offline --out /tmp/offline.json   # needs systemd-
 ```
 
 `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` turns "systemd-analyze missing" from a skip
-into a failure, as in the pipeline.
+into a failure, as in the pipeline. Likewise `FLEET_REQUIRE_PGP_TOOLS=1` turns a
+missing `gpg` or `node` into a failure instead of a skip for the OpenPGP interop
+tests (`tests/test_pgp_interop.py`, `tests/test_secrets_ui.py`,
+`tests/test_vendored_openpgp.py`); run `node --test tests/js/*.test.mjs` for the
+browser-crypto tests.

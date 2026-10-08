@@ -349,6 +349,8 @@ fleet reboot-notify --test
   rotation, bulk operations, port changes).
 - `docs/networking.md` — the port-exposure mechanism behind
   `fleet refresh-ports`.
+- `docs/client-side-encryption.md` — how the web UI's Secrets page encrypts in the
+  browser, and the threat model of the encrypted secret store.
 
 
 ## Per-instance basic auth, and Authelia mode for networks that block it

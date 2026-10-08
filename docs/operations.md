@@ -343,8 +343,8 @@ Protected: the stored secret files and their backups (ciphertext only).
 Not protected: anyone who is root on the host or can read
 `/srv/fleet/gnupg/` (the host private key has **no passphrase**, because
 deploys are unattended; it is protected by file permissions only), and the
-decrypted values that deploy writes into each instance's asset files and tty
-commands, as before.
+decrypted values that deploy writes into each instance's asset files, `post_deploy`
+commands and tty commands, as before.
 
 ### Back up and loss of the host key
 
@@ -354,6 +354,16 @@ backup holding both defeats the encryption). If the host key is lost, every
 and you must `fleet secret set` the values again. Deleting the key on purpose
 (`rm -r /srv/fleet/gnupg`, then `fleet keys init`) is the same operation, so
 re-create the secrets afterwards.
+
+### Setting a secret from the web UI
+
+The dashboard's **Secrets** page (`/secrets`) sets and deletes a project's secrets without ever
+sending plaintext: the value is encrypted in the browser with OpenPGP.js to the host key and
+stored as `secrets/<project>/<KEY>.asc`. It needs the host key first
+(`sudo -u fleet fleet keys init`, once per server); without one the page says so and shows no form.
+Names listed there are the same ones `fleet secret list <project>` shows. Design, key
+management and what the encryption does and does not protect:
+[`docs/client-side-encryption.md`](client-side-encryption.md).
 
 ### Checking gpg-agent under the systemd sandbox (manual, per server)
 

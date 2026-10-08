@@ -70,3 +70,17 @@ def test_every_static_file_is_top_level_so_the_package_data_glob_ships_it():
     # pyproject: package-data fleet = ["static/*", ...] does not recurse.
     assert [p for p in STATIC.iterdir() if p.is_dir()] == []
 
+
+def test_client_side_encryption_doc_exists_and_is_linked_from_the_readme():
+    doc = (ROOT / "docs" / "client-side-encryption.md").read_text(encoding="utf-8")
+    for needle in (
+        "## Threat model",
+        "## Data flow",
+        "OpenPGP version 4",
+        "Content-Security-Policy",
+        OPENPGP_SHA256,
+        "root on the host",
+        "fleet keys init",
+    ):
+        assert needle in doc, needle
+    assert "docs/client-side-encryption.md" in (ROOT / "README.md").read_text(encoding="utf-8")
