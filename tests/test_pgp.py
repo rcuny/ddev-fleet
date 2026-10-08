@@ -125,10 +125,71 @@ def test_init_host_key_refuses_when_a_key_exists(tmp_path):
     assert not any("--quick-gen-key" in c for c in gpg.calls)
 
 
-@pytest.mark.parametrize("uid", ["", "   ", "two\nlines", "bell\x07"])
+@pytest.mark.parametrize(
+    "uid", ["", "   ", "two\nlines", "bell\x07", "-x", "--version", "ok\x7fuid", "  --x"]
+)
 def test_init_host_key_rejects_unusable_uids(tmp_path, uid):
     with pytest.raises(PgpError, match="user id"):
         pgp.init_host_key(tmp_path, uid, gpg=FakeGpg())
+
+
+def test_init_host_key_rejects_uids_before_any_gpg_call(tmp_path):
+    gpg = FakeGpg()
+    with pytest.raises(PgpError, match="user id"):
+        pgp.init_host_key(tmp_path, "--version", gpg=gpg)
+    assert gpg.calls == []
+
+
+def test_gpg_result_repr_does_not_leak_stdout():
+    assert "SECRET" not in repr(GpgResult(0, b"SECRET", ""))
+    assert GpgResult(0, b"a", "") == GpgResult(0, b"a", "")
+
+
+def test_run_gpg_creates_a_missing_home_0700(tmp_path, monkeypatch):
+    monkeypatch.setattr(
+        subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, b"", b"")
+    )
+    home = tmp_path / "a" / "gnupg"
+    run_gpg(["--version"], gnupghome=home)
+    assert stat.S_IMODE(home.stat().st_mode) == 0o700
+
+
+def test_run_gpg_timeout_does_not_chain_the_exception(monkeypatch, tmp_path):
+    def boom(*a, **k):
+        raise subprocess.TimeoutExpired(["gpg"], 60)
+
+    monkeypatch.setattr(subprocess, "run", boom)
+    with pytest.raises(PgpError) as excinfo:
+        run_gpg(["--version"], gnupghome=tmp_path / "g")
+    assert excinfo.value.__cause__ is None
+    assert excinfo.value.__suppress_context__ is True
+
+
+def _keygen_then(listing):
+    """A gpg runner that lists no key until `--quick-gen-key` ran, then `listing`."""
+    state = {"generated": False}
+
+    def gpg(args, *, gnupghome, input_bytes=None):
+        if "--quick-gen-key" in args:
+            state["generated"] = True
+        if "--list-secret-keys" in args and state["generated"]:
+            return GpgResult(0, listing.encode(), "")
+        return GpgResult(0, b"", "")
+
+    return gpg
+
+
+def test_init_host_key_failure_messages_say_how_to_recover(tmp_path):
+    with pytest.raises(PgpError, match="fleet keys init` again") as excinfo:
+        pgp.init_host_key(tmp_path, "fleet host", gpg=_keygen_then(""))
+    assert "fingerprint could not be read" in excinfo.value.message
+
+    primary_only = "".join(
+        line + "\n" for line in SECRET_KEYS_COLONS.splitlines()[:2]  # sec + fpr, no ssb
+    )
+    with pytest.raises(PgpError, match="fleet keys init` again") as excinfo:
+        pgp.init_host_key(tmp_path, "fleet host", gpg=_keygen_then(primary_only))
+    assert "no usable encryption subkey" in excinfo.value.message
 
 
 def test_init_host_key_reports_a_failing_gpg_without_a_traceback_payload(tmp_path):

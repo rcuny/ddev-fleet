@@ -1123,6 +1123,17 @@ def test_init_creates_an_empty_0700_gnupg_dir(fleet_home):
     assert stat.S_IMODE((fleet_home / "gnupg").stat().st_mode) == 0o700
 
 
+def test_keys_show_with_an_empty_gnupg_dir_does_not_call_gpg(fleet_home, capsys, monkeypatch):
+    (fleet_home / "gnupg").mkdir(mode=0o700)
+    monkeypatch.setenv("PATH", "")
+
+    assert _fleet(fleet_home, "keys", "show") == 1
+
+    err = capsys.readouterr().err
+    assert "fleet keys init" in err
+    assert "not installed" not in err
+
+
 # --- with a real host key ------------------------------------------------------
 
 

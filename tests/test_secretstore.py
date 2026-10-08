@@ -1,5 +1,6 @@
 import os
 import stat
+from pathlib import Path
 
 import pytest
 
@@ -367,6 +368,80 @@ def test_migrate_does_not_overwrite_an_existing_asc_with_an_older_legacy_value(p
 
     assert store.read_all("demo") == {"A": "new-encrypted", "B": "legacy-b"}
     assert not (paths.project_secrets / "demo.env").exists()
+
+
+def test_migrate_with_a_corrupt_existing_asc_loses_nothing(paths):
+    store, gpg = _keyed(paths)
+    write_secret(paths.project_secrets / "demo.env", "A", "legacy-a")
+    write_secret(paths.project_secrets / "demo.env", "B", "legacy-b")
+    asc_dir = paths.project_secrets / "demo"
+    asc_dir.mkdir(parents=True)
+    (asc_dir / "A.asc").write_text("not a message\n", encoding="utf-8")
+    env_before = (paths.project_secrets / "demo.env").read_text(encoding="utf-8")
+
+    with pytest.raises(SecretStoreError, match="existing encrypted A is unreadable") as excinfo:
+        store.migrate("demo")
+
+    assert "legacy-a" not in excinfo.value.message and "not a message" not in excinfo.value.message
+    assert (paths.project_secrets / "demo.env").read_text(encoding="utf-8") == env_before
+    assert sorted(p.name for p in asc_dir.iterdir()) == ["A.asc"]
+    assert (asc_dir / "A.asc").read_text(encoding="utf-8") == "not a message\n"
+
+
+def test_migrate_with_an_unreadable_existing_asc_loses_nothing(paths):
+    store, _ = _keyed(paths)
+    write_secret(paths.project_secrets / "demo.env", "A", "legacy-a")
+    asc_dir = paths.project_secrets / "demo"
+    asc_dir.mkdir(parents=True)
+    (asc_dir / "A.asc").write_bytes(b"\xff\xfe\x00")
+
+    with pytest.raises(SecretStoreError, match="existing encrypted A is unreadable"):
+        store.migrate("demo")
+
+    assert (paths.project_secrets / "demo.env").exists()
+
+
+def test_real_gpg_migrate_with_a_corrupt_existing_asc_loses_nothing(gpg_fleet_home):
+    paths = FleetPaths.from_home(gpg_fleet_home)
+    pgp.init_host_key(paths.gnupg, "ddev-fleet test host")
+    store = SecretStore(paths)
+    write_secret(paths.project_secrets / "demo.env", "TOKEN", "legacy-value")
+    asc_dir = paths.project_secrets / "demo"
+    asc_dir.mkdir(parents=True)
+    (asc_dir / "TOKEN.asc").write_text("garbage\n", encoding="utf-8")
+
+    with pytest.raises(SecretStoreError, match="existing encrypted TOKEN is unreadable"):
+        store.migrate("demo")
+
+    assert read_secrets(paths.project_secrets / "demo.env") == {"TOKEN": "legacy-value"}
+    assert sorted(p.name for p in asc_dir.iterdir()) == ["TOKEN.asc"]
+
+
+def test_read_all_with_asc_files_but_no_host_key_points_at_keys_init(paths):
+    asc_dir = paths.project_secrets / "demo"
+    asc_dir.mkdir(parents=True)
+    (asc_dir / "A.asc").write_text(fake_armor("x"), encoding="utf-8")
+    gpg = FakeGpg()
+    store = SecretStore(paths, gpg=gpg)
+
+    with pytest.raises(PgpError, match="fleet keys init"):
+        store.read_all("demo")
+
+    assert gpg.calls == []
+
+
+def test_secret_project_directory_is_created_0700(paths, monkeypatch):
+    modes = []
+    real_mkdir = Path.mkdir
+
+    def spy(self, mode=0o777, parents=False, exist_ok=False):
+        modes.append((self.name, mode))
+        return real_mkdir(self, mode=mode, parents=parents, exist_ok=exist_ok)
+
+    monkeypatch.setattr(Path, "mkdir", spy)
+    store, _ = _keyed(paths)
+    store.set("demo", "A", "x")
+    assert ("demo", 0o700) in modes
 
 
 def test_migrate_twice_is_idempotent(paths):

@@ -16,7 +16,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
@@ -39,6 +39,7 @@ _TAG_SKESK = 3
 _TAG_SEIPD = 18
 _DEAD_VALIDITY = ("r", "e", "d", "i")
 _NO_KEY = "no host key yet: run `fleet keys init` first"
+_RECOVER = "; remove the directory (`rm -r {home}`) and run `fleet keys init` again"
 
 
 class PgpError(FleetError):
@@ -48,7 +49,7 @@ class PgpError(FleetError):
 @dataclass(frozen=True)
 class GpgResult:
     returncode: int
-    stdout: bytes
+    stdout: bytes = field(repr=False)
     stderr: str
 
 
@@ -58,7 +59,7 @@ GpgRunner = Callable[..., GpgResult]
 def run_gpg(args: list[str], *, gnupghome: Path, input_bytes: bytes | None = None) -> GpgResult:
     """Run `gpg --batch --no-tty <args>` with GNUPGHOME=`gnupghome` (created
     0700 if missing). Never logs. A missing binary is a PgpError."""
-    gnupghome.mkdir(parents=True, exist_ok=True)
+    gnupghome.mkdir(parents=True, exist_ok=True, mode=0o700)
     os.chmod(gnupghome, 0o700)
     try:
         proc = subprocess.run(
@@ -71,8 +72,8 @@ def run_gpg(args: list[str], *, gnupghome: Path, input_bytes: bytes | None = Non
         )
     except FileNotFoundError as exc:
         raise PgpError("gpg is not installed (install the 'gnupg' package)") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise PgpError(f"gpg did not finish within {_GPG_TIMEOUT_SECONDS} seconds") from exc
+    except subprocess.TimeoutExpired:
+        raise PgpError(f"gpg did not finish within {_GPG_TIMEOUT_SECONDS} seconds") from None
     return GpgResult(proc.returncode, proc.stdout, proc.stderr.decode("utf-8", "replace"))
 
 
@@ -165,8 +166,10 @@ def init_host_key(gnupghome: Path, uid: str, *, gpg: GpgRunner = run_gpg) -> Hos
     subkey, no passphrase, no expiry (v4 keys, readable by GnuPG 2.2 and 2.4).
     Refuses if a secret key already exists in `gnupghome`."""
     uid = uid.strip()
-    if not uid or any(ord(ch) < 32 for ch in uid):
-        raise PgpError("invalid host key user id: use a non-empty single line")
+    if not uid or uid.startswith("-") or any(ord(ch) < 32 or ord(ch) == 0x7F for ch in uid):
+        raise PgpError(
+            "invalid host key user id: use a non-empty single line that does not start with '-'"
+        )
     if any(rec[0] == "sec" for rec in _secret_records(gnupghome, gpg)):
         raise PgpError(
             f"a GnuPG key already exists in {gnupghome}; refusing to create another "
@@ -184,6 +187,7 @@ def init_host_key(gnupghome: Path, uid: str, *, gpg: GpgRunner = run_gpg) -> Hos
     if fingerprint is None or not _FPR_RE.match(fingerprint):
         raise PgpError(
             f"the key was generated but its fingerprint could not be read; inspect {gnupghome}"
+            f"{_RECOVER.format(home=gnupghome)}"
         )
     _checked(
         gpg(
@@ -196,6 +200,7 @@ def init_host_key(gnupghome: Path, uid: str, *, gpg: GpgRunner = run_gpg) -> Hos
     if key is None:
         raise PgpError(
             f"the key was generated but has no usable encryption subkey; inspect {gnupghome}"
+            f"{_RECOVER.format(home=gnupghome)}"
         )
     return key
 

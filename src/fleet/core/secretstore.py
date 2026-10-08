@@ -112,23 +112,30 @@ class SecretStore:
 
     def read_all(self, project: str) -> dict[str, str]:
         """Every secret of `project` as plaintext. `.asc` files win over legacy
-        keys. gpg is only called when at least one `.asc` exists."""
+        keys. gpg is only called when at least one `.asc` exists and a host key
+        is present."""
         values = dict(read_secrets(self._legacy_path(project)))
-        directory = self._project_dir(project)
-        for key in self._asc_keys(project):
-            try:
-                armored = (directory / f"{key}{_ASC_SUFFIX}").read_text(encoding="utf-8")
-            except (UnicodeDecodeError, OSError):
-                raise pgp.PgpError(f"unreadable encrypted secret {key}") from None
-            values[key] = pgp.decrypt(self._paths.gnupg, armored, gpg=self._gpg)
+        asc_keys = self._asc_keys(project)
+        if asc_keys and not self.encrypted():
+            raise pgp.PgpError(_NO_KEY)
+        for key in asc_keys:
+            values[key] = self._read_asc(project, key)
         return values
+
+    def _read_asc(self, project: str, key: str) -> str:
+        path = self._project_dir(project) / f"{key}{_ASC_SUFFIX}"
+        try:
+            armored = path.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            raise pgp.PgpError(f"unreadable encrypted secret {key}") from None
+        return pgp.decrypt(self._paths.gnupg, armored, gpg=self._gpg)
 
     # --- writes --------------------------------------------------------------
 
     def _write_asc(self, project: str, key: str, armored: str) -> None:
         directory = self._project_dir(project)
         self._paths.project_secrets.mkdir(mode=0o700, parents=True, exist_ok=True)
-        directory.mkdir(exist_ok=True)
+        directory.mkdir(mode=0o700, exist_ok=True)
         os.chmod(directory, 0o700)
         text = armored if armored.endswith("\n") else armored + "\n"
         _atomic_write(directory / f"{key}{_ASC_SUFFIX}", text)
@@ -185,8 +192,7 @@ class SecretStore:
         """Browser path: store a message that was encrypted client-side.
         `pgp.inspect_message` runs first and is structural only (it never
         decrypts), so it checks that this is a single armored message for this
-        host's key, not that it will decrypt; the message is stored byte for
-        byte."""
+        host's key, not that it will decrypt; X"""
         validate_key(key)
         self._project_dir(project)
         if not self.encrypted():
@@ -230,6 +236,15 @@ class SecretStore:
                 f"({', '.join(invalid)}); rename or remove them in {legacy} first"
             )
         already = set(self._asc_keys(project))
+        for key in sorted(already & values.keys()):
+            # "Encrypted value wins" only if that value is readable: otherwise
+            # deleting the legacy file would destroy the only readable copy.
+            try:
+                self._read_asc(project, key)
+            except pgp.PgpError:
+                raise SecretStoreError(
+                    f"existing encrypted {key} is unreadable; nothing was changed"
+                ) from None
         prepared: dict[str, str] = {}
         for key, value in values.items():
             if key in already:

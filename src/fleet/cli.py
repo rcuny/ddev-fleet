@@ -918,7 +918,7 @@ def _cmd_keys(fleet_home: Path, args: argparse.Namespace) -> None:
         print("host key created")
         _print_host_key(paths, key)
     elif args.keys_command == "show":
-        key = pgp_mod.host_key(paths.gnupg) if paths.gnupg.is_dir() else None
+        key = SecretStore(paths).host_key()
         if key is None:
             raise FleetError("no host key yet: run `fleet keys init` first")
         _print_host_key(paths, key)
