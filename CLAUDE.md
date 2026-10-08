@@ -87,6 +87,7 @@ this repo's checkout locally:
 .venv/bin/pytest -q          # 1009 passed, 4 skipped as of 2026-09-28
 .venv/bin/ruff check .
 .venv/bin/black --check .
+node --test tests/js/*.test.mjs   # browser-crypto tests (OpenPGP.js, FLE-22); needs Node
 ```
 
 `pyproject.toml` declares `dev` extras (`pytest`, `ruff`, `black`, `httpx`)
@@ -96,8 +97,8 @@ dependency groups. `ruff` selects `E,F,I`, line length 100 (`black` matches).
 (see `[tool.pytest.ini_options]`).
 
 CI is Bitbucket Pipelines only (`bitbucket-pipelines.yml`, Debian 13 image;
-there is no GitHub Actions workflow, GitHub is a read-only mirror). Besides the
-three gates it scores the rendered systemd units with `systemd-analyze
+there is no GitHub Actions workflow, GitHub is a read-only mirror). Besides these
+gates it scores the rendered systemd units with `systemd-analyze
 security` and fails when an exposure score rises against
 `ci/systemd-security-baseline.json` (FLE-8). If you change a sandboxed unit on
 purpose, re-record the baseline: `docs/README-ci.md`. The weekly live run on

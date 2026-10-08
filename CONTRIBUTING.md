@@ -28,7 +28,12 @@ python3 -m venv .venv
 .venv/bin/pytest -q
 .venv/bin/ruff check .
 .venv/bin/black --check .
+node --test tests/js/*.test.mjs
 ```
+
+`node` (20 or newer) and `gpg` are needed for the secrets tests; without them
+those tests skip locally (set `FLEET_REQUIRE_PGP_TOOLS=1` to make that an
+error, as CI does).
 
 `ruff` selects `E,F,I`, line length 100 (`black` matches). Never open a
 PR with a red suite.

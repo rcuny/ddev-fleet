@@ -9,9 +9,11 @@
   <script src="/static/ws-log.js" defer></script>
   <script src="/static/bulk.js" defer></script>
   <script src="/static/ui-errors.js" defer></script>
+  {% block head_extra %}{% endblock %}
 </head>
 <body>
   <h1>ddev-fleet ({{ hostname }})</h1>
+  <nav class="main-nav"><a href="/">Instances</a> <a href="/secrets">Secrets</a></nav>
   {% block content %}{% endblock %}
   {% if sys_stats %}
   <footer class="sys-stats">

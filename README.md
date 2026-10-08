@@ -133,6 +133,7 @@ Full detail (both credential types, the underlying mechanism): `docs/operations.
 | `docs/configuration.md` | The `fleet.yml` registry schema, field by field |
 | `docs/cli.md` | The full `fleet` CLI command reference, with examples |
 | `docs/networking.md` | Full network topology, every port in one table, and how to expose a new one |
+| `docs/client-side-encryption.md` | The Secrets page: browser-side OpenPGP.js encryption, the GnuPG host key, and the threat model |
 | `docs/architecture.md` | Native-not-in-DDEV design, module map, the daemon/CLI split |
 | `docs/README-typesense.md` | The Typesense browser-search exposure worked example |
 | `CONTRIBUTING.md` | Dev setup, code style, and how to submit a change |

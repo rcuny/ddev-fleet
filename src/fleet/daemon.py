@@ -8,6 +8,7 @@ import hashlib
 import hmac
 import json
 import logging
+import mimetypes
 import os
 import re
 import time
@@ -27,10 +28,15 @@ from fleet.core import caddyauth, caddyports, hostinfo, naming, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core import webhooks as webhooks_mod
 from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
+from fleet.core.secretstore import SecretStore
 from fleet.jobs import JobManager
 
 _STATIC_DIR = Path(__file__).parent / "static"
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
+
+# Python 3.11's MIME table has no ".mjs": StaticFiles would serve the ES modules
+# as application/octet-stream and browsers refuse to run those as module scripts.
+mimetypes.add_type("text/javascript", ".mjs")
 
 _INSTANCE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
 
@@ -45,6 +51,12 @@ _HEADER_LOG_MAX = 64
 def _validate_instance_id(instance_id: str) -> None:
     if not _INSTANCE_ID_RE.match(instance_id):
         raise FleetError(f"invalid instance id {instance_id!r}")
+
+
+def format_fingerprint(fingerprint: str) -> str:
+    """40 hex chars -> ten space-separated groups of four, as ``gpg --fingerprint`` prints."""
+    fpr = fingerprint.upper()
+    return " ".join(fpr[i : i + 4] for i in range(0, len(fpr), 4))
 
 
 def mint_ws_token(secret: bytes, instance_id: str, *, ttl: float = 3600.0) -> str:
@@ -186,6 +198,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
     templates.env.filters["bulk_progress"] = _parse_bulk_progress
+    templates.env.filters["fingerprint"] = format_fingerprint
     # Neither can change without a daemon restart, so compute them once.
     templates.env.globals["hostname"] = hostinfo.hostname()
     templates.env.globals["fleet_version"] = hostinfo.fleet_version()
@@ -699,6 +712,86 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 "auth_mode": registry.auth_mode,
             },
         )
+
+    # --- Secrets screen (FLE-22) -------------------------------------------------
+    # The browser encrypts the value with OpenPGP.js (static/secrets-form.mjs) to the
+    # host's GnuPG public key; these routes only ever see ciphertext. Validation is
+    # SecretStore.set_armored -> pgp.inspect_message (packet inspection, never a
+    # decrypt). FleetError subclasses (bad key name, not addressed to the host key,
+    # no host key yet, ...) become a 400 error panel via fleet_error_handler.
+
+    def _unknown_project(request: Request, project: str):
+        return templates.TemplateResponse(
+            request,
+            "partials/error.html",
+            {"message": f"unknown project {project!r}"},
+            status_code=404,
+        )
+
+    async def _names_response(
+        request: Request, store: SecretStore, project: str, notice: str | None = None
+    ):
+        names = await asyncio.to_thread(store.names, project)
+        context = {"project": project, "names": names, "notice": notice, "oob": notice is not None}
+        template = "partials/secret_result.html" if notice else "partials/secret_names.html"
+        return templates.TemplateResponse(request, template, context)
+
+    @app.get("/secrets")
+    async def secrets_page(request: Request, project: str = Query("")):
+        paths, registry = _paths_and_registry()
+        projects = registry.project_keys()
+        project = project or (projects[0] if projects else "")
+        if project and not registry.has_project(project):
+            return _unknown_project(request, project)
+        store = SecretStore(paths)
+        host_key = await asyncio.to_thread(store.host_key)
+        names = await asyncio.to_thread(store.names, project) if project else []
+        return templates.TemplateResponse(
+            request,
+            "secrets.html",
+            {
+                "projects": projects,
+                "project": project,
+                "host_key": host_key,
+                "names": names,
+                "oob": False,
+            },
+        )
+
+    @app.get("/ui/secrets/{project}")
+    async def ui_secrets_names(request: Request, project: str):
+        paths, registry = _paths_and_registry()
+        if not registry.has_project(project):
+            return _unknown_project(request, project)
+        return await _names_response(request, SecretStore(paths), project)
+
+    @app.post("/ui/secrets/{project}")
+    async def ui_secrets_set(
+        request: Request, project: str, key: str = Form(...), armored: str = Form(...)
+    ):
+        paths, registry = _paths_and_registry()
+        if not registry.has_project(project):
+            return _unknown_project(request, project)
+        store = SecretStore(paths)
+        key = key.strip()
+        await asyncio.to_thread(store.set_armored, project, key, armored)
+        return await _names_response(request, store, project, f"Stored {key} (encrypted).")
+
+    @app.post("/ui/secrets/{project}/{key}/delete")
+    async def ui_secrets_delete(request: Request, project: str, key: str):
+        paths, registry = _paths_and_registry()
+        if not registry.has_project(project):
+            return _unknown_project(request, project)
+        store = SecretStore(paths)
+        removed = await asyncio.to_thread(store.unset, project, key)
+        if not removed:
+            return templates.TemplateResponse(
+                request,
+                "partials/error.html",
+                {"message": f"no secret {key!r} in project {project!r}"},
+                status_code=404,
+            )
+        return await _names_response(request, store, project, f"Deleted {key}.")
 
     @app.get("/ui/deploy/templates")
     async def ui_deploy_templates(request: Request, project: str = Query(...)):
