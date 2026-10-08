@@ -1,5 +1,7 @@
 import argparse
 import inspect
+import io
+import re
 import stat
 from pathlib import Path
 
@@ -1025,17 +1027,156 @@ def test_refresh_config_non_git_checkout_prints_message_without_runner_calls(
     assert f"{cfg} is not a git checkout" in capsys.readouterr().out
 
 
-def test_secret_set_writes_per_project_secret_file(fleet_home):
-    exit_code = cli.main(
-        ["--fleet-home", str(fleet_home), "secret", "set", "oak", "SLACK_BOT_TOKEN", "xoxb-abc"]
+_SET = ["secret", "set", "demo", "SLACK_BOT_TOKEN"]
+
+
+def _fleet(fleet_home, *argv):
+    return cli.main(["--fleet-home", str(fleet_home), *argv])
+
+
+def test_secret_set_positional_value_still_works_but_warns_and_does_not_echo(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+
+    assert _fleet(fleet_home, *_SET, "xoxb-abc") == 0
+
+    captured = capsys.readouterr()
+    assert "deprecated" in captured.err
+    assert "xoxb-abc" not in captured.out + captured.err
+    assert "stored SLACK_BOT_TOKEN for demo (plaintext)" in captured.out
+    assert "fleet keys init" in captured.err  # plaintext fallback is called out
+    secret_path = fleet_home / "secrets" / "demo.env"
+    assert secret_path.read_text(encoding="utf-8") == "SLACK_BOT_TOKEN=xoxb-abc\n"
+    assert stat.S_IMODE(secret_path.stat().st_mode) == 0o600
+
+
+def test_secret_set_reads_the_value_from_piped_stdin(fleet_home, capsys, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr("sys.stdin", io.StringIO("xoxb-piped\n"))
+
+    assert _fleet(fleet_home, *_SET) == 0
+
+    captured = capsys.readouterr()
+    assert "deprecated" not in captured.err
+    assert "xoxb-piped" not in captured.out + captured.err
+    assert (fleet_home / "secrets" / "demo.env").read_text(encoding="utf-8") == (
+        "SLACK_BOT_TOKEN=xoxb-piped\n"
     )
 
-    assert exit_code == 0
-    secret_path = fleet_home / "secrets" / "oak.env"
-    assert secret_path.exists()
-    assert secret_path.read_text(encoding="utf-8") == "SLACK_BOT_TOKEN=xoxb-abc\n"
-    mode = stat.S_IMODE(secret_path.stat().st_mode)
-    assert mode == 0o600
+
+def test_secret_set_on_a_tty_uses_a_hidden_prompt(fleet_home, capsys, monkeypatch):
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr("sys.stdin", type("Tty", (), {"isatty": lambda self: True})())
+    prompts = []
+    monkeypatch.setattr(cli.getpass, "getpass", lambda prompt: prompts.append(prompt) or "tok-tty")
+
+    assert _fleet(fleet_home, *_SET) == 0
+
+    assert len(prompts) == 1 and "SLACK_BOT_TOKEN" in prompts[0]
+    assert "tok-tty" not in "".join(capsys.readouterr())
+    assert "SLACK_BOT_TOKEN=tok-tty" in (fleet_home / "secrets" / "demo.env").read_text()
+
+
+def test_secret_set_rejects_empty_stdin_unknown_project_and_bad_names(
+    fleet_home, capsys, monkeypatch
+):
+    _write_minimal_registry(fleet_home)
+    monkeypatch.setattr("sys.stdin", io.StringIO("\n"))
+    assert _fleet(fleet_home, *_SET) == 1
+    assert "empty" in capsys.readouterr().err
+
+    assert _fleet(fleet_home, "secret", "set", "nope", "KEY", "v") == 1
+    assert "nope" in capsys.readouterr().err
+
+    # A secret pasted into the NAME slot must not be echoed back.
+    assert _fleet(fleet_home, "secret", "set", "demo", "sk-live-9f8e7d", "v") == 1
+    assert "sk-live-9f8e7d" not in capsys.readouterr().err
+    assert not (fleet_home / "secrets" / "demo.env").exists()
+
+
+def test_secret_list_unset_and_migrate_need_no_gpg_without_a_key(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+    _fleet(fleet_home, *_SET, "xoxb-abc")
+    capsys.readouterr()
+
+    assert _fleet(fleet_home, "secret", "list", "demo") == 0
+    assert capsys.readouterr().out == "SLACK_BOT_TOKEN  plaintext\n"
+
+    assert _fleet(fleet_home, "secret", "migrate", "demo") == 1
+    assert "fleet keys init" in capsys.readouterr().err
+
+    assert _fleet(fleet_home, "secret", "unset", "demo", "SLACK_BOT_TOKEN") == 0
+    assert "removed SLACK_BOT_TOKEN from demo" in capsys.readouterr().out
+    assert _fleet(fleet_home, "secret", "unset", "demo", "SLACK_BOT_TOKEN") == 1
+    assert _fleet(fleet_home, "secret", "list", "demo") == 0
+    assert "no secrets stored for demo" in capsys.readouterr().out
+
+
+def test_secret_migrate_needs_exactly_one_of_project_or_all(fleet_home, capsys):
+    _write_minimal_registry(fleet_home)
+    assert _fleet(fleet_home, "secret", "migrate") == 1
+    assert _fleet(fleet_home, "secret", "migrate", "demo", "--all") == 1
+    assert "project or --all" in capsys.readouterr().err
+
+
+def test_init_creates_an_empty_0700_gnupg_dir(fleet_home):
+    assert _fleet(fleet_home, "init", "--domain", "fleet.example.test", "--skip-claude") == 0
+    assert stat.S_IMODE((fleet_home / "gnupg").stat().st_mode) == 0o700
+
+
+# --- with a real host key ------------------------------------------------------
+
+
+def test_keys_show_before_init_fails_and_init_twice_refuses(gpg_fleet_home, capsys):
+    assert _fleet(gpg_fleet_home, "keys", "show") == 1
+    assert "fleet keys init" in capsys.readouterr().err
+
+    assert _fleet(gpg_fleet_home, "keys", "init", "--uid", "ddev-fleet cli test") == 0
+    out = capsys.readouterr().out
+    assert "host key created" in out
+    fingerprint = re.search(r"fingerprint:\s+([0-9A-F]{40})", out).group(1)
+    public_key = gpg_fleet_home / "host-public-key.asc"
+    assert public_key.read_text(encoding="utf-8").startswith("-----BEGIN PGP PUBLIC KEY BLOCK-----")
+    assert str(public_key) in out
+
+    assert _fleet(gpg_fleet_home, "keys", "show") == 0
+    assert fingerprint in capsys.readouterr().out
+    assert _fleet(gpg_fleet_home, "keys", "init") == 1
+    assert "already exists" in capsys.readouterr().err
+
+
+def test_encrypted_secret_lifecycle_through_the_cli(gpg_fleet_home, capsys, monkeypatch):
+    _write_minimal_registry(gpg_fleet_home)
+    assert _fleet(gpg_fleet_home, "keys", "init") == 0
+    capsys.readouterr()
+
+    monkeypatch.setattr("sys.stdin", io.StringIO("xoxb-encrypted\n"))
+    assert _fleet(gpg_fleet_home, *_SET) == 0
+    captured = capsys.readouterr()
+    assert "stored SLACK_BOT_TOKEN for demo (encrypted)" in captured.out
+    assert "plaintext" not in captured.err
+    assert (gpg_fleet_home / "secrets" / "demo" / "SLACK_BOT_TOKEN.asc").is_file()
+    assert not (gpg_fleet_home / "secrets" / "demo.env").exists()
+
+    assert _fleet(gpg_fleet_home, "secret", "list", "demo") == 0
+    assert capsys.readouterr().out == "SLACK_BOT_TOKEN  encrypted\n"
+
+
+def test_secret_migrate_all_through_the_cli(gpg_fleet_home, capsys):
+    from fleet.core.secrets import write_secret
+
+    paths = FleetPaths.from_home(gpg_fleet_home)
+    write_secret(paths.project_secrets / "demo.env", "SLACK_BOT_TOKEN", "xoxb-legacy")
+    write_secret(paths.project_secrets / "other.env", "API_KEY", "k-legacy")
+    assert _fleet(gpg_fleet_home, "keys", "init") == 0
+    capsys.readouterr()
+
+    assert _fleet(gpg_fleet_home, "secret", "migrate", "--all") == 0
+    out = capsys.readouterr().out
+    assert "demo: migrated 1 secret(s)" in out
+    assert "other: migrated 1 secret(s)" in out
+    assert not list(paths.project_secrets.glob("*.env"))
+    assert _fleet(gpg_fleet_home, "secret", "migrate", "--all") == 0
+    assert "no plaintext secret files to migrate" in capsys.readouterr().out
 
 
 def test_refresh_ports_prints_no_changes_when_sync_returns_empty(fleet_home, monkeypatch, capsys):
