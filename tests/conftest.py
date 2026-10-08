@@ -142,6 +142,11 @@ def requires_gpg():
     require_tool("gpg")
 
 
+@pytest.fixture
+def requires_node():
+    require_tool("node")
+
+
 def _short_tmp_root() -> str | None:
     # gpg-agent sockets live in GNUPGHOME and unix socket paths are limited to
     # about 100 characters; pytest's tmp_path can be longer than that.
