@@ -176,6 +176,14 @@ ssh <existing-host> 'sudo tar czf - -C /srv/fleet secrets .secrets' \
       && sudo chmod 600 /srv/fleet/.secrets'
 ```
 
+**Warning (encrypted secrets, FLE-21):** if the source host has a host key
+(`fleet keys show` works), its `secrets/<project>/*.asc` files are encrypted to
+that host's key, so the new host cannot decrypt them (and `gnupg/` must never
+be copied). In that case do not copy `secrets/`: run `fleet keys init` on the
+new host and re-enter each secret with `fleet secret set`. Alternatively copy
+only the legacy plaintext `secrets/*.env` files and run
+`fleet secret migrate --all` on the new host.
+
 Or set secrets individually on the new host:
 
 ```bash

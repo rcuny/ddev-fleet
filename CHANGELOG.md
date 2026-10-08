@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FLE-21: `fleet secret set <project> <key>`** reads the value from a hidden prompt or stdin; the positional `<value>` still works but is deprecated and prints a warning to stderr. The project must exist in `fleet.yml`, and the key must match `^[A-Z][A-Z0-9_]{0,63}$`. `fleet init` now also creates an empty `gnupg/` directory.
 
 ### Security
-- **FLE-21:** project secrets can rest only as ciphertext on disk; no plaintext value appears in argv (stdin/prompt), logs, error messages or command output, and gpg is run with separate stdout/stderr rather than the merged streaming runner. Run `fleet secret migrate --all` after `fleet keys init`, then rotate secrets that were ever stored in plaintext. The host key has no passphrase; it is protected by file permissions only (see the threat notes in `docs/operations.md`).
+- **FLE-21:** project secrets can rest as ciphertext on disk once a host key exists; no plaintext value in argv when the prompt or stdin is used (the deprecated positional value still lands in argv), in logs, error messages or command output, and gpg is run with separate stdout/stderr rather than the merged streaming runner. Run `fleet secret migrate --all` after `fleet keys init`, then rotate secrets that were ever stored in plaintext. The host key has no passphrase; it is protected by file permissions only (see the threat notes in `docs/operations.md`).
 
 ## [0.11.0] - 2026-10-07
 

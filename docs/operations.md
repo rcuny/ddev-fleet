@@ -310,7 +310,7 @@ opt-in per server.
 
 ```bash
 sudo -u fleet fleet keys init            # once per server; prints the fingerprint
-sudo -u fleet fleet keys show            # fingerprint, subkey id, public-key path
+sudo -u fleet fleet keys show            # fingerprint, subkey id, public-key path (also rewrites host-public-key.asc)
 sudo -u fleet fleet secret list <project>
 printf '%s' "$TOKEN" | sudo -u fleet fleet secret set <project> SLACK_BOT_TOKEN
 ```
@@ -360,7 +360,7 @@ re-create the secrets afterwards.
 `gpg` starts a `gpg-agent` whose socket lives in `GNUPGHOME`. The daemon runs
 under `fleet-sandbox.inc.j2` (`MemoryDenyWriteExecute`, `SystemCallFilter`),
 which gpg children inherit. After enabling encrypted secrets on a server,
-verify once, as the service does:
+verify once, approximating the service sandbox (see `fleet-sandbox.inc.j2` for the full set):
 
 ```bash
 sudo systemd-run --pipe --wait -p User=fleet -p NoNewPrivileges=yes \
@@ -370,7 +370,7 @@ sudo systemd-run --pipe --wait -p User=fleet -p NoNewPrivileges=yes \
   --trust-model always -r "$(fleet keys show | awk "/^fingerprint/{print \$2}")" | gpg --batch --no-tty --decrypt'
 ```
 
-Expected output: `ok`. Then deploy an instance that uses a secret and check the
+Expected output: `ok` (gpg's own stderr lines may appear before it). Then deploy an instance that uses a secret and check the
 journal (`journalctl -u fleet -n 50`) for `gpg` or seccomp denials. If the
 sandbox blocks gpg, widen the minimum in `fleet-sandbox.inc.j2`; do not drop
 the sandbox.
