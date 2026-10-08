@@ -38,7 +38,7 @@ class SecretStoreError(FleetError):
 def validate_key(key: str) -> None:
     """The error deliberately does not echo `key`: a secret pasted into the
     name argument by mistake must not end up in a terminal log."""
-    if not KEY_RE.match(key):
+    if not KEY_RE.fullmatch(key):
         raise SecretStoreError(
             "invalid secret name: must match ^[A-Z][A-Z0-9_]{0,63}$ "
             "(uppercase letters, digits and underscores, starting with a letter)"
@@ -100,7 +100,7 @@ class SecretStore:
         return sorted(
             path.stem
             for path in directory.glob(f"*{_ASC_SUFFIX}")
-            if path.is_file() and KEY_RE.match(path.stem)
+            if path.is_file() and KEY_RE.fullmatch(path.stem)
         )
 
     # --- reads ---------------------------------------------------------------
@@ -116,7 +116,10 @@ class SecretStore:
         values = dict(read_secrets(self._legacy_path(project)))
         directory = self._project_dir(project)
         for key in self._asc_keys(project):
-            armored = (directory / f"{key}{_ASC_SUFFIX}").read_text(encoding="utf-8")
+            try:
+                armored = (directory / f"{key}{_ASC_SUFFIX}").read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                raise pgp.PgpError(f"unreadable encrypted secret {key}") from None
             values[key] = pgp.decrypt(self._paths.gnupg, armored, gpg=self._gpg)
         return values
 

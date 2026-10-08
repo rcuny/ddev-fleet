@@ -205,3 +205,46 @@ def test_real_gpg_roundtrip_through_fleet_paths(gpg_fleet_home):
     assert "SENTINEL" not in asc
     pgp.inspect_message(paths.gnupg, asc)  # a real message for the host subkey
     assert store.read_all("demo") == {"SLACK_BOT_TOKEN": "SENTINEL-real-1\nline2"}
+
+
+# --- trailing-newline / unreadable-file regressions (review fix round 1) ----------
+
+
+def test_key_with_trailing_newline_is_rejected_on_a_keyless_host(paths):
+    store = SecretStore(paths, gpg=FakeGpg())
+    with pytest.raises(SecretStoreError) as excinfo:
+        store.set("demo", "FOO\n", "v")
+    assert "FOO" not in str(excinfo.value)
+    assert not (paths.project_secrets / "demo.env").exists()
+
+
+def test_key_with_trailing_newline_is_rejected_on_a_keyed_host(paths):
+    store, _ = _keyed(paths)
+    with pytest.raises(SecretStoreError) as excinfo:
+        store.set("demo", "FOO\n", "v")
+    assert "FOO" not in str(excinfo.value)
+    assert not (paths.project_secrets / "demo").exists()
+
+
+def test_stray_asc_with_trailing_newline_in_name_is_ignored(paths):
+    store, _ = _keyed(paths)
+    store.set("demo", "REAL", "v")
+    (paths.project_secrets / "demo" / "FOO\n.asc").write_text("x", encoding="utf-8")
+    assert store.names("demo") == [("REAL", "encrypted")]
+    assert store.read_all("demo") == {"REAL": "v"}
+
+
+def test_project_with_trailing_newline_is_rejected(paths):
+    store, _ = _keyed(paths)
+    with pytest.raises(FleetError):
+        store.set("demo\n", "KEY", "v")
+    with pytest.raises(FleetError):
+        store.read_all("demo\n")
+
+
+def test_read_all_non_utf8_asc_raises_pgp_error_naming_only_the_key(paths):
+    store, _ = _keyed(paths)
+    store.set("demo", "A", "v")
+    (paths.project_secrets / "demo" / "A.asc").write_bytes(b"\xff\xfe\x00bad")
+    with pytest.raises(PgpError, match="unreadable encrypted secret A"):
+        store.read_all("demo")

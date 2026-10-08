@@ -18,7 +18,7 @@ def validate_part(value: str) -> None:
     still allowed) — and must not contain ``--`` (reserved as the id
     separator between project and instance).
     """
-    if not _PART_RE.match(value):
+    if not _PART_RE.fullmatch(value):
         raise ValidationError(
             f"invalid name {value!r}: must match ^[a-z0-9]([a-z0-9-]*[a-z0-9])?$ "
             "(lowercase letters, digits, single dashes only, no leading/trailing dash)"
