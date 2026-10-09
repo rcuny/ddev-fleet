@@ -1,0 +1,55 @@
+---
+# Scoped playbook: the hardening roles only (network_hardening UFW + DOCKER-USER
+# guard + dead-man's switch, security_hardening, security_probe).
+#
+# Use this instead of site.yml to harden an EXISTING server with live DDEV
+# instances. site.yml's fleet_service role rewrites /opt/ddev-fleet's git remote
+# to https, which breaks the SSH-key `git pull` the whole rollout flow depends
+# on, so it must never be run against a live host. This playbook touches only
+# the three hardening roles.
+#
+# Before the first run, edit /etc/ddev-fleet/local-vars.yml:
+#   fleet_network_hardening_enabled: true
+#   fleet_security_hardening_enabled: true
+#   fleet_ssh_allow_users: [debian, root]    # PIN it: must include the account
+#                                            # you are logged in with, or sshd
+#                                            # AllowUsers locks you out
+# Each role is a no-op unless its *_enabled variable is true (the probe unless
+# fleet_security_probe_authorized_keys is set).
+#
+# Safe on a live host: Docker is RELOADED (live-restore applies on SIGHUP),
+# never restarted, so running containers survive; the registry's named ports
+# (Typesense 9108, ...) are staged in UFW before it is enabled.
+#
+# It must live beside site.yml: group_vars/ resolves relative to the playbook's
+# directory, so a copy in /tmp silently runs with fleet_ssh_allow_users
+# undefined.
+#
+#   cd /opt/ddev-fleet/ansible
+#   sudo ansible-playbook hardening.yml --check --diff   # preview first
+#   sudo ansible-playbook hardening.yml
+#
+# UFW dead-man's switch: when this run enables UFW it arms a timer that DISABLES
+# UFW again after fleet_ufw_deadman_grace_minutes unless you confirm. From a
+# second, independent SSH session (proving the firewall did not cut you off):
+#   sudo /usr/local/sbin/fleet-firewall-confirm
+#
+# pre_tasks mirror site.yml/caddy-only.yml so /etc/ddev-fleet/local-vars.yml
+# still overrides the committed group_vars. Facts are gathered (the default):
+# security_hardening reads ansible_env / ansible_user_id.
+- name: Apply network and security hardening to this host
+  hosts: localhost
+  become: true
+  force_handlers: true
+  pre_tasks:
+    - name: Check for host-local variable overrides
+      ansible.builtin.stat:
+        path: /etc/ddev-fleet/local-vars.yml
+      register: _fleet_local_vars
+    - name: Load host-local variable overrides if present
+      ansible.builtin.include_vars: /etc/ddev-fleet/local-vars.yml
+      when: _fleet_local_vars.stat.exists
+  roles:
+    - network_hardening   # no-op unless fleet_network_hardening_enabled
+    - security_hardening  # no-op unless fleet_security_hardening_enabled
+    - security_probe      # no-op unless fleet_security_probe_authorized_keys is set

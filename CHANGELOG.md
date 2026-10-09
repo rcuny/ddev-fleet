@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-25: scoped playbooks for live servers.** `ansible/hardening.yml` applies `network_hardening`, `security_hardening` and `security_probe` alone, and `ansible/fleet-units.yml` applies only the systemd units and CLI wrapper of `fleet_service` (no git clone/update, no venv/pip; the unit tasks moved to `roles/fleet_service/tasks/units.yml`, still imported by `main.yml` in the same order). Both load `/etc/ddev-fleet/local-vars.yml` like `caddy-only.yml`. A changed `fleet.service` now also queues a `systemctl try-restart fleet.service` (no-op when the daemon is not running). See `docs/operations.md`.
+
+### Changed
+- **Rollout:** (FLE-25) servers hardened before this release may still block the registry's named ports (Typesense 9108, ...): run `fleet refresh-ports` once, or re-run `hardening.yml`.
+
+### Fixed
+- **FLE-25: named ports blocked after hardening.** `network_hardening` now deploys `fleet-ufw-sync` and runs it before `ufw enable`, so the registry's named ports are staged with SSH/80/443 (skipped in `--check` and when the fleet venv is missing; a failing sync warns instead of aborting).
+- **FLE-25: hardening no longer restarts Docker.** The `daemon.json` change notifies a `Reload docker` handler (`systemctl reload docker`) instead of restarting it, so running DDEV containers (restart policy `no`) survive on a host without live-restore yet.
+- **FLE-25: `--check` works.** The UFW "SSH port staged" assert no longer errors in a dry run (`ufw show added` runs read-only in check mode); the `findmnt` and msmtp credential reads in `security_hardening` do too, and its test-send report is skipped with the send.
+
 ## [0.12.1] - 2026-10-09
 
 ### Added

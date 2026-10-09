@@ -81,7 +81,7 @@ def test_template_vars_are_substituted():
 
 
 def test_role_deploys_enables_and_starts_the_unit():
-    text = (TASKS / "main.yml").read_text(encoding="utf-8")
+    text = (TASKS / "units.yml").read_text(encoding="utf-8")
     assert "src: fleet-tmux.service.j2" in text
     assert "dest: /etc/systemd/system/fleet-tmux.service" in text
     assert "name: fleet-tmux.service" in text

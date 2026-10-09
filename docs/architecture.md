@@ -35,7 +35,10 @@ Provisioning is Ansible (`ansible/site.yml`, roles `base`, `docker`,
 `fleet_service`) — see `docs/installation.md`. The `caddy` role also
 renders the shared `tls.conf` snippet per `fleet_tls_mode`
 (`on_demand`/`ovh_dns` — see `docs/networking.md` §4), and `ansible/
-caddy-only.yml` reapplies just that role on a live host.
+caddy-only.yml` reapplies just that role on a live host. The other scoped
+playbooks are `hardening.yml` (network/security hardening + probe) and
+`fleet-units.yml` (only the systemd units + CLI wrapper of `fleet_service`) —
+see `docs/operations.md`.
 
 ## Module map (`src/fleet/`)
 
