@@ -332,6 +332,9 @@
     state: started
     daemon_reload: true
   when: fleet_reboot_notify_enabled
+  # --check: the unit file templated above is not written in a dry run, so
+  # systemd cannot find it on a host that never had it. Check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 # --- systemd security check (FLE-1) -----------------------------------------
 # Runs LAST (this role is last in site.yml), so every unit/drop-in this play
