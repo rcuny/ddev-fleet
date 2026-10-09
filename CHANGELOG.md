@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.1] - 2026-10-09
+
 ### Fixed
 - **FLE-26: `hardening.yml --check` on a never-hardened host.** v0.13.0 still failed a dry run on a server without ufw: the `ufw` tasks (the binary is only pretend-installed in check mode) and enabling units the roles template in the same run (`fleet-ufw-deadman-bootcheck.service`, the dead-man's timer, `fleet-reboot-notify.timer`). These tasks are now tolerated in check mode only, so a dry run reaches `security_hardening` and shows its diff. Real runs are unchanged.
 
@@ -403,7 +405,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/rcuny/ddev-fleet/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/rcuny/ddev-fleet/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/rcuny/ddev-fleet/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/rcuny/ddev-fleet/compare/v0.11.0...v0.12.0
