@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-09
+
 ### Added
 - **FLE-25: scoped playbooks for live servers.** `ansible/hardening.yml` applies `network_hardening`, `security_hardening` and `security_probe` alone, and `ansible/fleet-units.yml` applies only the systemd units and CLI wrapper of `fleet_service` (no git clone/update, no venv/pip; the unit tasks moved to `roles/fleet_service/tasks/units.yml`, still imported by `main.yml` in the same order). Both load `/etc/ddev-fleet/local-vars.yml` like `caddy-only.yml`. A changed `fleet.service` now also queues a `systemctl try-restart fleet.service` (no-op when the daemon is not running). See `docs/operations.md`.
 
@@ -16,7 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **FLE-25: named ports blocked after hardening.** `network_hardening` now deploys `fleet-ufw-sync` and runs it before `ufw enable`, so the registry's named ports are staged with SSH/80/443 (skipped in `--check` and when the fleet venv is missing; a failing sync warns instead of aborting).
 - **FLE-25: hardening no longer restarts Docker.** The `daemon.json` change notifies a `Reload docker` handler (`systemctl reload docker`) instead of restarting it, so running DDEV containers (restart policy `no`) survive on a host without live-restore yet.
-- **FLE-25: `--check` works.** The UFW "SSH port staged" assert no longer errors in a dry run (`ufw show added` runs read-only in check mode); the `findmnt` and msmtp credential reads in `security_hardening` do too, and its test-send report is skipped with the send.
+- **FLE-25: `--check` works.** The UFW "SSH port staged" assert no longer errors in a dry run (`ufw show added` runs read-only in check mode); the `findmnt` and msmtp credential reads in `security_hardening` do too, and its test-send report is skipped with the send. On a host that has never been hardened, the needrestart, fail2ban and auditd tasks (their directories and units only exist once the packages are really installed) are tolerated in check mode only.
+
+### Dependencies
+- FLE-10: `fastapi>=0.143.0` (was `>=0.142.4`), Renovate #29.
 
 ## [0.12.1] - 2026-10-09
 
@@ -395,7 +400,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.12.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/rcuny/ddev-fleet/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/rcuny/ddev-fleet/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/rcuny/ddev-fleet/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/rcuny/ddev-fleet/compare/v0.10.0...v0.11.0
