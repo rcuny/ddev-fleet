@@ -23,13 +23,13 @@ same systemd (257) as the servers.
 | Custom `systemd-security-live` | the live systemd security check, the published report and the Jira alert (weekly schedule) |
 
 - **Gates**: `pytest -q`, `ruff check .`, `black --check .`,
-  `node --test tests/js/*.test.mjs` (the OpenPGP.js browser-crypto tests), then
+  `node --test tests/node/*.test.mjs` (the OpenPGP.js browser-crypto tests), then
   the offline systemd security check (below). The image has `systemd` installed
   and `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
   instead of skipping if `systemd-analyze` is ever missing. The image also gets
   `gnupg` and `nodejs`, and `FLEET_REQUIRE_PGP_TOOLS=1` is set so the gpg/node
   interop tests fail instead of skipping if either tool is missing.
-  `pytest -q` also runs the browser E2E suite (`tests/e2e`, Playwright driving a
+  `pytest -q` also runs the browser E2E suite (`tests/playwright`, Playwright driving a
   real daemon in headless Chromium with the CSP enforced). The step installs the
   browser with `python -m playwright install --with-deps --only-shell chromium`
   and sets `FLEET_REQUIRE_E2E=1`, so a missing Playwright or a Chromium that
@@ -55,7 +55,7 @@ baseline and fails when one goes up.
 
 `python ci/systemd_security.py offline --out reports/offline.json` renders the
 sandboxed units from the Ansible templates exactly like
-`tests/test_systemd_sandbox.py` does (`fleet.service`, `fleet-boot.service`,
+`tests/pytest/ansible/test_systemd_sandbox.py` does (`fleet.service`, `fleet-boot.service`,
 `fleet-reboot-notify.service`, and `caddy.service` = a stand-in for the Debian
 vendor unit plus the `caddy` role's drop-in), scores them with
 `systemd-analyze security --offline=yes`, prints a table and writes the report.
@@ -173,7 +173,7 @@ artifact (`reports/SYSTEMD-SECURITY-REPORT.md`) and commits nothing.
   `ddev-fleet security check <security-check@noreply.fleet.pm>`, and only when
   the file changed. There is no `[skip ci]`: the `develop` pipeline is what
   mirrors the commit to GitHub. That cannot loop, because the `develop` push
-  pipeline does not run the live check (pinned by `tests/test_ci_config.py`).
+  pipeline does not run the live check (pinned by `tests/pytest/repo/test_ci_config.py`).
 - It is committed **even when a host regressed**; the step then still fails. A
   host that cannot be fetched is listed as such and the other hosts are
   published.
@@ -296,19 +296,19 @@ OK before touching it.
 ## Local runs
 
 ```bash
-.venv/bin/pytest -q tests/test_systemd_sandbox.py tests/test_systemd_security_ci.py \
-  tests/test_security_probe_role.py
+.venv/bin/pytest -q tests/pytest/ansible/test_systemd_sandbox.py tests/pytest/repo/test_systemd_security_ci.py \
+  tests/pytest/ansible/test_security_probe_role.py
 python ci/systemd_security.py offline --out /tmp/offline.json   # needs systemd-analyze
 ```
 
 `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` turns "systemd-analyze missing" from a skip
 into a failure, as in the pipeline. Likewise `FLEET_REQUIRE_PGP_TOOLS=1` turns a
 missing `gpg` or `node` into a failure instead of a skip for the OpenPGP interop
-tests (`tests/test_pgp_interop.py`, `tests/test_secrets_ui.py`,
-`tests/test_vendored_openpgp.py`); run `node --test tests/js/*.test.mjs` for the
+tests (`tests/pytest/secrets/test_pgp_interop.py`, `tests/pytest/web/test_secrets_ui.py`,
+`tests/pytest/secrets/test_vendored_openpgp.py`); run `node --test tests/node/*.test.mjs` for the
 browser-crypto tests. `FLEET_REQUIRE_E2E=1` does the same for the browser E2E
-suite (`tests/e2e`): without it, a missing Playwright or Chromium skips those
+suite (`tests/playwright`): without it, a missing Playwright or Chromium skips those
 tests. Locally, install the browser once with
 `.venv/bin/python -m playwright install --only-shell chromium` (add
 `--with-deps` or run `playwright install-deps chromium` with root for the system
-libraries), then run `.venv/bin/pytest tests/e2e`.
+libraries), then run `.venv/bin/pytest tests/playwright`.

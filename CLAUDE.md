@@ -84,17 +84,37 @@ don't assume they're the same). From `/opt/ddev-fleet` on the server, or
 this repo's checkout locally:
 
 ```bash
-.venv/bin/pytest -q          # 1009 passed, 4 skipped as of 2026-09-28
+.venv/bin/pytest -q          # 1767 passed, 4 skipped as of 2026-10-09
 .venv/bin/ruff check .
 .venv/bin/black --check .
-node --test tests/js/*.test.mjs   # browser-crypto tests (OpenPGP.js, FLE-22); needs Node
-.venv/bin/pytest tests/e2e        # browser E2E (FLE-24): real daemon + headless Chromium via Playwright
+node --test tests/node/*.test.mjs   # browser-crypto tests (OpenPGP.js, FLE-22); needs Node
+.venv/bin/pytest tests/playwright        # browser E2E (FLE-24): real daemon + headless Chromium via Playwright
 ```
 
-`tests/e2e` is part of `pytest -q`; it skips when Playwright or Chromium is missing
+### Test layout
+
+`tests/` is organised per framework (full guide: `tests/README-tests.md`):
+
+- `tests/pytest/<area>/` — unit and `TestClient` tests, one folder per area (each has an
+  `__init__.py`): `cli/`, `web/` (daemon, UI, CSP, Secrets page, jobs), `instances/`
+  (deploy/lifecycle/paths/locks/naming/ddev/bulk), `secrets/` (OpenPGP store, pgp, tokens,
+  vendored OpenPGP.js), `integrations/` (webhooks, gitops, Typesense, Authelia, Caddy),
+  `core/` (registry, fleetconfig, runner, shell, assets, tmux, reboot, ...), `ansible/`
+  (role/template tests) and `repo/` (CI config, Renovate merge, systemd security, hygiene).
+  `pytest/fakegpg.py` is the scripted gpg stand-in.
+- `tests/playwright/` — browser E2E (Python Playwright driven by pytest).
+- `tests/node/` — Node's built-in runner (`node --test`) for the browser ES modules.
+- `tests/conftest.py` (shared fixtures) and `tests/fixtures/` (shared data, e.g. `pgp/`)
+  stay at the root, shared by all three.
+
+Run: `.venv/bin/pytest -q` (pytest + playwright), `.venv/bin/pytest tests/pytest/cli` (one
+area), `.venv/bin/pytest tests/playwright`, `node --test tests/node/*.test.mjs`. Put a new
+test in the area that matches the source module under test.
+
+`tests/playwright` is part of `pytest -q`; it skips when Playwright or Chromium is missing
 (install: `.venv/bin/python -m playwright install --only-shell chromium`) and fails
 instead under `FLEET_REQUIRE_E2E=1` (CI sets it). **Any change to a UI page, template,
-or the JS it loads needs an E2E test** in `tests/e2e/`: unit tests with a fake htmx or
+or the JS it loads needs an E2E test** in `tests/playwright/`: unit tests with a fake htmx or
 the ASGI test client cannot see htmx form validation, the CSP or module loading
 (FLE-24 shipped broken for exactly that reason). The `browser_page` fixture fails the
 test on any console error, page error or CSP violation.

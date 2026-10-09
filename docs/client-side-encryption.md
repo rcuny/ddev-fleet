@@ -78,7 +78,7 @@ Details worth knowing:
 
 | File | Role |
 |---|---|
-| `src/fleet/static/openpgp.min.mjs` | OpenPGP.js 6.3.2, vendored unmodified, sha256-pinned by `tests/test_vendored_openpgp.py` (see `docs/vendored-assets.md`) |
+| `src/fleet/static/openpgp.min.mjs` | OpenPGP.js 6.3.2, vendored unmodified, sha256-pinned by `tests/pytest/secrets/test_vendored_openpgp.py` (see `docs/vendored-assets.md`) |
 | `src/fleet/static/secrets-crypto.mjs` | `encryptSecret(armoredPublicKey, plaintext)`; the only importer of OpenPGP.js; refuses non-v4 and private keys and empty values |
 | `src/fleet/static/secrets-form.mjs` | `encryptForm`: reads the form, encrypts, fills `armored`, clears the value, fires `fleet:encrypted` |
 | `src/fleet/static/secrets.js` | `type="module"` entry: submit / project-change / after-request wiring |
@@ -102,9 +102,9 @@ Details worth knowing:
   OpenPGP v6 keys or the v2 (AEAD) encrypted-data packet. The browser therefore
   refuses any key or subkey that is not version 4 and pins `aeadProtect: false`, so
   what it produces is a v3 PKESK + SEIPDv1 message that GnuPG 2.1 or newer (so 2.2 and 2.4) reads.
-  `tests/test_pgp_interop.py` proves this against a real `gpg`, including a committed
-  OpenPGP.js ciphertext. `tests/js/secrets-form.test.mjs` covers the form logic against a
-  fake htmx, and `tests/e2e/test_secrets_page.py` drives the real page in headless
+  `tests/pytest/secrets/test_pgp_interop.py` proves this against a real `gpg`, including a committed
+  OpenPGP.js ciphertext. `tests/node/secrets-form.test.mjs` covers the form logic against a
+  fake htmx, and `tests/playwright/test_secrets_page.py` drives the real page in headless
   Chromium (CSP enforced, real htmx and OpenPGP.js) against a real daemon: save, empty
   value, invalid name, delete and the no-host-key page, ending with `gpg` decrypting what
   the browser encrypted. Both exist because the fake-htmx test alone missed FLE-24 (an
@@ -152,7 +152,7 @@ together with `X-Content-Type-Options: nosniff` and `Referrer-Policy: no-referre
 For this page that means: only scripts served by the daemon itself run (no inline
 script, no `eval`, no third-party origin), the page cannot be framed, and a form cannot
 post elsewhere. It does not stop a compromised daemon or a malicious browser extension.
-The source is `src/fleet/websecurity.py`; `tests/test_csp_templates.py` fails if a
+The source is `src/fleet/websecurity.py`; `tests/pytest/web/test_csp_templates.py` fails if a
 template reintroduces inline script or style.
 
 ## Why no Subresource Integrity (SRI)
@@ -160,7 +160,7 @@ template reintroduces inline script or style.
 SRI protects against a third party (a CDN) serving a different file than the one the page
 author reviewed. Here every script is served by the daemon itself from `/static/`, and an
 attacker able to change the file could change the HTML carrying the `integrity` attribute
-just as easily. The real guards are: the pinned sha256 in `tests/test_vendored_openpgp.py`
+just as easily. The real guards are: the pinned sha256 in `tests/pytest/secrets/test_vendored_openpgp.py`
 (any change fails CI; the current pin, also in `docs/vendored-assets.md`, is
 `7d3285efa6dfedbb34a136d8b5ad21c28fb973269df0b2818dcb74dfb40b59d9`), vendoring from the
 npm tarball after verifying its registry hash, `script-src 'self'` (no third-party script

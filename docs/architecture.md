@@ -79,7 +79,7 @@ of them. The consequence for templates: **no inline `<script>`, `<style>`,
 `style=`, `on*=` handlers or `hx-on`** — styles live in `static/fleet.css`,
 scripts in `static/*.js`, and `base.html` carries `<meta name="htmx-config"
 content='{"includeIndicatorStyles":false,"allowEval":false}'>` so htmx neither
-injects a `<style>` nor evaluates strings. `tests/test_csp_templates.py` fails
+injects a `<style>` nor evaluates strings. `tests/pytest/web/test_csp_templates.py` fails
 the build if a template reintroduces any of them.
 
 **Same-origin rule for state-changing `/ui/*` requests** (every method except

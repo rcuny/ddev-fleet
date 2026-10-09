@@ -28,7 +28,7 @@ python3 -m venv .venv
 .venv/bin/pytest -q
 .venv/bin/ruff check .
 .venv/bin/black --check .
-node --test tests/js/*.test.mjs
+node --test tests/node/*.test.mjs
 ```
 
 `node` (20 or newer) and `gpg` are needed for the secrets tests; without them

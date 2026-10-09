@@ -478,7 +478,7 @@ The check (the last tasks of `security_hardening`, so only when
 `systemd-analyze security --threshold=N <unit>` for the rest and prints one
 summary line per unit. Expect a warning for every unit when
 `fleet_systemd_sandbox_enabled` is `false`. The same scores are asserted offline
-in `tests/test_systemd_sandbox.py` (skipped when `systemd-analyze` is absent,
+in `tests/pytest/ansible/test_systemd_sandbox.py` (skipped when `systemd-analyze` is absent,
 but never in Bitbucket Pipelines, where the Debian 13 image has systemd).
 
 **Regression checks (FLE-8).** Bitbucket Pipelines scores every sandboxed unit
