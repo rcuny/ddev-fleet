@@ -74,8 +74,8 @@ set stays fully inert for both.
 | `claude_cli` | Node.js/npm + the Claude Code CLI, so `claude setup-token` can mint `CLAUDE_CODE_OAUTH_TOKEN` |
 | `caddy` | Caddy apt repo + package, fleet-owned Caddy snippet dirs, seeded admin-auth default credentials, the rendered Caddyfile, the `50-fleet-sandbox.conf` systemd sandbox drop-in (FLE-1) |
 | `fleet_service` | Clones/updates the product repo into `{{ fleet_opt_dir }}`, installs the editable venv, deploys `fleet.service` + `fleet-boot.service` (both sandboxed via the shared `fleet-sandbox.inc.j2`, FLE-1; toggle `fleet_systemd_sandbox_enabled`) + `fleet-tmux.service` (owns the `fleet` tmux session in its own cgroup, deliberately unsandboxed; tag `fleet_tmux`) + the `fleet` CLI wrapper |
-| `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443/registry-port allows), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
-| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits, SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/operations.md`) |
+| `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443 allows, plus the registry's named ports staged via `fleet-ufw-sync` before `ufw enable`), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
+| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/operations.md`) |
 
 ## Testing
 
@@ -173,7 +173,14 @@ Full details: `docs/operations.md`. Summary:
   `git pull` that Option B depends on. When only the Caddy config needs
   reapplying (e.g. after touching `Caddyfile.j2` or
   `fleet_typesense_public_port`), apply the `caddy` role alone via a scoped
-  one-off playbook, not the full `site.yml`. **Rotating the dashboard admin
+  playbook (`ansible/caddy-only.yml`), not the full `site.yml`. The other
+  scoped playbooks beside it: `ansible/hardening.yml` (`network_hardening` +
+  `security_hardening` + `security_probe`, for hardening a live server),
+  `ansible/fleet-units.yml` (only the systemd units + CLI wrapper of
+  `fleet_service`, i.e. `roles/fleet_service/tasks/units.yml`, no clone/pip),
+  `ansible/security-probe.yml` and `ansible/authelia.yml`. They must live beside
+  `site.yml` (`group_vars/` resolves relative to the playbook); procedures in
+  `docs/operations.md`. **Rotating the dashboard admin
   password is NOT one of these cases** — `fleet rotate-admin-password` /
   `fleet set-admin-password` (`core/caddyauth.py`) never touches Ansible at
   all; see README.md "Default credentials".

@@ -1,0 +1,44 @@
+---
+# Scoped playbook: the systemd units + CLI wrapper of the fleet_service role
+# only (fleet.service, fleet-boot.service, fleet-tmux.service, the /usr/local/bin/fleet
+# wrapper and their enabling). NO git clone/update, NO venv, NO pip.
+#
+# Use this instead of site.yml to refresh the units on a live host (e.g. after a
+# release changed the FLE-1 sandbox drop-ins or a unit template). site.yml's
+# fleet_service role also runs the git task, which rewrites /opt/ddev-fleet's
+# git remote to https and breaks the SSH-key `git pull` the rollout flow depends
+# on, so site.yml must never be run against a live host.
+#
+# Effects: a changed fleet.service is daemon-reloaded and `systemctl try-restart`
+# ed (the daemon restarts; DDEV instances are untouched). fleet-boot.service is
+# only enabled (boot-only). fleet-tmux.service is enabled and started but never
+# restarted: a changed unit is picked up at a moment you choose.
+#
+# It must live beside site.yml: group_vars/ resolves relative to the playbook's
+# directory, so a copy in /tmp silently runs with fleet_* variables undefined.
+#
+#   cd /opt/ddev-fleet/ansible
+#   sudo ansible-playbook fleet-units.yml --check --diff   # preview
+#   sudo ansible-playbook fleet-units.yml
+#
+# pre_tasks mirror site.yml/caddy-only.yml so /etc/ddev-fleet/local-vars.yml
+# still overrides the committed group_vars.
+- name: Refresh the fleet systemd units and CLI wrapper
+  hosts: localhost
+  become: true
+  force_handlers: true
+  pre_tasks:
+    - name: Check for host-local variable overrides
+      ansible.builtin.stat:
+        path: /etc/ddev-fleet/local-vars.yml
+      register: _fleet_local_vars
+    - name: Load host-local variable overrides if present
+      ansible.builtin.include_vars: /etc/ddev-fleet/local-vars.yml
+      when: _fleet_local_vars.stat.exists
+  tasks:
+    # import_role (static), not include_role: the fleet_boot / fleet_tmux tags on
+    # the tasks in units.yml keep working with --tags.
+    - name: Apply only the unit/wrapper tasks of fleet_service
+      ansible.builtin.import_role:
+        name: fleet_service
+        tasks_from: units.yml

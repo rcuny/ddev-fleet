@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-06
+Last updated: 2026-10-09
 Type: documentation
 ---
 
@@ -499,8 +499,9 @@ Rolling it out to an existing server: do **not** run the full `site.yml`
 (see `CLAUDE.md`). For Caddy use `ansible-playbook caddy-only.yml` (it installs
 the drop-in, reloads systemd and restarts Caddy). For the fleet units, install
 the rendered `fleet.service` / `fleet-boot.service` / `fleet-reboot-notify.service`
-(root:root 0644), `systemctl daemon-reload`, then `systemctl restart fleet`.
-Verify with a web-UI deploy (the daemon path) and, for `fleet-boot`, a reboot.
+(root:root 0644), `systemctl daemon-reload`, then `systemctl restart fleet` -- or
+run `ansible-playbook fleet-units.yml` (see "Applying the fleet units" below),
+which does exactly that without touching git or the venv. Verify with a web-UI deploy (the daemon path) and, for `fleet-boot`, a reboot.
 After a Caddy restart, watch `journalctl -u caddy` through the first certificate
 renewal.
 
@@ -517,6 +518,80 @@ cp /opt/ddev-fleet/docs/srv-fleet-CLAUDE.md /srv/fleet/CLAUDE.md
 Re-run this after every `ddev-fleet` upgrade that changed
 `docs/srv-fleet-CLAUDE.md` (a CLI surface change, a registry schema
 change, or a new server-side Claude skill).
+
+## Hardening an existing server (FLE-25)
+
+`site.yml` must never run on a live host (its `fleet_service` role rewrites the
+git remote of `/opt/ddev-fleet`), so use the scoped playbooks in `ansible/`
+(they must stay beside `site.yml`: `group_vars/` resolves relative to the
+playbook).
+
+### Applying `hardening.yml`
+
+Runs `network_hardening`, `security_hardening` and `security_probe`; each is a
+no-op unless enabled.
+
+1. Edit `/etc/ddev-fleet/local-vars.yml`:
+
+   ```yaml
+   fleet_network_hardening_enabled: true
+   fleet_security_hardening_enabled: true
+   fleet_ssh_allow_users: [debian, root]   # pin it: must include your login
+   ```
+
+2. Preview, then apply:
+
+   ```bash
+   cd /opt/ddev-fleet/ansible
+   sudo ansible-playbook hardening.yml --check --diff
+   sudo ansible-playbook hardening.yml
+   ```
+
+3. **Confirm the UFW dead-man's switch.** When the run enables UFW it arms a
+   timer that disables UFW again after `fleet_ufw_deadman_grace_minutes`
+   unless confirmed. From a **second, independent SSH session** (this proves
+   the firewall let you in):
+
+   ```bash
+   sudo /usr/local/sbin/fleet-firewall-confirm
+   ```
+
+Safe with running instances:
+
+- **Docker is reloaded, never restarted.** `/etc/docker/daemon.json`
+  (`live-restore` + log limits) changes notify a `Reload docker` handler
+  (`systemctl reload docker`, SIGHUP). `live-restore` is reloadable and the log
+  options only affect new containers. A restart would stop every container, and
+  DDEV containers have restart policy `no`, so nothing would come back on a host
+  without live-restore yet. Containers keep running through the play.
+- **Named ports are staged before UFW is enabled.** The role deploys
+  `fleet-ufw-sync` and runs it before `ufw enable`, so the registry's named
+  ports (`Registry.public_ports_in_use()`, e.g. Typesense 9108) are open the
+  moment the firewall comes up. The step is skipped in `--check` and when the
+  fleet venv does not exist yet; if it fails the play warns and continues.
+  On a server hardened before FLE-25 whose named ports are blocked, run
+  `fleet refresh-ports` (or re-run `hardening.yml`).
+- `--check --diff` completes: the read-only commands (`ufw show added`,
+  `findmnt`, the msmtp credential reads) run in check mode, and the "SSH port is
+  staged" assert accepts a rule the dry run would add.
+
+### Applying the fleet units (`fleet-units.yml`)
+
+Refreshes only the systemd units and the CLI wrapper of `fleet_service`
+(`fleet.service`, `fleet-boot.service`, `fleet-tmux.service`,
+`/usr/local/bin/fleet`): no git clone/update, no venv, no pip.
+
+```bash
+cd /opt/ddev-fleet/ansible
+sudo ansible-playbook fleet-units.yml --check --diff
+sudo ansible-playbook fleet-units.yml
+```
+
+A changed `fleet.service` is daemon-reloaded and then `systemctl try-restart`ed
+(the daemon restarts if it was running; DDEV instances are untouched).
+`fleet-boot.service` is only enabled (it runs at boot). `fleet-tmux.service` is
+enabled and started but never restarted: pick up a changed unit yourself, at a
+moment of your choosing, since stopping it ends the `fleet` tmux session.
 
 ## See also
 

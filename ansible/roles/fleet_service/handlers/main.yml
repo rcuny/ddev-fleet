@@ -2,3 +2,13 @@
 - name: Reload systemd daemon
   ansible.builtin.systemd:
     daemon_reload: true
+
+- name: Restart fleet.service if running
+  # try-restart: a no-op when the unit is not running (fresh bootstrap, where
+  # the runbook starts it only after the verification items pass). Picks up a
+  # changed unit file; the daemon is stateless, running DDEV instances are
+  # untouched, and the tmux session lives in fleet-tmux.service's own cgroup.
+  # `command`, not the systemd module: the module has no try-restart.
+  ansible.builtin.command:  # noqa: command-instead-of-module
+    cmd: systemctl try-restart fleet.service
+  changed_when: true

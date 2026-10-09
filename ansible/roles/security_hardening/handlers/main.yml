@@ -1,8 +1,14 @@
 ---
-- name: Restart docker
+- name: Reload docker
+  # NEVER restart docker from this role: a restart stops every container, and
+  # DDEV containers have restart policy `no`, so on a live host that does not
+  # run with live-restore yet every instance would stay down. docker.service's
+  # ExecReload sends SIGHUP; `live-restore` is a reloadable daemon option and
+  # the log-driver options only affect containers created afterwards, so a
+  # reload applies everything daemon.json carries without touching containers.
   ansible.builtin.systemd:
     name: docker
-    state: restarted
+    state: reloaded
 
 - name: Reload sshd
   ansible.builtin.systemd:
