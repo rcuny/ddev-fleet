@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+- **FLE-26: `hardening.yml --check` on a never-hardened host.** v0.13.0 still failed a dry run on a server without ufw: the `ufw` tasks (the binary is only pretend-installed in check mode) and enabling units the roles template in the same run (`fleet-ufw-deadman-bootcheck.service`, the dead-man's timer, `fleet-reboot-notify.timer`). These tasks are now tolerated in check mode only, so a dry run reaches `security_hardening` and shows its diff. Real runs are unchanged.
+
 ## [0.13.0] - 2026-10-09
 
 ### Added
