@@ -259,3 +259,28 @@ def test_package_dependent_hardening_tasks_tolerate_check_mode_only():
         "Ensure auditd is enabled",
     ):
         assert _task(tasks, fragment).get("ignore_errors") == "{{ ansible_check_mode }}", fragment
+
+
+def test_ufw_and_new_unit_tasks_tolerate_check_mode_on_a_fresh_host():
+    # FLE-26: on a host that never had ufw, a dry run cannot run the ufw module
+    # nor find units this role only templates in the same run.
+    nh = _tasks("network_hardening", "harden.yml")
+    for fragment in (
+        "Set UFW default policies",
+        "Allow SSH (unconditional",
+        "Allow HTTP/HTTPS for Caddy",
+        "Allow each resolved extra port",
+        "Enable UFW (last",
+        "bootcheck service is enabled",
+        "Arm the UFW dead-man's switch",
+    ):
+        assert _task(nh, fragment).get("ignore_errors") == "{{ ansible_check_mode }}", fragment
+    sh = _tasks("security_hardening", "harden.yml")
+    task = _task(sh, "Enable and start the fleet-reboot-notify timer")
+    assert task.get("ignore_errors") == "{{ ansible_check_mode }}"
+
+
+def test_ssh_staged_assert_accepts_a_dry_run_without_ufw():
+    nh = _tasks("network_hardening", "harden.yml")
+    that = " ".join(_task(nh, "Assert the SSH port is present")["ansible.builtin.assert"]["that"])
+    assert "nh_ufw_ssh_allow is failed" in that and "ansible_check_mode" in that

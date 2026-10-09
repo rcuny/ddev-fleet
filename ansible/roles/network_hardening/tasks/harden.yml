@@ -47,6 +47,9 @@
     - { direction: outgoing, policy: allow }
   loop_control:
     label: "{{ item.direction }}={{ item.policy }}"
+  # --check on a host without ufw yet: apt only pretends to install it, so the
+  # ufw module cannot run. Tolerated in check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Allow SSH (unconditional, must precede ufw enable — spec §5)
   community.general.ufw:
@@ -54,6 +57,9 @@
     port: "{{ fleet_ufw_ssh_port | string }}"
     proto: tcp
   register: nh_ufw_ssh_allow
+  # --check on a host without ufw yet: apt only pretends to install it, so the
+  # ufw module cannot run. Tolerated in check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Allow HTTP/HTTPS for Caddy
   community.general.ufw:
@@ -63,6 +69,9 @@
   loop:
     - "80"
     - "443"
+  # --check on a host without ufw yet: apt only pretends to install it, so the
+  # ufw module cannot run. Tolerated in check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Allow each resolved extra port (spec §4 — seeded empty at provision time)
   community.general.ufw:
@@ -70,6 +79,9 @@
     port: "{{ item | string }}"
     proto: tcp
   loop: "{{ fleet_ufw_extra_ports }}"
+  # --check on a host without ufw yet: apt only pretends to install it, so the
+  # ufw module cannot run. Tolerated in check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Render the DOCKER-USER guard into /etc/ufw/after.rules
   # Inserted as its OWN *filter/COMMIT stanza, textually BEFORE ufw's
@@ -179,13 +191,14 @@
   # exactly 22, never one that merely contains "22".
   # In --check the ufw module only reports what it WOULD add, so a host that
   # is not hardened yet has no staged SSH rule: there, "the allow task would
-  # change" counts as staged. A real run never takes that branch.
+  # change" (or could not run: no ufw yet, FLE-26) counts as staged. A real run
+  # never takes that branch.
   ansible.builtin.assert:
     that:
       - >-
         (fleet_ufw_ssh_port | string) in (nh_ufw_added.stdout_lines | default([])
         | map('regex_findall', '[0-9]+') | sum(start=[]))
-        or (ansible_check_mode and nh_ufw_ssh_allow is changed)
+        or (ansible_check_mode and (nh_ufw_ssh_allow is changed or nh_ufw_ssh_allow is failed))
     fail_msg: >-
       SSH port {{ fleet_ufw_ssh_port }} was not found as an exact (whole
       number) port in 'ufw show added' — refusing to enable UFW. Any
@@ -196,6 +209,9 @@
   community.general.ufw:
     state: enabled
   register: nh_ufw_enable
+  # --check on a host without ufw yet: apt only pretends to install it, so the
+  # ufw module cannot run. Tolerated in check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Deploy the shared dead-man's-switch fire script
   ansible.builtin.copy:
@@ -267,6 +283,9 @@
       {{ fleet_ufw_deadman_switch_enabled
          and (nh_deadman_confirmed_marker.stat.exists or nh_ufw_enable.changed) }}
     daemon_reload: true
+  # --check: the unit file templated above is not written in a dry run, so
+  # systemd cannot find it on a host that never had it. Check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Arm the UFW dead-man's switch
   ansible.builtin.systemd:
@@ -276,6 +295,9 @@
     nh_ufw_enable.changed
     and fleet_ufw_deadman_switch_enabled
     and not nh_deadman_confirmed_marker.stat.exists
+  # --check: the unit file templated above is not written in a dry run, so
+  # systemd cannot find it on a host that never had it. Check mode only (FLE-26).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Print the dead-man's-switch operator message (spec §3.3)
   ansible.builtin.debug:
