@@ -504,7 +504,7 @@ def deploy(
         # instance_lock below): re-entering instance_lock() for the SAME
         # lock id from inside the same process is NOT reentrant (flock() is
         # per open-file-description, not per-process — see
-        # tests/test_locks.py::test_nested_lock_on_same_instance_raises_lock_held)
+        # tests/pytest/instances/test_locks.py::test_nested_lock_on_same_instance_raises_lock_held)
         # and would raise LockHeldError rather than deadlock — but it's
         # still wrong, so we simply don't hold both at once. This leaves a
         # narrow, accepted TOCTOU window: the label chosen here isn't

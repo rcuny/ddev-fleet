@@ -2,7 +2,7 @@
    Included by both so the two units cannot drift. Needs fleet_srv_dir,
    fleet_caddy_snippet_dir and fleet_home_dir. fleet-reboot-notify.service
    (security_hardening role) carries its own, smaller copy — a role cannot
-   include another role's templates; tests/test_systemd_sandbox.py guards
+   include another role's templates; tests/pytest/ansible/test_systemd_sandbox.py guards
    against drift between the two. #}
 # systemd sandbox (FLE-1; score 8.7 -> 1.8 in `systemd-analyze security`).
 # Validated on a live server under exactly this set, incl. a full

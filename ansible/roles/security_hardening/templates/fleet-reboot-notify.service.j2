@@ -11,7 +11,7 @@ ExecStart={{ fleet_opt_dir }}/venv/bin/fleet reboot-notify --interval-hours {{ f
 
 # systemd sandbox (FLE-1). Same base set as fleet.service (see the
 # fleet_service role's fleet-sandbox.inc.j2 — a role can't include another
-# role's templates, so tests/test_systemd_sandbox.py guards against drift).
+# role's templates, so tests/pytest/ansible/test_systemd_sandbox.py guards against drift).
 # This oneshot only reads /run/reboot-required (world-readable), reads
 # {{ fleet_srv_dir }}/msmtprc + reboot-notify.env, writes its cadence state
 # {{ fleet_srv_dir }}/reboot-notify-state.json, and spawns msmtp (SMTP over

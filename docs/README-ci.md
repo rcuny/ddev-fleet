@@ -23,12 +23,18 @@ same systemd (257) as the servers.
 | Custom `systemd-security-live` | the live systemd security check, the published report and the Jira alert (weekly schedule) |
 
 - **Gates**: `pytest -q`, `ruff check .`, `black --check .`,
-  `node --test tests/js/*.test.mjs` (the OpenPGP.js browser-crypto tests), then
-  the offline systemd security check (below). The image has `systemd` installed
-  and `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
+  `node --test tests/node/*.test.mjs` (the OpenPGP.js browser-crypto tests), the
+  browser E2E suite (below), then the offline systemd security check (below). The
+  image has `systemd` installed and `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
   instead of skipping if `systemd-analyze` is ever missing. The image also gets
   `gnupg` and `nodejs`, and `FLEET_REQUIRE_PGP_TOOLS=1` is set so the gpg/node
   interop tests fail instead of skipping if either tool is missing.
+  The step also runs the browser E2E suite (`tests/playwright`, a TypeScript
+  `@playwright/test` npm package driving real daemons in headless Chromium with the CSP
+  enforced): `npm ci`, `npx playwright install --with-deps --only-shell chromium` and
+  `npx playwright test`, run from that folder after the Node tests. The image gets the
+  Debian `npm` package next to `nodejs` (Debian 13 ships Node 20, which Playwright 1.63
+  supports). The runner has no skip mode: a missing browser fails the step.
 - **Ansible lint (non-blocking)**: `ansible-lint ansible/` and `yamllint
   ansible/` (the `infra` extra). Findings are printed but never fail the run;
   drop the `|| echo` in the step to promote it to a hard gate.
@@ -50,7 +56,7 @@ baseline and fails when one goes up.
 
 `python ci/systemd_security.py offline --out reports/offline.json` renders the
 sandboxed units from the Ansible templates exactly like
-`tests/test_systemd_sandbox.py` does (`fleet.service`, `fleet-boot.service`,
+`tests/pytest/ansible/test_systemd_sandbox.py` does (`fleet.service`, `fleet-boot.service`,
 `fleet-reboot-notify.service`, and `caddy.service` = a stand-in for the Debian
 vendor unit plus the `caddy` role's drop-in), scores them with
 `systemd-analyze security --offline=yes`, prints a table and writes the report.
@@ -168,7 +174,7 @@ artifact (`reports/SYSTEMD-SECURITY-REPORT.md`) and commits nothing.
   `ddev-fleet security check <security-check@noreply.fleet.pm>`, and only when
   the file changed. There is no `[skip ci]`: the `develop` pipeline is what
   mirrors the commit to GitHub. That cannot loop, because the `develop` push
-  pipeline does not run the live check (pinned by `tests/test_ci_config.py`).
+  pipeline does not run the live check (pinned by `tests/pytest/repo/test_ci_config.py`).
 - It is committed **even when a host regressed**; the step then still fails. A
   host that cannot be fetched is listed as such and the other hosts are
   published.
@@ -291,14 +297,17 @@ OK before touching it.
 ## Local runs
 
 ```bash
-.venv/bin/pytest -q tests/test_systemd_sandbox.py tests/test_systemd_security_ci.py \
-  tests/test_security_probe_role.py
+.venv/bin/pytest -q tests/pytest/ansible/test_systemd_sandbox.py tests/pytest/repo/test_systemd_security_ci.py \
+  tests/pytest/ansible/test_security_probe_role.py
 python ci/systemd_security.py offline --out /tmp/offline.json   # needs systemd-analyze
 ```
 
 `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` turns "systemd-analyze missing" from a skip
 into a failure, as in the pipeline. Likewise `FLEET_REQUIRE_PGP_TOOLS=1` turns a
 missing `gpg` or `node` into a failure instead of a skip for the OpenPGP interop
-tests (`tests/test_pgp_interop.py`, `tests/test_secrets_ui.py`,
-`tests/test_vendored_openpgp.py`); run `node --test tests/js/*.test.mjs` for the
-browser-crypto tests.
+tests (`tests/pytest/secrets/test_pgp_interop.py`, `tests/pytest/web/test_secrets_ui.py`,
+`tests/pytest/secrets/test_vendored_openpgp.py`); run `node --test tests/node/*.test.mjs` for the
+browser-crypto tests. The browser E2E suite (`tests/playwright`) has no such flag: it never
+skips. Locally, install it once with `cd tests/playwright && npm ci && npx playwright install
+--only-shell chromium` (add `--with-deps` or run `npx playwright install-deps chromium` with
+root for the system libraries), then run `npx playwright test` from that folder.

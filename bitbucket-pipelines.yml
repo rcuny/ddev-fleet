@@ -1,7 +1,7 @@
 # Bitbucket Pipelines — the canonical CI for ddev-fleet (Bitbucket is the
 # source of truth; GitHub is a read-only public mirror published from here).
 #
-#   pull request (any branch)  -> gates (pytest, ruff, black, offline systemd
+#   pull request (any branch)  -> gates (pytest, ruff, black, browser E2E, offline systemd
 #                                 security check) in parallel with a
 #                                 non-blocking ansible-lint/yamllint step
 #   push to develop            -> the same parallel pair, then mirror develop
@@ -98,7 +98,7 @@ image: python:3.11-trixie # full Debian 13 image on purpose: the tests run real 
 definitions:
   steps:
     - step: &gates
-        name: Gates (pytest, ruff, black, systemd security)
+        name: Gates (pytest, ruff, black, browser E2E, systemd security)
         caches:
           - pip
         script:
@@ -109,7 +109,9 @@ definitions:
           # systemd: systemd-analyze scores the rendered units (FLE-8)
           # gnupg + nodejs: the secrets tests run the real gpg and a real node against the
           #   vendored OpenPGP.js (FLE-22); Debian 13's node 20 is enough.
-          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync systemd gnupg nodejs > /dev/null
+          # npm: Debian ships it as a separate package; it installs tests/playwright's
+          #   dependencies (FLE-24). @playwright/test 1.63 needs Node >= 20, so no newer Node.
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync systemd gnupg nodejs npm > /dev/null
           # The systemd scoring tests fail instead of skipping when systemd-analyze is missing.
           - export FLEET_REQUIRE_SYSTEMD_ANALYZE=1
           # Likewise the gpg/node interop tests fail instead of skipping (FLE-22).
@@ -118,8 +120,13 @@ definitions:
           - pytest -q
           - ruff check .
           - black --check .
-          # Glob form: `node --test tests/js/` (a directory) fails on Node 22.
-          - node --test tests/js/*.test.mjs
+          # Glob form: `node --test tests/node/` (a directory) fails on Node 22.
+          - node --test tests/node/*.test.mjs
+          # Browser E2E (FLE-24): TypeScript @playwright/test in its own npm package. It starts the
+          # daemons itself with the `python3` of this image (the package is pip-installed above),
+          # needs headless Chromium plus its system libraries (apt, as root), and fails outright
+          # when the browser is missing. A subshell keeps the working directory at the repo root.
+          - (cd tests/playwright && npm ci && npx playwright install --with-deps --only-shell chromium && npx playwright test)
           - python ci/systemd_security.py offline --out reports/offline.json
           - >-
             python ci/systemd_security.py compare --env offline --current reports/offline.json

@@ -84,11 +84,45 @@ don't assume they're the same). From `/opt/ddev-fleet` on the server, or
 this repo's checkout locally:
 
 ```bash
-.venv/bin/pytest -q          # 1009 passed, 4 skipped as of 2026-09-28
+.venv/bin/pytest -q          # 1767 passed, 4 skipped as of 2026-10-09
 .venv/bin/ruff check .
 .venv/bin/black --check .
-node --test tests/js/*.test.mjs   # browser-crypto tests (OpenPGP.js, FLE-22); needs Node
+node --test tests/node/*.test.mjs   # browser-crypto tests (OpenPGP.js, FLE-22); needs Node
+(cd tests/playwright && npx playwright test)   # browser E2E (FLE-24): TypeScript @playwright/test, real daemons + headless Chromium
 ```
+
+### Test layout
+
+`tests/` is organised per framework (full guide: `tests/README-tests.md`):
+
+- `tests/pytest/<area>/` — unit and `TestClient` tests, one folder per area (each has an
+  `__init__.py`): `cli/`, `web/` (daemon, UI, CSP, Secrets page, jobs), `instances/`
+  (deploy/lifecycle/paths/locks/naming/ddev/bulk), `secrets/` (OpenPGP store, pgp, tokens,
+  vendored OpenPGP.js), `integrations/` (webhooks, gitops, Typesense, Authelia, Caddy),
+  `core/` (registry, fleetconfig, runner, shell, assets, tmux, reboot, ...), `ansible/`
+  (role/template tests) and `repo/` (CI config, Renovate merge, systemd security, hygiene).
+  `pytest/fakegpg.py` is the scripted gpg stand-in.
+- `tests/playwright/` — browser E2E: TypeScript `@playwright/test`, a self-contained npm package
+  (`package.json`, `playwright.config.ts`, `support/`, `*.spec.ts`); not collected by pytest.
+- `tests/node/` — Node's built-in runner (`node --test`) for the browser ES modules.
+- `tests/conftest.py` (shared fixtures) and `tests/fixtures/` (shared data, e.g. `pgp/`)
+  stay at the root, shared by all three.
+
+Run: `.venv/bin/pytest -q` (pytest only), `.venv/bin/pytest tests/pytest/cli` (one area),
+`node --test tests/node/*.test.mjs`, and `cd tests/playwright && npx playwright test` (browser
+E2E; add `-g "<title>"` for one test, `--headed`/`--ui`/`--debug` to watch). Put a new test in
+the area that matches the source module under test.
+
+`tests/playwright` is its own npm package, outside `pytest -q`. One-time setup:
+`cd tests/playwright && npm ci && npx playwright install --with-deps chromium` (the browser
+build follows the exact `@playwright/test` pin in its `package.json`; reinstall after a bump).
+`playwright test` starts the two daemons itself (`webServer` + `support/start-daemon.mjs`, using
+`FLEET_PYTHON` or `.venv/bin/python`, else `python3`) and fails outright when a browser, `gpg` or
+Python is missing: there is no skip mode. **Any change to a UI page, template, or the JS it
+loads needs an E2E test** in `tests/playwright/`: unit tests with a fake htmx or the ASGI test
+client cannot see htmx form validation, the CSP or module loading (FLE-24 shipped broken for
+exactly that reason). The `page` fixture in `support/fixtures.ts` fails the test on any console
+error, page error or CSP violation.
 
 `pyproject.toml` declares `dev` extras (`pytest`, `ruff`, `black`, `httpx`)
 and `infra` extras (`ansible-core`, `ansible-lint`, `yamllint`) as optional

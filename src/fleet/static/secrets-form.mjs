@@ -1,7 +1,10 @@
 // The testable half of the Secrets screen (no DOM globals, only
 // form.querySelector): encrypt the typed value in the browser, then let htmx
 // POST only the ciphertext. The plaintext input has no `name`, so it is never
-// part of any request, and it is cleared as soon as the ciphertext exists.
+// part of any request, and it is cleared as soon as the ciphertext exists. It must
+// not carry `required`: htmx validates every form element before sending, so an
+// emptied required field would silently halt the request (FLE-24). An empty value
+// is refused here instead, with a visible message.
 import { encryptSecret } from "./secrets-crypto.mjs";
 
 export async function encryptForm(form, htmxApi) {

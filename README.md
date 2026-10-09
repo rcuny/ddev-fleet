@@ -118,7 +118,10 @@ Full detail (both credential types, the underlying mechanism): `docs/operations.
   registry for the web UI), `templates/` + `static/` (Jinja2/HTMX UI)
 - `ansible/` — provisioning playbook (`site.yml` and its roles)
 - `bootstrap.sh` — one-shot installer entry point
-- `tests/` — pytest suite (unit + FastAPI `TestClient`/`httpx` tests)
+- `tests/` — the test suite, split by framework: `pytest/<area>/` (unit + FastAPI
+  `TestClient`/`httpx` tests, grouped by area), `playwright/` (browser E2E) and `node/`
+  (Node's test runner for the browser ES modules); shared `conftest.py` and `fixtures/`
+  at its root. See [`tests/README-tests.md`](tests/README-tests.md)
 - `fleet.yml.dist` — example registry (project/template/ports skeleton);
   the live registry is edited at `<config-repo>/fleet.yml` or
   `/srv/fleet/config/fleet.yml`, not committed to this repo
