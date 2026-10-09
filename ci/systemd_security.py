@@ -51,8 +51,8 @@ REPORT_SCRIPT = ROLES / "security_probe" / "files" / "fleet-security-report"
 DEFAULT_BASELINE = ROOT / "ci" / "systemd-security-baseline.json"
 DEFAULT_TOLERANCE = 0.1
 
-# Keep in step with tests/test_systemd_sandbox.py (tests/test_systemd_security_ci.py
-# fails when the two drift apart).
+# Keep in step with tests/pytest/ansible/test_systemd_sandbox.py
+# (tests/pytest/repo/test_systemd_security_ci.py fails when the two drift apart).
 TEMPLATE_VARS = dict(
     fleet_user="fleet",
     fleet_opt_dir="/opt/ddev-fleet",
