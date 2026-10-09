@@ -23,17 +23,18 @@ same systemd (257) as the servers.
 | Custom `systemd-security-live` | the live systemd security check, the published report and the Jira alert (weekly schedule) |
 
 - **Gates**: `pytest -q`, `ruff check .`, `black --check .`,
-  `node --test tests/node/*.test.mjs` (the OpenPGP.js browser-crypto tests), then
-  the offline systemd security check (below). The image has `systemd` installed
-  and `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
+  `node --test tests/node/*.test.mjs` (the OpenPGP.js browser-crypto tests), the
+  browser E2E suite (below), then the offline systemd security check (below). The
+  image has `systemd` installed and `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
   instead of skipping if `systemd-analyze` is ever missing. The image also gets
   `gnupg` and `nodejs`, and `FLEET_REQUIRE_PGP_TOOLS=1` is set so the gpg/node
   interop tests fail instead of skipping if either tool is missing.
-  `pytest -q` also runs the browser E2E suite (`tests/playwright`, Playwright driving a
-  real daemon in headless Chromium with the CSP enforced). The step installs the
-  browser with `python -m playwright install --with-deps --only-shell chromium`
-  and sets `FLEET_REQUIRE_E2E=1`, so a missing Playwright or a Chromium that
-  cannot launch fails the run instead of skipping the E2E tests.
+  The step also runs the browser E2E suite (`tests/playwright`, a TypeScript
+  `@playwright/test` npm package driving real daemons in headless Chromium with the CSP
+  enforced): `npm ci`, `npx playwright install --with-deps --only-shell chromium` and
+  `npx playwright test`, run from that folder after the Node tests. The image gets the
+  Debian `npm` package next to `nodejs` (Debian 13 ships Node 20, which Playwright 1.63
+  supports). The runner has no skip mode: a missing browser fails the step.
 - **Ansible lint (non-blocking)**: `ansible-lint ansible/` and `yamllint
   ansible/` (the `infra` extra). Findings are printed but never fail the run;
   drop the `|| echo` in the step to promote it to a hard gate.
@@ -306,9 +307,7 @@ into a failure, as in the pipeline. Likewise `FLEET_REQUIRE_PGP_TOOLS=1` turns a
 missing `gpg` or `node` into a failure instead of a skip for the OpenPGP interop
 tests (`tests/pytest/secrets/test_pgp_interop.py`, `tests/pytest/web/test_secrets_ui.py`,
 `tests/pytest/secrets/test_vendored_openpgp.py`); run `node --test tests/node/*.test.mjs` for the
-browser-crypto tests. `FLEET_REQUIRE_E2E=1` does the same for the browser E2E
-suite (`tests/playwright`): without it, a missing Playwright or Chromium skips those
-tests. Locally, install the browser once with
-`.venv/bin/python -m playwright install --only-shell chromium` (add
-`--with-deps` or run `playwright install-deps chromium` with root for the system
-libraries), then run `.venv/bin/pytest tests/playwright`.
+browser-crypto tests. The browser E2E suite (`tests/playwright`) has no such flag: it never
+skips. Locally, install it once with `cd tests/playwright && npm ci && npx playwright install
+--only-shell chromium` (add `--with-deps` or run `npx playwright install-deps chromium` with
+root for the system libraries), then run `npx playwright test` from that folder.

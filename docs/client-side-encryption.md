@@ -104,7 +104,7 @@ Details worth knowing:
   what it produces is a v3 PKESK + SEIPDv1 message that GnuPG 2.1 or newer (so 2.2 and 2.4) reads.
   `tests/pytest/secrets/test_pgp_interop.py` proves this against a real `gpg`, including a committed
   OpenPGP.js ciphertext. `tests/node/secrets-form.test.mjs` covers the form logic against a
-  fake htmx, and `tests/playwright/test_secrets_page.py` drives the real page in headless
+  fake htmx, and `tests/playwright/secrets.spec.ts` drives the real page in headless
   Chromium (CSP enforced, real htmx and OpenPGP.js) against a real daemon: save, empty
   value, invalid name, delete and the no-host-key page, ending with `gpg` decrypting what
   the browser encrypted. Both exist because the fake-htmx test alone missed FLE-24 (an

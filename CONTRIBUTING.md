@@ -29,11 +29,15 @@ python3 -m venv .venv
 .venv/bin/ruff check .
 .venv/bin/black --check .
 node --test tests/node/*.test.mjs
+(cd tests/playwright && npm ci && npx playwright install --with-deps chromium && npx playwright test)
 ```
 
 `node` (20 or newer) and `gpg` are needed for the secrets tests; without them
 those tests skip locally (set `FLEET_REQUIRE_PGP_TOOLS=1` to make that an
-error, as CI does).
+error, as CI does). The last line is the browser E2E suite, a TypeScript
+`@playwright/test` npm package in `tests/playwright/`; run `npm ci` and the
+browser install once, then only `npx playwright test` (it starts the daemons
+itself and never skips). See `tests/README-tests.md`.
 
 `ruff` selects `E,F,I`, line length 100 (`black` matches). Never open a
 PR with a red suite.

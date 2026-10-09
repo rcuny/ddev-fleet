@@ -1,0 +1,16 @@
+{
+  "name": "ddev-fleet-e2e",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Browser end-to-end tests for ddev-fleet: the real daemon in headless Chromium with the CSP enforced.",
+  "scripts": {
+    "test": "playwright test",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.63.0",
+    "@types/node": "22.20.5",
+    "typescript": "5.9.3"
+  }
+}

@@ -28,7 +28,7 @@ Gitflow:
 Bitbucket (`origin`) is the source of truth. GitHub is a read-only mirror
 published by Bitbucket Pipelines (`bitbucket-pipelines.yml`):
 
-- **`develop` pipeline:** gates (pytest, ruff, black), then "Mirror develop
+- **`develop` pipeline:** gates (pytest, ruff, black, browser E2E), then "Mirror develop
   to GitHub". The mirror step only pushes if `develop` is still the pushed
   commit, so a newer push is mirrored by its own pipeline.
 - **`v*` tag pipeline:** gates, then "Publish release to GitHub mirror". That
@@ -120,6 +120,7 @@ the dev venv set up (`CONTRIBUTING.md`).
    .venv/bin/ruff check .
    .venv/bin/black --check .
    node --test tests/node/*.test.mjs
+   (cd tests/playwright && npx playwright test)   # browser E2E; `npm ci` and the browser install once
    ```
 
 4. **Merge to `main` and tag.**

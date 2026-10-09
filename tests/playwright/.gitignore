@@ -1,0 +1,7 @@
+node_modules/
+# Playwright run artifacts (traces, report) and the launcher's per-run state files.
+test-results/
+playwright-report/
+blob-report/
+.run/
+.auth/

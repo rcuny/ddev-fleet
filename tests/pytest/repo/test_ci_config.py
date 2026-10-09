@@ -98,10 +98,6 @@ def test_gates_run_on_debian_13_with_systemd_and_require_systemd_analyze():
     assert script.index("FLEET_REQUIRE_SYSTEMD_ANALYZE=1") < script.index("pytest -q")
     assert re.search(r"apt-get install .*\bgnupg\b.*\bnodejs\b", script)
     assert script.index("FLEET_REQUIRE_PGP_TOOLS=1") < script.index("pytest -q")
-    assert script.index("FLEET_REQUIRE_E2E=1") < script.index("pytest -q")
-    install = script.index('pip install -q -e ".[dev]"')
-    browser = script.index("python -m playwright install --with-deps --only-shell chromium")
-    assert install < browser < script.index("pytest -q")
     node_gate = script.index("node --test tests/node/*.test.mjs")
     assert script.index("black --check .") < node_gate
     assert node_gate < script.index("systemd_security.py offline")
@@ -109,13 +105,31 @@ def test_gates_run_on_debian_13_with_systemd_and_require_systemd_analyze():
     assert gates["artifacts"] == ["reports/**"]
 
 
-def test_playwright_is_a_pinned_dev_dependency():
-    # FLE-24: the browser E2E suite. The pin must equal the companion's
-    # test/playwright/package.json (the Chromium build comes from the Playwright version).
-    pyproject = (ROOT / "pyproject.toml").read_text()
-    assert re.search(r'"playwright==\d+\.\d+\.\d+"', pyproject)
-    dev = pyproject[pyproject.index("dev = [") : pyproject.index("infra = [")]
-    assert '"playwright==' in dev
+def test_gates_run_the_typescript_browser_e2e_suite_with_a_browser_install():
+    # FLE-24: tests/playwright is its own npm package; the step needs npm (a separate Debian
+    # package), installs the pinned dependencies and Chromium, and fails when a browser is missing.
+    script = _script(_gates(PIPELINES["pipelines"]["pull-requests"]["**"]))
+    assert re.search(r"apt-get install .*\bnodejs\b.*\bnpm\b", script)
+    (e2e,) = [ln for ln in script.splitlines() if "npx playwright test" in ln]
+    assert "cd tests/playwright" in e2e
+    install = e2e.index("npm ci")
+    browser = e2e.index("npx playwright install --with-deps --only-shell chromium")
+    assert install < browser < e2e.index("npx playwright test")
+    assert script.index("node --test tests/node/*.test.mjs") < script.index(e2e)
+    assert script.index(e2e) < script.index("systemd_security.py offline")
+    assert script.index('pip install -q -e ".[dev]"') < script.index(e2e)
+    # the Python E2E suite and its skip switch are gone
+    assert not re.search(r"REQUIRE_E2E|python -m\s+playwright", script)
+
+
+def test_playwright_is_pinned_exactly_in_its_own_npm_package():
+    # The Chromium build comes from the Playwright version: it must stay equal to the browsers
+    # installed locally, so it is exact-pinned (and no longer a Python dependency).
+    package = json.loads((ROOT / "tests" / "playwright" / "package.json").read_text())
+    assert package["type"] == "module" and package["private"] is True
+    assert re.fullmatch(r"\d+\.\d+\.\d+", package["devDependencies"]["@playwright/test"])
+    assert (ROOT / "tests" / "playwright" / "package-lock.json").is_file()
+    assert "playwright" not in (ROOT / "pyproject.toml").read_text().lower()
 
 
 def test_ansible_lint_is_a_non_blocking_parallel_step_next_to_the_gates():

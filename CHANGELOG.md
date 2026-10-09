@@ -10,10 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.12.1] - 2026-10-09
 
 ### Added
-- **FLE-24: browser end-to-end tests.** `tests/playwright/` runs the real daemon under uvicorn and drives the Secrets page in headless Chromium (Playwright 1.63.0, `[dev]` extra) with the CSP enforced; console errors, page errors and CSP violations fail a test. They skip without Playwright/Chromium unless `FLEET_REQUIRE_E2E=1`, which the Bitbucket gates step sets after `python -m playwright install --with-deps --only-shell chromium`. See `docs/README-ci.md`.
+- **FLE-24: browser end-to-end tests.** `tests/playwright/` is a TypeScript `@playwright/test` suite (its own npm package, Playwright 1.63.0 pinned exactly) that starts the real daemons under uvicorn and drives the Secrets page in headless Chromium with the CSP enforced; console errors, page errors and CSP violations fail a test, and the save test checks that only ciphertext is sent and that `gpg` decrypts what the browser encrypted. It never skips: a missing browser fails the run. The Bitbucket gates step runs `npm ci`, `npx playwright install --with-deps --only-shell chromium` and `npx playwright test` in that folder. See `tests/README-tests.md` and `docs/README-ci.md`.
 
 ### Changed
-- **FLE-24: test tree reorganised by framework.** `tests/pytest/<area>/` (unit and TestClient tests, grouped by area), `tests/playwright/` (browser E2E, was `tests/e2e/`) and `tests/node/` (Node's built-in test runner, was `tests/js/`); shared `conftest.py` and `fixtures/` stay at the root of `tests/`.
+- **FLE-24: test tree reorganised by framework.** `tests/pytest/<area>/` (unit and TestClient tests, grouped by area), `tests/playwright/` (browser E2E, TypeScript) and `tests/node/` (Node's built-in test runner, was `tests/js/`); shared `conftest.py` and `fixtures/` stay at the root of `tests/`.
 
 ### Fixed
 - **FLE-24: Secrets "Encrypt and save" sent nothing.** htmx validates every form field before sending; the plaintext value field was cleared after encryption, so its `required` attribute silently halted the request. `required` is removed from that unnamed field; an empty value is still refused in the browser with a visible message.
