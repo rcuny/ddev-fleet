@@ -53,6 +53,7 @@
     rule: allow
     port: "{{ fleet_ufw_ssh_port | string }}"
     proto: tcp
+  register: nh_ufw_ssh_allow
 
 - name: Allow HTTP/HTTPS for Caddy
   community.general.ufw:
@@ -102,11 +103,72 @@
   # 'enable' task both still run AFTER this flush.
   ansible.builtin.meta: flush_handlers
 
+- name: Deploy fleet-ufw-sync
+  # Deployed BEFORE `ufw enable` (FLE-25) so the named-port sync below can run
+  # while UFW is still inactive. Additive-only, takes no arguments.
+  ansible.builtin.template:
+    src: fleet-ufw-sync.sh.j2
+    dest: /usr/local/sbin/fleet-ufw-sync
+    owner: root
+    group: "{{ fleet_group }}"
+    mode: "0750"
+
+- name: Install the fleet-ufw-sync sudoers drop-in
+  ansible.builtin.copy:
+    dest: /etc/sudoers.d/fleet-ufw-sync
+    content: "{{ fleet_user }} ALL=(root) NOPASSWD: /usr/local/sbin/fleet-ufw-sync\n"
+    owner: root
+    group: root
+    mode: "0440"
+    validate: "visudo -cf %s"
+
+- name: Check that the fleet venv python the sync helper uses exists
+  # On a fresh bootstrap fleet_service runs earlier in site.yml, so the venv is
+  # there. Scoped runs (hardening.yml) on a host without it simply skip the
+  # staging; `fleet refresh-ports` can do it later.
+  ansible.builtin.stat:
+    path: "{{ fleet_opt_dir }}/venv/bin/python3"
+  register: nh_fleet_venv_python
+
+- name: Stage the registry's named ports (Typesense etc.) before enabling UFW
+  # FLE-25: `ufw enable` below would otherwise drop the registry's named ports
+  # (Registry.public_ports_in_use(), e.g. 9108/9111/9325) until someone ran
+  # `fleet refresh-ports`. `ufw allow` is accepted while UFW is inactive, so the
+  # rules are staged first and live the instant UFW is enabled. Additive only
+  # (never removes a rule); same helper, same no-args contract as refresh-ports.
+  # Skipped in check mode: it writes UFW rules.
+  ansible.builtin.command:
+    cmd: /usr/local/sbin/fleet-ufw-sync
+  register: nh_ufw_sync
+  changed_when: "'Rules updated' in nh_ufw_sync.stdout"
+  failed_when: false
+  when:
+    - not ansible_check_mode
+    - nh_fleet_venv_python.stat.exists
+
+- name: Warn when the named-port sync failed
+  # Not fatal: a missing/invalid registry must not abort hardening half-way.
+  # Recover with `fleet refresh-ports` once the registry loads.
+  ansible.builtin.debug:
+    msg: >-
+      fleet-ufw-sync failed (rc={{ nh_ufw_sync.rc }}); named ports are NOT
+      staged in UFW. Run `fleet refresh-ports` after hardening.
+      {{ nh_ufw_sync.stderr | default('') }}
+  when:
+    - nh_ufw_sync is not skipped
+    - nh_ufw_sync.rc | default(0) != 0
+
 - name: Verify the SSH allow rule is staged before enabling UFW (spec §5)
+  # Read-only, so it runs in --check too (check_mode: false): otherwise the
+  # assert below sees no output and a dry run of this role errors out (FLE-25).
+  # In a dry run on a host that does not have ufw yet (apt is a no-op there) the
+  # command cannot run: tolerated in check mode only.
   ansible.builtin.command:
     cmd: ufw show added
   register: nh_ufw_added
   changed_when: false
+  check_mode: false
+  failed_when: nh_ufw_added.rc | default(1) != 0 and not ansible_check_mode
 
 - name: Assert the SSH port is present in the staged rules
   # Word/line-boundary match, NOT substring: a plain `in nh_ufw_added.stdout`
@@ -115,9 +177,15 @@
   # 8080 also allowed). regex_findall('[0-9]+', ...) tokenises each staged
   # rule line into whole numbers, so "22" only matches a rule whose port is
   # exactly 22, never one that merely contains "22".
+  # In --check the ufw module only reports what it WOULD add, so a host that
+  # is not hardened yet has no staged SSH rule: there, "the allow task would
+  # change" counts as staged. A real run never takes that branch.
   ansible.builtin.assert:
     that:
-      - (fleet_ufw_ssh_port | string) in (nh_ufw_added.stdout_lines | map('regex_findall', '[0-9]+') | sum(start=[]))
+      - >-
+        (fleet_ufw_ssh_port | string) in (nh_ufw_added.stdout_lines | default([])
+        | map('regex_findall', '[0-9]+') | sum(start=[]))
+        or (ansible_check_mode and nh_ufw_ssh_allow is changed)
     fail_msg: >-
       SSH port {{ fleet_ufw_ssh_port }} was not found as an exact (whole
       number) port in 'ufw show added' — refusing to enable UFW. Any
@@ -220,20 +288,3 @@
     nh_ufw_enable.changed
     and fleet_ufw_deadman_switch_enabled
     and not nh_deadman_confirmed_marker.stat.exists
-
-- name: Deploy fleet-ufw-sync
-  ansible.builtin.template:
-    src: fleet-ufw-sync.sh.j2
-    dest: /usr/local/sbin/fleet-ufw-sync
-    owner: root
-    group: "{{ fleet_group }}"
-    mode: "0750"
-
-- name: Install the fleet-ufw-sync sudoers drop-in
-  ansible.builtin.copy:
-    dest: /etc/sudoers.d/fleet-ufw-sync
-    content: "{{ fleet_user }} ALL=(root) NOPASSWD: /usr/local/sbin/fleet-ufw-sync\n"
-    owner: root
-    group: root
-    mode: "0440"
-    validate: "visudo -cf %s"

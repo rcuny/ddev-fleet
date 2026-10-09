@@ -22,6 +22,10 @@
     owner: root
     group: root
     mode: "0644"
+  # --check on a host that does not have the package yet: apt only pretends to
+  # install it, so its directory/unit is missing and this task cannot be
+  # simulated. Tolerated in check mode only; a real run installs it first (FLE-25).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Deploy the fleet-owned Docker daemon.json (live-restore + log rotation)
   # Fully fleet-owned (copy semantics via template, not a merge) —
@@ -32,7 +36,9 @@
     owner: root
     group: root
     mode: "0644"
-  notify: Restart docker
+  # Reload, never restart (see the "Reload docker" handler): running DDEV
+  # containers must survive this role on a live host.
+  notify: Reload docker
 
 - name: Determine the real invoking operator (sudo-local, not root)
   # The installer runs `ansible-playbook -c local` under `sudo`, so
@@ -100,6 +106,10 @@
     mode: "0644"
   when: fleet_fail2ban_enabled
   notify: Restart fail2ban
+  # --check on a host that does not have the package yet: apt only pretends to
+  # install it, so its directory/unit is missing and this task cannot be
+  # simulated. Tolerated in check mode only; a real run installs it first (FLE-25).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Ensure fail2ban is enabled and started
   ansible.builtin.systemd:
@@ -107,6 +117,10 @@
     enabled: true
     state: started
   when: fleet_fail2ban_enabled
+  # --check on a host that does not have the package yet: apt only pretends to
+  # install it, so its directory/unit is missing and this task cannot be
+  # simulated. Tolerated in check mode only; a real run installs it first (FLE-25).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Deploy the conservative sysctl drop-in
   ansible.builtin.copy:
@@ -132,6 +146,10 @@
     mode: "0640"
   when: fleet_auditd_enabled
   notify: Reload auditd rules
+  # --check on a host that does not have the package yet: apt only pretends to
+  # install it, so its directory/unit is missing and this task cannot be
+  # simulated. Tolerated in check mode only; a real run installs it first (FLE-25).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Ensure auditd is enabled and started
   ansible.builtin.systemd:
@@ -139,6 +157,10 @@
     enabled: true
     state: started
   when: fleet_auditd_enabled
+  # --check on a host that does not have the package yet: apt only pretends to
+  # install it, so its directory/unit is missing and this task cannot be
+  # simulated. Tolerated in check mode only; a real run installs it first (FLE-25).
+  ignore_errors: "{{ ansible_check_mode }}"
 
 - name: Determine whether /tmp is already its own mount point
   ansible.builtin.command:
@@ -146,6 +168,7 @@
   register: sh_tmp_target
   changed_when: false
   failed_when: false
+  check_mode: false  # read-only; the /tmp tasks below key off its output
   when: fleet_tmp_hardening_enabled
 
 - name: Warn and skip /tmp hardening when the pre-check is inconclusive
@@ -202,6 +225,7 @@
     executable: /bin/bash
   register: sh_msmtp_user_raw
   changed_when: false
+  check_mode: false  # read-only; shell is skipped in --check otherwise
   no_log: true
 
 - name: Read MSMTP_PASSWORD from .secrets (no_log)
@@ -210,6 +234,7 @@
     executable: /bin/bash
   register: sh_msmtp_password_raw
   changed_when: false
+  check_mode: false  # read-only; shell is skipped in --check otherwise
   no_log: true
 
 - name: Compute extracted msmtp credentials (no_log)
@@ -276,7 +301,9 @@
       {{ 'SUCCEEDED' if sh_msmtp_test_send.rc == 0
          else 'FAILED (rc=' + (sh_msmtp_test_send.rc | string) + ') — check '
               + fleet_srv_dir + '/msmtprc and the relay settings' }}
-  when: fleet_msmtp_enabled
+  when:
+    - fleet_msmtp_enabled
+    - sh_msmtp_test_send is not skipped  # the send is skipped in --check
 
 - name: Deploy the fleet-reboot-notify service unit
   ansible.builtin.template:
