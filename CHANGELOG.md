@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.1] - 2026-10-09
+
+### Fixed
+- **FLE-24: Secrets "Encrypt and save" sent nothing.** htmx validates every form field before sending; the plaintext value field was cleared after encryption, so its `required` attribute silently halted the request. `required` is removed from that unnamed field; an empty value is still refused in the browser with a visible message.
+
+### Added
+- **FLE-24: browser end-to-end tests.** `tests/e2e/` runs the real daemon under uvicorn and drives the Secrets page in headless Chromium (Playwright 1.63.0, `[dev]` extra) with the CSP enforced; console errors, page errors and CSP violations fail a test. They skip without Playwright/Chromium unless `FLEET_REQUIRE_E2E=1`, which the Bitbucket gates step sets after `python -m playwright install --with-deps --only-shell chromium`. See `docs/README-ci.md`.
+
 ## [0.12.0] - 2026-10-08
 
 ### Added
@@ -373,7 +381,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/rcuny/ddev-fleet/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/rcuny/ddev-fleet/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/rcuny/ddev-fleet/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/rcuny/ddev-fleet/compare/v0.9.2...v0.10.0
