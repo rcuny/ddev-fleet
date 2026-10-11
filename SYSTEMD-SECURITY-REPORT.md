@@ -4,7 +4,7 @@
 
 Every score is compared with the committed baseline `ci/systemd-security-baseline.json`. A unit counts as a regression only when its score rises by more than the tolerance (+0.1) over that baseline.
 
-**Run:** 2026-10-07 08:56 UTC, branch `develop`, [pipeline run](https://bitbucket.org/renaud_cuny/ddev-fleet/pipelines/results/66)
+**Run:** 2026-10-11 20:28 UTC, branch `develop`, [pipeline run](https://bitbucket.org/renaud_cuny/ddev-fleet/pipelines/results/114)
 
 | Host | systemd | Status |
 |---|---|---|
@@ -12,7 +12,7 @@ Every score is compared with the committed baseline `ci/systemd-security-baselin
 
 ## ddev3
 
-Status: OK. systemd 257, report generated 2026-10-07T08:56:21Z.
+Status: OK. systemd 257, report generated 2026-10-11T20:28:58Z.
 
 The units the product owns:
 
