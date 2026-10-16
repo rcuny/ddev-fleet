@@ -245,7 +245,7 @@ projects:
 |---|---|---|
 | `on_event` | yes | Bitbucket event key: `pullrequest:<x>` or `repo:<x>` (e.g. `pullrequest:approved`, `pullrequest:comment_created`, `repo:commit_status_updated`). |
 | `repo` | yes | `workspace/slug`. The payload's `repository.full_name` must equal it (case-insensitive), else the event is ignored. It is also the repo the pipeline is started on. |
-| `branch` | no | `fnmatch` glob (case-sensitive) against the PR's source branch, or a commit status's `refname`. A rule with `branch` never matches an event that has no branch (a commit status whose `refname` is null). |
+| `branch` | no (required for `deploy`) | `fnmatch` glob (case-sensitive) against the PR's source branch, a commit status's `refname`, or, for `repo:push`, the name of the pushed branch. A rule with `branch` never matches an event that has no branch (a commit status whose `refname` is null). Required for `action: deploy`. |
 | `state` | no | Commit-status events only (`repo:commit_status_*`): the status `state`, case-insensitive (`SUCCESSFUL`, `FAILED`, ...). |
 | `comment` | no | `pullrequest:comment_*` events only: matches when any line of the comment (stripped, case-insensitive) equals it, e.g. `/merge`. |
 | `action` | yes | `run-pipeline` or `deploy` (see [Deploy on branch push](#deploy-on-branch-push-action-deploy)). |
@@ -253,8 +253,8 @@ projects:
 | `ref` | `run-pipeline` only | The branch to run the pipeline on, e.g. `develop`. |
 | `template` | `deploy` only | The project template to deploy (must exist in the project). |
 | `label` | `deploy` only | A fixed instance label (slugified), e.g. `pw-regression`. Exclusive with `label_prefix` / `strip_suffix`. |
-| `label_prefix` | `deploy` only | Prepended to the pushed branch (after `strip_suffix` is removed) to form the label. |
-| `strip_suffix` | `deploy` only | Literal text removed from the end of the pushed branch. The `branch` glob must end with it (`*--pw-run` / `--pw-run`). |
+| `label_prefix` | `deploy` only; required for a derived label | Prepended to the pushed branch (after `strip_suffix` is removed) to form the label. Required whenever the label is derived (without `label`): a bare branch slug could equal the id of a hand-deployed or Jira-hook instance, which the deploy would replace. |
+| `strip_suffix` | `deploy` only | Literal text removed from the end of the pushed branch. The `branch` glob must end with it (`*--pw-run` / `--pw-run`). Needs `label_prefix` alongside. |
 
 The first matching rule wins. Validation is strict and fails at load time with
 a `projects.<p>.bitbucket_hooks[i]...` message: unknown keys, a malformed
@@ -265,13 +265,22 @@ release before v0.10.0 ignore the unknown `bitbucket_hooks` key, and a rule
 alone enables nothing: each server also needs its own secret (and, for
 `run-pipeline`, token). A release from v0.10.0 up to the one that added
 `action: deploy` refuses a `fleet.yml` that contains a deploy rule (unknown
-keys), so upgrade every server that pulls that `fleet.yml` first.
+keys), so upgrade every server that pulls that `fleet.yml` first (details in
+the next section).
 
 ## Deploy on branch push (`action: deploy`)
 
 FLE-27. A `repo:push` rule deploys the pushed branch instead of starting a
 pipeline. It lets a push to a branch name with a marker suffix start a CI run
 on a fleet server (the Playwright CI: `git push origin HEAD:feature/x--pw-run`).
+
+**Requires fleet v0.14.0 or later on every server that loads the `fleet.yml`.**
+Pushing a `fleet.yml` that contains a deploy rule (`ddev push-config`) to a
+server running v0.10.0 to v0.13.1 makes `Registry.load` fail there on the
+unknown `bitbucket_hooks` keys, which breaks every fleet command and every
+webhook route on that server. Servers older than v0.10.0 (before
+`bitbucket_hooks` and the `post_deploy` mapping existed) cannot load such a
+config either. Upgrade the product first, then push the config.
 
 ```yaml
 bitbucket_hooks:
@@ -289,7 +298,13 @@ bitbucket_hooks:
   `pw-feature-abc-1898-x`, instance `website--pw-feature-abc-1898-x`). When
   `<project>--<label>` would exceed 63 characters the label is cut and ends in
   `-` plus the first 6 hex of the SHA-1 of the branch name, so the id still
-  fits and the same branch always lands on the same id.
+  fits and the same branch always lands on the same id. The fitting is
+  alias-aware: a project with `additional_hostnames` also needs
+  `<hostname>-<instance id>` to fit in 63 characters, so the id is shortened by
+  the longest `<hostname>-` prefix, and a long branch can still deploy.
+- Two different branch names can slugify to the same instance id (for example
+  `Feature/A_b--pw-run` and `feature/a/b--pw-run`): the later push replaces
+  the instance of the earlier one.
 - The job is a normal deploy of `template` on the pushed branch with
   `replace=True`: a re-push destroys the existing instance (and its tmux
   window, which kills a run in flight) and rebuilds it under the same id. If
@@ -304,12 +319,16 @@ bitbucket_hooks:
   reserved for webhook-owned instances: with `replace=True` the deploy destroys
   and rebuilds whatever instance already has that id, whoever created it. Do
   not deploy by hand under that prefix.
+- **Jobs live in memory.** Deploy jobs are held by the daemon process only: a
+  daemon restart drops a queued or lock-waiting job (Bitbucket already got its
+  200, so it will not retry). Push the branch again to retry.
 - **Waiting occupies a job slot.** A re-push while the same instance is still
   deploying waits for its lock (`retry_while_locked`, up to 45 minutes) and
   holds one of the daemon's job slots for the whole wait.
 - Validation (at load time): `deploy` only with `on_event: repo:push`; `branch`
   and `template` required; exactly one of `label` or `label_prefix` /
-  `strip_suffix`; `pattern` / `ref` are not allowed; `run-pipeline` is not
+  `strip_suffix` (a derived label requires a non-empty `label_prefix`);
+  `pattern` / `ref` are not allowed; `run-pipeline` is not
   allowed on `repo:push`.
 - A deploy rule needs **no Bitbucket token** (only the webhook secret).
 - Targets are resolved before the delivery is claimed: a branch that cannot be
