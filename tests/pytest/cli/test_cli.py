@@ -1939,6 +1939,32 @@ def test_webhook_secret_default_source_is_jira(fleet_home, capsys):
     assert store.read_secret("demo", "bitbucket") is None
 
 
+def test_webhook_secret_bitbucket_push_deploy_rules_need_no_token(fleet_home, capsys):
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      ci: {}
+    bitbucket_hooks:
+      - {on_event: "repo:push", repo: acme/demo, branch: "*--pw-run", action: deploy, template: ci, label_prefix: "pw-", strip_suffix: "--pw-run"}
+""",  # noqa: E501
+        encoding="utf-8",
+    )
+    base = ["--fleet-home", str(fleet_home), "webhook", "secret", "demo", "--source", "bitbucket"]
+
+    assert cli.main(base) == 0
+    out = capsys.readouterr().out
+    assert "URL: https://fleet.example.test/hooks/bitbucket/demo" in out
+    assert "warning" not in out  # a rule exists and no pipeline token is needed
+
+
 def test_webhook_bitbucket_token_from_stdin_is_not_echoed(fleet_home, capsys, monkeypatch):
     import io
 
