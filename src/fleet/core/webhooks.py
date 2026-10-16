@@ -43,6 +43,9 @@ MAX_BODY_BYTES = 1024 * 1024
 _SIGNATURE_PREFIX = "sha256="
 _ISSUE_EVENT_PREFIX = "jira:issue_"
 
+# Bitbucket's push event: one delivery can carry several ref changes.
+PUSH_EVENT = "repo:push"
+
 
 def verify_signature(secret: str, body: bytes, header: str | None) -> bool:
     """True when `header` is `sha256=<hex HMAC-SHA256(secret, body)>` (what Jira
@@ -130,7 +133,8 @@ class BitbucketEvent:
     `pullrequest:*` / `repo:*` (such as `diagnostics:ping`) only `event` is
     set. `branch` is the PR's source branch, or for a commit status its
     `refname` (None when absent). `comment_lines` are the stripped, non-empty
-    lines of a PR comment."""
+    lines of a PR comment. For `repo:push` (one event per updated branch)
+    `branch` is the pushed branch and `sha` the commit it now points at."""
 
     event: str
     repo: str | None = None
@@ -138,6 +142,7 @@ class BitbucketEvent:
     branch: str | None = None
     state: str | None = None
     comment_lines: tuple[str, ...] = ()
+    sha: str | None = None
 
 
 def _dig(payload: object, *keys: str) -> object:
@@ -165,6 +170,10 @@ def parse_bitbucket_event(event_key: str | None, payload: object) -> BitbucketEv
         raise ValidationError("webhook request has no X-Event-Key header")
     if not isinstance(payload, dict):
         raise ValidationError("webhook payload must be a JSON object")
+    if event_key == PUSH_EVENT:
+        raise ValidationError(
+            f"{PUSH_EVENT} carries one change per ref: use parse_bitbucket_events()"
+        )
     if not event_key.startswith(("pullrequest:", "repo:")):
         return BitbucketEvent(event_key)
     repo = _str_or_none(_dig(payload, "repository", "full_name"))
@@ -197,6 +206,45 @@ def parse_bitbucket_event(event_key: str | None, payload: object) -> BitbucketEv
         branch=_str_or_none(_dig(payload, "pullrequest", "source", "branch", "name")),
         comment_lines=lines,
     )
+
+
+def _push_events(payload: dict) -> list[BitbucketEvent]:
+    """One `repo:push` event per branch the push created or updated, in payload
+    order. Deletions (`new: null`), tags and other ref types are skipped, so the
+    list may be empty."""
+    repo = _str_or_none(_dig(payload, "repository", "full_name"))
+    if repo is None:
+        raise ValidationError(f"{PUSH_EVENT} payload has no string 'repository.full_name'")
+    changes = _dig(payload, "push", "changes")
+    if not isinstance(changes, list):
+        raise ValidationError(f"{PUSH_EVENT} payload has no list 'push.changes'")
+    events: list[BitbucketEvent] = []
+    for change in changes:
+        new = change.get("new") if isinstance(change, dict) else None
+        if not isinstance(new, dict) or new.get("type") != "branch":
+            continue
+        name = _str_or_none(new.get("name"))
+        sha = _str_or_none(_dig(new, "target", "hash"))
+        if name is None or sha is None:
+            raise ValidationError(
+                f"{PUSH_EVENT} branch change has no string 'new.name' / 'new.target.hash'"
+            )
+        events.append(BitbucketEvent(PUSH_EVENT, repo=repo, branch=name, sha=sha))
+    return events
+
+
+def parse_bitbucket_events(event_key: str | None, payload: object) -> list[BitbucketEvent]:
+    """Like `parse_bitbucket_event`, but for every event key: a `repo:push`
+    yields one event per created/updated branch (possibly none: a delete- or
+    tag-only push), any other key yields exactly one event. Raises
+    ValidationError in the same cases as `parse_bitbucket_event`, plus a
+    `repo:push` without `push.changes` or with a branch change lacking its
+    name or commit hash (the route maps these to 400)."""
+    if event_key == PUSH_EVENT:
+        if not isinstance(payload, dict):
+            raise ValidationError("webhook payload must be a JSON object")
+        return _push_events(payload)
+    return [parse_bitbucket_event(event_key, payload)]
 
 
 def match_bitbucket_rule(
