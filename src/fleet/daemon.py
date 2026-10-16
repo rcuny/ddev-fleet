@@ -618,6 +618,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 return ignored(f"event {webhooks_mod.PUSH_EVENT}")
 
             fixed_label_rules = [r for r in rules if r.action == "deploy" and r.label]
+            # Alias labels are `<hostname>-<instance id>` and share the 63-char
+            # limit (instances.alias_fqdns): keep room for the longest prefix.
+            alias_reserve = max(
+                (len(h) + 1 for h in registry.additional_hostnames(project)), default=0
+            )
             targets = []
             collided = []
             seen_ids: set[str] = set()
@@ -630,6 +635,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                         label=rule.label,
                         label_prefix=rule.label_prefix,
                         strip_suffix=rule.strip_suffix,
+                        reserve=alias_reserve,
                     )
                     resolved = instances_mod.resolve_target(
                         registry, project, rule.template, ev.branch, label

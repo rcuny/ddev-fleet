@@ -52,6 +52,7 @@ def derive_label(
     label: str | None = None,
     label_prefix: str | None = None,
     strip_suffix: str | None = None,
+    reserve: int = 0,
 ) -> str:
     """The instance label for a branch deployed by a `repo:push` hook rule.
 
@@ -62,6 +63,11 @@ def derive_label(
     so the id fits, stays deterministic (a re-run lands on the same instance)
     and two long branches sharing a prefix do not collide.
 
+    `reserve` is the number of characters the caller needs to keep free on top
+    of the id (the longest `<hostname>-` alias prefix of the project's
+    `additional_hostnames`, whose label `<hostname>-<instance id>` is held to
+    the same 63-character limit): the id is fitted to `63 - reserve`.
+
     Raises `ValidationError` if the slug is empty, or if `project` is so long
     that not even a shortened label fits."""
     if label:
@@ -70,7 +76,8 @@ def derive_label(
         stem = branch.removesuffix(strip_suffix) if strip_suffix else branch
         raw = f"{label_prefix or ''}{stem}"
     slug = slugify(raw)
-    room = _MAX_INSTANCE_ID_LENGTH - len(project) - 2  # 2 = the "--" separator
+    # 2 = the "--" separator
+    room = _MAX_INSTANCE_ID_LENGTH - reserve - len(project) - 2
     if len(slug) <= room:
         return slug
     digest = hashlib.sha1(branch.encode("utf-8"), usedforsecurity=False).hexdigest()

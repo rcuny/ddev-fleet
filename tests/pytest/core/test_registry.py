@@ -1723,7 +1723,7 @@ def test_bitbucket_deploy_hooks_valid(fleet_home):
         "      - {on_event: 'repo:push', repo: acme/website, branch: develop, action: deploy,\n"
         "         template: ci-baseline, label: pw-regression}\n"
         f"      - {{{_BB_PUSH}, branch: 'ci/*', label_prefix: 'ci-'}}\n"
-        f"      - {{{_BB_PUSH}, branch: '*--x', strip_suffix: '--x'}}\n",
+        f"      - {{{_BB_PUSH}, branch: '*--x', label_prefix: 'x-', strip_suffix: '--x'}}\n",
     )
     registry = Registry.load(path)
 
@@ -1759,6 +1759,7 @@ def test_bitbucket_deploy_hooks_valid(fleet_home):
             "deploy",
             branch="*--x",
             template="ci-pw",
+            label_prefix="x-",
             strip_suffix="--x",
         ),
     ]
@@ -1847,6 +1848,12 @@ def test_bitbucket_deploy_and_pipeline_rules_coexist(fleet_home):
             " label_prefix: ''}",
             "label_prefix: must be a non-empty string",
             id="label-prefix-empty",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: '*-x',"
+            " strip_suffix: '-x'}",
+            "label_prefix: required",
+            id="strip-suffix-without-label-prefix",
         ),
         pytest.param(
             "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: '*-x',"

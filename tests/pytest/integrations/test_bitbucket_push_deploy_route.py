@@ -34,9 +34,17 @@ projects:
       - {{on_event: "repo:push", repo: {_REPO}, branch: "*--pw-run", action: deploy, template: ci-pw, label_prefix: "pw-", strip_suffix: "--pw-run"}}
       - {{on_event: "repo:push", repo: {_REPO}, branch: "*--pw-run-ml", action: deploy, template: ci-pw-ml, label_prefix: "pwml-", strip_suffix: "--pw-run-ml"}}
       - {{on_event: "repo:push", repo: {_REPO}, branch: develop, action: deploy, template: ci-baseline, label: pw-regression}}
-      - {{on_event: "repo:push", repo: {_REPO}, branch: "*--bare", action: deploy, template: ci-pw, strip_suffix: "--bare"}}
+      - {{on_event: "repo:push", repo: {_REPO}, branch: "*--bare", action: deploy, template: ci-pw, label_prefix: "-", strip_suffix: "--bare"}}
   website:
     git: git@example.test:org/website.git
+    templates:
+      ci-pw: {{}}
+    bitbucket_hooks:
+      - {{on_event: "repo:push", repo: {_REPO}, branch: "*--pw-run", action: deploy, template: ci-pw, label_prefix: "pw-", strip_suffix: "--pw-run"}}
+  aliased:
+    git: git@example.test:org/aliased.git
+    additional_hostnames:
+      - odihr
     templates:
       ci-pw: {{}}
     bitbucket_hooks:
@@ -62,6 +70,7 @@ def hook_env(fleet_home, monkeypatch):
     secret = store.create_secret("p", source="bitbucket")
     store.create_secret("prs", source="bitbucket")
     store.create_secret("website", source="bitbucket")
+    store.create_secret("aliased", source="bitbucket")
 
     from fleet import daemon as daemon_mod
 
@@ -251,6 +260,21 @@ def test_push_ignored(hook_env, payload, reason):
     assert not calls
     # Ignored deliveries never consume the id.
     assert store.claim_delivery("p", "u1", "bitbucket") is True
+
+
+def test_long_branch_leaves_room_for_the_additional_hostname_alias(hook_env):
+    client, store, _, calls, _, _ = hook_env
+    branch = "feature/" + "long-name-" * 8 + "--pw-run"
+    resp = _post(
+        client, _push(_change(branch)), store.read_secret("aliased", "bitbucket"), "aliased"
+    )
+    assert resp.status_code == 200
+    instance = resp.json()["instance"]
+    assert _wait_job(client, resp.json()["job"]) == "succeeded"
+    assert len(f"odihr-{instance}") <= 63
+    assert len(instance) > 50  # fitted to the reserved room, not collapsed
+    ((_, kwargs),) = calls
+    assert f"aliased--{kwargs['label']}" == instance
 
 
 def test_project_without_a_push_rule_ignores_push_events(hook_env):

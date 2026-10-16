@@ -91,7 +91,7 @@ class BitbucketHookRule:
     - `deploy` (only for `on_event: repo:push`, `branch` glob required): deploy
       `template` for the pushed branch, replacing the instance in place. The
       instance label is the fixed `label`, or derived from the pushed branch
-      as `label_prefix` + the branch minus `strip_suffix` (see
+      as `label_prefix` (required) + the branch minus `strip_suffix` (see
       `core.naming.derive_label`); `pattern` / `ref` are forbidden.
 
     Consumed by `core/webhooks.py` and `daemon.py`."""
@@ -501,6 +501,12 @@ class Registry:
                     f"{where}.strip_suffix: {suffix!r} is not guaranteed by the branch glob "
                     f"{branch!r} (the glob must end with it)"
                 )
+        if derived and "label_prefix" not in rule:
+            raise RegistryError(
+                f"{where}.label_prefix: required when the label is derived from the pushed "
+                "branch (without a prefix the label is the bare branch slug, which can equal "
+                "the id of a hand-deployed or Jira-hook instance and would replace it)"
+            )
 
     def _validate(self, *, host_config_path: Path | None = None) -> None:
         data = self._data

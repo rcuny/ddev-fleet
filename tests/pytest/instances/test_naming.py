@@ -206,6 +206,41 @@ def test_derive_label_cut_on_a_dash_does_not_leave_a_double_dash():
     instance_id("website", label)  # must not raise
 
 
+def test_derive_label_reserve_leaves_room_for_an_alias_prefix():
+    # reserve=6 (`odihr-`): "website--" + label must be <= 63 - 6 = 57, so the
+    # label may be 48 chars. Exactly 48 is not shortened ...
+    branch = "a" * 45 + "--pw-run"
+    kw = dict(label_prefix="pw-", strip_suffix="--pw-run", reserve=6)
+    label = derive_label("website", branch, **kw)
+    assert label == "pw-" + "a" * 45
+    assert len(f"odihr-{instance_id('website', label)}") == 63
+
+
+def test_derive_label_reserve_overflow_is_cut_and_hashed_to_fit():
+    branch = "a" * 46 + "--pw-run"  # one char over the reserved room
+    kw = dict(label_prefix="pw-", strip_suffix="--pw-run", reserve=6)
+    label = derive_label("website", branch, **kw)
+    assert label == ("pw-" + "a" * 46)[:41] + "-" + _sha6(branch)
+    assert len(f"odihr-{instance_id('website', label)}") == 63
+    assert derive_label("website", branch, **kw) == label  # deterministic
+
+
+def test_derive_label_reserve_zero_is_the_default():
+    branch = "a" * 52 + "--pw-run"
+    kw = dict(label_prefix="pw-", strip_suffix="--pw-run")
+    assert derive_label("website", branch, reserve=0, **kw) == derive_label("website", branch, **kw)
+
+
+def test_derive_label_reserve_applies_to_a_fixed_label_too():
+    label = derive_label("website", "develop", label="a" * 60, reserve=6)
+    assert len(f"odihr-website--{label}") == 63
+
+
+def test_derive_label_reserve_can_make_the_project_too_long():
+    with pytest.raises(ValidationError, match="too long"):
+        derive_label("p" * 50, "x" * 80, label_prefix="pw-", reserve=10)
+
+
 def test_derive_label_empty_slug_raises():
     with pytest.raises(ValidationError, match="cannot slugify"):
         derive_label("website", "--bare", strip_suffix="--bare")
