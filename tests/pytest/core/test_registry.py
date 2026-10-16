@@ -1690,3 +1690,221 @@ def test_auth_bypass_cidrs_warns_once_when_present_and_well_formed(fleet_home, c
     ]
     deprecation_warnings = [r for r in caplog.records if "auth_bypass_cidrs" in r.message]
     assert len(deprecation_warnings) == 1
+
+
+# --- bitbucket_hooks: action: deploy (repo:push) ---------------------------
+
+
+def _bb_deploy_registry(fleet_home, hooks_yaml: str) -> Path:
+    """A one-project fleet.yml with CI templates and the given `bitbucket_hooks:` block."""
+    text = (
+        "fleet:\n"
+        "  domain: fleet.example.test\n"
+        "\n"
+        "projects:\n"
+        "  p:\n"
+        "    git: git@example.test:org/p.git\n"
+        "    templates:\n"
+        "      ci-pw: {}\n"
+        "      ci-baseline: {}\n" + hooks_yaml
+    )
+    return _write(fleet_home / "fleet.yml", text)
+
+
+_BB_PUSH = "on_event: 'repo:push', repo: acme/pws, action: deploy, template: ci-pw"
+
+
+def test_bitbucket_deploy_hooks_valid(fleet_home):
+    path = _bb_deploy_registry(
+        fleet_home,
+        "    bitbucket_hooks:\n"
+        f"      - {{{_BB_PUSH}, branch: '*--pw-run', label_prefix: 'pw-',\n"
+        "         strip_suffix: ' --pw-run '}\n"
+        "      - {on_event: 'repo:push', repo: acme/pws, branch: develop, action: deploy,\n"
+        "         template: ci-baseline, label: pw-regression}\n"
+        f"      - {{{_BB_PUSH}, branch: 'ci/*', label_prefix: 'ci-'}}\n"
+        f"      - {{{_BB_PUSH}, branch: '*--x', strip_suffix: '--x'}}\n",
+    )
+    registry = Registry.load(path)
+
+    assert registry.bitbucket_hooks("p") == [
+        BitbucketHookRule(
+            "repo:push",
+            "acme/pws",
+            "deploy",
+            branch="*--pw-run",
+            template="ci-pw",
+            label_prefix="pw-",
+            strip_suffix="--pw-run",
+        ),
+        BitbucketHookRule(
+            "repo:push",
+            "acme/pws",
+            "deploy",
+            branch="develop",
+            template="ci-baseline",
+            label="pw-regression",
+        ),
+        BitbucketHookRule(
+            "repo:push", "acme/pws", "deploy", branch="ci/*", template="ci-pw", label_prefix="ci-"
+        ),
+        BitbucketHookRule(
+            "repo:push", "acme/pws", "deploy", branch="*--x", template="ci-pw", strip_suffix="--x"
+        ),
+    ]
+
+
+def test_bitbucket_deploy_and_pipeline_rules_coexist(fleet_home):
+    path = _bb_deploy_registry(
+        fleet_home,
+        "    bitbucket_hooks:\n"
+        f"      - {{{_BB_PUSH}, branch: develop, label: pw-regression}}\n"
+        f"      - {{on_event: 'pullrequest:approved', repo: acme/web, {_BB_BASE}}}\n",
+    )
+    rules = Registry.load(path).bitbucket_hooks("p")
+    assert [r.action for r in rules] == ["deploy", "run-pipeline"]
+    assert rules[1].template is None and rules[0].pattern is None and rules[0].ref is None
+
+
+@pytest.mark.parametrize(
+    "rule,message",
+    [
+        pytest.param(
+            "{on_event: 'pullrequest:approved', repo: a/b, action: deploy, template: ci-pw,"
+            " branch: x, label: l}",
+            "only valid for 'repo:push'",
+            id="deploy-on-a-pr-event",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, label: l}",
+            "branch: a branch glob is required",
+            id="deploy-without-branch",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: '',"
+            " label: l}",
+            "branch: a branch glob is required",
+            id="deploy-with-empty-branch",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, branch: x, label: l}",
+            "template: required",
+            id="deploy-without-template",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: nope, branch: x,"
+            " label: l}",
+            "is not a template of project",
+            id="deploy-unknown-template",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x}",
+            "not both and not neither",
+            id="deploy-without-any-label-key",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: l, label_prefix: p-}",
+            "not both and not neither",
+            id="label-and-label-prefix",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: '*-x',"
+            " label: l, strip_suffix: -x}",
+            "not both and not neither",
+            id="label-and-strip-suffix",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: ''}",
+            "label: must be a non-empty string",
+            id="label-empty",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: 3}",
+            "label: must be a non-empty string",
+            id="label-not-a-string",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: '---'}",
+            "label: cannot slugify",
+            id="label-slugifies-to-nothing",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label_prefix: ''}",
+            "label_prefix: must be a non-empty string",
+            id="label-prefix-empty",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: '*-x',"
+            " strip_suffix: ''}",
+            "strip_suffix: must be a non-empty string",
+            id="strip-suffix-empty",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw,"
+            " branch: '*--pw-*', strip_suffix: '--pw-*'}",
+            "must be literal text",
+            id="strip-suffix-with-glob-characters",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw,"
+            " branch: '*--pw-run', strip_suffix: '--pw-run-ml'}",
+            "not guaranteed by the branch glob",
+            id="strip-suffix-not-guaranteed-by-the-glob",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: l, pattern: renovate-merge}",
+            "pattern: only valid for action 'run-pipeline'",
+            id="deploy-with-pattern",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: l, ref: develop}",
+            "ref: only valid for action 'run-pipeline'",
+            id="deploy-with-ref",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: l, state: SUCCESSFUL}",
+            "only valid for 'repo:commit_status_",
+            id="deploy-with-state",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: l, comment: /merge}",
+            "only valid for 'pullrequest:comment_",
+            id="deploy-with-comment",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b, template: ci-pw, {_BB_BASE}}}",
+            "template: only valid for action 'deploy'",
+            id="run-pipeline-with-template",
+        ),
+        pytest.param(
+            f"{{on_event: 'pullrequest:approved', repo: a/b, label: l, {_BB_BASE}}}",
+            "label: only valid for action 'deploy'",
+            id="run-pipeline-with-label",
+        ),
+        pytest.param(
+            f"{{on_event: 'repo:push', repo: a/b, branch: x, {_BB_BASE}}}",
+            "only supported with action 'deploy'",
+            id="run-pipeline-on-push",
+        ),
+        pytest.param(
+            "{on_event: 'repo:push', repo: a/b, action: deploy, template: ci-pw, branch: x,"
+            " label: l, when: now}",
+            "unknown key",
+            id="deploy-with-unknown-key",
+        ),
+    ],
+)
+def test_bitbucket_deploy_hooks_invalid_rule(fleet_home, rule, message):
+    path = _bb_deploy_registry(fleet_home, f"    bitbucket_hooks:\n      - {rule}\n")
+    with pytest.raises(RegistryError, match=r"projects\.p\.bitbucket_hooks\[0\]") as exc:
+        Registry.load(path)
+    assert message in str(exc.value)

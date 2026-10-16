@@ -84,24 +84,52 @@ _JIRA_HOOK_ACTIONS = frozenset({"deploy"})
 class BitbucketHookRule:
     """One `projects.<p>.bitbucket_hooks` entry: when a Bitbucket Cloud event
     `on_event` arrives for `repo` (and passes the optional `branch` glob,
-    commit-status `state` and PR `comment` filters), run `action` (v1: only
-    "run-pipeline") = start the custom pipeline `pattern` on branch `ref`.
-    Consumed by `core/webhooks.py` (spec FLE-11 §4)."""
+    commit-status `state` and PR `comment` filters), run `action`:
+
+    - `run-pipeline` (FLE-11): start the custom pipeline `pattern` on branch
+      `ref` (both required, the deploy keys are forbidden);
+    - `deploy` (only for `on_event: repo:push`, `branch` glob required): deploy
+      `template` for the pushed branch, replacing the instance in place. The
+      instance label is the fixed `label`, or derived from the pushed branch
+      as `label_prefix` + the branch minus `strip_suffix` (see
+      `core.naming.derive_label`); `pattern` / `ref` are forbidden.
+
+    Consumed by `core/webhooks.py` and `daemon.py`."""
 
     on_event: str
     repo: str
     action: str
-    pattern: str
-    ref: str
+    pattern: str | None = None
+    ref: str | None = None
     branch: str | None = None
     state: str | None = None
     comment: str | None = None
+    template: str | None = None
+    label: str | None = None
+    label_prefix: str | None = None
+    strip_suffix: str | None = None
 
 
 _BITBUCKET_HOOK_KEYS = frozenset(
-    {"on_event", "repo", "branch", "state", "comment", "action", "pattern", "ref"}
+    {
+        "on_event",
+        "repo",
+        "branch",
+        "state",
+        "comment",
+        "action",
+        "pattern",
+        "ref",
+        "template",
+        "label",
+        "label_prefix",
+        "strip_suffix",
+    }
 )
-_BITBUCKET_HOOK_ACTIONS = frozenset({"run-pipeline"})
+_BITBUCKET_HOOK_ACTIONS = frozenset({"run-pipeline", "deploy"})
+_BITBUCKET_PUSH_EVENT = "repo:push"
+_BITBUCKET_PIPELINE_KEYS = ("pattern", "ref")
+_BITBUCKET_DEPLOY_KEYS = ("template", "label", "label_prefix", "strip_suffix")
 _BITBUCKET_EVENT_RE = re.compile(r"(pullrequest|repo):[a-z_]+")
 # `workspace/slug`: also what the pipeline-trigger URL is built from, so keep
 # it to characters Bitbucket allows in both parts.
@@ -351,7 +379,7 @@ class Registry:
                 raise RegistryError(f"{where}.branch: must be a non-empty string")
 
     @staticmethod
-    def _validate_bitbucket_hooks(project_key: str, project_block: dict) -> None:
+    def _validate_bitbucket_hooks(project_key: str, project_block: dict, templates: dict) -> None:
         """Validate `projects.<p>.bitbucket_hooks`. Same strictness as
         `jira_hooks`: a rule decides which pipeline an unauthenticated-looking
         HTTP call starts, so unknown keys and malformed values fail at load
@@ -391,10 +419,22 @@ class Registry:
                     f"{where}.action: must be one of {sorted(_BITBUCKET_HOOK_ACTIONS)}, "
                     f"got {action!r}"
                 )
-            for key in ("pattern", "ref"):
-                value = rule.get(key)
-                if not isinstance(value, str) or not value.strip():
-                    raise RegistryError(f"{where}.{key}: required for action 'run-pipeline'")
+            if action == "deploy":
+                Registry._validate_bitbucket_deploy_rule(
+                    where, rule, on_event, project_key, templates
+                )
+            else:
+                if on_event == _BITBUCKET_PUSH_EVENT:
+                    raise RegistryError(
+                        f"{where}.on_event: 'repo:push' is only supported with action 'deploy'"
+                    )
+                for key in _BITBUCKET_PIPELINE_KEYS:
+                    value = rule.get(key)
+                    if not isinstance(value, str) or not value.strip():
+                        raise RegistryError(f"{where}.{key}: required for action 'run-pipeline'")
+                for key in _BITBUCKET_DEPLOY_KEYS:
+                    if key in rule:
+                        raise RegistryError(f"{where}.{key}: only valid for action 'deploy'")
             if "branch" in rule and (not isinstance(rule["branch"], str) or not rule["branch"]):
                 raise RegistryError(f"{where}.branch: must be a non-empty string")
             if "state" in rule:
@@ -411,6 +451,56 @@ class Registry:
                     raise RegistryError(
                         f"{where}.comment: only valid for 'pullrequest:comment_*' events"
                     )
+
+    @staticmethod
+    def _validate_bitbucket_deploy_rule(
+        where: str, rule: dict, on_event: str, project_key: str, templates: dict
+    ) -> None:
+        """The `action: deploy` half of `_validate_bitbucket_hooks`: a push of a
+        branch matching the glob deploys `template`, so everything that decides
+        the target instance is checked here, at load time."""
+        if on_event != _BITBUCKET_PUSH_EVENT:
+            raise RegistryError(
+                f"{where}.on_event: action 'deploy' is only valid for 'repo:push', got {on_event!r}"
+            )
+        branch = rule.get("branch")
+        if not isinstance(branch, str) or not branch:
+            raise RegistryError(f"{where}.branch: a branch glob is required for action 'deploy'")
+        for key in _BITBUCKET_PIPELINE_KEYS:
+            if key in rule:
+                raise RegistryError(f"{where}.{key}: only valid for action 'run-pipeline'")
+        template = rule.get("template")
+        if not isinstance(template, str) or not template:
+            raise RegistryError(f"{where}.template: required for action 'deploy'")
+        if template not in templates:
+            raise RegistryError(
+                f"{where}.template: {template!r} is not a template of project {project_key!r}"
+            )
+        for key in ("label", "label_prefix", "strip_suffix"):
+            if key in rule and (not isinstance(rule[key], str) or not rule[key].strip()):
+                raise RegistryError(f"{where}.{key}: must be a non-empty string")
+        derived = "label_prefix" in rule or "strip_suffix" in rule
+        if ("label" in rule) == derived:
+            raise RegistryError(
+                f"{where}: set either 'label' (a fixed instance label) or 'label_prefix' / "
+                "'strip_suffix' (derived from the pushed branch), not both and not neither"
+            )
+        if "label" in rule:
+            try:
+                validate_part(slugify(rule["label"]))
+            except ValidationError as exc:
+                raise RegistryError(f"{where}.label: {exc.message}") from exc
+        if "strip_suffix" in rule:
+            suffix = rule["strip_suffix"].strip()
+            if any(ch in suffix for ch in "*?["):
+                raise RegistryError(
+                    f"{where}.strip_suffix: must be literal text (no glob characters)"
+                )
+            if not branch.endswith(suffix):
+                raise RegistryError(
+                    f"{where}.strip_suffix: {suffix!r} is not guaranteed by the branch glob "
+                    f"{branch!r} (the glob must end with it)"
+                )
 
     def _validate(self, *, host_config_path: Path | None = None) -> None:
         data = self._data
@@ -479,7 +569,7 @@ class Registry:
 
             templates = project_block.get("templates") or {}
             self._validate_jira_hooks(project_key, project_block, templates)
-            self._validate_bitbucket_hooks(project_key, project_block)
+            self._validate_bitbucket_hooks(project_key, project_block, templates)
             for template_key, template_block in templates.items():
                 try:
                     validate_part(template_key)
@@ -846,11 +936,15 @@ class Registry:
                 on_event=str(rule["on_event"]),
                 repo=str(rule["repo"]),
                 action=str(rule["action"]),
-                pattern=str(rule["pattern"]).strip(),
-                ref=str(rule["ref"]).strip(),
+                pattern=opt(rule, "pattern"),
+                ref=opt(rule, "ref"),
                 branch=str(rule["branch"]) if rule.get("branch") is not None else None,
                 state=opt(rule, "state"),
                 comment=opt(rule, "comment"),
+                template=opt(rule, "template"),
+                label=opt(rule, "label"),
+                label_prefix=opt(rule, "label_prefix"),
+                strip_suffix=opt(rule, "strip_suffix"),
             )
             for rule in (block.get("bitbucket_hooks") or [])
         ]
