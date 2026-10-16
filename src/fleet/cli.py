@@ -939,12 +939,15 @@ def _cmd_webhook(fleet_home: Path, args: argparse.Namespace) -> None:
             "server-side only (webhooks/secrets.env, mode 0600) and not shown again; "
             "use --rotate to replace it."
         )
-        if not registry.bitbucket_hooks(args.project):
+        rules = registry.bitbucket_hooks(args.project)
+        if not rules:
             print(
                 f"warning: project {args.project!r} has no bitbucket_hooks in fleet.yml yet, "
                 "so the route answers 404 until a rule is added."
             )
-        if store.read_pipeline_token(args.project) is None:
+        # Only `run-pipeline` rules use the token; push-deploy-only projects need none.
+        needs_token = not rules or any(rule.action == "run-pipeline" for rule in rules)
+        if needs_token and store.read_pipeline_token(args.project) is None:
             print(
                 "warning: no Bitbucket token stored yet; run "
                 f"`fleet webhook bitbucket-token {args.project}` or matched events answer 422."

@@ -3,7 +3,7 @@ import errno
 import pytest
 
 from fleet.core.errors import LockHeldError
-from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock
+from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock, retry_while_locked
 
 
 def test_allocation_lock_id_is_the_original_multideploy_lock_file_name():
@@ -63,3 +63,55 @@ def test_non_contention_oserror_is_not_swallowed_as_lock_held(tmp_path, monkeypa
             pass
     assert not isinstance(exc_info.value, LockHeldError)
     assert exc_info.value.errno == errno.ENOLCK
+
+
+def _flaky(failures, result="done", error=None):
+    calls = []
+
+    def fn():
+        calls.append(1)
+        if len(calls) <= failures:
+            raise error or LockHeldError("held")
+        return result
+
+    return fn, calls
+
+
+def test_retry_while_locked_returns_at_once_when_free():
+    fn, calls = _flaky(0)
+    sleeps = []
+    assert retry_while_locked(fn, interval=5, max_wait=60, sleep=sleeps.append) == "done"
+    assert len(calls) == 1 and sleeps == []
+
+
+def test_retry_while_locked_waits_then_succeeds():
+    fn, calls = _flaky(2)
+    sleeps = []
+    clock = iter(range(100))
+    result = retry_while_locked(
+        fn, interval=5, max_wait=60, sleep=sleeps.append, monotonic=lambda: next(clock)
+    )
+    assert result == "done"
+    assert len(calls) == 3 and sleeps == [5, 5]
+
+
+def test_retry_while_locked_gives_up_after_max_wait():
+    fn, calls = _flaky(10**6)
+    sleeps = []
+    now = [0.0]
+
+    def fake_sleep(seconds):
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    with pytest.raises(LockHeldError):
+        retry_while_locked(fn, interval=10, max_wait=30, sleep=fake_sleep, monotonic=lambda: now[0])
+    assert sleeps == [10, 10, 10]
+    assert len(calls) == 4
+
+
+def test_retry_while_locked_does_not_retry_other_errors():
+    fn, calls = _flaky(1, error=ValueError("boom"))
+    with pytest.raises(ValueError):
+        retry_while_locked(fn, interval=5, max_wait=60, sleep=lambda s: None)
+    assert len(calls) == 1
