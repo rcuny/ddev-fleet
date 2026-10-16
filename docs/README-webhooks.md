@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-07
+Last updated: 2026-10-16
 Type: documentation
 ---
 
@@ -194,7 +194,8 @@ Jira's deliveries are redirected to a login page.
 # Bitbucket webhooks
 
 FLE-11. A Bitbucket Cloud webhook can start a **custom pipeline** of the
-product repo. The use case is the hands-off Renovate workflow: when the
+product repo (and, since FLE-27, **deploy a pushed branch**: see
+[Deploy on branch push](#deploy-on-branch-push-action-deploy)). The use case is the hands-off Renovate workflow: when the
 maintainer approves a Renovate PR, or comments `/merge` on it, or when a
 Renovate PR's build turns green, the fleet server starts the
 `renovate-merge` custom pipeline, which merges the next eligible PR and
@@ -244,20 +245,98 @@ projects:
 |---|---|---|
 | `on_event` | yes | Bitbucket event key: `pullrequest:<x>` or `repo:<x>` (e.g. `pullrequest:approved`, `pullrequest:comment_created`, `repo:commit_status_updated`). |
 | `repo` | yes | `workspace/slug`. The payload's `repository.full_name` must equal it (case-insensitive), else the event is ignored. It is also the repo the pipeline is started on. |
-| `branch` | no | `fnmatch` glob (case-sensitive) against the PR's source branch, or a commit status's `refname`. A rule with `branch` never matches an event that has no branch (a commit status whose `refname` is null). |
+| `branch` | no (required for `deploy`) | `fnmatch` glob (case-sensitive) against the PR's source branch, a commit status's `refname`, or, for `repo:push`, the name of the pushed branch. A rule with `branch` never matches an event that has no branch (a commit status whose `refname` is null). Required for `action: deploy`. |
 | `state` | no | Commit-status events only (`repo:commit_status_*`): the status `state`, case-insensitive (`SUCCESSFUL`, `FAILED`, ...). |
 | `comment` | no | `pullrequest:comment_*` events only: matches when any line of the comment (stripped, case-insensitive) equals it, e.g. `/merge`. |
-| `action` | yes | `run-pipeline` (the only action). |
-| `pattern` | yes | The custom pipeline's name in `bitbucket-pipelines.yml` (`custom:` key), e.g. `renovate-merge`. |
-| `ref` | yes | The branch to run the pipeline on, e.g. `develop`. |
+| `action` | yes | `run-pipeline` or `deploy` (see [Deploy on branch push](#deploy-on-branch-push-action-deploy)). |
+| `pattern` | `run-pipeline` only | The custom pipeline's name in `bitbucket-pipelines.yml` (`custom:` key), e.g. `renovate-merge`. |
+| `ref` | `run-pipeline` only | The branch to run the pipeline on, e.g. `develop`. |
+| `template` | `deploy` only | The project template to deploy (must exist in the project). |
+| `label` | `deploy` only | A fixed instance label (slugified), e.g. `pw-regression`. Exclusive with `label_prefix` / `strip_suffix`. |
+| `label_prefix` | `deploy` only; required for a derived label | Prepended to the pushed branch (after `strip_suffix` is removed) to form the label. Required whenever the label is derived (without `label`): a bare branch slug could equal the id of a hand-deployed or Jira-hook instance, which the deploy would replace. |
+| `strip_suffix` | `deploy` only | Literal text removed from the end of the pushed branch. The `branch` glob must end with it (`*--pw-run` / `--pw-run`). Needs `label_prefix` alongside. |
 
 The first matching rule wins. Validation is strict and fails at load time with
 a `projects.<p>.bitbucket_hooks[i]...` message: unknown keys, a malformed
 `on_event` or `repo`, a missing `action` / `pattern` / `ref`, an empty
 `branch` / `state` / `comment`, and `state` / `comment` on the wrong kind of
-event. As with `jira_hooks`, servers on an older release ignore the unknown
-`bitbucket_hooks` key, and a rule alone enables nothing: each server also needs
-its own secret and token.
+event (the `action: deploy` rules have their own checks, below). Servers on a
+release before v0.10.0 ignore the unknown `bitbucket_hooks` key, and a rule
+alone enables nothing: each server also needs its own secret (and, for
+`run-pipeline`, token). A release from v0.10.0 up to the one that added
+`action: deploy` refuses a `fleet.yml` that contains a deploy rule (unknown
+keys), so upgrade every server that pulls that `fleet.yml` first (details in
+the next section).
+
+## Deploy on branch push (`action: deploy`)
+
+FLE-27. A `repo:push` rule deploys the pushed branch instead of starting a
+pipeline. It lets a push to a branch name with a marker suffix start a CI run
+on a fleet server (the Playwright CI: `git push origin HEAD:feature/x--pw-run`).
+
+**Requires fleet v0.14.0 or later on every server that loads the `fleet.yml`.**
+Pushing a `fleet.yml` that contains a deploy rule (`ddev push-config`) to a
+server running v0.10.0 to v0.13.1 makes `Registry.load` fail there on the
+unknown `bitbucket_hooks` keys, which breaks every fleet command and every
+webhook route on that server. Servers older than v0.10.0 (before
+`bitbucket_hooks` and the `post_deploy` mapping existed) cannot load such a
+config either. Upgrade the product first, then push the config.
+
+```yaml
+bitbucket_hooks:
+  - {on_event: "repo:push", repo: acme/website, branch: "*--pw-run", action: deploy, template: ci-pw, label_prefix: "pw-", strip_suffix: "--pw-run"}
+  - {on_event: "repo:push", repo: acme/website, branch: develop, action: deploy, template: ci-baseline, label: pw-regression}
+```
+
+- Bitbucket sends one `repo:push` per push with one entry per ref in
+  `push.changes`. Each **created or updated branch** is matched against the
+  rules (first match wins, per branch); branch deletions, tags and other refs
+  are skipped, so a push that only deletes a branch is `ignored`. The
+  `branch` glob is anchored: `*--pw-run` does not match `x--pw-run-ml`.
+- The instance label is the rule's `label`, or `label_prefix` + the branch
+  minus `strip_suffix`, slugified (`feature/ABC-1898-x--pw-run` ->
+  `pw-feature-abc-1898-x`, instance `website--pw-feature-abc-1898-x`). When
+  `<project>--<label>` would exceed 63 characters the label is cut and ends in
+  `-` plus the first 6 hex of the SHA-1 of the branch name, so the id still
+  fits and the same branch always lands on the same id. The fitting is
+  alias-aware: a project with `additional_hostnames` also needs
+  `<hostname>-<instance id>` to fit in 63 characters, so the id is shortened by
+  the longest `<hostname>-` prefix, and a long branch can still deploy.
+- Two different branch names can slugify to the same instance id (for example
+  `Feature/A_b--pw-run` and `feature/a/b--pw-run`): the later push replaces
+  the instance of the earlier one.
+- The job is a normal deploy of `template` on the pushed branch with
+  `replace=True`: a re-push destroys the existing instance (and its tmux
+  window, which kills a run in flight) and rebuilds it under the same id. If
+  the previous deploy of that id is still running, the job waits for its lock
+  (retries every 15 s, up to 45 minutes) instead of failing.
+- **Label-collision guard.** A derived-label deploy that would land on the
+  instance id of a fixed-`label` deploy rule is ignored with reason
+  `collides with a fixed-label rule` (a `*--pw-run` branch must not rebuild the
+  baseline instance). Each such branch gets its own delivery-log line; if every
+  target of the push collides, the answer is 200 `ignored`.
+- **Reserved prefix.** The derived-label prefix namespace (e.g. `pw-`) is
+  reserved for webhook-owned instances: with `replace=True` the deploy destroys
+  and rebuilds whatever instance already has that id, whoever created it. Do
+  not deploy by hand under that prefix.
+- **Jobs live in memory.** Deploy jobs are held by the daemon process only: a
+  daemon restart drops a queued or lock-waiting job (Bitbucket already got its
+  200, so it will not retry). Push the branch again to retry.
+- **Waiting occupies a job slot.** A re-push while the same instance is still
+  deploying waits for its lock (`retry_while_locked`, up to 45 minutes) and
+  holds one of the daemon's job slots for the whole wait.
+- Validation (at load time): `deploy` only with `on_event: repo:push`; `branch`
+  and `template` required; exactly one of `label` or `label_prefix` /
+  `strip_suffix` (a derived label requires a non-empty `label_prefix`);
+  `pattern` / `ref` are not allowed; `run-pipeline` is not
+  allowed on `repo:push`.
+- A deploy rule needs **no Bitbucket token** (only the webhook secret).
+- Targets are resolved before the delivery is claimed: a branch that cannot be
+  turned into a valid instance (for example it slugifies to nothing) answers
+  422 and nothing is deployed, so Bitbucket's retry can succeed once fixed.
+  One delivery can start several deploys (one per distinct instance id).
+
+Webhook trigger to enable in Bitbucket: Repository **Push**.
 
 ## Create the token and the secret
 
@@ -300,7 +379,7 @@ In the Bitbucket repo: **Repository settings -> Webhooks -> Add webhook**.
 |---|---|
 | URL | the `URL:` line printed above, e.g. `https://ddev1.example.com/hooks/bitbucket/example-project` |
 | Secret | the printed secret |
-| Triggers | Choose from a full list: Pull request **Approved**, Pull request **Comment created**, Repository **Build status created** and **Build status updated** |
+| Triggers | Choose from a full list: Pull request **Approved**, Pull request **Comment created**, Repository **Build status created** and **Build status updated**, Repository **Push** (deploy rules) |
 
 Trigger only what your rules use. One webhook per (repo, server), each with
 its own secret.
@@ -315,11 +394,12 @@ nothing beyond "this project has hooks", and every response is JSON.
 | Unknown project, no `bitbucket_hooks`, or no Bitbucket secret configured | 404 | `{"error": "not found"}` |
 | Body over the limit (Caddy's 1MB first; the daemon's own 1 MiB cap) | 413 | `{"error": "payload too large"}` |
 | Missing / malformed / wrong signature | 401 | `{"error": "unauthorized"}` |
-| Body not JSON or not an object, no `X-Event-Key`, or a required field missing (`repository.full_name`, `pullrequest.id`, `comment.content.raw`, `commit_status.state`) | 400 | `{"error": "<reason>"}` |
-| Ignored (other event, or no rule matches the repo / branch / state / comment) | 200 | `{"result": "ignored", "reason": "..."}` |
+| Body not JSON or not an object, no `X-Event-Key`, or a required field missing (`repository.full_name`, `pullrequest.id`, `comment.content.raw`, `commit_status.state`, `push.changes`, a pushed branch's `new.name` / `new.target.hash`) | 400 | `{"error": "<reason>"}` |
+| Ignored (other event, a push without a created/updated branch, or no rule matches the repo / branch / state / comment) | 200 | `{"result": "ignored", "reason": "..."}` |
 | Duplicate delivery (same `X-Request-UUID`) | 200 | `{"result": "duplicate"}` |
-| Rule matched but no Bitbucket token is stored | 422 | `{"error": "<reason>"}` |
+| `run-pipeline` rule matched but no Bitbucket token is stored, or a `deploy` target cannot be resolved | 422 | `{"error": "<reason>"}` |
 | Pipeline started | 200 | `{"result": "triggered", "pipeline": <build number>}` |
+| Push deploys started | 200 | `{"result": "accepted", "deploys": [{"instance": "...", "job": "..."}]}`, plus top-level `instance` and `job` when there is exactly one deploy |
 | Bitbucket refused the call, timed out or is unreachable (8 s timeout), or the call failed in any other way | 502 | `{"error": "pipeline trigger failed"}` |
 | `fleet.yml` fails to load | 500 | `{"error": "internal error"}` |
 
@@ -345,7 +425,8 @@ written to be idempotent.
 Every authenticated request (one that passed the 404 and signature checks)
 appends one JSON line to `/srv/fleet/logs/webhooks/bitbucket.jsonl`, next to the
 Jira log (no secrets, no bodies): `ts, project, delivery_id, attempt, event,
-repo, pr, branch, state, result, reason, pipeline`. Header values are truncated
+repo, pr, branch, state, result, reason, pipeline`. Push deliveries add `sha`,
+`instance` and `job` and write one line per deploy. Header values are truncated
 to 64 characters. 401s go to the daemon journal only
 (`journalctl -u fleet | grep 'bitbucket webhook'`). Read it with:
 

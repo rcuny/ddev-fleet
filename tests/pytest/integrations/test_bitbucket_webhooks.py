@@ -18,6 +18,7 @@ from fleet.core.webhooks import (
     WebhookStore,
     match_bitbucket_rule,
     parse_bitbucket_event,
+    parse_bitbucket_events,
 )
 
 _REPO = "renaud_cuny/ddev-fleet"
@@ -132,6 +133,110 @@ def test_parse_other_event_only_sets_event():
 def test_parse_malformed(key, payload):
     with pytest.raises(ValidationError):
         parse_bitbucket_event(key, payload)
+
+
+# --- repo:push parsing -------------------------------------------------------
+
+_SHA_A = "a" * 40
+_SHA_B = "b" * 40
+
+
+def _change(name="feature/x--pw-run", sha=_SHA_A, kind="branch", created=True):
+    return {
+        "new": {"type": kind, "name": name, "target": {"type": "commit", "hash": sha}},
+        "old": None if created else {"type": kind, "name": name, "target": {"hash": _SHA_B}},
+        "created": created,
+        "closed": False,
+    }
+
+
+_DELETE = {
+    "new": None,
+    "old": {"type": "branch", "name": "gone", "target": {"hash": _SHA_B}},
+    "created": False,
+    "closed": True,
+}
+
+
+def _push_payload(*changes, repo=_REPO):
+    return {"repository": {"full_name": repo}, "push": {"changes": list(changes)}}
+
+
+def test_parse_push_branch_created():
+    events = parse_bitbucket_events("repo:push", _push_payload(_change()))
+    assert events == [
+        BitbucketEvent("repo:push", repo=_REPO, branch="feature/x--pw-run", sha=_SHA_A)
+    ]
+
+
+def test_parse_push_branch_updated():
+    events = parse_bitbucket_events("repo:push", _push_payload(_change(created=False)))
+    assert [(e.branch, e.sha) for e in events] == [("feature/x--pw-run", _SHA_A)]
+
+
+def test_parse_push_skips_deletions_and_tags():
+    payload = _push_payload(_DELETE, _change(name="v1.0.0", kind="tag"), _change(name="main"))
+    events = parse_bitbucket_events("repo:push", payload)
+    assert [e.branch for e in events] == ["main"]
+
+
+def test_parse_push_delete_only_gives_no_events():
+    assert parse_bitbucket_events("repo:push", _push_payload(_DELETE)) == []
+    assert parse_bitbucket_events("repo:push", _push_payload()) == []
+
+
+def test_parse_push_multiple_changes_keep_payload_order():
+    payload = _push_payload(_change("b-branch", _SHA_B), _change("a-branch", _SHA_A))
+    events = parse_bitbucket_events("repo:push", payload)
+    assert [(e.branch, e.sha) for e in events] == [("b-branch", _SHA_B), ("a-branch", _SHA_A)]
+    assert {e.repo for e in events} == {_REPO}
+
+
+def test_parse_push_ignores_non_object_changes():
+    payload = _push_payload("junk", 3, None, _change())
+    assert [e.branch for e in parse_bitbucket_events("repo:push", payload)] == ["feature/x--pw-run"]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        pytest.param([], id="not-an-object"),
+        pytest.param({"push": {"changes": []}}, id="no-repository"),
+        pytest.param({"repository": {"full_name": "a/b"}}, id="no-push"),
+        pytest.param({"repository": {"full_name": "a/b"}, "push": {}}, id="no-changes"),
+        pytest.param(
+            {"repository": {"full_name": "a/b"}, "push": {"changes": {}}}, id="changes-not-a-list"
+        ),
+        pytest.param(_push_payload({"new": {"type": "branch", "name": "x"}}), id="no-target"),
+        pytest.param(
+            _push_payload({"new": {"type": "branch", "target": {"hash": _SHA_A}}}), id="no-name"
+        ),
+        pytest.param(_push_payload(_change(sha=3)), id="hash-not-a-string"),
+    ],
+)
+def test_parse_push_malformed(payload):
+    with pytest.raises(ValidationError):
+        parse_bitbucket_events("repo:push", payload)
+
+
+def test_parse_events_wraps_every_other_key_in_a_one_item_list():
+    events = parse_bitbucket_events("pullrequest:approved", _pr_payload(approval={}))
+    assert events == [parse_bitbucket_event("pullrequest:approved", _pr_payload(approval={}))]
+    assert parse_bitbucket_events("diagnostics:ping", {}) == [BitbucketEvent("diagnostics:ping")]
+
+
+def test_parse_events_still_rejects_a_missing_event_key():
+    with pytest.raises(ValidationError):
+        parse_bitbucket_events(None, {})
+
+
+def test_single_event_parser_refuses_push():
+    with pytest.raises(ValidationError, match="parse_bitbucket_events"):
+        parse_bitbucket_event("repo:push", _push_payload(_change()))
+
+
+def test_event_sha_defaults_to_none():
+    assert BitbucketEvent("pullrequest:approved").sha is None
 
 
 # --- matching --------------------------------------------------------------

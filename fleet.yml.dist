@@ -31,6 +31,9 @@ projects:
     #   - {on_event: "pullrequest:approved", repo: workspace/slug, branch: "renovate/*", action: run-pipeline, pattern: renovate-merge, ref: develop}
     #   - {on_event: "pullrequest:comment_created", repo: workspace/slug, branch: "renovate/*", comment: "/merge", action: run-pipeline, pattern: renovate-merge, ref: develop}
     #   - {on_event: "repo:commit_status_updated", repo: workspace/slug, branch: "renovate/*", state: SUCCESSFUL, action: run-pipeline, pattern: renovate-merge, ref: develop}
+    #   # Deploy a pushed branch (FLE-27, requires fleet 0.14.0+ on every server that loads this file;
+    #   # label_prefix is required for a derived label):
+    #   - {on_event: "repo:push", repo: acme/website, branch: "*--pw-run", action: deploy, template: ci-pw, label_prefix: "pw-", strip_suffix: "--pw-run"}
     # jira_hooks:                           # optional — Jira status change -> deploy (FLE-3, same doc)
     #   - {on_status: Dispatched, action: deploy, template: jira-pull}
     templates:

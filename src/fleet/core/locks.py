@@ -3,8 +3,9 @@
 import contextlib
 import errno
 import fcntl
+import time
 from pathlib import Path
-from typing import Iterator
+from typing import Callable, Iterator, TypeVar
 
 from fleet.core.errors import LockHeldError
 
@@ -23,6 +24,8 @@ from fleet.core.errors import LockHeldError
 # constant; renaming the string here would let it and a new process
 # allocate concurrently, defeating the whole point of the lock.
 ALLOCATION_LOCK_ID = "_multideploy"
+
+_T = TypeVar("_T")
 
 
 @contextlib.contextmanager
@@ -47,3 +50,27 @@ def instance_lock(locks_dir: Path, instance_id: str) -> Iterator[None]:
             fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
     finally:
         fh.close()
+
+
+def retry_while_locked(
+    fn: Callable[[], _T],
+    *,
+    interval: float,
+    max_wait: float,
+    sleep: Callable[[float], None] = time.sleep,
+    monotonic: Callable[[], float] = time.monotonic,
+) -> _T:
+    """Call `fn()`; while it raises `LockHeldError` (another operation holds the
+    instance lock, which `instance_lock` reports at once instead of blocking),
+    wait `interval` seconds and try again, for at most `max_wait` seconds, then
+    let the last `LockHeldError` propagate. Any other exception propagates
+    immediately. For background jobs that must not be lost because they were
+    queued behind a running deploy of the same instance."""
+    deadline = monotonic() + max_wait
+    while True:
+        try:
+            return fn()
+        except LockHeldError:
+            if monotonic() >= deadline:
+                raise
+            sleep(interval)
