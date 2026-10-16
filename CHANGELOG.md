@@ -7,12 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-16
+
 ### Added
 - **FLE-27: Bitbucket `repo:push` webhooks deploy the pushed branch.** `bitbucket_hooks` rules take a new `action: deploy` (only with `on_event: repo:push`, `branch` glob required) with `template` and either a fixed `label` or `label_prefix` / `strip_suffix`. A push of a matching branch starts a deploy job of that template with `replace=True` on the instance `<project>--<label>`, e.g. `*--pw-run` -> `website--pw-<branch>`. Branch deletions and tags are ignored; one push can start several deploys. Labels are slugified and, when the id would exceed 63 characters, cut and suffixed with `-` + the first 6 hex of the branch's SHA-1 (deterministic). No Bitbucket token is needed. A job that finds its instance locked (a deploy of the same id still running) waits and retries for up to 45 minutes instead of failing. A derived-label deploy that would land on the id of a fixed-`label` rule is ignored (label-collision guard), and the derived-label prefix namespace is reserved for webhook-owned instances. Label fitting is alias-aware: a project's `additional_hostnames` aliases (`<hostname>-<id>`, 63-character limit) are reserved room, so long branches still deploy. A derived label requires `label_prefix` (`strip_suffix` alone is rejected at load time, since a bare branch slug could equal a hand-deployed instance id). See `docs/README-webhooks.md`.
 
 ### Changed
 - **Rollout:** (FLE-27) every server must run 0.14.0+ before `fleet.yml` contains an `action: deploy` rule: v0.10.0-v0.13.1 refuse a registry with unknown `bitbucket_hooks` keys, which breaks every command and webhook route on that server, and all servers share the config repo.
 - `fleet webhook secret <p> --source bitbucket` no longer warns about a missing pipeline token when all of the project's rules are `deploy` rules.
+
+### Dependencies
+- Python tooling: ruff >=0.17.1, black >=26.10.1, ansible-lint >=26.10.1 (Renovate #32, #33, #35).
+- Python runtime: fastapi >=0.143.2 (Renovate #34).
 
 ## [0.13.1] - 2026-10-09
 
@@ -412,7 +418,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/rcuny/ddev-fleet/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/rcuny/ddev-fleet/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/rcuny/ddev-fleet/compare/v0.12.1...v0.13.0
 [0.12.1]: https://github.com/rcuny/ddev-fleet/compare/v0.12.0...v0.12.1
