@@ -24,7 +24,7 @@ from starlette.requests import Request
 from fleet import websecurity
 from fleet.core import bitbucket as bitbucket_mod
 from fleet.core import bulk as bulk_mod
-from fleet.core import caddyauth, caddyports, hostinfo, naming, sysinfo
+from fleet.core import caddyauth, caddyports, hostinfo, locks, naming, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core import webhooks as webhooks_mod
 from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
@@ -46,6 +46,41 @@ logger = logging.getLogger(__name__)
 
 # Max chars of caller-supplied webhook headers (delivery id, retry) we log.
 _HEADER_LOG_MAX = 64
+
+# A `repo:push` deploy job that finds its instance locked (a deploy of the same
+# id still running, e.g. a re-push seconds after the first) waits and retries
+# instead of failing: the newest push must win. Read at call time (tests patch).
+_PUSH_DEPLOY_LOCK_INTERVAL = 15.0
+_PUSH_DEPLOY_LOCK_MAX_WAIT = 45 * 60.0
+
+# Reason logged/answered when a derived-label push rule would land on the
+# instance of a fixed-label push rule (see `push_deploys` in `bitbucket_hook`).
+_PUSH_LABEL_COLLISION = "collides with a fixed-label rule"
+
+
+def _push_deploy_job(paths, registry, project: str, template: str, branch: str, label: str):
+    """The background job of one `repo:push` deploy: the same call as a web-UI
+    deploy with auth on (default password), but `replace=True` so a re-push
+    destroys and rebuilds the instance in place (landing on the same id is the
+    point: the CI report URL and the runner's marker names depend on it)."""
+
+    def run():
+        return locks.retry_while_locked(
+            lambda: instances_mod.deploy(
+                paths,
+                registry,
+                project,
+                template,
+                branch=branch,
+                label=label,
+                replace=True,
+                auth_enabled=True,
+            ),
+            interval=_PUSH_DEPLOY_LOCK_INTERVAL,
+            max_wait=_PUSH_DEPLOY_LOCK_MAX_WAIT,
+        )
+
+    return run
 
 
 def _validate_instance_id(instance_id: str) -> None:
@@ -472,8 +507,10 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
 
     @app.post("/hooks/bitbucket/{project}")
     async def bitbucket_hook(project: str, request: Request):
-        """Bitbucket Cloud webhook -> start a custom pipeline, per the
-        project's `bitbucket_hooks` rules (spec FLE-11 §4). Same contract and
+        """Bitbucket Cloud webhook -> start a custom pipeline, or (for a
+        `repo:push`) deploy the pushed branch, per the project's
+        `bitbucket_hooks` rules (spec FLE-11 §4; push deploys: see
+        `push_deploys` below). Same contract and
         ordering as `jira_hook`: 404 (project has no rules/secret) -> 413 ->
         401 (signature) -> parse (400) -> match (200 ignored). Bitbucket signs
         like Jira (`X-Hub-Signature`), but with its OWN per-project secret.
@@ -521,16 +558,142 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             "pipeline": None,
         }
 
-        def respond(status: int, content: dict, *, result: str, reason: str | None = None):
+        def write_log(line: dict):
             try:
-                store.append_log(
-                    {**entry, "result": result, "reason": reason}, webhooks_mod.SOURCE_BITBUCKET
-                )
+                store.append_log(line, webhooks_mod.SOURCE_BITBUCKET)
             except OSError as exc:
                 logger.warning(
                     "bitbucket webhook for %r: delivery log write failed: %s", project, exc
                 )
+
+        def respond(status: int, content: dict, *, result: str, reason: str | None = None):
+            write_log({**entry, "result": result, "reason": reason})
             return JSONResponse(status_code=status, content=content)
+
+        def ignored(reason: str):
+            return respond(
+                200, {"result": "ignored", "reason": reason}, result="ignored", reason=reason
+            )
+
+        def claim_delivery() -> bool:
+            """Claim this delivery id (and prune old dedupe markers). False
+            for a repeat of an already-claimed id; True otherwise, also when
+            Bitbucket sent no id (nothing to claim, every delivery is processed)."""
+            if delivery_id is None:
+                return True
+            if not store.claim_delivery(project, delivery_id, webhooks_mod.SOURCE_BITBUCKET):
+                return False
+            try:
+                store.prune_seen()
+            except OSError as exc:  # housekeeping must not fail an accepted delivery
+                logger.warning("bitbucket webhook for %r: pruning dedupe markers: %s", project, exc)
+            return True
+
+        async def push_deploys(events: list[webhooks_mod.BitbucketEvent]):
+            """`repo:push`: one deploy job per (pushed branch, matching rule).
+            Targets are resolved for ALL matches before the delivery is
+            claimed, so a config/branch error answers 422 and submits nothing
+            (Bitbucket's retry can still succeed). Two pushed branches that
+            resolve to the same instance id deploy once (the first). A
+            derived-label rule whose instance id equals that of a fixed-label
+            rule is ignored (a `*--pw-run` branch must not rebuild the
+            baseline instance). No token is needed. Answers `{"result":
+            "accepted", "deploys": [{"instance", "job"}, ...]}`, plus
+            top-level `instance` / `job` when there is exactly one deploy.
+            Each deploy gets its own delivery-log line."""
+            entry.update(
+                {"event": webhooks_mod.PUSH_EVENT, "sha": None, "instance": None, "job": None}
+            )
+            if not events:
+                return ignored("no branch update")
+            entry.update({"repo": events[0].repo, "branch": events[0].branch, "sha": events[0].sha})
+            plan = [
+                (ev, rule)
+                for ev in events
+                if (rule := webhooks_mod.match_bitbucket_rule(rules, ev)) is not None
+            ]
+            if not plan:
+                if any(r.on_event == webhooks_mod.PUSH_EVENT for r in rules):
+                    return ignored("no matching rule")
+                return ignored(f"event {webhooks_mod.PUSH_EVENT}")
+
+            fixed_label_rules = [r for r in rules if r.action == "deploy" and r.label]
+            targets = []
+            collided = []
+            seen_ids: set[str] = set()
+            try:
+                for ev, rule in plan:
+                    assert rule.action == "deploy" and rule.template is not None
+                    label = naming.derive_label(
+                        project,
+                        ev.branch,
+                        label=rule.label,
+                        label_prefix=rule.label_prefix,
+                        strip_suffix=rule.strip_suffix,
+                    )
+                    resolved = instances_mod.resolve_target(
+                        registry, project, rule.template, ev.branch, label
+                    )
+                    if not rule.label and any(
+                        instances_mod.resolve_target(
+                            registry, project, fixed.template, ev.branch, fixed.label
+                        ).instance_id
+                        == resolved.instance_id
+                        for fixed in fixed_label_rules
+                    ):
+                        collided.append((ev, resolved))
+                    elif resolved.instance_id not in seen_ids:
+                        seen_ids.add(resolved.instance_id)
+                        targets.append((ev, rule, resolved))
+            except FleetError as exc:
+                return respond(422, {"error": exc.message}, result="error", reason=exc.message)
+
+            for ev, resolved in collided:
+                write_log(
+                    {
+                        **entry,
+                        "branch": ev.branch,
+                        "sha": ev.sha,
+                        "instance": resolved.instance_id,
+                        "result": "ignored",
+                        "reason": _PUSH_LABEL_COLLISION,
+                    }
+                )
+            if not targets:
+                return JSONResponse(
+                    status_code=200,
+                    content={"result": "ignored", "reason": _PUSH_LABEL_COLLISION},
+                )
+
+            if not claim_delivery():
+                return respond(200, {"result": "duplicate"}, result="duplicate")
+
+            deploys = []
+            for ev, rule, resolved in targets:
+                job = await app.state.jobs.submit(
+                    "deploy",
+                    resolved.instance_id,
+                    _push_deploy_job(
+                        paths, registry, project, rule.template, ev.branch, resolved.label
+                    ),
+                    log_path=str(paths.logs / resolved.instance_id / "deploy.log"),
+                )
+                deploys.append({"instance": resolved.instance_id, "job": job.id})
+                write_log(
+                    {
+                        **entry,
+                        "branch": ev.branch,
+                        "sha": ev.sha,
+                        "instance": resolved.instance_id,
+                        "job": job.id,
+                        "result": "accepted",
+                        "reason": None,
+                    }
+                )
+            content = {"result": "accepted", "deploys": deploys}
+            if len(deploys) == 1:
+                content.update(deploys[0])
+            return JSONResponse(status_code=200, content=content)
 
         if not webhooks_mod.verify_signature(secret, body, request.headers.get("x-hub-signature")):
             # Journal only (rate-limited/rotated), never bitbucket.jsonl.
@@ -541,16 +704,18 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             )
             return JSONResponse(status_code=401, content={"error": "unauthorized"})
 
+        event_key = request.headers.get("x-event-key")
         try:
-            event = webhooks_mod.parse_bitbucket_event(
-                request.headers.get("x-event-key"), json.loads(body)
-            )
+            events = webhooks_mod.parse_bitbucket_events(event_key, json.loads(body))
         except (ValueError, RecursionError):
             reason = "body is not valid JSON"
             return respond(400, {"error": reason}, result="bad_request", reason=reason)
         except ValidationError as exc:
             return respond(400, {"error": exc.message}, result="bad_request", reason=exc.message)
 
+        if event_key == webhooks_mod.PUSH_EVENT:
+            return await push_deploys(events)
+        (event,) = events
         entry.update(
             {
                 "event": event.event,
@@ -561,16 +726,14 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             }
         )
 
-        def ignored(reason: str):
-            return respond(
-                200, {"result": "ignored", "reason": reason}, result="ignored", reason=reason
-            )
-
         rule = webhooks_mod.match_bitbucket_rule(rules, event)
         if rule is None:
             if not any(r.on_event == event.event for r in rules):
                 return ignored(f"event {event.event}")
             return ignored("no matching rule")
+        if rule.action != "run-pipeline":  # `deploy` rules only exist for repo:push
+            return ignored("no matching rule")
+        assert rule.ref is not None and rule.pattern is not None  # run-pipeline requires both
 
         # A missing token is a config error: do not claim the delivery, so
         # Bitbucket's retry succeeds once `fleet webhook bitbucket-token` ran.
@@ -579,15 +742,9 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             reason = f"no Bitbucket token stored for {project!r}"
             return respond(422, {"error": reason}, result="error", reason=reason)
 
-        claimed = False
-        if delivery_id is not None:
-            if not store.claim_delivery(project, delivery_id, webhooks_mod.SOURCE_BITBUCKET):
-                return respond(200, {"result": "duplicate"}, result="duplicate")
-            claimed = True
-            try:
-                store.prune_seen()
-            except OSError as exc:  # housekeeping must not fail an accepted delivery
-                logger.warning("bitbucket webhook for %r: pruning dedupe markers: %s", project, exc)
+        if not claim_delivery():
+            return respond(200, {"result": "duplicate"}, result="duplicate")
+        claimed = delivery_id is not None
 
         try:
             pipeline = await asyncio.to_thread(
