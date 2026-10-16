@@ -1,5 +1,6 @@
 """Composition and validation of instance ids (spec §4.3, §5.1)."""
 
+import hashlib
 import re
 
 from fleet.core.errors import ValidationError
@@ -7,6 +8,7 @@ from fleet.core.errors import ValidationError
 _PART_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 _SLUGIFY_RE = re.compile(r"[^a-z0-9]+")
 _MAX_INSTANCE_ID_LENGTH = 63
+_LABEL_HASH_LENGTH = 6
 
 
 def validate_part(value: str) -> None:
@@ -41,6 +43,45 @@ def slugify(value: str) -> str:
     if not slug:
         raise ValidationError(f"cannot slugify {value!r}: result is empty")
     return slug
+
+
+def derive_label(
+    project: str,
+    branch: str,
+    *,
+    label: str | None = None,
+    label_prefix: str | None = None,
+    strip_suffix: str | None = None,
+) -> str:
+    """The instance label for a branch deployed by a `repo:push` hook rule.
+
+    `label`, when given, is used as is. Otherwise the label is `label_prefix` +
+    `branch` minus a trailing `strip_suffix`. Either way the result is
+    slugified, and when `<project>--<label>` would exceed the 63-character DNS
+    label limit the slug is cut and ends in `-<first 6 hex of sha1(branch)>`,
+    so the id fits, stays deterministic (a re-run lands on the same instance)
+    and two long branches sharing a prefix do not collide.
+
+    Raises `ValidationError` if the slug is empty, or if `project` is so long
+    that not even a shortened label fits."""
+    if label:
+        raw = label
+    else:
+        stem = branch.removesuffix(strip_suffix) if strip_suffix else branch
+        raw = f"{label_prefix or ''}{stem}"
+    slug = slugify(raw)
+    room = _MAX_INSTANCE_ID_LENGTH - len(project) - 2  # 2 = the "--" separator
+    if len(slug) <= room:
+        return slug
+    digest = hashlib.sha1(branch.encode("utf-8"), usedforsecurity=False).hexdigest()
+    tail = f"-{digest[:_LABEL_HASH_LENGTH]}"
+    keep = room - len(tail)
+    if keep < 1:
+        raise ValidationError(
+            f"project name {project!r} is too long to fit any label for branch {branch!r} "
+            f"within the {_MAX_INSTANCE_ID_LENGTH}-character DNS label limit"
+        )
+    return slug[:keep].rstrip("-") + tail
 
 
 def instance_id(project: str, label: str) -> str:
