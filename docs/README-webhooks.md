@@ -302,27 +302,38 @@ bitbucket_hooks:
   alias-aware: a project with `additional_hostnames` also needs
   `<hostname>-<instance id>` to fit in 63 characters, so the id is shortened by
   the longest `<hostname>-` prefix, and a long branch can still deploy.
-- Two different branch names can slugify to the same instance id (for example
-  `Feature/A_b--pw-run` and `feature/a/b--pw-run`): the later push replaces
-  the instance of the earlier one.
-- The job is a normal deploy of `template` on the pushed branch with
-  `replace=True`: a re-push destroys the existing instance (and its tmux
-  window, which kills a run in flight) and rebuilds it under the same id. If
-  the previous deploy of that id is still running, the job waits for its lock
-  (retries every 15 s, up to 45 minutes) instead of failing.
+- Two different branch names can slugify to the same base instance id (for
+  example `Feature/A_b--pw-run` and `feature/a/b--pw-run`): within one push
+  only the first deploys; across pushes, the second gets a suffixed instance
+  (see below).
+- **Fixed `label` vs `label_prefix`: what a re-push does.**
+  - A rule with a fixed `label` (for example a `develop` baseline) keeps
+    exactly **one** instance: every push is a deploy with `replace=True` that
+    destroys the existing instance (and its tmux window, which kills a run in
+    flight) and rebuilds it under the same id.
+  - A rule with `label_prefix` never overwrites. If `<project>--<label>`
+    already exists, the push deploys a **new** instance `<label>-1`, then
+    `<label>-2`, and so on (the same allocation as a plain `fleet deploy`).
+    The id is picked when the webhook is received, so the answer, the delivery
+    log, the job and `logs/<instance>/deploy.log` all name the instance that
+    will really be created. Old instances are kept for debugging; clean them up
+    by hand with `fleet destroy`. Room for a `-999` suffix is reserved when
+    the label is fitted to 63 characters, so a long branch still deploys.
+  - Either way, if the deploy of the same id is still running, the job waits
+    for its lock (retries every 15 s, up to 45 minutes) instead of failing.
 - **Label-collision guard.** A derived-label deploy that would land on the
   instance id of a fixed-`label` deploy rule is ignored with reason
   `collides with a fixed-label rule` (a `*--pw-run` branch must not rebuild the
   baseline instance). Each such branch gets its own delivery-log line; if every
   target of the push collides, the answer is 200 `ignored`.
 - **Reserved prefix.** The derived-label prefix namespace (e.g. `pw-`) is
-  reserved for webhook-owned instances: with `replace=True` the deploy destroys
-  and rebuilds whatever instance already has that id, whoever created it. Do
-  not deploy by hand under that prefix.
+  reserved for webhook-owned instances: a hand-deployed instance under that
+  prefix is never overwritten, but it makes the push allocate a `-1` suffix.
+  A fixed-`label` instance is rebuilt in place, whoever created it.
 - **Jobs live in memory.** Deploy jobs are held by the daemon process only: a
   daemon restart drops a queued or lock-waiting job (Bitbucket already got its
   200, so it will not retry). Push the branch again to retry.
-- **Waiting occupies a job slot.** A re-push while the same instance is still
+- **Waiting occupies a job slot.** A push while the same instance is still
   deploying waits for its lock (`retry_while_locked`, up to 45 minutes) and
   holds one of the daemon's job slots for the whole wait.
 - Validation (at load time): `deploy` only with `on_event: repo:push`; `branch`

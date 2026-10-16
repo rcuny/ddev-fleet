@@ -430,6 +430,35 @@ def _reload_push_key_after_start(
         log(f"WARNING: push-key load failed: {exc}; in-container git push may fail")
 
 
+def allocate_instance_label(
+    paths: FleetPaths, project: str, label: str, *, taken: frozenset[str] | set[str] = frozenset()
+) -> str:
+    """Return the first free label from `label`, `label-1`, `label-2`, … for
+    `project`, under the fleet-wide allocation lock (`ALLOCATION_LOCK_ID`,
+    shared with `multi_deploy()`). The lock is released before returning: see
+    the TOCTOU note in `deploy()`.
+
+    "Occupied" means an instance directory containing `.git`, plus any id in
+    `taken` (ids the caller has already handed out but not created yet).
+    A directory that exists but has no `.git` is a partial/failed-destroy stub
+    (see the recovered_stub handling in `deploy()`), not a live instance
+    occupying the id: excluding it keeps the stub-recovery path reachable —
+    otherwise a leftover stub would permanently "occupy" its id and every
+    later deploy would allocate an ever-growing suffix instead of cleaning it
+    up.
+
+    Raises `ValidationError` (via `naming.allocate_free_label`) if the final id
+    exceeds the 63-character DNS label limit.
+    """
+    with instance_lock(paths.locks, ALLOCATION_LOCK_ID):
+        existing_ids = (
+            {p.name for p in paths.instances.iterdir() if p.is_dir() and (p / ".git").is_dir()}
+            if paths.instances.exists()
+            else set()
+        )
+        return naming.allocate_free_label(existing_ids | set(taken), project, label)
+
+
 def deploy(
     paths: FleetPaths,
     registry: Registry,
@@ -514,20 +543,7 @@ def deploy(
         # `if instance_dir.exists(): gitops.update(...)` branch below
         # exists partly to degrade that (extremely rare) race safely
         # rather than corrupt state.
-        with instance_lock(paths.locks, ALLOCATION_LOCK_ID):
-            # A directory that exists but has no `.git` is a partial/failed
-            # -destroy stub (see the recovered_stub handling below), not a
-            # live instance occupying this id. Excluding it here is what
-            # keeps the stub-recovery path reachable — otherwise a leftover
-            # stub would permanently "occupy" its id and every subsequent
-            # deploy attempt would allocate an ever-growing suffix instead
-            # of ever cleaning it up.
-            existing_ids = (
-                {p.name for p in paths.instances.iterdir() if p.is_dir() and (p / ".git").is_dir()}
-                if paths.instances.exists()
-                else set()
-            )
-            allocated_label = naming.allocate_free_label(existing_ids, project, slugified_label)
+        allocated_label = allocate_instance_label(paths, project, slugified_label)
         if allocated_label != slugified_label:
             resolved = registry.resolve(
                 project, resolved.template, resolved.branch, label=allocated_label

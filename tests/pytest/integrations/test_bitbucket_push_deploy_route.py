@@ -128,7 +128,7 @@ def _log(store):
     return store.tail_log(source="bitbucket")
 
 
-def test_pw_run_push_deploys_the_pushed_branch_in_place(hook_env):
+def test_pw_run_push_deploys_the_pushed_branch_without_replace(hook_env):
     client, store, secret, calls, _, _ = hook_env
     resp = _post(client, _push(_change("feature/ABC-1-x--pw-run")), secret)
     assert resp.status_code == 200
@@ -144,7 +144,7 @@ def test_pw_run_push_deploys_the_pushed_branch_in_place(hook_env):
     assert kwargs == {
         "branch": "feature/ABC-1-x--pw-run",
         "label": "pw-feature-abc-1-x",
-        "replace": True,
+        "replace": False,
         "auth_enabled": True,
     }
 
@@ -187,12 +187,13 @@ def test_develop_push_deploys_the_baseline_instance(hook_env):
     assert kwargs["label"] == "pw-regression" and kwargs["replace"] is True
 
 
-def test_long_branch_name_is_fitted_to_63_chars(hook_env):
+def test_long_branch_name_is_fitted_leaving_room_for_the_suffix(hook_env):
     client, _, secret, calls, _, _ = hook_env
     branch = "feature/" + "very-long-name-" * 6 + "--pw-run"
     resp = _post(client, _push(_change(branch)), secret)
     instance = resp.json()["instance"]
-    assert len(instance) == 63 and instance.startswith("p--pw-feature-very-long-name")
+    # 63 minus the 4 characters kept free for an allocated `-999` suffix.
+    assert len(instance) == 59 and instance.startswith("p--pw-feature-very-long-name")
     _wait_job(client, resp.json()["job"])
     assert calls[0][1]["label"] == instance.removeprefix("p--")
     assert calls[0][1]["branch"] == branch  # the real branch is still what is cloned
@@ -433,3 +434,116 @@ def test_colliding_branch_is_skipped_but_the_others_in_the_push_deploy(collision
     results = [(ln["branch"], ln["result"]) for ln in _log(store)[-2:]]
     assert ("regression--pw-run", "ignored") in results
     assert ("feature/x--pw-run", "accepted") in results
+
+
+def _make_instance(fleet_home, instance_id, *, git=True):
+    inst = fleet_home / "instances" / instance_id
+    inst.mkdir(parents=True)
+    if git:
+        (inst / ".git").mkdir()
+
+
+def test_derived_rule_with_a_free_id_deploys_the_base_id(hook_env, fleet_home):
+    client, _, secret, calls, _, _ = hook_env
+    _make_instance(fleet_home, "p--pw-other")  # unrelated instance
+    body = _post(client, _push(_change("feature/x--pw-run")), secret).json()
+    assert body["instance"] == "p--pw-feature-x"
+    _wait_job(client, body["job"])
+    ((_, kwargs),) = calls
+    assert kwargs["label"] == "pw-feature-x" and kwargs["replace"] is False
+
+
+def test_derived_rule_with_an_existing_id_deploys_a_new_suffixed_instance(hook_env, fleet_home):
+    client, store, secret, calls, _, _ = hook_env
+    _make_instance(fleet_home, "p--pw-feature-x")
+    resp = _post(client, _push(_change("feature/x--pw-run")), secret)
+    body = resp.json()
+    assert body["instance"] == "p--pw-feature-x-1"
+    assert body["deploys"] == [{"instance": "p--pw-feature-x-1", "job": body["job"]}]
+    _wait_job(client, body["job"])
+    ((_, kwargs),) = calls
+    assert kwargs["label"] == "pw-feature-x-1" and kwargs["replace"] is False
+    assert kwargs["branch"] == "feature/x--pw-run"
+    last = _log(store)[-1]
+    assert last["instance"] == "p--pw-feature-x-1" and last["job"] == body["job"]
+    # The job is keyed on, and logs to, the actual instance id.
+    job = client.get(f"/api/jobs/{body['job']}").json()
+    assert job["instance_id"] == "p--pw-feature-x-1"
+    assert job["log_path"].endswith("/p--pw-feature-x-1/deploy.log")
+
+
+def test_derived_rule_skips_every_taken_suffix(hook_env, fleet_home):
+    client, _, secret, calls, _, _ = hook_env
+    _make_instance(fleet_home, "p--pw-feature-x")
+    _make_instance(fleet_home, "p--pw-feature-x-1")
+    body = _post(client, _push(_change("feature/x--pw-run")), secret).json()
+    assert body["instance"] == "p--pw-feature-x-2"
+    _wait_job(client, body["job"])
+    assert calls[0][1]["label"] == "pw-feature-x-2"
+
+
+def test_a_directory_without_git_is_a_stub_not_an_occupied_id(hook_env, fleet_home):
+    client, _, secret, _, _, _ = hook_env
+    _make_instance(fleet_home, "p--pw-feature-x", git=False)
+    body = _post(client, _push(_change("feature/x--pw-run")), secret).json()
+    assert body["instance"] == "p--pw-feature-x"
+
+
+def test_fixed_label_rule_with_an_existing_instance_rebuilds_it_in_place(hook_env, fleet_home):
+    client, _, secret, calls, _, _ = hook_env
+    _make_instance(fleet_home, "p--pw-regression")
+    body = _post(client, _push(_change("develop")), secret).json()
+    assert body["instance"] == "p--pw-regression"  # never suffixed
+    _wait_job(client, body["job"])
+    ((_, kwargs),) = calls
+    assert kwargs["label"] == "pw-regression" and kwargs["replace"] is True
+
+
+def test_derived_rule_never_lands_on_a_taken_fixed_label_suffix(collision_env, fleet_home):
+    client, _, secret, calls = collision_env
+    # A derived branch whose base id is free, next to existing baseline instances.
+    _make_instance(fleet_home, "website--pw-regression")
+    _make_instance(fleet_home, "website--pw-feature-x")
+    body = _post(client, _push(_change("feature/x--pw-run")), secret, project="website").json()
+    assert body["instance"] == "website--pw-feature-x-1"
+    _wait_job(client, body["job"])
+
+
+def test_two_branches_of_one_push_never_allocate_the_same_id(hook_env, fleet_home):
+    client, _, secret, _, _, _ = hook_env
+    # `x` exists; branch `x-1` has a free base id that the allocation for `x` hands out.
+    _make_instance(fleet_home, "p--pw-x")
+    payload = _push(_change("x--pw-run"), _change("x-1--pw-run"))
+    body = _post(client, payload, secret).json()
+    ids = [d["instance"] for d in body["deploys"]]
+    assert ids == ["p--pw-x-1", "p--pw-x-1-1"]
+    for deploy in body["deploys"]:
+        _wait_job(client, deploy["job"])
+
+
+def test_long_branch_with_an_existing_base_id_still_allocates_within_63_chars(hook_env, fleet_home):
+    client, _, secret, calls, _, _ = hook_env
+    branch = "feature/" + "very-long-name-" * 6 + "--pw-run"
+    first = _post(client, _push(_change(branch)), secret, delivery_id="a").json()
+    _wait_job(client, first["job"])
+    _make_instance(fleet_home, first["instance"])
+    _make_instance(fleet_home, first["instance"] + "-1")
+    second = _post(client, _push(_change(branch)), secret, delivery_id="b")
+    assert second.status_code == 200
+    instance = second.json()["instance"]
+    assert instance == first["instance"] + "-2"
+    assert len(instance) <= 63
+    _wait_job(client, second.json()["job"])
+    assert calls[-1][1]["label"] == instance.removeprefix("p--")
+    assert calls[-1][1]["branch"] == branch
+
+
+def test_alias_room_is_kept_for_an_allocated_suffix(hook_env, fleet_home):
+    client, store, _, calls, _, _ = hook_env
+    secret = store.read_secret("aliased", "bitbucket")
+    branch = "feature/" + "long-name-" * 8 + "--pw-run"
+    first = _post(client, _push(_change(branch)), secret, "aliased", delivery_id="a").json()
+    _make_instance(fleet_home, first["instance"])
+    second = _post(client, _push(_change(branch)), secret, "aliased", delivery_id="b").json()
+    assert second["instance"] == first["instance"] + "-1"
+    assert len(f"odihr-{second['instance']}") <= 63
