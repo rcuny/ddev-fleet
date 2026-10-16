@@ -53,16 +53,39 @@ _HEADER_LOG_MAX = 64
 _PUSH_DEPLOY_LOCK_INTERVAL = 15.0
 _PUSH_DEPLOY_LOCK_MAX_WAIT = 45 * 60.0
 
+# The handler allocates the label of a derived-label push deploy under the
+# fleet-wide allocation lock, which reports "held" at once instead of blocking:
+# retry briefly (allocation itself takes milliseconds). Read at call time.
+_PUSH_ALLOC_LOCK_INTERVAL = 0.2
+_PUSH_ALLOC_LOCK_MAX_WAIT = 30.0
+
+# Room kept free for the `-N` suffix of an allocated label (`-999`).
+_PUSH_ALLOC_SUFFIX_RESERVE = 4
+
 # Reason logged/answered when a derived-label push rule would land on the
 # instance of a fixed-label push rule (see `push_deploys` in `bitbucket_hook`).
 _PUSH_LABEL_COLLISION = "collides with a fixed-label rule"
 
 
-def _push_deploy_job(paths, registry, project: str, template: str, branch: str, label: str):
+def _push_deploy_job(
+    paths,
+    registry,
+    project: str,
+    template: str,
+    branch: str,
+    label: str,
+    *,
+    replace: bool,
+):
     """The background job of one `repo:push` deploy: the same call as a web-UI
-    deploy with auth on (default password), but `replace=True` so a re-push
-    destroys and rebuilds the instance in place (landing on the same id is the
-    point: the CI report URL and the runner's marker names depend on it)."""
+    deploy with auth on (default password).
+
+    `replace=True` (fixed-`label` rules) destroys and rebuilds the instance in
+    place, so a re-push lands on the same id (the baseline instance is the
+    point). `replace=False` (derived-label rules) is the normal never-overwrite
+    deploy: `label` was already allocated free by the webhook handler, so
+    `deploy()` keeps it (and, if something took it meanwhile, falls back to
+    the next free `-N` suffix, like any plain deploy)."""
 
     def run():
         return locks.retry_while_locked(
@@ -73,7 +96,7 @@ def _push_deploy_job(paths, registry, project: str, template: str, branch: str, 
                 template,
                 branch=branch,
                 label=label,
-                replace=True,
+                replace=replace,
                 auth_enabled=True,
             ),
             interval=_PUSH_DEPLOY_LOCK_INTERVAL,
@@ -594,10 +617,17 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             Targets are resolved for ALL matches before the delivery is
             claimed, so a config/branch error answers 422 and submits nothing
             (Bitbucket's retry can still succeed). Two pushed branches that
-            resolve to the same instance id deploy once (the first). A
-            derived-label rule whose instance id equals that of a fixed-label
-            rule is ignored (a `*--pw-run` branch must not rebuild the
-            baseline instance). No token is needed. Answers `{"result":
+            resolve to the same base instance id deploy once (the first).
+            A fixed-`label` rule rebuilds its one instance in place on every
+            push (`replace=True`). A derived-label rule never overwrites: when
+            its instance id exists, the push deploys a NEW instance
+            `<label>-1`, `-2`, … (allocated here, before the job is
+            submitted, so the response, the delivery log, the job and its log
+            path all name the id that will really be created); old ones are
+            kept for the operator to destroy. A derived-label rule whose base
+            instance id equals that of a fixed-label rule is ignored (a
+            `*--pw-run` branch must not rebuild the baseline instance). No
+            token is needed. Answers `{"result":
             "accepted", "deploys": [{"instance", "job"}, ...]}`, plus
             top-level `instance` / `job` when there is exactly one deploy.
             Each deploy gets its own delivery-log line."""
@@ -635,7 +665,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                         label=rule.label,
                         label_prefix=rule.label_prefix,
                         strip_suffix=rule.strip_suffix,
-                        reserve=alias_reserve,
+                        # Derived labels get room for an allocated `-N` suffix.
+                        reserve=alias_reserve + (0 if rule.label else _PUSH_ALLOC_SUFFIX_RESERVE),
                     )
                     resolved = instances_mod.resolve_target(
                         registry, project, rule.template, ev.branch, label
@@ -651,6 +682,35 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                     elif resolved.instance_id not in seen_ids:
                         seen_ids.add(resolved.instance_id)
                         targets.append((ev, rule, resolved))
+
+                # Derived-label rules never overwrite: allocate the actual
+                # label (base, else `-1`, `-2`, …) now, so everything below
+                # names the id the deploy will create. Ids handed out earlier
+                # in this delivery and the fixed-label instances are `taken`.
+                taken = {
+                    instances_mod.resolve_target(
+                        registry, project, fixed.template, events[0].branch, fixed.label
+                    ).instance_id
+                    for fixed in fixed_label_rules
+                }
+                allocated_targets = []
+                for ev, rule, resolved in targets:
+                    if not rule.label:
+                        label = await asyncio.to_thread(
+                            locks.retry_while_locked,
+                            lambda label=resolved.label: instances_mod.allocate_instance_label(
+                                paths, project, label, taken=taken
+                            ),
+                            interval=_PUSH_ALLOC_LOCK_INTERVAL,
+                            max_wait=_PUSH_ALLOC_LOCK_MAX_WAIT,
+                        )
+                        if label != resolved.label:
+                            resolved = instances_mod.resolve_target(
+                                registry, project, rule.template, ev.branch, label
+                            )
+                    taken.add(resolved.instance_id)
+                    allocated_targets.append((ev, rule, resolved))
+                targets = allocated_targets
             except FleetError as exc:
                 return respond(422, {"error": exc.message}, result="error", reason=exc.message)
 
@@ -680,7 +740,13 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                     "deploy",
                     resolved.instance_id,
                     _push_deploy_job(
-                        paths, registry, project, rule.template, ev.branch, resolved.label
+                        paths,
+                        registry,
+                        project,
+                        rule.template,
+                        ev.branch,
+                        resolved.label,
+                        replace=bool(rule.label),
                     ),
                     log_path=str(paths.logs / resolved.instance_id / "deploy.log"),
                 )
