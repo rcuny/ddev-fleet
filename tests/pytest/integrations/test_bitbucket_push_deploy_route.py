@@ -16,7 +16,7 @@ from fleet.core.instances import FleetPaths
 from fleet.core.webhooks import WebhookStore
 from fleet.daemon import create_app
 
-_REPO = "acme/pws"
+_REPO = "acme/website"
 _SHA = "c" * 40
 
 _REGISTRY = f"""\
@@ -35,8 +35,8 @@ projects:
       - {{on_event: "repo:push", repo: {_REPO}, branch: "*--pw-run-ml", action: deploy, template: ci-pw-ml, label_prefix: "pwml-", strip_suffix: "--pw-run-ml"}}
       - {{on_event: "repo:push", repo: {_REPO}, branch: develop, action: deploy, template: ci-baseline, label: pw-regression}}
       - {{on_event: "repo:push", repo: {_REPO}, branch: "*--bare", action: deploy, template: ci-pw, strip_suffix: "--bare"}}
-  osce:
-    git: git@example.test:org/osce.git
+  website:
+    git: git@example.test:org/website.git
     templates:
       ci-pw: {{}}
     bitbucket_hooks:
@@ -61,7 +61,7 @@ def hook_env(fleet_home, monkeypatch):
     store = WebhookStore.from_paths(paths)
     secret = store.create_secret("p", source="bitbucket")
     store.create_secret("prs", source="bitbucket")
-    store.create_secret("osce", source="bitbucket")
+    store.create_secret("website", source="bitbucket")
 
     from fleet import daemon as daemon_mod
 
@@ -121,20 +121,20 @@ def _log(store):
 
 def test_pw_run_push_deploys_the_pushed_branch_in_place(hook_env):
     client, store, secret, calls, _, _ = hook_env
-    resp = _post(client, _push(_change("feature/PWD8-1-x--pw-run")), secret)
+    resp = _post(client, _push(_change("feature/ABC-1-x--pw-run")), secret)
     assert resp.status_code == 200
     body = resp.json()
     assert body["result"] == "accepted"
-    assert body["instance"] == "p--pw-feature-pwd8-1-x"
+    assert body["instance"] == "p--pw-feature-abc-1-x"
     assert len(body["job"]) == 12 and int(body["job"], 16) >= 0
-    assert body["deploys"] == [{"instance": "p--pw-feature-pwd8-1-x", "job": body["job"]}]
+    assert body["deploys"] == [{"instance": "p--pw-feature-abc-1-x", "job": body["job"]}]
 
     assert _wait_job(client, body["job"]) == "succeeded"
     ((args, kwargs),) = calls
     assert args[2:4] == ("p", "ci-pw")
     assert kwargs == {
-        "branch": "feature/PWD8-1-x--pw-run",
-        "label": "pw-feature-pwd8-1-x",
+        "branch": "feature/ABC-1-x--pw-run",
+        "label": "pw-feature-abc-1-x",
         "replace": True,
         "auth_enabled": True,
     }
@@ -142,22 +142,22 @@ def test_pw_run_push_deploys_the_pushed_branch_in_place(hook_env):
     last = _log(store)[-1]
     assert last["result"] == "accepted"
     assert last["event"] == "repo:push" and last["repo"] == _REPO
-    assert last["branch"] == "feature/PWD8-1-x--pw-run" and last["sha"] == _SHA
-    assert last["instance"] == "p--pw-feature-pwd8-1-x" and last["job"] == body["job"]
+    assert last["branch"] == "feature/ABC-1-x--pw-run" and last["sha"] == _SHA
+    assert last["instance"] == "p--pw-feature-abc-1-x" and last["job"] == body["job"]
     assert last["delivery_id"] == "u1"
 
 
 def test_user_prefixed_uppercase_branch_deploys_the_slugified_instance(hook_env):
     client, store, _, calls, _, _ = hook_env
-    branch = "renaud/hotfix/PWD8-1896-IEF-patch--pw-run"
-    secret = store.read_secret("osce", "bitbucket")
-    resp = _post(client, _push(_change(branch)), secret, project="osce")
-    assert resp.json()["instance"] == "osce--pw-renaud-hotfix-pwd8-1896-ief-patch"
+    branch = "jdoe/hotfix/ABC-1896-Font-patch--pw-run"
+    secret = store.read_secret("website", "bitbucket")
+    resp = _post(client, _push(_change(branch)), secret, project="website")
+    assert resp.json()["instance"] == "website--pw-jdoe-hotfix-abc-1896-font-patch"
     assert _wait_job(client, resp.json()["job"]) == "succeeded"
     ((args, kwargs),) = calls
-    assert args[2:4] == ("osce", "ci-pw")
+    assert args[2:4] == ("website", "ci-pw")
     assert kwargs["branch"] == branch  # the real, case-preserved branch is what is cloned
-    assert kwargs["label"] == "pw-renaud-hotfix-pwd8-1896-ief-patch"
+    assert kwargs["label"] == "pw-jdoe-hotfix-abc-1896-font-patch"
 
 
 def test_pw_run_ml_push_matches_only_the_ml_rule(hook_env):
@@ -313,7 +313,7 @@ def test_bad_signature_401(hook_env):
         pytest.param(b"not json", id="garbage"),
         pytest.param(b"[]", id="not-an-object"),
         pytest.param(b"{}", id="no-repository"),
-        pytest.param(b'{"repository": {"full_name": "acme/pws"}}', id="no-push-changes"),
+        pytest.param(b'{"repository": {"full_name": "acme/website"}}', id="no-push-changes"),
         pytest.param(
             json.dumps(_push({"new": {"type": "branch", "name": "x"}})).encode(), id="no-hash"
         ),
@@ -357,8 +357,8 @@ fleet:
   domain: fleet.example.test
 
 projects:
-  osce:
-    git: git@example.test:org/osce.git
+  website:
+    git: git@example.test:org/website.git
     templates:
       ci-pw: {{}}
       ci-baseline: {{}}
@@ -373,28 +373,28 @@ def collision_env(hook_env, fleet_home):
     client, store, _, calls, _, _ = hook_env
     paths = FleetPaths.from_home(fleet_home)
     paths.registry.write_text(_COLLISION_REGISTRY, encoding="utf-8")
-    return client, store, store.read_secret("osce", "bitbucket"), calls
+    return client, store, store.read_secret("website", "bitbucket"), calls
 
 
 def test_derived_label_colliding_with_a_fixed_label_rule_is_ignored(collision_env):
     client, store, secret, calls = collision_env
     # `regression--pw-run` -> `pw-regression`: the baseline instance's id.
-    resp = _post(client, _push(_change("regression--pw-run")), secret, project="osce")
+    resp = _post(client, _push(_change("regression--pw-run")), secret, project="website")
     assert resp.status_code == 200
     assert resp.json() == {"result": "ignored", "reason": "collides with a fixed-label rule"}
     time.sleep(0.1)
     assert not calls
     last = _log(store)[-1]
     assert last["result"] == "ignored" and last["reason"] == "collides with a fixed-label rule"
-    assert last["branch"] == "regression--pw-run" and last["instance"] == "osce--pw-regression"
-    assert store.claim_delivery("osce", "u1", "bitbucket") is True  # not consumed
+    assert last["branch"] == "regression--pw-run" and last["instance"] == "website--pw-regression"
+    assert store.claim_delivery("website", "u1", "bitbucket") is True  # not consumed
 
 
 def test_fixed_label_rule_still_deploys_its_own_instance(collision_env):
     client, _, secret, calls = collision_env
-    resp = _post(client, _push(_change("develop")), secret, project="osce")
+    resp = _post(client, _push(_change("develop")), secret, project="website")
     assert resp.json()["result"] == "accepted"
-    assert resp.json()["instance"] == "osce--pw-regression"
+    assert resp.json()["instance"] == "website--pw-regression"
     _wait_job(client, resp.json()["job"])
     assert calls[0][1]["branch"] == "develop"
 
@@ -402,9 +402,9 @@ def test_fixed_label_rule_still_deploys_its_own_instance(collision_env):
 def test_colliding_branch_is_skipped_but_the_others_in_the_push_deploy(collision_env):
     client, store, secret, calls = collision_env
     payload = _push(_change("regression--pw-run"), _change("feature/x--pw-run"))
-    body = _post(client, payload, secret, project="osce").json()
+    body = _post(client, payload, secret, project="website").json()
     assert body["result"] == "accepted"
-    assert [d["instance"] for d in body["deploys"]] == ["osce--pw-feature-x"]
+    assert [d["instance"] for d in body["deploys"]] == ["website--pw-feature-x"]
     _wait_job(client, body["deploys"][0]["job"])
     results = [(ln["branch"], ln["result"]) for ln in _log(store)[-2:]]
     assert ("regression--pw-run", "ignored") in results

@@ -271,12 +271,12 @@ keys), so upgrade every server that pulls that `fleet.yml` first.
 
 FLE-27. A `repo:push` rule deploys the pushed branch instead of starting a
 pipeline. It lets a push to a branch name with a marker suffix start a CI run
-on a fleet server (the osce Playwright CI: `git push origin HEAD:feature/x--pw-run`).
+on a fleet server (the Playwright CI: `git push origin HEAD:feature/x--pw-run`).
 
 ```yaml
 bitbucket_hooks:
-  - {on_event: "repo:push", repo: renaud_cuny/pws, branch: "*--pw-run", action: deploy, template: ci-pw, label_prefix: "pw-", strip_suffix: "--pw-run"}
-  - {on_event: "repo:push", repo: renaud_cuny/pws, branch: develop, action: deploy, template: ci-baseline, label: pw-regression}
+  - {on_event: "repo:push", repo: acme/website, branch: "*--pw-run", action: deploy, template: ci-pw, label_prefix: "pw-", strip_suffix: "--pw-run"}
+  - {on_event: "repo:push", repo: acme/website, branch: develop, action: deploy, template: ci-baseline, label: pw-regression}
 ```
 
 - Bitbucket sends one `repo:push` per push with one entry per ref in
@@ -285,8 +285,8 @@ bitbucket_hooks:
   are skipped, so a push that only deletes a branch is `ignored`. The
   `branch` glob is anchored: `*--pw-run` does not match `x--pw-run-ml`.
 - The instance label is the rule's `label`, or `label_prefix` + the branch
-  minus `strip_suffix`, slugified (`feature/PWD8-1898-x--pw-run` ->
-  `pw-feature-pwd8-1898-x`, instance `osce--pw-feature-pwd8-1898-x`). When
+  minus `strip_suffix`, slugified (`feature/ABC-1898-x--pw-run` ->
+  `pw-feature-abc-1898-x`, instance `website--pw-feature-abc-1898-x`). When
   `<project>--<label>` would exceed 63 characters the label is cut and ends in
   `-` plus the first 6 hex of the SHA-1 of the branch name, so the id still
   fits and the same branch always lands on the same id.

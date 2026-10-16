@@ -138,53 +138,55 @@ def _sha6(branch):
 
 def test_derive_label_prefix_and_strip_suffix():
     label = derive_label(
-        "osce",
-        "feature/PWD8-1898-playwright-ci-fleet--pw-run",
+        "website",
+        "feature/ABC-1898-playwright-ci-fleet--pw-run",
         label_prefix="pw-",
         strip_suffix="--pw-run",
     )
-    assert label == "pw-feature-pwd8-1898-playwright-ci-fleet"
-    assert instance_id("osce", label) == "osce--pw-feature-pwd8-1898-playwright-ci-fleet"
+    assert label == "pw-feature-abc-1898-playwright-ci-fleet"
+    assert instance_id("website", label) == "website--pw-feature-abc-1898-playwright-ci-fleet"
 
 
 def test_derive_label_strips_only_a_trailing_suffix():
-    label = derive_label("osce", "a--pw-run-b--pw-run", label_prefix="pw-", strip_suffix="--pw-run")
+    label = derive_label(
+        "website", "a--pw-run-b--pw-run", label_prefix="pw-", strip_suffix="--pw-run"
+    )
     assert label == "pw-a-pw-run-b"
 
 
 def test_derive_label_fixed_label_ignores_the_branch():
-    assert derive_label("osce", "develop", label="pw-regression") == "pw-regression"
-    assert derive_label("osce", "release/1.2", label="PW Regression") == "pw-regression"
+    assert derive_label("website", "develop", label="pw-regression") == "pw-regression"
+    assert derive_label("website", "release/1.2", label="PW Regression") == "pw-regression"
 
 
 def test_derive_label_without_prefix_or_suffix_slugifies_the_branch():
-    assert derive_label("osce", "Feature/ABC_12") == "feature-abc-12"
+    assert derive_label("website", "Feature/ABC_12") == "feature-abc-12"
 
 
 def test_derive_label_suffix_without_prefix():
-    assert derive_label("osce", "feat/x--bare", strip_suffix="--bare") == "feat-x"
+    assert derive_label("website", "feat/x--bare", strip_suffix="--bare") == "feat-x"
 
 
 def test_derive_label_exactly_63_chars_is_not_shortened():
-    # "osce--" is 6 chars, so a 57-char label makes a 63-char id.
-    branch = "a" * 54 + "--pw-run"
-    label = derive_label("osce", branch, label_prefix="pw-", strip_suffix="--pw-run")
-    assert label == "pw-" + "a" * 54
-    assert len(instance_id("osce", label)) == 63
+    # "website--" is 9 chars, so a 54-char label makes a 63-char id.
+    branch = "a" * 51 + "--pw-run"
+    label = derive_label("website", branch, label_prefix="pw-", strip_suffix="--pw-run")
+    assert label == "pw-" + "a" * 51
+    assert len(instance_id("website", label)) == 63
 
 
 def test_derive_label_overflow_is_cut_and_hashed_to_fit():
-    branch = "a" * 55 + "--pw-run"  # one char over: 58-char label
-    label = derive_label("osce", branch, label_prefix="pw-", strip_suffix="--pw-run")
-    assert label == ("pw-" + "a" * 55)[:50] + "-" + _sha6(branch)
-    assert len(instance_id("osce", label)) == 63
+    branch = "a" * 52 + "--pw-run"  # one char over: 55-char label
+    label = derive_label("website", branch, label_prefix="pw-", strip_suffix="--pw-run")
+    assert label == ("pw-" + "a" * 52)[:47] + "-" + _sha6(branch)
+    assert len(instance_id("website", label)) == 63
 
 
 def test_derive_label_hash_is_over_the_whole_pushed_branch():
     long_a = "x" * 80 + "-a--pw-run"
     long_b = "x" * 80 + "-b--pw-run"
     kw = dict(label_prefix="pw-", strip_suffix="--pw-run")
-    a, b = derive_label("osce", long_a, **kw), derive_label("osce", long_b, **kw)
+    a, b = derive_label("website", long_a, **kw), derive_label("website", long_b, **kw)
     assert a != b
     assert a.endswith("-" + _sha6(long_a)) and b.endswith("-" + _sha6(long_b))
 
@@ -192,21 +194,21 @@ def test_derive_label_hash_is_over_the_whole_pushed_branch():
 def test_derive_label_is_deterministic():
     branch = "feature/" + "long-name-" * 10 + "--pw-run"
     kw = dict(label_prefix="pw-", strip_suffix="--pw-run")
-    assert derive_label("osce", branch, **kw) == derive_label("osce", branch, **kw)
+    assert derive_label("website", branch, **kw) == derive_label("website", branch, **kw)
 
 
 def test_derive_label_cut_on_a_dash_does_not_leave_a_double_dash():
-    # The 50-char cut lands right after the dash following the a's.
-    branch = "a" * 46 + "-" + "b" * 20 + "--pw-run"
-    label = derive_label("osce", branch, label_prefix="pw-", strip_suffix="--pw-run")
-    assert label == "pw-" + "a" * 46 + "-" + _sha6(branch)
+    # The 47-char cut lands right after the dash following the a's.
+    branch = "a" * 43 + "-" + "b" * 20 + "--pw-run"
+    label = derive_label("website", branch, label_prefix="pw-", strip_suffix="--pw-run")
+    assert label == "pw-" + "a" * 43 + "-" + _sha6(branch)
     assert "--" not in label
-    instance_id("osce", label)  # must not raise
+    instance_id("website", label)  # must not raise
 
 
 def test_derive_label_empty_slug_raises():
     with pytest.raises(ValidationError, match="cannot slugify"):
-        derive_label("osce", "--bare", strip_suffix="--bare")
+        derive_label("website", "--bare", strip_suffix="--bare")
 
 
 def test_derive_label_overflow_with_a_huge_project_name_raises():
@@ -222,10 +224,10 @@ def test_derive_label_short_label_with_a_long_project_still_works():
 
 def test_derive_label_user_prefixed_and_uppercase_branch():
     label = derive_label(
-        "osce",
-        "renaud/hotfix/PWD8-1896-IEF-patch--pw-run",
+        "website",
+        "jdoe/hotfix/ABC-1896-Font-patch--pw-run",
         label_prefix="pw-",
         strip_suffix="--pw-run",
     )
-    assert label == "pw-renaud-hotfix-pwd8-1896-ief-patch"
-    assert instance_id("osce", label) == "osce--pw-renaud-hotfix-pwd8-1896-ief-patch"
+    assert label == "pw-jdoe-hotfix-abc-1896-font-patch"
+    assert instance_id("website", label) == "website--pw-jdoe-hotfix-abc-1896-font-patch"

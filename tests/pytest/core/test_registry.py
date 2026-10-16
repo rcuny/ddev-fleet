@@ -1711,7 +1711,7 @@ def _bb_deploy_registry(fleet_home, hooks_yaml: str) -> Path:
     return _write(fleet_home / "fleet.yml", text)
 
 
-_BB_PUSH = "on_event: 'repo:push', repo: acme/pws, action: deploy, template: ci-pw"
+_BB_PUSH = "on_event: 'repo:push', repo: acme/website, action: deploy, template: ci-pw"
 
 
 def test_bitbucket_deploy_hooks_valid(fleet_home):
@@ -1720,7 +1720,7 @@ def test_bitbucket_deploy_hooks_valid(fleet_home):
         "    bitbucket_hooks:\n"
         f"      - {{{_BB_PUSH}, branch: '*--pw-run', label_prefix: 'pw-',\n"
         "         strip_suffix: ' --pw-run '}\n"
-        "      - {on_event: 'repo:push', repo: acme/pws, branch: develop, action: deploy,\n"
+        "      - {on_event: 'repo:push', repo: acme/website, branch: develop, action: deploy,\n"
         "         template: ci-baseline, label: pw-regression}\n"
         f"      - {{{_BB_PUSH}, branch: 'ci/*', label_prefix: 'ci-'}}\n"
         f"      - {{{_BB_PUSH}, branch: '*--x', strip_suffix: '--x'}}\n",
@@ -1730,7 +1730,7 @@ def test_bitbucket_deploy_hooks_valid(fleet_home):
     assert registry.bitbucket_hooks("p") == [
         BitbucketHookRule(
             "repo:push",
-            "acme/pws",
+            "acme/website",
             "deploy",
             branch="*--pw-run",
             template="ci-pw",
@@ -1739,17 +1739,27 @@ def test_bitbucket_deploy_hooks_valid(fleet_home):
         ),
         BitbucketHookRule(
             "repo:push",
-            "acme/pws",
+            "acme/website",
             "deploy",
             branch="develop",
             template="ci-baseline",
             label="pw-regression",
         ),
         BitbucketHookRule(
-            "repo:push", "acme/pws", "deploy", branch="ci/*", template="ci-pw", label_prefix="ci-"
+            "repo:push",
+            "acme/website",
+            "deploy",
+            branch="ci/*",
+            template="ci-pw",
+            label_prefix="ci-",
         ),
         BitbucketHookRule(
-            "repo:push", "acme/pws", "deploy", branch="*--x", template="ci-pw", strip_suffix="--x"
+            "repo:push",
+            "acme/website",
+            "deploy",
+            branch="*--x",
+            template="ci-pw",
+            strip_suffix="--x",
         ),
     ]
 
