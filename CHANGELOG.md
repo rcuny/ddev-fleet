@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.0] - 2026-10-16
+
 ### Changed
 - **FLE-27: derived-label push deploys no longer overwrite.** A Bitbucket `repo:push` `action: deploy` rule with `label_prefix` now behaves like a normal deploy: when `<project>--<label>` already exists, the push deploys a new instance `<label>-1`, `-2`, ... (the response, the delivery log, the job and its `deploy.log` name the instance that will really be created) and old instances are kept (destroy them with `fleet destroy`). Rules with a fixed `label` are unchanged: one instance, rebuilt in place on every push. Derived labels are fitted with 4 characters of extra room for the suffix, so ids of 60-63 characters are now cut and hashed. New `instances.allocate_instance_label()`, shared with `deploy()`. See `docs/README-webhooks.md`.
 
@@ -421,7 +423,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/rcuny/ddev-fleet/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/rcuny/ddev-fleet/compare/v0.13.1...v0.14.0
 [0.13.1]: https://github.com/rcuny/ddev-fleet/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/rcuny/ddev-fleet/compare/v0.12.1...v0.13.0
