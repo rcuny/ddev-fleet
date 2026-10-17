@@ -200,7 +200,87 @@ sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
   (they're all single-label subdomains of the same domain), with no
   `/api/tls-authorize` round trip and no per-hostname issuance at all.
 
-## 8. Cross-references
+## 8. In-network mirror of named ports (FLE-29)
+
+**Why.** The public named ports (`fleet.ports` entries and the built-in
+Typesense `9108`) exist only on the host's Caddy (`*.<domain>:<public>`
+-> `127.0.0.1:<router>`). Inside an instance's containers the instance FQDN
+resolves to `ddev-router` on the Docker network, which does not listen on those
+public ports, so an in-container browser (Playwright) could not reach
+`https://<fqdn>:9108`, the URL the site hands to the client.
+
+**What.** `ddev-router` (Traefik) is made to listen on the same public ports
+inside the Docker network only (these ports are not published on the host, so
+there is no clash with Caddy). `core/routermirror.py` writes two generic files
+(no per-instance content) into the fleet user's DDEV global Traefik directory,
+`~/.ddev/traefik/`:
+
+- `static_config.fleet-port-mirror.yaml` - one entrypoint `fleet-mirror-<public>`
+  per port. DDEV merges every `static_config.*.yaml` into its generated static
+  config during `ddev start`.
+- `custom-global-config/fleet-port-mirror.yaml` - one TCP router + service per
+  entrypoint (`HostSNI(*)`, TLS terminated with the certificates DDEV already
+  loads) forwarding the plaintext to the router's OWN http entrypoint
+  `127.0.0.1:<router>`, whose existing Host rules pick the instance. DDEV copies
+  this directory into the router's config volume on `ddev start`.
+
+Both files start with a `# Managed by ddev-fleet (FLE-29): do not edit.` comment.
+A port is skipped (never raised, with a reason printed by `fleet refresh-ports`)
+when its public number is one of the router's own entrypoints
+(`80/443/8080/8443/8025/8026/10999`), equals the `router` port of any catalogue
+entry, duplicates another entry's `public`, or is already declared as an entrypoint
+by another `static_config.*.yaml` in `~/.ddev/traefik/` (the reason names the
+file): a colliding entrypoint would stop
+the shared router from starting and take every instance down.
+
+**Apply model.**
+
+1. `deploy`, `destroy`, `fleet refresh-ports` and the daemon at startup call
+   `routermirror.sync()`, which only (re)writes the files, atomically and only
+   when their content changed (and deletes them when there is nothing to
+   mirror). It never touches the router.
+2. DDEV merges/copies the files during the instance's `ddev start`. The router
+   only reads its static config when it starts, so right after a successful
+   `ddev start`, `deploy` calls `routermirror.converge()`: it compares the live
+   entrypoints (`GET http://127.0.0.1:10999/api/entrypoints`) with the wanted
+   `fleet-mirror-*` set and restarts `ddev-router` (`docker restart`, then waits
+   for `healthy`) only when they differ. Otherwise nothing happens.
+3. **Self-repair and marker.** If the router does not come back healthy with the
+   wanted entrypoints, fleet removes both files, writes the marker
+   `~/.ddev/traefik/.fleet-port-mirror-failed` (the wanted public ports, e.g.
+   `9108,9111`), runs `ddev start` in the instance again (DDEV re-merges its
+   config without ours), restarts the router again and reports
+   `RouterMirrorError`. The deploy itself still succeeds; the deploy log gets a
+   `WARNING: port mirror: ...` line. While the marker matches the wanted ports,
+   `sync()` writes nothing and `converge()` never restarts the router, so a
+   broken mirror cannot restart the shared router on every deploy. A different
+   wanted set deletes the marker; `fleet refresh-ports` deletes it
+   unconditionally (the explicit retry).
+   A transient failure (a docker hiccup, a health timeout) also writes the marker
+   and disables the mirror until `fleet refresh-ports` is run: by design, to
+   protect the shared router.
+   `fleet-mirror-*` entrypoints declared by another `static_config.*.yaml` (for
+   example a leftover spike file) are not ours and are ignored when comparing
+   with the live router.
+   `converge()` also refuses to restart when the two files are missing or differ
+   from what would be written now (e.g. `~/.ddev/traefik` absent).
+   Every `ddev-router` step (`converge()`, and the `sync()` of deploy, destroy
+   and `refresh-ports`) runs under a `flock` on `<fleet home>/locks/_routermirror.lock`
+   (waits up to 300 s, then skips with a message, never restarting).
+4. `fleet refresh-ports` prints `router mirror: live` or `router mirror:
+   pending - applied at the next instance deploy (ddev start + router restart)`;
+   it never restarts the router.
+
+**Rollout note.** The first deploy after upgrading restarts `ddev-router` once,
+a brief blip for every instance on that host.
+
+**Opt-out.** `fleet.port_mirror: false` in `fleet.yml` (default `true`) removes
+the files; the next deploy restarts the router once to drop the entrypoints.
+
+**TLS.** In-container the certificate is DDEV's own mkcert one, not the public
+Caddy certificate: clients such as Playwright need `ignoreHTTPSErrors`.
+
+## 9. Cross-references
 
 - `docs/README-typesense.md` — the worked example this document
   generalizes (topology, admin vs. search-only keys, env injection).

@@ -257,6 +257,7 @@ def _fake_registry(*, issue_id_regexp=None):
         domain = "fleet.example.test"
         auth_bypass_cidrs: list[str] = []
         auth_mode = "basic"
+        port_mirror_enabled = True
 
         def git_url(self, project):
             return "git@example.test:org/demo.git"

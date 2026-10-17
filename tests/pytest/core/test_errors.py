@@ -7,6 +7,7 @@ from fleet.core.errors import (
     FleetError,
     LockHeldError,
     RegistryError,
+    RouterMirrorError,
     TokenError,
     ValidationError,
 )
@@ -22,6 +23,7 @@ from fleet.core.errors import (
         LockHeldError,
         DeployError,
         CaddyPortsError,
+        RouterMirrorError,
     ],
 )
 def test_subclasses_carry_message(cls):

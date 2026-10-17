@@ -523,6 +523,10 @@ class Registry:
 
         fleet_ports = self._validate_fleet_ports(fleet_block)
         self._warn_auth_bypass_deprecated(fleet_block)
+        if "port_mirror" in fleet_block and not isinstance(fleet_block["port_mirror"], bool):
+            raise RegistryError(
+                f"fleet.port_mirror: must be true or false, got {fleet_block['port_mirror']!r}"
+            )
 
         projects = data.get("projects") or {}
         self._validate_users(projects)
@@ -765,6 +769,13 @@ class Registry:
         if self._host_domain is not None:
             return self._host_domain
         return str(self._data["fleet"]["domain"])
+
+    @property
+    def port_mirror_enabled(self) -> bool:
+        """`fleet.port_mirror` (default True): mirror the fleet's named
+        ports inside the Docker network via ddev-router (FLE-29,
+        `core/routermirror.py`). `false` opts out."""
+        return (self._data.get("fleet") or {}).get("port_mirror", True) is not False
 
     @property
     def auth_mode(self) -> str:

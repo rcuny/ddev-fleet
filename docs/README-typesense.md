@@ -143,6 +143,13 @@ rules — verify with your provider before relying on `:9108` being
 reachable from a real browser; a local `iptables`/`ufw` check alone is
 not sufficient proof of external reachability.
 
+Inside the Docker network (an instance's own containers, for example a
+Playwright browser), `https://<fqdn>:9108` is served by `ddev-router`
+itself through the in-network port mirror (FLE-29, `docs/networking.md` section
+"In-network mirror of named ports"), so the public Caddy port is not needed
+there. The certificate in-container is DDEV's mkcert one (clients need
+`ignoreHTTPSErrors`).
+
 ## Verifying live
 
 ```bash

@@ -43,6 +43,7 @@ fleet:
   git_bot_name: <string>            # OPTIONAL — default commit identity name  (default "ddev-fleet bot")
   git_bot_email: <string>           # OPTIONAL — default commit identity email (default bot@<domain>)
   # git_bot: false                  # OPTIONAL — disable git identity injection fleet-wide
+  # port_mirror: false              # OPTIONAL (default true) — mirror the named ports inside the Docker network (ddev-router) for in-container clients
   ports:                            # OPTIONAL — fleet-wide named-port catalogue
     <port-name>:
       public: <int>                 # Caddy's externally-reachable port (1-65535, not 22/80/443/8765)
@@ -117,6 +118,19 @@ within an entry, and no `public`/`router` value reused across entries.
 Apply a `ports:` edit with `fleet refresh-ports` (see below) — no Ansible
 run, no redeploy. Full reference: `docs/configuration.md`; runbook for
 adding a new port: `docs/networking.md`.
+
+**In-network port mirror (FLE-29, `fleet.port_mirror`, default `true`).** So that
+a browser INSIDE an instance's containers (Playwright) can reach
+`https://<fqdn>:<public>`, fleet makes `ddev-router` listen on every named
+public port inside the Docker network (two generic files in
+`~/.ddev/traefik/`, `static_config.fleet-port-mirror.yaml` and
+`custom-global-config/fleet-port-mirror.yaml`). Deploys write the files, DDEV
+merges them on `ddev start`, and the deploy restarts `ddev-router` only when its
+live entrypoints differ (so the first deploy after an upgrade restarts it once);
+a failure is self-repaired (files removed) and only warned about.
+`fleet refresh-ports` rewrites the files and reports `router mirror: live` or
+`pending`; it never restarts the router. Set `fleet.port_mirror: false` to opt
+out. Details: `docs/networking.md`.
 
 **Domain Access alias hostnames (`additional_hostnames`).** Each entry
 must be a bare DNS label (lowercase, no dots — rejected at registry load
@@ -198,7 +212,7 @@ registry load with an actionable message naming the bad key.
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same mode-aware way, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull); no-op message if `config/` isn't a git checkout |
 | `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it. Does NOT rewrite `settings.local.php` — see `docs/runbook-server-rollout.md` for the domain-change workaround |
-| `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
+| `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also rewrites the in-network port-mirror files (FLE-29) and prints whether the router already has them; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
 | `fleet refresh-auth` | — | Re-applies the current auth config to every deployed instance — the "apply my auth edits now" command, and how a server switches `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from its recorded `auth-enabled`/`auth-password` (`fleet.auth_bypass_cidrs` is deprecated and no longer applied). Authelia mode: re-renders `users.yml` from `fleet.yml`'s `users:` + the admin account, plus every instance's `forward_auth` snippet. Either way: ONE `caddy validate` + `caddy reload` |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
 | `fleet ddev [<instance-id>] [-- args]` | — | Runs `ddev <args>` inside an instance's directory |
