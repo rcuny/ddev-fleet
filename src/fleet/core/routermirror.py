@@ -27,6 +27,18 @@ the router starts, so `converge()` (called right after a successful instance
 what the registry wants, and self-repairs (removes the files, re-merges,
 restarts again) if the router does not come back with the mirror.
 
+Site mirror on :443 (FLE-32): on the fleet hosts DDEV's `router_https_port` is
+`8443` (Caddy owns the host's 443), so inside the Docker network
+`https://<fleet host>/` is refused and only `https://<fleet host>:8443/`
+works - which puts `:8443` in the Host header and breaks exact-hostname matching
+in multi-domain apps. The site mirror is ONE extra entry in the SAME two files:
+an entrypoint `fleet-mirror-443` on `:443` and a TLS PASSTHROUGH TCP router that
+forwards the raw stream to the router's own https entrypoint (`router_https_port`
+from `~/.ddev/global_config.yaml`), which terminates TLS with DDEV's certificates,
+routes by Host (no port) and sets `X-Forwarded-Proto: https`. Skipped when
+`router_https_port` is already 443 or a foreign static config owns `:443`. The
+same `fleet.port_mirror` switch covers it.
+
 Safety nets: a failed apply leaves a marker file (`FAILED_MARKER`) holding the
 wanted ports; while it matches, neither `sync()` nor `converge()` act, so a
 broken mirror cannot cause a router restart on every deploy
@@ -65,6 +77,13 @@ ENTRYPOINT_PREFIX = "fleet-mirror-"
 TRAEFIK_API = "http://127.0.0.1:10999"
 FAILED_MARKER = ".fleet-port-mirror-failed"
 LOCK_NAME = "_routermirror.lock"
+GLOBAL_CONFIG_FILENAME = "global_config.yaml"
+
+# FLE-32: the public https port the site mirror binds inside the Docker network
+# (the only thing allowed to bind a port in RESERVED_PORTS).
+SITE_PUBLIC_PORT = 443
+DDEV_DEFAULT_HTTPS_PORT = 443
+SITE_ENTRYPOINT = f"{ENTRYPOINT_PREFIX}{SITE_PUBLIC_PORT}"
 
 # DDEV router's own entrypoints on the fleet hosts (http/https, http/https on
 # the loopback ports, mailpit, Traefik API).
@@ -84,6 +103,7 @@ _LOCK_WAIT = 300.0
 _LOCK_POLL_SECONDS = 1.0
 _HEALTH_TEMPLATE = "{{if .State.Health}}{{.State.Health.Status}}{{else}}{{.State.Status}}{{end}}"
 _ADDRESS_PORT_RE = re.compile(r":(\d+)(?:/\w+)?$")
+_ASCII_DIGITS_RE = re.compile(r"[0-9]+")
 
 
 def _entrypoint_name(profile: PortProfile) -> str:
@@ -137,8 +157,9 @@ def mirror_profiles(
     own (`RESERVED_PORTS`), equals ANY catalogue profile's `router` port (the
     mirror forwards to that port), duplicates an earlier profile's `public`, or
     is already declared as an entrypoint by another `static_config.*.yaml` in
-    `traefik_dir` (when given) is skipped - never raised. `[]` when
-    `fleet.port_mirror` is false."""
+    `traefik_dir` (when given), or is DDEV's `router_https_port` (read from
+    `traefik_dir`'s sibling `global_config.yaml`, when known and not 443) is
+    skipped - never raised. `[]` when `fleet.port_mirror` is false."""
     if not registry.port_mirror_enabled:
         return [], []
     catalogue = registry.all_port_profiles()
@@ -146,6 +167,7 @@ def mirror_profiles(
     foreign, foreign_names = (
         _foreign_entrypoints(traefik_dir) if traefik_dir is not None else ({}, {})
     )
+    https_port = router_https_port(traefik_dir) if traefik_dir is not None else None
     selected: list[PortProfile] = []
     skipped: list[str] = []
     seen_public: dict[int, str] = {}
@@ -153,6 +175,11 @@ def mirror_profiles(
         prefix = f"port {profile.name!r} (public {profile.public}) not mirrored: "
         if profile.public in RESERVED_PORTS:
             skipped.append(prefix + "the port is used by ddev-router itself")
+        elif profile.public == https_port and https_port != DDEV_DEFAULT_HTTPS_PORT:
+            skipped.append(
+                prefix + "the port is the router's https port (router_https_port in "
+                f"{GLOBAL_CONFIG_FILENAME})"
+            )
         elif profile.public in router_ports:
             skipped.append(prefix + "the port is also a router (upstream) port of the catalogue")
         elif profile.public in seen_public:
@@ -173,19 +200,120 @@ def mirror_profiles(
     return selected, skipped
 
 
-def render_static(profiles: list[PortProfile]) -> str:
-    """Traefik static-config fragment: one entrypoint per profile."""
+def router_https_port(traefik_dir: Path) -> int | None:
+    """DDEV's `router_https_port` from `<traefik_dir>/../global_config.yaml`
+    (`~/.ddev/global_config.yaml`): an int or a quoted string. The key absent,
+    null, or the file missing means DDEV's default (443). `None` (unknown) when
+    the file cannot be read, is not valid YAML / not a mapping, or the value is
+    not a port number."""
+    path = traefik_dir.parent / GLOBAL_CONFIG_FILENAME
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return DDEV_DEFAULT_HTTPS_PORT
+    except (OSError, UnicodeDecodeError):
+        return None
+    try:
+        data = YAML(typ="safe").load(text)
+    except Exception:  # noqa: BLE001 - any YAML error means "unknown"
+        return None
+    if data is None:
+        return DDEV_DEFAULT_HTTPS_PORT
+    if not isinstance(data, dict):
+        return None
+    value = data.get("router_https_port")
+    if value is None:
+        return DDEV_DEFAULT_HTTPS_PORT
+    if isinstance(value, bool) or not isinstance(value, (int, str)):
+        return None
+    text = str(value).strip()
+    if not _ASCII_DIGITS_RE.fullmatch(text):
+        return None
+    port = int(text)
+    return port if 1 <= port <= 65535 else None
+
+
+def site_mirror(
+    registry: Registry, *, traefik_dir: Path | None = None
+) -> tuple[int | None, list[str]]:
+    """FLE-32: the router https port the `:443` site mirror passes through to,
+    or `None` when there is no site mirror, plus a reason for every
+    non-obvious skip. No mirror (and no reason) when `fleet.port_mirror` is
+    false, when `traefik_dir` is None, or when DDEV's `router_https_port` is
+    already 443 (the router serves https there itself)."""
+    if not registry.port_mirror_enabled or traefik_dir is None:
+        return None, []
+    prefix = f"site mirror (:{SITE_PUBLIC_PORT}) not mirrored: "
+    port = router_https_port(traefik_dir)
+    if port is None:
+        return None, [
+            f"site mirror (:{SITE_PUBLIC_PORT}) not configured: cannot read "
+            f"router_https_port from {traefik_dir.parent / GLOBAL_CONFIG_FILENAME}"
+        ]
+    if port == SITE_PUBLIC_PORT:
+        return None, []
+    foreign, foreign_names = _foreign_entrypoints(traefik_dir)
+    if SITE_ENTRYPOINT in foreign_names:
+        return None, [
+            prefix + f"{foreign_names[SITE_ENTRYPOINT]} already declares the entrypoint "
+            f"{SITE_ENTRYPOINT!r} (delete that file to mirror the site on :{SITE_PUBLIC_PORT})"
+        ]
+    if SITE_PUBLIC_PORT in foreign:
+        return None, [
+            prefix + f"{foreign[SITE_PUBLIC_PORT]} already declares an entrypoint on "
+            f":{SITE_PUBLIC_PORT} (delete that file to mirror the site on :{SITE_PUBLIC_PORT})"
+        ]
+    return port, []
+
+
+def _wanted_names(profiles: list[PortProfile], site_target: int | None) -> set[str]:
+    names = {_entrypoint_name(p) for p in profiles}
+    if site_target is not None:
+        names.add(SITE_ENTRYPOINT)
+    return names
+
+
+def wanted_entrypoints(registry: Registry, *, traefik_dir: Path | None = None) -> set[str]:
+    """Names of the mirror entrypoints fleet wants live: the port profiles'
+    plus `fleet-mirror-443` when the site mirror is active."""
+    profiles, _ = mirror_profiles(registry, traefik_dir=traefik_dir)
+    site_target, _ = site_mirror(registry, traefik_dir=traefik_dir)
+    return _wanted_names(profiles, site_target)
+
+
+def _public_ports(profiles: list[PortProfile], site_target: int | None) -> list[int]:
+    ports = [p.public for p in profiles]
+    if site_target is not None:
+        ports.append(SITE_PUBLIC_PORT)
+    return sorted(ports)
+
+
+def render_static(profiles: list[PortProfile], site_target: int | None = None) -> str:
+    """Traefik static-config fragment: one entrypoint per profile, preceded by
+    the `:443` site entrypoint when `site_target` is set."""
     out = [_HEADER, "entryPoints:\n"]
+    if site_target is not None:
+        out.append(f"  {SITE_ENTRYPOINT}:\n")
+        out.append(f'    address: ":{SITE_PUBLIC_PORT}"\n')
     for p in profiles:
         out.append(f"  {_entrypoint_name(p)}:\n")
         out.append(f'    address: ":{p.public}"\n')
     return "".join(out)
 
 
-def render_dynamic(profiles: list[PortProfile]) -> str:
+def render_dynamic(profiles: list[PortProfile], site_target: int | None = None) -> str:
     """Traefik dynamic-config fragment: a TLS-terminating TCP router and
-    service per profile, forwarding to the router's own http entrypoint."""
+    service per profile, forwarding to the router's own http entrypoint. When
+    `site_target` is set the `:443` site entry comes first: a TLS PASSTHROUGH
+    router forwarding to the router's https entrypoint on `127.0.0.1:<site_target>`."""
     out = [_HEADER, "tcp:\n", "  routers:\n"]
+    if site_target is not None:
+        out.append(f"    {SITE_ENTRYPOINT}:\n")
+        out.append(f"      entryPoints: [{SITE_ENTRYPOINT}]\n")
+        out.append('      rule: "HostSNI(`*`)"\n')
+        out.append(f"      service: {SITE_ENTRYPOINT}\n")
+        out.append("      tls:\n")
+        out.append("        passthrough: true\n")
     for p in profiles:
         name = _entrypoint_name(p)
         out.append(f"    {name}:\n")
@@ -194,6 +322,11 @@ def render_dynamic(profiles: list[PortProfile]) -> str:
         out.append(f"      service: {name}\n")
         out.append("      tls: {}\n")
     out.append("  services:\n")
+    if site_target is not None:
+        out.append(f"    {SITE_ENTRYPOINT}:\n")
+        out.append("      loadBalancer:\n")
+        out.append("        servers:\n")
+        out.append(f'          - address: "127.0.0.1:{site_target}"\n')
     for p in profiles:
         name = _entrypoint_name(p)
         out.append(f"    {name}:\n")
@@ -270,8 +403,8 @@ def _router_lock(lock_path: Path | None, *, wait: float, sleep, monotonic):
         fh.close()
 
 
-def _ports_text(profiles: list[PortProfile]) -> str:
-    return ",".join(str(p) for p in sorted(p.public for p in profiles))
+def _ports_text(ports: list[int]) -> str:
+    return ",".join(str(p) for p in sorted(ports))
 
 
 def _marker_path(traefik_dir: Path) -> Path:
@@ -295,13 +428,13 @@ def clear_failed_marker(traefik_dir: Path | None = None) -> bool:
         return False
 
 
-def _marker_blocks(traefik_dir: Path, profiles: list[PortProfile]) -> bool:
+def _marker_blocks(traefik_dir: Path, ports: list[int]) -> bool:
     """True while the marker matches the current wanted set. A marker for a
     different set (or when nothing is wanted any more) is deleted."""
     recorded = _read_marker(traefik_dir)
     if recorded is None:
         return False
-    if profiles and recorded == _ports_text(profiles):
+    if ports and recorded == _ports_text(ports):
         return True
     try:
         clear_failed_marker(traefik_dir)
@@ -360,25 +493,30 @@ def _sync_locked(registry: Registry, traefik_dir: Path) -> MirrorSyncResult:
             ],
         )
     profiles, skipped = mirror_profiles(registry, traefik_dir=traefik_dir)
-    if _marker_blocks(traefik_dir, profiles):
+    site_target, site_skipped = site_mirror(registry, traefik_dir=traefik_dir)
+    skipped = [*skipped, *site_skipped]
+    ports = _public_ports(profiles, site_target)
+    if _marker_blocks(traefik_dir, ports):
         return MirrorSyncResult(
             changed=False, mirrored=[], skipped=[*skipped, _marker_skip_reason(traefik_dir)]
         )
 
     static_path, dynamic_path = _files(traefik_dir)
-    if not profiles:
+    if not ports:
         return MirrorSyncResult(changed=_remove_files(traefik_dir), mirrored=[], skipped=skipped)
 
     try:
         changed = _write_if_changed(
-            static_path, render_static(profiles), prefix=".fleet-port-mirror-static-"
+            static_path, render_static(profiles, site_target), prefix=".fleet-port-mirror-static-"
         )
         changed |= _write_if_changed(
-            dynamic_path, render_dynamic(profiles), prefix=".fleet-port-mirror-dynamic-"
+            dynamic_path,
+            render_dynamic(profiles, site_target),
+            prefix=".fleet-port-mirror-dynamic-",
         )
     except CaddyAuthError as exc:
         raise OSError(exc.message) from exc
-    return MirrorSyncResult(changed=changed, mirrored=[p.public for p in profiles], skipped=skipped)
+    return MirrorSyncResult(changed=changed, mirrored=ports, skipped=skipped)
 
 
 def _http_fetch(url: str):
@@ -436,16 +574,18 @@ def _restart_router(runner) -> bool:
     return result.returncode == 0
 
 
-def _files_current(traefik_dir: Path, profiles: list[PortProfile]) -> bool:
+def _files_current(
+    traefik_dir: Path, profiles: list[PortProfile], site_target: int | None = None
+) -> bool:
     """Both fleet files exist with exactly what `sync()` would write now (or,
     when nothing is wanted, neither exists)."""
     static_path, dynamic_path = _files(traefik_dir)
-    if not profiles:
+    if not profiles and site_target is None:
         return not static_path.exists() and not dynamic_path.exists()
     try:
         return static_path.read_text(encoding="utf-8") == render_static(
-            profiles
-        ) and dynamic_path.read_text(encoding="utf-8") == render_dynamic(profiles)
+            profiles, site_target
+        ) and dynamic_path.read_text(encoding="utf-8") == render_dynamic(profiles, site_target)
     except OSError:
         return False
 
@@ -478,11 +618,13 @@ def converge(
     ours), restarts the router again and raises `RouterMirrorError`."""
     traefik_dir = traefik_dir if traefik_dir is not None else DEFAULT_TRAEFIK_DIR
     profiles, _skipped = mirror_profiles(registry, traefik_dir=traefik_dir)
+    site_target, _site_skipped = site_mirror(registry, traefik_dir=traefik_dir)
     with _router_lock(lock_path, wait=lock_wait, sleep=sleep, monotonic=monotonic) as acquired:
         if not acquired:
             return "another deploy holds the router-mirror lock; skipped"
         return _converge_locked(
             profiles,
+            site_target,
             instance_dir=instance_dir,
             traefik_dir=traefik_dir,
             runner=runner,
@@ -494,6 +636,7 @@ def converge(
 
 def _converge_locked(
     profiles: list[PortProfile],
+    site_target: int | None,
     *,
     instance_dir: Path,
     traefik_dir: Path,
@@ -502,14 +645,15 @@ def _converge_locked(
     wait_timeout: float,
     sleep,
 ) -> str:
-    wanted = {_entrypoint_name(p) for p in profiles}
+    wanted = _wanted_names(profiles, site_target)
+    ports = _public_ports(profiles, site_target)
 
-    if _marker_blocks(traefik_dir, profiles):
+    if _marker_blocks(traefik_dir, ports):
         return (
             "port mirror disabled after a failed apply; router not restarted "
             "(run `fleet refresh-ports` to retry)"
         )
-    if not _files_current(traefik_dir, profiles):
+    if not _files_current(traefik_dir, profiles, site_target):
         return "port mirror files missing or stale; router not restarted"
 
     # Read AFTER taking the lock: a concurrent deploy may have just fixed it.
@@ -529,7 +673,6 @@ def _converge_locked(
         for attempt in range(5):
             after = live_entrypoints(fetch=fetch)
             if after is not None and live_mirror_names(after, traefik_dir) == wanted:
-                ports = sorted(p.public for p in profiles)
                 shown = ", ".join(str(p) for p in ports) if ports else "none"
                 return f"restarted ddev-router: port mirror now {shown}"
             if attempt < 4:
@@ -548,7 +691,7 @@ def _converge_locked(
         (
             "could not write the failed-apply marker",
             lambda: _marker_path(traefik_dir).write_text(
-                _ports_text(profiles) + "\n", encoding="utf-8"
+                _ports_text(ports) + "\n", encoding="utf-8"
             ),
         ),
     )
@@ -572,8 +715,8 @@ def _converge_locked(
         f"{instance_dir.name} and ddev-router restarted again, so the router runs "
         f"without the mirror.{detail} The mirror stays off ({FAILED_MARKER} in "
         f"{traefik_dir}) until you run `fleet refresh-ports`. In-container access to "
-        "the named ports does not work until this is fixed; check `docker logs "
-        "ddev-router`, or set `fleet.port_mirror: false` to disable the mirror."
+        "the named ports and to https on :443 does not work until this is fixed; check "
+        "`docker logs ddev-router`, or set `fleet.port_mirror: false` to disable the mirror."
     )
 
 
@@ -584,6 +727,8 @@ __all__ = [
     "MirrorSyncResult",
     "RESERVED_PORTS",
     "RouterMirrorError",
+    "SITE_ENTRYPOINT",
+    "SITE_PUBLIC_PORT",
     "clear_failed_marker",
     "converge",
     "lock_path_for",
@@ -592,5 +737,8 @@ __all__ = [
     "mirror_profiles",
     "render_dynamic",
     "render_static",
+    "router_https_port",
+    "site_mirror",
     "sync",
+    "wanted_entrypoints",
 ]

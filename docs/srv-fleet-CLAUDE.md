@@ -43,7 +43,7 @@ fleet:
   git_bot_name: <string>            # OPTIONAL — default commit identity name  (default "ddev-fleet bot")
   git_bot_email: <string>           # OPTIONAL — default commit identity email (default bot@<domain>)
   # git_bot: false                  # OPTIONAL — disable git identity injection fleet-wide
-  # port_mirror: false              # OPTIONAL (default true) — mirror the named ports inside the Docker network (ddev-router) for in-container clients
+  # port_mirror: false              # OPTIONAL (default true) — mirror the named ports inside the Docker network (ddev-router) for in-container clients; also covers the :443 site mirror (FLE-32)
   ports:                            # OPTIONAL — fleet-wide named-port catalogue
     <port-name>:
       public: <int>                 # Caddy's externally-reachable port (1-65535, not 22/80/443/8765)
@@ -130,7 +130,13 @@ live entrypoints differ (so the first deploy after an upgrade restarts it once);
 a failure is self-repaired (files removed) and only warned about.
 `fleet refresh-ports` rewrites the files and reports `router mirror: live` or
 `pending`; it never restarts the router. Set `fleet.port_mirror: false` to opt
-out. Details: `docs/networking.md`.
+out. The same switch covers the **site mirror on :443 (FLE-32)**: when DDEV's
+`router_https_port` (in `~/.ddev/global_config.yaml`) is not 443 (the fleet
+hosts use 8443), fleet adds a `fleet-mirror-443` entrypoint with TLS passthrough
+to the router's https port, so `https://<fqdn>/` works inside the containers and
+the `Host` header carries no `:8443` (use `https://$FLEET_INSTANCE_HOST` as the
+base URL, not `DDEV_PRIMARY_URL`). It is skipped when `router_https_port` is 443
+or another `static_config.*.yaml` owns `:443`. Details: `docs/networking.md`.
 
 **Domain Access alias hostnames (`additional_hostnames`).** Each entry
 must be a bare DNS label (lowercase, no dots — rejected at registry load

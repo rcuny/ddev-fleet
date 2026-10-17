@@ -280,6 +280,42 @@ the files; the next deploy restarts the router once to drop the entrypoints.
 **TLS.** In-container the certificate is DDEV's own mkcert one, not the public
 Caddy certificate: clients such as Playwright need `ignoreHTTPSErrors`.
 
+### Site mirror on :443 (FLE-32)
+
+**Why.** On fleet hosts DDEV's `router_https_port` is `8443` (Caddy owns the
+host's 443). Inside the Docker network every fleet hostname resolves to
+`ddev-router`, so `https://<fleet host>/` (port 443) is refused and only
+`https://<fleet host>:8443/` works. That puts `:8443` in the `Host` header,
+which breaks exact-hostname matching in multi-domain apps: a real case was
+Drupal Domain Access redirecting to the PRODUCTION host.
+
+**How.** The site mirror is one extra entry in the same two files: an
+entrypoint `fleet-mirror-443` on `:443` (not published on the host) and a TCP
+router with TLS **passthrough** (not termination, unlike the port mirrors above)
+that forwards the raw TLS stream to the router's own https entrypoint on
+`127.0.0.1:<router_https_port>`. That entrypoint terminates TLS with DDEV's
+certificates, routes by `Host` (now without a port) and sets
+`X-Forwarded-Proto: https`. `router_https_port` is read from
+`~/.ddev/global_config.yaml`.
+
+**When it is skipped.** When `router_https_port` is already `443` (or the key
+or file is absent: DDEV's default), since the router then serves https on 443
+itself. When another `static_config.*.yaml` already declares `:443` or the
+entrypoint name `fleet-mirror-443`: `fleet refresh-ports` prints the reason
+(delete that file to mirror the site). When `global_config.yaml` exists but
+cannot be read or has a non-numeric `router_https_port`: the reason is printed
+and no site mirror is written. Port profiles with public port `443` stay
+rejected; the site mirror is the only thing that binds `:443`.
+
+**Switch.** The same `fleet.port_mirror` setting (default `true`) covers it;
+`false` removes the site entry together with the port mirrors. Rollout is the
+same: the first deploy after an upgrade restarts `ddev-router` once.
+
+**Tip.** Inside an instance container use `https://$FLEET_INSTANCE_HOST` (already
+injected by fleet) as the base URL, not `DDEV_PRIMARY_URL`, which carries
+`:8443`. The certificate is DDEV's self-signed mkcert one as before
+(`ignoreHTTPSErrors` for Playwright, `curl -k`).
+
 ## 9. Cross-references
 
 - `docs/README-typesense.md` — the worked example this document
