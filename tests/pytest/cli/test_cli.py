@@ -2238,3 +2238,31 @@ def test_webhook_log_empty_and_entries(fleet_home, capsys):
     assert cli.main([*base, "-n", "1"]) == 0
     out = capsys.readouterr().out
     assert "FLE-2" in out and "FLE-1" not in out
+
+
+def test_refresh_ports_site_mirror_pending_then_live(fleet_home, monkeypatch, capsys):
+    # FLE-32: the :443 site entrypoint is part of the wanted set
+    _write_typesense_registry(fleet_home)
+    _no_caddy(monkeypatch)
+    traefik = routermirror.DEFAULT_TRAEFIK_DIR
+    (traefik.parent / "global_config.yaml").write_text(
+        'router_https_port: "8443"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        routermirror, "live_entrypoints", lambda **kw: {"http-80", "fleet-mirror-9108"}
+    )
+
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+    out = capsys.readouterr().out
+    assert "router mirror: files updated (443, 9108)" in out
+    assert "router mirror: pending" in out
+
+    monkeypatch.setattr(
+        routermirror,
+        "live_entrypoints",
+        lambda **kw: {"http-80", "fleet-mirror-443", "fleet-mirror-9108"},
+    )
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+    out = capsys.readouterr().out
+    assert "router mirror: no changes" in out
+    assert "router mirror: live" in out

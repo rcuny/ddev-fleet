@@ -1283,10 +1283,7 @@ def _print_router_mirror_status(registry, paths) -> None:
         print("router mirror: no changes")
     for reason in mirror.skipped:
         print(f"router mirror: {reason}")
-    profiles, _ = routermirror.mirror_profiles(
-        registry, traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR
-    )
-    wanted = {f"{routermirror.ENTRYPOINT_PREFIX}{p.public}" for p in profiles}
+    wanted = routermirror.wanted_entrypoints(registry, traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR)
     live = routermirror.live_entrypoints()
     if live is None:
         print("router mirror: router API unreachable; live state not verified")

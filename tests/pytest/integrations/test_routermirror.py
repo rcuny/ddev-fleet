@@ -858,3 +858,338 @@ def test_live_mirror_names_excludes_foreign_declared(tmp_path):
     traefik = _spike_dir(tmp_path)
     live = {"http-80", "fleet-mirror-9108", "fleet-mirror-9111"}
     assert routermirror.live_mirror_names(live, traefik) == {"fleet-mirror-9111"}
+
+
+# --- FLE-32: site mirror on :443 ------------------------------------------
+
+SITE_STATIC = '  fleet-mirror-443:\n    address: ":443"\n'
+SITE_ROUTER = (
+    "    fleet-mirror-443:\n"
+    "      entryPoints: [fleet-mirror-443]\n"
+    '      rule: "HostSNI(`*`)"\n'
+    "      service: fleet-mirror-443\n"
+    "      tls:\n"
+    "        passthrough: true\n"
+)
+SITE_SERVICE = (
+    "    fleet-mirror-443:\n"
+    "      loadBalancer:\n"
+    "        servers:\n"
+    '          - address: "127.0.0.1:8443"\n'
+)
+TS_ROUTER = (
+    "    fleet-mirror-9108:\n"
+    "      entryPoints: [fleet-mirror-9108]\n"
+    '      rule: "HostSNI(`*`)"\n'
+    "      service: fleet-mirror-9108\n"
+    "      tls: {}\n"
+)
+TS_SERVICE = (
+    "    fleet-mirror-9108:\n"
+    "      loadBalancer:\n"
+    "        servers:\n"
+    '          - address: "127.0.0.1:8108"\n'
+)
+
+
+def _site_dir(tmp_path, port='"8443"'):
+    """A tmp traefik dir whose sibling global_config.yaml sets router_https_port."""
+    traefik = tmp_path / "traefik"
+    traefik.mkdir(exist_ok=True)
+    if port is not None:
+        (tmp_path / "global_config.yaml").write_text(
+            f"router_https_port: {port}\n", encoding="utf-8"
+        )
+    return traefik
+
+
+def _global_config(tmp_path, text):
+    traefik = tmp_path / "traefik"
+    traefik.mkdir(exist_ok=True)
+    (tmp_path / "global_config.yaml").write_text(text, encoding="utf-8")
+    return traefik
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ('router_https_port: "8443"\n', 8443),
+        ("router_https_port: 8443\n", 8443),
+        ("use_letsencrypt: false\n", 443),
+        ("router_https_port:\n", 443),
+        ("", 443),
+        ("router_https_port: [unclosed\n", None),
+        ("router_https_port: abc\n", None),
+        ('router_https_port: "8_443"\n', None),
+        ('router_https_port: "\u0668\u0664\u0664\u0663"\n', None),
+        ('router_https_port: " 8443 "\n', 8443),
+        ("router_https_port: 99999\n", None),
+        ("- just\n- a list\n", None),
+    ],
+)
+def test_router_https_port_values(tmp_path, text, expected):
+    traefik = _global_config(tmp_path, text)
+    assert routermirror.router_https_port(traefik) == expected
+
+
+def test_router_https_port_missing_file_is_ddev_default(tmp_path):
+    traefik = tmp_path / "traefik"
+    traefik.mkdir()
+    assert routermirror.router_https_port(traefik) == 443
+
+
+def test_router_https_port_unreadable_file_is_unknown(tmp_path):
+    traefik = tmp_path / "traefik"
+    traefik.mkdir()
+    (tmp_path / "global_config.yaml").mkdir()  # reading a directory fails with OSError
+    assert routermirror.router_https_port(traefik) is None
+
+
+def test_site_mirror_disabled_by_the_switch(tmp_path):
+    traefik = _site_dir(tmp_path)
+    registry = _registry(tmp_path, fleet_extra="  port_mirror: false\n")
+    assert routermirror.site_mirror(registry, traefik_dir=traefik) == (None, [])
+
+
+def test_site_mirror_without_traefik_dir_is_none(tmp_path):
+    assert routermirror.site_mirror(_registry(tmp_path)) == (None, [])
+
+
+def test_site_mirror_router_port_443_is_silently_none(tmp_path):
+    traefik = _site_dir(tmp_path, port="443")
+    assert routermirror.site_mirror(_registry(tmp_path), traefik_dir=traefik) == (None, [])
+    (tmp_path / "global_config.yaml").unlink()  # missing file: DDEV defaults to 443 too
+    assert routermirror.site_mirror(_registry(tmp_path), traefik_dir=traefik) == (None, [])
+
+
+def test_site_mirror_returns_the_router_https_port(tmp_path):
+    traefik = _site_dir(tmp_path)
+    assert routermirror.site_mirror(_registry(tmp_path), traefik_dir=traefik) == (8443, [])
+
+
+def test_site_mirror_skipped_when_a_foreign_file_declares_port_443(tmp_path):
+    traefik = _site_dir(tmp_path)
+    (traefik / "static_config.other.yaml").write_text(
+        'entryPoints:\n  web-secure:\n    address: ":443"\n', encoding="utf-8"
+    )
+    port, reasons = routermirror.site_mirror(_registry(tmp_path), traefik_dir=traefik)
+    assert port is None
+    assert len(reasons) == 1
+    assert "static_config.other.yaml" in reasons[0] and ":443" in reasons[0]
+    assert "delete that file to mirror the site on :443" in reasons[0]
+
+
+def test_site_mirror_skipped_when_a_foreign_file_declares_the_name(tmp_path):
+    traefik = _site_dir(tmp_path)
+    (traefik / "static_config.other.yaml").write_text(
+        'entryPoints:\n  fleet-mirror-443:\n    address: ":9999"\n', encoding="utf-8"
+    )
+    port, reasons = routermirror.site_mirror(_registry(tmp_path), traefik_dir=traefik)
+    assert port is None
+    assert len(reasons) == 1
+    assert "static_config.other.yaml" in reasons[0] and "fleet-mirror-443" in reasons[0]
+
+
+def test_site_mirror_unreadable_config_gives_a_reason(tmp_path):
+    traefik = _global_config(tmp_path, "router_https_port: abc\n")
+    port, reasons = routermirror.site_mirror(_registry(tmp_path), traefik_dir=traefik)
+    assert port is None
+    assert reasons == [
+        "site mirror (:443) not configured: cannot read router_https_port from "
+        f"{tmp_path / 'global_config.yaml'}"
+    ]
+
+
+def test_render_site_only():
+    assert routermirror.render_static([], 8443) == HEADER + "entryPoints:\n" + SITE_STATIC
+    assert routermirror.render_dynamic([], 8443) == (
+        HEADER + "tcp:\n  routers:\n" + SITE_ROUTER + "  services:\n" + SITE_SERVICE
+    )
+
+
+def test_render_site_comes_first_then_profiles():
+    assert routermirror.render_static([TS], 8443) == (
+        HEADER + "entryPoints:\n" + SITE_STATIC + '  fleet-mirror-9108:\n    address: ":9108"\n'
+    )
+    assert routermirror.render_dynamic([TS], 8443) == (
+        HEADER
+        + "tcp:\n  routers:\n"
+        + SITE_ROUTER
+        + TS_ROUTER
+        + "  services:\n"
+        + SITE_SERVICE
+        + TS_SERVICE
+    )
+
+
+def test_render_default_site_target_none_is_unchanged():
+    assert routermirror.render_static([TS], None) == routermirror.render_static([TS])
+    assert routermirror.render_dynamic([TS], None) == routermirror.render_dynamic([TS])
+    assert "fleet-mirror-443" not in routermirror.render_static([TS])
+
+
+def test_rendered_site_files_are_valid_yaml():
+    from ruamel.yaml import YAML
+
+    yaml = YAML(typ="safe")
+    static = yaml.load(routermirror.render_static([TS], 8443))
+    dynamic = yaml.load(routermirror.render_dynamic([TS], 8443))
+    assert static["entryPoints"]["fleet-mirror-443"]["address"] == ":443"
+    assert dynamic["tcp"]["routers"]["fleet-mirror-443"]["tls"] == {"passthrough": True}
+    servers = dynamic["tcp"]["services"]["fleet-mirror-443"]["loadBalancer"]["servers"]
+    assert servers == [{"address": "127.0.0.1:8443"}]
+
+
+def test_sync_site_only_writes_files_and_is_idempotent(tmp_path):
+    traefik = _site_dir(tmp_path)
+    registry = _registry(tmp_path, project_extra="")
+
+    first = routermirror.sync(registry, traefik_dir=traefik)
+
+    assert first.changed is True
+    assert first.mirrored == [443]
+    assert first.skipped == []
+    assert (traefik / routermirror.STATIC_FILENAME).read_text(
+        encoding="utf-8"
+    ) == routermirror.render_static([], 8443)
+    assert (traefik / routermirror.DYNAMIC_RELPATH).read_text(
+        encoding="utf-8"
+    ) == routermirror.render_dynamic([], 8443)
+
+    second = routermirror.sync(registry, traefik_dir=traefik)
+    assert second.changed is False
+    assert second.mirrored == [443]
+
+
+def test_sync_site_plus_profiles_lists_public_ports_sorted(tmp_path):
+    traefik = _site_dir(tmp_path)
+    result = routermirror.sync(_registry(tmp_path), traefik_dir=traefik)
+    assert result.mirrored == [443, 9108]
+    assert (traefik / routermirror.STATIC_FILENAME).read_text(
+        encoding="utf-8"
+    ) == routermirror.render_static([TS], 8443)
+
+
+def test_sync_removes_files_when_router_port_becomes_443_and_no_profiles(tmp_path):
+    traefik = _site_dir(tmp_path)
+    registry = _registry(tmp_path, project_extra="")
+    routermirror.sync(registry, traefik_dir=traefik)
+    assert (traefik / routermirror.STATIC_FILENAME).exists()
+
+    _site_dir(tmp_path, port="443")
+    result = routermirror.sync(registry, traefik_dir=traefik)
+
+    assert result.changed is True
+    assert result.mirrored == []
+    assert not (traefik / routermirror.STATIC_FILENAME).exists()
+    assert not (traefik / routermirror.DYNAMIC_RELPATH).exists()
+
+
+def test_sync_drops_only_the_site_entry_when_router_port_becomes_443(tmp_path):
+    traefik = _site_dir(tmp_path)
+    registry = _registry(tmp_path)
+    routermirror.sync(registry, traefik_dir=traefik)
+
+    _site_dir(tmp_path, port="443")
+    result = routermirror.sync(registry, traefik_dir=traefik)
+
+    assert result.changed is True
+    assert result.mirrored == [9108]
+    assert (traefik / routermirror.STATIC_FILENAME).read_text(
+        encoding="utf-8"
+    ) == routermirror.render_static([TS])
+
+
+def test_sync_reports_the_site_mirror_skip_reason(tmp_path):
+    traefik = _global_config(tmp_path, "router_https_port: abc\n")
+    result = routermirror.sync(_registry(tmp_path), traefik_dir=traefik)
+    assert result.mirrored == [9108]
+    assert len(result.skipped) == 1 and "cannot read router_https_port" in result.skipped[0]
+
+
+def test_sync_missing_global_config_is_silent_no_site_mirror(tmp_path):
+    traefik = _site_dir(tmp_path, port=None)
+    result = routermirror.sync(_registry(tmp_path, project_extra=""), traefik_dir=traefik)
+    assert result.mirrored == [] and result.skipped == []
+
+
+def test_wanted_entrypoints(tmp_path):
+    traefik = _site_dir(tmp_path)
+    registry = _registry(tmp_path)
+    assert routermirror.wanted_entrypoints(registry, traefik_dir=traefik) == {
+        "fleet-mirror-443",
+        "fleet-mirror-9108",
+    }
+    assert routermirror.wanted_entrypoints(registry) == {"fleet-mirror-9108"}
+    off = _registry(tmp_path, fleet_extra="  port_mirror: false\n")
+    assert routermirror.wanted_entrypoints(off, traefik_dir=traefik) == set()
+    _site_dir(tmp_path, port="443")
+    assert routermirror.wanted_entrypoints(registry, traefik_dir=traefik) == {"fleet-mirror-9108"}
+
+
+def test_converge_noop_when_live_has_the_site_entrypoint(tmp_path):
+    traefik = _site_dir(tmp_path)
+    runner = ScriptedRunner()
+    fetch = SequencedFetch(["http-80", "fleet-mirror-443", "fleet-mirror-9108"])
+    message, _ = _converge(_registry(tmp_path), traefik, runner, fetch, tmp_path)
+    assert message == ""
+    assert runner.calls == []
+
+
+def test_converge_restarts_when_live_lacks_the_site_entrypoint(tmp_path):
+    traefik = _site_dir(tmp_path)
+    runner = ScriptedRunner()
+    fetch = SequencedFetch(
+        ["http-80", "fleet-mirror-9108"],
+        ["http-80", "fleet-mirror-443", "fleet-mirror-9108"],
+    )
+
+    message, _ = _converge(_registry(tmp_path), traefik, runner, fetch, tmp_path)
+
+    assert message == "restarted ddev-router: port mirror now 443, 9108"
+    assert runner.cmds()[0] == ["docker", "restart", "ddev-router"]
+
+
+def test_converge_site_only_restart_and_failed_apply_marker(tmp_path):
+    traefik = _site_dir(tmp_path)
+    registry = _registry(tmp_path, project_extra="")
+    runner = ScriptedRunner()
+
+    with pytest.raises(RouterMirrorError):
+        _converge(registry, traefik, runner, SequencedFetch(["http-80"]), tmp_path)
+
+    assert (traefik / routermirror.FAILED_MARKER).read_text(encoding="utf-8") == "443\n"
+    assert not (traefik / routermirror.STATIC_FILENAME).exists()
+    # the marker blocks the next sync while the wanted set is unchanged
+    again = routermirror.sync(registry, traefik_dir=traefik)
+    assert again.changed is False and any("previous apply failed" in s for s in again.skipped)
+
+
+def test_converge_stale_files_without_the_site_entry_mean_no_restart(tmp_path):
+    traefik = _site_dir(tmp_path, port="443")
+    registry = _registry(tmp_path)
+    routermirror.sync(registry, traefik_dir=traefik)  # files without the site entry
+    _site_dir(tmp_path)  # router_https_port became 8443 afterwards
+    runner = ScriptedRunner()
+
+    message, _ = _converge(
+        registry, traefik, runner, SequencedFetch(["http-80"]), tmp_path, sync_first=False
+    )
+
+    assert "missing or stale" in message
+    assert runner.calls == []
+
+
+def test_mirror_profiles_skips_a_profile_on_the_router_https_port(tmp_path):
+    traefik = _global_config(tmp_path, 'router_https_port: "9443"\n')
+    registry = _registry(
+        tmp_path,
+        ports="  ports:\n    tls: { public: 9443, router: 8300 }\n",
+        project_extra="    typesense: true\n    ports: [tls]\n",
+    )
+    profiles, skipped = routermirror.mirror_profiles(registry, traefik_dir=traefik)
+    assert profiles == [TS]
+    assert len(skipped) == 1
+    assert "tls" in skipped[0] and "9443" in skipped[0] and "router's https port" in skipped[0]
+    # without a traefik dir the port cannot be known: unchanged behaviour
+    assert [p.name for p in routermirror.mirror_profiles(registry)[0]] == ["typesense", "tls"]
