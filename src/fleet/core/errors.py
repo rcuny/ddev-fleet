@@ -48,6 +48,11 @@ class CaddyPortsError(FleetError):
     exposure snippet failed (fleet.core.caddyports)."""
 
 
+class RouterMirrorError(FleetError):
+    """Applying the in-network named-port mirror to the shared ddev-router
+    failed and was rolled back (fleet.core.routermirror)."""
+
+
 class AutheliaError(FleetError):
     """Hashing/rendering/writing Authelia's admin account or users.yml
     failed (fleet.core.authelia)."""

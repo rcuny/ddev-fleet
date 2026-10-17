@@ -1925,3 +1925,41 @@ def test_bitbucket_deploy_hooks_invalid_rule(fleet_home, rule, message):
     with pytest.raises(RegistryError, match=r"projects\.p\.bitbucket_hooks\[0\]") as exc:
         Registry.load(path)
     assert message in str(exc.value)
+
+
+def _port_mirror_registry(fleet_home, value_line):
+    return Registry.load(
+        _write(
+            fleet_home / "fleet.yml",
+            f"""\
+fleet:
+  domain: fleet.example.test
+{value_line}
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    templates:
+      default: {{}}
+""",
+        )
+    )
+
+
+def test_port_mirror_enabled_by_default(fleet_home, sample_registry_text):
+    registry = Registry.load(_write(fleet_home / "fleet.yml", sample_registry_text))
+    assert registry.port_mirror_enabled is True
+
+
+def test_port_mirror_true_is_honoured(fleet_home):
+    assert _port_mirror_registry(fleet_home, "  port_mirror: true\n").port_mirror_enabled is True
+
+
+def test_port_mirror_false_is_honoured(fleet_home):
+    registry = _port_mirror_registry(fleet_home, "  port_mirror: false\n")
+    assert registry.port_mirror_enabled is False
+
+
+@pytest.mark.parametrize("value", ['"yes"', "1", "null", "[true]"])
+def test_port_mirror_non_bool_is_rejected(fleet_home, value):
+    with pytest.raises(RegistryError, match="fleet.port_mirror"):
+        _port_mirror_registry(fleet_home, f"  port_mirror: {value}\n")

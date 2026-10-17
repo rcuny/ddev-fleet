@@ -15,7 +15,7 @@ from fleet import tmux_sidebar
 from fleet.core import assets as assets_mod
 from fleet.core import authelia as authelia_mod
 from fleet.core import bulk as bulk_mod
-from fleet.core import caddyauth, caddyports, ddev, fleetconfig
+from fleet.core import caddyauth, caddyports, ddev, fleetconfig, routermirror
 from fleet.core import instances as instances_mod
 from fleet.core import pgp as pgp_mod
 from fleet.core import reboot as reboot_mod
@@ -1259,6 +1259,46 @@ def _cmd_refresh_auth(fleet_home: Path, args: argparse.Namespace, *, runner=run_
     return 0
 
 
+def _print_router_mirror_status(registry, paths) -> None:
+    """FLE-29: write the in-network port-mirror files and report whether the
+    live ddev-router already has them. Never restarts the router (that happens
+    at the next instance deploy) and never fails `refresh-ports`."""
+    try:
+        # refresh-ports is the explicit "retry" path after a failed apply.
+        if routermirror.clear_failed_marker(routermirror.DEFAULT_TRAEFIK_DIR):
+            print("router mirror: cleared the failed-apply marker (retrying)")
+        mirror = routermirror.sync(
+            registry,
+            traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR,
+            lock_path=routermirror.lock_path_for(paths.locks),
+        )
+    except Exception as exc:  # noqa: BLE001 - never fails refresh-ports
+        message = exc.message if isinstance(exc, FleetError) else str(exc)
+        print(f"router mirror: WARNING: {message}")
+        return
+    if mirror.changed:
+        ports = ", ".join(str(p) for p in mirror.mirrored) or "none"
+        print(f"router mirror: files updated ({ports})")
+    else:
+        print("router mirror: no changes")
+    for reason in mirror.skipped:
+        print(f"router mirror: {reason}")
+    profiles, _ = routermirror.mirror_profiles(
+        registry, traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR
+    )
+    wanted = {f"{routermirror.ENTRYPOINT_PREFIX}{p.public}" for p in profiles}
+    live = routermirror.live_entrypoints()
+    if live is None:
+        print("router mirror: router API unreachable; live state not verified")
+    elif routermirror.live_mirror_names(live, routermirror.DEFAULT_TRAEFIK_DIR) == wanted:
+        print("router mirror: live")
+    else:
+        print(
+            "router mirror: pending — applied at the next instance deploy "
+            "(ddev start + router restart)"
+        )
+
+
 def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run_streamed) -> int:
     """Reconcile Caddy port-exposure snippets to `fleet.yml`'s current
     `fleet.ports`/`ports:` state — the "apply my port edits now"
@@ -1278,6 +1318,8 @@ def _cmd_refresh_ports(fleet_home: Path, args: argparse.Namespace, *, runner=run
             print(f"caddy: removed port snippet {name!r}")
     else:
         print("caddy: no changes")
+
+    _print_router_mirror_status(registry, paths)
 
     if _FLEET_UFW_SYNC_HELPER.exists():
         ufw_result = runner(["sudo", str(_FLEET_UFW_SYNC_HELPER)], echo=False)

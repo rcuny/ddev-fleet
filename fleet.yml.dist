@@ -13,6 +13,9 @@ fleet:
   # ports:                                  # fleet-wide named-port catalogue (optional, see docs/networking.md)
   #   typesense:  { public: 9108, router: 8108 }  # explicit form of the built-in legacy default below
   #   playwright: { public: 9324, router: 8323 }
+  # port_mirror: false                      # OPTIONAL (default true) — mirror the named ports inside the Docker
+  #                                         # network via ddev-router so in-container clients (Playwright) reach
+  #                                         # https://<fqdn>:<public> (FLE-29, see docs/networking.md)
 projects:
   example:
     git: git@example.com:you/example.git

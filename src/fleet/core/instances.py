@@ -20,6 +20,7 @@ from fleet.core import (
     ddev,
     gitops,
     naming,
+    routermirror,
     tmux,
     ttycmds,
     typesense,
@@ -724,6 +725,18 @@ def deploy(
                 f"{exc.message}"
             ) from exc
 
+        # FLE-29: write the in-network named-port mirror files (files only;
+        # DDEV merges them on the `ddev start` below and `converge()` restarts
+        # the router if needed). Never fails the deploy.
+        try:
+            routermirror.sync(
+                registry,
+                traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR,
+                lock_path=routermirror.lock_path_for(paths.locks),
+            )
+        except Exception as exc:  # noqa: BLE001 - the mirror must never fail a deploy
+            _append_log(deploy_log, f"WARNING: port mirror: {_exc_text(exc)}")
+
         write_fleet_config(
             instance_dir,
             inst_id,
@@ -780,6 +793,21 @@ def deploy(
             raise DeployError(
                 f"ddev start failed in {instance_dir} with exit code {start_result.returncode}"
             )
+
+        # FLE-29: DDEV has just merged/copied the mirror files; restart
+        # ddev-router only if its live entrypoints differ. Never fails the deploy.
+        try:
+            mirror_message = routermirror.converge(
+                registry,
+                instance_dir=instance_dir,
+                traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR,
+                runner=runner,
+                lock_path=routermirror.lock_path_for(paths.locks),
+            )
+            if mirror_message:
+                _append_log(deploy_log, f"port mirror: {mirror_message}")
+        except Exception as exc:  # noqa: BLE001 - the mirror must never fail a deploy
+            _append_log(deploy_log, f"WARNING: port mirror: {_exc_text(exc)}")
 
         if typesense_enabled:
             try:
@@ -848,6 +876,10 @@ def deploy(
     )
 
     return f"https://{inst_id}.{registry.domain}"
+
+
+def _exc_text(exc: Exception) -> str:
+    return exc.message if isinstance(exc, FleetError) else str(exc)
 
 
 def _tmux_deploy_hook(
@@ -1243,6 +1275,18 @@ def _destroy_locked(
             f"failed to reconcile Caddy port snippets after destroying instance "
             f"{instance_id!r}: {exc.message}"
         ) from exc
+
+    # FLE-29: keep the in-network mirror files in step with the registry. A
+    # stale live entrypoint is harmless; the next deploy's converge() removes
+    # it. Never fails the destroy.
+    try:
+        routermirror.sync(
+            registry,
+            traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR,
+            lock_path=routermirror.lock_path_for(paths.locks),
+        )
+    except Exception as exc:  # noqa: BLE001 - the mirror must never fail a destroy
+        logger.warning("port mirror: %s", _exc_text(exc))
 
 
 def destroy(
