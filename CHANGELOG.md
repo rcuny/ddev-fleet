@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-32: the instance https site is reachable on `:443` inside the Docker network.** On fleet hosts DDEV's `router_https_port` is `8443`, so in-container clients had to use `https://<fleet host>:8443/`; the `:8443` in the `Host` header broke exact-hostname matching in multi-domain apps (Drupal Domain Access redirected to the production host). The FLE-29 router mirror now also writes a `fleet-mirror-443` entrypoint (`:443`, not published on the host) and a TLS-passthrough TCP router to the router's own https entrypoint (`router_https_port` from `~/.ddev/global_config.yaml`), so `https://<fleet host>/` works and the `Host` header carries no port (DDEV's certificate, `X-Forwarded-Proto: https`). It goes through the same files, lock, failed-apply marker and self-repair; it is skipped when `router_https_port` is `443` or another `static_config.*.yaml` already declares `:443` / `fleet-mirror-443` (`fleet refresh-ports` prints the reason). The existing `fleet.port_mirror` switch (default `true`) covers it. Inside a container use `https://$FLEET_INSTANCE_HOST` as the base URL rather than `DDEV_PRIMARY_URL`. See `docs/networking.md`.
+- **Rollout:** (FLE-32) the first deploy after upgrading restarts `ddev-router` once (a brief blip for every instance on that host); `fleet refresh-ports` reports `router mirror: live` afterwards.
+
 ## [0.16.0] - 2026-10-17
 
 ### Added

@@ -39,9 +39,11 @@ def _isolate_caddy_paths(monkeypatch, tmp_path, tmp_path_factory):
     # FLE-29: same for the in-network port mirror - never write the real
     # ~/.ddev/traefik, never probe a real Traefik API (port 1 refuses at once).
     # (its own dir, not under tmp_path: tests assert on what lands in tmp_path)
-    monkeypatch.setattr(
-        routermirror, "DEFAULT_TRAEFIK_DIR", tmp_path_factory.mktemp("ddev-traefik")
-    )
+    # FLE-32: the traefik dir sits in its own fake `~/.ddev` (global_config.yaml
+    # is read from its parent), so one test's global_config can never leak.
+    ddev_home = tmp_path_factory.mktemp("ddev-home")
+    (ddev_home / "traefik").mkdir()
+    monkeypatch.setattr(routermirror, "DEFAULT_TRAEFIK_DIR", ddev_home / "traefik")
     monkeypatch.setattr(routermirror, "TRAEFIK_API", "http://127.0.0.1:1")
 
 
