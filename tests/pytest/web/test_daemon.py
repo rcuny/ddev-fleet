@@ -8,7 +8,7 @@ from fastapi import WebSocketDisconnect
 from fastapi.testclient import TestClient
 
 from fleet import daemon
-from fleet.core import caddyports
+from fleet.core import caddyports, routermirror
 from fleet.core.errors import CaddyPortsError
 from fleet.core.instances import FleetPaths
 from fleet.daemon import create_app, mint_ws_token, verify_ws_token
@@ -511,6 +511,57 @@ def test_startup_real_sync_honours_isolated_snippet_dir(fleet_home):
     assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.exists()
     assert caddyports.DEFAULT_PORTS_SNIPPET_DIR.is_relative_to(fleet_home.parent)
     assert not real_default.exists()
+
+
+def test_startup_syncs_router_mirror_files(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    calls = []
+
+    def fake_sync(registry, **kwargs):
+        calls.append((registry.domain, kwargs["traefik_dir"]))
+        return routermirror.MirrorSyncResult()
+
+    monkeypatch.setattr(daemon.routermirror, "sync", fake_sync)
+
+    with TestClient(create_app(fleet_home)) as _client:
+        pass
+
+    assert calls == [("fleet.example.test", routermirror.DEFAULT_TRAEFIK_DIR)]
+
+
+def test_startup_router_mirror_failure_does_not_crash_app(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+
+    def failing_sync(registry, **kwargs):
+        raise OSError("permission denied: ~/.ddev/traefik")
+
+    monkeypatch.setattr(daemon.routermirror, "sync", failing_sync)
+
+    with TestClient(create_app(fleet_home)) as client:
+        response = client.get(
+            "/api/tls-authorize", params={"domain": "demo--develop.fleet.example.test"}
+        )
+    assert response.status_code == 200
+
+
+def test_startup_router_mirror_runs_even_when_caddy_port_sync_fails(fleet_home, monkeypatch):
+    _setup_fleet_home(fleet_home)
+    calls = []
+
+    def failing_caddy_sync(registry, **kwargs):
+        raise CaddyPortsError("boom")
+
+    monkeypatch.setattr(daemon.caddyports, "sync", failing_caddy_sync)
+    monkeypatch.setattr(
+        daemon.routermirror,
+        "sync",
+        lambda registry, **kw: calls.append(1) or routermirror.MirrorSyncResult(),
+    )
+
+    with TestClient(create_app(fleet_home)) as _client:
+        pass
+
+    assert calls == [1]
 
 
 def test_ui_bulk_start_returns_bulk_job_panel(fleet_home, monkeypatch):

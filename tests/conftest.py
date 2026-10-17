@@ -12,12 +12,12 @@ from pathlib import Path
 
 import pytest
 
-from fleet.core import caddyauth, caddyports
+from fleet.core import caddyauth, caddyports, routermirror
 from fleet.core.runner import RunResult
 
 
 @pytest.fixture(autouse=True)
-def _isolate_caddy_paths(monkeypatch, tmp_path):
+def _isolate_caddy_paths(monkeypatch, tmp_path, tmp_path_factory):
     """Redirect the default per-instance Caddy auth paths away from the real
     `/etc/caddy` for every test, fleet-suite-wide.
 
@@ -36,6 +36,13 @@ def _isolate_caddy_paths(monkeypatch, tmp_path):
     monkeypatch.setattr(caddyauth, "DEFAULT_INSTANCE_SNIPPET_DIR", tmp_path / "caddy-instances")
     monkeypatch.setattr(caddyauth, "DEFAULT_CADDYFILE_PATH", tmp_path / "Caddyfile")
     monkeypatch.setattr(caddyports, "DEFAULT_PORTS_SNIPPET_DIR", tmp_path / "caddy-ports")
+    # FLE-29: same for the in-network port mirror - never write the real
+    # ~/.ddev/traefik, never probe a real Traefik API (port 1 refuses at once).
+    # (its own dir, not under tmp_path: tests assert on what lands in tmp_path)
+    monkeypatch.setattr(
+        routermirror, "DEFAULT_TRAEFIK_DIR", tmp_path_factory.mktemp("ddev-traefik")
+    )
+    monkeypatch.setattr(routermirror, "TRAEFIK_API", "http://127.0.0.1:1")
 
 
 SAMPLE_REGISTRY_YAML = """\

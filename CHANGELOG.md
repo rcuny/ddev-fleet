@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- **FLE-29: fleet named ports are mirrored inside the Docker network.** The fleet's public named ports (`fleet.ports` catalogue plus the built-in Typesense `9108`) are now also served by `ddev-router` inside the Docker network, so in-container clients (e.g. Playwright) reach `https://<fqdn>:<public port>` (TLS is DDEV's mkcert certificate, so such clients need `ignoreHTTPSErrors`). New `core/routermirror.py` writes two generic Traefik files in `~/.ddev/traefik/` (`static_config.fleet-port-mirror.yaml`, `custom-global-config/fleet-port-mirror.yaml`) from `deploy`, `destroy`, `fleet refresh-ports` and daemon startup; DDEV merges them on `ddev start`, and a deploy restarts `ddev-router` only when its live entrypoints differ from the registry, self-repairing (files removed, router restarted again) and warning if the router does not come back. Ports that collide with the router's own (`80/443/8080/8443/8025/8026/10999`), with another entry's router port, or that duplicate a public port are skipped with a reason. `fleet refresh-ports` reports `router mirror: live` or `pending`. Opt out with `fleet.port_mirror: false` (default `true`). New `RouterMirrorError`. See `docs/networking.md`.
+- **Rollout:** (FLE-29) the first deploy after upgrading restarts `ddev-router` once (a brief blip for every instance on that host). On ddev3, delete the spike files `~/.ddev/traefik/static_config.fleet-spike.yaml` and `~/.ddev/traefik/custom-global-config/fleet-spike.yaml` BEFORE that deploy: a duplicate `:9108` entrypoint would stop the router. Until they are deleted the mirror simply skips `9108` (another `static_config.*.yaml` already declares it; `fleet refresh-ports` prints the reason). A failed apply leaves `~/.ddev/traefik/.fleet-port-mirror-failed`, which keeps the mirror off until the wanted ports change or `fleet refresh-ports` clears it.
+
 ## [0.15.0] - 2026-10-16
 
 ### Changed

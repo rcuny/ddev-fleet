@@ -1,7 +1,7 @@
 import pytest
 
 from fleet.core import caddyauth, instances, pgp
-from fleet.core.errors import DeployError, FleetError, TokenError
+from fleet.core.errors import DeployError, FleetError, RouterMirrorError, TokenError
 from fleet.core.registry import Registry
 from fleet.core.runner import RunResult, run_streamed
 from fleet.core.secrets import read_secrets, write_secret
@@ -1643,3 +1643,214 @@ def test_deploy_fails_loudly_on_a_corrupt_encrypted_secret(gpg_fleet_home, git_r
         )
 
     assert "broken-payload" not in str(excinfo.value)
+
+
+def _typesense_registry_text(git_url):
+    return f"""\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: {git_url}
+    default_template: default
+    typesense: true
+    templates:
+      default:
+        post_deploy:
+          - echo hi
+"""
+
+
+def _typesense_paths_and_registry(fleet_home, git_url):
+    paths = instances.FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(_typesense_registry_text(git_url), encoding="utf-8")
+    write_secret(fleet_home / ".secrets", "CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-test")
+    return paths, Registry.load(paths.registry)
+
+
+def test_deploy_writes_router_mirror_files_and_converges_after_ddev_start(
+    fleet_home, git_repo, monkeypatch
+):
+    from fleet.core import routermirror
+
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+    runner = HybridRunner()
+    order = []
+    real_start = instances.ddev.start
+
+    def spy_start(*args, **kwargs):
+        order.append("ddev start")
+        return real_start(*args, **kwargs)
+
+    def fake_converge(reg, *, instance_dir, traefik_dir, runner, lock_path):
+        order.append("converge")
+        assert (traefik_dir / routermirror.STATIC_FILENAME).exists()  # sync ran first
+        assert instance_dir.name == "demo--develop"
+        assert lock_path == paths.locks / routermirror.LOCK_NAME
+        return "restarted ddev-router: port mirror now 9108"
+
+    monkeypatch.setattr(instances.ddev, "start", spy_start)
+    monkeypatch.setattr(instances.routermirror, "converge", fake_converge)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=runner
+    )
+
+    assert order == ["ddev start", "converge"]
+    log = (paths.logs / "demo--develop" / "deploy.log").read_text(encoding="utf-8")
+    assert "port mirror: restarted ddev-router: port mirror now 9108" in log
+
+
+def test_deploy_does_not_log_an_empty_converge_message(fleet_home, git_repo, monkeypatch):
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+    monkeypatch.setattr(instances.routermirror, "converge", lambda *a, **kw: "")
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    log = (paths.logs / "demo--develop" / "deploy.log").read_text(encoding="utf-8")
+    assert "port mirror" not in log
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RouterMirrorError("router stayed down"), OSError("disk full"), RuntimeError("unexpected")],
+)
+def test_deploy_survives_a_router_mirror_converge_error(fleet_home, git_repo, monkeypatch, error):
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+
+    def failing_converge(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(instances.routermirror, "converge", failing_converge)
+
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    assert url == "https://demo--develop.fleet.example.test"
+    log = (paths.logs / "demo--develop" / "deploy.log").read_text(encoding="utf-8")
+    assert "WARNING: port mirror:" in log
+    assert str(error) in log
+    assert "deploy complete" in log
+
+
+def test_deploy_survives_a_router_mirror_sync_error(fleet_home, git_repo, monkeypatch):
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+
+    def failing_sync(*args, **kwargs):
+        raise PermissionError("read-only file system")
+
+    monkeypatch.setattr(instances.routermirror, "sync", failing_sync)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    log = (paths.logs / "demo--develop" / "deploy.log").read_text(encoding="utf-8")
+    assert "WARNING: port mirror: read-only file system" in log
+    assert "deploy complete" in log
+
+
+def test_deploy_without_a_mirror_dir_still_succeeds(fleet_home, git_repo, monkeypatch, tmp_path):
+    from fleet.core import routermirror
+
+    monkeypatch.setattr(routermirror, "DEFAULT_TRAEFIK_DIR", tmp_path / "missing-traefik")
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    assert not (tmp_path / "missing-traefik").exists()
+
+
+def test_destroy_syncs_the_router_mirror_files_only(fleet_home, git_repo, monkeypatch):
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+    sync_calls = []
+    monkeypatch.setattr(
+        instances.routermirror, "sync", lambda reg, **kw: sync_calls.append(kw["traefik_dir"])
+    )
+    monkeypatch.setattr(
+        instances.routermirror,
+        "converge",
+        lambda *a, **kw: pytest.fail("destroy must not restart the router"),
+    )
+
+    instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+    assert len(sync_calls) == 1
+
+
+def test_destroy_survives_a_router_mirror_sync_error(fleet_home, git_repo, monkeypatch):
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    def failing_sync(*args, **kwargs):
+        raise OSError("boom")
+
+    monkeypatch.setattr(instances.routermirror, "sync", failing_sync)
+
+    instances.destroy(paths, registry, "demo--develop", runner=HybridRunner())
+
+    assert not (paths.instances / "demo--develop").exists()
+
+
+def test_deploy_survives_a_failing_converge_runner(fleet_home, git_repo, monkeypatch):
+    """End to end through the real converge(): the router restart fails, the
+    self-repair runs, RouterMirrorError is raised inside and the deploy still
+    completes with a WARNING."""
+    from fleet.core import routermirror
+
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+
+    class Runner(HybridRunner):
+        def __call__(self, cmd, *, cwd=None, env=None, log_path=None, echo=True, timeout=None):
+            if cmd[:2] == ["docker", "restart"]:
+                return RunResult(returncode=1, lines=["no such container"])
+            return super().__call__(cmd, cwd=cwd, env=env, log_path=log_path, echo=echo)
+
+    monkeypatch.setattr(
+        routermirror,
+        "live_entrypoints",
+        lambda **kw: {"http-80"},
+    )
+
+    url = instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=Runner()
+    )
+
+    assert url == "https://demo--develop.fleet.example.test"
+    log = (paths.logs / "demo--develop" / "deploy.log").read_text(encoding="utf-8")
+    assert "WARNING: port mirror: in-network port mirror could not be applied" in log
+    assert "deploy complete" in log
+    assert (routermirror.DEFAULT_TRAEFIK_DIR / routermirror.FAILED_MARKER).exists()
+    assert not (routermirror.DEFAULT_TRAEFIK_DIR / routermirror.STATIC_FILENAME).exists()
+
+
+def test_deploy_takes_the_router_mirror_lock_for_sync(fleet_home, git_repo, monkeypatch):
+    from fleet.core import routermirror
+
+    paths, registry = _typesense_paths_and_registry(fleet_home, git_repo["origin"])
+    seen = []
+    real_sync = routermirror.sync
+
+    def spy(reg, **kw):
+        seen.append(kw["lock_path"])
+        return real_sync(reg, **kw)
+
+    monkeypatch.setattr(instances.routermirror, "sync", spy)
+
+    instances.deploy(
+        paths, registry, "demo", "default", branch="main", label="develop", runner=HybridRunner()
+    )
+
+    assert seen == [paths.locks / routermirror.LOCK_NAME]

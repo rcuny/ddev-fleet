@@ -5,8 +5,10 @@ import re
 import stat
 from pathlib import Path
 
+import pytest
+
 from fleet import cli
-from fleet.core import caddyports
+from fleet.core import caddyports, routermirror
 from fleet.core import instances as real_instances_mod
 from fleet.core.errors import CaddyPortsError, DeployError
 from fleet.core.instances import FleetPaths, InstanceStatus
@@ -1335,6 +1337,147 @@ def test_refresh_ports_real_sync_honours_isolated_snippet_dir(fleet_home, monkey
     # that fails if the call site reverts to the bare `caddyports.sync(...)`
     # default.
     assert not real_default.exists()
+
+
+def _write_typesense_registry(fleet_home):
+    paths = FleetPaths.from_home(fleet_home)
+    paths.registry.parent.mkdir(parents=True, exist_ok=True)
+    paths.registry.write_text(
+        """\
+fleet:
+  domain: fleet.example.test
+
+projects:
+  demo:
+    git: git@example.test:org/demo.git
+    typesense: true
+    templates:
+      default: {}
+""",
+        encoding="utf-8",
+    )
+
+
+def _no_caddy(monkeypatch):
+    monkeypatch.setattr(
+        cli.caddyports, "sync", lambda registry, **kw: caddyports.SyncResult([], [])
+    )
+
+
+def test_refresh_ports_router_mirror_files_updated_then_pending(fleet_home, monkeypatch, capsys):
+    _write_typesense_registry(fleet_home)
+    _no_caddy(monkeypatch)
+    monkeypatch.setattr(routermirror, "live_entrypoints", lambda **kw: {"http-80"})
+
+    exit_code = cli.main(["--fleet-home", str(fleet_home), "refresh-ports"])
+
+    out = capsys.readouterr().out
+    assert exit_code == 0
+    assert "router mirror: files updated (9108)" in out
+    assert (
+        "router mirror: pending — applied at the next instance deploy "
+        "(ddev start + router restart)" in out
+    )
+    assert (routermirror.DEFAULT_TRAEFIK_DIR / routermirror.STATIC_FILENAME).exists()
+
+
+def test_refresh_ports_router_mirror_no_changes_and_live(fleet_home, monkeypatch, capsys):
+    _write_typesense_registry(fleet_home)
+    _no_caddy(monkeypatch)
+    monkeypatch.setattr(
+        routermirror, "live_entrypoints", lambda **kw: {"http-80", "fleet-mirror-9108"}
+    )
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+    capsys.readouterr()
+
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+
+    out = capsys.readouterr().out
+    assert "router mirror: no changes" in out
+    assert "router mirror: live" in out
+
+
+def test_refresh_ports_router_mirror_prints_skipped_reasons(fleet_home, monkeypatch, capsys):
+    _write_typesense_registry(fleet_home)
+    _no_caddy(monkeypatch)
+    monkeypatch.setattr(routermirror, "live_entrypoints", lambda **kw: None)
+    monkeypatch.setattr(
+        cli.routermirror,
+        "sync",
+        lambda registry, **kw: routermirror.MirrorSyncResult(
+            changed=False, mirrored=[], skipped=["port 'mail' (public 8025) not mirrored: reserved"]
+        ),
+    )
+
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+
+    out = capsys.readouterr().out
+    assert "router mirror: port 'mail' (public 8025) not mirrored: reserved" in out
+    assert "router API unreachable" in out
+
+
+def test_refresh_ports_router_mirror_error_does_not_fail_the_command(
+    fleet_home, monkeypatch, capsys
+):
+    _write_minimal_registry(fleet_home)
+    _no_caddy(monkeypatch)
+
+    def failing_sync(registry, **kw):
+        raise OSError("read-only file system")
+
+    monkeypatch.setattr(cli.routermirror, "sync", failing_sync)
+
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+    assert "router mirror: WARNING: read-only file system" in capsys.readouterr().out
+
+
+def test_refresh_ports_clears_the_failed_apply_marker_before_syncing(
+    fleet_home, monkeypatch, capsys
+):
+    _write_typesense_registry(fleet_home)
+    _no_caddy(monkeypatch)
+    monkeypatch.setattr(routermirror, "live_entrypoints", lambda **kw: {"http-80"})
+    traefik = routermirror.DEFAULT_TRAEFIK_DIR
+    (traefik / routermirror.FAILED_MARKER).write_text("9108\n", encoding="utf-8")
+
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+
+    out = capsys.readouterr().out
+    assert "router mirror: cleared the failed-apply marker" in out
+    assert "router mirror: files updated (9108)" in out
+    assert not (traefik / routermirror.FAILED_MARKER).exists()
+    assert (traefik / routermirror.STATIC_FILENAME).exists()
+
+
+def test_refresh_ports_foreign_declared_mirror_entrypoint_is_not_pending(
+    fleet_home, monkeypatch, capsys
+):
+    _write_typesense_registry(fleet_home)
+    _no_caddy(monkeypatch)
+    (routermirror.DEFAULT_TRAEFIK_DIR / "static_config.fleet-spike.yaml").write_text(
+        'entryPoints:\n  fleet-mirror-9108:\n    address: ":9108"\n', encoding="utf-8"
+    )
+    monkeypatch.setattr(
+        routermirror, "live_entrypoints", lambda **kw: {"http-80", "fleet-mirror-9108"}
+    )
+
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
+
+    out = capsys.readouterr().out
+    assert "static_config.fleet-spike.yaml" in out  # the skip reason names the file
+    assert "router mirror: live" in out
+    assert "pending" not in out
+
+
+def test_refresh_ports_never_restarts_the_router(fleet_home, monkeypatch):
+    _write_typesense_registry(fleet_home)
+    _no_caddy(monkeypatch)
+    monkeypatch.setattr(routermirror, "live_entrypoints", lambda **kw: {"http-80"})
+    monkeypatch.setattr(
+        routermirror, "converge", lambda *a, **kw: pytest.fail("CLI must not restart the router")
+    )
+
+    assert cli.main(["--fleet-home", str(fleet_home), "refresh-ports"]) == 0
 
 
 def _make_instance_dir(fleet_home, instance_id):

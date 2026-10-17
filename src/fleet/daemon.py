@@ -24,7 +24,7 @@ from starlette.requests import Request
 from fleet import websecurity
 from fleet.core import bitbucket as bitbucket_mod
 from fleet.core import bulk as bulk_mod
-from fleet.core import caddyauth, caddyports, hostinfo, locks, naming, sysinfo
+from fleet.core import caddyauth, caddyports, hostinfo, locks, naming, routermirror, sysinfo
 from fleet.core import instances as instances_mod
 from fleet.core import webhooks as webhooks_mod
 from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
@@ -247,6 +247,16 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 # `.message`) precisely because this branch catches failures
                 # `CaddyPortsError` was never designed to describe.
                 logger.exception("startup port sync failed with an unexpected error")
+            # FLE-29: in-network port mirror files (files only; applied to the
+            # router by the next instance deploy). Same never-fail-startup rule.
+            try:
+                await asyncio.to_thread(
+                    routermirror.sync,
+                    registry,
+                    traefik_dir=routermirror.DEFAULT_TRAEFIK_DIR,
+                )
+            except Exception:
+                logger.exception("startup router port-mirror sync failed")
         yield
 
     app = FastAPI(lifespan=lifespan)
