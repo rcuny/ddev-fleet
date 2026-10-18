@@ -57,13 +57,13 @@ final class HostRenderCommand extends Command
         $errors = $io->getErrorStyle();
 
         $gate = $input->getOption('gate');
-        $force = match ($gate) {
+        $forcedGate = match ($gate) {
             'auto' => null,
             'setup' => GateMode::Setup,
             'authelia' => GateMode::Authelia,
             default => false,
         };
-        if (false === $force) {
+        if (false === $forcedGate) {
             $errors->error('--gate must be auto, setup or authelia.');
 
             return Command::FAILURE;
@@ -75,7 +75,7 @@ final class HostRenderCommand extends Command
             return Command::FAILURE;
         }
 
-        if (GateMode::Setup === $force && $host->isSetupComplete()) {
+        if (GateMode::Setup === $forcedGate && $host->isSetupComplete()) {
             if (!$input->getOption('force')) {
                 $errors->error('Setup is complete: the setup gate would make /setup reachable without signing in. Use fleet:setup:reset to reopen setup, or pass --force.');
 
@@ -94,7 +94,7 @@ final class HostRenderCommand extends Command
                 $this->system->renderStaging($host);
                 $io->writeln('Staged: caddy, authelia.');
             }
-            $mode = $this->system->renderGate($host, $force, !$input->getOption('no-reload'));
+            $mode = $this->system->renderGate($host, $forcedGate, !$input->getOption('no-reload'));
         } catch (\InvalidArgumentException|\RuntimeException $e) {
             $errors->error($e->getMessage());
 

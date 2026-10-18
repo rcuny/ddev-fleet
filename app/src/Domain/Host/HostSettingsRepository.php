@@ -19,7 +19,8 @@ final readonly class HostSettingsRepository
 
     /**
      * The row as stored right now. get() hands back the entity this process already holds (the identity map);
-     * another process may have changed the row since. This re-reads it, overwriting unflushed changes.
+     * another process may have changed the row since. This re-reads it and DISCARDS any unflushed change to that
+     * entity: flush (save()) first if there is something to keep.
      */
     public function fresh(): ?HostSettings
     {

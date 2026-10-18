@@ -30,19 +30,26 @@ use Symfony\Component\Lock\LockFactory;
  * it), then the completion mark. If `apply caddy` fails after the gate flipped, the setup gate is put back, so the
  * wizard stays reachable for the retry.
  *
- * Time: the steps wait on external processes. A step is not started unless its worst case still fits in BUDGET_SECONDS,
- * and the php-fpm pool must allow REQUIRED_REQUEST_TIMEOUT seconds per request or the pool kills Finish half way.
+ * Time: the steps wait on external processes. A step is not started unless its worst case still fits in BUDGET_SECONDS
+ * (the gate restore after a failed Caddy apply comes on top, see REQUIRED_REQUEST_TIMEOUT), and the php-fpm pool must
+ * allow REQUIRED_REQUEST_TIMEOUT seconds per request or the pool kills Finish half way.
  */
 final readonly class SetupFinisher
 {
     /** Seconds from the first side effect to the last one. */
     public const float BUDGET_SECONDS = 150.0;
 
+    /** Seconds the gate restore after a failed `apply caddy` can take (Caddy validate + reload). Not part of the budget. */
+    public const float RESTORE_SECONDS = CaddyReloader::MAX_SECONDS;
+
     /**
-     * The php-fpm `request_terminate_timeout` (and any proxy read timeout) the Finish request needs: the budget plus
-     * room to render the response. The installer's pool must set at least this.
+     * The php-fpm `request_terminate_timeout` (and any proxy read timeout) the Finish request needs. The worst case is
+     * `apply caddy` starting as late as the budget allows and failing at its limit, followed by the gate restore:
+     * BUDGET_SECONDS + RESTORE_SECONDS = 210 s, plus 30 s to render the response. It is also at least the sum of every
+     * step's own timeout (apply x2, validate+reload x2 = 240 s), so no change in step order can exceed it; the unit
+     * test SetupFinisherTimeoutsTest pins both. The installer's pool must set at least this.
      */
-    public const int REQUIRED_REQUEST_TIMEOUT = 180;
+    public const int REQUIRED_REQUEST_TIMEOUT = 240;
 
     public function __construct(
         private HostSettingsRepository $settings,
