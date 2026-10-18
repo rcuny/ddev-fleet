@@ -23,7 +23,7 @@ security:
         - { path: ^/health$, roles: PUBLIC_ACCESS }
         # The dev role switch must stay reachable while the stand-in role is "none" (the route
         # does not exist in prod, where this rule is inert).
-        - { path: ^/_dev/stand-in/, roles: PUBLIC_ACCESS }
+        - { path: ^/_dev/stand-in/(admin|member|none)$, roles: PUBLIC_ACCESS }
         - { path: ^/admin, roles: ROLE_ADMIN }
         - { path: ^/, roles: IS_AUTHENTICATED_FULLY }
 

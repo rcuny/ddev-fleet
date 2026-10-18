@@ -56,14 +56,40 @@ final class StandInSwitchTest extends WebTestCase
     {
         yield 'protocol relative' => ['//evil.example'];
         yield 'absolute' => ['https://evil.example'];
-        yield 'crlf' => ['/%0d%0aX:y'];
+        yield 'crlf' => ["/\r\nX:y"];
+        yield 'tab' => ["/\t/evil.example"];
+        yield 'vertical tab' => ["/\x0b/evil.example"];
+        yield 'nul' => ["/\x00/evil.example"];
+        yield 'del' => ["/\x7f/evil.example"];
+        yield 'trailing control' => ["/instances\x09"];
         yield 'backslash' => ['/\\evil.example'];
+        yield 'backslash inside' => ['/a\\b'];
         yield 'relative' => ['instances'];
         yield 'empty' => [''];
     }
 
     #[DataProvider('unsafeNext')]
     public function testUnsafeNextFallsBackToHome(string $next): void
+    {
+        $client = self::createClient();
+        $client->request('GET', '/_dev/stand-in/member', ['next' => $next]);
+
+        self::assertResponseRedirects('/', 302);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function unsafeEncodedNext(): iterable
+    {
+        yield 'crlf' => ['/%0d%0aX:y'];
+        yield 'tab' => ['/%09/evil.example'];
+        yield 'vertical tab' => ['/%0b/evil.example'];
+        yield 'nul' => ['/%00/evil.example'];
+    }
+
+    #[DataProvider('unsafeEncodedNext')]
+    public function testUnsafeEncodedNextFallsBackToHome(string $next): void
     {
         $client = self::createClient();
         $client->request('GET', '/_dev/stand-in/member?next='.$next);

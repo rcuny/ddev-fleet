@@ -25,6 +25,8 @@ final class RemoteUserAuthenticator extends AbstractAuthenticator implements Aut
 {
     private const string USERNAME_PATTERN = '/^[A-Za-z0-9._@+-]{1,128}$/D';
     private const int MAX_TEXT = 256;
+    private const int MAX_GROUPS = 64;
+    private const int MAX_GROUP_LENGTH = 128;
 
     public function __construct(
         private readonly TrustedProxyChecker $proxies,
@@ -41,6 +43,10 @@ final class RemoteUserAuthenticator extends AbstractAuthenticator implements Aut
     public function authenticate(Request $request): Passport
     {
         // The raw peer address, never getClientIp(): X-Forwarded-For is attacker-controlled.
+        // Known limitation (K26): behind Caddy's php_fastcgi, REMOTE_ADDR is the real client address, so with
+        // the default FLEET_TRUSTED_PROXIES prod answers 401 to everyone (fails closed) until M0.02 adds a
+        // shared-secret header or loopback TCP. Never widen FLEET_TRUSTED_PROXIES to "fix" that: any
+        // broader range lets anyone spoof the identity headers.
         $peer = $request->server->get('REMOTE_ADDR');
         if (!\is_string($peer) || !$this->proxies->isTrusted($peer)) {
             throw new CustomUserMessageAuthenticationException('Identity headers are not accepted from this peer.');
@@ -54,9 +60,15 @@ final class RemoteUserAuthenticator extends AbstractAuthenticator implements Aut
         $groups = [];
         foreach (explode(',', (string) $request->headers->get('Remote-Groups')) as $group) {
             $group = trim($group);
+            if (mb_strlen($group) > self::MAX_GROUP_LENGTH) {
+                throw new CustomUserMessageAuthenticationException('Invalid Remote-Groups header.');
+            }
             if ('' !== $group && !\in_array($group, $groups, true)) {
                 $groups[] = $group;
             }
+        }
+        if (\count($groups) > self::MAX_GROUPS) {
+            throw new CustomUserMessageAuthenticationException('Invalid Remote-Groups header.');
         }
 
         $name = self::text($request->headers->get('Remote-Name')) ?? $username;

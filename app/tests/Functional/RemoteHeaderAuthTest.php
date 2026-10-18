@@ -65,6 +65,18 @@ final class RemoteHeaderAuthTest extends WebTestCase
         self::assertResponseStatusCodeSame(401);
     }
 
+    public function testOversizedGroupsHeaderIs401(): void
+    {
+        $client = self::createClient();
+        $client->request('GET', '/', server: [
+            'REMOTE_ADDR' => '127.0.0.1',
+            'HTTP_REMOTE_USER' => 'alice',
+            'HTTP_REMOTE_GROUPS' => str_repeat('g', 129),
+        ]);
+
+        self::assertResponseStatusCodeSame(401);
+    }
+
     public function testInvalidUsernameFromATrustedPeerIs401(): void
     {
         $client = self::createClient();

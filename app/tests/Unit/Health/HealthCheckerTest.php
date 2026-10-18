@@ -11,6 +11,7 @@ use App\Tests\Support\TempFleetHome;
 use Doctrine\DBAL\Connection;
 use Doctrine\DBAL\DriverManager;
 use PHPUnit\Framework\TestCase;
+use Psr\Log\AbstractLogger;
 
 final class HealthCheckerTest extends TestCase
 {
@@ -50,6 +51,29 @@ final class HealthCheckerTest extends TestCase
             ['status' => 'fail', 'checks' => ['fleet_db' => 'ok', 'queue_db' => 'ok', 'home_writable' => 'fail']],
             $report->toArray(),
         );
+    }
+
+    public function testAFailedCheckIsLoggedButNotExposed(): void
+    {
+        $home = $this->useFreshFleetHome();
+        $logger = new class extends AbstractLogger {
+            /** @var list<array{string, array<mixed>}> */
+            public array $records = [];
+
+            public function log(mixed $level, string|\Stringable $message, array $context = []): void
+            {
+                $this->records[] = [(string) $level, $context];
+            }
+        };
+        $broken = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'path' => '/proc/nonexistent/x.sqlite']);
+
+        $report = new HealthChecker(new FleetPaths($home), self::memoryConnection(), $broken, $logger)->check();
+
+        self::assertFalse($report->isOk());
+        self::assertCount(1, $logger->records);
+        self::assertSame('warning', $logger->records[0][0]);
+        self::assertSame('queue_db', $logger->records[0][1]['check']);
+        self::assertStringNotContainsString('nonexistent', json_encode($report->toArray(), \JSON_THROW_ON_ERROR));
     }
 
     public function testReportsFailWhenADatabaseIsUnreachable(): void

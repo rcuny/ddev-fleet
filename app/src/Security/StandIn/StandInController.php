@@ -17,7 +17,9 @@ use Symfony\Component\Routing\Attribute\Route;
 #[When(env: 'test')]
 final class StandInController
 {
-    private const string NEXT_PATTERN = '#^/(?!/)[^\r\n\\\\]*$#D';
+    // Same-site absolute path only: no "//", no backslash and no control character anywhere (browsers
+    // strip TAB/CR/LF while parsing a Location, so "/<TAB>/evil.example" would otherwise go off-site).
+    private const string NEXT_PATTERN = '#^/(?!/)[^\x00-\x1F\x7F\\\\]*$#D';
 
     #[Route('/_dev/stand-in/{role}', name: 'dev_stand_in', requirements: ['role' => 'admin|member|none'], methods: ['GET'])]
     public function __invoke(string $role, Request $request): RedirectResponse

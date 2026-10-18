@@ -107,6 +107,36 @@ final class RemoteUserAuthenticatorTest extends TestCase
         self::assertSame($name, self::userOf($this->authenticator->authenticate($this->request(['Remote-User' => $name])))->getUserIdentifier());
     }
 
+    public function testGroupBoundsAreEnforced(): void
+    {
+        $max = implode(',', array_map(static fn (int $i): string => 'g'.$i, range(1, 64)));
+        self::assertCount(64, self::userOf($this->authenticator->authenticate(
+            $this->request(['Remote-User' => 'alice', 'Remote-Groups' => $max]),
+        ))->groups());
+
+        $longest = str_repeat('g', 128);
+        self::assertSame([$longest], self::userOf($this->authenticator->authenticate(
+            $this->request(['Remote-User' => 'alice', 'Remote-Groups' => $longest]),
+        ))->groups());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function oversizedGroups(): iterable
+    {
+        yield 'too many groups' => [implode(',', array_map(static fn (int $i): string => 'g'.$i, range(1, 65)))];
+        yield 'group too long' => [str_repeat('g', 129)];
+    }
+
+    #[DataProvider('oversizedGroups')]
+    public function testOversizedGroupsFailAuthentication(string $groups): void
+    {
+        $this->expectException(AuthenticationException::class);
+
+        $this->authenticator->authenticate($this->request(['Remote-User' => 'alice', 'Remote-Groups' => $groups]));
+    }
+
     public function testUntrustedProxyIsRejected(): void
     {
         $this->expectException(AuthenticationException::class);

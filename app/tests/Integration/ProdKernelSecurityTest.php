@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Integration;
 
 use App\Kernel;
+use App\Security\StandIn\StandInAuthenticator;
+use App\Security\StandIn\StandInController;
+use App\Security\StandIn\StandInSettings;
 use App\Tests\Support\TempFleetHome;
 use Monolog\Handler\StreamHandler;
 use PHPUnit\Framework\TestCase;
@@ -102,6 +105,31 @@ final class ProdKernelSecurityTest extends TestCase
         $request = Request::create('/', 'GET', [], ['fleet_stand_in_role' => 'admin']);
 
         self::assertSame(401, $this->kernel->handle($request)->getStatusCode());
+    }
+
+    public function testStandInClassesAreAbsentFromTheCompiledProdContainer(): void
+    {
+        self::assertNotNull($this->kernel);
+        $this->kernel->boot();
+        $container = $this->kernel->getContainer();
+
+        foreach ([StandInAuthenticator::class, StandInController::class, StandInSettings::class] as $class) {
+            self::assertFalse($container->has($class), $class);
+        }
+
+        // Private services are invisible to has(), so also scan the compiled container for the classes.
+        $offenders = [];
+        foreach (new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($this->cacheDir, \FilesystemIterator::SKIP_DOTS)) as $file) {
+            \assert($file instanceof \SplFileInfo);
+            // removed-ids.php and *.meta* merely list removed/known ids and resources.
+            if (!$file->isFile() || 'removed-ids.php' === $file->getFilename() || str_contains($file->getFilename(), '.meta')) {
+                continue;
+            }
+            if (str_contains((string) file_get_contents($file->getPathname()), 'StandIn')) {
+                $offenders[] = substr($file->getPathname(), \strlen($this->cacheDir));
+            }
+        }
+        self::assertSame([], $offenders, 'the prod container must not reference the stand-in');
     }
 
     public function testTheSwitchRouteDoesNotExist(): void
