@@ -1,0 +1,27 @@
+{# symfony-design-system:start #}
+{%- props
+    ## string The token name, e.g. ink-body.
+    name,
+    ## string The background utility for the token, as a literal class so Tailwind emits it, e.g. bg-ink-body.
+    swatch,
+    ## string The utilities that use the token, shown as text.
+    utility,
+    ## string Light mode value.
+    light,
+    ## string Dark mode value.
+    dark
+-%}
+<div class="flex flex-col gap-2" data-token="{{ name }}">
+    <div class="aspect-[2/1] rounded-md border border-hairline {{ swatch }}" role="img" aria-label="{{ name }} in the current mode"></div>
+    <div class="text-xs">
+        <div class="font-medium text-ink-display">{{ name }}</div>
+        <div class="font-mono text-ink-muted">{{ utility }}</div>
+        <dl class="mt-1 grid grid-cols-[auto_1fr] gap-x-2 font-mono text-[11px] text-ink-muted">
+            <dt>Light</dt>
+            <dd class="text-ink-body">{{ light }}</dd>
+            <dt>Dark</dt>
+            <dd class="text-ink-body">{{ dark }}</dd>
+        </dl>
+    </div>
+</div>
+{# symfony-design-system:end #}

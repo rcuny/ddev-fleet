@@ -1,0 +1,9 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Forbidden · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Access denied" description="You do not have access to this page." />
+    <p class="mt-6">Ask an administrator if you need it, or go back to a page you can open.</p>
+    <twig:Button as="a" href="{{ path('home') }}" class="mt-4 h-11 md:h-8">Back to Home</twig:Button>
+{% endblock %}

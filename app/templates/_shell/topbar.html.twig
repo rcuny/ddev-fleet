@@ -1,0 +1,9 @@
+<header data-shell="topbar" class="sticky top-0 z-30 flex min-h-(--shell-top-bar) shrink-0 items-center gap-2 border-b border-hairline bg-page px-4 md:px-8">
+    {{ include('_shell/brand.html.twig', {class: 'md:hidden'}) }}
+    <div class="ml-auto flex items-center gap-1">
+        <twig:ThemeToggle />
+        <div class="hidden md:block">
+            <twig:UserMenu />
+        </div>
+    </div>
+</header>

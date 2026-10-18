@@ -1,0 +1,44 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<h1 class="font-display">Display headline</h1>
+<p class="font-sans">Body paragraph.</p>
+<p><code class="font-mono">composer require symfony/ux-icons</code></p>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="typography" title="Typography" :sample="sample|trim">
+    <twig:block name="preview">
+        <div class="space-y-6">
+            <div>
+                <div class="mb-1 font-mono text-xs text-ink-muted">Display · font-display</div>
+                <div class="font-display text-4xl font-semibold text-ink-display">The quick brown fox jumps over the lazy dog</div>
+            </div>
+            <div>
+                <div class="mb-1 font-mono text-xs text-ink-muted">Body · font-sans</div>
+                <div class="font-sans">The quick brown fox jumps over the lazy dog. 0123456789. The five boxing wizards jump quickly.</div>
+            </div>
+            <div>
+                <div class="mb-1 font-mono text-xs text-ink-muted">Code · font-mono</div>
+                <div class="font-mono text-sm">const answer = 42; // 0O 1lI</div>
+            </div>
+        </div>
+    </twig:block>
+    <twig:block name="description">
+        <p>
+            Three system font stacks and no web fonts, so the page makes no third-party request:
+            display and body share <code>ui-sans-serif, system-ui, sans-serif</code>; code uses
+            <code>ui-monospace, SFMono-Regular, Menlo, monospace</code>. The root size is 106.25 % (17 px), so every rem-based size scales with it.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li><code>font-display</code> for headings only; headings already inherit it from the base styles.</li>
+            <li><code>font-mono</code> for identifiers, commands and code.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Do not add web fonts or <code>@import url()</code> to the stylesheet.</li>
+            <li>Do not override <code>font-family</code> inline.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

@@ -814,7 +814,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("compare", help="compare a report with the baseline (exit 1 on regression)")
     p.add_argument("--baseline", default=str(DEFAULT_BASELINE))
-    p.add_argument("--env", required=True, help="baseline environment: offline, ddev3, ...")
+    p.add_argument("--env", required=True, help="baseline environment: offline, or a SECURITY_PROBE_TARGETS name")
     p.add_argument("--current", required=True, help="report JSON to check")
     p.add_argument("--tolerance", type=float, help="override the baseline file's tolerance")
     p.add_argument("--report-md")

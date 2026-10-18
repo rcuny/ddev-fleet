@@ -1,0 +1,54 @@
+security:
+    # Identities are never stored: the authenticating reverse proxy asserts them per request.
+    # The provider exists only because a firewall needs one; the authenticators build FleetUser themselves.
+    providers:
+        users_in_memory: { memory: null }
+
+    role_hierarchy:
+        ROLE_ADMIN: [ROLE_MEMBER]
+
+    firewalls:
+        dev:
+            # Dev tools and static assets are never authenticated.
+            pattern: ^/(_profiler|_wdt|assets)/
+            security: false
+        main:
+            stateless: true
+            provider: users_in_memory
+            entry_point: App\Security\RemoteUserAuthenticator
+            # A signed-in user without the role sees the 403 inside the app shell.
+            access_denied_handler: App\Security\ForbiddenHandler
+            # custom_authenticators is set per environment below (lists would otherwise concatenate).
+
+    # Note: Only the *first* matching rule is applied
+    access_control:
+        - { path: ^/health$, roles: PUBLIC_ACCESS }
+        # The dev role switch must stay reachable while the stand-in role is "none" (the route
+        # does not exist in prod, where this rule is inert).
+        - { path: ^/_dev/stand-in/(admin|member|none)$, roles: PUBLIC_ACCESS }
+        - { path: ^/admin, roles: ROLE_ADMIN }
+        - { path: ^/, roles: IS_AUTHENTICATED_FULLY }
+
+when@prod:
+    security:
+        firewalls:
+            main:
+                custom_authenticators:
+                    - App\Security\RemoteUserAuthenticator
+
+# The dev/test stand-in authenticator exists in these environments only.
+when@dev:
+    security:
+        firewalls:
+            main:
+                custom_authenticators:
+                    - App\Security\RemoteUserAuthenticator
+                    - App\Security\StandIn\StandInAuthenticator
+
+when@test:
+    security:
+        firewalls:
+            main:
+                custom_authenticators:
+                    - App\Security\RemoteUserAuthenticator
+                    - App\Security\StandIn\StandInAuthenticator

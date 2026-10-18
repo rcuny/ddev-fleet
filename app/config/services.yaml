@@ -1,0 +1,88 @@
+# yaml-language-server: $schema=../vendor/symfony/dependency-injection/Loader/schema/services.schema.json
+
+# This file is the entry point to configure your own services.
+# Files in the packages/ subdirectory configure your dependencies.
+# See also https://symfony.com/doc/current/service_container/import.html
+
+# Put parameters here that don't need to change on each machine where the app is deployed
+# https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
+parameters:
+    # Symfony profiler toolbar in dev (see App\Ui\ProfilerToolbarSwitch); the Playwright suite sets 0 so it cannot cover the phone bottom bar.
+    env(FLEET_PROFILER_TOOLBAR): '1'
+    # Authorisation: members of this group get ROLE_ADMIN; everyone else authenticated is ROLE_MEMBER.
+    fleet.admin_group: '%env(FLEET_ADMIN_GROUP)%'
+    # Peers (IPs/CIDRs) allowed to assert identity headers.
+    fleet.trusted_proxies: '%env(FLEET_TRUSTED_PROXIES)%'
+    # The dev/test stand-in authenticator and role switch; never true in prod.
+    fleet.stand_in_enabled: false
+
+services:
+    # symfony-design-system:start
+    # Renders each design system sample as its own live preview. Only committed, static sample strings
+    # may reach template_from_string (no sandbox); tests/Repo/DesignSystemSampleRendererTest guards it.
+    Twig\Extension\StringLoaderExtension:
+        tags: ['twig.extension']
+    # symfony-design-system:end
+
+    # default configuration for services in *this* file
+    _defaults:
+        autowire: true      # Automatically injects dependencies in your services.
+        autoconfigure: true # Automatically registers your services as commands, event subscribers, etc.
+
+    # makes classes in src/ available to be used as services
+    # this creates a service per class whose id is the fully-qualified class name
+    App\:
+        resource: '../src/'
+        exclude:
+            # The concrete runners are not autowirable on purpose: consumers type-hint CommandRunner (the seam).
+            - '../src/Fleet/Shell/ProcessCommandRunner.php'
+            - '../src/Fleet/Shell/RecordingCommandRunner.php'
+
+    # add more service definitions when explicit configuration is needed
+    # please note that last definitions always *replace* previous ones
+    App\Fleet\FleetPaths:
+        # Public so integration tests can fetch it from the test container.
+        public: true
+        arguments:
+            $home: '%env(resolve:FLEET_HOME)%'
+
+    # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
+    # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
+    fleet.command_runner.process:
+        class: App\Fleet\Shell\ProcessCommandRunner
+        autowire: false
+    fleet.command_runner.recording:
+        class: App\Fleet\Shell\RecordingCommandRunner
+        autowire: false
+    App\Fleet\Shell\CommandRunnerFactory:
+        arguments:
+            $process: '@fleet.command_runner.process'
+            $recording: '@fleet.command_runner.recording'
+            $environment: '%kernel.environment%'
+    App\Fleet\Shell\CommandRunner:
+        factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'create']
+        arguments: ['%env(FLEET_RUNNER)%']
+
+when@dev:
+    parameters:
+        fleet.stand_in_enabled: true
+
+when@test:
+    parameters:
+        fleet.stand_in_enabled: true
+
+    services:
+        # Public so functional tests can swap in a stub.
+        App\Health\HealthChecker:
+            autowire: true
+            public: true
+
+        # Keep the seam and the shared recorder alive in the container so integration
+        # tests can fetch them by their normal ids (private services are only reachable
+        # through the test container while they are not removed as unused).
+        fleet.test_alias.command_runner:
+            alias: App\Fleet\Shell\CommandRunner
+            public: true
+        fleet.test_alias.recording_command_runner:
+            alias: fleet.command_runner.recording
+            public: true

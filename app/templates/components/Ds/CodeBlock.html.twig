@@ -1,0 +1,9 @@
+{# symfony-design-system:start #}
+{%- props
+    ## string The source text, shown verbatim.
+    code,
+    ## string Language hint for the <code> class.
+    language = 'twig'
+-%}
+<pre data-sample tabindex="0" class="overflow-x-auto rounded-md border border-hairline bg-surface p-4 text-xs leading-relaxed"><code class="language-{{ language }} text-ink-body">{#- ~ '' turns a captured (safe) value into a plain string so it is escaped -#}{{ code ~ '' }}</code></pre>
+{# symfony-design-system:end #}

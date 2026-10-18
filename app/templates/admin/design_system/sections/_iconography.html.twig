@@ -1,0 +1,57 @@
+{# symfony-design-system:start #}
+{% set icons = [
+    'lucide:activity', 'lucide:arrow-right', 'lucide:bell', 'lucide:check', 'lucide:chevron-right', 'lucide:folder',
+    'lucide:plus', 'lucide:search', 'lucide:settings', 'lucide:trash-2', 'lucide:user', 'lucide:x',
+] %}
+{% set sample %}{% verbatim %}
+<twig:ux:icon name="lucide:plus" class="size-4" />
+
+<twig:Button>
+    <twig:ux:icon name="lucide:plus" data-icon="inline-start" />
+    New project
+</twig:Button>
+
+<twig:Button variant="ghost" size="icon" aria-label="Search">
+    <twig:ux:icon name="lucide:search" />
+</twig:Button>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="iconography" title="Iconography" :sample="sample|trim" :components="['Button']">
+    <twig:block name="preview">
+        <div class="grid grid-cols-3 gap-4 sm:grid-cols-4 md:grid-cols-6">
+            {% for icon in icons %}
+                <div class="flex flex-col items-center gap-2 rounded-md border border-hairline p-3">
+                    <twig:ux:icon :name="icon" class="size-5 text-ink-display" />
+                    <span class="font-mono text-[10px] text-ink-muted">{{ icon|replace({'lucide:': ''}) }}</span>
+                </div>
+            {% endfor %}
+        </div>
+    </twig:block>
+    <twig:block name="description">
+        <p>
+            Icons are the Lucide set rendered by <code>symfony/ux-icons</code> as inline SVG. Each icon is committed under <code>assets/icons/</code>
+            (<code>php bin/console ux:icons:import lucide:plus</code>; <code>ux:icons:lock</code> without arguments locks every icon it finds written literally in the templates), so rendering never calls the network. Default size is <code>size-4</code>;
+            use <code>size-5</code> for standalone anchors and <code>size-6</code> for empty states.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Reinforce a button label or a status.</li>
+            <li>Visually anchor empty states and section headers.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Decoration with no meaning.</li>
+            <li>Replacing a label: an icon-only control needs an <code>aria-label</code>.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li>Icons are hidden from assistive technology by default; the surrounding control carries the name.</li>
+            <li><code>text-ink-muted</code> for icons that recede; <code>text-brand-darker dark:text-brand</code> to emphasise.</li>
+            <li>Inside kit buttons, mark the icon <code>data-icon="inline-start"</code> or <code>"inline-end"</code> for correct padding.</li>
+            <li>Lock every new icon before using it; a missing icon fails the test suite by design.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

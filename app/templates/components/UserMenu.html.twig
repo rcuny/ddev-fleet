@@ -1,0 +1,48 @@
+{# Who is signed in. Default: the desktop top bar dropdown. variant="block": the static block used in the phone More sheet and on Home. #}
+{# "this" is the nested component inside slot content, so read the identity into plain variables first. #}
+{% set identity_initial = this.initial %}
+{% set identity_name = this.name %}
+{% set identity_email = this.email %}
+{% set identity_role = this.role %}
+{% set identity_groups = this.groups %}
+{% if variant == 'block' %}
+    <div {{ attributes.defaults({class: 'flex items-start gap-3'}) }}>
+        <span class="flex size-10 shrink-0 items-center justify-center rounded-full bg-brand-faded text-sm font-semibold text-brand-darker dark:text-brand" aria-hidden="true">{{ identity_initial }}</span>
+        <div class="flex min-w-0 flex-col gap-1">
+            <strong class="truncate">{{ identity_name }}</strong>
+            {% if identity_email %}
+                <span class="truncate text-sm text-ink-muted">{{ identity_email }}</span>
+            {% endif %}
+            <div class="flex flex-wrap gap-1">
+                <twig:Badge variant="secondary">{{ identity_role }}</twig:Badge>
+                {% for group in identity_groups %}
+                    <twig:Badge variant="outline">{{ group }}</twig:Badge>
+                {% endfor %}
+            </div>
+        </div>
+    </div>
+{% else %}
+    {# A disclosure (native popover: Esc and outside click close it), not role="menu": it holds identity info, no actions. #}
+    <div {{ attributes.defaults({'data-testid': 'identity'}) }}>
+        <twig:Button variant="ghost" class="h-9 gap-2 px-2" popovertarget="user-popover" aria-label="Account: {{ identity_name }}">
+            <span class="flex size-6 items-center justify-center rounded-full bg-brand-faded text-xs font-semibold text-brand-darker dark:text-brand" aria-hidden="true">{{ identity_initial }}</span>
+            <span class="max-w-40 truncate">{{ identity_name }}</span>
+            <twig:ux:icon name="lucide:chevron-down" class="size-4" />
+        </twig:Button>
+        <div id="user-popover" popover role="group" aria-label="Signed in as" class="fixed inset-auto top-(--shell-top-bar) right-8 m-0 w-64 rounded-lg bg-popover p-3 text-popover-foreground shadow-md ring-1 ring-foreground/10">
+            <div class="flex flex-col gap-1">
+                <p class="text-xs font-medium text-muted-foreground">Signed in as</p>
+                <strong class="truncate">{{ identity_name }}</strong>
+                {% if identity_email %}
+                    <span class="truncate text-sm text-ink-muted">{{ identity_email }}</span>
+                {% endif %}
+                <div class="flex flex-wrap gap-1">
+                    <twig:Badge variant="secondary">{{ identity_role }}</twig:Badge>
+                    {% for group in identity_groups %}
+                        <twig:Badge variant="outline">{{ group }}</twig:Badge>
+                    {% endfor %}
+                </div>
+            </div>
+        </div>
+    </div>
+{% endif %}

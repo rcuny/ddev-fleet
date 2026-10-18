@@ -1,0 +1,48 @@
+{# "this" is the nested component inside slot content, so read the entries into plain variables first. #}
+{% set bar_items = this.items %}
+{% set more_entries = this.more %}
+{% set more_current = this.moreIsCurrent %}
+{# Phone bottom bar (< md): min 56 px incl. the 1 px top border (--shell-bottom-bar, px not rem: the base font is 17 px) plus the safe-area inset; it grows with very large text. The Sheet wraps the bar so its dialog is a sibling of the nav, not part of it. #}
+<twig:Sheet id="more" side="bottom" class="md:hidden">
+    <nav
+        aria-label="Primary"
+        data-bottom-nav
+        {{ attributes.defaults({
+            'data-controller': 'sheet-viewport',
+            class: 'fixed inset-x-0 bottom-0 z-40 box-border border-t border-hairline bg-page pb-[env(safe-area-inset-bottom)]',
+        }) }}
+    >
+        <ul class="flex min-h-[calc(var(--shell-bottom-bar)-1px)] items-stretch">
+            {% for entry in bar_items %}
+                <li class="flex min-w-0 flex-1">
+                    <a
+                        href="{{ entry.item.path }}"
+                        {% if entry.current %}aria-current="page"{% endif %}
+                        class="flex min-h-11 w-full flex-col items-center justify-center gap-0.5 text-xs hover:no-underline {{ entry.current ? 'text-brand-darker dark:text-brand' : 'text-ink-body' }}"
+                    >
+                        <twig:ux:icon :name="entry.item.icon" class="size-5" />{{ entry.item.label }}
+                    </a>
+                </li>
+            {% endfor %}
+            <li class="flex min-w-0 flex-1">
+                <twig:Sheet:Trigger>
+                    <twig:Button
+                        variant="ghost"
+                        class="h-auto min-h-11 w-full flex-col gap-0.5 rounded-none px-0 text-xs font-normal {{ more_current ? 'text-brand-darker dark:text-brand' : 'text-ink-body' }}"
+                        {{ ...sheet_trigger_attrs }}
+                    >
+                        <twig:ux:icon name="lucide:ellipsis" class="size-5" />More
+                    </twig:Button>
+                </twig:Sheet:Trigger>
+            </li>
+        </ul>
+    </nav>
+    <twig:Sheet:Content :showCloseButton="false" class="max-h-[85dvh] rounded-t-xl">
+        {{ include('_shell/more_sheet.html.twig', {entries: more_entries}) }}
+        <twig:Sheet:Close>
+            <twig:Button variant="ghost" size="icon" class="absolute top-2 end-2 size-11" aria-label="Close" {{ ...sheet_close_attrs }}>
+                <twig:ux:icon name="lucide:x" />
+            </twig:Button>
+        </twig:Sheet:Close>
+    </twig:Sheet:Content>
+</twig:Sheet>

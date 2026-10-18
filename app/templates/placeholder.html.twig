@@ -1,0 +1,13 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ item.label }} · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="item.label" />
+    <twig:Card data-testid="placeholder" class="mt-6 max-w-xl">
+        <twig:Card:Header>
+            <twig:Card:Title>Planned for {{ item.milestone }}</twig:Card:Title>
+            <twig:Card:Description>This page is already in the navigation; its content arrives with that milestone.</twig:Card:Description>
+        </twig:Card:Header>
+    </twig:Card>
+{% endblock %}

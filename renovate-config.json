@@ -21,29 +21,95 @@
   "commitMessagePrefix": "FLE-10",
   "packageRules": [
     {
-      "description": "Python runtime dependencies: one grouped PR for minor/patch (pyproject.toml is extracted by the poetry and/or pep621 manager, so match on datasource + depType)",
-      "matchDatasources": [
-        "pypi"
+      "description": "Symfony components (app/composer.json pins 8.1.*): one grouped PR for patch bumps, never merged by Renovate itself",
+      "matchManagers": [
+        "composer"
       ],
-      "matchDepTypes": [
-        "project.dependencies"
+      "matchPackageNames": [
+        "symfony/**"
       ],
-      "matchUpdateTypes": [
-        "minor",
-        "patch"
-      ],
-      "groupName": "python runtime"
+      "groupName": "symfony",
+      "automerge": false
     },
     {
-      "description": "Dev/infra extras and build backend: one grouped PR",
-      "matchDatasources": [
-        "pypi"
+      "description": "Symfony minor bumps (8.1 -> 8.2) get their own PR: they change the pinned series and need a changelog read",
+      "matchManagers": [
+        "composer"
       ],
-      "matchDepTypes": [
-        "project.optional-dependencies",
-        "build-system.requires"
+      "matchPackageNames": [
+        "symfony/**"
       ],
-      "groupName": "python tooling"
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "groupName": "symfony minor",
+      "automerge": false
+    },
+    {
+      "description": "Symfony major bumps get their own PR and are always a deliberate migration",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "symfony major",
+      "automerge": false
+    },
+    {
+      "description": "Symfony UX (Twig components, Live components, Turbo, Icons, Stimulus bundle) release together: one grouped PR (rule order matters, this overrides the symfony groups above)",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/ux-*",
+        "symfony/stimulus-bundle"
+      ],
+      "groupName": "symfony ux",
+      "automerge": false
+    },
+    {
+      "description": "Doctrine ORM, DBAL, bundle and migrations: one grouped PR",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "doctrine/**"
+      ],
+      "groupName": "doctrine"
+    },
+    {
+      "description": "PHP dev tooling (tests and static analysis): one grouped PR",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "phpunit/phpunit",
+        "phpstan/**",
+        "friendsofphp/php-cs-fixer"
+      ],
+      "groupName": "php dev tooling"
+    },
+    {
+      "description": "Playwright and its axe-core integration (tests/playwright) move together; the companion's DDEV image pins the same Playwright version, so a bump here needs the matching companion change",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "@playwright/test",
+        "@axe-core/playwright"
+      ],
+      "groupName": "playwright"
+    },
+    {
+      "description": "Python CI tooling (ci/requirements-*.txt: pytest, jinja2, PyYAML, ansible-lint, ...): one grouped PR",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "groupName": "python ci tooling"
     },
     {
       "description": "Ansible Galaxy collections: one grouped PR",
@@ -53,48 +119,34 @@
       "groupName": "ansible collections"
     },
     {
-      "description": "The Python interpreter version is a deliberate decision: never auto-bump the python docker image (pipelines)",
+      "description": "The OS image of the gates (debian:trixie) is a deliberate decision, in step with the servers: never auto-bump it",
+      "matchManagers": [
+        "bitbucket-pipelines"
+      ],
+      "matchDepNames": [
+        "debian"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The Python interpreter version of the infra steps is a deliberate decision: never auto-bump the python docker image",
+      "matchManagers": [
+        "bitbucket-pipelines"
+      ],
       "matchDepNames": [
         "python"
       ],
       "enabled": false
     },
     {
-      "description": "Same for the requires-python floor in pyproject.toml",
+      "description": "The PHP platform constraint in app/composer.json is a deliberate decision: never auto-bump it",
       "matchManagers": [
-        "pep621",
-        "poetry"
+        "composer"
       ],
-      "matchDepTypes": [
-        "requires-python"
+      "matchDepNames": [
+        "php"
       ],
       "enabled": false
-    }
-  ],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "description": "Vendored htmx: Renovate bumps the version in docs/vendored-assets.md, a human re-downloads the file",
-      "managerFilePatterns": [
-        "/^docs/vendored-assets\\.md$/"
-      ],
-      "matchStrings": [
-        "\\|\\s*htmx\\.min\\.js\\s*\\|\\s*htmx\\.org\\s*\\|\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*\\|"
-      ],
-      "depNameTemplate": "htmx.org",
-      "datasourceTemplate": "npm"
-    },
-    {
-      "customType": "regex",
-      "description": "Vendored OpenPGP.js: Renovate bumps the version in docs/vendored-assets.md, a human re-vendors the file (see that doc)",
-      "managerFilePatterns": [
-        "/^docs/vendored-assets\\.md$/"
-      ],
-      "matchStrings": [
-        "\\|\\s*openpgp\\.min\\.mjs\\s*\\|\\s*openpgp\\s*\\|\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*\\|"
-      ],
-      "depNameTemplate": "openpgp",
-      "datasourceTemplate": "npm"
     }
   ]
 }

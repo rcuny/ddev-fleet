@@ -1,0 +1,15 @@
+<nav aria-label="Main" {{ attributes }}>
+    <ul class="flex flex-col gap-1 text-sm">
+        {% for entry in this.items %}
+            <li>
+                <a
+                    href="{{ entry.item.path }}"
+                    {% if entry.current %}aria-current="page"{% endif %}
+                    class="flex min-h-11 items-center gap-3 rounded-md px-3 hover:no-underline md:min-h-9 {{ entry.current ? 'bg-brand-faded text-brand-darker dark:text-brand' : 'text-ink-body hover:bg-surface hover:text-ink-display' }}"
+                >
+                    <twig:ux:icon :name="entry.item.icon" class="size-4 shrink-0" />{{ entry.item.label }}
+                </a>
+            </li>
+        {% endfor %}
+    </ul>
+</nav>

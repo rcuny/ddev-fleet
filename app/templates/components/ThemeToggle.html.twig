@@ -1,0 +1,48 @@
+{# symfony-design-system:start #}
+{%- props
+    ## 'toggle'|'segmented' One button that flips light/dark, or a Light/Dark/System group.
+    variant = 'toggle'
+-%}
+{%- if variant == 'segmented' -%}
+    <div
+        role="group"
+        aria-label="Theme"
+        data-slot="theme-toggle"
+        {{ attributes.defaults({
+            'data-controller': 'theme',
+            class: 'inline-flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5',
+        }) }}
+    >
+        {%- for mode, label in {light: 'Light mode', dark: 'Dark mode', system: 'System theme'} -%}
+            <button
+                type="button"
+                aria-label="{{ label }}"
+                aria-pressed="false"
+                title="{{ label }}"
+                data-theme-mode="{{ mode }}"
+                data-action="theme#set"
+                data-theme-mode-param="{{ mode }}"
+                class="inline-flex size-11 items-center justify-center rounded-md text-muted-foreground transition-colors outline-none hover:text-foreground focus-visible:ring-3 focus-visible:ring-ring/50 aria-pressed:bg-background aria-pressed:text-foreground md:size-8"
+            >
+                <twig:ux:icon :name="mode == 'light' ? 'lucide:sun' : (mode == 'dark' ? 'lucide:moon' : 'lucide:monitor')" class="size-4" />
+            </button>
+        {%- endfor -%}
+    </div>
+{%- else -%}
+    <twig:Button
+        variant="ghost"
+        size="icon"
+        aria-label="Toggle dark mode"
+        aria-pressed="false"
+        {{ ...attributes.defaults({
+            'data-slot': 'theme-toggle',
+            'data-controller': 'theme',
+            'data-action': 'theme#toggle',
+            class: 'size-11 md:size-8',
+        }) }}
+    >
+        <twig:ux:icon name="lucide:moon" class="size-4 dark:hidden" />
+        <twig:ux:icon name="lucide:sun" class="hidden size-4 dark:block" />
+    </twig:Button>
+{%- endif -%}
+{# symfony-design-system:end #}

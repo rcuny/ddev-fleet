@@ -1,140 +1,112 @@
+---
+Author: Claude Code
+Reviewer: none
+Last updated: 2026-10-18
+Type: documentation
+---
+
 # Tests
 
-The suite is split by framework. Pytest holds the unit and FastAPI `TestClient`
-tests (grouped by area), Playwright (TypeScript, `@playwright/test`) drives a real browser,
-and Node's built-in test runner covers the browser ES modules.
+The 1.x app is tested at three levels: PHPUnit inside the Symfony project (`app/tests/`),
+Playwright in a real browser (`tests/playwright/`), and a small set of Python tests that remain
+for the CI tooling and the Ansible roles (`tests/pytest/`). The commands below are run from the
+repository root unless stated otherwise; use `php8.4` where the default `php` is older than 8.4.
+
+## Current counts (2026-10-18)
+
+| Suite | Where | Count |
+|---|---|---|
+| PHPUnit `Unit` | `app/tests/Unit/` | 114 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 25 tests |
+| PHPUnit `Functional` | `app/tests/Functional/` | 70 tests |
+| PHPUnit `Repo` | `app/tests/Repo/` | 63 tests |
+| Playwright | `tests/playwright/` | 38 (6 spec files; each spec runs on the `desktop` and the `phone` project where it applies) |
+| pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
+
+PHPUnit totals 272 tests. Update this table when the numbers change.
 
 ## Layout
 
 ```
-tests/
-  __init__.py        package root (tests import each other as `tests.<...>`)
-  conftest.py        pytest: shared fixtures and helpers (FakeRunner, gpg helpers,
-                     autouse isolation fixtures), used by pytest/
-  README-tests.md    this file
-  fixtures/          shared data: the PGP test key pair and a committed OpenPGP.js
-                     ciphertext (fixtures/pgp), read by pytest and node tests
-  pytest/            pytest: unit + TestClient tests, one subfolder per area
-    fakegpg.py         a scripted stand-in for gpg, used by the secrets/integrations tests
-    cli/               the `fleet` command line (cli.py, bulk commands)
-    web/               daemon, dashboard UI, CSP/web security, Secrets, Webhooks and Scheduled jobs pages, job registry
-    instances/         instance lifecycle: deploy, redeploy, list, snapshot, refresh-config,
-                       paths, locks, naming, ddev wrappers, bulk orchestration, git/branch reads
-    secrets/           OpenPGP secret store, gpg wrapper, tokens, vendored OpenPGP.js, interop
-    integrations/      Bitbucket/generic webhooks, gitops, Typesense, Authelia, Caddy auth + ports
-    core/              registry, fleet config, runner, shell, errors, host/system info, assets,
-                       tmux (+ sidebar), tty commands, reboot status, scheduled jobs (cron, scheduler)
-    ansible/           Ansible role and template checks (Caddyfile, Authelia, systemd units/sandbox)
-    repo/              repository and CI hygiene (pipeline config, Renovate merge, systemd
-                       security report, no personal data, demo project)
-  playwright/        TypeScript `@playwright/test`, its own npm package (package.json,
-                     package-lock.json, node_modules/): real daemons + headless Chromium
-    playwright.config.ts   chromium only, one worker; starts the two daemons (webServer)
-    support/           start-daemon.mjs (launcher), env.ts (ports, state files), fixtures.ts
-    *.spec.ts          the tests (secrets.spec.ts: the Secrets page; webhooks.spec.ts: the Webhooks page; schedules.spec.ts: the Scheduled jobs page)
-  node/              Node's built-in test runner (`node --test`): the browser ES modules
-                     (`*.test.mjs`) and `encrypt-cli.mjs`, a helper the pytest interop tests call
+app/tests/
+  bootstrap.php      forces APP_ENV=test and gives each PHPUnit process its own FLEET_HOME
+  Unit/              plain objects: FleetPaths, the command runners, health, security, navigation, tokens
+  Integration/       kernel and container wiring: Doctrine/SQLite, Messenger, Lock, Mercure, prod security
+  Functional/        HTTP through WebTestCase: access control, app shell, design-system page, health, stand-in
+  Repo/              repository rules: hygiene (no owner or workspace references), pipeline configuration,
+                     tag guard, the design-system block in CLAUDE.md, the Python app being gone
+  Support/           shared helpers (a temporary FLEET_HOME)
+tests/playwright/    TypeScript @playwright/test, its own npm package
+  playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
+  support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts
+  *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes)
+tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
+                     scorer and report, the Renovate merge helper)
 ```
-
-## Prerequisites
-
-- Python 3.11+ and the dev extras:
-  `python -m venv .venv && .venv/bin/pip install -e '.[dev]'`
-- `gpg` (GnuPG 2.2+) for the real-crypto tests (`pytest/secrets/`, `playwright/`).
-- Node 22+ (Playwright itself needs 20+) for `node/`, for the pytest tests that run the
-  vendored OpenPGP.js through Node (`secrets/test_pgp_interop.py`, `web/test_secrets_ui.py`)
-  and for `playwright/`.
-- For `playwright/`, once: `cd tests/playwright && npm ci && npx playwright install --with-deps chromium`
-  (or `--only-shell chromium`, enough for the headless runs the suite uses). The browser
-  build belongs to the `@playwright/test` version pinned in `tests/playwright/package.json`:
-  after a bump of that pin, run the install again.
-
-The Playwright runner has no skip mode: a missing browser, `gpg` or Python makes the run fail.
-
-Optional binaries (`systemd-analyze`, `caddy`, `authelia`) enable a few more checks; the
-tests that need them skip when they are missing.
 
 ## Running
 
+### PHPUnit (the app)
+
 ```bash
-.venv/bin/pytest -q                                   # everything under tests/pytest/
-.venv/bin/pytest -q tests/pytest/cli                  # one area
-.venv/bin/pytest -q tests/pytest/cli/test_cli.py      # one file
-.venv/bin/pytest -q "tests/pytest/cli/test_cli.py::test_deploy_happy_path_prints_url"   # one test
-node --test tests/node/*.test.mjs                     # Node tests (see below)
-cd tests/playwright && npx playwright test            # browser E2E (see below)
-.venv/bin/ruff check .                                # lint gates
-.venv/bin/black --check .
+cd app
+composer run gates                         # assets, php-cs-fixer, PHPStan 8, lint, then all four suites
+php vendor/bin/phpunit                     # all suites
+php vendor/bin/phpunit --testsuite Unit    # Unit | Integration | Functional | Repo
+php vendor/bin/phpunit --filter RepoHygiene
 ```
 
-Notes:
+PHPUnit fails on deprecations, notices and warnings. It forces `APP_ENV=test` and a temporary
+`FLEET_HOME`, whatever the shell exports, and `FLEET_RUNNER=recording`, so no test runs a host command.
 
-- Use the glob for Node. On Node 22 the directory form `node --test tests/node` fails
-  ("Cannot find module"), so name the files.
-- Run `pytest` from the repository root.
+### Playwright (browser end to end)
 
-### Browser E2E (`tests/playwright/`)
+One-time setup: `cd tests/playwright && npm ci && npx playwright install chromium` (add `--with-deps` as root).
 
 ```bash
 cd tests/playwright
-npx playwright test                              # all of it, headless
-npx playwright test -g "empty value"             # one test, by title
-npx playwright test --headed                     # watch the browser
-npx playwright test --ui                         # Playwright's UI mode
-npx playwright test --debug                      # step through with the inspector
-npx playwright show-report                       # the HTML report of the last run
-npm run typecheck                                # tsc --noEmit
+npm run typecheck                                  # tsc --noEmit
+env -u FLEET_E2E_BASE_URL npx playwright test      # the self-contained gate
+npm run test:smoke                                 # @smoke specs only
+npx playwright test -g "dark mode"                 # one group, by title
+npx playwright test --project=phone --headed       # watch the 390 px project
+npx playwright show-report                         # the HTML report of the last run
 ```
 
-- `playwright test` starts the daemons itself (`webServer` in `playwright.config.ts`, launcher
-  `support/start-daemon.mjs`): one with a host key, one without. Per daemon the launcher makes a
-  short `FLEET_HOME` under `/tmp` (gpg-agent socket paths are limited to about 100 characters),
-  writes the registry, creates the host key with `fleet keys init`, runs uvicorn on
-  `fleet.daemon:app`, and on exit stops it, kills the gpg-agent and removes the home.
-- Chromium runs headless with the real CSP enforced. A console error, an uncaught page error or a
-  CSP violation fails the test (`support/fixtures.ts`); a test that provokes an expected 4xx adds
-  its console text to `expectedConsoleErrors`.
-- The tests share the two daemons, so they run serially in one worker, and each starts with an
-  empty secret store.
-- Environment: `FLEET_PYTHON` (interpreter with `fleet` installed; default `.venv/bin/python`
-  when it exists, else `python3`), `FLEET_E2E_PORT` (default 18791) and `FLEET_E2E_PORT_NOKEY`
-  (default 18792).
+With `FLEET_E2E_BASE_URL` unset, Playwright starts the app itself (`support/start-app.mjs`: a throw-away
+`FLEET_HOME`, `importmap:install`, `tailwind:build`, migrations, `php -S 127.0.0.1:8000`) and stops it
+afterwards. With it set to a URL, the suite targets that already-running server and starts nothing
+(`FLEET_E2E_IGNORE_HTTPS_ERRORS=1` accepts a local certificate; `*.ddev.site` hosts are accepted
+automatically). Other variables: `FLEET_E2E_PORT` (default 8000) and `FLEET_PHP` (the PHP binary of the
+launcher). The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
+bottom bar, and the shell specs assert that no console error or uncaught page error was seen (`support/shell.ts`).
 
-## Skip versus fail
-
-A pytest test that needs an external tool skips when the tool is missing. These flags turn the
-skip into a failure, so a missing tool cannot silently shrink the suite. CI sets both.
-
-| Flag | Requires |
-|---|---|
-| `FLEET_REQUIRE_PGP_TOOLS=1` | `gpg` and `node` (the real-crypto and interop tests) |
-| `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` | `systemd-analyze` (unit sandbox scoring; any non-empty value counts) |
-
-Two environment variables point at optional binaries: `FLEET_TEST_CADDY_BIN` (validate the
-rendered Caddyfile; `caddy` on `PATH` is used by the Caddy auth tests) and
-`FLEET_TEST_AUTHELIA_BIN` (validate the Authelia configuration; falls back to `authelia` on
-`PATH`). Without them those few tests skip.
-
-To run the suite the way CI does:
+### pytest (CI tooling and Ansible roles)
 
 ```bash
-FLEET_REQUIRE_PGP_TOOLS=1 FLEET_REQUIRE_SYSTEMD_ANALYZE=1 .venv/bin/pytest -q
-(cd tests/playwright && npx playwright test)
+pip install -r ci/requirements-dev.txt
+FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest     # as the pipeline does; needs systemd-analyze
+pytest -q tests/pytest/repo                                  # one area
 ```
+
+Without `FLEET_REQUIRE_SYSTEMD_ANALYZE`, the unit-scoring tests skip when `systemd-analyze` is missing;
+with it, a missing binary is a failure so the suite cannot silently shrink (CI sets it). Two more tests
+use optional binaries: `FLEET_TEST_CADDY_BIN` (validates a rendered Caddyfile) and
+`FLEET_TEST_AUTHELIA_BIN` (validates the Authelia configuration, falls back to `authelia` on `PATH`);
+without them those tests skip. The Python code of the 0.x app and its pytest, Node and gpg tests are
+not on `develop`; they are on `main`.
 
 ## Conventions
 
-- Put a new test in the pytest area that matches the source module it exercises, as
-  `tests/pytest/<area>/test_<topic>.py`. A new area is a new folder with an empty
-  `__init__.py`.
-- A change to a UI page, template or the JavaScript it loads also needs a Playwright test
-  (`tests/playwright/*.spec.ts`): unit tests with a fake htmx or the ASGI test client cannot see htmx
-  form validation, the CSP or module loading.
-- Browser-side logic that can run without a browser (the ES modules under
-  `src/fleet/static`) is tested in `tests/node/`.
-- Import shared helpers as `from tests.conftest import ...`. Never import from a sibling
-  area's test file unless that file exports the helper on purpose.
-- CI (`bitbucket-pipelines.yml`) runs the same commands: `pytest -q`, `ruff check .`,
-  `black --check .`, `node --test tests/node/*.test.mjs` and, in `tests/playwright`,
-  `npm ci`, `npx playwright install --with-deps --only-shell chromium` and
-  `npx playwright test`.
+- Put a PHPUnit test where it belongs: `Unit` for plain objects, `Integration` when the container or a
+  database is involved, `Functional` for an HTTP round trip, `Repo` for a rule about the repository.
+  Classes live in `App\Tests\<Suite>\`.
+- A change to a page, a template or the JavaScript it loads also needs a Playwright spec: unit and
+  functional tests cannot see layout, focus, dark mode or contrast. Check both projects (1280 px and 390 px).
+- Never touch real state: tests use the temporary `FLEET_HOME` and the recording runner. A test that
+  needs a real host command does not belong in the gates.
+- Public repository: test data uses `fleet.example.com`, `demo` and `blog`. `app/tests/Repo/RepoHygieneTest.php`
+  fails on owner hostnames, private project names and workspace paths.
+- CI (`bitbucket-pipelines.yml`) runs the same commands: `composer run gates`, then in `tests/playwright`
+  `npm ci`, `npx playwright install --with-deps --only-shell chromium`, `npm run typecheck` and
+  `npx playwright test`, plus the pytest step above. Details: [`docs/README-ci.md`](../docs/README-ci.md).

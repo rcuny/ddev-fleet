@@ -2,15 +2,7 @@
 *.sql
 .venv/
 __pycache__/
-*.pyc
-.pytest_cache/
-.ruff_cache/
-*.egg-info/
-/assets/
-/instances/
-/fleet.yml
-# Superpowers/SDD scratch must never live in the product repo — belongs in the
-# companion's .claude/user/tmp/ (see its rules/34-superpowers-state-location.md).
+# Agent workflow scratch (planning and review state) is never product code.
 .superpowers/
 
 # CI report artifacts (ci/systemd_security.py, bitbucket-pipelines.yml)

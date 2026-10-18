@@ -1,0 +1,83 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="flex min-h-screen bg-page text-ink-body">
+    {# Main navigation rail: sticky, from md up. Phones get the bottom bar instead. #}
+    <aside class="sticky top-0 hidden h-screen w-56 shrink-0 border-r border-hairline md:block">
+        {# nav aria-label="Main" #}
+    </aside>
+
+    <div class="flex min-w-0 flex-1 flex-col">
+        <header class="flex h-14 items-center justify-between border-b border-hairline px-4">
+            <span class="font-display text-sm font-semibold text-ink-display">Page title</span>
+            <twig:ThemeToggle />
+        </header>
+        <main id="main" class="flex-1 px-4 py-8 pb-24 sm:px-8 md:pb-8">
+            <div class="mx-auto max-w-4xl">
+                {# <twig:PageHeader> then the page content #}
+            </div>
+        </main>
+    </div>
+
+    {# Phone bottom bar: fixed, 56 px plus the safe-area inset. #}
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="shells" title="Shells" :sample="sample|trim">
+    <twig:block name="preview">
+        <div class="overflow-hidden rounded-md border border-hairline" aria-hidden="true">
+            <div class="flex h-48">
+                <div class="w-12 shrink-0 border-r border-hairline bg-page p-2">
+                    <div class="mb-2 size-7 rounded bg-brand-faded"></div>
+                    <div class="space-y-1.5">
+                        <div class="h-4 w-7 rounded bg-surface"></div>
+                        <div class="h-4 w-7 rounded bg-surface"></div>
+                        <div class="h-4 w-7 rounded bg-surface"></div>
+                    </div>
+                </div>
+                <div class="flex-1 bg-surface">
+                    <div class="flex h-10 items-center justify-between border-b border-hairline bg-page px-3">
+                        <div class="h-3 w-24 rounded bg-surface"></div>
+                        <div class="size-5 rounded-full bg-surface"></div>
+                    </div>
+                    <div class="space-y-1.5 p-3">
+                        <div class="h-2 w-3/4 rounded bg-page"></div>
+                        <div class="h-2 w-1/2 rounded bg-page"></div>
+                        <div class="h-2 w-2/3 rounded bg-page"></div>
+                    </div>
+                </div>
+            </div>
+            <div class="flex h-10 items-center justify-around border-t border-hairline bg-page md:hidden">
+                <div class="size-5 rounded bg-brand-faded"></div>
+                <div class="size-5 rounded bg-surface"></div>
+                <div class="size-5 rounded bg-surface"></div>
+            </div>
+        </div>
+    </twig:block>
+    <twig:block name="description">
+        <p>
+            The outermost page frame: a full-bleed <code>bg-page</code> container with the main navigation rail on the left and a content column on the right.
+            The content column holds a slim top bar (page title, <code>ThemeToggle</code>, account menu) and the <code>main</code> landmark.
+            Below <code>md</code> the rail disappears in favour of a fixed bottom bar; sub navigation lives inside page headers as tabs, never in the shell.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Every authenticated screen.</li>
+            <li>Pair with a page header at the top of <code>main</code>.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Modals and sheets: they layer on top of the shell.</li>
+            <li>Sign-in and error screens that have no navigation.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><strong>One <code>main</code></strong> with <code>id="main"</code> per page, the target of the skip link; one <code>h1</code> per page (the page header).</li>
+            <li><strong>Content width</strong>: wrap the page in <code>mx-auto max-w-4xl</code> for readable prose; the shell itself stays full-bleed.</li>
+            <li><strong>Phone</strong>: reserve room for the bottom bar (<code>pb-24</code>) so the last content is never hidden behind it.</li>
+            <li><strong>Tap targets</strong>: every control is at least 44 px (<code>min-h-11</code>) below <code>md</code>.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

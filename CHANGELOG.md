@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+- **FLE-35: `develop` is now the Symfony 1.x line.** The Python app (`src/fleet/`, the `fleet` CLI, the FastAPI daemon), `pyproject.toml`, `fleet.yml` and its example, the OpenPGP/htmx vendoring (`bootstrap.sh`, `docs/client-side-encryption.md`, `docs/vendored-assets.md`) and the Python/Node/pytest suites for them are removed from `develop`. The 0.x line continues on `main` (tags `v0.*`) and is not affected.
+- The documentation is reworked for the 1.x workflow: `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `docs/README.md` (index with a status per document), `docs/development.md`, `tests/README-tests.md`, and `docs/RELEASING.md` (new section "1.x during the port": `v1.*` tags are cut from `release/1.x.y` and merged into `develop` only). The 0.x reference documentation moved to `docs/v0/` with a banner naming the milestone that re-implements each document, and its server, client and workspace specifics were replaced with neutral examples.
+- CI is now PHP: gates (php-cs-fixer, PHPStan level 8, Twig/YAML/container lint, Doctrine schema validation, PHPUnit) and the Playwright suite run on pull requests, `develop`, `feature/**`, `release/**` and tags; Python only remains for the infra tests and the systemd security check. A `v1.*` tag publishes to the GitHub mirror only when its commit is on `origin/develop` and pushes the tag alone (`ci/tag-guard.sh`); `v0.*` tags keep the old rule. Renovate now covers Composer and npm.
+
+### Added
+- **FLE-35: the Symfony 8.1 app skeleton in `app/`** (PHP 8.4, Doctrine ORM over SQLite, Twig, Symfony UX, AssetMapper, Tailwind v4 without a Node build) with the seams every later milestone uses: `App\Fleet\Shell\CommandRunner` (real `ProcessCommandRunner`, scripted `RecordingCommandRunner`, chosen by `FLEET_RUNNER`), `App\Fleet\FleetPaths` (every path under `FLEET_HOME`, ids validated), two SQLite databases (`fleet.sqlite` and the Messenger `queue.sqlite`, WAL, `busy_timeout`, foreign keys on every connection), Symfony Lock and Mercure wiring.
+- Authentication by proxy header: `Remote-User`, `Remote-Groups`, `Remote-Email` and `Remote-Name` are trusted only from `FLEET_TRUSTED_PROXIES`; the group `FLEET_ADMIN_GROUP` gives `ROLE_ADMIN`, everyone else is a member. A dev/test-only stand-in login (role switch, cookie and header) replaces the proxy during development. Until the installer milestone the proxy trust boundary is loopback only; do not expose the 1.x app to the Internet yet.
+- Production safety for the Symfony app: a `prod` kernel refuses to boot with an empty `APP_SECRET` or `FLEET_RUNNER=recording`; the committed `.env` stand-in role is `none`; host commands run with an allow-listed environment (no `APP_SECRET`, `DATABASE_URL`, ...); a repo test keeps process execution inside `ProcessCommandRunner`; `composer run prod-check` (also a CI step) builds and probes the production path in a throw-away copy.
+- A public `GET /health` endpoint (fleet database, queue database, writable `FLEET_HOME`).
+- The design system and responsive app shell: design tokens with dark mode, the UX Toolkit shadcn kit, reusable Twig components, sidebar and phone bottom navigation, and a reference page at `/admin/design-system`.
+- A Playwright suite (38 specs at 1280 px and 390 px: app shell, navigation, dark mode, accessibility with axe in both themes, design-system page) and the PHPUnit suites (`Unit`, `Integration`, `Functional`, `Repo`).
+
 ## [0.20.0] - 2026-10-18
 
 ### Added

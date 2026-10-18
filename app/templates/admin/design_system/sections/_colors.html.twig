@@ -1,0 +1,87 @@
+{# symfony-design-system:start #}
+{% set palette = {
+    'Surfaces': [
+        {name: 'page', swatch: 'bg-page', utility: 'bg-page', light: '#ffffff', dark: '#020617'},
+        {name: 'surface', swatch: 'bg-surface', utility: 'bg-surface', light: '#f8fafc', dark: '#0f172a'},
+        {name: 'hairline', swatch: 'bg-hairline', utility: 'border-hairline', light: '#e2e8f0', dark: '#1e293b'},
+    ],
+    'Text': [
+        {name: 'ink-body', swatch: 'bg-ink-body', utility: 'text-ink-body', light: '#334155', dark: '#e2e8f0'},
+        {name: 'ink-display', swatch: 'bg-ink-display', utility: 'text-ink-display', light: '#0f172a', dark: '#f8fafc'},
+        {name: 'ink-muted', swatch: 'bg-ink-muted', utility: 'text-ink-muted', light: '#64748b', dark: '#94a3b8'},
+    ],
+    'Brand': [
+        {name: 'brand', swatch: 'bg-brand', utility: 'bg-brand / ring-brand', light: '#0891b2', dark: '#0891b2'},
+        {name: 'brand-faded', swatch: 'bg-brand-faded', utility: 'bg-brand-faded', light: '#e1f2f6', dark: '#031f33'},
+        {name: 'brand-darker', swatch: 'bg-brand-darker', utility: 'bg-brand-darker / text-brand-darker', light: '#0e7490', dark: '#0e7490'},
+    ],
+    'Signal': [
+        {name: 'signal', swatch: 'bg-signal', utility: 'bg-signal', light: '#fcd34d', dark: '#fcd34d'},
+        {name: 'signal-faded', swatch: 'bg-signal-faded', utility: 'bg-signal-faded', light: '#fffaea', dark: '#2f2b21'},
+        {name: 'signal-darker', swatch: 'bg-signal-darker', utility: 'text-signal-darker', light: '#b45309', dark: '#b45309'},
+    ],
+    'Danger': [
+        {name: 'danger', swatch: 'bg-danger', utility: 'bg-danger / text-danger', light: '#dc2626', dark: '#f87171'},
+        {name: 'danger-faded', swatch: 'bg-danger-faded', utility: 'bg-danger-faded', light: '#fbe5e5', dark: '#2e1927'},
+        {name: 'danger-darker', swatch: 'bg-danger-darker', utility: 'text-danger-darker', light: '#b91c1c', dark: '#b91c1c'},
+    ],
+} %}
+{% set sample %}{% verbatim %}
+<div class="bg-page text-ink-body">
+    <div class="border border-hairline bg-surface p-4">
+        <h2>Headline</h2>
+        <p class="text-ink-muted">Quiet supporting copy.</p>
+        <twig:Button>Primary action</twig:Button>
+    </div>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="colors" title="Colors" :sample="sample|trim">
+    <twig:block name="preview">
+        <div class="space-y-8">
+            {% for group, tokens in palette %}
+                <div>
+                    <p class="mb-3 text-sm font-semibold text-ink-display">{{ group }}</p>
+                    <div class="grid grid-cols-2 gap-4 sm:grid-cols-3">
+                        {% for token in tokens %}
+                            <twig:Ds:ColorSwatch :name="token.name" :swatch="token.swatch" :utility="token.utility" :light="token.light" :dark="token.dark" />
+                        {% endfor %}
+                    </div>
+                </div>
+            {% endfor %}
+        </div>
+    </twig:block>
+    <twig:block name="description">
+        <p>
+            Fifteen semantic tokens, each defined for light and dark mode. Use the token names, never raw hex.
+            Each swatch follows the mode you are viewing; both values are listed below it.
+        </p>
+        <p>
+            The kit's shadcn utilities (<code>bg-primary</code>, <code>bg-muted</code>, <code>text-muted-foreground</code>,
+            <code>border-input</code>) resolve to these tokens in <code>design-system.css</code>, so kit components follow the system in both modes.
+            The brand colour is <code>brand</code>, not <code>accent</code>: in the kit <code>accent</code> is the hover surface.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Always reach for a token first.</li>
+            <li><code>page</code> / <code>surface</code> for layered backgrounds.</li>
+            <li><code>ink-display</code> for headlines and emphasised content.</li>
+            <li>Pair every <code>*-faded</code> background with <code>*-darker</code> text (<code>dark:</code> the base colour, see options).</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Never raw hex values or default palette colours (<code>bg-gray-50</code>, <code>text-blue-600</code>).</li>
+            <li>Do not invent colour names ad hoc: extend the system through the skill.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><strong>Text on faded backgrounds</strong> (4.5:1): <code>text-brand-darker dark:text-brand</code> on <code>bg-brand-faded</code>, <code>text-signal-darker dark:text-signal</code> on <code>bg-signal-faded</code>, <code>text-danger-darker dark:text-danger</code> on <code>bg-danger-faded</code>.</li>
+            <li><strong>Links</strong> use <code>brand-darker</code> in light mode and <code>brand</code> in dark mode (base style).</li>
+            <li><strong>Bridge per mode</strong>: <code>--primary</code> is <code>brand-darker</code> with white text in light mode and <code>brand</code> with page-coloured text in dark mode; <code>--destructive</code> is <code>danger-darker</code> in light mode and <code>danger</code> in dark mode. Kit buttons, badges, links and alerts therefore reach 4.5:1 without overrides.</li>
+            <li><strong>Dark mode</strong> redefines the variables under <code>.dark</code> on <code>&lt;html&gt;</code>; a token that swaps needs no <code>dark:</code> utility; only the <code>*-darker</code> text pairings above add one.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

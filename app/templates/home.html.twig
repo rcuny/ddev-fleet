@@ -1,0 +1,16 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Home · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Home" description="The fleet at a glance. Instances, jobs and projects arrive milestone by milestone." />
+    <twig:Card class="mt-6 max-w-xl">
+        <twig:Card:Header>
+            <twig:Card:Title>Your access</twig:Card:Title>
+            <twig:Card:Description>The identity and role your sign-in proxy gave you.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            <twig:UserMenu variant="block" data-testid="role-summary" />
+        </twig:Card:Content>
+    </twig:Card>
+{% endblock %}

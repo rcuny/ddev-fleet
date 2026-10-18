@@ -1,0 +1,115 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="space-y-8">
+    <div class="flex h-80 overflow-hidden rounded-md border border-hairline">
+        <nav aria-label="Rail sample" class="flex w-52 shrink-0 flex-col border-r border-hairline bg-page">
+            <div class="flex h-14 items-center gap-2 border-b border-hairline px-3">
+                <span class="flex size-7 items-center justify-center rounded-md bg-brand-faded font-display text-sm font-semibold text-brand-darker dark:text-brand" aria-hidden="true">A</span>
+                <span class="font-display text-sm font-semibold text-ink-display">Acme</span>
+            </div>
+            <ul class="flex flex-1 flex-col gap-1 p-2 text-sm">
+                <li>
+                    <a href="#main-navigation" aria-current="page" class="flex min-h-11 items-center gap-3 rounded-md bg-brand-faded px-3 text-brand-darker hover:no-underline dark:text-brand">
+                        <twig:ux:icon name="lucide:house" class="size-4 shrink-0" />Home
+                    </a>
+                </li>
+                <li>
+                    <a href="#main-navigation" class="flex min-h-11 items-center gap-3 rounded-md px-3 text-ink-body hover:bg-surface hover:text-ink-display hover:no-underline">
+                        <twig:ux:icon name="lucide:folder" class="size-4 shrink-0" />Projects
+                    </a>
+                </li>
+                <li>
+                    <a href="#main-navigation" class="flex min-h-11 items-center gap-3 rounded-md px-3 text-ink-body hover:bg-surface hover:text-ink-display hover:no-underline">
+                        <twig:ux:icon name="lucide:users" class="size-4 shrink-0" />Members
+                    </a>
+                </li>
+            </ul>
+            <div class="border-t border-hairline p-2">
+                <twig:DropdownMenu id="ds-main-nav-user" side="top" align="start" class="w-full">
+                    <twig:DropdownMenu:Trigger>
+                        <twig:Button variant="ghost" class="h-11 w-full justify-start gap-3 px-2" {{ ...dropdown_menu_trigger_attrs }}>
+                            <span class="flex size-7 items-center justify-center rounded-full bg-brand-faded text-xs font-semibold text-brand-darker dark:text-brand" aria-hidden="true">Y</span>
+                            <span class="min-w-0 flex-1 truncate text-start">you@example.com</span>
+                        </twig:Button>
+                    </twig:DropdownMenu:Trigger>
+                    <twig:DropdownMenu:Content class="w-56">
+                        <twig:DropdownMenu:Label>Signed in as you@example.com</twig:DropdownMenu:Label>
+                        <twig:DropdownMenu:Separator />
+                        <twig:DropdownMenu:Item><twig:ux:icon name="lucide:user" />Profile</twig:DropdownMenu:Item>
+                        <twig:DropdownMenu:Item><twig:ux:icon name="lucide:log-out" />Sign out</twig:DropdownMenu:Item>
+                    </twig:DropdownMenu:Content>
+                </twig:DropdownMenu>
+            </div>
+        </nav>
+        <div class="flex-1 bg-surface p-4 text-sm text-ink-muted">Page content</div>
+    </div>
+
+    <div>
+        <p class="mb-2 text-xs tracking-wider text-ink-muted uppercase">Phone: bottom bar with a More sheet</p>
+        <nav aria-label="Bottom bar sample" class="flex max-w-sm items-stretch justify-around rounded-md border border-hairline bg-page">
+            <a href="#main-navigation" aria-current="page" class="flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs text-brand-darker hover:no-underline dark:text-brand">
+                <twig:ux:icon name="lucide:house" class="size-5" />Home
+            </a>
+            <a href="#main-navigation" class="flex min-h-14 flex-1 flex-col items-center justify-center gap-0.5 text-xs text-ink-body hover:no-underline">
+                <twig:ux:icon name="lucide:folder" class="size-5" />Projects
+            </a>
+            <twig:Sheet id="ds-more" side="bottom" class="flex flex-1">
+                <twig:Sheet:Trigger>
+                    <twig:Button variant="ghost" class="h-auto min-h-14 w-full flex-col gap-0.5 rounded-none text-xs font-normal text-ink-body" {{ ...sheet_trigger_attrs }}>
+                        <twig:ux:icon name="lucide:ellipsis" class="size-5" />More
+                    </twig:Button>
+                </twig:Sheet:Trigger>
+                <twig:Sheet:Content>
+                    <twig:Sheet:Header>
+                        <twig:Sheet:Title>More</twig:Sheet:Title>
+                        <twig:Sheet:Description>Everything that does not fit in the bar.</twig:Sheet:Description>
+                    </twig:Sheet:Header>
+                    <ul class="px-4 pb-6">
+                        <li><a href="#main-navigation" class="flex min-h-11 items-center">Members</a></li>
+                        <li><a href="#main-navigation" class="flex min-h-11 items-center">Settings</a></li>
+                    </ul>
+                </twig:Sheet:Content>
+            </twig:Sheet>
+        </nav>
+    </div>
+
+    <div class="flex flex-wrap items-center gap-6">
+        <div class="flex items-center gap-3"><twig:ThemeToggle /><span class="text-sm text-ink-muted">ThemeToggle</span></div>
+        <div class="flex items-center gap-3"><twig:ThemeToggle variant="segmented" /><span class="text-sm text-ink-muted">segmented</span></div>
+    </div>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="main-navigation" title="Main navigation" :sample="sample|trim" :components="['DropdownMenu', 'Sheet', 'ThemeToggle']">
+    <twig:block name="description">
+        <p>
+            Top-level destinations. On <code>md</code> and up a sticky rail on the left holds the brand, the destinations and the account menu.
+            On phones the same destinations become a bottom bar with the most used items plus a <strong>More</strong> button that opens a sheet with the rest.
+            The active destination is marked with <code>aria-current="page"</code> and a <code>bg-brand-faded</code> pill.
+        </p>
+        <p>
+            <code>ThemeToggle</code> flips light and dark with the Stimulus <code>theme</code> controller (state on <code>&lt;html class="dark"&gt;</code>, choice in
+            <code>localStorage["fleet-theme"]</code>); <code>variant="segmented"</code> adds an explicit Light / Dark / System choice.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>One per shell, always present.</li>
+            <li>Top-level destinations only; 4 to 8 items, more only with hairline groups.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Second-level destinations: use sub navigation tabs in the page header.</li>
+            <li>Actions: those are buttons or menus.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><strong>Labels</strong>: distinct <code>aria-label</code> per landmark (<code>Main</code> for the rail, <code>Primary</code> for the bottom bar).</li>
+            <li><strong>Account menu</strong>: <code>DropdownMenu</code> opening upwards (<code>side="top"</code>) from the rail foot.</li>
+            <li><strong>Role-aware</strong>: render only the items the current user may open; hiding is cosmetic, the access rules decide.</li>
+            <li><strong>Phone</strong>: bar height 56 px plus <code>env(safe-area-inset-bottom)</code>; every target at least 44 px.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

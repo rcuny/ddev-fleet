@@ -1,0 +1,86 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="flex flex-wrap items-center gap-3">
+    {# Confirmation dialog. #}
+    <twig:Dialog id="ds-modal-confirm">
+        <twig:Dialog:Trigger>
+            <twig:Button {{ ...dialog_trigger_attrs }}>Open dialog</twig:Button>
+        </twig:Dialog:Trigger>
+        <twig:Dialog:Content>
+            <twig:Dialog:Header>
+                <twig:Dialog:Title>Destroy instance?</twig:Dialog:Title>
+                <twig:Dialog:Description>This permanently removes the instance and its data. This action cannot be undone.</twig:Dialog:Description>
+            </twig:Dialog:Header>
+            <twig:Dialog:Footer>
+                <twig:Dialog:Close>
+                    <twig:Button variant="outline" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                </twig:Dialog:Close>
+                <twig:Dialog:Close>
+                    <twig:Button variant="destructive" {{ ...dialog_close_attrs }}>Destroy</twig:Button>
+                </twig:Dialog:Close>
+            </twig:Dialog:Footer>
+        </twig:Dialog:Content>
+    </twig:Dialog>
+
+    {# Wider dialog whose body scrolls when taller than the viewport. #}
+    <twig:Dialog id="ds-modal-tall">
+        <twig:Dialog:Trigger>
+            <twig:Button variant="secondary" {{ ...dialog_trigger_attrs }}>Open tall dialog</twig:Button>
+        </twig:Dialog:Trigger>
+        <twig:Dialog:Content class="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
+            <twig:Dialog:Header>
+                <twig:Dialog:Title>Terms of service</twig:Dialog:Title>
+                <twig:Dialog:Description>Content taller than the screen scrolls inside the dialog.</twig:Dialog:Description>
+            </twig:Dialog:Header>
+            {% for i in 1..10 %}
+                <p>Section {{ i }}. Lorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore.</p>
+            {% endfor %}
+        </twig:Dialog:Content>
+    </twig:Dialog>
+
+    {# Sheet: a panel sliding in from an edge. #}
+    <twig:Sheet id="ds-modal-sheet" side="right">
+        <twig:Sheet:Trigger>
+            <twig:Button variant="outline" {{ ...sheet_trigger_attrs }}>Open sheet</twig:Button>
+        </twig:Sheet:Trigger>
+        <twig:Sheet:Content>
+            <twig:Sheet:Header>
+                <twig:Sheet:Title>Filters</twig:Sheet:Title>
+                <twig:Sheet:Description>Narrow the list.</twig:Sheet:Description>
+            </twig:Sheet:Header>
+            <div class="px-4 text-sm">Sheet body</div>
+        </twig:Sheet:Content>
+    </twig:Sheet>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="modal" title="Modal" :sample="sample|trim" :components="['Dialog', 'Sheet', 'Button']">
+    <twig:block name="description">
+        <p>
+            <code>Dialog</code> and <code>Sheet</code> use the native <code>&lt;dialog&gt;</code> element driven by the kit's Stimulus <code>dialog</code> controller:
+            focus is trapped, Escape and a click on the backdrop close it, and the title and description are linked for assistive technology.
+            A sheet slides in from <code>left</code>, <code>right</code>, <code>top</code> or <code>bottom</code>; on phones prefer a bottom sheet.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Confirmations (destroy, discard).</li>
+            <li>Focused tasks that block the page; sheets for filters and secondary navigation.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Passive notifications: use an alert or a toast.</li>
+            <li>Long forms: use a page.</li>
+            <li>Stacked on another dialog: flatten the flow.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li>Each dialog needs a unique <code>id</code>; the trigger spreads <code>dialog_trigger_attrs</code> onto its button, closers spread <code>dialog_close_attrs</code>.</li>
+            <li>Always give a <code>Title</code>; a <code>Description</code> is the supporting line.</li>
+            <li><code>showCloseButton="false"</code> on <code>Dialog:Content</code> hides the corner close button.</li>
+            <li>Width: <code>sm:max-w-lg</code> on the content for larger dialogs.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

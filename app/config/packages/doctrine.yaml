@@ -1,0 +1,46 @@
+doctrine:
+    dbal:
+        default_connection: default
+        connections:
+            # Domain data (projects, instances, jobs, audit ...): FLEET_HOME/var/fleet.sqlite
+            default:
+                url: '%env(resolve:DATABASE_URL)%'
+                profiling_collect_backtrace: '%kernel.debug%'
+            # Messenger transports only: FLEET_HOME/var/queue.sqlite
+            queue:
+                url: '%env(resolve:QUEUE_DATABASE_URL)%'
+                profiling_collect_backtrace: '%kernel.debug%'
+    orm:
+        default_entity_manager: default
+        entity_managers:
+            default:
+                connection: default
+                validate_xml_mapping: true
+                naming_strategy: doctrine.orm.naming_strategy.underscore
+                # Entities live under App\Domain\<Area>\ (attribute mapping, one namespace root).
+                mappings:
+                    Domain:
+                        type: attribute
+                        is_bundle: false
+                        dir: '%kernel.project_dir%/src/Domain'
+                        prefix: 'App\Domain'
+
+when@prod:
+    doctrine:
+        orm:
+            entity_managers:
+                default:
+                    query_cache_driver:
+                        type: pool
+                        pool: doctrine.system_cache_pool
+                    result_cache_driver:
+                        type: pool
+                        pool: doctrine.result_cache_pool
+
+    framework:
+        cache:
+            pools:
+                doctrine.result_cache_pool:
+                    adapter: cache.app
+                doctrine.system_cache_pool:
+                    adapter: cache.system

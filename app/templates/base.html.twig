@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+        <title>{% block title %}Fleet{% endblock %}</title>
+        {% block head_extra %}{% endblock %}
+        {# symfony-design-system:start #}
+        {{ include('_partials/head_theme_boot.html.twig') }}
+        {# symfony-design-system:end #}
+        {{ importmap('app') }}
+    </head>
+    <body>
+        {% block body %}
+            <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-page focus:px-4 focus:py-3 focus:text-ink-display focus:ring-2 focus:ring-ring">Skip to content</a>
+            <div class="flex min-h-dvh">
+                <div class="sticky top-0 hidden h-dvh w-60 shrink-0 flex-col border-r border-hairline bg-page md:flex">
+                    {{ include('_shell/sidebar.html.twig') }}
+                </div>
+                <div class="flex min-w-0 flex-1 flex-col">
+                    {{ include('_shell/topbar.html.twig') }}
+                    <main id="main" class="flex-1 px-4 pt-6 pb-[calc(var(--shell-bottom-bar)+env(safe-area-inset-bottom)+1.5rem)] md:px-8 md:pb-10">
+                        {% block content %}{% endblock %}
+                    </main>
+                </div>
+            </div>
+            <twig:BottomNav />
+        {% endblock %}
+    </body>
+</html>

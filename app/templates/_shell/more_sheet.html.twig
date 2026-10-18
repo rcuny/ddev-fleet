@@ -1,0 +1,27 @@
+{# Body of the phone More sheet. Expects "entries": the destinations that do not fit in the bottom bar. #}
+<twig:Sheet:Header>
+    <twig:Sheet:Title>More</twig:Sheet:Title>
+    <twig:Sheet:Description class="sr-only">Other pages, who you are signed in as, and the theme.</twig:Sheet:Description>
+</twig:Sheet:Header>
+<div id="more-sheet" class="flex min-h-0 flex-col gap-4 overflow-y-auto px-4 pb-[calc(1.5rem+env(safe-area-inset-bottom))]">
+    <twig:UserMenu variant="block" data-testid="more-identity" />
+    {% if entries %}
+        <ul class="flex flex-col gap-0.5">
+            {% for entry in entries %}
+                <li>
+                    <a
+                        href="{{ entry.item.path }}"
+                        data-more-item
+                        {% if entry.current %}aria-current="page"{% endif %}
+                        class="flex min-h-11 items-center gap-3 rounded-md px-3 hover:no-underline {{ entry.current ? 'bg-brand-faded text-brand-darker dark:text-brand' : 'text-ink-body hover:bg-surface hover:text-ink-display' }}"
+                    >
+                        <twig:ux:icon :name="entry.item.icon" class="size-4 shrink-0" />{{ entry.item.label }}
+                    </a>
+                </li>
+            {% endfor %}
+        </ul>
+    {% endif %}
+    {% if fleet_stand_in_enabled %}
+        {{ include('_shell/stand_in_switch.html.twig') }}
+    {% endif %}
+</div>

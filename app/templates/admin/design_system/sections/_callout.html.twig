@@ -1,0 +1,70 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="grid max-w-2xl gap-4">
+    <twig:Alert>
+        <twig:ux:icon name="lucide:info" />
+        <twig:Alert:Title>Heads up</twig:Alert:Title>
+        <twig:Alert:Description>A neutral note: tips, summaries and side remarks.</twig:Alert:Description>
+    </twig:Alert>
+
+    <twig:Alert variant="destructive">
+        <twig:ux:icon name="lucide:circle-alert" />
+        <twig:Alert:Title>Deploy failed</twig:Alert:Title>
+        <twig:Alert:Description>The command exited with status 1. See the job log.</twig:Alert:Description>
+    </twig:Alert>
+
+    <twig:Alert class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">
+        <twig:ux:icon name="lucide:check" />
+        <twig:Alert:Title>Instance running</twig:Alert:Title>
+        <twig:Alert:Description class="text-ink-body">It answers on its public URL.</twig:Alert:Description>
+    </twig:Alert>
+
+    <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">
+        <twig:ux:icon name="lucide:triangle-alert" />
+        <twig:Alert:Title>Certificate expires soon</twig:Alert:Title>
+        <twig:Alert:Description class="text-ink-body">Renewal runs automatically.</twig:Alert:Description>
+    </twig:Alert>
+
+    <twig:Card>
+        <twig:Card:Header>
+            <twig:Card:Title>Card</twig:Card:Title>
+            <twig:Card:Description>A bordered container for a group of related content.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            <p>Use a card for a self-contained panel; use an alert for a message about the page.</p>
+        </twig:Card:Content>
+        <twig:Card:Footer>
+            <twig:Button variant="outline" size="sm">Action</twig:Button>
+        </twig:Card:Footer>
+    </twig:Card>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="callout" title="Callout" :sample="sample|trim" :components="['Alert', 'Card']">
+    <twig:block name="description">
+        <p>
+            <code>Alert</code> draws attention to a message inside a page; <code>Card</code> frames a self-contained group of content.
+            Status tints use the faded tokens with their darker text pair.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Tips, warnings, results of an action (alerts).</li>
+            <li>Empty states and summary panels (cards).</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Dialog content: use <code>Dialog</code>.</li>
+            <li>Items of a collection: use the listings patterns.</li>
+            <li>Grouping form fields: use a <code>fieldset</code>.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><code>Alert</code> <code>variant</code>: <code>default</code> | <code>destructive</code>; add an icon first, then <code>Alert:Title</code> and <code>Alert:Description</code>; <code>Alert:Action</code> places a button at the end.</li>
+            <li><code>Card</code> <code>size</code>: <code>default</code> | <code>sm</code>; parts <code>Header</code>, <code>Title</code>, <code>Description</code>, <code>Action</code>, <code>Content</code>, <code>Footer</code>.</li>
+            <li>Tinted alerts: <code>border-transparent bg-*-faded text-*-darker dark:text-*</code>, with body copy in <code>text-ink-body</code>.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

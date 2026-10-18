@@ -1,0 +1,167 @@
+---
+Author: Claude Code
+Reviewer: none
+Last updated: 2026-10-18
+Type: documentation
+---
+
+# Typesense browser-search exposure
+
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.07; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
+How the fleet makes a project's Typesense reachable **from the browser**
+(for widgets like `fern_facets` that query Typesense client-side), without
+ever exposing the Typesense admin key.
+
+## Why this exists
+
+Under classic (non-fleet) DDEV, a project exposes Typesense on a dedicated
+port on its own dev hostname (e.g. `https://fern.ddev.site:8109`) and the
+browser talks to it directly. Under the fleet, instances sit behind Caddy,
+which only fronts `:443` for the wildcard site and proxies to DDEV's shared
+`ddev-router` on loopback — nothing else is reachable from outside the host
+by default. Typesense needed its own deliberate, opt-in exposure path.
+
+## This supersedes the path-based design
+
+An earlier design (see the 2026-07-15 edge-exposure design notes, kept outside this repository)
+exposed Typesense at `https://{instance}.fleet.<domain>/_typesense/*`
+(same-origin, Caddy `handle`/`strip_prefix`). It was implemented, then
+found **incompatible** at rollout: the `fern_facets` widget's built
+typesense-js client has no `path` option (confirmed in the built dist JS —
+zero `_typesense` occurrences; it always calls `/multi_search` at the
+document root), so path-prefixing broke it. The **port-based** design below
+replaced it fleet-wide (ddev-fleet commit `f3d3820`, 2026-07-16) and matches
+how the project already worked locally (a dedicated port, not a path). If
+you see `/_typesense` or a `FLEET_TYPESENSE_PATH` env var referenced
+anywhere (old specs, stray comments in `fleet.yml.dist`), it's stale.
+
+## Topology (port-based)
+
+```
+Browser
+  │  HTTPS, dedicated port
+  ▼
+https://<project>--<label>.fleet.example.com:9108/multi_search
+  │
+  ▼
+Caddy  — *.{{ fleet_domain }}:9108 site (ansible/roles/caddy/templates/Caddyfile.j2)
+  │  on_demand TLS (same wildcard cert machinery as the main :443 site)
+  │  reverse_proxy 127.0.0.1:{{ ddev_typesense_http_port }}   (8108)
+  ▼
+127.0.0.1:8108  — the shared ddev-router HTTP entrypoint (loopback-only),
+  │                Host-routed to the correct instance's Typesense container
+  ▼
+Instance's Typesense (internal :8108)
+```
+
+- `9108`/`8108` are no longer Python constants hand-synced against Ansible
+  vars — that footgun was eliminated 2026-07-24
+  (`2026-07-24-fleet-port-exposure-design.md`). They now come from
+  `Registry.port_profile("typesense")` (`core/registry.py`): an explicit
+  `fleet.ports.typesense: { public, router }` entry in `fleet.yml`, or —
+  if absent — a built-in legacy default of `public=9108`/`router=8108`
+  (`_TYPESENSE_LEGACY_DEFAULT`), so an existing `fleet.yml` with only
+  `typesense: true` needs zero edits.
+- `8108` (or whatever `router` resolves to) is the shared `ddev-router`
+  entrypoint that every Typesense-enabled instance's container sits
+  behind, Host-routed exactly like the main `:8080` HTTP entrypoint DDEV
+  instances already share. Caddy's `*.<domain>:<public>` site is written
+  and kept in sync by `core/caddyports.py`'s `sync()` — called from
+  `deploy()`/`destroy()`, `fleet refresh-ports`, and daemon startup — not
+  by Ansible past the one-time `ports/` directory seed. See
+  `docs/v0/networking.md` for the generic mechanism.
+- Opt-in is per-project: set `typesense: true` on a project block in
+  `fleet.yml` (see `fleet.yml.dist` for the commented example).
+  `Registry.typesense_enabled(project)` gates all of the behavior below.
+
+## The two keys, and why
+
+`src/fleet/core/typesense.py:ensure_project_keys()` generates and persists,
+once per project, through the secret store (`/srv/fleet/secrets/<project>.env`, or encrypted `.asc` files once the host has a key; see `docs/v0/operations.md`):
+
+| Key | Purpose | Ever sent to the browser? |
+|---|---|---|
+| `TYPESENSE_API_KEY` | Admin key. Boots the Typesense container, used by the Drupal backend for indexing (`search_api` write access). | **No.** |
+| `FLEET_TYPESENSE_SEARCH_KEY` | Search-only key (`documents:search` only, all collections), registered against the running instance's Typesense via `register_search_key()` (a `POST /keys` call over the loopback route above) after `ddev start`. | **Yes — this is the only key the browser ever receives.** |
+
+Key generation is idempotent (`generate_key()` is `secrets.token_hex(24)`;
+existing keys are read back and never rotated once set) and non-fatal on
+failure: if `register_search_key()` can't reach the instance's admin API,
+deploy logs a `WARNING` and continues rather than failing the whole deploy —
+search just won't work until the key is re-registered (re-running a deploy
+retries it).
+
+## `.ddev/.env` — the container boot key
+
+`write_ddev_env()` (`src/fleet/core/fleetconfig.py`) upserts
+`TYPESENSE_API_KEY` into the instance's `.ddev/.env`, which DDEV interpolates
+into the project's own `docker-compose.*.yaml` (the project commits its own
+`.ddev/docker-compose.typesense.yaml` — the fleet does not generate the
+compose file, only the admin key it needs). This is how the Typesense
+container itself boots with the fleet-managed admin key instead of a
+project-local default. `.ddev/.env` is added to `.git/info/exclude` for the
+instance (never committed).
+
+## `FLEET_TYPESENSE_*` env injection (`config.fleet.yaml`)
+
+`write_fleet_config()` adds to the instance's `.ddev/config.fleet.yaml`
+`web_environment` block, when the project opts in:
+
+| Var | Value |
+|---|---|
+| `FLEET_TYPESENSE_HOST` | `{instance-id}.{fleet-domain}` |
+| `FLEET_TYPESENSE_PORT` | `9108` (the public Caddy port, `typesense_port` param) |
+| `TYPESENSE_API_KEY` | the admin key (backend indexing use only) |
+| `FLEET_TYPESENSE_SEARCH_KEY` | the search-only key (what the frontend/Drupal settings hand to the browser) |
+
+## `settings.project.php` connection (config repo)
+
+The project's `settings.project.php` (in the private `ddev-fleet-config`
+repo's `assets/<project>/` tree, injected + token-substituted at deploy —
+see the main `CLAUDE.md`'s "per-project secrets model") reads
+`FLEET_TYPESENSE_HOST`/`FLEET_TYPESENSE_PORT`/`FLEET_TYPESENSE_SEARCH_KEY`
+from the environment and builds the Typesense client config Drupal hands to
+`drupalSettings` for the browser widget — host/port/protocol only, **no
+path** (the old `FLEET_TYPESENSE_PATH` value was removed when the port-based
+design replaced the path-based one). The admin key never appears in
+anything served to the browser.
+
+## `post_deploy` reindex
+
+Because a fresh deploy imports a DB dump whose `search_api` tracker state
+can desync from an empty/fresh Typesense (Drupal reports the index 100%
+tracked while Typesense holds zero documents), the `oak` project's
+`fleet.yml` template `post_deploy` includes `drush search-api:reset-tracker`
+followed by `drush search-api:index` so a freshly deployed instance's
+Typesense index is actually populated, not just marked complete.
+
+## Edge firewall reachability caveat
+
+`:9108` is a non-standard port. Some hosting providers filter
+non-standard ports at the network edge regardless of host firewall
+rules — verify with your provider before relying on `:9108` being
+reachable from a real browser; a local `iptables`/`ufw` check alone is
+not sufficient proof of external reachability.
+
+Inside the Docker network (an instance's own containers, for example a
+Playwright browser), `https://<fqdn>:9108` is served by `ddev-router`
+itself through the in-network port mirror (FLE-29, `docs/v0/networking.md` section
+"In-network mirror of named ports"), so the public Caddy port is not needed
+there. The certificate in-container is DDEV's mkcert one (clients need
+`ignoreHTTPSErrors`).
+
+## Verifying live
+
+```bash
+# Shared ddev-router Typesense entrypoint bound on loopback:
+ss -tlnp | grep -E ':8108\b'          # expect 127.0.0.1:8108
+
+# End-to-end from an external client (replace with a real typesense-enabled instance):
+curl -s -o /dev/null -w '%{http_code}\n' \
+  https://<project>--<label>.fleet.example.com:9108/health
+```
+
+See also `docs/v0/operations.md`'s verification checklist for the fuller
+live-verification list (note: an earlier `/_typesense/health` example
+predates this port-based design and is stale — use the `:9108` form above).
