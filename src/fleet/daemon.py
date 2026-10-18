@@ -13,6 +13,7 @@ import os
 import re
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import FastAPI, Form, Query, WebSocket, WebSocketDisconnect
@@ -67,6 +68,16 @@ _PUSH_ALLOC_SUFFIX_RESERVE = 4
 _PUSH_LABEL_COLLISION = "collides with a fixed-label rule"
 
 
+def _rule_fields(rule) -> dict:
+    """Delivery-log fields naming the Bitbucket rule that matched (FLE-30):
+    its action and template and a short selector string; rule config only."""
+    return {
+        "action": rule.action,
+        "template": rule.template,
+        "rule": webhooks_mod.describe_bitbucket_rule(rule),
+    }
+
+
 def _push_deploy_job(
     paths,
     registry,
@@ -109,6 +120,20 @@ def _push_deploy_job(
 def _validate_instance_id(instance_id: str) -> None:
     if not _INSTANCE_ID_RE.match(instance_id):
         raise FleetError(f"invalid instance id {instance_id!r}")
+
+
+def _webhook_time(ts: object) -> str:
+    """A delivery-log `ts` shown as `YYYY-MM-DD HH:MM:SS UTC`; anything that
+    does not parse is shown as logged (the template escapes it)."""
+    if not isinstance(ts, str):
+        return "-"
+    try:
+        parsed = datetime.fromisoformat(ts)
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    except (ValueError, OverflowError):  # e.g. year 1 with a positive offset
+        return ts
 
 
 def format_fingerprint(fingerprint: str) -> str:
@@ -267,6 +292,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
     templates = Jinja2Templates(directory=_TEMPLATES_DIR)
     templates.env.filters["bulk_progress"] = _parse_bulk_progress
     templates.env.filters["fingerprint"] = format_fingerprint
+    templates.env.filters["webhook_time"] = _webhook_time
     # Neither can change without a daemon restart, so compute them once.
     templates.env.globals["hostname"] = hostinfo.hostname()
     templates.env.globals["fleet_version"] = hostinfo.fleet_version()
@@ -443,6 +469,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             "reason": None,
             "instance": None,
             "job": None,
+            # Which rule matched and what it ran (FLE-30): rule config only.
+            "action": None,
+            "template": None,
+            "label": None,
+            "rule": None,
         }
 
         def respond(status: int, content: dict, *, result: str, reason: str | None = None):
@@ -497,6 +528,13 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         rule = webhooks_mod.match_rule(rules, event.to_status)
         if rule is None:
             return ignored(f"no rule for status {event.to_status}")
+        entry.update(
+            {
+                "action": rule.action,
+                "template": rule.template,
+                "rule": webhooks_mod.describe_jira_rule(rule),
+            }
+        )
 
         # Resolve BEFORE claiming the delivery id: a config error (e.g. no
         # default_branch) must not burn the id, so Jira's retry succeeds once
@@ -531,7 +569,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             run_deploy,
             log_path=str(paths.logs / resolved.instance_id / "deploy.log"),
         )
-        entry.update({"instance": resolved.instance_id, "job": job.id})
+        entry.update({"instance": resolved.instance_id, "label": resolved.label, "job": job.id})
         return respond(
             200,
             {"result": "accepted", "instance": resolved.instance_id, "job": job.id},
@@ -589,6 +627,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             "result": None,
             "reason": None,
             "pipeline": None,
+            # Which rule matched and what it ran (FLE-30): rule config only.
+            "action": None,
+            "template": None,
+            "label": None,
+            "rule": None,
         }
 
         def write_log(line: dict):
@@ -657,6 +700,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                     return ignored("no matching rule")
                 return ignored(f"event {webhooks_mod.PUSH_EVENT}")
 
+            if len(plan) == 1:  # a 422 / duplicate line below names the one rule at play
+                entry.update(_rule_fields(plan[0][1]))
             fixed_label_rules = [r for r in rules if r.action == "deploy" and r.label]
             # Alias labels are `<hostname>-<instance id>` and share the 63-char
             # limit (instances.alias_fqdns): keep room for the longest prefix.
@@ -688,7 +733,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                         == resolved.instance_id
                         for fixed in fixed_label_rules
                     ):
-                        collided.append((ev, resolved))
+                        collided.append((ev, rule, resolved))
                     elif resolved.instance_id not in seen_ids:
                         seen_ids.add(resolved.instance_id)
                         targets.append((ev, rule, resolved))
@@ -724,10 +769,12 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             except FleetError as exc:
                 return respond(422, {"error": exc.message}, result="error", reason=exc.message)
 
-            for ev, resolved in collided:
+            for ev, rule, resolved in collided:
                 write_log(
                     {
                         **entry,
+                        **_rule_fields(rule),
+                        "label": resolved.label,
                         "branch": ev.branch,
                         "sha": ev.sha,
                         "instance": resolved.instance_id,
@@ -764,6 +811,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 write_log(
                     {
                         **entry,
+                        **_rule_fields(rule),
+                        "label": resolved.label,
                         "branch": ev.branch,
                         "sha": ev.sha,
                         "instance": resolved.instance_id,
@@ -816,6 +865,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         if rule.action != "run-pipeline":  # `deploy` rules only exist for repo:push
             return ignored("no matching rule")
         assert rule.ref is not None and rule.pattern is not None  # run-pipeline requires both
+        entry.update(_rule_fields(rule))
 
         # A missing token is a config error: do not claim the delivery, so
         # Bitbucket's retry succeeds once `fleet webhook bitbucket-token` ran.
@@ -1031,6 +1081,69 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 status_code=404,
             )
         return await _names_response(request, store, project, f"Deleted {key}.")
+
+    # --- Webhooks screen (FLE-30) ------------------------------------------------
+    # Read-only view of the Jira + Bitbucket delivery logs (`WebhookStore.recent`).
+    # Behind the same Caddy auth as every other page (`/hooks/*` is the only exempt
+    # prefix; `/webhooks` is not under it). Filters are plain query parameters; an
+    # unknown value just yields no rows. Every logged value is rendered through
+    # Jinja autoescape.
+
+    def _webhooks_context(
+        source: str,
+        project: str,
+        result: str,
+        limit: str,
+    ) -> dict:
+        paths, registry = _paths_and_registry()
+        rows_limit = webhooks_mod.clip_limit(limit)
+        filters = {"source": source, "project": project, "result": result}
+        entries, options = webhooks_mod.WebhookStore.from_paths(paths).recent_with_options(
+            rows_limit, **{k: v or None for k, v in filters.items()}
+        )
+        # Link only instances that exist right now: the log outlives destroys.
+        instance_urls: dict[str, str] = {}
+        for entry in entries:
+            instance_id = entry.get("instance")
+            if (
+                isinstance(instance_id, str)
+                and instance_id not in instance_urls
+                and _INSTANCE_ID_RE.fullmatch(instance_id)
+                and (paths.instances / instance_id).is_dir()
+            ):
+                instance_urls[instance_id] = f"https://{instance_id}.{registry.domain}"
+        limit_options = sorted({50, 100, 200, 500, rows_limit})
+        return {
+            "entries": entries,
+            "options": options,
+            "filters": filters,
+            "filtered": any(filters.values()),
+            "limit": rows_limit,
+            "limit_options": limit_options,
+            "instance_urls": instance_urls,
+        }
+
+    @app.get("/webhooks")
+    async def webhooks_page(
+        request: Request,
+        source: str = Query(""),
+        project: str = Query(""),
+        result: str = Query(""),
+        limit: str = Query(""),
+    ):
+        context = await asyncio.to_thread(_webhooks_context, source, project, result, limit)
+        return templates.TemplateResponse(request, "webhooks.html", context)
+
+    @app.get("/ui/webhooks/table")
+    async def ui_webhooks_table(
+        request: Request,
+        source: str = Query(""),
+        project: str = Query(""),
+        result: str = Query(""),
+        limit: str = Query(""),
+    ):
+        context = await asyncio.to_thread(_webhooks_context, source, project, result, limit)
+        return templates.TemplateResponse(request, "partials/webhook_table.html", context)
 
     @app.get("/ui/deploy/templates")
     async def ui_deploy_templates(request: Request, project: str = Query(...)):

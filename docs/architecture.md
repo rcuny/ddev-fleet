@@ -45,7 +45,7 @@ see `docs/operations.md`.
 | File | Responsibility |
 |---|---|
 | `cli.py` | Thin argparse CLI (`fleet …`); calls straight into `fleet.core`, never depends on the daemon |
-| `daemon.py` | FastAPI app: `/api/tls-authorize` (Caddy on-demand TLS callback), `/api/jobs/{id}`, `/ws/instances/{id}/log` (HMAC-token-gated WebSocket), `/` + `/ui/*` HTMX routes for the web UI |
+| `daemon.py` | FastAPI app: `/api/tls-authorize` (Caddy on-demand TLS callback), `/api/jobs/{id}`, `/ws/instances/{id}/log` (HMAC-token-gated WebSocket), `/` + `/ui/*` HTMX routes for the web UI, incl. the read-only `/webhooks` page (FLE-30) |
 | `websecurity.py` | Pure helpers for the dashboard's strict Content-Security-Policy and the same-origin check on `/ui/*` writes (wired in by a middleware in `daemon.py`) |
 | `jobs.py` | In-memory `JobManager` backing the web UI's async deploy jobs |
 | `core/registry.py` | Loads/validates `fleet.yml` (`Registry`), resolves `(project, template, branch, label)` → `ResolvedInstance` |

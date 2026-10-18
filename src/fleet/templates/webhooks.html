@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>Webhooks</h2>
+<p>The latest deliveries received from Jira and Bitbucket, newest first. Read-only: the data is the
+  delivery log (<code>fleet webhook log</code>); deliveries rejected for a bad signature are not
+  logged.</p>
+<form id="webhook-filters" class="inline-form webhook-filters" method="get" action="/webhooks"
+      hx-get="/ui/webhooks/table" hx-trigger="change, submit"
+      hx-target="#webhook-table" hx-swap="outerHTML">
+  <label>Source
+    <select name="source">
+      <option value="">all</option>
+      {% for s in options.sources %}
+      <option value="{{ s }}"{% if s == filters.source %} selected{% endif %}>{{ s }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Project
+    <select name="project">
+      <option value="">all</option>
+      {% for p in options.projects %}
+      <option value="{{ p }}"{% if p == filters.project %} selected{% endif %}>{{ p }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Result
+    <select name="result">
+      <option value="">all</option>
+      {% for r in options.results %}
+      <option value="{{ r }}"{% if r == filters.result %} selected{% endif %}>{{ r }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Show last
+    <select name="limit">
+      {% for n in limit_options %}
+      <option value="{{ n }}"{% if n == limit %} selected{% endif %}>{{ n }}</option>
+      {% endfor %}
+    </select>
+  </label>
+  <button type="submit">Apply</button>
+  <button type="button" id="webhook-refresh" hx-get="/ui/webhooks/table"
+          hx-include="#webhook-filters" hx-target="#webhook-table" hx-swap="outerHTML">Refresh</button>
+</form>
+{% include "partials/webhook_table.html" %}
+{% endblock %}

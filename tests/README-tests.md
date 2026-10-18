@@ -17,7 +17,7 @@ tests/
   pytest/            pytest: unit + TestClient tests, one subfolder per area
     fakegpg.py         a scripted stand-in for gpg, used by the secrets/integrations tests
     cli/               the `fleet` command line (cli.py, bulk commands)
-    web/               daemon, dashboard UI, CSP/web security, Secrets page, job registry
+    web/               daemon, dashboard UI, CSP/web security, Secrets and Webhooks pages, job registry
     instances/         instance lifecycle: deploy, redeploy, list, snapshot, refresh-config,
                        paths, locks, naming, ddev wrappers, bulk orchestration, git/branch reads
     secrets/           OpenPGP secret store, gpg wrapper, tokens, vendored OpenPGP.js, interop
@@ -31,7 +31,7 @@ tests/
                      package-lock.json, node_modules/): real daemons + headless Chromium
     playwright.config.ts   chromium only, one worker; starts the two daemons (webServer)
     support/           start-daemon.mjs (launcher), env.ts (ports, state files), fixtures.ts
-    *.spec.ts          the tests (secrets.spec.ts: the Secrets page)
+    *.spec.ts          the tests (secrets.spec.ts: the Secrets page; webhooks.spec.ts: the Webhooks page)
   node/              Node's built-in test runner (`node --test`): the browser ES modules
                      (`*.test.mjs`) and `encrypt-cli.mjs`, a helper the pytest interop tests call
 ```

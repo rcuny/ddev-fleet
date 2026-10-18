@@ -154,6 +154,10 @@ def test_pw_run_push_deploys_the_pushed_branch_without_replace(hook_env):
     assert last["branch"] == "feature/ABC-1-x--pw-run" and last["sha"] == _SHA
     assert last["instance"] == "p--pw-feature-abc-1-x" and last["job"] == body["job"]
     assert last["delivery_id"] == "u1"
+    # FLE-30: the matched rule and what it ran.
+    assert last["action"] == "deploy" and last["template"] == "ci-pw"
+    assert last["label"] == "pw-feature-abc-1-x"
+    assert last["rule"] == "on_event=repo:push branch=*--pw-run"
 
 
 def test_user_prefixed_uppercase_branch_deploys_the_slugified_instance(hook_env):
@@ -412,6 +416,10 @@ def test_derived_label_colliding_with_a_fixed_label_rule_is_ignored(collision_en
     last = _log(store)[-1]
     assert last["result"] == "ignored" and last["reason"] == "collides with a fixed-label rule"
     assert last["branch"] == "regression--pw-run" and last["instance"] == "website--pw-regression"
+    # FLE-30: the collision line names the derived-label rule that was skipped.
+    assert last["action"] == "deploy" and last["template"] == "ci-pw"
+    assert last["label"] == "pw-regression"
+    assert last["rule"] == "on_event=repo:push branch=*--pw-run"
     assert store.claim_delivery("website", "u1", "bitbucket") is True  # not consumed
 
 
@@ -470,6 +478,23 @@ def test_derived_rule_with_an_existing_id_deploys_a_new_suffixed_instance(hook_e
     job = client.get(f"/api/jobs/{body['job']}").json()
     assert job["instance_id"] == "p--pw-feature-x-1"
     assert job["log_path"].endswith("/p--pw-feature-x-1/deploy.log")
+
+
+def test_page_reader_sees_the_allocated_instance_and_delivery_id(hook_env, fleet_home):
+    """FLE-30: the Webhooks page reads `instance` (the really created id, `-N`
+    suffix included) and `delivery_id` straight from this log line."""
+    client, store, secret, _, _, _ = hook_env
+    _make_instance(fleet_home, "p--pw-feature-x")
+    body = _post(client, _push(_change("feature/x--pw-run")), secret, delivery_id="uuid-7").json()
+    _wait_job(client, body["job"])
+    (entry,) = store.recent(source="bitbucket")
+    assert entry["source"] == "bitbucket"
+    assert entry["instance"] == body["instance"] == "p--pw-feature-x-1"
+    assert entry["delivery_id"] == "uuid-7"
+    assert (entry["action"], entry["template"]) == ("deploy", "ci-pw")
+    assert entry["label"] == "pw-feature-x-1"  # the suffixed label really deployed
+    assert entry["rule"] == "on_event=repo:push branch=*--pw-run"
+    assert "signature" not in json.dumps(entry).lower()
 
 
 def test_derived_rule_skips_every_taken_suffix(hook_env, fleet_home):

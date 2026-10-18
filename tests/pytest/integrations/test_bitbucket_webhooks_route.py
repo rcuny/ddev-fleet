@@ -252,6 +252,21 @@ def test_ignored(hook_env, event, payload, reason):
     assert not calls
 
 
+_RULE_TEXT = {
+    "pullrequest:approved": (
+        "on_event=pullrequest:approved branch=renovate/* ref=develop pattern=renovate-merge"
+    ),
+    "pullrequest:comment_created": (
+        "on_event=pullrequest:comment_created branch=renovate/* comment=/merge"
+        " ref=develop pattern=renovate-merge"
+    ),
+    "repo:commit_status_updated": (
+        "on_event=repo:commit_status_updated branch=renovate/* state=SUCCESSFUL"
+        " ref=develop pattern=renovate-merge"
+    ),
+}
+
+
 @pytest.mark.parametrize(
     "event,payload",
     [
@@ -283,8 +298,12 @@ def test_triggered(hook_env, event, payload):
     assert last["attempt"] == "1"
     assert set(last) == {
         "ts", "project", "delivery_id", "attempt", "event", "repo", "pr", "branch", "state",
-        "result", "reason", "pipeline",
+        "result", "reason", "pipeline", "action", "template", "label", "rule",
     }  # fmt: skip
+    # FLE-30: which rule matched and what it ran (rule config only).
+    assert last["action"] == "run-pipeline"
+    assert last["template"] is None and last["label"] is None
+    assert last["rule"] == _RULE_TEXT[event]
     # Nothing secret ever reaches the log or the response.
     assert "pipeline-token-xyz" not in json.dumps(last) + resp.text
 

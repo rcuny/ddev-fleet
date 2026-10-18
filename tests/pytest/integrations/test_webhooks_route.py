@@ -246,8 +246,13 @@ def test_hook_accepted_submits_deploy(hook_env):
     assert last["job"] == body["job"]
     assert set(last) == {
         "ts", "project", "delivery_id", "retry", "event", "issue", "from", "to",
-        "result", "reason", "instance", "job",
+        "result", "reason", "instance", "job", "action", "template", "label", "rule",
     }  # fmt: skip
+    # FLE-30: the matched rule and what it ran.
+    assert last["action"] == "deploy"
+    assert last["template"] == "jira-work"
+    assert last["label"] == "fle-3"
+    assert last["rule"] == "on_status=Dispatched"
 
 
 def test_hook_log_truncates_delivery_id_and_retry(hook_env):
@@ -265,6 +270,20 @@ def test_hook_log_truncates_delivery_id_and_retry(hook_env):
     last = store.tail_log()[-1]
     assert last["delivery_id"] == "D" * 64
     assert last["retry"] == "R" * 64
+
+
+def test_page_reader_sees_instance_and_delivery_id_of_a_jira_delivery(hook_env):
+    """FLE-30: the Webhooks page reads `instance` and `delivery_id` from this log line."""
+    client, store, secrets, _ = hook_env
+    body = _post(client, "p", _issue_updated(), secrets["p"], delivery_id="jira-uuid-1").json()
+    _wait_job(client, body["job"])
+    (entry,) = store.recent(source="jira")
+    assert entry["source"] == "jira"
+    assert entry["instance"] == "p--fle-3"
+    assert entry["delivery_id"] == "jira-uuid-1"
+    assert (entry["action"], entry["template"], entry["label"]) == ("deploy", "jira-work", "fle-3")
+    assert entry["rule"] == "on_status=Dispatched"
+    assert secrets["p"] not in json.dumps(entry)
 
 
 def test_hook_invalid_registry_500_no_leak(hook_env, fleet_home):
@@ -332,6 +351,10 @@ def test_hook_resolve_error_422(hook_env, fleet_home):
     assert "error" in resp.json()
     assert not calls
     assert store.tail_log()[-1]["result"] == "error"
+    # FLE-30: the 422 line still says which rule/template failed to resolve.
+    failed = store.tail_log()[-1]
+    assert (failed["action"], failed["template"]) == ("deploy", "jira-work")
+    assert failed["rule"] == "on_status=Dispatched" and failed["instance"] is None
 
     # No marker was claimed: once the config is fixed the retry goes through.
     paths = FleetPaths.from_home(fleet_home)

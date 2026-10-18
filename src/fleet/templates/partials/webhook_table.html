@@ -1,0 +1,61 @@
+<div id="webhook-table">
+  {% if entries %}
+  <table class="webhook-table">
+    <thead>
+      <tr>
+        <th>Time</th><th>Source</th><th>Project</th><th>Event</th><th>Ref</th>
+        <th>Rule</th><th>Action</th><th>Result</th><th>Reason</th><th>Delivery</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for e in entries %}
+      <tr class="webhook-row">
+        <td title="{{ e.ts }}">{{ e.ts|webhook_time }}</td>
+        <td>{{ e.source }}</td>
+        <td>{{ e.project if e.project else "-" }}</td>
+        <td>{{ e.event if e.event else "-" }}</td>
+        <td>
+          {%- if e.source == "jira" -%}
+            {{ e.issue if e.issue else "-" }}
+            {%- if e.to %} <span class="webhook-detail">{{ e["from"] if e["from"] else "?" }} &rarr; {{ e.to }}</span>{% endif -%}
+          {%- else -%}
+            {{ e.branch if e.branch else "-" }}
+            {%- if e.pr %} <span class="webhook-detail">PR #{{ e.pr }}</span>{% endif -%}
+            {%- if e.sha %} <span class="webhook-detail">{{ (e.sha|string)[:8] }}</span>{% endif -%}
+            {%- if e.state %} <span class="webhook-detail">{{ e.state }}</span>{% endif -%}
+          {%- endif -%}
+        </td>
+        <td>{{ e.rule if e.rule else "-" }}</td>
+        <td>
+          {%- if e.action -%}
+            {{ e.action }}{% if e.template %} {{ e.template }}{% endif %}
+            {%- if e.instance or e.pipeline %}<br>{% endif -%}
+          {%- endif -%}
+          {%- if e.instance -%}
+            {%- set url = instance_urls.get(e.instance|string) -%}
+            {%- if url -%}
+            <a href="{{ url }}">{{ e.instance }}</a>
+            {%- else -%}
+            {{ e.instance }}
+            {%- endif -%}
+            {%- if e.label %} <span class="webhook-detail">label {{ e.label }}</span>{% endif -%}
+            {%- if e.job %} <span class="webhook-detail">job {{ e.job }}</span>{% endif -%}
+          {%- elif e.pipeline -%}
+            pipeline #{{ e.pipeline }}
+          {%- elif not e.action -%}
+            -
+          {%- endif -%}
+        </td>
+        <td>{{ e.result if e.result else "-" }}</td>
+        <td>{{ e.reason if e.reason else "" }}</td>
+        <td><code>{{ e.delivery_id if e.delivery_id else "-" }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% elif filtered %}
+  <p class="webhook-empty">No delivery matches these filters in the latest part of the logs.</p>
+  {% else %}
+  <p class="webhook-empty">No webhook delivery has been logged yet.</p>
+  {% endif %}
+</div>
