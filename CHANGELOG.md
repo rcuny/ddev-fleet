@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-18
+
+### Added
+- FLE-30 follow-up: Webhooks page filter **Hide ignored hooks** (unchecked by default) hides deliveries whose result is `ignored`.
+
 ## [0.18.0] - 2026-10-18
 
 ### Added
@@ -440,7 +445,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/rcuny/ddev-fleet/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/rcuny/ddev-fleet/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/rcuny/ddev-fleet/compare/v0.15.0...v0.16.0

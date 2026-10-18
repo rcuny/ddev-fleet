@@ -488,6 +488,9 @@ that shows the latest deliveries of **both** sources without ssh and `fleet webh
   An unknown value simply matches nothing. The table partial is
   `GET /ui/webhooks/table` (same parameters); the **Refresh** button re-fetches it with the
   current filters. There is no auto-refresh.
+- **Hide ignored hooks.** A checkbox in the filter form (unchecked by default; query
+  parameter `hide_ignored=1` on the page and on the partial) drops the deliveries whose
+  result is `ignored` before the limit is applied, so you still get up to `limit` other rows.
 - **Log fields it relies on.** `instance`, `delivery_id` (Jira
   `X-Atlassian-Webhook-Identifier`, Bitbucket `X-Request-UUID`) and, since FLE-30, `action`,
   `template`, `label` and `rule` (see the two "Delivery log" sections). Entries written before
