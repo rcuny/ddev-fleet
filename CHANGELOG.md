@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-18
+
 ### Added
 - **FLE-30: Webhooks page in the web UI.** New read-only `GET /webhooks` page (nav: Instances, Secrets, Webhooks) listing the latest Jira and Bitbucket deliveries from the existing delivery logs, merged and newest first, with time, source, project, event, issue or branch, deployed instance (linked while it exists) / job / pipeline, result, reason and delivery id. Filters `source`, `project`, `result` and `limit` (default 100, max 500) work on the page and on its HTMX partial `GET /ui/webhooks/table`; a Refresh button re-fetches the table. A missing or empty log shows an empty state, torn lines are skipped. New `WebhookStore.recent()` / `recent_with_options()` read a bounded tail of each log. The delivery logs gain four plain fields, `action`, `template`, `label` and `rule` (the rule that matched, from `fleet.yml`, never from the request), shown in the new Rule and Action columns; older lines render with a dash and `fleet webhook log` is unchanged. See `docs/README-webhooks.md`.
 
@@ -438,7 +440,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/rcuny/ddev-fleet/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/rcuny/ddev-fleet/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/rcuny/ddev-fleet/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/rcuny/ddev-fleet/compare/v0.14.0...v0.15.0
