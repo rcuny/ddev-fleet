@@ -11,6 +11,8 @@ use PHPUnit\Framework\TestCase;
 
 final class ProcessCommandRunnerTest extends TestCase
 {
+    private ?string $lockedDir = null;
+
     public function testCapturesStdoutStderrAndExitCode(): void
     {
         $result = new ProcessCommandRunner()->run(['sh', '-c', 'echo out; echo err >&2; exit 3']);
@@ -102,5 +104,85 @@ final class ProcessCommandRunnerTest extends TestCase
         $this->expectException(CommandRunnerException::class);
 
         new ProcessCommandRunner()->run([]);
+    }
+
+    public function testChildKilledBySignalGivesExit128PlusSignal(): void
+    {
+        $result = new ProcessCommandRunner()->run(['sh', '-c', 'kill -TERM $$']);
+
+        self::assertSame(143, $result->exitCode);
+        self::assertStringContainsString('signal 15', $result->stderr);
+    }
+
+    public function testUnusableCwdThrowsInsteadOfReportingMissingBinary(): void
+    {
+        $dir = sys_get_temp_dir().'/fleet-runner-noaccess-'.bin2hex(random_bytes(4));
+        mkdir($dir);
+        chmod($dir, 0o000);
+        $this->lockedDir = $dir;
+
+        try {
+            $result = new ProcessCommandRunner()->run(['true'], $dir);
+        } catch (CommandRunnerException $e) {
+            self::assertInstanceOf(\Throwable::class, $e->getPrevious());
+
+            return;
+        }
+        // Running as a user who can enter the directory anyway (e.g. root): nothing to assert.
+        self::assertTrue($result->isSuccess());
+    }
+
+    public function testNonExecutableFileGivesExit126(): void
+    {
+        $file = sys_get_temp_dir().'/fleet-runner-noexec-'.bin2hex(random_bytes(4));
+        file_put_contents($file, "#!/bin/sh\n");
+        chmod($file, 0o644);
+        try {
+            self::assertSame(126, new ProcessCommandRunner()->run([$file])->exitCode);
+        } finally {
+            unlink($file);
+        }
+    }
+
+    public function testNulByteAndEmptyProgramAreRejected(): void
+    {
+        $runner = new ProcessCommandRunner();
+        foreach ([['echo', "a\0b"], ['']] as $argv) {
+            try {
+                $runner->run($argv);
+                self::fail('Expected CommandRunnerException.');
+            } catch (CommandRunnerException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testThrowingCallbackStopsTheChild(): void
+    {
+        $started = microtime(true);
+        $caught = null;
+        try {
+            new ProcessCommandRunner()->run(
+                ['sh', '-c', 'echo go; sleep 5'],
+                onOutput: static function (): void {
+                    throw new \LogicException('callback failed');
+                },
+            );
+        } catch (\Throwable $e) {
+            $caught = $e;
+        }
+
+        self::assertInstanceOf(\LogicException::class, $caught);
+        self::assertSame('callback failed', $caught->getMessage());
+        self::assertLessThan(2.0, microtime(true) - $started);
+    }
+
+    protected function tearDown(): void
+    {
+        if (null !== $this->lockedDir) {
+            chmod($this->lockedDir, 0o700);
+            rmdir($this->lockedDir);
+            $this->lockedDir = null;
+        }
     }
 }

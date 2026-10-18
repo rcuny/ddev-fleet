@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Fleet\Shell;
 
+use Symfony\Component\Process\Exception\ProcessSignaledException;
 use Symfony\Component\Process\Exception\ProcessStartFailedException;
 use Symfony\Component\Process\Exception\ProcessTimedOutException;
+use Symfony\Component\Process\ExecutableFinder;
 use Symfony\Component\Process\Process;
 
 /**
@@ -20,9 +22,7 @@ final class ProcessCommandRunner implements CommandRunner
         ?callable $onOutput = null,
         ?float $timeout = null,
     ): CommandResult {
-        if ([] === $argv) {
-            throw new CommandRunnerException('Cannot run an empty command.');
-        }
+        $this->assertRunnable($argv);
         if (null !== $cwd && !is_dir($cwd)) {
             throw new CommandRunnerException(\sprintf('Working directory "%s" does not exist.', $cwd));
         }
@@ -40,8 +40,22 @@ final class ProcessCommandRunner implements CommandRunner
             $process->wait();
         } catch (ProcessTimedOutException $e) {
             throw new CommandTimedOut(\sprintf('Command timed out after %s seconds: %s', $timeout ?? 0, $argv[0]), $process->getOutput(), $process->getErrorOutput(), $e);
+        } catch (ProcessSignaledException $e) {
+            $signal = $e->getSignal();
+
+            return new CommandResult(
+                128 + $signal,
+                $process->getOutput(),
+                $process->getErrorOutput().\sprintf('%s: terminated by signal %d', $argv[0], $signal),
+                microtime(true) - $started,
+            );
         } catch (ProcessStartFailedException $e) {
-            return new CommandResult(127, '', $argv[0].': command not found', microtime(true) - $started);
+            return $this->startFailure($argv[0], $e, microtime(true) - $started);
+        } finally {
+            // Also covers an $onOutput callback that throws: never leave the child running.
+            if ($process->isRunning()) {
+                $process->stop(0);
+            }
         }
 
         return new CommandResult(
@@ -50,5 +64,44 @@ final class ProcessCommandRunner implements CommandRunner
             $process->getErrorOutput(),
             microtime(true) - $started,
         );
+    }
+
+    /**
+     * @param array<array-key, mixed> $argv
+     */
+    private function assertRunnable(array $argv): void
+    {
+        if ([] === $argv) {
+            throw new CommandRunnerException('Cannot run an empty command.');
+        }
+        if ('' === $argv[0]) {
+            throw new CommandRunnerException('Cannot run a command with an empty program name.');
+        }
+        foreach ($argv as $index => $arg) {
+            if (str_contains((string) $arg, "\0")) {
+                throw new CommandRunnerException(\sprintf('Command argument %d contains a NUL byte.', $index));
+            }
+        }
+    }
+
+    private function startFailure(string $program, ProcessStartFailedException $e, float $duration): CommandResult
+    {
+        if (str_contains($program, '/')) {
+            $found = file_exists($program);
+            $executable = is_file($program) && is_executable($program);
+        } else {
+            $path = new ExecutableFinder()->find($program);
+            $found = null !== $path;
+            $executable = $found;
+        }
+
+        if (!$found) {
+            return new CommandResult(127, '', $program.': command not found', $duration);
+        }
+        if (!$executable) {
+            return new CommandResult(126, '', $program.': permission denied', $duration);
+        }
+
+        throw new CommandRunnerException(\sprintf('Could not start "%s": %s', $program, $e->getMessage()), 0, $e);
     }
 }

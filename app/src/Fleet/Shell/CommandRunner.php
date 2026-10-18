@@ -12,6 +12,10 @@ namespace App\Fleet\Shell;
 interface CommandRunner
 {
     /**
+     * $timeout is in seconds; null or 0.0 means no timeout.
+     * A missing binary gives exit 127, a non-executable one 126, a child killed by
+     * signal N gives 128+N (stderr notes the signal).
+     *
      * @param list<string>                          $argv     program followed by its arguments
      * @param array<string, string>                 $env      merged over the inherited environment
      * @param (callable(string, string): void)|null $onOutput receives ('stdout'|'stderr', chunk)
