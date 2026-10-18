@@ -1165,12 +1165,13 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         project: str,
         result: str,
         limit: str,
+        hide_ignored: bool = False,
     ) -> dict:
         paths, registry = _paths_and_registry()
         rows_limit = webhooks_mod.clip_limit(limit)
         filters = {"source": source, "project": project, "result": result}
         entries, options = webhooks_mod.WebhookStore.from_paths(paths).recent_with_options(
-            rows_limit, **{k: v or None for k, v in filters.items()}
+            rows_limit, **{k: v or None for k, v in filters.items()}, hide_ignored=hide_ignored
         )
         # Link only instances that exist right now: the log outlives destroys.
         instance_urls: dict[str, str] = {}
@@ -1188,7 +1189,8 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
             "entries": entries,
             "options": options,
             "filters": filters,
-            "filtered": any(filters.values()),
+            "filtered": any(filters.values()) or hide_ignored,
+            "hide_ignored": hide_ignored,
             "limit": rows_limit,
             "limit_options": limit_options,
             "instance_urls": instance_urls,
@@ -1201,8 +1203,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         project: str = Query(""),
         result: str = Query(""),
         limit: str = Query(""),
+        hide_ignored: str = Query(""),
     ):
-        context = await asyncio.to_thread(_webhooks_context, source, project, result, limit)
+        context = await asyncio.to_thread(
+            _webhooks_context, source, project, result, limit, hide_ignored == "1"
+        )
         return templates.TemplateResponse(request, "webhooks.html", context)
 
     @app.get("/ui/webhooks/table")
@@ -1212,8 +1217,11 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         project: str = Query(""),
         result: str = Query(""),
         limit: str = Query(""),
+        hide_ignored: str = Query(""),
     ):
-        context = await asyncio.to_thread(_webhooks_context, source, project, result, limit)
+        context = await asyncio.to_thread(
+            _webhooks_context, source, project, result, limit, hide_ignored == "1"
+        )
         return templates.TemplateResponse(request, "partials/webhook_table.html", context)
 
     # --- Scheduled jobs screen (FLE-31) ------------------------------------------

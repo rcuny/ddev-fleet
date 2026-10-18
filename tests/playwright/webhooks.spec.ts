@@ -123,6 +123,39 @@ test('a filter narrows the rows and refresh keeps it', async ({ page, daemon }) 
   await expect(rows).toHaveCount(4);
 });
 
+test('Hide ignored hooks is unchecked by default, hides ignored rows and survives Refresh', async ({
+  page,
+  daemon,
+}) => {
+  await page.goto(daemon.url + '/webhooks');
+  const rows = page.locator('tr.webhook-row');
+  const hide = page.getByLabel('Hide ignored hooks');
+  await expect(hide).not.toBeChecked();
+  await expect(rows).toHaveCount(2);
+  await expect(page.locator('tr.webhook-row', { hasText: 'bb-delivery-e2e' })).toHaveCount(1);
+
+  const partial = page.waitForResponse((r) => r.url().includes('/ui/webhooks/table'));
+  await hide.check();
+  expect((await partial).url()).toContain('hide_ignored=1');
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first()).toContainText('FLE-30');
+  await expect(page.locator('tr.webhook-row', { hasText: 'bb-delivery-e2e' })).toHaveCount(0);
+  await expect(hide).toBeChecked();
+
+  // Refresh keeps the box: a new ignored delivery stays hidden, a new accepted one shows.
+  seed(daemon, 'bitbucket.jsonl', [
+    { ts: '2026-10-18T13:00:00+00:00', project: 'demo', event: 'repo:push', branch: 'late', result: 'ignored' },
+    { ts: '2026-10-18T14:00:00+00:00', project: 'demo', event: 'repo:push', branch: 'ontime', result: 'triggered' },
+  ]);
+  await page.getByRole('button', { name: 'Refresh' }).click();
+  await expect(rows).toHaveCount(2);
+  await expect(page.locator('tr.webhook-row', { hasText: 'late' })).toHaveCount(0);
+  await expect(page.locator('tr.webhook-row', { hasText: 'ontime' })).toHaveCount(1);
+
+  await hide.uncheck();
+  await expect(rows).toHaveCount(4);
+});
+
 test('a filter with no match shows the empty state, not an error', async ({ page, daemon }) => {
   await page.goto(daemon.url + '/webhooks?project=ghost');
   await expect(page.locator('tr.webhook-row')).toHaveCount(0);
