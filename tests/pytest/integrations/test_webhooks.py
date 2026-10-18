@@ -11,11 +11,13 @@ import pytest
 
 from fleet.core.errors import FleetError, ValidationError
 from fleet.core.instances import FleetPaths
-from fleet.core.registry import JiraHookRule
+from fleet.core.registry import BitbucketHookRule, JiraHookRule
 from fleet.core.webhooks import (
     MAX_BODY_BYTES,
     JiraEvent,
     WebhookStore,
+    describe_bitbucket_rule,
+    describe_jira_rule,
     match_rule,
     parse_jira_event,
     verify_signature,
@@ -250,3 +252,23 @@ def test_fleet_paths_webhook_fields(tmp_path):
     paths = FleetPaths.from_home(tmp_path)
     assert paths.webhooks == tmp_path / "webhooks"
     assert paths.webhook_log == tmp_path / "logs" / "webhooks" / "jira.jsonl"
+
+
+def test_describe_rules_name_the_selectors_only():
+    assert describe_jira_rule(JiraHookRule("Dispatched", "deploy", "t")) == "on_status=Dispatched"
+    assert (
+        describe_jira_rule(JiraHookRule("Done", "deploy", "t", branch="main"))
+        == "on_status=Done branch=main"
+    )
+    push = BitbucketHookRule("repo:push", "o/r", "deploy", branch="*--pw-run", template="t")
+    assert describe_bitbucket_rule(push) == "on_event=repo:push branch=*--pw-run"
+    pipeline = BitbucketHookRule(
+        "repo:commit_status_updated", "o/r", "run-pipeline", pattern="nightly", ref="develop",
+        branch="renovate/*", state="SUCCESSFUL",
+    )  # fmt: skip
+    assert describe_bitbucket_rule(pipeline) == (
+        "on_event=repo:commit_status_updated branch=renovate/* state=SUCCESSFUL"
+        " ref=develop pattern=nightly"
+    )
+    long = JiraHookRule("x" * 500, "deploy", "t")
+    assert len(describe_jira_rule(long)) == 200

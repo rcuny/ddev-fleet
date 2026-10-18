@@ -39,3 +39,9 @@ form.secret-form { margin: 1rem 0; display: flex; gap: 0.5rem; align-items: end;
 .secret-notice { color: #060; }
 .secret-client-error { color: #b00; flex-basis: 100%; margin: 0; }
 .fingerprint { font-family: monospace; }
+
+/* Webhooks screen (FLE-30) */
+.webhook-filters { display: flex; gap: 0.8rem; align-items: end; flex-wrap: wrap; }
+.webhook-table td { vertical-align: top; overflow-wrap: anywhere; }
+.webhook-detail { color: #666; font-size: 0.85rem; }
+.webhook-empty { color: #666; }

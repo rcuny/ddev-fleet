@@ -286,6 +286,87 @@ SOURCE_BITBUCKET = "bitbucket"
 _SOURCES = (SOURCE_JIRA, SOURCE_BITBUCKET)
 _PIPELINE_TOKEN_PREFIX = "bitbucket-token:"
 
+# The Webhooks page (FLE-30). `recent()` reads this many tail lines per log
+# file per row requested (floor `_RECENT_WINDOW_MIN`), so filters have a real
+# window to work on without ever loading a whole, unbounded log.
+DEFAULT_RECENT_LIMIT = 100
+MAX_RECENT_LIMIT = 500
+_RECENT_WINDOW_FACTOR = 10
+_RECENT_WINDOW_MIN = 1000
+_TAIL_BLOCK = 64 * 1024
+
+# Every `result` the two routes log today (the page's fixed filter vocabulary):
+# accepted/triggered = work started, ignored/duplicate = nothing to do, error =
+# a config or upstream failure, bad_request = unusable body.
+RESULTS = ("accepted", "triggered", "ignored", "duplicate", "error", "bad_request")
+
+
+def clip_limit(value: object, default: int = DEFAULT_RECENT_LIMIT) -> int:
+    """A row limit for the Webhooks page: `default` for anything that is not a
+    whole number, otherwise clipped into 1..MAX_RECENT_LIMIT."""
+    try:
+        number = int(str(value).strip())
+    except ValueError:
+        return default
+    return max(1, min(number, MAX_RECENT_LIMIT))
+
+
+def _tail_lines(path: Path, max_lines: int) -> list[bytes]:
+    """The last `max_lines` non-empty lines of `path` (oldest first), reading
+    backwards in blocks so a huge log is never loaded whole. A missing file is
+    empty. A line cut by the start of the read window is dropped."""
+    try:
+        with path.open("rb") as fh:
+            pos = fh.seek(0, os.SEEK_END)
+            data = b""
+            while pos > 0 and data.count(b"\n") <= max_lines:
+                step = min(_TAIL_BLOCK, pos)
+                pos -= step
+                fh.seek(pos)
+                data = fh.read(step) + data
+    except FileNotFoundError:
+        return []
+    lines = data.split(b"\n")
+    if pos > 0:
+        lines = lines[1:]  # the first element is (the end of) a cut line
+    return [line for line in lines if line.strip()][-max_lines:]
+
+
+def _entry_time(entry: dict) -> datetime:
+    """The entry's `ts` as an aware datetime; an absent/unparseable one sorts
+    as the oldest possible."""
+    ts = entry.get("ts")
+    if isinstance(ts, str):
+        try:
+            parsed = datetime.fromisoformat(ts)
+        except ValueError:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=timezone.utc)
+    return datetime.min.replace(tzinfo=timezone.utc)
+
+
+_RULE_TEXT_MAX = 200
+
+
+def describe_jira_rule(rule: JiraHookRule) -> str:
+    """A short human string naming the rule that matched, for the delivery log
+    (rule config only: never anything from the request)."""
+    text = f"on_status={rule.on_status}"
+    if rule.branch:
+        text += f" branch={rule.branch}"
+    return text[:_RULE_TEXT_MAX]
+
+
+def describe_bitbucket_rule(rule: BitbucketHookRule) -> str:
+    """Like `describe_jira_rule`, from the rule's selectors (`on_event`,
+    `branch`, `state`, `comment`, and `ref`/`pattern` of a pipeline rule)."""
+    parts = [f"on_event={rule.on_event}"]
+    for name in ("branch", "state", "comment", "ref", "pattern"):
+        value = getattr(rule, name)
+        if value:
+            parts.append(f"{name}={value}")
+    return " ".join(parts)[:_RULE_TEXT_MAX]
+
 
 class WebhookStore:
     """On-disk state for webhooks: per-project secrets, delivery-id dedupe
@@ -482,3 +563,79 @@ class WebhookStore:
                 continue
             entries.append(entry)
         return entries[-n:] if n > 0 else []
+
+    def _window(self, limit: int, sources: tuple[str, ...] = _SOURCES) -> list[dict]:
+        """Both logs' recent tails merged, newest first, each entry copied and
+        tagged with its `source`. Unreadable/torn/non-object lines are skipped
+        like `tail_log` does; nothing is filtered or truncated here."""
+        wanted = max(limit, 1) * _RECENT_WINDOW_FACTOR
+        lines_per_file = max(wanted, _RECENT_WINDOW_MIN)
+        merged: list[tuple[datetime, int, dict]] = []
+        for source in sources:
+            for raw in _tail_lines(self._log_file(source), lines_per_file):
+                try:
+                    entry = json.loads(raw)
+                except (ValueError, RecursionError):
+                    continue
+                if not isinstance(entry, dict):
+                    continue
+                entry["source"] = source
+                merged.append((_entry_time(entry), len(merged), entry))
+        # Within one log, later lines win a timestamp tie (second-resolution `ts`).
+        merged.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        return [entry for _, _, entry in merged]
+
+    @staticmethod
+    def _select(
+        entries: list[dict], project: str | None, result: str | None, limit: int
+    ) -> list[dict]:
+        picked = [
+            e
+            for e in entries
+            if (project is None or e.get("project") == project)
+            and (result is None or e.get("result") == result)
+        ]
+        return picked[: max(limit, 0)]
+
+    def recent(
+        self,
+        limit: int = DEFAULT_RECENT_LIMIT,
+        source: str | None = None,
+        project: str | None = None,
+        result: str | None = None,
+    ) -> list[dict]:
+        """The newest `limit` deliveries of BOTH logs (Jira and Bitbucket),
+        newest first by `ts`, each tagged with `source`; optionally only one
+        source / project / result. Filters apply to a bounded tail of each log
+        (`_RECENT_WINDOW_FACTOR` x `limit` lines, at least `_RECENT_WINDOW_MIN`),
+        not to the whole history. Missing files, torn lines and entries from
+        before a field existed are tolerated; an unknown filter value just
+        matches nothing."""
+        if source is not None and source not in _SOURCES:
+            return []
+        sources = _SOURCES if source is None else (source,)
+        return self._select(self._window(limit, sources), project, result, limit)
+
+    def recent_with_options(
+        self,
+        limit: int = DEFAULT_RECENT_LIMIT,
+        source: str | None = None,
+        project: str | None = None,
+        result: str | None = None,
+    ) -> tuple[list[dict], dict[str, list[str]]]:
+        """`recent()` plus the values the page's filter dropdowns offer, read
+        from the same unfiltered window: `sources` (both, always), `projects`
+        (those present in the window, sorted) and `results` (the fixed
+        `RESULTS` vocabulary, then any other value present)."""
+        window = self._window(limit)
+        projects = sorted({p for e in window if isinstance(p := e.get("project"), str) and p})
+        seen = {r for e in window if isinstance(r := e.get("result"), str) and r}
+        options = {
+            "sources": list(_SOURCES),
+            "projects": projects,
+            "results": [*RESULTS, *sorted(seen - set(RESULTS))],
+        }
+        if source is not None and source not in _SOURCES:
+            return [], options
+        entries = [e for e in window if source is None or e["source"] == source]
+        return self._select(entries, project, result, limit), options

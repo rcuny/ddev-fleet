@@ -141,6 +141,22 @@ def test_rendered_fragments_are_csp_clean(client):
     assert scan(error.text) == []
 
 
+def test_rendered_webhooks_page_and_partial_are_csp_clean(client, fleet_home):
+    from fleet.core.instances import FleetPaths
+    from fleet.core.webhooks import WebhookStore
+
+    store = WebhookStore.from_paths(FleetPaths.from_home(fleet_home))
+    store.append_log(
+        {"project": "demo", "event": "jira:issue_updated", "instance": "demo--develop"}
+    )
+    store.append_log({"project": "demo", "event": "repo:push", "branch": "x"}, "bitbucket")
+    for url in ("/webhooks", "/ui/webhooks/table"):
+        body = client.get(url).text
+        assert "webhook-row" in body
+        assert scan(body) == []
+    assert 'href="https://demo--develop.fleet.example.test"' in client.get("/webhooks").text
+
+
 def test_fleet_css_is_served_with_the_moved_rules(client):
     response = client.get("/static/fleet.css")
     assert response.status_code == 200
