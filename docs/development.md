@@ -54,12 +54,12 @@ with `curl http://127.0.0.1:8000/health`:
 | Variable | Default | Meaning |
 |---|---|---|
 | `APP_ENV` | `dev` in `.env`; `test` under PHPUnit | Symfony environment. Production must set `prod` |
-| `APP_SECRET` | dev/test values in `.env.dev` / `.env.test` | Symfony secret; production sets its own |
+| `APP_SECRET` | empty in `.env`; dev/test values in `.env.dev` / `.env.test` | Symfony secret; production sets its own, and a `prod` kernel refuses to boot when it is empty |
 | `FLEET_HOME` | `app/var/fleet-home` | Absolute directory for everything the app persists (`FleetPaths`). Relative or empty values are rejected |
-| `FLEET_RUNNER` | `process` in `.env`; `recording` in `.env.dev` and `.env.test` | `process` runs host commands; `recording` records them and replays scripted results |
+| `FLEET_RUNNER` | `process` in `.env`; `recording` in `.env.dev` and `.env.test` | `process` runs host commands; `recording` records them and replays scripted results. A `prod` kernel refuses to boot with `recording` |
 | `FLEET_TRUSTED_PROXIES` | `127.0.0.1,::1` | IPs and CIDRs allowed to assert `Remote-*` identity headers |
 | `FLEET_ADMIN_GROUP` | `fleet-admins` | Members of this group get `ROLE_ADMIN` |
-| `FLEET_STAND_IN_ROLE` | `admin` (dev/test) | Default stand-in role: `admin`, `member` or `none` |
+| `FLEET_STAND_IN_ROLE` | `none` in `.env` (fail-closed); `admin` in `.env.dev` / `.env.test` | Default stand-in role: `admin`, `member` or `none` |
 | `FLEET_STAND_IN_ADMIN_USER`, `_ADMIN_GROUPS` | `dev-admin`, `fleet-admins` | Stand-in admin identity |
 | `FLEET_STAND_IN_MEMBER_USER`, `_MEMBER_GROUPS` | `dev-member`, `demo` | Stand-in member identity |
 | `FLEET_PROFILER_TOOLBAR` | `1` | `0` hides the Symfony toolbar in `dev` (it would cover the phone bottom bar) |
@@ -87,6 +87,16 @@ self::assertCount(1, $runner->callsMatching(['ddev', 'list']));
 
 Set `FLEET_RUNNER=process` to run real commands (Symfony Process, argv without a shell). No code
 path in this milestone needs it.
+
+Rules the repo tests enforce (`tests/Repo/HostCommandSeamTest`): nothing in `app/src` starts a
+process except `ProcessCommandRunner` (no `new Process`, `exec`, `proc_open`, backticks, ...), and
+no class may type-hint `ProcessCommandRunner` or `RecordingCommandRunner` (they are not
+autowirable; depend on `CommandRunner`).
+
+**Child environment.** A child does not inherit the app's environment, so `APP_SECRET`,
+`MERCURE_JWT_SECRET` and `DATABASE_URL` never reach `ddev`, `git` or a project's post-deploy
+commands. It gets `PATH`, `HOME`, `LANG`, `LC_ALL`, `TERM`, `USER`, `SSH_AUTH_SOCK` and every
+`DDEV_*`, `DOCKER_*` and `GIT_*` variable, plus the `$env` argument of `run()`, which wins.
 
 ## Signing in during development: the stand-in
 
@@ -118,6 +128,31 @@ which adds a shared-secret header (or loopback TCP) between the proxy and the ap
 to strip both `Remote-User` and `Remote_User` from client requests, and sets production values for
 `APP_ENV=prod`, an absolute `FLEET_HOME`, `APP_SECRET` and `MERCURE_JWT_SECRET` (the committed `.env`
 defaults are for development).
+
+## Directory modes under `FLEET_HOME`
+
+`FleetPaths::ensureLayout()` creates the tree with exact modes (applied with `chmod`, so the
+umask does not matter): `keys/` and `ssh/` are `0700`; `home`, `var/`, `assets/`, `instances/` and
+`logs/` (with `logs/jobs/` and `logs/instances/`) are `0750`, because they hold database files,
+injected `.env` files and job logs that echo secrets; `locks/` is `0755`. Job logs are
+`logs/jobs/<job>.log` for fleet-level jobs and `logs/instances/<instance>/<job>.log` for jobs of
+an instance, so an instance named `jobs` cannot collide with the job directory.
+
+Which user and group own the tree is **decided in M0.02**: php-fpm and the Messenger worker both
+write the SQLite directory (WAL needs both to create `-wal` and `-shm`), so they will share a group
+and the directories that both write will get group write. Until then the tree is single-user.
+
+## Production build
+
+`cd app && composer run prod-check` (also a step of the CI gates) builds and probes the production
+path in a throw-away copy of `app/`: `composer install --no-dev`, `importmap:install`,
+`tailwind:build --minify`, `asset-map:compile`, `cache:warmup` and `lint:container` with
+`APP_ENV=prod`, a check that an empty `APP_SECRET` and `FLEET_RUNNER=recording` stop the kernel
+from booting, and a `php -S` server that must answer `/health` (200), `/` without an identity
+(401) and with `Remote-User` from loopback (200), and must not know the stand-in. It needs network
+for Composer, jsDelivr and the Tailwind binary. The deployment steps it mirrors are the same, run
+with the service's real environment (`APP_ENV=prod`, absolute `FLEET_HOME`, `APP_SECRET`,
+`MERCURE_JWT_SECRET`; `composer dump-env prod` is optional).
 
 ## Gates
 

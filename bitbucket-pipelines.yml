@@ -148,6 +148,9 @@ definitions:
           # Assets (importmap, Tailwind), php-cs-fixer, phpstan level 8, Twig/YAML/container lint, Doctrine
           # schema validation and phpunit (Unit, Integration, Functional, Repo).
           - (cd app && composer run gates)
+          # Production build in a throw-away copy: composer install --no-dev, importmap, minified Tailwind,
+          # asset-map:compile, prod cache warm-up, the boot guard and a php -S probe of /health and auth.
+          - (cd app && composer run prod-check)
           # Browser E2E: Playwright starts the app itself (php -S, a throw-away FLEET_HOME) because
           # FLEET_E2E_BASE_URL is unset. It needs headless Chromium plus its system libraries (apt, as root)
           # and fails outright when the browser is missing. A subshell keeps the working directory at the root.

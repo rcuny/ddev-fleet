@@ -74,11 +74,12 @@ New work follows these namespaces; add a new one only with a reason.
   `App\Fleet\Shell\CommandRunner::run(list<string> $argv, ?string $cwd = null, array $env = [], ?callable $onOutput = null, ?float $timeout = null): CommandResult`.
   `ProcessCommandRunner` runs argv without a shell (Symfony Process); `RecordingCommandRunner`
   records calls and replays scripted results (`expect()`, `calls()`, `callsMatching()`). `FLEET_RUNNER=process|recording`
-  picks one: `process` in `.env`, `recording` in `.env.dev` and `.env.test`.
+  picks one: `process` in `.env`, `recording` in `.env.dev` and `.env.test`; prod refuses `recording`. Children get an allow-listed
+  environment, not the app's secrets. Nothing else may start a process (`tests/Repo/HostCommandSeamTest`).
 - **`App\Fleet\FleetPaths` owns every filesystem path** under `FLEET_HOME` (must be absolute):
   `var/fleet.sqlite`, `var/queue.sqlite`, `keys/`, `ssh/`, `assets/<project>/`, `instances/<id>/`,
-  `logs/jobs/`, `locks/`. Never hard-code a path outside it. Ids are validated (no `..`, no `/`).
-  `ensureLayout()` creates the tree with exact modes.
+  `logs/jobs/<job>.log`, `logs/instances/<instance>/<job>.log`, `locks/`. Never hard-code a path outside it. Ids are validated (no `..`, no `/`).
+  `ensureLayout()` creates the tree with exact modes (`keys/`, `ssh/` 0700; everything holding data or logs 0750).
 - **Two SQLite files**: `fleet.sqlite` (Doctrine `default`, domain data) and `queue.sqlite` (Doctrine
   `queue`, Messenger transports `jobs` and `failed` only). Entities live under `App\Domain\<Area>\`.
 - **Locks** use Symfony Lock with a flock store in `FLEET_HOME/locks` (`LOCK_DSN`).

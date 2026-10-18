@@ -13,7 +13,7 @@ use Symfony\Component\Yaml\Yaml;
  */
 final class PipelineConfigTest extends TestCase
 {
-    private const GATE_SNIPPETS = ['composer run gates', 'npm run typecheck', 'npx playwright test'];
+    private const GATE_SNIPPETS = ['composer run gates', 'composer run prod-check', 'npm run typecheck', 'npx playwright test'];
 
     /** @var array<string, mixed> */
     private array $pipelines = [];

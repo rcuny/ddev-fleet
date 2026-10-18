@@ -99,6 +99,7 @@
             "@php bin/console doctrine:schema:validate --skip-sync"
         ],
         "test": "@php vendor/bin/phpunit",
+        "prod-check": "bash bin/prod-check",
         "gates": [
             "@assets",
             "@cs",
