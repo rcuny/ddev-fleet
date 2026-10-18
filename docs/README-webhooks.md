@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-16
+Last updated: 2026-10-18
 Type: documentation
 ---
 
@@ -160,7 +160,12 @@ typed and no agent starts. Check with `systemctl status fleet-tmux`.
 Every authenticated request (one that passed the 404 and signature checks)
 appends one JSON line to `/srv/fleet/logs/webhooks/jira.jsonl` (no secrets, no
 bodies): `ts, project, delivery_id, retry, event, issue, from, to, result,
-reason, instance, job`. The `delivery_id` and `retry` header values are
+reason, instance, job, action, template, label, rule`. The last four (FLE-30)
+say which rule matched and what it ran, from the rule's own configuration:
+`action` (`deploy`), `template`, `label` (the label of the instance really
+deployed) and `rule` (a short selector string such as `on_status=Dispatched`);
+they are empty when no rule matched or the delivery failed earlier, and lines
+written before FLE-30 do not have them. The `delivery_id` and `retry` header values are
 truncated to 64 characters. Requests rejected for a bad or missing signature
 (401) are **not** written there, so unauthenticated callers cannot grow the
 file; they are logged as a warning (project and truncated delivery id only) in
@@ -436,8 +441,16 @@ written to be idempotent.
 Every authenticated request (one that passed the 404 and signature checks)
 appends one JSON line to `/srv/fleet/logs/webhooks/bitbucket.jsonl`, next to the
 Jira log (no secrets, no bodies): `ts, project, delivery_id, attempt, event,
-repo, pr, branch, state, result, reason, pipeline`. Push deliveries add `sha`,
-`instance` and `job` and write one line per deploy. Header values are truncated
+repo, pr, branch, state, result, reason, pipeline, action, template, label,
+rule`. Push deliveries add `sha`, `instance` and `job` and write one line per
+deploy. The last four (FLE-30) name the rule that matched and what it ran:
+`action` (`deploy` / `run-pipeline`), `template` (deploys only), `label` (the
+label of the deployed instance, `-N` suffix included) and `rule` (a short
+selector string, e.g. `on_event=repo:push branch=*--pw-run` or
+`on_event=pullrequest:approved branch=renovate/* ref=develop pattern=renovate-merge`).
+They come from the rule in `fleet.yml`, never from the request; a push deploy
+skipped by the label-collision guard still names the rule it matched. Lines
+written before FLE-30 do not have them. Header values are truncated
 to 64 characters. 401s go to the daemon journal only
 (`journalctl -u fleet | grep 'bitbucket webhook'`). Read it with:
 
@@ -446,3 +459,36 @@ fleet webhook log --source bitbucket [--project <p>] [-n 20]
 ```
 
 One line per entry: `ts  project  event  repo#pr  branch  result  pipeline-or-reason`.
+
+# Webhooks page (web UI)
+
+The dashboard has a **Webhooks** page (nav: Instances, Secrets, Webhooks; `GET /webhooks`)
+that shows the latest deliveries of **both** sources without ssh and `fleet webhook log`.
+
+- **Read-only.** The page has no form that changes anything; it cannot trigger, replay or
+  delete a delivery. It sits behind the same Caddy login as the rest of the dashboard
+  (Caddy exempts only `/hooks/*` and the token-gated `/ws/*`).
+- **Data.** It reads `/srv/fleet/logs/webhooks/jira.jsonl` and `bitbucket.jsonl`, the files
+  described under "Delivery log" above, merges them and shows the newest first (by `ts`).
+  Nothing is stored besides those files. A missing or empty file shows an empty state; torn
+  or non-JSON lines are skipped. Requests rejected for a bad signature (401) are not logged,
+  so they do not appear (see the journal).
+- **Columns.** Time (UTC), source, project, event, ref (the Jira issue and status
+  transition, or the Bitbucket branch with PR number / short commit / state), rule (the
+  `rule` log field), action (`action` and `template`, then the deployed `instance` with its
+  `label` and `job`, or the triggered `pipeline`), result, reason and the `delivery_id`. The
+  instance is a link to the instance's URL while it still exists on this host, plain text
+  once it is destroyed. A result of `accepted` means the deploy job was started, not that it
+  finished (see the instance's `deploy.log`); `triggered` means a pipeline was started.
+- **Filters.** Source, project and result (query parameters `source`, `project`, `result`,
+  plus `limit`: the default is the last 100 deliveries, at most 500). The project options come
+  from the deliveries read; the result options are `accepted`, `triggered`, `ignored`,
+  `duplicate`, `error`, `bad_request` plus any other value found. Filters apply to the latest
+  part of each log (10 times the limit, at least 1000 lines per file), not to its whole history.
+  An unknown value simply matches nothing. The table partial is
+  `GET /ui/webhooks/table` (same parameters); the **Refresh** button re-fetches it with the
+  current filters. There is no auto-refresh.
+- **Log fields it relies on.** `instance`, `delivery_id` (Jira
+  `X-Atlassian-Webhook-Identifier`, Bitbucket `X-Request-UUID`) and, since FLE-30, `action`,
+  `template`, `label` and `rule` (see the two "Delivery log" sections). Entries written before
+  a field existed render with `-` in its column. Every logged value is HTML-escaped.
