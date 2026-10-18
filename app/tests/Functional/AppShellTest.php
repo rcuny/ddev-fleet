@@ -39,6 +39,9 @@ final class AppShellTest extends WebTestCase
 
         self::assertStringContainsString('Dev Admin', $identity);
         self::assertStringContainsString('fleet-admins', $identity);
+        // A disclosure, not an ARIA menu: it holds no actions, so role="menu" would be invalid.
+        self::assertCount(0, $crawler->filter('[data-testid=identity] [role=menu], [data-testid=identity] [role=menuitem], [data-testid=identity] [aria-haspopup]'));
+        self::assertCount(1, $crawler->filter('[data-testid=identity] [popover]'));
     }
 
     public function testThemeBootScriptComesBeforeTheStylesheet(): void
@@ -121,6 +124,10 @@ final class AppShellTest extends WebTestCase
         $nav = $crawler->filter('nav[aria-label="Primary"][data-bottom-nav]');
         self::assertCount(1, $nav);
         self::assertSame(['Home', 'Instances', 'Jobs', 'More'], $this->texts($crawler, 'nav[aria-label="Primary"] a, nav[aria-label="Primary"] button'));
+
+        // The sheet closes itself when the viewport grows past md (a modal dialog would keep the page inert).
+        self::assertCount(1, $nav->filter('[data-controller~="sheet-viewport"]'));
+        self::assertStringContainsString('(min-width: 48rem)', (string) file_get_contents(__DIR__.'/../../assets/controllers/sheet_viewport_controller.js'));
 
         $more = $crawler->filter('#more-sheet');
         self::assertCount(1, $more);

@@ -2,14 +2,17 @@
 {% set bar_items = this.items %}
 {% set more_entries = this.more %}
 {% set more_current = this.moreIsCurrent %}
-{# Phone bottom bar (< md): 56 px plus the safe-area inset (px, not rem: the base font is 17 px). The Sheet wraps the bar so its dialog is a sibling of the nav, not part of it. #}
+{# Phone bottom bar (< md): min 56 px incl. the 1 px top border (--shell-bottom-bar, px not rem: the base font is 17 px) plus the safe-area inset; it grows with very large text. The Sheet wraps the bar so its dialog is a sibling of the nav, not part of it. #}
 <twig:Sheet id="more" side="bottom" class="md:hidden">
     <nav
         aria-label="Primary"
         data-bottom-nav
-        {{ attributes.defaults({class: 'fixed inset-x-0 bottom-0 z-40 box-border h-[calc(56px+env(safe-area-inset-bottom))] border-t border-hairline bg-page pb-[env(safe-area-inset-bottom)]'}) }}
+        {{ attributes.defaults({
+            'data-controller': 'sheet-viewport',
+            class: 'fixed inset-x-0 bottom-0 z-40 box-border border-t border-hairline bg-page pb-[env(safe-area-inset-bottom)]',
+        }) }}
     >
-        <ul class="flex h-full items-stretch">
+        <ul class="flex min-h-[calc(var(--shell-bottom-bar)-1px)] items-stretch">
             {% for entry in bar_items %}
                 <li class="flex min-w-0 flex-1">
                     <a
@@ -25,7 +28,7 @@
                 <twig:Sheet:Trigger>
                     <twig:Button
                         variant="ghost"
-                        class="h-full min-h-11 w-full flex-col gap-0.5 rounded-none px-0 text-xs font-normal {{ more_current ? 'text-brand-darker dark:text-brand' : 'text-ink-body' }}"
+                        class="h-auto min-h-11 w-full flex-col gap-0.5 rounded-none px-0 text-xs font-normal {{ more_current ? 'text-brand-darker dark:text-brand' : 'text-ink-body' }}"
                         {{ ...sheet_trigger_attrs }}
                     >
                         <twig:ux:icon name="lucide:ellipsis" class="size-5" />More

@@ -53,6 +53,23 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
+/* App shell dimensions, defined once. The bars use them as minimums (very large text may grow them);
+   scroll padding keeps focused and anchored elements clear of the sticky top bar and the phone bottom bar. */
+@layer base {
+    :root {
+        --shell-top-bar: 3.5rem;
+        --shell-bottom-bar: 56px; /* px, not rem: the base font is 17px; the safe-area inset is added where used */
+    }
+    html {
+        scroll-padding-top: var(--shell-top-bar);
+    }
+    @media (max-width: 47.99rem) {
+        html {
+            scroll-padding-bottom: calc(var(--shell-bottom-bar) + env(safe-area-inset-bottom));
+        }
+    }
+}
+
 @layer base {
     * {
         @apply border-border outline-ring/50;

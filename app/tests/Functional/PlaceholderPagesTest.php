@@ -45,7 +45,16 @@ final class PlaceholderPagesTest extends WebTestCase
         $client->request('GET', '/instances', server: ['HTTP_X_FLEET_STAND_IN_ROLE' => 'member']);
         self::assertResponseStatusCodeSame(200);
 
-        foreach (['/admin/projects', '/admin/jobs', '/admin/settings'] as $path) {
+        $catalog = self::getContainer()->get(NavigationCatalog::class);
+        $adminPaths = [];
+        foreach ($catalog->all() as $item) {
+            if ('ROLE_ADMIN' === $item->role) {
+                $adminPaths[] = $item->path;
+            }
+        }
+        self::assertCount(8, $adminPaths);
+
+        foreach ($adminPaths as $path) {
             $client->request('GET', $path, server: ['HTTP_X_FLEET_STAND_IN_ROLE' => 'member']);
             self::assertResponseStatusCodeSame(403, $path);
         }

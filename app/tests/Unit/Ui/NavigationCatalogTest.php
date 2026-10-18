@@ -43,6 +43,16 @@ final class NavigationCatalogTest extends TestCase
         }
     }
 
+    public function testEveryAdminItemLivesUnderAdmin(): void
+    {
+        // access_control ^/admin is what actually protects these pages; the menu only hides them.
+        foreach ($this->catalog()->all() as $item) {
+            if ('ROLE_ADMIN' === $item->role) {
+                self::assertStringStartsWith('/admin/', $item->path, $item->key);
+            }
+        }
+    }
+
     public function testExactlyHomeInstancesJobsArePrimary(): void
     {
         $primary = array_values(array_map(

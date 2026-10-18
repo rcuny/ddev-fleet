@@ -1,8 +1,5 @@
-<header data-shell="topbar" class="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-hairline bg-page px-4 md:px-8">
-    <a href="{{ path('home') }}" class="flex items-center gap-2 hover:no-underline md:hidden">
-        <span class="flex size-7 items-center justify-center rounded-md bg-brand-faded font-display text-sm font-semibold text-brand-darker dark:text-brand" aria-hidden="true">F</span>
-        <span class="font-display text-sm font-semibold text-ink-display">Fleet</span>
-    </a>
+<header data-shell="topbar" class="sticky top-0 z-30 flex min-h-(--shell-top-bar) shrink-0 items-center gap-2 border-b border-hairline bg-page px-4 md:px-8">
+    {{ include('_shell/brand.html.twig', {class: 'md:hidden'}) }}
     <div class="ml-auto flex items-center gap-1">
         <twig:ThemeToggle />
         <div class="hidden md:block">
