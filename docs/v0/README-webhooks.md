@@ -7,6 +7,8 @@ Type: documentation
 
 # Jira webhooks
 
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.08; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
 A Jira admin webhook can start a fleet deploy by itself: when an issue moves
 into a configured status (for example **Dispatched**), the fleet server
 receives the event and deploys an instance for that issue, exactly as if you
@@ -95,7 +97,7 @@ Jira Cloud: **Settings -> System -> WebHooks -> Create a WebHook**.
 
 | Field | Value |
 |---|---|
-| URL | the `URL:` line printed above, e.g. `https://ddev1.example.com/hooks/jira/example-project` |
+| URL | the `URL:` line printed above, e.g. `https://fleet.example.com/hooks/jira/example-project` |
 | Secret | the printed secret |
 | Events | Issue -> **updated** |
 | JQL | `project = FLE` (optionally `AND status = Dispatched`; the daemon re-checks the transition regardless) |
@@ -152,7 +154,7 @@ succeeds once `fleet.yml` is fixed.
 
 A template's `tty1` / `tty2` commands are typed into the fleet tmux session by
 the deploy hook. That only happens when `fleet-tmux.service` is running (see
-`docs/operations.md`); without it the instance still deploys, but nothing is
+`docs/v0/operations.md`); without it the instance still deploys, but nothing is
 typed and no agent starts. Check with `systemctl status fleet-tmux`.
 
 ## Delivery log
@@ -241,9 +243,9 @@ projects:
   example-project:
     git: git@bitbucket.org:org/example-project.git
     bitbucket_hooks:
-      - {on_event: "pullrequest:approved", repo: renaud_cuny/ddev-fleet, branch: "renovate/*", action: run-pipeline, pattern: renovate-merge, ref: develop}
-      - {on_event: "pullrequest:comment_created", repo: renaud_cuny/ddev-fleet, branch: "renovate/*", comment: "/merge", action: run-pipeline, pattern: renovate-merge, ref: develop}
-      - {on_event: "repo:commit_status_updated", repo: renaud_cuny/ddev-fleet, branch: "renovate/*", state: SUCCESSFUL, action: run-pipeline, pattern: renovate-merge, ref: develop}
+      - {on_event: "pullrequest:approved", repo: example-workspace/ddev-fleet, branch: "renovate/*", action: run-pipeline, pattern: renovate-merge, ref: develop}
+      - {on_event: "pullrequest:comment_created", repo: example-workspace/ddev-fleet, branch: "renovate/*", comment: "/merge", action: run-pipeline, pattern: renovate-merge, ref: develop}
+      - {on_event: "repo:commit_status_updated", repo: example-workspace/ddev-fleet, branch: "renovate/*", state: SUCCESSFUL, action: run-pipeline, pattern: renovate-merge, ref: develop}
 ```
 
 | Key | Required | Meaning |
@@ -393,7 +395,7 @@ In the Bitbucket repo: **Repository settings -> Webhooks -> Add webhook**.
 
 | Field | Value |
 |---|---|
-| URL | the `URL:` line printed above, e.g. `https://ddev1.example.com/hooks/bitbucket/example-project` |
+| URL | the `URL:` line printed above, e.g. `https://fleet.example.com/hooks/bitbucket/example-project` |
 | Secret | the printed secret |
 | Triggers | Choose from a full list: Pull request **Approved**, Pull request **Comment created**, Repository **Build status created** and **Build status updated**, Repository **Push** (deploy rules) |
 

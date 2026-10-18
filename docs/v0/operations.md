@@ -1,14 +1,16 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-09
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Operating ddev-fleet
 
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.12; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
 Ongoing procedures for an already-provisioned host. For first-time setup
-see `docs/installation.md`.
+see `docs/v0/installation.md`.
 
 ## Updating the code
 
@@ -45,7 +47,7 @@ Also — if you do run the full installer, run it via `sudo` from your
 actual login shell, not detached as root with no controlling `sudo`
 session (e.g. `systemd-run`). With no `$SUDO_USER`, the optional
 `security_hardening` role's sshd `AllowUsers` can lock out your real SSH
-login user; see `docs/installation.md` §4's SSH-lockout warning and
+login user; see `docs/v0/installation.md` §4's SSH-lockout warning and
 `FLEET_SSH_ALLOW_USERS`.
 
 ### Rollback
@@ -267,7 +269,7 @@ Reconciles the Caddy port-exposure snippets (and UFW rules, if the
 network-hardening role is installed) to whatever `fleet.yml`'s
 `fleet.ports`/per-project `ports:` keys currently say — no Ansible
 re-run, no redeploy needed. Run this after editing the ports catalogue
-or a project's `ports:` list. See `docs/networking.md` for the full
+or a project's `ports:` list. See `docs/v0/networking.md` for the full
 port-exposure mechanism and the runbook for adding a new named port.
 
 ## Refreshing the registry checkout
@@ -363,7 +365,7 @@ stored as `secrets/<project>/<KEY>.asc`. It needs the host key first
 (`sudo -u fleet fleet keys init`, once per server); without one the page says so and shows no form.
 Names listed there are the same ones `fleet secret list <project>` shows. Design, key
 management and what the encryption does and does not protect:
-[`docs/client-side-encryption.md`](client-side-encryption.md).
+`docs/client-side-encryption.md` on the `main` branch.
 
 ### Checking gpg-agent under the systemd sandbox (manual, per server)
 
@@ -413,7 +415,7 @@ just once at first rollout:
   ss -tlnp | grep -E ':8108\b'                                  # loopback listener once a typesense-enabled instance is up
   curl -s -o /dev/null -w '%{http_code}\n' https://<project>--<label>.fleet.example.com:9108/health
   ```
-  Expected: a `200`. See `docs/README-typesense.md`.
+  Expected: a `200`. See `docs/v0/README-typesense.md`.
 - **`known_hosts` has entries for every forge you use:**
   ```bash
   sudo -u fleet ssh-keygen -F <forge-hostname> -f /home/fleet/.ssh/known_hosts
@@ -484,10 +486,10 @@ but never in Bitbucket Pipelines, where the Debian 13 image has systemd).
 **Regression checks (FLE-8).** Bitbucket Pipelines scores every sandboxed unit
 on each pull request / `develop` push / release tag and compares it with a
 committed baseline, and a weekly scheduled pipeline does the same for the real
-units on `ddev3` through a no-sudo, forced-command `fleet-probe` user
+units on a live host through a no-sudo, forced-command `fleet-probe` user
 (`ansible/security-probe.yml`, role `security_probe`). A unit whose exposure
 rises by more than 0.1 fails the pipeline. How it works, how to record a new
-baseline and how to set up the live check: [`docs/README-ci.md`](README-ci.md).
+baseline and how to set up the live check: [`docs/README-ci.md`](../README-ci.md).
 
 Check by hand:
 
@@ -512,11 +514,11 @@ Copy the CLI/registry reference doc into `/srv/fleet/` so `claude -p
 context:
 
 ```bash
-cp /opt/ddev-fleet/docs/srv-fleet-CLAUDE.md /srv/fleet/CLAUDE.md
+cp /opt/ddev-fleet/docs/v0/srv-fleet-CLAUDE.md /srv/fleet/CLAUDE.md
 ```
 
 Re-run this after every `ddev-fleet` upgrade that changed
-`docs/srv-fleet-CLAUDE.md` (a CLI surface change, a registry schema
+`docs/v0/srv-fleet-CLAUDE.md` (a CLI surface change, a registry schema
 change, or a new server-side Claude skill).
 
 ## Hardening an existing server (FLE-25)
@@ -595,7 +597,7 @@ moment of your choosing, since stopping it ends the `fleet` tmux session.
 
 ## See also
 
-- `docs/installation.md` — first-run checklist.
-- `docs/networking.md` — the port-exposure mechanism behind
+- `docs/v0/installation.md` — first-run checklist.
+- `docs/v0/networking.md` — the port-exposure mechanism behind
   `fleet refresh-ports`.
 - `README.md` — the full CLI command reference.

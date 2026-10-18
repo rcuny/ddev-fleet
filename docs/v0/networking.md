@@ -1,14 +1,16 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Fleet networking — topology, ports, and how to add one
 
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.07; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
 How traffic reaches a deployed instance, every port the fleet manages, and
-the exact steps to expose a new one. Generalizes `docs/README-typesense.md`'s
+the exact steps to expose a new one. Generalizes `docs/v0/README-typesense.md`'s
 topology (kept as the worked example) to any named port, per
 `2026-07-24-fleet-port-exposure-design.md`.
 
@@ -49,7 +51,7 @@ this document's `Last updated` date.
 | `80`, `443` | Caddy | HTTP→HTTPS redirect / TLS termination for `fleet.<domain>` and every `*.<domain>` instance |
 | `2019` | Caddy admin API | Loopback-only, never proxied — `caddy reload`/`validate` talk to it locally |
 | `8080` | ddev-router HTTP | Shared entrypoint every instance's main site sits behind (loopback-only) |
-| `8443` | ddev-router HTTPS | Not used by Caddy's proxy path — proxying to the HTTPS entrypoint 404s (Traefik's HTTPS router matching doesn't engage for a proxied request; see `docs/README-typesense.md`) |
+| `8443` | ddev-router HTTPS | Not used by Caddy's proxy path — proxying to the HTTPS entrypoint 404s (Traefik's HTTPS router matching doesn't engage for a proxied request; see `docs/v0/README-typesense.md`) |
 | `8765` | fleet daemon | FastAPI/uvicorn, loopback-only, proxied by Caddy at `fleet.<domain>` |
 | `9108` / `8108` | `fleet.ports.typesense` (public/router) | Typesense browser search — legacy built-in default when `fleet.ports.typesense` is undefined (`typesense: true` back-compat, `core/registry.py`) |
 | *(any name)* | `fleet.ports.<name>` (public/router) | Any other opt-in named port — e.g. `playwright` (`9324`/`8323`), `ts-dashboard` (`9111`/`8110`) |
@@ -65,7 +67,7 @@ only because it never leaves the host (`127.0.0.1`). Caddy sets
 ### Certificate mode (`fleet_tls_mode`)
 
 How Caddy actually *gets* those certificates is chosen at install time
-(`docs/installation.md` "Choosing a TLS mode") and persisted as the
+(`docs/v0/installation.md` "Choosing a TLS mode") and persisted as the
 `fleet_tls_mode` Ansible var:
 
 - **`on_demand`** (default) — one cert per exact hostname, issued the
@@ -93,7 +95,7 @@ modes — it isn't a wildcard-eligible hostname.
 
 Switching an existing server's mode: `ansible/caddy-only.yml` (a scoped
 playbook, mirroring `ddev-only.yml`) reapplies just the `caddy` role — see
-`docs/installation.md` "Switching TLS mode on an existing server", which
+`docs/v0/installation.md` "Switching TLS mode on an existing server", which
 also covers the OVH token gotchas learned rolling this out to two live
 servers: tokens can be **IP-restricted** (one token per server, or list
 every server's IP on a shared token), the required rights are
@@ -103,7 +105,7 @@ hand-edit of `/etc/caddy/ovh.env` needs its own `systemctl restart caddy`
 (a `reload` does not re-read the `EnvironmentFile=`).
 
 **`auth.<domain>` (Authelia mode only).** When `host.yml`'s `auth_mode` is
-`authelia` (`docs/README-authelia.md`), Caddy also serves Authelia's login
+`authelia` (`docs/v0/README-authelia.md`), Caddy also serves Authelia's login
 portal at `auth.{{ fleet_domain }}` — a single-label subdomain like any
 instance hostname, so it is covered by the exact same certificate handling
 as every other `*.{{ fleet_domain }}` host: an individual on-demand cert in
@@ -162,7 +164,7 @@ per named service, not per instance.
 A project's `additional_hostnames: [news, odihr, ...]` (`fleet.yml`) gives
 each instance extra hostnames for Drupal Domain Access-style multi-domain
 sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
-`docs/configuration.md`'s `additional_hostnames` row.
+`docs/v0/configuration.md`'s `additional_hostnames` row.
 
 - **Flattened, single-label form.** An alias for hostname `h` on instance
   `<instance-id>` is `<h>-<instance-id>.<domain>` — e.g.
@@ -182,7 +184,7 @@ sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
   snippet's `@auth-<instance-id>` matcher (`core/caddyauth.py`) lists the
   instance FQDN *and* every alias FQDN in the same `host` clause, whether
   it's a basic-auth snippet or an Authelia `forward_auth` one
-  (`docs/README-authelia.md`), so an alias can never bypass auth.
+  (`docs/v0/README-authelia.md`), so an alias can never bypass auth.
 - **`FLEET_INSTANCE_HOST`** — injected into every instance's
   `web_environment` (`core/fleetconfig.py`) as `<instance-id>.<domain>` (no
   scheme). A project's Domain Access config builds its own alias-matching
@@ -318,15 +320,14 @@ injected by fleet) as the base URL, not `DDEV_PRIMARY_URL`, which carries
 
 ## 9. Cross-references
 
-- `docs/README-typesense.md` — the worked example this document
+- `docs/v0/README-typesense.md` — the worked example this document
   generalizes (topology, admin vs. search-only keys, env injection).
-- `.claude/user/docs/specs/2026-07-24-fleet-port-exposure-design.md`
-  (companion repo) — the full design this document summarizes.
-- `.claude/user/docs/specs/2026-07-24-fleet-security-hardening-design.md`
-  (companion repo) — the UFW/`fleet-ufw-sync` side of `fleet refresh-ports`,
+- The port-exposure design notes (2026-07-24, kept outside this repository) — the full design this
+  document summarizes.
+- The security-hardening design notes (2026-07-24, kept outside this repository) — the UFW/`fleet-ufw-sync` side of `fleet refresh-ports`,
   and the `DOCKER-USER` firewall guard referenced in §2 above.
 - `core/caddyauth.py` — the sibling fleet-owned-snippet mechanism (per-
   instance/dashboard `basic_auth`, or `forward_auth` in Authelia mode),
   same write/validate/reload shape as `core/caddyports.py`.
-- `docs/README-authelia.md` — the Authelia auth mode design (server-level
+- `docs/v0/README-authelia.md` — the Authelia auth mode design (server-level
   `auth_mode`, `auth.<domain>` portal, per-project `users:`).

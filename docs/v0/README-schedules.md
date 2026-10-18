@@ -7,6 +7,8 @@ Type: documentation
 
 # Scheduled jobs
 
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.09; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
 A fleet server can run periodic tasks by itself. A schedule is declared in
 `fleet.yml`, fired by a scheduler that lives inside the fleet daemon, and shown
 (with **Run now** and **Pause / Resume**) on the **Scheduled jobs** tab of the
@@ -14,8 +16,8 @@ web UI and by `fleet schedule`. v1 has one action: `redeploy <instance>`, an
 in-place rebuild of an existing instance, the same operation as `fleet redeploy`
 and the dashboard's Redeploy button.
 
-The first use case: redeploy the osce Playwright baseline instance
-(`osce--pw-regression`) every night at 03:00 so that date-dependent listers do
+The first use case: redeploy the blog Playwright baseline instance
+(`blog--baseline`) every night at 03:00 so that date-dependent listers do
 not make the next branch run fail visual regression for reasons that have
 nothing to do with the branch.
 
@@ -29,8 +31,8 @@ schedules:
     cron: "0 3 * * *"             # 5 fields, see below
     timezone: Europe/Paris        # IANA name; required
     action: redeploy              # v1: only "redeploy"
-    instance: osce--pw-regression # required for action redeploy
-    servers: [ddev3.fleet.pm]     # optional: fleet domains it runs on; absent = every server
+    instance: blog--baseline # required for action redeploy
+    servers: [server1.fleet.example.com]     # optional: fleet domains it runs on; absent = every server
     enabled: true                 # optional, default true
 ```
 
@@ -138,12 +140,12 @@ error as the reason.
 | The instance is locked (a deploy or redeploy of it is running) | `skipped`, reason `instance busy`. Never queued: the next occurrence tries again |
 
 **"Succeeded" means the redeploy job succeeded, not that the work inside the
-instance ran.** The tty1 commands (for the osce baseline, `pw-ci.sh` in baseline
+instance ran.** The tty1 commands (for the blog baseline, `pw-ci.sh` in baseline
 mode) are typed into the instance's tmux window only when `fleet-tmux.service` is
 active; if it is not, the deploy log gets a warning and the job still succeeds.
 Even when they are typed, they run after the job has ended. To check that the
-baseline itself was refreshed, look at the artifact (for osce, the mtime of
-`/srv/fleet/artifacts/osce/pw-baseline/BASELINE_SHA`), not only at the green row.
+baseline itself was refreshed, look at the artifact (for the blog project, the mtime of
+`/srv/fleet/artifacts/blog/pw-baseline/BASELINE_SHA`), not only at the green row.
 
 A schedule removed from `fleet.yml` and added again later keeps its old
 `last_fired`, so it can report one `missed` entry (or catch up, inside the
@@ -152,8 +154,8 @@ window) for the occurrences while it was absent. Delete its entry in
 
 ### Interaction with the CI baseline lock
 
-`osce--pw-regression` is the osce Playwright CI baseline. Its tty1 command
-(`pw-ci.sh`, baseline mode) takes the `flock` `/srv/fleet/artifacts/osce/pw.lock`,
+`blog--baseline` is the blog Playwright CI baseline. Its tty1 command
+(`pw-ci.sh`, baseline mode) takes the `flock` `/srv/fleet/artifacts/blog/pw.lock`,
 as does a branch CI run. A baseline run therefore delays a branch CI run in
 progress, and the reverse, **by design**. That lock is taken inside the instance,
 not by fleet: the scheduled redeploy itself only needs the per-instance fleet lock

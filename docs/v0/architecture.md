@@ -1,11 +1,13 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-08
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Architecture
+
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.12; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
 
 ## Runs natively, not inside DDEV
 
@@ -32,13 +34,13 @@ Bare-metal / VPS host
 
 Provisioning is Ansible (`ansible/site.yml`, roles `base`, `docker`,
 `fleet_user`, `shell_profile`, `ddev`, `claude_cli`, `caddy`,
-`fleet_service`) — see `docs/installation.md`. The `caddy` role also
+`fleet_service`) — see `docs/v0/installation.md`. The `caddy` role also
 renders the shared `tls.conf` snippet per `fleet_tls_mode`
-(`on_demand`/`ovh_dns` — see `docs/networking.md` §4), and `ansible/
+(`on_demand`/`ovh_dns` — see `docs/v0/networking.md` §4), and `ansible/
 caddy-only.yml` reapplies just that role on a live host. The other scoped
 playbooks are `hardening.yml` (network/security hardening + probe) and
 `fleet-units.yml` (only the systemd units + CLI wrapper of `fleet_service`) —
-see `docs/operations.md`.
+see `docs/v0/operations.md`.
 
 ## Module map (`src/fleet/`)
 
@@ -106,8 +108,8 @@ purely to provide the web UI and JSON/WebSocket API over the same
 
 ## See also
 
-- `docs/installation.md` / `docs/operations.md` — provisioning and
+- `docs/v0/installation.md` / `docs/v0/operations.md` — provisioning and
   day-to-day operation.
-- `docs/networking.md` — full network topology, every port in one table.
-- `docs/configuration.md` — the `fleet.yml` registry schema.
+- `docs/v0/networking.md` — full network topology, every port in one table.
+- `docs/v0/configuration.md` — the `fleet.yml` registry schema.
 - `CONTRIBUTING.md` — dev setup and code style.

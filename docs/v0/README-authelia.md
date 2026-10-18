@@ -1,19 +1,20 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Authelia auth mode
+
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestones M0.02 and M0.10; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
 
 An alternative to fleet's default per-instance HTTP basic auth: a
 cookie-based login portal ([Authelia](https://www.authelia.com/)) that
 works on networks that block basic auth outright, with users defined per
 project in `fleet.yml`.
 
-**Status:** implemented and rolled out to **two** live servers (ddev2 and
-the primary, both Debian 13, Authelia 4.39.28 apt package, `User=authelia
+**Status:** implemented and rolled out to **two** live servers (both Debian 13, Authelia 4.39.28 apt package, `User=authelia
 Group=authelia`, both now on Authelia mode as of 2026-09-28) — see
 "Rollout" below for the fixes those live runs required.
 
@@ -61,7 +62,7 @@ survive the next playbook run.
 - **Named ports are unauthenticated in both modes.** A project's opted-in
   named ports (Typesense, a Playwright report port, …) are exposed by
   `core/caddyports.py`, which Authelia mode does not touch — see
-  `docs/networking.md`.
+  `docs/v0/networking.md`.
 - **Editing users never restarts Authelia.** `fleet.yml`'s `users:` only
   ever rewrites `/srv/fleet/authelia/users.yml`, which Authelia's file
   backend hot-reloads (`watch: true`) — apply an edit with
@@ -91,7 +92,7 @@ survive the next playbook run.
 | `/var/lib/authelia/` | `<authelia svc user>:<authelia svc group>` | `0750` | Ansible creates the dir (before Authelia starts); Authelia writes into it at runtime | `db.sqlite3` (storage backend) + `notification.txt` (filesystem notifier) — Authelia's own writable state |
 
 **Why the DB/notifier moved out of `/srv/fleet/authelia`**: the first live
-rollout (ddev2) pointed `storage.local.path` and
+rollout pointed `storage.local.path` and
 `notifier.filesystem.filename` at `/srv/fleet/authelia/db.sqlite3` /
 `notification.txt`. That directory is intentionally `2750`
 `<fleet user>:<authelia group>` — group-**read** only for Authelia, since
@@ -208,8 +209,7 @@ order written.
 
 ## Rollout
 
-Applied to two live servers so far — ddev2 (2026-09-27) and the primary
-(2026-09-28). The ddev2 run exposed the apt signing key 404, the three
+Applied to two live servers so far (2026-09-27 and 2026-09-28). The first run exposed the apt signing key 404, the three
 bugs fixed in "File layout" and "The `/srv/fleet` traverse ACL" above,
 and the validate-task secrets gap covered in "Secrets" — all fixed in the
 role before the primary's run, which needed no further code changes. The

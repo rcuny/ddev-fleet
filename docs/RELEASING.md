@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-06
+Last updated: 2026-10-18
 Type: documentation
 ---
 
@@ -11,6 +11,58 @@ The one place that describes how a release is cut: branching model,
 versioning, CHANGELOG conventions, the release and hotfix steps, and the
 push order the CI guard depends on. For what a contributor does day to day
 see `CONTRIBUTING.md`.
+
+> **Two lines.** Sections 1 to 7 describe the **0.x** flow (Python, tags `v0.*` on `main`) and
+> stay valid for 0.x fixes. The **1.x** flow during the port is the next section. The full
+> `/release` rework for 1.x (version source, deploy offer, `main` cut-over) lands in milestone
+> M0.04; this document is rewritten at v1.0.0.
+
+## 1.x during the port (`develop` line)
+
+Until the cut-over `main` stays on 0.x and the 1.x line lives on `develop`. A 1.x release is
+therefore cut **on the `develop` line only**:
+
+- Tags are `v1.X.Y` (or `v1.X.Y-<prerelease>`), annotated, created on a commit that is on
+  `origin/develop`. They are cut from `release/1.X.Y` branches (off `develop`) that are merged
+  back into **`develop` only**. Nothing is merged into `main`, and `main` keeps its `v0.*` tags.
+- The tag pipeline runs the gates, then `ci/tag-guard.sh` accepts the tag only if its commit is
+  the tip of `origin/develop` or an ancestor of it, and pushes **the tag alone** to the GitHub
+  mirror (the mirror's `main` never moves for a 1.x tag). `v0.*` tags still need the tip of `origin/main`.
+- Hotfixes for 0.x keep section 6 (`hotfix/<slug>` off `main`, tag `v0.*`).
+
+Procedure, replacing `1.X.Y`:
+
+1. **Preflight.** `git status --short` prints nothing; `git fetch origin --tags`;
+   `git rev-parse develop origin/develop` shows the same sha; the latest `develop` pipeline is
+   green; `## [Unreleased]` in `CHANGELOG.md` is not empty.
+2. **Release branch.** `git switch -c release/1.X.Y develop`. In `CHANGELOG.md` rename
+   `## [Unreleased]` to `## [1.X.Y] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it
+   and update the compare links (conventions: section 3). The 1.x line has no version file yet:
+   the annotated tag is the version. Commit as `chore(release): 1.X.Y`.
+3. **Gates.** `cd app && composer run gates`, then in `tests/playwright/`
+   `npm run typecheck && env -u FLEET_E2E_BASE_URL npx playwright test`.
+4. **Merge into `develop` and tag.**
+
+   ```bash
+   git switch develop
+   git merge --no-ff release/1.X.Y -m "Merge branch 'release/1.X.Y'"
+   git tag -a v1.X.Y -m "v1.X.Y - <one-line headline>"
+   git branch -d release/1.X.Y
+   ```
+
+5. **Push, in one command**, so the commit is on `origin/develop` when the tag pipeline starts:
+   `git push origin develop v1.X.Y`.
+6. **Watch the pipelines.** The tag pipeline must be green (gates, then "Publish release to
+   GitHub mirror"), and so must the `develop` one. Then check the mirror carries the tag:
+
+   ```bash
+   git ls-remote https://github.com/rcuny/ddev-fleet.git 'refs/tags/v1.X.Y^{}'
+   git rev-parse 'v1.X.Y^{commit}'        # the two shas must match
+   ```
+
+If the guard fails with "not on origin/develop", the tag reached Bitbucket before `develop` did:
+`git push origin develop`, then re-run the tag pipeline. Never delete and re-push a published
+tag, and never force-push `develop` or a tag.
 
 ## 1. Model
 
@@ -209,5 +261,5 @@ Releasing is not deploying. A release makes the tag available on `main`;
 each server updates when its operator pulls it. Read the CHANGELOG for any
 "Rollout" notes first (they state the order in which servers must be
 updated), then follow
-[Updating the code](operations.md#updating-the-code) and the precondition in
-[runbook-server-rollout.md](runbook-server-rollout.md#1-routine-rollout-code--config).
+[Updating the code](v0/operations.md#updating-the-code) and the precondition in
+[runbook-server-rollout.md](v0/runbook-server-rollout.md#1-routine-rollout-code--config).

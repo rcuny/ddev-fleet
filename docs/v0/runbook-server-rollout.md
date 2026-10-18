@@ -1,15 +1,17 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-29
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Runbook: rolling code/config out to a live server, and changing its domain
 
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.12; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
 Two related but distinct procedures for an already-provisioned host:
 **§1** is the routine "ship a change" loop referenced from several other
-docs (`docs/operations.md` covers the same `git pull` mechanics from the
+docs (`docs/v0/operations.md` covers the same `git pull` mechanics from the
 server side). **§2** is the rarer, higher-risk procedure for moving an
 existing server (and its already-deployed instances) to a new domain
 and/or a new TLS/auth mode — written up here because it has real gotchas
@@ -23,13 +25,13 @@ that a plain code update never hits.
 > unset) can lock your SSH login user out via `security_hardening`'s
 > `AllowUsers`. Run it via `sudo` from your login shell, or set
 > `FLEET_SSH_ALLOW_USERS="debian root"` explicitly — see
-> `docs/installation.md` §4.
+> `docs/v0/installation.md` §4.
 
 ## 1. Routine rollout (code + config)
 
 `/opt/ddev-fleet` and `/srv/fleet/config` are both `fleet`-owned git
 checkouts tracking `origin/main` with read-only deploy keys (see
-`docs/operations.md` "Updating the code" for the exact commands: `git
+`docs/v0/operations.md` "Updating the code" for the exact commands: `git
 pull --ff-only` on each, then `systemctl restart fleet`). Whatever wraps
 that for you — a hand-run `ssh` one-liner, or a convenience script/alias
 in your own tooling — the same precondition applies:
@@ -57,14 +59,14 @@ look at it.
 Moving a live server's fleet domain — e.g. after acquiring a new one, or
 consolidating two servers onto matching domains — while **keeping every
 existing instance's database** (no destroy/recreate). This assumes the
-TLS/auth mode groundwork from `docs/installation.md` ("Choosing a TLS
+TLS/auth mode groundwork from `docs/v0/installation.md` ("Choosing a TLS
 mode", "Choosing an auth mode", "Switching TLS mode on an existing
-server") and `docs/README-authelia.md` ("Switching an existing server's
+server") and `docs/v0/README-authelia.md` ("Switching an existing server's
 mode") is already done — this section is specifically about the
 *instance*-level fallout of a domain change, which those docs don't cover.
 
 1. **Confirm the new domain's Caddy/TLS config actually applies first**
-   (`ansible/caddy-only.yml`, per `docs/installation.md`) — instances are
+   (`ansible/caddy-only.yml`, per `docs/v0/installation.md`) — instances are
    unreachable under the OLD domain from the moment this lands until step
    3 below finishes for each of them, since Caddy now only has site
    blocks for the new domain.
@@ -81,7 +83,7 @@ mode") is already done — this section is specifically about the
    domain until this runs.
 3. **Known gap — `settings.local.php` is not rewritten by step 2.**
    `fleet refresh-instance-config` only rewrites `.ddev/config.fleet.yaml`
-   (see `docs/cli.md`'s entry for it). It does **not** call
+   (see `docs/v0/cli.md`'s entry for it). It does **not** call
    `core/fleetconfig.py:write_settings_local()` — the function that
    injects Drupal's `trusted_host_patterns` — which only runs at
    `deploy`/`redeploy` time. After a domain change, every untouched
@@ -115,19 +117,19 @@ mode") is already done — this section is specifically about the
    instances' containers back-to-back can trigger the DDEV mass-start
    port-allocation race (a `ddev start` FAST-FAILing on a port the kernel
    hasn't released yet) — restart in small batches (e.g. 4 at a time) and
-   watch for it; `docs/operations.md`'s `--retry-port-conflict` self-heal
+   watch for it; `docs/v0/operations.md`'s `--retry-port-conflict` self-heal
    only applies to `fleet start`, not to the `--restart` flag on
    `refresh-instance-config`, so a failed one needs a manual `fleet stop`
    + `fleet start` retry.
 5. **`fleet refresh-ports`**, then a manual `caddy validate` as a final
-   sanity check (see `docs/operations.md`'s verification checklist) — a
+   sanity check (see `docs/v0/operations.md`'s verification checklist) — a
    domain change can leave a stale named-port site block referencing the
    old domain if a project's `ports:` catalogue embeds it anywhere
    non-templated.
 6. **Smoke test before declaring done**: log in as a real per-project
    user (or basic-auth credential) against the new domain, confirm the
    dashboard, and confirm at least one `additional_hostnames` alias host
-   if the project uses them (`docs/networking.md` §7) — aliases compose
+   if the project uses them (`docs/v0/networking.md` §7) — aliases compose
    their own hostname string and are easy to miss in a spot check of only
    the primary instance URLs.
 
@@ -136,7 +138,7 @@ mode") is already done — this section is specifically about the
 A freshly provisioned server can pass `bootstrap.sh`, start `fleet.service`,
 and serve its dashboard — and still **fail every instance deploy** if it
 lacks the secrets an already-running fleet server has. This bit a real
-rollout: `ddev4`/`ddev3` provisioned cleanly, but the first
+rollout: two new hosts provisioned cleanly, but the first
 `fleet deploy fern ...` on the new host failed with
 `unresolved token(s): [[jira-claude-token]]` purely because secrets had
 never been copied over — nothing else was wrong.
@@ -145,7 +147,7 @@ There are two independent kinds of secret, and they fail differently:
 
 - **Per-project secrets** — `/srv/fleet/secrets/<project>.env`
   (`KEY=VALUE`, `0600`, owned by `fleet`; legacy plaintext, with a host key they are
-  `/srv/fleet/secrets/<project>/<KEY>.asc` ciphertexts, see `docs/operations.md`
+  `/srv/fleet/secrets/<project>/<KEY>.asc` ciphertexts, see `docs/v0/operations.md`
   "Encrypted project secrets"; see this repo's
   `CLAUDE.md` "Per-project secrets model"). A project's asset `.env` (or
   any other asset file) references these as `[[token]]`, where the token
@@ -162,7 +164,7 @@ There are two independent kinds of secret, and they fail differently:
 
 Don't confuse the two when triage-reading a failed deploy's log: an
 `unresolved token(s)` failure almost always means a missing **per-project**
-secret, not the fleet-wide Claude token (see also `docs/installation.md`
+secret, not the fleet-wide Claude token (see also `docs/v0/installation.md`
 §6's clarification on when you actually need to mint a new Claude token).
 
 **Replicate everything from an existing server in one shot.** Secret
@@ -200,22 +202,22 @@ re-inject the new values with:
 fleet refresh-instance-config <instance-id> [--restart]
 ```
 
-(see `docs/cli.md` for its full flag reference — the same command used in
+(see `docs/v0/cli.md` for its full flag reference — the same command used in
 §2 above for a domain change).
 
 ## See also
 
-- `docs/operations.md` — the plain code/config update loop, rollback, and
+- `docs/v0/operations.md` — the plain code/config update loop, rollback, and
   the full verification checklist referenced in step 5 above.
-- `docs/installation.md` — first-run TLS/auth mode choices and how to
+- `docs/v0/installation.md` — first-run TLS/auth mode choices and how to
   switch either on an existing server.
-- `docs/README-authelia.md` — switching auth mode, including the
+- `docs/v0/README-authelia.md` — switching auth mode, including the
   same-maintenance-window warning for a server currently relying on the
   deprecated `auth_bypass_cidrs` whitelist.
-- `docs/cli.md` — `fleet refresh-instance-config`'s full flag reference
+- `docs/v0/cli.md` — `fleet refresh-instance-config`'s full flag reference
   and the `settings.local.php` limitation noted in step 3 above.
-- `docs/networking.md` — alias hostnames, TLS certificate modes.
-- `docs/installation.md` — §6, minting vs. copying the fleet-wide Claude
+- `docs/v0/networking.md` — alias hostnames, TLS certificate modes.
+- `docs/v0/installation.md` — §6, minting vs. copying the fleet-wide Claude
   token, and the deploy-blocking-token clarification referenced in §3 above.
 - This repo's `CLAUDE.md` — "Per-project secrets model" section, the
   canonical description of the `[[token]]` substitution mechanism used in

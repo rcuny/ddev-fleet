@@ -1,21 +1,23 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-29
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Installing ddev-fleet
 
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.02; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
 This is the first-run checklist: DNS, the installer, adding the deploy
 key, minting the Claude Code token, and the first deploy. For ongoing
-operations (updates, rollback, password rotation) see `docs/operations.md`.
+operations (updates, rollback, password rotation) see `docs/v0/operations.md`.
 
 ## 1. Choosing a TLS mode
 
 The installer asks how Caddy should get Let's Encrypt certificates for
 `*.<domain>` (every deployed instance) and any named-port site
-(`docs/networking.md`). This is the `fleet_tls_mode` Ansible var
+(`docs/v0/networking.md`). This is the `fleet_tls_mode` Ansible var
 (`ansible/group_vars/all.yml`), persisted per host in
 `/etc/ddev-fleet/local-vars.yml`:
 
@@ -88,7 +90,7 @@ visitors — the `FLEET_AUTH_MODE` prompt, persisted per host in
 | **`authelia`** | A cookie-based login portal (Authelia, systemd service on `127.0.0.1:9091`); Caddy authorizes each instance against it per project, using users defined in `fleet.yml`'s `users:` key. | A network's own policy blocks HTTP basic auth outright (it looks like a server error to the client, not a login prompt), or you want named per-user logins instead of one shared instance credential. |
 
 Full design, `fleet.yml` schema, and how to switch an already-provisioned
-server's mode later: `docs/README-authelia.md`.
+server's mode later: `docs/v0/README-authelia.md`.
 
 ## 3. DNS
 
@@ -243,12 +245,12 @@ time no fleet server anywhere has a valid token yet. If you're adding
 another server to a fleet that already has one, do **not** re-mint —
 copy the existing token instead: `fleet set-claude-token <existing-token>`,
 or replicate `/srv/fleet/.secrets` wholesale (see
-`docs/runbook-server-rollout.md` §3). This is also the more common
+`docs/v0/runbook-server-rollout.md` §3). This is also the more common
 source of deploy-blocking token errors than people expect: a
 `fleet deploy` failing with `unresolved token(s): [[…]]` is almost always
 a missing **per-project** secret (`/srv/fleet/secrets/<project>.env`), not
 this fleet-wide Claude token — the Claude token's absence only produces a
-non-fatal warning. See `docs/runbook-server-rollout.md` §3 for the full
+non-fatal warning. See `docs/v0/runbook-server-rollout.md` §3 for the full
 picture of secrets on a newly provisioned server.
 
 ### Multi-server: one config repo, per-host domain
@@ -263,7 +265,7 @@ THAT host — you don't create or edit it by hand. `host.yml`'s domain always
 wins over whatever `fleet.yml`'s own (shared) `fleet.domain` says, so
 `fleet.domain` becomes optional in `fleet.yml` once every host in the
 fleet has been provisioned (and thus has its own `host.yml`). See
-`docs/configuration.md`'s "Per-host domain" section for the full precedence
+`docs/v0/configuration.md`'s "Per-host domain" section for the full precedence
 rules and schema.
 
 ## 7. Start the fleet daemon
@@ -333,7 +335,7 @@ No need to re-run the full installer. From the server:
    ```
    This is the same scoped-playbook pattern as `ddev-only.yml` — never run
    the full `site.yml` against a live host (see `CLAUDE.md` /
-   `docs/operations.md`).
+   `docs/v0/operations.md`).
 
 **Upgrade order matters — read this if the server is already running an
 older `fleet.core.caddyports`.** Named-port snippets (Typesense, etc.) only
@@ -357,11 +359,11 @@ either way) but leaves snippets on the inline block until the next
 
 ## See also
 
-- `docs/operations.md` — ongoing code updates, rollback, password
+- `docs/v0/operations.md` — ongoing code updates, rollback, password
   rotation, the verification checklist as a repeatable template.
-- `docs/networking.md` — TLS termination points and every port in one
+- `docs/v0/networking.md` — TLS termination points and every port in one
   table, including the `fleet_tls_mode` mechanics.
-- `docs/README-authelia.md` — full design, `fleet.yml` `users:` schema, and
+- `docs/v0/README-authelia.md` — full design, `fleet.yml` `users:` schema, and
   how to switch an existing server's `auth_mode` later.
 - `fleet.yml.dist` — the `fleet.yml` registry schema, with the full set
   of optional keys (named ports, Typesense, additional hostnames)

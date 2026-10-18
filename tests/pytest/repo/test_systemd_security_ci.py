@@ -86,7 +86,7 @@ def _run(tmp_path, capsys, *argv) -> tuple[int, str, str]:
     return code, out.out, out.err
 
 
-def _compare(tmp_path, capsys, baseline: dict | None, current: dict, env="ddev3", *extra):
+def _compare(tmp_path, capsys, baseline: dict | None, current: dict, env="server1", *extra):
     base = _baseline(tmp_path, **({env: baseline} if baseline else {}))
     cur = _write(tmp_path / "current.json", current)
     return _run(
@@ -204,7 +204,7 @@ def test_clean_compare_exits_zero_and_writes_both_reports(tmp_path, capsys):
     assert (tmp_path / "out" / "r.md").read_text() == out
     data = json.loads((tmp_path / "out" / "r.json").read_text())
     assert (
-        data["ok"] is True and data["env"] == "ddev3" and data["rows"][0]["unit"] == "fleet.service"
+        data["ok"] is True and data["env"] == "server1" and data["rows"][0]["unit"] == "fleet.service"
     )
 
 
@@ -215,7 +215,7 @@ def test_regression_exits_one_names_the_unit_and_lists_directives(tmp_path, caps
     )
     code, out, err = _compare(tmp_path, capsys, base, cur)
     assert code == 1
-    assert err.strip() == "REGRESSION fleet.service (ddev3): 1.8 -> 2.6 (+0.8)"
+    assert err.strip() == "REGRESSION fleet.service (server1): 1.8 -> 2.6 (+0.8)"
     lines = out.splitlines()
     assert lines.index("| `fleet.service` | 1.8 | 2.6 | +0.8 | **REGRESSION** |") < lines.index(
         "| `other.service` | 1.0 | 1.0 | 0.0 | OK |"
@@ -230,7 +230,7 @@ def test_improvement_is_reported_with_a_baseline_update_hint_and_does_not_fail(t
     cur = _report({"fleet.service": _unit(1.8)})
     code, out, err = _compare(tmp_path, capsys, base, cur)
     assert code == 0 and err == ""
-    assert "| IMPROVED |" in out and "consider `update-baseline --env ddev3`" in out
+    assert "| IMPROVED |" in out and "consider `update-baseline --env server1`" in out
 
 
 def test_new_and_gone_units_are_reported_but_never_fail(tmp_path, capsys):
@@ -246,16 +246,16 @@ def test_tolerance_option_overrides_the_baseline_file(tmp_path, capsys):
     base = _report({"a.service": _unit(1.8)})
     cur = _report({"a.service": _unit(2.2)})
     assert _compare(tmp_path, capsys, base, cur)[0] == 1
-    assert _compare(tmp_path, capsys, base, cur, "ddev3", "--tolerance", "0.5")[0] == 0
+    assert _compare(tmp_path, capsys, base, cur, "server1", "--tolerance", "0.5")[0] == 0
 
 
 def test_environment_without_a_baseline_reports_everything_as_new(tmp_path, capsys):
     cur = _report({"fleet.service": _unit(1.8)}, missing=["authelia.service"])
-    code, out, err = _compare(tmp_path, capsys, None, cur, "ddev3")
+    code, out, err = _compare(tmp_path, capsys, None, cur, "server1")
     assert code == 0
-    assert "No baseline recorded for `ddev3` yet" in out and "| NEW |" in out
+    assert "No baseline recorded for `server1` yet" in out and "| NEW |" in out
     assert "authelia.service" in out  # not-loaded units are mentioned
-    assert "update-baseline" in err and "ddev3" in err
+    assert "update-baseline" in err and "server1" in err
 
 
 def test_missing_baseline_file_is_the_same_as_no_environment(tmp_path, capsys):
@@ -284,7 +284,7 @@ def test_a_different_systemd_major_version_is_called_out(tmp_path, capsys):
 def test_unreadable_current_report_is_an_error_not_a_pass(tmp_path, capsys):
     bad = tmp_path / "c.json"
     bad.write_text("not json")
-    code, _, err = _run(tmp_path, capsys, "compare", "--env", "ddev3", "--current", bad)
+    code, _, err = _run(tmp_path, capsys, "compare", "--env", "server1", "--current", bad)
     assert code == 2 and "invalid JSON" in err
 
 
@@ -304,7 +304,7 @@ def test_update_baseline_replaces_one_environment_and_keeps_the_rest(tmp_path, c
                     "overview": {},
                     "units": {},
                 },
-                "ddev3": {
+                "server1": {
                     "systemd": "257",
                     "recorded": "2026-01-01",
                     "overview": {"x.service": 1.0},
@@ -321,19 +321,19 @@ def test_update_baseline_replaces_one_environment_and_keeps_the_rest(tmp_path, c
         "--baseline",
         base_file,
         "--env",
-        "ddev3",
+        "server1",
         "--current",
         cur,
     )
-    assert code == 0 and "recorded baseline for 'ddev3'" in out
+    assert code == 0 and "recorded baseline for 'server1'" in out
     text = base_file.read_text()
     data = json.loads(text)
     assert data["tolerance"] == 0.3
     assert data["environments"]["offline"]["recorded"] == "2026-01-01"  # untouched
-    ddev3 = data["environments"]["ddev3"]
-    assert ddev3["systemd"] == "258" and ddev3["units"]["fleet.service"] == _unit(1.8, A=0.1)
-    assert ddev3["overview"] == {"fleet.service": 1.8}
-    assert ddev3["recorded"] != "2026-01-01"
+    server1 = data["environments"]["server1"]
+    assert server1["systemd"] == "258" and server1["units"]["fleet.service"] == _unit(1.8, A=0.1)
+    assert server1["overview"] == {"fleet.service": 1.8}
+    assert server1["recorded"] != "2026-01-01"
     # stable formatting: indent=2, sorted keys, trailing newline
     assert text == json.dumps(data, indent=2, sort_keys=True) + "\n"
 
@@ -472,7 +472,7 @@ def live_env(tmp_path):
     python.chmod(0o755)
     report = _write(tmp_path / "report.json", _report({"fleet.service": _unit(1.8)}))
     # Never the real baseline file: it changes whenever a real baseline is recorded.
-    baseline = _baseline(tmp_path, ddev3=_report({"fleet.service": _unit(1.8)}))
+    baseline = _baseline(tmp_path, server1=_report({"fleet.service": _unit(1.8)}))
     env = {
         **os.environ,
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
@@ -532,7 +532,7 @@ def test_live_check_fetches_compares_and_still_checks_every_target_on_failure(li
 
 def test_live_check_succeeds_when_every_target_is_fine(live_env):
     work, env = live_env
-    done = _live(work, env, SECURITY_PROBE_TARGETS="ddev3=fleet-probe@ddev3.example")
+    done = _live(work, env, SECURITY_PROBE_TARGETS="server1=fleet-probe@server1.example")
     assert done.returncode == 0, done.stderr
 
 

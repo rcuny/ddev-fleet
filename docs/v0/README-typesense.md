@@ -1,11 +1,13 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-07-16
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Typesense browser-search exposure
+
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.07; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
 
 How the fleet makes a project's Typesense reachable **from the browser**
 (for widgets like `fern_facets` that query Typesense client-side), without
@@ -22,8 +24,7 @@ by default. Typesense needed its own deliberate, opt-in exposure path.
 
 ## This supersedes the path-based design
 
-An earlier design (see the companion repo's
-`.claude/user/docs/specs/2026-07-15-typesense-edge-exposure-design.md`)
+An earlier design (see the 2026-07-15 edge-exposure design notes, kept outside this repository)
 exposed Typesense at `https://{instance}.fleet.<domain>/_typesense/*`
 (same-origin, Caddy `handle`/`strip_prefix`). It was implemented, then
 found **incompatible** at rollout: the `fern_facets` widget's built
@@ -69,7 +70,7 @@ Instance's Typesense (internal :8108)
   and kept in sync by `core/caddyports.py`'s `sync()` — called from
   `deploy()`/`destroy()`, `fleet refresh-ports`, and daemon startup — not
   by Ansible past the one-time `ports/` directory seed. See
-  `docs/networking.md` for the generic mechanism.
+  `docs/v0/networking.md` for the generic mechanism.
 - Opt-in is per-project: set `typesense: true` on a project block in
   `fleet.yml` (see `fleet.yml.dist` for the commented example).
   `Registry.typesense_enabled(project)` gates all of the behavior below.
@@ -77,7 +78,7 @@ Instance's Typesense (internal :8108)
 ## The two keys, and why
 
 `src/fleet/core/typesense.py:ensure_project_keys()` generates and persists,
-once per project, through the secret store (`/srv/fleet/secrets/<project>.env`, or encrypted `.asc` files once the host has a key; see `docs/operations.md`):
+once per project, through the secret store (`/srv/fleet/secrets/<project>.env`, or encrypted `.asc` files once the host has a key; see `docs/v0/operations.md`):
 
 | Key | Purpose | Ever sent to the browser? |
 |---|---|---|
@@ -145,7 +146,7 @@ not sufficient proof of external reachability.
 
 Inside the Docker network (an instance's own containers, for example a
 Playwright browser), `https://<fqdn>:9108` is served by `ddev-router`
-itself through the in-network port mirror (FLE-29, `docs/networking.md` section
+itself through the in-network port mirror (FLE-29, `docs/v0/networking.md` section
 "In-network mirror of named ports"), so the public Caddy port is not needed
 there. The certificate in-container is DDEV's mkcert one (clients need
 `ignoreHTTPSErrors`).
@@ -161,6 +162,6 @@ curl -s -o /dev/null -w '%{http_code}\n' \
   https://<project>--<label>.fleet.example.com:9108/health
 ```
 
-See also `docs/operations.md`'s verification checklist for the fuller
+See also `docs/v0/operations.md`'s verification checklist for the fuller
 live-verification list (note: an earlier `/_typesense/health` example
 predates this port-based design and is stale — use the `:9108` form above).

@@ -62,16 +62,36 @@ final class RepoHygieneTest extends TestCase
 
     public function testNoCompanionOrOwnerReferencesInNewCode(): void
     {
-        // Not scanned yet: ansible/ (reshaped in M0.02) and the root documentation (CLAUDE.md, README.md,
-        // CONTRIBUTING.md, docs/*.md, tests/README-tests.md), which M0.01 Task 12 rewrites and then adds here.
-        // Missing paths (docs/development.md, docs/README.md until Task 12) are skipped.
+        // Not scanned: ansible/ (reshaped in M0.02), CHANGELOG.md (release history keeps what it recorded; its
+        // [Unreleased] section is scanned by testChangelogUnreleasedSectionIsClean), LICENSE (the copyright holder)
+        // and SYSTEMD-SECURITY-REPORT.md (generated from the maintainer's live hosts). docs/v0 is scanned too.
         $roots = [
-            'app', 'ci', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright',
-            'docs/development.md', 'docs/README.md',
+            'app', 'ci', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright', 'tests/pytest',
+            'tests/README-tests.md', 'CLAUDE.md', 'README.md', 'CONTRIBUTING.md', 'docs',
+            '.github', '.gitignore', 'demo', 'scripts',
         ];
         $hits = $this->scan(self::root(), $roots, $this->ownerPatterns(), self::SKIP_PATHS);
 
         self::assertSame([], $hits, "companion or owner references in public code:\n".implode("\n", $hits));
+    }
+
+    public function testChangelogUnreleasedSectionIsClean(): void
+    {
+        $changelog = (string) file_get_contents(self::root().'/CHANGELOG.md');
+        if (1 !== preg_match('/^## \[Unreleased\]\R(.*?)(?=^## \[|\z)/ms', $changelog, $match)) {
+            self::fail('CHANGELOG.md has no [Unreleased] section');
+        }
+
+        $hits = [];
+        foreach (explode("\n", $match[1]) as $number => $line) {
+            foreach ($this->ownerPatterns() as $pattern) {
+                if (1 === preg_match($pattern, $line)) {
+                    $hits[] = \sprintf('[Unreleased] line %d matched %s', $number + 1, $pattern);
+                }
+            }
+        }
+
+        self::assertSame([], $hits, "owner references in the [Unreleased] changelog entry:\n".implode("\n", $hits));
     }
 
     public function testNestedDirectoriesNamedLikeSkippedOnesAreStillScanned(): void

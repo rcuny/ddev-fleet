@@ -1,19 +1,21 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # ddev-fleet server context
 
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.11; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+
 This file is the server-side Claude Code context document. The canonical
-copy lives in the product repo at `docs/srv-fleet-CLAUDE.md`;
-`docs/operations.md`'s Claude-context-refresh section copies it to
+copy lives in the product repo at `docs/v0/srv-fleet-CLAUDE.md`;
+`docs/v0/operations.md`'s Claude-context-refresh section copies it to
 `/srv/fleet/CLAUDE.md` so a `claude -p "..."` session run as the `fleet`
 user on the server has grounded context without reading the whole doc set.
 This is a compact, server-side reference — the full versions are
-`docs/configuration.md` (registry schema) and `docs/cli.md` (CLI), both in
+`docs/v0/configuration.md` (registry schema) and `docs/v0/cli.md` (CLI), both in
 the product repo, not copied to the server.
 
 ## Per-host domain (`/srv/fleet/host.yml`)
@@ -29,11 +31,11 @@ fails at load time naming both locations. `fleet.domain` in `fleet.yml`
 below is therefore optional once every host has its own `host.yml`. Every
 call site loads via `fleet.core.instances.load_registry(paths)`, which
 always passes `host.yml` through — never call `Registry.load()` directly.
-Full detail: `docs/configuration.md`.
+Full detail: `docs/v0/configuration.md`.
 
 `host.yml` also carries `auth_mode: basic | authelia` (absent means
 `basic`), letting one shared `fleet.yml` run different auth modes on
-different hosts — see "Auth modes" below and `docs/README-authelia.md`.
+different hosts — see "Auth modes" below and `docs/v0/README-authelia.md`.
 
 ## Registry (`/srv/fleet/config/fleet.yml`)
 
@@ -102,7 +104,7 @@ rebuild it; instances deployed before this field existed need an explicit
 while a web-UI deploy only logs `fleet-tmux.service not running: tty commands
 not typed` (start it with `sudo systemctl start fleet-tmux` and redeploy).
 Full reference:
-`docs/configuration.md`.
+`docs/v0/configuration.md`.
 
 **Named ports (`fleet.ports` / project `ports:`).** Each `fleet.ports`
 entry is one externally-exposable named port: `public` is what Caddy
@@ -116,8 +118,8 @@ within an entry, and no `public`/`router` value reused across entries.
 `public=9108, router=8108` default when `fleet.ports` has no explicit
 `typesense` entry, so a `typesense: true`-only registry needs zero edits.
 Apply a `ports:` edit with `fleet refresh-ports` (see below) — no Ansible
-run, no redeploy. Full reference: `docs/configuration.md`; runbook for
-adding a new port: `docs/networking.md`.
+run, no redeploy. Full reference: `docs/v0/configuration.md`; runbook for
+adding a new port: `docs/v0/networking.md`.
 
 **In-network port mirror (FLE-29, `fleet.port_mirror`, default `true`).** So that
 a browser INSIDE an instance's containers (Playwright) can reach
@@ -136,7 +138,7 @@ hosts use 8443), fleet adds a `fleet-mirror-443` entrypoint with TLS passthrough
 to the router's https port, so `https://<fqdn>/` works inside the containers and
 the `Host` header carries no `:8443` (use `https://$FLEET_INSTANCE_HOST` as the
 base URL, not `DDEV_PRIMARY_URL`). It is skipped when `router_https_port` is 443
-or another `static_config.*.yaml` owns `:443`. Details: `docs/networking.md`.
+or another `static_config.*.yaml` owns `:443`. Details: `docs/v0/networking.md`.
 
 **Domain Access alias hostnames (`additional_hostnames`).** Each entry
 must be a bare DNS label (lowercase, no dots — rejected at registry load
@@ -153,7 +155,7 @@ implemented). Every instance also gets `FLEET_INSTANCE_HOST=<instance-id>.
 <domain>` injected into `web_environment`, so a project's own Domain
 Access config can build these same alias patterns in PHP:
 `"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full reference:
-`docs/networking.md` §7, `docs/configuration.md`.
+`docs/v0/networking.md` §7, `docs/v0/configuration.md`.
 
 **Auth modes (`host.yml`'s `auth_mode`, project `users:`).** Basic mode
 (default): per-instance HTTP basic auth, credential symmetric
@@ -166,8 +168,8 @@ rejected in this mode. Apply a `users:`/`auth_mode` edit with
 `fleet refresh-auth` (re-renders `users.yml` — hot-reloaded, no restart —
 and every instance's snippet). The old `fleet.auth_bypass_cidrs` IP
 whitelist is deprecated: accepted with a warning, otherwise ignored in
-both modes. Full reference: `docs/README-authelia.md`,
-`docs/configuration.md`.
+both modes. Full reference: `docs/v0/README-authelia.md`,
+`docs/v0/configuration.md`.
 
 **git identity injection.** The fleet injects `GIT_AUTHOR_*`/`GIT_COMMITTER_*`
 into each instance's `config.fleet.yaml` `web_environment` so commits made
@@ -191,7 +193,7 @@ daemon runs itself: `name: {cron: "0 3 * * *", timezone: Europe/Paris,
 action: redeploy, instance: <id>, servers: [<fleet domain>], enabled: true}`
 (`servers` and `enabled` optional). They are shown on the web UI's Scheduled jobs
 tab and managed with `fleet schedule`; runtime state is in
-`/srv/fleet/schedules/`. See `docs/README-schedules.md`.
+`/srv/fleet/schedules/`. See `docs/v0/README-schedules.md`.
 
 Running instance id = `<project-key>--<label>` (double-dash), where `label`
 defaults to the slugified branch. This is the DDEV project name, the Docker
@@ -215,17 +217,17 @@ registry load with an actionable message naming the bad key.
 | `fleet ssh-key` | — | Prints the fleet deploy public key |
 | `fleet assets push <project> <src> <dest-rel>` | — | Copies a local file into `assets/<project>/<dest-rel>` |
 | `fleet secret set <project> <key>` | — | Stores one secret (value from a hidden prompt or stdin, never argv; positional value is deprecated). Encrypted to the host key as `secrets/<project>/<KEY>.asc` once `fleet keys init` has run, else legacy plaintext `secrets/<project>.env` (0600). Available at deploy as `[[key-with-dashes]]`. Companions: `fleet secret list|unset|migrate`, `fleet keys init|show`. |
-| `fleet webhook secret <project>` | `[--rotate] [--source=jira\|bitbucket]` | Creates/rotates the project's Jira webhook secret (`webhooks/secrets.env`, 0600), printed once with the hook URL; see `docs/README-webhooks.md` |
+| `fleet webhook secret <project>` | `[--rotate] [--source=jira\|bitbucket]` | Creates/rotates the project's Jira webhook secret (`webhooks/secrets.env`, 0600), printed once with the hook URL; see `docs/v0/README-webhooks.md` |
 | `fleet webhook bitbucket-token <project>` | (token via stdin / hidden prompt) | Stores the Bitbucket `pipeline:write` token for `bitbucket_hooks` rules |
 | `fleet webhook log` | `[--project=<p>] [-n=20] [--source=jira\|bitbucket]` | Last N webhook deliveries from `logs/webhooks/jira.jsonl` (or `bitbucket.jsonl`) |
-| `fleet schedule list\|run <name>\|history [<name>] [-n]\|pause <name>\|resume <name>` | — | Scheduled jobs from `fleet.yml`'s top-level `schedules:` (cron + IANA timezone + `action: redeploy` + `instance`, optional `servers:`/`enabled:`). `run` redeploys now in-process (instance lock respected); pause/resume edit `schedules/state.json`; see `docs/README-schedules.md` |
+| `fleet schedule list\|run <name>\|history [<name>] [-n]\|pause <name>\|resume <name>` | — | Scheduled jobs from `fleet.yml`'s top-level `schedules:` (cron + IANA timezone + `action: redeploy` + `instance`, optional `servers:`/`enabled:`). `run` redeploys now in-process (instance lock respected); pause/resume edit `schedules/state.json`; see `docs/v0/README-schedules.md` |
 | `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | `ddev export-db --gzip=false` into the project's asset tree; refuses to write `dumps/default.sql` |
 | `fleet refresh-claude-token` | `[--restart]` | Rotates `CLAUDE_CODE_OAUTH_TOKEN` fleet-wide, rewrites every instance's `config.fleet.yaml`; restarts running instances only if `--restart` |
 | `fleet set-claude-token <token>` | `[--restart]` | Same propagation as `refresh-claude-token` for a token you already have, instead of running `claude setup-token` |
 | `fleet set-admin-password <password>` | — | Mode-aware (reads only `host.yml`'s `auth_mode` — a break-glass guarantee that still works with a broken/missing `fleet.yml` in basic mode). Basic mode: hashes it, atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy — no Ansible run. Authelia mode: writes `admin.yml` and re-renders `users.yml` — no restart needed (hot-reloaded) |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same mode-aware way, and prints it once |
 | `fleet refresh-config` | — | Git-aware pull of `/srv/fleet/config` (fetch + `--ff-only` pull); no-op message if `config/` isn't a git checkout |
-| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it. Does NOT rewrite `settings.local.php` — see `docs/runbook-server-rollout.md` for the domain-change workaround |
+| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (incl. the Claude onboarding hook) without a full deploy; `--restart` also restarts it. Does NOT rewrite `settings.local.php` — see `docs/v0/runbook-server-rollout.md` for the domain-change workaround |
 | `fleet refresh-ports` | — | Reconciles Caddy port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s `fleet.ports`/project `ports:` state — the "apply my port edits now" command; also rewrites the in-network port-mirror files (FLE-29) and prints whether the router already has them; also runs `sudo /usr/local/sbin/fleet-ufw-sync` when the `network_hardening` role's helper is present (silent no-op otherwise) |
 | `fleet refresh-auth` | — | Re-applies the current auth config to every deployed instance — the "apply my auth edits now" command, and how a server switches `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from its recorded `auth-enabled`/`auth-password` (`fleet.auth_bypass_cidrs` is deprecated and no longer applied). Authelia mode: re-renders `users.yml` from `fleet.yml`'s `users:` + the admin account, plus every instance's `forward_auth` snippet. Either way: ONE `caddy validate` + `caddy reload` |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Interactive shell in an instance's dir (or fleet home); `--list` prints known instance ids instead |
@@ -259,7 +261,7 @@ explicit instance ids, or a selector (`--all` / `--project=<p>` /
 bulk deploy. Every bulk operation (including `deploy --count`) prints a
 per-instance `OK`/`FAILED` line plus a `N succeeded, M failed` summary and
 exits `0` (all succeeded), `1` (all failed), or `2` (partial failure).
-Full detail + examples: `docs/cli.md`.
+Full detail + examples: `docs/v0/cli.md`.
 
 ## Common workflows
 
@@ -276,7 +278,7 @@ Full detail + examples: `docs/cli.md`.
 - **Pull the latest registry/assets after someone else edits `fleet.yml`:** `fleet refresh-config`.
 - **Let a network that blocks basic auth outright reach an instance:**
   switch the server to Authelia mode (`fleet_auth_mode: authelia`, see
-  `docs/README-authelia.md`) rather than the deprecated
+  `docs/v0/README-authelia.md`) rather than the deprecated
   `fleet.auth_bypass_cidrs` whitelist, which is now ignored.
 - **Add/edit a project user (Authelia mode):** edit that project's
   `users:` in `fleet.yml`, then `fleet refresh-auth` — no redeploy, no
@@ -338,9 +340,9 @@ recently (anti-spam cadence). Reads `MSMTP_TO`/`MSMTP_FROM` from
 email immediately, ignoring the pending-reboot check, to verify the relay
 is configured correctly — exits `1` if the test send fails.
 
-## Claude Code skills (`/srv/fleet/.claude/skills/`)
+## Claude Code skills (`<fleet home>/.claude` skills directory)
 
-Added by `2026-07-24-fleet-host-claude-design.md` (companion repo) — this
+Added by the 2026-07-24 host-Claude design notes (kept outside this repository) — this
 spec owns this section; a later doc regeneration pass should pull from here,
 not re-derive it. An interactive `claude` session started at cwd
 `/srv/fleet` (`fleet shell` with no instance id, or `cd /srv/fleet && claude`)
@@ -354,13 +356,13 @@ discovers four project-scoped skills:
 | `/fleet-cleanup` | `/fleet-cleanup`, "what can we destroy" | Builds a candidate table (stopped >7 days, or an incomplete deploy) and destroys **only** after an explicit yes/no confirmation — a bare invocation never destroys anything. |
 
 **Delivery**: `ansible/roles/claude_cli` copies the skills to
-`/srv/fleet/.claude/skills/<name>/SKILL.md` and a permission allowlist to
-`/srv/fleet/.claude/settings.json` — both project-scoped at `FLEET_HOME`,
-**not** under `/home/fleet/.claude/` (which stays `$HOME`-scoped, holding
+`skills/<name>/SKILL.md` and a permission allowlist to
+`settings.json` inside `/srv/fleet/.claude` — both project-scoped at `FLEET_HOME`,
+**not** under the `fleet` user's `$HOME/.claude` (which stays `$HOME`-scoped, holding
 only `.claude.json`). Applied via the scoped `ansible/claude-onboarding.yml`
 playbook (roles: `shell_profile`, `claude_cli`) — never the full `site.yml`.
 
-**Permission tiers (`/srv/fleet/.claude/settings.json`)**: read-only/
+**Permission tiers (`settings.json` in `/srv/fleet/.claude`)**: read-only/
 reversible `fleet`/`ddev` commands are allow-tier (`fleet list`, `fleet
 deploy *`, `fleet start/stop/snapshot`, read-only `ddev`/`git`/`grep`/`find`/
 `df`/`free` commands). Credential and fleet-wide-restart commands

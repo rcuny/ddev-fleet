@@ -1,11 +1,13 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-27
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # Configuring ddev-fleet: the `fleet.yml` registry
+
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.03; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
 
 `fleet.yml` is the fleet's single source of truth for *what* it manages:
 which projects exist, where their git remotes live, what deploy templates
@@ -15,8 +17,8 @@ never write to it. You author it by hand (or via provisioning tooling) and
 edit it directly to onboard a project, change a default, or expose a port.
 
 This document is the field-by-field reference. For the first-run checklist
-that creates this file, see `docs/installation.md`'s `fleet init` section.
-For the runbook on exposing a new port end-to-end, see `docs/networking.md`.
+that creates this file, see `docs/v0/installation.md`'s `fleet init` section.
+For the runbook on exposing a new port end-to-end, see `docs/v0/networking.md`.
 
 ## Where it lives
 
@@ -102,7 +104,7 @@ projects:
         #   tty2: [<string>, ...]          #   typed once into the new window's RIGHT pane
         # tty1/tty2 directly under the template are DEPRECATED (still accepted, with a warning)
 
-schedules:                                 # optional — periodic jobs (FLE-31, docs/README-schedules.md)
+schedules:                                 # optional — periodic jobs (FLE-31, docs/v0/README-schedules.md)
   <schedule-name>:
     cron: "<5-field expression>"           # required
     timezone: <IANA name>                  # required, e.g. Europe/Paris
@@ -113,13 +115,13 @@ schedules:                                 # optional — periodic jobs (FLE-31,
 ```
 
 `schedules:` is a top-level key, not part of a project. The scheduler, the cron
-syntax, the DST rules and the missed-run policy are in `docs/README-schedules.md`.
+syntax, the DST rules and the missed-run policy are in `docs/v0/README-schedules.md`.
 
 ## The `fleet:` block
 
 | Field | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `domain` | string | yes, unless `host.yml` sets it (see "Per-host domain" above) | — | The wildcard DNS root, e.g. `fleet.example.com`. Every instance is reachable at `<instance-id>.<domain>`; the dashboard/web UI at `<domain>` itself (behind Caddy's `fleet.<domain>` site — see `docs/networking.md`). |
+| `domain` | string | yes, unless `host.yml` sets it (see "Per-host domain" above) | — | The wildcard DNS root, e.g. `fleet.example.com`. Every instance is reachable at `<instance-id>.<domain>`; the dashboard/web UI at `<domain>` itself (behind Caddy's `fleet.<domain>` site — see `docs/v0/networking.md`). |
 | `git_bot_name` | string | no | `ddev-fleet bot` | Default commit-author/committer name injected as `GIT_AUTHOR_NAME`/`GIT_COMMITTER_NAME` into every instance's `web_environment`, unless a project overrides it. |
 | `git_bot_email` | string | no | `bot@<domain>` | Default commit-author/committer email, same injection. |
 | `git_bot` | `false` | no | (unset = enabled) | Set to `false` to disable git identity injection **fleet-wide** — every instance's own `git config` then decides commit identity. Per-project `git_bot: false` (below) overrides this for one project only. |
@@ -165,7 +167,7 @@ catalogue before a project can reference it.
 Once declared, run `fleet refresh-ports` to reconcile the Caddy
 port-exposure snippets (and UFW rules, if the network-hardening role is
 installed) to the current registry state — no Ansible re-run, no redeploy.
-Full runbook: `docs/networking.md` §6.
+Full runbook: `docs/v0/networking.md` §6.
 
 ## The `projects:` block
 
@@ -191,8 +193,8 @@ labels)`).
 | `git` | string | **yes** | — | SSH git URL cloned/updated for every instance of this project. The fleet's read-only deploy key (`fleet ssh-key`) must be added to the forge as a deploy key. |
 | `default_template` | string | no | (none — `fleet deploy` errors without one) | Template name used when `fleet deploy <project>` omits its `<template>` positional arg. |
 | `default_branch` | string | no | (none — `fleet deploy` errors without one) | Branch used when `fleet deploy` omits `--branch`. |
-| `additional_hostnames` | list of strings | no | `[]` | Extra alias hostnames routed to the instance alongside `<instance-id>.<domain>` (e.g. Drupal Domain Access-style subdomains). Each entry must be a bare DNS label (lowercase, `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, no dots — validated at registry load, `RegistryError` otherwise). Resolved per instance as the FLATTENED FQDN `<h>-<instance-id>.<domain>` (`core/instances.py:alias_fqdns()`), e.g. `news-oak--translations-test.fleet.example.com` — never nested under the instance id, since Caddy's site block is a single-label wildcard. Deploy raises `DeployError` if `<h>-<instance-id>` exceeds the 63-character DNS label limit. Alias hosts are covered by the SAME per-instance basic-auth matcher as the instance's own FQDN (`core/caddyauth.py`) and each gets its own on-demand Let's Encrypt certificate (mind the ~50 new-certs/domain/week rate limit with many aliases). Every instance also gets `FLEET_INSTANCE_HOST=<instance-id>.<domain>` injected into `web_environment`, so Drupal can build the same alias pattern: `"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full design: `docs/networking.md` §7. |
-| `typesense` | bool | no | `false` | **Legacy** opt-in flag: expose Typesense at the `typesense` named port (`*.<domain>:9108` by default) for every instance of this project. Equivalent to `ports: [typesense]`; both may be present without duplicating the exposure (`Registry.project_ports` de-dupes). The browser-exposed key must be a **search-only** key, never the admin key — see `docs/README-typesense.md`. |
+| `additional_hostnames` | list of strings | no | `[]` | Extra alias hostnames routed to the instance alongside `<instance-id>.<domain>` (e.g. Drupal Domain Access-style subdomains). Each entry must be a bare DNS label (lowercase, `^[a-z0-9]([a-z0-9-]*[a-z0-9])?$`, no dots — validated at registry load, `RegistryError` otherwise). Resolved per instance as the FLATTENED FQDN `<h>-<instance-id>.<domain>` (`core/instances.py:alias_fqdns()`), e.g. `news-oak--translations-test.fleet.example.com` — never nested under the instance id, since Caddy's site block is a single-label wildcard. Deploy raises `DeployError` if `<h>-<instance-id>` exceeds the 63-character DNS label limit. Alias hosts are covered by the SAME per-instance basic-auth matcher as the instance's own FQDN (`core/caddyauth.py`) and each gets its own on-demand Let's Encrypt certificate (mind the ~50 new-certs/domain/week rate limit with many aliases). Every instance also gets `FLEET_INSTANCE_HOST=<instance-id>.<domain>` injected into `web_environment`, so Drupal can build the same alias pattern: `"<h>-" . getenv('FLEET_INSTANCE_HOST')`. Full design: `docs/v0/networking.md` §7. |
+| `typesense` | bool | no | `false` | **Legacy** opt-in flag: expose Typesense at the `typesense` named port (`*.<domain>:9108` by default) for every instance of this project. Equivalent to `ports: [typesense]`; both may be present without duplicating the exposure (`Registry.project_ports` de-dupes). The browser-exposed key must be a **search-only** key, never the admin key — see `docs/v0/README-typesense.md`. |
 | `ports` | list of strings | no | `[]` | The general mechanism superseding `typesense: true` — names must each exist as a key in `fleet.ports` (validated: `Registry._validate` raises if a project references an undeclared port name). |
 | `git_bot` | mapping `{name, email}` or `false` | no | (inherits the fleet-level default) | Per-project override of the injected git commit identity. A mapping overrides `name`/`email` individually (either key may be omitted, falling back to the fleet default for that field). `false` disables identity injection for this project only, letting the project's own `git config` (e.g. a post-start hook) win — note the injected `GIT_AUTHOR_*`/`GIT_COMMITTER_*` env vars otherwise take precedence over `git config user.*`. |
 | `issue_id_regexp` | string | no | (none — `[[issue-id]]` and `FLEET_ISSUE_ID` are simply absent) | A Python `re` pattern used to derive the `[[issue-id]]` token for this project's deploys — see "`[[issue-id]]` resolution" below. Validated at registry load: must be a string that `re.compile()`s (`RegistryError` otherwise). |
@@ -396,7 +398,7 @@ part of the instance's git history: `.fleet/` is added to the instance's
 `.git/info/exclude` at deploy time, alongside `.ddev/config.fleet.yaml` and
 the other fleet-injected files, so it can never be accidentally committed.
 
-**`fleet redeploy`** (`docs/cli.md`) reads this file to recover an
+**`fleet redeploy`** (`docs/v0/cli.md`) reads this file to recover an
 instance's project/template/branch/label/auth and rebuild it in place under
 the same id, without the operator re-supplying any of them. If `template`
 was never recorded (the instance predates this field), `redeploy` refuses
@@ -416,7 +418,7 @@ copies verbatim (comments included) into a fresh `fleet.yml`, patching only
 # Example fleet registry. Copy to your private config repo as fleet.yml and edit.
 fleet:
   domain: fleet.example.com
-  # ports:                                  # fleet-wide named-port catalogue (optional, see docs/networking.md)
+  # ports:                                  # fleet-wide named-port catalogue (optional, see docs/v0/networking.md)
   #   typesense:  { public: 9108, router: 8108 }  # explicit form of the built-in legacy default below
   #   playwright: { public: 9324, router: 8323 }
 projects:
@@ -480,16 +482,16 @@ server to pull the update (a plain `git fetch --quiet && git pull
 i.e. you're still on local-file mode). `fleet init` never re-clones an
 existing `config/` checkout and never overwrites an existing `fleet.yml` —
 both modes are safe to re-run. Full first-run walkthrough, including this
-mode: `docs/installation.md` §6.
+mode: `docs/v0/installation.md` §6.
 
 ## See also
 
-- `docs/installation.md` — the `fleet init` step in the first-run checklist.
-- `docs/operations.md` — `fleet refresh-config`, `fleet refresh-ports`, and
+- `docs/v0/installation.md` — the `fleet init` step in the first-run checklist.
+- `docs/v0/operations.md` — `fleet refresh-config`, `fleet refresh-ports`, and
   the rest of the ongoing-operations command set.
-- `docs/networking.md` — the full port-exposure topology and runbook for
+- `docs/v0/networking.md` — the full port-exposure topology and runbook for
   adding a new named port.
-- `docs/cli.md` — the full CLI reference.
+- `docs/v0/cli.md` — the full CLI reference.
 - `CLAUDE.md` — `Registry`'s implementation notes (`core/registry.py`) and
   the git-identity-injection mechanism in more depth.
 
@@ -497,7 +499,7 @@ mode: `docs/installation.md` §6.
 ## Auth modes and `users:` — Authelia as an alternative to basic auth
 
 Full design, install/switch instructions, and troubleshooting:
-`docs/README-authelia.md`. Summary of the registry-facing pieces:
+`docs/v0/README-authelia.md`. Summary of the registry-facing pieces:
 
 - **`host.yml`'s `auth_mode: basic | authelia`** (server-level, see above)
   picks which per-instance auth mechanism Caddy enforces. Absent means
@@ -525,7 +527,7 @@ Full design, install/switch instructions, and troubleshooting:
   restart, nobody is logged out) and every instance's Caddy snippet, then
   one `caddy validate` + `caddy reload`.
 
-## `fleet.auth_bypass_cidrs` — deprecated, see `docs/README-authelia.md`
+## `fleet.auth_bypass_cidrs` — deprecated, see `docs/v0/README-authelia.md`
 
 **Deprecated.** This per-server CIDR whitelist used to let known networks
 skip the per-instance basic-auth prompt entirely. It is now accepted in
@@ -533,5 +535,5 @@ skip the per-instance basic-auth prompt entirely. It is now accepted in
 deprecation warning naming the key and otherwise **ignores it entirely**:
 no code path enforces it any more, in either auth mode. Networks that need
 to bypass HTTP basic auth outright should switch the server to **Authelia
-auth mode** instead (`docs/README-authelia.md`), which replaces the
+auth mode** instead (`docs/v0/README-authelia.md`), which replaces the
 whole-fleet IP whitelist with per-project login.

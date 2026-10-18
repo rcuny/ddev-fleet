@@ -1,11 +1,13 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-10-18
 Type: documentation
 ---
 
 # CLI reference
+
+> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.04; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
 
 Full reference for the `fleet` command, generated against the real,
 landed `argparse` surface in `src/fleet/cli.py` — every command below
@@ -22,19 +24,19 @@ fleet --fleet-home /srv/fleet list
 ```
 
 For narrative walkthroughs (first deploy, rotating credentials, adding a
-port) see `docs/installation.md` and `docs/operations.md`; for the
+port) see `docs/v0/installation.md` and `docs/v0/operations.md`; for the
 `fleet.yml` schema these commands read/write against, see
-`docs/configuration.md`.
+`docs/v0/configuration.md`.
 
 ## Command table
 
 | Command | Arguments | Behavior |
 |---|---|---|
 | `fleet init` | `[--domain=<domain>] [--skip-claude]` | Interactive first-run setup: creates `$FLEET_HOME`'s directory tree, prompts for the fleet domain if `--domain` is omitted, creates `fleet.yml` (local-file mode by default — copies `fleet.yml.dist` and patches only `fleet.domain`; or clones a private config repo when `FLEET_CONFIG_REPO` is set — see below), and runs `claude setup-token` to mint `CLAUDE_CODE_OAUTH_TOKEN` into `.secrets` (skip with `--skip-claude`). Never overwrites an existing `fleet.yml` or re-clones an existing `config/` checkout — safe to re-run. |
-| `fleet deploy <project> [<template>]` | `--branch <ref> [--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n> \| -n <n>] [--skip-disk-check]` | Full deploy pipeline. `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted. Running instance is named `<project>--<label>` (`label` defaults to the slugified branch; an explicit `--label` is normalised the same way — lowercased, non-alphanumeric runs collapsed to `-`, e.g. `--label=ABC-1234` → `abc-1234` — rather than rejected, see `docs/configuration.md`). **Never overwrites an existing instance**: if the resolved id is already in use, `-1`, `-2`, … is appended until a free one is found — see "`fleet deploy` never overwrites" below. Refuses a dirty/unpushed worktree update without `--force`. In basic auth mode (default), per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default credential, used as BOTH username and password (e.g. `--auth-password=fern` → `fern`/`fern`). In **Authelia mode** (`auth_mode: authelia` in `host.yml`, see `docs/README-authelia.md`), `--auth-password` is **rejected** — per-instance credentials don't exist in this mode, authorization is by project group membership instead (`fleet.yml`'s `users:`). `--count`/`-n` (default `1`) deploys that many independently-labelled instances in one call — see "Bulk deploy" below. |
+| `fleet deploy <project> [<template>]` | `--branch <ref> [--label=<name>] [--force] [--no-auth] [--auth-password=<pw>] [--count=<n> \| -n <n>] [--skip-disk-check]` | Full deploy pipeline. `template`/`--branch` fall back to the project's `default_template`/`default_branch` when omitted. Running instance is named `<project>--<label>` (`label` defaults to the slugified branch; an explicit `--label` is normalised the same way — lowercased, non-alphanumeric runs collapsed to `-`, e.g. `--label=ABC-1234` → `abc-1234` — rather than rejected, see `docs/v0/configuration.md`). **Never overwrites an existing instance**: if the resolved id is already in use, `-1`, `-2`, … is appended until a free one is found — see "`fleet deploy` never overwrites" below. Refuses a dirty/unpushed worktree update without `--force`. In basic auth mode (default), per-instance basic auth is ON by default (`fleet`/`fleet`); `--no-auth` disables it, `--auth-password` sets a non-default credential, used as BOTH username and password (e.g. `--auth-password=fern` → `fern`/`fern`). In **Authelia mode** (`auth_mode: authelia` in `host.yml`, see `docs/v0/README-authelia.md`), `--auth-password` is **rejected** — per-instance credentials don't exist in this mode, authorization is by project group membership instead (`fleet.yml`'s `users:`). `--count`/`-n` (default `1`) deploys that many independently-labelled instances in one call — see "Bulk deploy" below. |
 | `fleet redeploy [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--template=<name>] [--auth-password=<pw>] [--force] [--yes]` | Destroys an instance and rebuilds it under the **same id**, from the project/template/branch/label/auth recorded in its `.fleet/instance.yml` at the last deploy. Refuses if no `template` was recorded (an instance deployed before template recording existed) unless `--template` is given. See "`fleet redeploy`" below. |
 | `fleet destroy [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--yes]` | Tears down containers, removes the instance dir + lock file. Accepts one explicit id (legacy single-instance form, no prompt), several explicit ids, or a selector (`--all`, `--project=<name>`, `--state=running\|deployed`) — never mixed with explicit ids. See "Bulk actions" below for confirmation/exit-code behavior. |
-| `fleet start [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential] [--timeout=<seconds>] [--retry-port-conflict]` | `ddev start` on one or more existing, stopped instances. Same targeting rules as `destroy`. `--sequential` runs the bulk path one instance at a time (`run_sequential`) instead of the default 2-at-a-time `run_concurrent` — used by `fleet-boot.service` (`fleet start --all --sequential --timeout 1800 --retry-port-conflict`) at boot to avoid CPU spikes / `ddev-ssh-agent` races; see `docs/operations.md`'s "Automatic instance startup after reboot". `--timeout` is a per-instance **hang guard**: a `ddev start` that doesn't finish within that many seconds is killed and recorded as a failed instance (continue-on-error) instead of stalling the batch forever. Default: no timeout. `--retry-port-conflict` self-heals a Docker port-allocation race: if `ddev start` FAST-FAILs with a port-already-allocated / container-networking error, it does one clean `ddev stop` + `ddev start` before giving up (a still-failing retry, or any other kind of failure, still just fails that instance — continue-on-error unchanged). Default: off. Both flags are also honoured by the single-explicit-id fast path. |
+| `fleet start [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential] [--timeout=<seconds>] [--retry-port-conflict]` | `ddev start` on one or more existing, stopped instances. Same targeting rules as `destroy`. `--sequential` runs the bulk path one instance at a time (`run_sequential`) instead of the default 2-at-a-time `run_concurrent` — used by `fleet-boot.service` (`fleet start --all --sequential --timeout 1800 --retry-port-conflict`) at boot to avoid CPU spikes / `ddev-ssh-agent` races; see `docs/v0/operations.md`'s "Automatic instance startup after reboot". `--timeout` is a per-instance **hang guard**: a `ddev start` that doesn't finish within that many seconds is killed and recorded as a failed instance (continue-on-error) instead of stalling the batch forever. Default: no timeout. `--retry-port-conflict` self-heals a Docker port-allocation race: if `ddev start` FAST-FAILs with a port-already-allocated / container-networking error, it does one clean `ddev stop` + `ddev start` before giving up (a still-failing retry, or any other kind of failure, still just fails that instance — continue-on-error unchanged). Default: off. Both flags are also honoured by the single-explicit-id fast path. |
 | `fleet stop [<instance-id> ...] \| --all \| --project=<p> \| --state=<s>` | `[--sequential] [--timeout=<seconds>]` | `ddev stop` — frees RAM, keeps disk. Same targeting rules as `destroy`; same `--sequential`/`--timeout` flags and semantics. |
 | `fleet list` | — | Prints a table: instance id, project, branch, state, RAM (MiB), URL. `state` is `running`/`deployed`/`unknown` — see "Degraded state" below for when `unknown` appears and why. |
 | `fleet ssh-key` | — | Prints the fleet deploy (read-only) public key, for adding to each forge. |
@@ -45,19 +47,19 @@ port) see `docs/installation.md` and `docs/operations.md`; for the
 | `fleet secret list <project>` | — | Lists secret names with `encrypted` or `plaintext`. Never prints values. |
 | `fleet secret unset <project> <key>` | — | Removes the secret (the `.asc` and any legacy plaintext copy). |
 | `fleet secret migrate <project>` \| `--all` | — | Encrypts the legacy plaintext `secrets/<project>.env` (every project that has one with `--all`): each value is encrypted, verified by decrypting it, and only then is the `.env` deleted. Needs a host key. Does not require the project to be registered in `fleet.yml`. Re-runnable; an existing `.asc` is never overwritten by an older plaintext value (the encrypted value is kept and the legacy one discarded). A project with no `.env` is a no-op. |
-| `fleet webhook secret <project>` | `[--rotate] [--source=jira\|bitbucket]` | Creates the project's Jira webhook secret in `webhooks/secrets.env` (`0600`) and prints it once, plus the `URL: https://<domain>/hooks/jira/<project>` to configure in Jira. Refuses to replace an existing secret without `--rotate`. With `--source=bitbucket` it creates the project's separate Bitbucket webhook secret and prints `https://<domain>/hooks/bitbucket/<project>` instead. See `docs/README-webhooks.md`. |
+| `fleet webhook secret <project>` | `[--rotate] [--source=jira\|bitbucket]` | Creates the project's Jira webhook secret in `webhooks/secrets.env` (`0600`) and prints it once, plus the `URL: https://<domain>/hooks/jira/<project>` to configure in Jira. Refuses to replace an existing secret without `--rotate`. With `--source=bitbucket` it creates the project's separate Bitbucket webhook secret and prints `https://<domain>/hooks/bitbucket/<project>` instead. See `docs/v0/README-webhooks.md`. |
 | `fleet webhook bitbucket-token <project>` | — | Stores the project's Bitbucket access token (`pipeline:write` scope only) used by `bitbucket_hooks` `run-pipeline` rules. Read from piped stdin or a hidden prompt (never argv) and never printed; replaces an existing token. |
 | `fleet webhook log` | `[--project=<p>] [-n=<count>] [--source=jira\|bitbucket]` | Prints the last N (default 20) webhook deliveries from `logs/webhooks/jira.jsonl` (or `bitbucket.jsonl` with `--source=bitbucket`), one line each. |
-| `fleet schedule list` \| `run <name>` \| `history [<name>] [-n N]` \| `pause <name>` \| `resume <name>` | — | Scheduled jobs declared in `fleet.yml` `schedules:` (FLE-31). `list` shows each schedule's effective state (`active`, `paused`, `disabled in fleet.yml`, `not on this server`) and next run; `run` redeploys the target now, in this process, with the output streamed, the instance lock respected (busy: skipped, exit 1) and the outcome recorded with trigger `manual-cli`; `history` prints the last N (default 20) run outcomes from `schedules/history.jsonl`; `pause`/`resume` edit `schedules/state.json` (resume never catches up the pause). See `docs/README-schedules.md`. |
+| `fleet schedule list` \| `run <name>` \| `history [<name>] [-n N]` \| `pause <name>` \| `resume <name>` | — | Scheduled jobs declared in `fleet.yml` `schedules:` (FLE-31). `list` shows each schedule's effective state (`active`, `paused`, `disabled in fleet.yml`, `not on this server`) and next run; `run` redeploys the target now, in this process, with the output streamed, the instance lock respected (busy: skipped, exit 1) and the outcome recorded with trigger `manual-cli`; `history` prints the last N (default 20) run outcomes from `schedules/history.jsonl`; `pause`/`resume` edit `schedules/state.json` (resume never catches up the pause). See `docs/v0/README-schedules.md`. |
 | `fleet snapshot <instance-id>` | `[--dest-rel=<path>]` | `ddev export-db --gzip=false` into the project's shared asset tree. Default dest: `dumps/default-<instance-id>.sql`. Refuses to write to `dumps/default.sql` (the project's shared, hard-linked default dump) under any `--dest-rel`. |
 | `fleet refresh-claude-token` | `[--restart]` | Interactively mints a new Claude Code OAuth token (`claude setup-token`), writes it to `.secrets`, and rewrites every deployed instance's `config.fleet.yaml`. Does **not** restart running instances by default (prints the `ddev restart` command for each); `--restart` restarts them immediately. |
 | `fleet set-claude-token <token>` | `[--restart]` | Same propagation as `refresh-claude-token`, but for a token you already have (validated against the `sk-ant-oat01-…` shape) instead of running `claude setup-token`. |
 | `fleet set-admin-password <password>` | — | Mode-aware (reads `host.yml`'s `auth_mode` only, so it works even with a broken/missing `fleet.yml` in basic mode — a break-glass guarantee). Basic mode: hashes it (`caddy hash-password`), atomically rewrites `/etc/caddy/fleet/admin-auth.conf`, validates, reloads Caddy. No Ansible run. Authelia mode: hashes it into `admin.yml` and re-renders `users.yml` — no Caddy/Authelia restart, since Authelia's file backend hot-reloads it. |
 | `fleet rotate-admin-password` | — | Generates a strong random dashboard password, applies it the same mode-aware way as `set-admin-password`, and prints it exactly once. |
 | `fleet refresh-config` | — | If `$FLEET_HOME/config` is a git checkout (`FLEET_CONFIG_REPO` mode), runs `git fetch --quiet && git pull --ff-only`. Otherwise prints a no-op message (local-file mode — edit `fleet.yml` in place). |
-| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (including the Claude onboarding hook) without a full deploy. The rewrite always happens; `--restart` additionally restarts the instance (omit it and the command prints the `ddev restart` command to run yourself). **Known limitation:** it does NOT rewrite `settings.local.php`/`services.fleet.yml` (those are `core/fleetconfig.py` outputs written at `deploy`/`redeploy` time, not by this command). A moved instance whose `settings.local.php` hardcodes the old domain in `trusted_host_patterns` keeps rejecting requests on the new domain (Drupal 400 "The provided host name is not valid for this server") even after this command reports success — see `docs/runbook-server-rollout.md`'s domain-change procedure for the manual `sed` workaround until this is fixed. |
+| `fleet refresh-instance-config <instance-id>` | `[--restart]` | Regenerates just that instance's `.ddev/config.fleet.yaml` (including the Claude onboarding hook) without a full deploy. The rewrite always happens; `--restart` additionally restarts the instance (omit it and the command prints the `ddev restart` command to run yourself). **Known limitation:** it does NOT rewrite `settings.local.php`/`services.fleet.yml` (those are `core/fleetconfig.py` outputs written at `deploy`/`redeploy` time, not by this command). A moved instance whose `settings.local.php` hardcodes the old domain in `trusted_host_patterns` keeps rejecting requests on the new domain (Drupal 400 "The provided host name is not valid for this server") even after this command reports success — see `docs/v0/runbook-server-rollout.md`'s domain-change procedure for the manual `sed` workaround until this is fixed. |
 | `fleet refresh-ports` | — | Reconciles Caddy's fleet-owned port-exposure snippets (`/etc/caddy/fleet/ports/*.conf`) to `fleet.yml`'s current `fleet.ports`/per-project `ports:` state — no Ansible re-run, no redeploy. Also runs `sudo /usr/local/sbin/fleet-ufw-sync` when that helper exists (installed by the network-hardening role) — silently skipped otherwise, not an error. |
-| `fleet refresh-auth` | — | Re-applies the current auth configuration to every deployed instance — the "apply my `fleet.yml`/`host.yml` auth edits now" command, and the mechanism a server uses when switching `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from each instance's recorded `auth-enabled`/`auth-password` (the old `fleet.auth_bypass_cidrs` whitelist is deprecated and no longer applied here — see `docs/README-authelia.md`). Authelia mode: re-renders `users.yml` from `fleet.yml`'s per-project `users:` plus the admin account, and every instance's `forward_auth` snippet. Either way: one `caddy validate` + `caddy reload` for the whole fleet. No redeploy, no Ansible run. |
+| `fleet refresh-auth` | — | Re-applies the current auth configuration to every deployed instance — the "apply my `fleet.yml`/`host.yml` auth edits now" command, and the mechanism a server uses when switching `auth_mode`. Basic mode: re-renders every instance's `basic_auth` snippet from each instance's recorded `auth-enabled`/`auth-password` (the old `fleet.auth_bypass_cidrs` whitelist is deprecated and no longer applied here — see `docs/v0/README-authelia.md`). Authelia mode: re-renders `users.yml` from `fleet.yml`'s per-project `users:` plus the admin account, and every instance's `forward_auth` snippet. Either way: one `caddy validate` + `caddy reload` for the whole fleet. No redeploy, no Ansible run. |
 | `fleet shell [<instance-id>]` | `[-l \| --list]` | Drops into an interactive shell in an instance's directory (or the fleet home if no id given). `--list`/`-l` prints the known instance ids instead of prompting. |
 | `fleet ddev [<instance-id>] [-- <ddev-args>...]` | — | Runs `ddev <ddev-args>` inside the given instance's directory (prompts for the instance if omitted). |
 | `fleet tmux` | `[--ensure]` | Attaches the persistent tmux session (general tab + one tab per instance), reconciling tabs to the current instance list on every attach. Every window it creates is a **plain shell** — a template's `post_deploy.tty1`/`tty2` are typed by deploy/redeploy only. `--ensure` is the non-interactive form `fleet-tmux.service` runs: create the session if missing, reconcile, exit (no attach; exit 0 if the session already exists). |
@@ -137,7 +139,7 @@ Rules (`_resolve_bulk_targets` in `cli.py`):
   path through `run_sequential` (one instance at a time, in the same order
   `fleet list` shows) instead of the default 2-at-a-time `run_concurrent`.
   Manual usage without the flag is unchanged; `fleet-boot.service` (boot-time
-  auto-start, see `docs/operations.md`) always passes it.
+  auto-start, see `docs/v0/operations.md`) always passes it.
 - `fleet start`/`fleet stop` also accept `--timeout=<seconds>` — a
   per-instance **hang guard**, not a slowness limit. It's bound onto the
   per-instance op via `functools.partial` (so `run_sequential`/
@@ -239,7 +241,7 @@ fleet redeploy <instance-id>... [--all | --project P | --state S]
 Destroys the named instance(s) and rebuilds each one under its **same
 id**, recovering the project/template/branch/label/auth it was originally
 deployed with from `<instance-dir>/.fleet/instance.yml` — see
-`docs/configuration.md` for that file's full field reference. The registry
+`docs/v0/configuration.md` for that file's full field reference. The registry
 is re-read at rebuild time, so a redeploy picks up any edits made since the
 original deploy to the resolved template's `post_deploy`
 (`exec`/`tty1`/`tty2`; a redeploy types the tty commands again) —
@@ -301,8 +303,8 @@ FLEET_CONFIG_REPO=git@forge:you/fleet-config.git fleet init   # config-repo mode
   multi-machine setups, since it makes the real registry + assets tree
   version-controlled and shareable. Never re-clones an existing checkout.
 
-Full walkthrough: `docs/installation.md` §6; schema reference:
-`docs/configuration.md`.
+Full walkthrough: `docs/v0/installation.md` §6; schema reference:
+`docs/v0/configuration.md`.
 
 ## Worked examples
 
@@ -343,14 +345,14 @@ fleet reboot-notify --test
 
 ## See also
 
-- `docs/configuration.md` — the `fleet.yml` schema these commands read.
-- `docs/installation.md` — first-run checklist (`fleet init` through the
+- `docs/v0/configuration.md` — the `fleet.yml` schema these commands read.
+- `docs/v0/installation.md` — first-run checklist (`fleet init` through the
   first `fleet deploy`).
-- `docs/operations.md` — ongoing procedures grouped by task (updates,
+- `docs/v0/operations.md` — ongoing procedures grouped by task (updates,
   rotation, bulk operations, port changes).
-- `docs/networking.md` — the port-exposure mechanism behind
+- `docs/v0/networking.md` — the port-exposure mechanism behind
   `fleet refresh-ports`.
-- `docs/client-side-encryption.md` — how the web UI's Secrets page encrypts in the
+- `docs/client-side-encryption.md` (on `main`) — how the web UI's Secrets page encrypts in the
   browser, and the threat model of the encrypted secret store.
 
 
@@ -371,7 +373,7 @@ cannot reach the instance at all. A server can instead run in **Authelia
 auth mode** (`auth_mode: authelia` in `host.yml`) — a cookie-based login
 portal, with per-project users defined in `fleet.yml`'s `users:` key and
 authorized per instance by Caddy. Full design, `users:` schema, and
-switch-over instructions: `docs/README-authelia.md`. In this mode
+switch-over instructions: `docs/v0/README-authelia.md`. In this mode
 `--auth-password`/`--no-auth` are irrelevant (rejected/ignored — see
 above) since there is no per-instance credential, only project group
 membership.
@@ -380,8 +382,8 @@ membership.
 networks skip the basic-auth prompt entirely. It is now accepted in
 `fleet.yml` only for backward compatibility — a deprecation warning is
 logged and the key is otherwise ignored in both auth modes; no Caddy
-snippet reads it any more. See `docs/configuration.md` and
-`docs/README-authelia.md` for the replacement.
+snippet reads it any more. See `docs/v0/configuration.md` and
+`docs/v0/README-authelia.md` for the replacement.
 
 Editing auth configuration (either mode) does not require redeploying
 anything:

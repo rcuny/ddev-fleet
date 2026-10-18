@@ -91,7 +91,7 @@ Then `compare --env offline` checks the report against the baseline and writes
 `reports/systemd-security-offline.md` and `.json`. The `reports/**` files are
 pipeline artifacts.
 
-### Live (weekly, ddev3)
+### Live (weekly)
 
 The `systemd-security-live` custom pipeline logs in to each server listed in the
 repository variable `SECURITY_PROBE_TARGETS` as the `fleet-probe` user. That
@@ -100,7 +100,7 @@ user has no shell access, no sudo and no group memberships: every key in its
 ..."`, so whatever the client asks for, sshd runs that one read-only script and
 returns a JSON report (the score of each watched unit with per-directive
 exposure, plus the `systemd-analyze security` overview of every service on the
-host). The pipeline compares the report with the `ddev3` baseline. Every target
+host). The pipeline compares the report with the baseline of that server (its `SECURITY_PROBE_TARGETS` name). Every target
 is checked before the pipeline fails. Logic: `ci/systemd-security-live.sh`.
 
 ### The baseline
@@ -112,7 +112,7 @@ is checked before the pipeline fails. Logic: `ci/systemd-security-live.sh`.
   "environments": { "offline": { "systemd": "257", "recorded": "2026-10-06",
                                  "overview": {"fleet.service": 1.8},
                                  "units": {"fleet.service": {"score": 1.8, "directives": {"...": 0.1}}} },
-                    "ddev3": { "...": "recorded from the first live run" } } }
+                    "server1": { "...": "recorded from the first live run" } } }
 ```
 
 Per environment, `compare` looks at the score of every unit in the report (the
@@ -162,10 +162,10 @@ Always on a feature branch and in a pull request, so the change is reviewed.
 
   or download `reports/offline.json` from the pipeline's artifacts and run the
   second command on it. Commit `ci/systemd-security-baseline.json`.
-- **live (ddev3)**: download `reports/ddev3.json` from the artifacts of the
+- **live (one environment per server)**: download `reports/<env>.json` from the artifacts of the
   scheduled run (or of a manual run of the custom pipeline), then
-  `python ci/systemd_security.py update-baseline --env ddev3 --current ddev3.json`
-  and commit. The first run, before any `ddev3` baseline exists, reports every
+  `python ci/systemd_security.py update-baseline --env <env> --current <env>.json`
+  and commit. The first run, before any baseline of that server (its `SECURITY_PROBE_TARGETS` name) exists, reports every
   unit as NEW and passes; record the baseline from that run.
 
 `update-baseline` replaces only the named environment and keeps the others and
@@ -176,7 +176,7 @@ the tolerance. `compare --tolerance X` overrides the tolerance for a single run.
 After checking the hosts, `ci/systemd-security-live.sh` also scores the shipped
 unit files offline (informational only: the gates enforce that baseline) and
 builds the page [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md)
-with `python ci/systemd_security.py publish-report --hosts "ddev3 ..."`. The page
+with `python ci/systemd_security.py publish-report --hosts "server1 ..."`. The page
 has the explanation of the score, one status line per host (`OK`, `N
 regression(s)` or `could not be fetched`), the product's units first (fleet,
 fleet-boot, fleet-reboot-notify, caddy, authelia), the full host overview in a
@@ -303,7 +303,7 @@ No credential is stored in the repository.
    uses `StrictHostKeyChecking=yes`, so an unknown host fails.
 4. **Repository variable** (Repository settings > Pipelines > Repository
    variables): `SECURITY_PROBE_TARGETS`, space-separated `name=user@host`
-   entries, e.g. `ddev3=fleet-probe@fleet.example.com`. The name selects the
+   entries, e.g. `server1=fleet-probe@fleet.example.com`. The name selects the
    baseline environment. Unset or empty: the pipeline skips and succeeds.
 5. **Schedule** (Pipelines > Schedules): branch `develop`, custom pipeline
    `systemd-security-live`, weekly.
@@ -315,8 +315,8 @@ Try it first with a manual run of the custom pipeline (Run pipeline > Custom:
 `ssh -i key fleet-probe@fleet.example.com anything | python3 -m json.tool | head`.
 
 Other servers: add the key and run the playbook there too, then add
-`name=fleet-probe@host` to the variable. ddev2 has colleagues: get an explicit
-OK before touching it.
+`name=fleet-probe@host` to the variable. For a server other people use, get their
+explicit OK before touching it.
 
 ## Local runs
 
