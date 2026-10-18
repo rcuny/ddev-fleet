@@ -7,6 +7,12 @@
 # Put parameters here that don't need to change on each machine where the app is deployed
 # https://symfony.com/doc/current/best_practices.html#use-parameters-for-application-configuration
 parameters:
+    # Authorisation: members of this group get ROLE_ADMIN; everyone else authenticated is ROLE_MEMBER.
+    fleet.admin_group: '%env(FLEET_ADMIN_GROUP)%'
+    # Peers (IPs/CIDRs) allowed to assert identity headers.
+    fleet.trusted_proxies: '%env(FLEET_TRUSTED_PROXIES)%'
+    # The dev/test stand-in authenticator and role switch; never true in prod.
+    fleet.stand_in_enabled: false
 
 services:
     # default configuration for services in *this* file
@@ -34,8 +40,20 @@ services:
         factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'create']
         arguments: ['%env(FLEET_RUNNER)%']
 
+when@dev:
+    parameters:
+        fleet.stand_in_enabled: true
+
 when@test:
+    parameters:
+        fleet.stand_in_enabled: true
+
     services:
+        # Public so functional tests can swap in a stub.
+        App\Health\HealthChecker:
+            autowire: true
+            public: true
+
         # Keep the seam and the shared recorder alive in the container so integration
         # tests can fetch them by their normal ids (private services are only reachable
         # through the test container while they are not removed as unused).

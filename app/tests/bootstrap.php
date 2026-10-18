@@ -6,13 +6,18 @@ use Symfony\Component\Dotenv\Dotenv;
 
 require dirname(__DIR__).'/vendor/autoload.php';
 
+// An inherited APP_ENV (e.g. the companion container exports dev) must never select the environment.
+$_SERVER['APP_ENV'] = $_ENV['APP_ENV'] = 'test';
+putenv('APP_ENV=test');
+
 new Dotenv()->bootEnv(dirname(__DIR__).'/.env');
 
 if ($_SERVER['APP_DEBUG']) {
     umask(0o000);
 }
 
-// Every PHPUnit process gets its own FLEET_HOME so tests never touch real state.
+// Every PHPUnit process gets its own FLEET_HOME so tests never touch real state; this overrides
+// any FLEET_HOME inherited from the shell (the companion container exports one).
 $fleetHome = sys_get_temp_dir().'/fleet-test-'.getmypid();
 $removeTree = static function (string $dir): void {
     if (!is_dir($dir) || is_link($dir)) {
