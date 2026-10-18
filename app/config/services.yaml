@@ -39,8 +39,6 @@ services:
             # The concrete runners are not autowirable on purpose: consumers type-hint CommandRunner (the seam).
             - '../src/Fleet/Shell/ProcessCommandRunner.php'
             - '../src/Fleet/Shell/RecordingCommandRunner.php'
-            # Wired through the explicit Applier alias below, never autowired by class.
-            - '../src/Fleet/System/UnavailableApplier.php'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -51,11 +49,10 @@ services:
             $home: '%env(resolve:FLEET_HOME)%'
             $caddyDir: '%env(resolve:FLEET_CADDY_DIR)%'
 
-    # TASK 6 (M0.02): point this at App\Fleet\System\PrivilegedApply and delete UnavailableApplier. Until then every
-    # apply() throws, so nothing can claim to have installed config that was never installed.
-    App\Fleet\System\UnavailableApplier: ~
+    # Callers type-hint Applier; the one implementation runs `sudo -n apply <target>` through the CommandRunner (a
+    # recording runner in dev/test, so nothing privileged runs there).
     App\Fleet\System\Applier:
-        alias: App\Fleet\System\UnavailableApplier
+        alias: App\Fleet\System\PrivilegedApply
 
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
@@ -96,4 +93,18 @@ when@test:
             public: true
         fleet.test_alias.recording_command_runner:
             alias: fleet.command_runner.recording
+            public: true
+
+        # Reachable for the env -> container wiring tests (nothing consumes these services at run time yet).
+        fleet.test_alias.applier:
+            alias: App\Fleet\System\Applier
+            public: true
+        fleet.test_alias.trusted_proxy_checker:
+            alias: App\Security\TrustedProxyChecker
+            public: true
+        fleet.test_alias.caddy_env_renderer:
+            alias: App\Fleet\System\CaddyEnvRenderer
+            public: true
+        fleet.test_alias.caddyfile_renderer:
+            alias: App\Fleet\System\CaddyfileRenderer
             public: true

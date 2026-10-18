@@ -1,0 +1,56 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fleet\System;
+
+use App\Domain\Host\HostSettings;
+use App\Domain\Host\TlsMode;
+use App\Fleet\Secrets\SecretStore;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
+
+/**
+ * Renders Caddy's environment file (`/etc/caddy/fleet.env`, installed through `apply caddy`): the proxy secret the
+ * Caddyfile passes to the app, and in DNS mode the OVH credentials read from the secret store. Plain KEY=VALUE lines,
+ * unquoted: every value is validated against a charset that is safe for systemd's EnvironmentFile and for the root
+ * helper's allowlist parser.
+ */
+final readonly class CaddyEnvRenderer
+{
+    /** Secret store names of the OVH settings, in the order they are written. */
+    private const array OVH = [
+        'OVH_ENDPOINT' => 'ovh_endpoint',
+        'OVH_APPLICATION_KEY' => 'ovh_application_key',
+        'OVH_APPLICATION_SECRET' => 'ovh_application_secret',
+        'OVH_CONSUMER_KEY' => 'ovh_consumer_key',
+    ];
+
+    public function __construct(
+        private SecretStore $secrets,
+        #[Autowire('%fleet.proxy_secret%')]
+        #[\SensitiveParameter]
+        private string $proxySecret,
+    ) {
+    }
+
+    /**
+     * @throws \RuntimeException         when an OVH value is missing in DNS mode
+     * @throws \InvalidArgumentException when a value has an unsafe shape
+     */
+    public function render(HostSettings $host): string
+    {
+        $lines = ['FLEET_PROXY_SECRET='.ConfigValue::proxySecret($this->proxySecret)];
+
+        if (TlsMode::OvhDns === $host->tlsMode()) {
+            foreach (self::OVH as $variable => $name) {
+                $value = $this->secrets->getFleetWide($name);
+                if (null === $value) {
+                    throw new \RuntimeException(\sprintf('The secret "%s" is not set; DNS mode needs all four OVH values.', $name));
+                }
+                $lines[] = $variable.'='.('ovh_endpoint' === $name ? ConfigValue::ovhEndpoint($value) : ConfigValue::ovhCredential($name, $value));
+            }
+        }
+
+        return implode("\n", $lines)."\n";
+    }
+}

@@ -11,6 +11,7 @@ use App\Fleet\Auth\AutheliaUsersRenderer;
 use App\Fleet\Auth\PasswordPolicy;
 use App\Fleet\Auth\UserService;
 use App\Fleet\FleetPaths;
+use App\Fleet\Shell\RecordingCommandRunner;
 use App\Fleet\System\ApplyTarget;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RecordingApplier;
@@ -221,7 +222,7 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         self::assertStringContainsString('interactively', $tester->getDisplay());
     }
 
-    public function testIsRegisteredAndNotYetBackedByARealApplier(): void
+    public function testIsRegisteredAndAppliesThroughTheSudoHelper(): void
     {
         $kernel = self::$kernel;
         self::assertNotNull($kernel);
@@ -234,11 +235,17 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         }
         self::assertInstanceOf(UserResetPasswordCommand::class, $command);
 
-        // Until Task 6 the container wires UnavailableApplier: the password is stored, the apply fails loudly.
+        // The container wires PrivilegedApply over the recording runner: nothing privileged runs, the argv is recorded.
+        $runner = self::getContainer()->get('fleet.test_alias.recording_command_runner');
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
         $tester = new CommandTester($command);
         $tester->setInputs([self::NEW, self::NEW]);
         $tester->execute(['username' => 'alice'], ['interactive' => true]);
-        self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('not available yet', $tester->getDisplay());
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('Authelia was updated.', $tester->getDisplay());
+        $sudo = $runner->callsMatching(['sudo']);
+        self::assertCount(1, $sudo);
+        self::assertSame(['sudo', '-n', '--', '/usr/local/libexec/fleet/apply', 'authelia'], $sudo[0]->argv);
     }
 }

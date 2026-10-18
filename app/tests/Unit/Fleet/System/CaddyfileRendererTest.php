@@ -1,0 +1,299 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Fleet\System;
+
+use App\Domain\Host\HostSettings;
+use App\Domain\Host\TlsMode;
+use App\Fleet\FleetPaths;
+use App\Fleet\System\CaddyfileRenderer;
+use App\Security\TrustedProxyChecker;
+use App\Tests\Support\SystemTemplates;
+use PHPUnit\Framework\Attributes\DataProvider;
+use PHPUnit\Framework\TestCase;
+
+final class CaddyfileRendererTest extends TestCase
+{
+    private static function renderer(string $projectDir = '/opt/ddev-fleet/app', string $caddyDir = '/etc/caddy/fleet'): CaddyfileRenderer
+    {
+        return new CaddyfileRenderer(SystemTemplates::twig(), new FleetPaths('/srv/fleet', $caddyDir), $projectDir);
+    }
+
+    private static function host(string $domain = 'fleet.example.com', ?string $email = null, TlsMode $mode = TlsMode::Http01): HostSettings
+    {
+        $host = new HostSettings($domain);
+        $host->changeAcmeEmail($email);
+        $host->changeTlsMode($mode);
+
+        return $host;
+    }
+
+    public function testStripsEveryRemoteHeaderSpellingBeforeTheGate(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        $routeAt = strpos($out, "    route {\n");
+        $importAt = strpos($out, 'import ');
+        self::assertNotFalse($routeAt);
+        self::assertNotFalse($importAt);
+
+        foreach (['User', 'Groups', 'Name', 'Email'] as $field) {
+            foreach (['-', '_'] as $separator) {
+                $line = '        request_header -Remote'.$separator.$field."\n";
+                $at = strpos($out, $line);
+                self::assertNotFalse($at, $line);
+                self::assertGreaterThan($routeAt, $at, 'inside the route');
+                self::assertLessThan($importAt, $at, 'before the gate import');
+            }
+        }
+        self::assertSame(8, substr_count($out, 'request_header -'), 'nothing else is stripped or added');
+        self::assertSame(1, substr_count($out, "route {\n"), 'one route keeps the written order');
+    }
+
+    public function testNothingIsExemptFromTheStrip(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        // The strip sits in front of the gate import and every handler, so /health, /setup* and /hooks/* get it too.
+        $stripAt = strpos($out, 'request_header -Remote-User');
+        foreach (['import ', 'handle ', '@hooks', 'php_fastcgi', 'file_server'] as $needle) {
+            $at = strpos($out, $needle);
+            self::assertNotFalse($at, $needle);
+            self::assertLessThan($at, $stripAt, $needle);
+        }
+        self::assertStringNotContainsString('@protected', $out);
+        self::assertDoesNotMatchRegularExpression('/request_header\s+@/', $out, 'no matcher narrows the strip');
+    }
+
+    public function testGateImportIsALiteralPathAfterTheStrip(): void
+    {
+        $out = self::renderer(caddyDir: '/etc/caddy/fleet')->render(self::host());
+
+        self::assertStringContainsString("        import /etc/caddy/fleet/gate.conf\n", $out);
+        self::assertSame(1, substr_count($out, 'import '));
+        self::assertStringNotContainsString('*.conf', $out, 'a glob import is a silent no-op when nothing matches');
+    }
+
+    public function testFastcgiParamCarriesTheProxySecretPlaceholder(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        // The parameter name is rendered from the constant the app reads; the secret itself is only a placeholder.
+        self::assertStringContainsString('env '.TrustedProxyChecker::PROXY_PARAM.' {env.FLEET_PROXY_SECRET}', $out);
+        self::assertStringNotContainsString('{$', $out, 'no parse-time substitution: validate would see empty values');
+
+        $template = (string) file_get_contents(SystemTemplates::dir().'/system/Caddyfile.twig');
+        self::assertStringNotContainsString(TrustedProxyChecker::PROXY_PARAM, $template, 'the template must take the name from the constant');
+    }
+
+    public function testMercureProxyDisablesBuffering(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        self::assertStringContainsString("handle /.well-known/mercure* {\n            reverse_proxy ".CaddyfileRenderer::HUB." {\n                flush_interval -1\n            }\n        }\n", $out);
+        self::assertSame('127.0.0.1:3000', CaddyfileRenderer::HUB);
+    }
+
+    public function testAuthSiteProxiesAuthelia(): void
+    {
+        $out = self::renderer()->render(self::host('fleet.example.com'));
+
+        self::assertStringContainsString("auth.fleet.example.com {\n    reverse_proxy 127.0.0.1:9091\n}\n", $out);
+    }
+
+    public function testOvhBlockOnlyInOvhMode(): void
+    {
+        $http = self::renderer()->render(self::host(mode: TlsMode::Http01));
+        $ovh = self::renderer()->render(self::host(mode: TlsMode::OvhDns));
+
+        self::assertStringNotContainsString('acme_dns', $http);
+        self::assertStringNotContainsString('OVH', $http);
+        self::assertStringContainsString(
+            "    acme_dns ovh {\n        endpoint {env.OVH_ENDPOINT}\n        application_key {env.OVH_APPLICATION_KEY}\n        application_secret {env.OVH_APPLICATION_SECRET}\n        consumer_key {env.OVH_CONSUMER_KEY}\n    }\n",
+            $ovh,
+        );
+    }
+
+    public function testNoEmailLineWhenUnset(): void
+    {
+        $without = self::renderer()->render(self::host(email: null));
+        $with = self::renderer()->render(self::host(email: 'ops@example.com'));
+        $empty = self::renderer()->render(self::host(email: ''));
+
+        self::assertStringNotContainsString('email', $without);
+        self::assertStringNotContainsString("\n{\n", $without, 'no empty global block');
+        self::assertStringContainsString("{\n    email ops@example.com\n}\n", $with);
+        self::assertSame($without, $empty);
+    }
+
+    public function testHooksBodyCapped(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        self::assertStringContainsString("        @hooks path /hooks/*\n        request_body @hooks {\n            max_size 1MB\n        }\n", $out);
+    }
+
+    public function testSocketMatchesConstant(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        self::assertSame('/run/php/fleet.sock', CaddyfileRenderer::PHP_SOCKET);
+        self::assertStringContainsString('php_fastcgi unix//run/php/fleet.sock {', $out);
+    }
+
+    public function testRootPointsAtThePublicDirectoryOfTheProject(): void
+    {
+        $out = self::renderer(projectDir: '/opt/ddev-fleet/app')->render(self::host());
+
+        self::assertStringContainsString("        root * /opt/ddev-fleet/app/public\n", $out);
+        self::assertLessThan((int) strpos($out, 'php_fastcgi'), (int) strpos($out, 'root *'));
+    }
+
+    public function testSecurityHeaders(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        foreach (['X-Content-Type-Options nosniff', 'Referrer-Policy same-origin', 'X-Frame-Options DENY', 'X-Robots-Tag noindex', '-Server'] as $line) {
+            self::assertStringContainsString("        {$line}\n", $out);
+        }
+    }
+
+    public function testNoCredentialValueIsEverRendered(): void
+    {
+        $out = self::renderer()->render(self::host(mode: TlsMode::OvhDns));
+        $config = implode("\n", array_filter(explode("\n", $out), static fn (string $line): bool => !str_starts_with($line, '#')));
+
+        self::assertDoesNotMatchRegularExpression('/application_secret\s+(?!\{env\.)/', $config);
+        self::assertSame(5, substr_count($config, '{env.'), 'four OVH placeholders and the proxy secret');
+    }
+
+    public function testGolden(): void
+    {
+        $expected = <<<'CADDY'
+            # Generated by Fleet and installed by `apply caddy`; edits are overwritten. Credentials never appear here: {env.X}
+            # placeholders are resolved from Caddy's environment file at run time.
+            {
+                email ops@example.com
+                acme_dns ovh {
+                    endpoint {env.OVH_ENDPOINT}
+                    application_key {env.OVH_APPLICATION_KEY}
+                    application_secret {env.OVH_APPLICATION_SECRET}
+                    consumer_key {env.OVH_CONSUMER_KEY}
+                }
+            }
+
+            fleet.example.com {
+                header {
+                    X-Content-Type-Options nosniff
+                    Referrer-Policy same-origin
+                    X-Frame-Options DENY
+                    X-Robots-Tag noindex
+                    -Server
+                }
+
+                # One route keeps the written order: Caddy would otherwise sort the directives and could run the header strip
+                # after forward_auth, deleting the identity forward_auth just copied. Every Remote-*/Remote_* spelling is removed
+                # first, on every path (health, setup and hooks included), so only the gate can introduce an identity.
+                route {
+                    request_header -Remote-User
+                    request_header -Remote_User
+                    request_header -Remote-Groups
+                    request_header -Remote_Groups
+                    request_header -Remote-Name
+                    request_header -Remote_Name
+                    request_header -Remote-Email
+                    request_header -Remote_Email
+
+                    import /etc/caddy/fleet/gate.conf
+
+                    handle /.well-known/mercure* {
+                        reverse_proxy 127.0.0.1:3000 {
+                            flush_interval -1
+                        }
+                    }
+
+                    @hooks path /hooks/*
+                    request_body @hooks {
+                        max_size 1MB
+                    }
+
+                    root * /opt/ddev-fleet/app/public
+                    php_fastcgi unix//run/php/fleet.sock {
+                        env FLEET_PROXY_AUTH {env.FLEET_PROXY_SECRET}
+                    }
+                    file_server
+                }
+            }
+
+            auth.fleet.example.com {
+                reverse_proxy 127.0.0.1:9091
+            }
+
+            CADDY;
+
+        self::assertSame($expected, self::renderer()->render(self::host('fleet.example.com', 'ops@example.com', TlsMode::OvhDns)));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function injectedDomains(): iterable
+    {
+        foreach (['newline' => "a.example.com\nrespond 200", 'brace' => 'a.example.com}', 'open brace' => 'a{.example.com', 'hash' => 'a.example.com#', 'quote' => 'a".example.com', 'space' => 'a.example.com b.example.com', 'semicolon' => 'a.example.com;', 'wildcard' => '*.example.com', 'port' => 'a.example.com:8080', 'ip' => '203.0.113.7', 'single label' => 'localhost', 'uppercase' => 'A.example.com', 'empty' => '', 'nul' => "a.example.com\0", 'backtick' => 'a`.example.com', 'dollar' => '$a.example.com', 'trailing dot' => 'a.example.com.', 'double dot' => 'a..example.com', 'placeholder' => '{env.X}.example.com'] as $label => $value) {
+            yield $label => [$value];
+        }
+    }
+
+    #[DataProvider('injectedDomains')]
+    public function testRefusesADomainThatCouldInjectDirectives(string $domain): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        self::renderer()->render(self::host($domain));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function injectedEmails(): iterable
+    {
+        foreach (['newline' => "a@example.com\nrespond 200", 'brace' => 'a@example.com}', 'open brace' => '{a}@example.com', 'hash' => 'a#b@example.com', 'quote' => '"a b"@example.com', 'space' => 'a b@example.com', 'two' => 'a@example.com b@example.com', 'angle' => 'A <a@example.com>', 'placeholder' => '{env.X}@example.com'] as $label => $value) {
+            yield $label => [$value];
+        }
+    }
+
+    #[DataProvider('injectedEmails')]
+    public function testRefusesAnEmailThatCouldInjectDirectives(string $email): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        self::renderer()->render(self::host(email: $email));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function unsafePaths(): iterable
+    {
+        foreach (['space' => '/opt/my app', 'brace' => '/opt/a}b', 'open brace' => '/opt/{env.X}', 'hash' => '/opt/a#b', 'quote' => '/opt/a"b', 'newline' => "/opt/a\nb"] as $label => $value) {
+            yield $label => [$value];
+        }
+    }
+
+    #[DataProvider('unsafePaths')]
+    public function testRefusesAProjectDirectoryThatCouldInjectDirectives(string $path): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        self::renderer(projectDir: $path)->render(self::host());
+    }
+
+    #[DataProvider('unsafePaths')]
+    public function testRefusesASnippetDirectoryThatCouldInjectDirectives(string $path): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        self::renderer(caddyDir: $path)->render(self::host());
+    }
+}
