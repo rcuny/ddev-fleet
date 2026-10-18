@@ -129,6 +129,8 @@ final class KnownHostsFileTest extends TestCase
         yield 'hashed' => ['|1|c2FsdA==|aGFzaA=='];
         yield 'port zero length' => ['[a.example.com]:'];
         yield 'port too big' => ['[a.example.com]:70000'];
+        yield 'port zero' => ['[a.example.com]:0'];
+        yield 'leading zero port' => ['[a.example.com]:022'];
         yield 'empty' => [''];
     }
 
@@ -308,6 +310,71 @@ final class KnownHostsFileTest extends TestCase
         $this->expectException(\RuntimeException::class);
 
         $this->file->seed();
+    }
+
+    public function testSeededHostsAcceptOnlyTheSeedKeysEvenWithoutSeedingFirst(): void
+    {
+        $foreign = new KnownHostEntry('github.com', 'ssh-ed25519', self::key());
+
+        try {
+            $this->file->add($foreign);
+            self::fail('a foreign key must be refused before seed() ever ran');
+        } catch (KnownHostConflict) {
+            self::assertFileDoesNotExist($this->paths->knownHostsFile());
+        }
+
+        // The seed lines were removed from an existing file: still refused, and the file is untouched.
+        mkdir($this->paths->sshDir(), 0o700);
+        file_put_contents($this->paths->knownHostsFile(), "# nothing here\n");
+        foreach ([[$foreign], [$foreign, new KnownHostEntry('github.com', 'ssh-rsa', self::rsaLikeKey())]] as $attempt) {
+            try {
+                $this->file->addAll($attempt);
+                self::fail('a foreign key must be refused when the seed lines are gone');
+            } catch (KnownHostConflict) {
+                $this->addToAssertionCount(1);
+            }
+        }
+        self::assertSame("# nothing here\n", file_get_contents($this->paths->knownHostsFile()));
+
+        // A real seed key is still accepted (it is what the seed would add anyway).
+        $seedLines = preg_grep('/^github\.com ssh-ed25519 /', explode("\n", (string) file_get_contents(self::realSeed())));
+        self::assertNotFalse($seedLines);
+        $seedLine = (string) reset($seedLines);
+        [, $type, $key] = explode(' ', $seedLine);
+        $this->file->add(new KnownHostEntry('github.com', $type, $key));
+        self::assertSame(self::GITHUB_ED25519, $this->file->entries()[0]->fingerprint());
+    }
+
+    public function testARevokedSeedKeyCannotBeAddedBack(): void
+    {
+        $old = self::key();
+        $seedFile = $this->home.'/seed';
+        file_put_contents($seedFile, "@revoked git.example.com ssh-ed25519 $old\ngit.example.com ssh-ed25519 ".self::key()."\n");
+
+        $this->expectException(KnownHostConflict::class);
+
+        new KnownHostsFile($this->paths, $seedFile)->add(new KnownHostEntry('git.example.com', 'ssh-ed25519', $old));
+    }
+
+    public function testReplaceNeverTouchesCertAuthorityLines(): void
+    {
+        $key = self::key();
+        mkdir($this->paths->sshDir(), 0o700);
+        file_put_contents($this->paths->knownHostsFile(), "@cert-authority git.example.com,other.example.com ssh-ed25519 $key\ngit.example.com ssh-ed25519 $key\n");
+        $new = new KnownHostEntry('git.example.com', 'ssh-ed25519', self::key());
+
+        $this->file->replace([$new]);
+
+        self::assertSame(
+            "@cert-authority git.example.com,other.example.com ssh-ed25519 $key\n".$new->line()."\n",
+            file_get_contents($this->paths->knownHostsFile()),
+        );
+    }
+
+    public function testDefaultPortInBracketFormIsTheBareHost(): void
+    {
+        self::assertSame('git.example.com', new KnownHostEntry('[Git.Example.com]:22', 'ssh-ed25519', self::key())->host);
+        self::assertSame('[git.example.com]:2222', new KnownHostEntry('[git.example.com]:2222', 'ssh-ed25519', self::key())->host);
     }
 
     public function testEntryFingerprintAndLine(): void

@@ -5,10 +5,12 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Fleet\Ssh;
 
 use App\Fleet\Shell\CommandResult;
+use App\Fleet\Shell\CommandRunnerException;
 use App\Fleet\Shell\CommandTimedOut;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Fleet\Ssh\Ed25519KeyGenerator;
 use App\Fleet\Ssh\KnownHostScanner;
+use App\Fleet\Ssh\KnownHostScannerUnavailable;
 use App\Fleet\Ssh\SshPublicKeys;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -67,6 +69,8 @@ final class KnownHostScannerTest extends TestCase
         yield 'empty' => [''];
         yield 'semicolon' => ['a.example.com;id'];
         yield 'bad port' => ['[a.example.com]:99999'];
+        yield 'port zero' => ['[a.example.com]:0'];
+        yield 'leading zero port' => ['[a.example.com]:022'];
     }
 
     #[DataProvider('badHosts')]
@@ -94,5 +98,37 @@ final class KnownHostScannerTest extends TestCase
             }
         };
         self::assertSame([], new KnownHostScanner($timeout)->scan('git.example.com'));
+    }
+
+    public function testAMissingSshKeyscanIsNotReportedAsNoKeys(): void
+    {
+        $runner = new RecordingCommandRunner()->expect(['ssh-keyscan'], new CommandResult(127, '', 'ssh-keyscan: not found'));
+
+        $this->expectException(KnownHostScannerUnavailable::class);
+
+        new KnownHostScanner($runner)->scan('git.example.com');
+    }
+
+    public function testACommandThatCannotStartIsNotReportedAsNoKeys(): void
+    {
+        $broken = new class implements \App\Fleet\Shell\CommandRunner {
+            public function run(array $argv, ?string $cwd = null, array $env = [], ?callable $onOutput = null, ?float $timeout = null): CommandResult
+            {
+                throw new CommandRunnerException('cannot fork');
+            }
+        };
+
+        $this->expectException(KnownHostScannerUnavailable::class);
+
+        new KnownHostScanner($broken)->scan('git.example.com');
+    }
+
+    public function testDefaultPortInBracketFormIsTheBareHost(): void
+    {
+        $runner = new RecordingCommandRunner();
+
+        new KnownHostScanner($runner)->scan('[Git.Example.com]:22');
+
+        self::assertSame(['ssh-keyscan', '-T', '5', '-t', 'ed25519,ecdsa,rsa', '--', 'git.example.com'], $runner->calls()[0]->argv);
     }
 }

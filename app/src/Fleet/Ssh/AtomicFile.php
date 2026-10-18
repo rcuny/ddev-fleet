@@ -17,7 +17,7 @@ final class AtomicFile
      * Writes $contents to a fresh temp file next to $path (mode applied before any content is written), then renames
      * it over $path.
      */
-    public static function write(string $path, string $contents, int $mode): void
+    public static function write(string $path, #[\SensitiveParameter] string $contents, int $mode): void
     {
         $tmp = self::tempPath(\dirname($path), '.'.basename($path));
         try {
@@ -35,7 +35,7 @@ final class AtomicFile
      * Creates $path exclusively (fails if it exists) with $mode and $contents. For short-lived files the caller
      * removes itself.
      */
-    public static function create(string $path, string $contents, int $mode): void
+    public static function create(string $path, #[\SensitiveParameter] string $contents, int $mode): void
     {
         $previousUmask = umask(0o077);
         try {

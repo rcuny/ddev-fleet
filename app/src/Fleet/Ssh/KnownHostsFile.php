@@ -14,7 +14,8 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  *  - seed() adds the providers' published keys and never removes anything, except a key the seed itself marks
  *    `@revoked`;
  *  - add() never attaches a different key to a host that already has one (seeded or not); that needs an explicit
- *    replace(), which is itself refused for the seeded provider hosts (their keys change only through the seed);
+ *    replace(), which is itself refused for the seeded provider hosts (their keys change only through the seed).
+ *    A seeded host accepts only the seed's own keys through add(), even if seed() has not run or its lines are gone;
  *  - every entry is a validated KnownHostEntry and the file is rewritten atomically under a lock, so no input can
  *    inject a line or leave a half-written file.
  *
@@ -139,6 +140,20 @@ final readonly class KnownHostsFile
         if (null === $host) {
             return;
         }
+        // A seeded provider host accepts only the seed's own keys, whatever the file currently holds: the check must
+        // not depend on seed() having run or on the seed lines still being there.
+        $seeded = array_values(array_filter($this->seedEntries(), static fn (KnownHostEntry $e): bool => $e->host === $host));
+        if ([] !== $seeded) {
+            foreach ($entries as $entry) {
+                $builtIn = false;
+                foreach ($seeded as $known) {
+                    $builtIn = $builtIn || (!$known->revoked && $known->sameKeyAs($entry));
+                }
+                if (!$builtIn) {
+                    throw new KnownHostConflict(\sprintf('"%s" is a seeded provider host; only its published keys are accepted.', $host));
+                }
+            }
+        }
 
         $this->modify(static function (array $lines) use ($entries, $host): array {
             $existing = [];
@@ -191,7 +206,8 @@ final readonly class KnownHostsFile
             $kept = [];
             foreach ($lines as $line) {
                 $parsed = self::parse($line);
-                if (null === $parsed || '@revoked' === $parsed['marker'] || !self::mentions($parsed['hosts'], $host)) {
+                // Marker lines (@revoked, @cert-authority) are never edited here.
+                if (null === $parsed || null !== $parsed['marker'] || !self::mentions($parsed['hosts'], $host)) {
                     $kept[] = $line;
                     continue;
                 }

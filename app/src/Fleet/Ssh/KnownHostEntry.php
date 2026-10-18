@@ -11,8 +11,8 @@ namespace App\Fleet\Ssh;
  */
 final readonly class KnownHostEntry
 {
-    /** A host name or address, or `[host]:port` for a non-standard port. */
-    public const string HOST_PATTERN = '/^(\[[A-Za-z0-9][A-Za-z0-9.-]{0,252}\]:\d{1,5}|[A-Za-z0-9][A-Za-z0-9.-]{0,252})$/D';
+    /** A host name or address, or `[host]:port` for a non-standard port (1 to 65535, no leading zero). */
+    public const string HOST_PATTERN = '/^(\[[A-Za-z0-9][A-Za-z0-9.-]{0,252}\]:[1-9]\d{0,4}|[A-Za-z0-9][A-Za-z0-9.-]{0,252})$/D';
 
     /** Lower case: OpenSSH matches host names case-insensitively, so "GitHub.com" must not be a second identity. */
     public string $host;
@@ -35,11 +35,20 @@ final readonly class KnownHostEntry
         if (1 !== preg_match(self::HOST_PATTERN, $host)) {
             throw new \InvalidArgumentException('Not a valid SSH host name.');
         }
-        if (str_starts_with($host, '[') && (int) substr($host, (int) strrpos($host, ':') + 1) > 65535) {
-            throw new \InvalidArgumentException('Not a valid SSH host name.');
+        $host = strtolower($host);
+        if (str_starts_with($host, '[')) {
+            $colon = (int) strrpos($host, ':');
+            $port = (int) substr($host, $colon + 1);
+            if ($port > 65535) {
+                throw new \InvalidArgumentException('Not a valid SSH host name.');
+            }
+            // OpenSSH writes the default port as the bare host, so that is the one identity for it.
+            if (22 === $port) {
+                return substr($host, 1, $colon - 2);
+            }
         }
 
-        return strtolower($host);
+        return $host;
     }
 
     public function fingerprint(): string

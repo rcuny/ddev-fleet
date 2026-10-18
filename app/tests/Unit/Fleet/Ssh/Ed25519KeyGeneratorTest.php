@@ -23,7 +23,7 @@ final class Ed25519KeyGeneratorTest extends TestCase
         mkdir($dir, 0o700);
         $file = $dir.'/key';
         try {
-            file_put_contents($file, $key->privatePem);
+            file_put_contents($file, $key->privatePem());
             chmod($file, 0o600);
 
             $public = $runner->run(['ssh-keygen', '-y', '-P', '', '-f', $file]);
@@ -51,9 +51,9 @@ final class Ed25519KeyGeneratorTest extends TestCase
     {
         $key = new Ed25519KeyGenerator()->generate('c');
 
-        self::assertStringStartsWith("-----BEGIN OPENSSH PRIVATE KEY-----\n", $key->privatePem);
-        self::assertStringEndsWith("-----END OPENSSH PRIVATE KEY-----\n", $key->privatePem);
-        $body = trim(str_replace(['-----BEGIN OPENSSH PRIVATE KEY-----', '-----END OPENSSH PRIVATE KEY-----'], '', $key->privatePem));
+        self::assertStringStartsWith("-----BEGIN OPENSSH PRIVATE KEY-----\n", $key->privatePem());
+        self::assertStringEndsWith("-----END OPENSSH PRIVATE KEY-----\n", $key->privatePem());
+        $body = trim(str_replace(['-----BEGIN OPENSSH PRIVATE KEY-----', '-----END OPENSSH PRIVATE KEY-----'], '', $key->privatePem()));
         foreach (explode("\n", $body) as $line) {
             self::assertLessThanOrEqual(70, \strlen($line));
         }
@@ -125,7 +125,7 @@ final class Ed25519KeyGeneratorTest extends TestCase
         $b = $generator->generate('x');
 
         self::assertNotSame($a->fingerprint, $b->fingerprint);
-        self::assertNotSame($a->privatePem, $b->privatePem);
+        self::assertNotSame($a->privatePem(), $b->privatePem());
     }
 
     public function testCommentWithNewlineIsRejected(): void
@@ -135,15 +135,24 @@ final class Ed25519KeyGeneratorTest extends TestCase
         new Ed25519KeyGenerator()->generate("evil\nssh-rsa AAAA");
     }
 
-    public function testThePrivateKeyDoesNotLeakThroughDumpsOrSerialisation(): void
+    public function testThePrivateKeyDoesNotLeakThroughDumpsJsonOrSerialisation(): void
     {
         $key = new Ed25519KeyGenerator()->generate('c');
+        $fragment = substr($key->privatePem(), 40, 30);
 
         ob_start();
         var_dump($key);
+        print_r($key);
         $dump = (string) ob_get_clean();
         self::assertStringNotContainsString('PRIVATE KEY', $dump);
-        self::assertStringNotContainsString(substr($key->privatePem, 40, 30), $dump);
+        self::assertStringNotContainsString($fragment, $dump);
+
+        $json = json_encode($key, \JSON_THROW_ON_ERROR);
+        self::assertStringNotContainsString($fragment, $json);
+        self::assertSame(['publicLine' => $key->publicLine, 'fingerprint' => $key->fingerprint], json_decode($json, true));
+
+        self::assertSame(['publicLine', 'fingerprint'], array_keys(get_object_vars($key)), 'no public private-key property');
+        self::assertSame($key->privatePem(), $key->privatePem());
 
         $this->expectException(\LogicException::class);
         serialize($key);

@@ -21,9 +21,11 @@ final readonly class KnownHostScanner
     }
 
     /**
-     * @return list<KnownHostEntry> empty when the host is unreachable, offers no usable key or the scan fails
+     * @return list<KnownHostEntry> empty when the host is unreachable, offers no usable key or the scan fails or times out
      *
-     * @throws \InvalidArgumentException when $host is not a valid host name (checked before anything runs)
+     * @throws \InvalidArgumentException   when $host is not a valid host name (checked before anything runs)
+     * @throws KnownHostScannerUnavailable when ssh-keyscan itself is missing or cannot be started (a different problem
+     *                                     from "the host offers no key": the operator has to fix the machine)
      */
     public function scan(string $host): array
     {
@@ -45,8 +47,13 @@ final readonly class KnownHostScanner
                 null,
                 20.0,
             );
-        } catch (CommandTimedOut|CommandRunnerException) {
+        } catch (CommandTimedOut) {
             return [];
+        } catch (CommandRunnerException $e) {
+            throw new KnownHostScannerUnavailable('ssh-keyscan could not be started.', 0, $e);
+        }
+        if (127 === $result->exitCode || 126 === $result->exitCode) {
+            throw new KnownHostScannerUnavailable('ssh-keyscan is not installed or not executable.');
         }
         if (!$result->isSuccess()) {
             return [];

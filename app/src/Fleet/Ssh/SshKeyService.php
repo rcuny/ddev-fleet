@@ -35,14 +35,17 @@ final readonly class SshKeyService
 
     /**
      * Makes sure both roles have a key pair on disk and a row. Idempotent: existing keys are kept (modes are
-     * repaired, a missing row or .pub is recreated from what is on disk); only a role with no private key gets a
-     * new pair.
+     * repaired, a missing row is recreated from what is on disk, a missing or mismatched .pub is rewritten from the
+     * private key); only a role with no private key gets a new pair. Serialised with regenerate() and importPrivate()
+     * by a lock file, so concurrent callers (installer, wizard) cannot interleave the two files of a pair.
      */
     public function ensureKeys(): void
     {
-        foreach (SshKeyRole::cases() as $role) {
-            $this->ensureRole($role);
-        }
+        $this->locked(function (): void {
+            foreach (SshKeyRole::cases() as $role) {
+                $this->ensureRole($role);
+            }
+        });
     }
 
     public function publicKey(SshKeyRole $role): string
@@ -63,11 +66,12 @@ final readonly class SshKeyService
     public function regenerate(SshKeyRole $role, string $by): void
     {
         self::assertBy($by);
-        $this->ensureSshDir();
 
-        $key = $this->generator->generate($this->comment($role));
-        $this->install($role, $key->privatePem, $key->publicLine);
-        $this->saveRow($role, $key->publicLine, $key->fingerprint);
+        $this->locked(function () use ($role): void {
+            $key = $this->generator->generate($this->comment($role));
+            $this->install($role, $key->privatePem(), $key->publicLine);
+            $this->saveRow($role, $key->publicLine, $key->fingerprint);
+        });
     }
 
     /**
@@ -89,33 +93,33 @@ final readonly class SshKeyService
         if (\strlen($pem) > self::MAX_IMPORT_BYTES || 1 !== preg_match('/^-----BEGIN [A-Z ]*PRIVATE KEY-----\n/', $pem)) {
             throw new \InvalidArgumentException('That is not an unencrypted SSH private key.');
         }
-        $this->ensureSshDir();
 
-        $tmp = AtomicFile::tempPath($this->paths->sshDir(), '.import');
-        try {
-            AtomicFile::create($tmp, $pem, 0o600);
-            $derived = $this->derivePublic($tmp);
-        } finally {
-            @unlink($tmp);
-        }
-        if (null === $derived) {
-            throw new \InvalidArgumentException('The private key is invalid or protected by a passphrase.');
-        }
+        $this->locked(function () use ($role, $pem): void {
+            $tmp = AtomicFile::tempPath($this->paths->sshDir(), '.import');
+            try {
+                AtomicFile::create($tmp, $pem, 0o600);
+                $derived = $this->derivePublic($tmp);
+            } finally {
+                @unlink($tmp);
+            }
+            if (null === $derived) {
+                throw new \InvalidArgumentException('The private key is invalid or protected by a passphrase.');
+            }
 
-        $publicLine = $derived['type'].' '.$derived['key'].' '.$this->comment($role);
-        $this->install($role, $pem, $publicLine);
-        $this->saveRow($role, $publicLine, SshPublicKeys::fingerprint($derived['type'], $derived['key']));
+            $publicLine = $derived['type'].' '.$derived['key'].' '.$this->comment($role);
+            $this->install($role, $pem, $publicLine);
+            $this->saveRow($role, $publicLine, SshPublicKeys::fingerprint($derived['type'], $derived['key']));
+        });
     }
 
     private function ensureRole(SshKeyRole $role): void
     {
-        $this->ensureSshDir();
         $private = $this->paths->sshPrivateKey($role);
         $public = $this->paths->sshPublicKey($role);
 
         if (!is_file($private) && !is_link($private)) {
             $key = $this->generator->generate($this->comment($role));
-            $this->install($role, $key->privatePem, $key->publicLine);
+            $this->install($role, $key->privatePem(), $key->publicLine);
             $this->saveRow($role, $key->publicLine, $key->fingerprint);
 
             return;
@@ -127,17 +131,22 @@ final readonly class SshKeyService
             throw new \RuntimeException(\sprintf('Cannot set mode 0600 on the %s SSH private key.', $role->value));
         }
 
+        // The private key is the truth: its public half comes from the file itself (no process for the format we
+        // write), from ssh-keygen for any other format. An existing .pub is kept only if it belongs to that key.
+        $derived = OpensshPrivateKey::publicKey((string) @file_get_contents($private)) ?? $this->derivePublic($private);
+        if (null === $derived) {
+            throw new \RuntimeException(\sprintf('The existing %s SSH private key is unusable; import or regenerate it.', $role->value));
+        }
+
         $line = $this->readPublicLine($public);
-        if (null === $line) {
-            // The private key survived but its .pub did not: derive it, never overwrite the private key.
-            $derived = $this->derivePublic($private);
-            if (null === $derived) {
-                throw new \RuntimeException(\sprintf('The existing %s SSH private key is unusable; import or regenerate it.', $role->value));
+        $parts = null === $line ? null : SshPublicKeys::parseLine($line);
+        if (null !== $line && null !== $parts && $parts['type'] === $derived['type'] && $parts['key'] === $derived['key']) {
+            if ((@fileperms($public) & 0o777) !== 0o644 && !@chmod($public, 0o644)) {
+                throw new \RuntimeException(\sprintf('Cannot set mode 0644 on the %s SSH public key.', $role->value));
             }
+        } else {
             $line = $derived['type'].' '.$derived['key'].' '.$this->comment($role);
             AtomicFile::write($public, $line."\n", 0o644);
-        } elseif ((@fileperms($public) & 0o777) !== 0o644 && !@chmod($public, 0o644)) {
-            throw new \RuntimeException(\sprintf('Cannot set mode 0644 on the %s SSH public key.', $role->value));
         }
 
         $parts = SshPublicKeys::parseLine($line);
@@ -217,6 +226,28 @@ final readonly class SshKeyService
         }
 
         return \sprintf('fleet-%s@%s', $role->value, $domain);
+    }
+
+    /**
+     * Runs $work holding an exclusive lock on `<ssh dir>/.keys.lock`.
+     *
+     * @param callable(): void $work
+     */
+    private function locked(callable $work): void
+    {
+        $this->ensureSshDir();
+        $lock = @fopen($this->paths->sshDir().'/.keys.lock', 'c');
+        if (false === $lock || !flock($lock, \LOCK_EX)) {
+            false !== $lock && fclose($lock);
+
+            throw new \RuntimeException('Cannot lock the SSH key directory.');
+        }
+        try {
+            $work();
+        } finally {
+            flock($lock, \LOCK_UN);
+            fclose($lock);
+        }
     }
 
     private function ensureSshDir(): void

@@ -75,7 +75,7 @@ final class SshKeyServiceTest extends KernelTestCase
         }
         $names = array_values(array_diff((array) scandir($this->paths->sshDir()), ['.', '..']));
         sort($names);
-        self::assertSame(['deploy_ed25519', 'deploy_ed25519.pub', 'push_ed25519', 'push_ed25519.pub'], $names, 'no temp files');
+        self::assertSame(['.keys.lock', 'deploy_ed25519', 'deploy_ed25519.pub', 'push_ed25519', 'push_ed25519.pub'], $names, 'no temp files');
     }
 
     public function testEnsureKeysRepairsLooseModesAndMissingRows(): void
@@ -94,27 +94,62 @@ final class SshKeyServiceTest extends KernelTestCase
         self::assertSame($fingerprint, $this->service->fingerprint(SshKeyRole::Deploy), 'the key on disk wins');
     }
 
-    public function testEnsureKeysDerivesAMissingPublicFileInsteadOfOverwritingThePrivateKey(): void
+    public function testEnsureKeysRebuildsAMissingPublicFileFromThePrivateKeyWithoutAProcess(): void
     {
         $this->service->ensureKeys();
         $private = (string) file_get_contents($this->paths->sshPrivateKey(SshKeyRole::Push));
         $line = $this->service->publicKey(SshKeyRole::Push);
         unlink($this->paths->sshPublicKey(SshKeyRole::Push));
-        $this->runner->expect(['ssh-keygen', '-y'], new CommandResult(0, explode(' ', $line)[0].' '.explode(' ', $line)[1]."\n"));
 
         $this->service->ensureKeys();
 
         self::assertSame($private, (string) file_get_contents($this->paths->sshPrivateKey(SshKeyRole::Push)));
         self::assertSame($line."\n", (string) file_get_contents($this->paths->sshPublicKey(SshKeyRole::Push)));
-        self::assertSame([$this->paths->sshPrivateKey(SshKeyRole::Push)], [$this->runner->calls()[0]->argv[5]]);
+        self::assertSame([], $this->runner->calls(), 'the openssh-key-v1 container is read in PHP');
+    }
+
+    public function testEnsureKeysRepairsAPublicFileThatDoesNotBelongToThePrivateKey(): void
+    {
+        $this->service->ensureKeys();
+        $pushFingerprint = $this->service->fingerprint(SshKeyRole::Push);
+        $pushLine = $this->service->publicKey(SshKeyRole::Push);
+        // A crash between the two renames of a regenerate leaves exactly this: a stale .pub next to a new private key.
+        copy($this->paths->sshPublicKey(SshKeyRole::Deploy), $this->paths->sshPublicKey(SshKeyRole::Push));
+        $this->entityManager()->getConnection()->executeStatement("UPDATE ssh_key SET fingerprint = 'SHA256:stale' WHERE role = 'push'");
+        $this->entityManager()->clear();
+
+        $this->service->ensureKeys();
+
+        self::assertSame($pushLine."\n", (string) file_get_contents($this->paths->sshPublicKey(SshKeyRole::Push)));
+        self::assertSame($pushFingerprint, $this->service->fingerprint(SshKeyRole::Push));
+        self::assertSame($pushLine, $this->service->publicKey(SshKeyRole::Push));
+        self::assertSame(0o644, fileperms($this->paths->sshPublicKey(SshKeyRole::Push)) & 0o777);
+        self::assertSame([], $this->runner->calls());
+    }
+
+    public function testEnsureKeysFallsBackToSshKeygenForOtherPrivateKeyFormats(): void
+    {
+        $this->service->ensureKeys();
+        $other = new Ed25519KeyGenerator()->generate('o');
+        file_put_contents($this->paths->sshPrivateKey(SshKeyRole::Push), "-----BEGIN RSA PRIVATE KEY-----\nQUJD\n-----END RSA PRIVATE KEY-----\n");
+        $this->runner->expect(['ssh-keygen', '-y'], new CommandResult(0, explode(' ', $other->publicLine)[0].' '.explode(' ', $other->publicLine)[1]."\n"));
+
+        $this->service->ensureKeys();
+
+        self::assertSame(
+            explode(' ', $other->publicLine)[1],
+            explode(' ', (string) file_get_contents($this->paths->sshPublicKey(SshKeyRole::Push)))[1],
+        );
+        self::assertSame($other->fingerprint, $this->service->fingerprint(SshKeyRole::Push));
+        self::assertCount(1, $this->runner->calls());
     }
 
     public function testEnsureKeysRefusesAnUnusablePrivateKeyRatherThanReplacingIt(): void
     {
         $this->service->ensureKeys();
-        unlink($this->paths->sshPublicKey(SshKeyRole::Push));
+        $garbage = "-----BEGIN RSA PRIVATE KEY-----\nQUJD\n-----END RSA PRIVATE KEY-----\n";
+        file_put_contents($this->paths->sshPrivateKey(SshKeyRole::Push), $garbage);
         $this->runner->expect(['ssh-keygen', '-y'], new CommandResult(1, '', 'incorrect passphrase supplied'));
-        $private = (string) file_get_contents($this->paths->sshPrivateKey(SshKeyRole::Push));
 
         try {
             $this->service->ensureKeys();
@@ -122,7 +157,54 @@ final class SshKeyServiceTest extends KernelTestCase
         } catch (\RuntimeException $e) {
             self::assertStringNotContainsString('PRIVATE KEY', $e->getMessage());
         }
-        self::assertSame($private, (string) file_get_contents($this->paths->sshPrivateKey(SshKeyRole::Push)));
+        self::assertSame($garbage, (string) file_get_contents($this->paths->sshPrivateKey(SshKeyRole::Push)));
+    }
+
+    public function testTheKeyLockIsHeldWhileKeysAreChangedAndReleasedAfterwards(): void
+    {
+        $lockPath = $this->paths->sshDir().'/.keys.lock';
+        $heldDuring = [];
+        $probe = new class($lockPath) implements CommandRunner {
+            /** @var list<bool> */
+            public array $lockWasBusy = [];
+
+            public function __construct(private readonly string $lockPath)
+            {
+            }
+
+            public function run(array $argv, ?string $cwd = null, array $env = [], ?callable $onOutput = null, ?float $timeout = null): CommandResult
+            {
+                // A second open file description: flock() conflicts across descriptions even in one process.
+                $other = fopen($this->lockPath, 'c');
+                \assert(false !== $other);
+                $acquired = flock($other, \LOCK_EX | \LOCK_NB);
+                $this->lockWasBusy[] = !$acquired;
+                $acquired && flock($other, \LOCK_UN);
+                fclose($other);
+
+                return new CommandResult(1);
+            }
+        };
+        $service = $this->serviceWith($probe);
+
+        try {
+            $service->importPrivate(SshKeyRole::Deploy, "-----BEGIN OPENSSH PRIVATE KEY-----\nQUJD\n-----END OPENSSH PRIVATE KEY-----", 'admin');
+        } catch (\InvalidArgumentException) {
+        }
+        $heldDuring = $probe->lockWasBusy;
+
+        self::assertSame([true], $heldDuring, 'ssh-keygen runs while the lock is held');
+        $other = fopen($lockPath, 'c');
+        self::assertNotFalse($other);
+        self::assertTrue(flock($other, \LOCK_EX | \LOCK_NB), 'the lock is released after the call, also on failure');
+        fclose($other);
+
+        $service->regenerate(SshKeyRole::Push, 'admin');
+        $service->ensureKeys();
+        $other = fopen($lockPath, 'c');
+        self::assertNotFalse($other);
+        self::assertTrue(flock($other, \LOCK_EX | \LOCK_NB));
+        fclose($other);
     }
 
     public function testRegenerateChangesFingerprint(): void
@@ -190,13 +272,13 @@ final class SshKeyServiceTest extends KernelTestCase
         [, $blob] = explode(' ', $generated->publicLine);
         $this->runner->expect(['ssh-keygen', '-y'], new CommandResult(0, "ssh-ed25519 $blob their-comment\n"));
 
-        $this->service->importPrivate(SshKeyRole::Push, str_replace("\n", "\r\n", $generated->privatePem), 'admin');
+        $this->service->importPrivate(SshKeyRole::Push, str_replace("\n", "\r\n", $generated->privatePem()), 'admin');
 
         $argv = $this->runner->calls()[0]->argv;
         self::assertSame(['ssh-keygen', '-y', '-P', '', '-f'], \array_slice($argv, 0, 5));
         self::assertStringStartsWith($this->paths->sshDir().'/', $argv[5]);
         self::assertNotSame($this->paths->sshPrivateKey(SshKeyRole::Push), $argv[5], 'derived from a temp copy, not the final file');
-        self::assertSame($generated->privatePem, (string) file_get_contents($this->paths->sshPrivateKey(SshKeyRole::Push)));
+        self::assertSame($generated->privatePem(), (string) file_get_contents($this->paths->sshPrivateKey(SshKeyRole::Push)));
         self::assertSame(0o600, fileperms($this->paths->sshPrivateKey(SshKeyRole::Push)) & 0o777);
         self::assertSame("ssh-ed25519 $blob fleet-push@fleet.example.com", $this->service->publicKey(SshKeyRole::Push));
         self::assertSame($generated->fingerprint, $this->service->fingerprint(SshKeyRole::Push));
@@ -242,7 +324,7 @@ final class SshKeyServiceTest extends KernelTestCase
         $service = $this->serviceWith($real);
         $generated = new Ed25519KeyGenerator()->generate('x');
 
-        $service->importPrivate(SshKeyRole::Deploy, $generated->privatePem, 'admin');
+        $service->importPrivate(SshKeyRole::Deploy, $generated->privatePem(), 'admin');
 
         self::assertSame($generated->fingerprint, $service->fingerprint(SshKeyRole::Deploy));
         self::assertSame(explode(' ', $generated->publicLine)[1], explode(' ', $service->publicKey(SshKeyRole::Deploy))[1]);
