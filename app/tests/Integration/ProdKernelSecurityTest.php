@@ -27,6 +27,7 @@ final class ProdKernelSecurityTest extends TestCase
     private string $cacheDir = '';
     private ?Kernel $kernel = null;
     private ?string $previousSecret = null;
+    private ?string $previousRunner = null;
 
     protected function setUp(): void
     {
@@ -34,6 +35,9 @@ final class ProdKernelSecurityTest extends TestCase
         // Dotenv fills $_SERVER/$_ENV but not getenv(), so restore from $_SERVER.
         $this->previousSecret = isset($_SERVER['APP_SECRET']) && \is_string($_SERVER['APP_SECRET']) ? $_SERVER['APP_SECRET'] : null;
         self::setEnv('APP_SECRET', 'prod-kernel-test-secret');
+        // The test environment records commands; production must not, and the guard enforces that.
+        $this->previousRunner = isset($_SERVER['FLEET_RUNNER']) && \is_string($_SERVER['FLEET_RUNNER']) ? $_SERVER['FLEET_RUNNER'] : null;
+        self::setEnv('FLEET_RUNNER', 'process');
 
         $this->cacheDir = sys_get_temp_dir().'/fleet-prod-cache-'.bin2hex(random_bytes(6));
         $cacheDir = $this->cacheDir;
@@ -70,6 +74,7 @@ final class ProdKernelSecurityTest extends TestCase
         $this->kernel?->shutdown();
         new Filesystem()->remove($this->cacheDir);
         self::setEnv('APP_SECRET', $this->previousSecret);
+        self::setEnv('FLEET_RUNNER', $this->previousRunner);
         $this->restoreFleetHome();
     }
 
@@ -93,6 +98,28 @@ final class ProdKernelSecurityTest extends TestCase
         self::assertNotNull($this->kernel);
 
         return $this->kernel->handle(Request::create($path, 'GET', [], [], [], $server));
+    }
+
+    public function testBootRefusesAnEmptyAppSecret(): void
+    {
+        self::assertNotNull($this->kernel);
+        self::setEnv('APP_SECRET', '');
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('APP_SECRET is empty');
+
+        $this->kernel->boot();
+    }
+
+    public function testBootRefusesTheRecordingRunner(): void
+    {
+        self::assertNotNull($this->kernel);
+        self::setEnv('FLEET_RUNNER', 'recording');
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('FLEET_RUNNER=recording');
+
+        $this->kernel->boot();
     }
 
     public function testTheStandInHeaderDoesNotAuthenticate(): void

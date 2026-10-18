@@ -33,6 +33,10 @@ services:
     # this creates a service per class whose id is the fully-qualified class name
     App\:
         resource: '../src/'
+        exclude:
+            # The concrete runners are not autowirable on purpose: consumers type-hint CommandRunner (the seam).
+            - '../src/Fleet/Shell/ProcessCommandRunner.php'
+            - '../src/Fleet/Shell/RecordingCommandRunner.php'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -42,9 +46,19 @@ services:
         arguments:
             $home: '%env(resolve:FLEET_HOME)%'
 
-    # Command seam: both runners are shared services; FLEET_RUNNER picks the CommandRunner.
-    App\Fleet\Shell\ProcessCommandRunner: ~
-    App\Fleet\Shell\RecordingCommandRunner: ~
+    # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
+    # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
+    fleet.command_runner.process:
+        class: App\Fleet\Shell\ProcessCommandRunner
+        autowire: false
+    fleet.command_runner.recording:
+        class: App\Fleet\Shell\RecordingCommandRunner
+        autowire: false
+    App\Fleet\Shell\CommandRunnerFactory:
+        arguments:
+            $process: '@fleet.command_runner.process'
+            $recording: '@fleet.command_runner.recording'
+            $environment: '%kernel.environment%'
     App\Fleet\Shell\CommandRunner:
         factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'create']
         arguments: ['%env(FLEET_RUNNER)%']
@@ -70,5 +84,5 @@ when@test:
             alias: App\Fleet\Shell\CommandRunner
             public: true
         fleet.test_alias.recording_command_runner:
-            alias: App\Fleet\Shell\RecordingCommandRunner
+            alias: fleet.command_runner.recording
             public: true

@@ -11,6 +11,13 @@ class Kernel extends BaseKernel
 {
     use MicroKernelTrait;
 
+    public function boot(): void
+    {
+        ProductionGuard::assertSafe($this->environment, ProductionGuard::currentVars());
+
+        parent::boot();
+    }
+
     /**
      * @return list<string> An array of allowed values for APP_ENV
      */

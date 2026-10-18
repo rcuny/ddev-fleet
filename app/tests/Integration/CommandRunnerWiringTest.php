@@ -18,6 +18,6 @@ final class CommandRunnerWiringTest extends KernelTestCase
         $runner = $container->get(CommandRunner::class);
 
         self::assertInstanceOf(RecordingCommandRunner::class, $runner);
-        self::assertSame($container->get(RecordingCommandRunner::class), $runner);
+        self::assertSame($container->get('fleet.test_alias.recording_command_runner'), $runner);
     }
 }
