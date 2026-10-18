@@ -6,6 +6,7 @@
 # asset-map:compile), a prod cache warm-up and container lint, the boot guard (empty APP_SECRET), and a real
 # php -S server answering /health and the authentication paths with the compiled prod kernel.
 #
+# The real app/ (vendor, .env*, var) is only read: everything runs in the copy.
 # Needs network (Composer, jsDelivr via importmap, the Tailwind binary, unless var/tailwind already exists),
 # curl and tar. Override the PHP binary with FLEET_PHP. Nothing in app/ is modified.
 set -euo pipefail
@@ -51,6 +52,11 @@ for dev_only in symfony/web-profiler-bundle symfony/ux-toolkit symfony/debug-bun
     [ ! -d "vendor/$dev_only" ] || fail "dev-only package $dev_only was installed with --no-dev"
 done
 
+step "composer dump-env prod (what a deployment compiles; the server must not depend on inheriting the environment)"
+printf 'APP_SECRET=%s\nMERCURE_JWT_SECRET=%s\n' "$APP_SECRET" "$MERCURE_JWT_SECRET" >.env.local   # the copy's, not app/'s
+"$php" "$composer" dump-env prod --no-interaction
+grep -q "'APP_ENV' => 'prod'" .env.local.php || fail ".env.local.php does not select prod"
+
 step "assets: importmap:install, tailwind:build --minify, asset-map:compile"
 "$php" bin/console importmap:install --no-interaction
 "$php" bin/console tailwind:build --minify --no-interaction
@@ -71,7 +77,9 @@ case "$refused" in *"Refusing to boot in prod: FLEET_RUNNER=recording"*) ;; *) f
 
 step "serve the compiled app with php -S and probe it"
 port=$((20000 + RANDOM % 20000))
-"$php" -S "127.0.0.1:$port" -t public >"$work/server.log" 2>&1 &
+# variables_order=GPCS (php.ini-production, the CI image): the server gets no environment in $_ENV, so it must
+# find prod in the compiled .env.local.php rather than falling back to APP_ENV=dev from .env.
+"$php" -d variables_order=GPCS -S "127.0.0.1:$port" -t public >"$work/server.log" 2>&1 &
 server_pid=$!
 for _ in $(seq 1 50); do
     curl -s -o /dev/null "http://127.0.0.1:$port/health" && break
