@@ -161,6 +161,50 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         self::assertSame([ApplyTarget::Authelia], $this->applier->applied);
     }
 
+    public function testPasswordQuestionIsHiddenWithoutEchoFallbackAndUntrimmed(): void
+    {
+        $question = UserResetPasswordCommand::passwordQuestion('New password');
+
+        self::assertTrue($question->isHidden());
+        self::assertFalse($question->isHiddenFallback(), 'a terminal that cannot hide typing must make the command fail, not echo');
+        self::assertFalse($question->isTrimmable());
+    }
+
+    public function testHelpExplainsTheTerminalRequirement(): void
+    {
+        $command = new UserResetPasswordCommand(
+            $this->repository,
+            $this->service,
+            new PasswordPolicy(),
+            new AutheliaUsersFile($this->paths, new AutheliaUsersRenderer()),
+            $this->applier,
+        );
+
+        self::assertStringContainsString('ssh -t', $command->getHelp());
+    }
+
+    public function testAFailingUsersFileLeavesPasswordAndFileUntouched(): void
+    {
+        // One corrupt row: a hash that is not argon2id (hand-edited database). Rendering must refuse, and the
+        // password change made in the same flow must be rolled back with it.
+        $this->service->upsertAdmin('bob', 'Bob', 'bob@example.com', self::OLD);
+        $this->entityManager()->getConnection()->executeStatement(
+            'UPDATE fleet_user SET password_hash = :h WHERE username = :u',
+            ['h' => 'not-a-hash', 'u' => 'bob'],
+        );
+        $this->entityManager()->clear();
+        $before = $this->storedHash();
+
+        $tester = $this->reset([self::NEW, self::NEW]);
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('Nothing was changed', $tester->getDisplay());
+        self::assertStringNotContainsString('not-a-hash', $tester->getDisplay());
+        self::assertSame($before, $this->storedHash());
+        self::assertFileDoesNotExist($this->paths->usersFile());
+        self::assertSame([], $this->applier->applied);
+    }
+
     public function testRefusesToRunWithoutATerminal(): void
     {
         $command = new UserResetPasswordCommand(

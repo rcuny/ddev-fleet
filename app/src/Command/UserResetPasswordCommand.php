@@ -13,6 +13,7 @@ use App\Fleet\System\Applier;
 use App\Fleet\System\ApplyTarget;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
+use Symfony\Component\Console\Exception\RuntimeException;
 use Symfony\Component\Console\Input\InputArgument;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Input\InputOption;
@@ -25,7 +26,18 @@ use Symfony\Component\Console\Style\SymfonyStyle;
  * terminal without echo and never taken from an argument or the environment (those show up in `ps` and shell history).
  * Authelia's own self-service reset is disabled, so this is the way to change a password until M0.10.
  */
-#[AsCommand(name: 'fleet:user:reset-password', description: 'Set a user\'s password and refresh the Authelia users file')]
+#[AsCommand(
+    name: 'fleet:user:reset-password',
+    description: 'Set a user\'s password and refresh the Authelia users file',
+    help: <<<'HELP'
+        Asks for the new password twice, without echo, then stores its argon2id hash, rewrites the Authelia users
+        file and has Authelia pick it up (<info>--no-apply</info> skips the last step).
+
+        It needs a terminal. Over SSH force one with <info>ssh -t user@host ...</info>. Without one (a pipe, cron, plain
+        <info>ssh host command</info>) it refuses to run rather than read the password from an argument or the
+        environment, and it never falls back to a visible prompt.
+        HELP,
+)]
 final class UserResetPasswordCommand extends Command
 {
     public function __construct(
@@ -62,38 +74,47 @@ final class UserResetPasswordCommand extends Command
             return Command::FAILURE;
         }
 
-        $password = $this->askHidden($io, 'New password');
-        $violations = $this->policy->violations($password, $username);
-        if ([] !== $violations) {
-            $io->error($violations);
-
-            return Command::FAILURE;
-        }
-        if ($password !== $this->askHidden($io, 'Repeat the new password')) {
-            $io->error('The two passwords differ.');
-
-            return Command::FAILURE;
-        }
-
         try {
-            $this->userService->setPassword($username, $password);
-        } catch (UnknownUser|\InvalidArgumentException $e) {
-            $io->error($e->getMessage());
+            $password = $this->askHidden($io, 'New password');
+            $violations = $this->policy->violations($password, $username);
+            if ([] !== $violations) {
+                $io->error($violations);
+
+                return Command::FAILURE;
+            }
+            if ($password !== $this->askHidden($io, 'Repeat the new password')) {
+                $io->error('The two passwords differ.');
+
+                return Command::FAILURE;
+            }
+        } catch (RuntimeException $e) {
+            $io->error('The password cannot be typed without echo here ('.$e->getMessage().'). Run this from a terminal, over SSH with `ssh -t`.');
 
             return Command::FAILURE;
-        } finally {
-            unset($password);
+        }
+
+        // The hash and the users file change together: the transaction commits only after the file was rendered and
+        // written, so a failure anywhere leaves both as they were.
+        try {
+            $changed = $this->users->transactional(function () use ($username, $password): bool {
+                $this->userService->setPassword($username, $password);
+
+                return $this->usersFile->sync($this->users);
+            });
+        } catch (UnknownUser|\InvalidArgumentException|\RuntimeException $e) {
+            $io->error('Nothing was changed: '.$e->getMessage());
+
+            return Command::FAILURE;
         }
         $io->success(\sprintf('The password of "%s" was changed.', $username));
+        $io->writeln($changed ? 'The Authelia users file was updated.' : 'The Authelia users file was already up to date.');
 
+        if ($input->getOption('no-apply')) {
+            $io->note('Skipped: installing the users file and restarting Authelia (--no-apply). The new password only works after that.');
+
+            return Command::SUCCESS;
+        }
         try {
-            $changed = $this->usersFile->write($this->users->all());
-            $io->writeln($changed ? 'The Authelia users file was updated.' : 'The Authelia users file was already up to date.');
-            if ($input->getOption('no-apply')) {
-                $io->note('Skipped: installing the users file and restarting Authelia (--no-apply). The new password only works after that.');
-
-                return Command::SUCCESS;
-            }
             $this->applier->apply(ApplyTarget::Authelia);
         } catch (\RuntimeException $e) {
             $io->error('The password is stored, but the sign-in service was not updated: '.$e->getMessage());
@@ -105,16 +126,26 @@ final class UserResetPasswordCommand extends Command
         return Command::SUCCESS;
     }
 
-    private function askHidden(SymfonyStyle $io, string $label): string
+    /**
+     * Hidden, never trimmed, never visible: if the terminal cannot hide the typing, asking fails instead of
+     * falling back to an echoed prompt.
+     */
+    public static function passwordQuestion(string $label): Question
     {
         $question = new Question($label);
         $question->setHidden(true);
+        $question->setHiddenFallback(false);
         // Not trimmed: spaces at either end are part of a password. Depending on how the answer is read (tty or
         // piped), Symfony leaves the line break on it, and a line can never contain one, so that is cut by hand.
         $question->setTrimmable(false);
         $question->setMaxAttempts(1);
 
-        $answer = $io->askQuestion($question);
+        return $question;
+    }
+
+    private function askHidden(SymfonyStyle $io, string $label): string
+    {
+        $answer = $io->askQuestion(self::passwordQuestion($label));
 
         return \is_string($answer) ? rtrim($answer, "\r\n") : '';
     }
