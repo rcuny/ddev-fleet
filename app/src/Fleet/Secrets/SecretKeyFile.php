@@ -13,6 +13,8 @@ use App\Fleet\FleetPaths;
  */
 final readonly class SecretKeyFile
 {
+    public const int KEY_BYTES = \SODIUM_CRYPTO_AEAD_XCHACHA20POLY1305_IETF_KEYBYTES;
+
     public function __construct(private FleetPaths $paths)
     {
     }
@@ -34,30 +36,29 @@ final readonly class SecretKeyFile
         if (!is_dir($dir) && !@mkdir($dir, 0o700, true) && !is_dir($dir)) {
             throw new \RuntimeException(\sprintf('Cannot create the secret key directory "%s".', $dir));
         }
+        self::assertDirectory($dir);
 
         // The key is written to a private temp file in the same directory, then hard-linked into place: link()
         // fails if the target exists, so a concurrent creator can never be overwritten, and the key never appears
         // under its final name with partial content or loose permissions.
+        $key = sodium_crypto_aead_xchacha20poly1305_ietf_keygen();
         $tmp = $dir.'/.secret.key.'.bin2hex(random_bytes(8)).'.tmp';
-        $previousUmask = umask(0o077);
+        $handle = false;
         try {
-            $handle = @fopen($tmp, 'x');
-        } finally {
-            umask($previousUmask);
-        }
-        if (false === $handle) {
-            throw new \RuntimeException(\sprintf('Cannot create a temporary secret key file in "%s".', $dir));
-        }
-
-        $key = sodium_crypto_secretbox_keygen();
-        try {
-            $written = @chmod($tmp, 0o600) ? fwrite($handle, $key) : false;
-            $synced = $written === \strlen($key) && fflush($handle);
-            $synced && \function_exists('fsync') && fsync($handle);
-            fclose($handle);
-            if (!$synced) {
+            $previousUmask = umask(0o077);
+            try {
+                $handle = @fopen($tmp, 'x');
+            } finally {
+                umask($previousUmask);
+            }
+            if (false === $handle) {
+                throw new \RuntimeException(\sprintf('Cannot create a temporary secret key file in "%s".', $dir));
+            }
+            if (!@chmod($tmp, 0o600) || self::KEY_BYTES !== fwrite($handle, $key) || !fflush($handle) || !fsync($handle)) {
                 throw new \RuntimeException('Cannot write the secret key file.');
             }
+            fclose($handle);
+            $handle = false;
             if (!@link($tmp, $path)) {
                 if (!file_exists($path)) {
                     throw new \RuntimeException(\sprintf('Cannot install the secret key file at "%s".', $path));
@@ -65,6 +66,7 @@ final readonly class SecretKeyFile
                 $this->read($path, true);
             }
         } finally {
+            \is_resource($handle) && fclose($handle);
             sodium_memzero($key);
             @unlink($tmp);
         }
@@ -81,6 +83,7 @@ final readonly class SecretKeyFile
 
     private function read(string $path, bool $discard): string
     {
+        self::assertDirectory(\dirname($path));
         $link = @lstat($path);
         if (false === $link || (($link['mode'] & 0o170000) !== 0o100000)) {
             throw new \RuntimeException(\sprintf('The secret key "%s" is missing or is not a regular file.', $path));
@@ -99,21 +102,21 @@ final readonly class SecretKeyFile
             if (0 !== ($stat['mode'] & 0o077)) {
                 throw new \RuntimeException(\sprintf('The secret key "%s" has mode %04o; group/other access is not allowed (expected 0600).', $path, $stat['mode'] & 0o777));
             }
-            if (\function_exists('posix_geteuid') && $stat['uid'] !== posix_geteuid()) {
+            if ($stat['uid'] !== self::effectiveUid()) {
                 throw new \RuntimeException(\sprintf('The secret key "%s" is not owned by the user running the app.', $path));
             }
-            if (\SODIUM_CRYPTO_SECRETBOX_KEYBYTES !== $stat['size']) {
-                throw new \RuntimeException(\sprintf('The secret key "%s" must be exactly %d bytes.', $path, \SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+            if (self::KEY_BYTES !== $stat['size']) {
+                throw new \RuntimeException(\sprintf('The secret key "%s" must be exactly %d bytes.', $path, self::KEY_BYTES));
             }
-            $key = stream_get_contents($handle, \SODIUM_CRYPTO_SECRETBOX_KEYBYTES + 1);
+            $key = stream_get_contents($handle, self::KEY_BYTES + 1);
         } finally {
             fclose($handle);
         }
 
-        if (!\is_string($key) || \SODIUM_CRYPTO_SECRETBOX_KEYBYTES !== \strlen($key)) {
+        if (!\is_string($key) || self::KEY_BYTES !== \strlen($key)) {
             \is_string($key) && sodium_memzero($key);
 
-            throw new \RuntimeException(\sprintf('The secret key "%s" must be exactly %d bytes.', $path, \SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+            throw new \RuntimeException(\sprintf('The secret key "%s" must be exactly %d bytes.', $path, self::KEY_BYTES));
         }
 
         if ($discard) {
@@ -123,5 +126,30 @@ final readonly class SecretKeyFile
         }
 
         return $key;
+    }
+
+    /** The keys directory must be private: a group/other-writable directory would let someone swap the key file. */
+    private static function assertDirectory(string $dir): void
+    {
+        $stat = @stat($dir);
+        if (false === $stat || ($stat['mode'] & 0o170000) !== 0o040000) {
+            throw new \RuntimeException(\sprintf('The secret key directory "%s" is missing.', $dir));
+        }
+        if (0 !== ($stat['mode'] & 0o077)) {
+            throw new \RuntimeException(\sprintf('The secret key directory "%s" has mode %04o; group/other access is not allowed (expected 0700).', $dir, $stat['mode'] & 0o777));
+        }
+        if ($stat['uid'] !== self::effectiveUid()) {
+            throw new \RuntimeException(\sprintf('The secret key directory "%s" is not owned by the user running the app.', $dir));
+        }
+    }
+
+    /** Fails closed: without ext-posix ownership cannot be verified, so the key is not used. */
+    private static function effectiveUid(): int
+    {
+        if (!\function_exists('posix_geteuid')) {
+            throw new \RuntimeException('ext-posix is required to verify the ownership of the secret key.');
+        }
+
+        return posix_geteuid();
     }
 }

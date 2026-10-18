@@ -6,6 +6,7 @@ namespace App\Fleet\Secrets;
 
 use App\Domain\Secret\Secret;
 use App\Domain\Secret\SecretRepository;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -26,33 +27,56 @@ final readonly class SecretStore
     ) {
     }
 
-    public function putFleetWide(string $name, string $plaintext, string $by): void
+    /**
+     * The context a sealed value is bound to: scope, scope id and name, each length-prefixed so no two different
+     * triples can produce the same bytes (a plain "a|b|c" join could be shifted across the separators).
+     */
+    public static function context(string $scope, string $scopeId, string $name): string
+    {
+        $context = '';
+        foreach ([$scope, $scopeId, $name] as $part) {
+            $context .= pack('N', \strlen($part)).$part;
+        }
+
+        return $context;
+    }
+
+    /**
+     * @throws SecretConflict when a concurrent writer created the same secret first
+     */
+    public function putFleetWide(string $name, #[\SensitiveParameter] string $plaintext, string $by): void
     {
         self::assertName($name);
         if ('' === $by || \strlen($by) > 64) {
             throw new \InvalidArgumentException('The updater must be 1 to 64 bytes.');
         }
 
-        $sealed = $this->box->seal($plaintext);
+        $sealed = $this->box->seal($plaintext, self::fleetContext($name));
         $now = $this->clock->now();
-        $existing = $this->secrets->find(Secret::SCOPE_FLEET, self::FLEET_SCOPE_ID, $name);
-        if (null === $existing) {
-            $this->secrets->save(new Secret(
-                Secret::SCOPE_FLEET,
-                self::FLEET_SCOPE_ID,
-                $name,
-                $sealed->ciphertext,
-                $sealed->nonce,
-                $sealed->keyVersion,
-                $by,
-                $now,
-            ));
+        try {
+            $this->secrets->transactional(function () use ($name, $sealed, $by, $now): void {
+                $existing = $this->secrets->find(Secret::SCOPE_FLEET, self::FLEET_SCOPE_ID, $name);
+                if (null === $existing) {
+                    $this->secrets->save(new Secret(
+                        Secret::SCOPE_FLEET,
+                        self::FLEET_SCOPE_ID,
+                        $name,
+                        $sealed->ciphertext,
+                        $sealed->nonce,
+                        $sealed->keyVersion,
+                        $by,
+                        $now,
+                    ));
 
-            return;
+                    return;
+                }
+
+                $existing->replace($sealed->ciphertext, $sealed->nonce, $sealed->keyVersion, $by, $now);
+                $this->secrets->save($existing);
+            });
+        } catch (UniqueConstraintViolationException $e) {
+            throw new SecretConflict(\sprintf('The secret "%s" was stored concurrently; retry.', $name), 0, $e);
         }
-
-        $existing->replace($sealed->ciphertext, $sealed->nonce, $sealed->keyVersion, $by, $now);
-        $this->secrets->save($existing);
     }
 
     /**
@@ -67,7 +91,10 @@ final readonly class SecretStore
         }
 
         try {
-            return $this->box->open(new SealedSecret($secret->ciphertext(), $secret->nonce(), $secret->keyVersion()));
+            return $this->box->open(
+                new SealedSecret($secret->ciphertext(), $secret->nonce(), $secret->keyVersion()),
+                self::fleetContext($name),
+            );
         } catch (SecretOpenFailed $e) {
             throw new SecretOpenFailed(\sprintf('The stored secret "%s" could not be opened.', $name), 0, $e);
         }
@@ -87,6 +114,11 @@ final readonly class SecretStore
         if (null !== $secret) {
             $this->secrets->remove($secret);
         }
+    }
+
+    private static function fleetContext(string $name): string
+    {
+        return self::context(Secret::SCOPE_FLEET, self::FLEET_SCOPE_ID, $name);
     }
 
     private static function assertName(string $name): void

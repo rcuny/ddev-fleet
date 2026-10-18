@@ -32,4 +32,18 @@ final readonly class SecretRepository
         $this->em->remove($secret);
         $this->em->flush();
     }
+
+    /**
+     * Runs $work in one database transaction (the entity manager is closed if it throws).
+     *
+     * @template T
+     *
+     * @param \Closure(): T $work
+     *
+     * @return T
+     */
+    public function transactional(\Closure $work): mixed
+    {
+        return $this->em->wrapInTransaction($work);
+    }
 }

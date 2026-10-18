@@ -38,7 +38,7 @@ final class SecretKeyFileTest extends TestCase
         $path = $this->paths()->secretKey();
         self::assertFileExists($path);
         self::assertSame(0o600, fileperms($path) & 0o777);
-        self::assertSame(\SODIUM_CRYPTO_SECRETBOX_KEYBYTES, filesize($path));
+        self::assertSame(SecretKeyFile::KEY_BYTES, filesize($path));
         self::assertSame(file_get_contents($path), $file->key());
         self::assertSame(0o700, fileperms($this->paths()->keysDir()) & 0o777);
         self::assertSame([], glob($this->paths()->keysDir().'/.secret.key.*') ?: [], 'no temp file is left behind');
@@ -61,7 +61,7 @@ final class SecretKeyFileTest extends TestCase
         // A key that appears between the existence check and link() is the same as one that was there already.
         $path = $this->paths()->secretKey();
         mkdir($this->paths()->keysDir(), 0o700);
-        $winner = random_bytes(\SODIUM_CRYPTO_SECRETBOX_KEYBYTES);
+        $winner = random_bytes(SecretKeyFile::KEY_BYTES);
         file_put_contents($path, $winner);
         chmod($path, 0o600);
 
@@ -72,7 +72,7 @@ final class SecretKeyFileTest extends TestCase
 
     public function testWideModeIsRefused(): void
     {
-        $path = $this->plantKey(random_bytes(\SODIUM_CRYPTO_SECRETBOX_KEYBYTES), 0o640);
+        $path = $this->plantKey(random_bytes(SecretKeyFile::KEY_BYTES), 0o640);
 
         try {
             $this->keyFile()->ensure();
@@ -103,13 +103,30 @@ final class SecretKeyFileTest extends TestCase
     public function testSymlinkedKeyIsRefused(): void
     {
         $target = $this->home.'/elsewhere';
-        file_put_contents($target, random_bytes(\SODIUM_CRYPTO_SECRETBOX_KEYBYTES));
+        file_put_contents($target, random_bytes(SecretKeyFile::KEY_BYTES));
         chmod($target, 0o600);
         mkdir($this->paths()->keysDir(), 0o700);
         symlink($target, $this->paths()->secretKey());
 
         $this->expectException(\RuntimeException::class);
         $this->keyFile()->ensure();
+    }
+
+    public function testGroupAccessibleKeysDirectoryIsRefused(): void
+    {
+        mkdir($this->paths()->keysDir(), 0o755);
+        chmod($this->paths()->keysDir(), 0o750);
+
+        foreach ([fn () => $this->keyFile()->ensure(), fn () => $this->keyFile()->key()] as $call) {
+            try {
+                $call();
+                self::fail('A keys directory open to the group must be refused.');
+            } catch (\RuntimeException $e) {
+                self::assertStringContainsString('0750', $e->getMessage());
+            }
+        }
+        self::assertFileDoesNotExist($this->paths()->secretKey());
+        self::assertSame([], glob($this->paths()->keysDir().'/.secret.key.*') ?: []);
     }
 
     public function testKeyDoesNotCreateAMissingFile(): void

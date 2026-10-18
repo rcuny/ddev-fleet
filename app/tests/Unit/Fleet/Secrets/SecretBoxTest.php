@@ -13,6 +13,8 @@ use PHPUnit\Framework\TestCase;
 
 final class SecretBoxTest extends TestCase
 {
+    private const string CONTEXT = 'ctx-a';
+
     /** @var list<string> */
     private array $homes = [];
 
@@ -31,10 +33,10 @@ final class SecretBoxTest extends TestCase
     {
         $box = $this->box();
 
-        $sealed = $box->seal('s3cret-value');
+        $sealed = $box->seal('s3cret-value', self::CONTEXT);
 
-        self::assertSame('s3cret-value', $box->open($sealed));
-        self::assertSame(1, $sealed->keyVersion);
+        self::assertSame('s3cret-value', $box->open($sealed, self::CONTEXT));
+        self::assertSame(2, $sealed->keyVersion);
         self::assertStringNotContainsString('s3cret-value', $sealed->ciphertext);
     }
 
@@ -43,8 +45,8 @@ final class SecretBoxTest extends TestCase
         $box = $this->box();
         $binary = random_bytes(300)."\0end";
 
-        self::assertSame('', $box->open($box->seal('')));
-        self::assertSame($binary, $box->open($box->seal($binary)));
+        self::assertSame('', $box->open($box->seal('', self::CONTEXT), self::CONTEXT));
+        self::assertSame($binary, $box->open($box->seal($binary, self::CONTEXT), self::CONTEXT));
     }
 
     public function testNonceIsFreshPerSeal(): void
@@ -53,24 +55,24 @@ final class SecretBoxTest extends TestCase
 
         $nonces = [];
         for ($i = 0; $i < 20; ++$i) {
-            $sealed = $box->seal('same plaintext');
-            self::assertSame(\SODIUM_CRYPTO_SECRETBOX_NONCEBYTES, \strlen($sealed->nonce));
+            $sealed = $box->seal('same plaintext', self::CONTEXT);
+            self::assertSame(SecretBox::NONCE_BYTES, \strlen($sealed->nonce));
             $nonces[] = $sealed->nonce;
         }
 
         self::assertCount(20, array_unique($nonces));
-        self::assertNotSame($box->seal('same plaintext')->ciphertext, $box->seal('same plaintext')->ciphertext);
+        self::assertNotSame($box->seal('same plaintext', self::CONTEXT)->ciphertext, $box->seal('same plaintext', self::CONTEXT)->ciphertext);
     }
 
     public function testTamperedCiphertextFails(): void
     {
         $box = $this->box();
-        $sealed = $box->seal('s3cret-value');
+        $sealed = $box->seal('s3cret-value', self::CONTEXT);
         $flipped = $sealed->ciphertext;
         $flipped = substr_replace($flipped, \chr(\ord($flipped[0]) ^ 1), 0, 1);
 
         try {
-            $box->open(new SealedSecret($flipped, $sealed->nonce, $sealed->keyVersion));
+            $box->open(new SealedSecret($flipped, $sealed->nonce, $sealed->keyVersion), self::CONTEXT);
             self::fail('Tampered ciphertext must not open.');
         } catch (SecretOpenFailed $e) {
             self::assertStringNotContainsString('s3cret-value', $e->getMessage());
@@ -80,10 +82,10 @@ final class SecretBoxTest extends TestCase
     public function testTamperedNonceAndTruncatedInputsFail(): void
     {
         $box = $this->box();
-        $sealed = $box->seal('s3cret-value');
+        $sealed = $box->seal('s3cret-value', self::CONTEXT);
 
         foreach ([
-            new SealedSecret($sealed->ciphertext, random_bytes(\SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), 1),
+            new SealedSecret($sealed->ciphertext, random_bytes(SecretBox::NONCE_BYTES), 1),
             new SealedSecret($sealed->ciphertext, substr($sealed->nonce, 1), 1),
             new SealedSecret($sealed->ciphertext, $sealed->nonce.'x', 1),
             new SealedSecret($sealed->ciphertext, '', 1),
@@ -92,7 +94,7 @@ final class SecretBoxTest extends TestCase
             new SealedSecret('', $sealed->nonce, 1),
         ] as $broken) {
             try {
-                $box->open($broken);
+                $box->open($broken, self::CONTEXT);
                 self::fail('A malformed or altered sealed secret must not open.');
             } catch (SecretOpenFailed) {
                 $this->addToAssertionCount(1);
@@ -102,23 +104,67 @@ final class SecretBoxTest extends TestCase
 
     public function testWrongKeyFails(): void
     {
-        $sealed = $this->box()->seal('s3cret-value');
+        $sealed = $this->box()->seal('s3cret-value', self::CONTEXT);
 
         $other = $this->box();
-        $other->seal('force the second key into existence');
+        $other->seal('force the second key into existence', self::CONTEXT);
 
         $this->expectException(SecretOpenFailed::class);
-        $other->open($sealed);
+        $other->open($sealed, self::CONTEXT);
+    }
+
+    public function testOpenFailsUnderAnotherContext(): void
+    {
+        $box = $this->box();
+        $sealed = $box->seal('s3cret-value', 'ctx-a');
+
+        foreach (['ctx-b', 'ctx-', 'ctx-a ', 'CTX-A'] as $other) {
+            try {
+                $box->open($sealed, $other);
+                self::fail('Context "'.$other.'" must not open a value sealed for ctx-a.');
+            } catch (SecretOpenFailed $e) {
+                self::assertStringNotContainsString('s3cret-value', $e->getMessage());
+            }
+        }
+        self::assertSame('s3cret-value', $box->open($sealed, 'ctx-a'));
+    }
+
+    public function testEmptyContextIsRejected(): void
+    {
+        $box = $this->box();
+
+        try {
+            $box->seal('x', '');
+            self::fail('seal() needs a context.');
+        } catch (\InvalidArgumentException) {
+            $this->addToAssertionCount(1);
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $box->open($box->seal('x', 'ctx-a'), '');
+    }
+
+    public function testSealedValuesCarryTheAeadKeyVersion(): void
+    {
+        self::assertSame(2, SecretBox::KEY_VERSION);
+        self::assertSame(2, $this->box()->seal('x', self::CONTEXT)->keyVersion);
+    }
+
+    public function testPlaintextParametersAreMarkedSensitive(): void
+    {
+        $parameter = new \ReflectionMethod(SecretBox::class, 'seal')->getParameters()[0];
+
+        self::assertCount(1, $parameter->getAttributes(\SensitiveParameter::class));
     }
 
     public function testUnknownKeyVersionFails(): void
     {
         $box = $this->box();
-        $sealed = $box->seal('s3cret-value');
+        $sealed = $box->seal('s3cret-value', self::CONTEXT);
 
-        foreach ([0, 2, -1] as $version) {
+        foreach ([0, 1, 3, -1] as $version) {
             try {
-                $box->open(new SealedSecret($sealed->ciphertext, $sealed->nonce, $version));
+                $box->open(new SealedSecret($sealed->ciphertext, $sealed->nonce, $version), self::CONTEXT);
                 self::fail('Key version '.$version.' must be rejected.');
             } catch (SecretOpenFailed $e) {
                 self::assertStringContainsString((string) $version, $e->getMessage());
@@ -128,12 +174,12 @@ final class SecretBoxTest extends TestCase
 
     public function testOpenWithoutAKeyFileFailsAndDoesNotCreateOne(): void
     {
-        $sealed = $this->box()->seal('s3cret-value');
+        $sealed = $this->box()->seal('s3cret-value', self::CONTEXT);
         $paths = $this->newPaths();
         $box = new SecretBox(new SecretKeyFile($paths));
 
         try {
-            $box->open($sealed);
+            $box->open($sealed, self::CONTEXT);
             self::fail('Opening without a key must fail.');
         } catch (SecretOpenFailed) {
             self::assertFileDoesNotExist($paths->secretKey());
@@ -146,7 +192,7 @@ final class SecretBoxTest extends TestCase
         $box = new SecretBox(new SecretKeyFile($paths));
         self::assertFileDoesNotExist($paths->secretKey());
 
-        $box->seal('x');
+        $box->seal('x', self::CONTEXT);
 
         self::assertSame(0o600, fileperms($paths->secretKey()) & 0o777);
     }
