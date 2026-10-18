@@ -12,7 +12,10 @@ use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\SetupFixture;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Lock\Store\InMemoryStore;
+use Symfony\Component\Process\InputStream;
+use Symfony\Component\Process\Process;
 
 final class SetupFinisherTest extends KernelTestCase
 {
@@ -337,5 +340,99 @@ final class SetupFinisherTest extends KernelTestCase
             $this->fx->clock,
             new \Psr\Log\NullLogger(),
         );
+    }
+
+    public function testTheCaddyStepRefusedForTimeStillPutsTheSetupGateBack(): void
+    {
+        $host = $this->fx->readyHost(TlsMode::OvhDns);
+        $token = $this->fx->tokens->mint();
+        // The gate "took" 100 s: apply caddy (worst case 60 s) would end after the 150 s budget.
+        $this->fx->probe = function (string $event): void {
+            if ('caddy:reload' === $event && !str_contains($this->gate(), 'redir @fleet_closed')) {
+                $this->fx->clock->sleep(100);
+            }
+        };
+
+        $e = $this->finishFailing();
+
+        self::assertInstanceOf(SetupRefused::class, $e);
+        self::assertStringContainsString('ran out of time before "caddy"', $e->getMessage());
+        self::assertNotContains('apply:caddy', $this->fx->events);
+        self::assertStringContainsString('redir @fleet_closed', $this->gate(), 'the wizard stays reachable');
+        self::assertFalse($host->isSetupComplete());
+        self::assertTrue($this->fx->tokens->verify($token));
+    }
+
+    public function testAStaleEntityDoesNotFinishASecondTime(): void
+    {
+        $this->fx->readyHost(TlsMode::OvhDns);
+        $this->fx->tokens->mint();
+        $stale = $this->fx->settings->get();
+        self::assertNotNull($stale);
+        self::assertFalse($stale->isSetupComplete());
+
+        // Another request finished while this one held an old copy of the row (what a second php-fpm worker does).
+        $this->entityManager()->getConnection()->executeStatement(
+            "UPDATE host_settings SET setup_completed_at = '2026-10-19 10:00:00', setup_token_hash = NULL, setup_token_expires_at = NULL",
+        );
+        self::assertFalse($stale->isSetupComplete(), 'the identity map still holds the old state');
+
+        $e = $this->finishFailing();
+
+        self::assertInstanceOf(SetupRefused::class, $e);
+        self::assertStringContainsString('already completed', $e->getMessage());
+        self::assertSame([], $this->fx->events, 'no side effect ran again');
+        self::assertSame([], $this->fx->staged());
+        self::assertTrue($stale->isSetupComplete(), 'the entity was refreshed');
+    }
+
+    public function testAReMintedTokenWhileWaitingRefusesTheFinish(): void
+    {
+        $this->fx->readyHost();
+        $this->fx->tokens->mint();
+        $stale = $this->fx->settings->get();
+        self::assertNotNull($stale);
+        $this->entityManager()->getConnection()->executeStatement(
+            "UPDATE host_settings SET setup_token_hash = '".str_repeat('f', 64)."'",
+        );
+
+        $e = $this->finishFailing();
+
+        self::assertInstanceOf(SetupRefused::class, $e);
+        self::assertStringContainsString('token changed', $e->getMessage());
+        self::assertSame([], $this->fx->events);
+    }
+
+    public function testTheRealFlockLockRefusesAFinishWhileAnotherProcessHoldsIt(): void
+    {
+        $host = $this->fx->readyHost();
+        $this->fx->tokens->mint();
+        $finisher = $this->finisherWithLocks(new LockFactory(new FlockStore($this->fx->paths->locksDir())));
+
+        $holder = new Process([\PHP_BINARY, \dirname(__DIR__, 2).'/Support/hold-finish-lock.php', $this->fx->paths->locksDir()]);
+        $input = new InputStream();
+        $holder->setInput($input);
+        $holder->setTimeout(30);
+        $holder->start();
+        try {
+            $holder->waitUntil(static fn (string $type, string $out): bool => str_contains($out, 'locked'));
+            self::assertStringContainsString('locked', $holder->getOutput());
+
+            try {
+                $finisher->finish('alice');
+                self::fail('Expected a refusal.');
+            } catch (SetupRefused $e) {
+                self::assertStringContainsString('already running', $e->getMessage());
+            }
+            self::assertSame([], $this->fx->events);
+            self::assertFalse($host->isSetupComplete());
+        } finally {
+            $input->close();
+            $holder->wait();
+        }
+        self::assertSame(0, $holder->getExitCode(), $holder->getErrorOutput());
+
+        $finisher->finish('alice');
+        self::assertTrue($host->isSetupComplete(), 'the lock is free once the other process ended');
     }
 }

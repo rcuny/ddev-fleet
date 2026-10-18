@@ -18,6 +18,20 @@ final readonly class HostSettingsRepository
     }
 
     /**
+     * The row as stored right now. get() hands back the entity this process already holds (the identity map);
+     * another process may have changed the row since. This re-reads it, overwriting unflushed changes.
+     */
+    public function fresh(): ?HostSettings
+    {
+        $settings = $this->get();
+        if (null !== $settings) {
+            $this->em->refresh($settings);
+        }
+
+        return $settings;
+    }
+
+    /**
      * Returns the singleton row, creating it for $domain when absent. An existing row is returned untouched
      * (changing its domain is an explicit HostSettings::changeDomain()).
      */

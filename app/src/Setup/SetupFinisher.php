@@ -69,21 +69,31 @@ final readonly class SetupFinisher
             throw new \InvalidArgumentException('The requester must be 1 to 64 bytes.');
         }
 
+        // What this caller saw before waiting for the lock; compared with the row once the lock is held.
+        $seenTokenHash = $this->settings->get()?->setupTokenHash();
+
         $lock = $this->locks->createLock('setup-finish', self::REQUIRED_REQUEST_TIMEOUT, false);
         if (!$lock->acquire(false)) {
             throw new SetupRefused('Finish is already running; wait for it to end.');
         }
 
         try {
-            return $this->run($by);
+            return $this->run($by, $seenTokenHash);
         } finally {
             $lock->release();
         }
     }
 
-    private function run(string $by): FinishResult
+    private function run(string $by, ?string $seenTokenHash): FinishResult
     {
-        $host = $this->settings->get() ?? throw new SetupRefused('The host is not initialised yet; run fleet:host:init first.');
+        // Re-read under the lock: the entity may have been loaded before another Finish completed (identity map).
+        $host = $this->settings->fresh() ?? throw new SetupRefused('The host is not initialised yet; run fleet:host:init first.');
+        if ($host->isSetupComplete()) {
+            throw new SetupRefused('Setup is already completed.');
+        }
+        if ($host->setupTokenHash() !== $seenTokenHash) {
+            throw new SetupRefused('The setup token changed while Finish was waiting; start again from the new link.');
+        }
         $this->assertCanFinish($host);
 
         $started = $this->seconds();
@@ -108,8 +118,7 @@ final readonly class SetupFinisher
 
             if (TlsMode::OvhDns === $host->tlsMode()) {
                 $step = 'caddy';
-                $this->within($started, PrivilegedApply::TIMEOUT, $step);
-                $this->applyCaddy($host);
+                $this->applyCaddy($host, $started);
                 $steps[] = $step;
             }
 
@@ -131,9 +140,10 @@ final readonly class SetupFinisher
         return new FinishResult($completedAt, $host->domain(), $host->tlsMode(), $steps);
     }
 
-    private function applyCaddy(HostSettings $host): void
+    private function applyCaddy(HostSettings $host, float $started): void
     {
         try {
+            $this->within($started, PrivilegedApply::TIMEOUT, 'caddy');
             $this->system->stageAndApply(ApplyTarget::Caddy, $host);
         } catch (\Throwable $e) {
             // The gate already requires a sign-in; put the wizard's gate back so the retry can be reached.

@@ -10,12 +10,14 @@ use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\SetupFixture;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
+use Symfony\Component\ErrorHandler\BufferingLogger;
 
 final class SetupResetCommandTest extends KernelTestCase
 {
     use FleetDatabase;
 
     private SetupFixture $fx;
+    private BufferingLogger $logger;
 
     protected function setUp(): void
     {
@@ -23,10 +25,12 @@ final class SetupResetCommandTest extends KernelTestCase
         $paths = self::getContainer()->get(FleetPaths::class);
         self::assertInstanceOf(FleetPaths::class, $paths);
         $this->fx = new SetupFixture($em, $paths);
+        $this->logger = new BufferingLogger();
     }
 
     protected function tearDown(): void
     {
+        $this->logger->cleanLogs();
         $this->tearDownFleetDatabase();
         parent::tearDown();
     }
@@ -37,7 +41,7 @@ final class SetupResetCommandTest extends KernelTestCase
      */
     private function reset(array $options = [], bool $interactive = false, array $inputs = []): CommandTester
     {
-        $tester = new CommandTester(new SetupResetCommand($this->fx->settings, $this->fx->tokens, $this->fx->system, false));
+        $tester = new CommandTester(new SetupResetCommand($this->fx->settings, $this->fx->tokens, $this->fx->system, $this->logger, $this->fx->clock, false));
         $tester->setInputs($inputs);
         $tester->execute($options, ['capture_stderr_separately' => true, 'interactive' => $interactive]);
 
@@ -124,5 +128,44 @@ final class SetupResetCommandTest extends KernelTestCase
         $this->reset(['--yes' => true]);
 
         self::assertFalse($cookie->isValid($issued, $this->fx->settings->get() ?? $host), 'a session from before completion stays dead');
+    }
+
+    public function testTheConfirmationPromptGoesToStderrNotStdout(): void
+    {
+        $this->completedHost();
+
+        $tester = $this->reset([], true, ['yes']);
+
+        self::assertStringContainsString('Reopen the setup wizard?', $tester->getErrorOutput());
+        self::assertStringNotContainsString('Reopen', $tester->getDisplay());
+        self::assertSame(1, preg_match('#^https://fleet\.example\.com/setup\?token=\S+$#D', rtrim($tester->getDisplay(), "\n")), 'stdout is the URL and nothing else');
+    }
+
+    public function testReopeningIsAuditedWithoutTheToken(): void
+    {
+        $this->completedHost();
+
+        $tester = $this->reset(['--yes' => true]);
+
+        $logs = $this->logger->cleanLogs();
+        self::assertCount(1, $logs);
+        [$level, $message, $context] = $logs[0];
+        self::assertSame('warning', $level);
+        self::assertSame('Setup reopened from the host shell.', $message);
+        self::assertSame('2026-10-19T10:00:00+00:00', $context['at']);
+        self::assertNotSame('', $context['user']);
+        $token = (string) substr(strrchr(trim($tester->getDisplay()), '=') ?: '', 1);
+        self::assertNotSame('', $token);
+        self::assertStringNotContainsString($token, (string) json_encode($logs));
+    }
+
+    public function testNothingIsAuditedWhenTheResetFails(): void
+    {
+        $this->completedHost();
+        $this->fx->caddyFails = ['validate'];
+
+        $this->reset(['--yes' => true]);
+
+        self::assertSame([], $this->logger->cleanLogs());
     }
 }

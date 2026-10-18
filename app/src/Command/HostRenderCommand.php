@@ -29,6 +29,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
         Authelia gate.
 
         <info>--apply</info> installs the staged files itself through the helper (sudo) and removes them afterwards.
+        <info>--gate=setup</info> after setup completed needs <info>--force</info>.
         <info>--no-reload</info> only writes the gate file; the installer needs it because Caddy is not installed yet.
         HELP,
 )]
@@ -46,6 +47,7 @@ final class HostRenderCommand extends Command
         $this
             ->addOption('gate', null, InputOption::VALUE_REQUIRED, 'auto, setup or authelia', 'auto')
             ->addOption('no-reload', null, InputOption::VALUE_NONE, 'Write the gate file but do not validate or reload Caddy')
+            ->addOption('force', null, InputOption::VALUE_NONE, 'Allow --gate=setup after setup is complete (reopens the wizard\'s gate; prefer fleet:setup:reset)')
             ->addOption('apply', null, InputOption::VALUE_NONE, 'Install the staged config through the root helper (authelia, then caddy) and remove it');
     }
 
@@ -71,6 +73,15 @@ final class HostRenderCommand extends Command
             $errors->error('The host is not initialised; run fleet:host:init first.');
 
             return Command::FAILURE;
+        }
+
+        if (GateMode::Setup === $force && $host->isSetupComplete()) {
+            if (!$input->getOption('force')) {
+                $errors->error('Setup is complete: the setup gate would make /setup reachable without signing in. Use fleet:setup:reset to reopen setup, or pass --force.');
+
+                return Command::FAILURE;
+            }
+            $errors->warning('Setup is complete, yet the setup gate is being written (--force). The app answers /setup with 404 while setup is complete, but every other page redirects there until the gate is switched back.');
         }
 
         try {

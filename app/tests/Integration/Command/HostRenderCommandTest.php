@@ -119,4 +119,22 @@ final class HostRenderCommandTest extends KernelTestCase
         self::assertSame(1, $noHost->getStatusCode());
         self::assertStringContainsString('fleet:host:init', $noHost->getErrorOutput());
     }
+
+    public function testTheSetupGateOnACompletedInstallNeedsForce(): void
+    {
+        $host = $this->fx->host();
+        $host->markSetupComplete($this->fx->clock->now());
+        $this->fx->settings->save($host);
+        $this->render(['--no-reload' => true]);
+
+        $refused = $this->render(['--gate' => 'setup', '--no-reload' => true]);
+        self::assertSame(1, $refused->getStatusCode());
+        self::assertStringContainsString('fleet:setup:reset', $refused->getErrorOutput());
+        self::assertStringContainsString('forward_auth', $this->gate(), 'the gate was not touched');
+
+        $forced = $this->render(['--gate' => 'setup', '--force' => true, '--no-reload' => true]);
+        self::assertSame(0, $forced->getStatusCode(), $forced->getErrorOutput());
+        self::assertStringContainsString('--force', $forced->getErrorOutput(), 'a warning is printed');
+        self::assertStringNotContainsString('forward_auth', $this->gate());
+    }
 }

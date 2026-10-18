@@ -9,6 +9,8 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Fleet\System\GateMode;
 use App\Fleet\System\SystemRenderer;
 use App\Setup\SetupTokenService;
+use Psr\Clock\ClockInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -37,6 +39,8 @@ final class SetupResetCommand extends Command
         private readonly HostSettingsRepository $settings,
         private readonly SetupTokenService $tokens,
         private readonly SystemRenderer $system,
+        private readonly LoggerInterface $logger,
+        private readonly ClockInterface $clock,
         // Tests turn this off; in production a confirmation is only accepted from a real terminal, never from a pipe.
         private readonly bool $requireRealTerminal = true,
     ) {
@@ -66,7 +70,7 @@ final class SetupResetCommand extends Command
 
                 return Command::FAILURE;
             }
-            if (!$io->confirm('Reopen the setup wizard? Until it finishes again the app is reachable only through /setup.', false)) {
+            if (!$errors->confirm('Reopen the setup wizard? Until it finishes again the app is reachable only through /setup.', false)) {
                 $errors->writeln('Nothing was changed.');
 
                 return Command::FAILURE;
@@ -90,9 +94,26 @@ final class SetupResetCommand extends Command
             return Command::FAILURE;
         }
 
+        // Audit line: who and when, never the token.
+        $this->logger->warning('Setup reopened from the host shell.', [
+            'user' => self::osUser(),
+            'at' => $this->clock->now()->format(\DATE_ATOM),
+            'domain' => $host->domain(),
+        ]);
+
         $output->writeln(SetupTokenCommand::url($host->domain(), $token), OutputInterface::OUTPUT_PLAIN | OutputInterface::VERBOSITY_QUIET);
 
         return Command::SUCCESS;
+    }
+
+    private static function osUser(): string
+    {
+        if (!\function_exists('posix_geteuid') || !\function_exists('posix_getpwuid')) {
+            return 'unknown';
+        }
+        $info = posix_getpwuid(posix_geteuid());
+
+        return false === $info ? 'uid '.posix_geteuid() : $info['name'];
     }
 
     private function restore(HostSettings $host, ?\DateTimeImmutable $completedAt, ?string $hash, ?\DateTimeImmutable $expiry): void
