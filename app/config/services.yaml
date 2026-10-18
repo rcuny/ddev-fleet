@@ -21,3 +21,14 @@ services:
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
+    App\Fleet\FleetPaths:
+        arguments:
+            $home: '%env(resolve:FLEET_HOME)%'
+
+when@test:
+    services:
+        # Tests fetch these straight from the container.
+        App\Fleet\FleetPaths:
+            public: true
+            arguments:
+                $home: '%env(resolve:FLEET_HOME)%'

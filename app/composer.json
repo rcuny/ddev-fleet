@@ -1,12 +1,14 @@
 {
     "type": "project",
-    "license": "proprietary",
+    "license": "MIT",
     "minimum-stability": "stable",
     "prefer-stable": true,
     "require": {
         "php": ">=8.4",
         "ext-ctype": "*",
         "ext-iconv": "*",
+        "ext-pdo_sqlite": "*",
+        "ext-sodium": "*",
         "doctrine/doctrine-bundle": "^3.3",
         "doctrine/doctrine-migrations-bundle": "^4.0",
         "doctrine/orm": "^3.7",
@@ -92,7 +94,8 @@
         "lint": [
             "@php bin/console lint:twig templates",
             "@php bin/console lint:yaml config",
-            "@php bin/console lint:container"
+            "@php bin/console lint:container",
+            "@php bin/console doctrine:schema:validate --skip-sync"
         ],
         "test": "@php vendor/bin/phpunit",
         "gates": [

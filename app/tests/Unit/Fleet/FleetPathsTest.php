@@ -1,0 +1,124 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Fleet;
+
+use App\Fleet\FleetPaths;
+use PHPUnit\Framework\TestCase;
+
+final class FleetPathsTest extends TestCase
+{
+    public function testDerivesAllPathsFromHome(): void
+    {
+        $paths = new FleetPaths('/srv/fleet');
+
+        self::assertSame('/srv/fleet', $paths->home());
+        self::assertSame('/srv/fleet/var', $paths->varDir());
+        self::assertSame('/srv/fleet/var/fleet.sqlite', $paths->fleetDb());
+        self::assertSame('/srv/fleet/var/queue.sqlite', $paths->queueDb());
+        self::assertSame('/srv/fleet/keys', $paths->keysDir());
+        self::assertSame('/srv/fleet/keys/secret.key', $paths->secretKey());
+        self::assertSame('/srv/fleet/ssh', $paths->sshDir());
+        self::assertSame('/srv/fleet/assets/osce', $paths->assetsDir('osce'));
+        self::assertSame('/srv/fleet/instances', $paths->instancesDir());
+        self::assertSame('/srv/fleet/instances/demo--main', $paths->instanceDir('demo--main'));
+        self::assertSame('/srv/fleet/logs', $paths->logsDir());
+        self::assertSame('/srv/fleet/logs/jobs/42.log', $paths->jobLog('42'));
+        self::assertSame('/srv/fleet/logs/demo--main/42.log', $paths->jobLog('42', 'demo--main'));
+        self::assertSame('/srv/fleet/locks', $paths->locksDir());
+    }
+
+    public function testNormalisesTrailingSlash(): void
+    {
+        $paths = new FleetPaths('/srv/fleet/');
+
+        self::assertSame('/srv/fleet', $paths->home());
+        self::assertSame('/srv/fleet/var/fleet.sqlite', $paths->fleetDb());
+    }
+
+    public function testRejectsRelativeOrEmptyHome(): void
+    {
+        foreach (['', 'var/x', '.', '/'] as $home) {
+            try {
+                new FleetPaths($home);
+                self::fail(\sprintf('Home "%s" should have been rejected.', $home));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testRejectsTraversalInIds(): void
+    {
+        $paths = new FleetPaths('/srv/fleet');
+        $bad = [
+            static fn () => $paths->instanceDir('../etc'),
+            static fn () => $paths->instanceDir(''),
+            static fn () => $paths->instanceDir('.hidden'),
+            static fn () => $paths->instanceDir('a/b'),
+            static fn () => $paths->assetsDir('a/b'),
+            static fn () => $paths->assetsDir('..'),
+            static fn () => $paths->jobLog('1', '..'),
+            static fn () => $paths->jobLog('../1'),
+            static fn () => $paths->instanceDir(str_repeat('a', 129)),
+            static fn () => $paths->instanceDir("a\0b"),
+        ];
+
+        foreach ($bad as $i => $call) {
+            try {
+                $call();
+                self::fail(\sprintf('Case %d should have been rejected.', $i));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testEnsureLayoutCreatesDirectoriesWithModes(): void
+    {
+        $home = sys_get_temp_dir().'/fleet-paths-'.bin2hex(random_bytes(4));
+        $previous = umask(0o077);
+
+        try {
+            $paths = new FleetPaths($home);
+            $paths->ensureLayout();
+            $paths->ensureLayout();
+
+            clearstatcache();
+            foreach (['var' => 0o750, 'keys' => 0o700, 'ssh' => 0o700] as $dir => $mode) {
+                self::assertDirectoryExists($home.'/'.$dir);
+                self::assertSame($mode, fileperms($home.'/'.$dir) & 0o777, $dir);
+            }
+            foreach (['locks', 'logs', 'logs/jobs', 'assets', 'instances'] as $dir) {
+                self::assertDirectoryExists($home.'/'.$dir);
+            }
+        } finally {
+            umask($previous);
+            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs', 'assets', 'instances'] as $dir) {
+                @rmdir($home.'/'.$dir);
+            }
+            @rmdir($home);
+        }
+    }
+
+    public function testEnsureLayoutModesAreExactUnderPermissiveUmask(): void
+    {
+        $home = sys_get_temp_dir().'/fleet-paths-'.bin2hex(random_bytes(4));
+        $previous = umask(0o000);
+
+        try {
+            new FleetPaths($home)->ensureLayout();
+
+            clearstatcache();
+            self::assertSame(0o750, fileperms($home.'/var') & 0o777);
+            self::assertSame(0o700, fileperms($home.'/keys') & 0o777);
+        } finally {
+            umask($previous);
+            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs', 'assets', 'instances'] as $dir) {
+                @rmdir($home.'/'.$dir);
+            }
+            @rmdir($home);
+        }
+    }
+}
