@@ -15,6 +15,13 @@ parameters:
     fleet.stand_in_enabled: false
 
 services:
+    # symfony-design-system:start
+    # Renders each design system sample as its own live preview. Only committed, static sample strings
+    # may reach template_from_string (no sandbox); tests/Repo/DesignSystemSampleRendererTest guards it.
+    Twig\Extension\StringLoaderExtension:
+        tags: ['twig.extension']
+    # symfony-design-system:end
+
     # default configuration for services in *this* file
     _defaults:
         autowire: true      # Automatically injects dependencies in your services.

@@ -1,0 +1,60 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="space-y-6">
+    <div class="flex flex-wrap items-center gap-3">
+        <twig:Button>Default</twig:Button>
+        <twig:Button variant="secondary">Secondary</twig:Button>
+        <twig:Button variant="outline">Outline</twig:Button>
+        <twig:Button variant="ghost">Ghost</twig:Button>
+        <twig:Button variant="destructive">Destructive</twig:Button>
+        <twig:Button variant="link">Link</twig:Button>
+    </div>
+    <div class="flex flex-wrap items-center gap-3">
+        <twig:Button size="xs">Extra small</twig:Button>
+        <twig:Button size="sm">Small</twig:Button>
+        <twig:Button>Default size</twig:Button>
+        <twig:Button size="lg">Large</twig:Button>
+        <twig:Button size="icon" aria-label="Add"><twig:ux:icon name="lucide:plus" /></twig:Button>
+    </div>
+    <div class="flex flex-wrap items-center gap-3">
+        <twig:Button>
+            <twig:ux:icon name="lucide:plus" data-icon="inline-start" />
+            With icon
+        </twig:Button>
+        <twig:Button disabled>Disabled</twig:Button>
+        <twig:Button as="a" href="#buttons" variant="outline">Link styled as a button</twig:Button>
+        <twig:Button class="h-11 md:h-8">Touch size on phones</twig:Button>
+    </div>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="buttons" title="Buttons" :sample="sample|trim" :components="['Button']">
+    <twig:block name="description">
+        <p>
+            <code>&lt;twig:Button&gt;</code> has six variants and eight sizes. <code>as="a"</code> renders a link with button styling; a
+            <code>href</code> then navigates, while the default <code>button</code> only submits or triggers scripting.
+            The default variant is filled with <code>brand-darker</code> and white text in light mode, <code>brand</code> and page-coloured text in dark mode (both above 5:1); <code>destructive</code> and <code>link</code> text meet 4.5:1 in both modes with no override.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Any action: submit, save, open a dialog, navigate.</li>
+            <li>One default (filled) button per scope; secondary, outline or ghost for the rest.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Links inside prose: use a plain <code>&lt;a&gt;</code>.</li>
+            <li>Several filled buttons in one view: demote all but one.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><code>variant</code>: <code>default</code> | <code>secondary</code> | <code>outline</code> | <code>ghost</code> | <code>destructive</code> | <code>link</code></li>
+            <li><code>size</code>: <code>default</code> | <code>xs</code> | <code>sm</code> | <code>lg</code> | <code>icon</code> | <code>icon-xs</code> | <code>icon-sm</code> | <code>icon-lg</code></li>
+            <li><code>as</code>: <code>button</code> (default) | <code>a</code></li>
+            <li><strong>Touch size</strong>: the kit's default height is 32 px. Where a control must reach 44 px on phones add <code>h-11 md:h-8</code> (icon buttons: <code>size-11 md:size-8</code>).</li>
+            <li>Icon-only buttons need an <code>aria-label</code>.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

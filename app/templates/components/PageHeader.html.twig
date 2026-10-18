@@ -1,0 +1,22 @@
+{# symfony-design-system:start #}
+{%- props
+    ## string The page title, rendered as the page's one <h1>.
+    title,
+    ## string|null Supporting line under the title.
+    description = null
+-%}
+<header {{ attributes.defaults({'data-slot': 'page-header'}) }}>
+    <div class="flex flex-col gap-4 border-b border-hairline pb-6 sm:flex-row sm:items-start sm:justify-between">
+        <div class="min-w-0 flex-1">
+            <h1>{{ title }}</h1>
+            {%- if description %}
+                <p class="mt-1">{{ description }}</p>
+            {%- endif %}
+        </div>
+        {## Right-hand slot: buttons, icon buttons, search, links. Primary action last. -#}
+        {%- block actions %}{% endblock -%}
+    </div>
+    {## Optional sub navigation tabs (the tabs row carries its own bottom border). -#}
+    {%- block tabs %}{% endblock -%}
+</header>
+{# symfony-design-system:end #}

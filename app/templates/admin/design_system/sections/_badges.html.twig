@@ -1,0 +1,44 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="flex flex-wrap items-center gap-3">
+    <twig:Badge>Default</twig:Badge>
+    <twig:Badge variant="secondary">Secondary</twig:Badge>
+    <twig:Badge variant="outline">Outline</twig:Badge>
+    <twig:Badge variant="destructive">Destructive</twig:Badge>
+    <twig:Badge class="bg-brand-faded text-brand-darker dark:text-brand">Running</twig:Badge>
+    <twig:Badge class="bg-signal-faded text-signal-darker dark:text-signal">Warning</twig:Badge>
+    <twig:Badge class="bg-danger-faded text-danger-darker dark:text-danger">Failed</twig:Badge>
+    <twig:Badge variant="secondary">
+        <twig:ux:icon name="lucide:check" data-icon="inline-start" />
+        Verified
+    </twig:Badge>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="badges" title="Badges" :sample="sample|trim" :components="['Badge']">
+    <twig:block name="description">
+        <p>
+            A small inline tag for status or category. Use the kit variants for neutral meaning and the token-coloured classes for status
+            (<code>brand</code> running, <code>signal</code> warning, <code>danger</code> failed). The word in the badge says the state; colour alone never carries meaning.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Status (Running, Stopped, Failed).</li>
+            <li>Category or plan tags on a list row.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Form labels: use <code>Label</code>.</li>
+            <li>Navigation: use a link or button (<code>as="a"</code> makes a badge navigable).</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><code>variant</code>: <code>default</code> | <code>secondary</code> | <code>destructive</code> | <code>outline</code> | <code>ghost</code> | <code>link</code></li>
+            <li><code>as</code>: <code>span</code> (default) | <code>a</code></li>
+            <li>Status pairs: <code>bg-brand-faded text-brand-darker dark:text-brand</code>, <code>bg-signal-faded text-signal-darker dark:text-signal</code>, <code>bg-danger-faded text-danger-darker dark:text-danger</code>.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

@@ -1,0 +1,72 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="space-y-10">
+    {# Basic: title, supporting line, actions. #}
+    <twig:PageHeader title="Projects" description="Everything your team is working on.">
+        <twig:block name="actions">
+            <div class="flex flex-wrap items-center gap-2">
+                <twig:Button variant="outline">Filter</twig:Button>
+                <twig:Button>New project</twig:Button>
+            </div>
+        </twig:block>
+    </twig:PageHeader>
+
+    {# Single item: the standard item settings menu in the actions slot. #}
+    <twig:PageHeader title="Onboarding redesign">
+        <twig:block name="actions">
+            <twig:DropdownMenu id="ds-header-menu" align="end">
+                <twig:DropdownMenu:Trigger>
+                    <twig:Button variant="ghost" size="icon" aria-label="Settings" {{ ...dropdown_menu_trigger_attrs }}>
+                        <twig:ux:icon name="lucide:ellipsis" class="size-5" />
+                    </twig:Button>
+                </twig:DropdownMenu:Trigger>
+                <twig:DropdownMenu:Content>
+                    <twig:DropdownMenu:Item>Deactivate</twig:DropdownMenu:Item>
+                    <twig:DropdownMenu:Item variant="destructive">Delete</twig:DropdownMenu:Item>
+                </twig:DropdownMenu:Content>
+            </twig:DropdownMenu>
+        </twig:block>
+    </twig:PageHeader>
+
+    {# With tabs: the tabs row adds a second hairline. #}
+    <twig:PageHeader title="Acme Inc." description="Workspace settings and billing.">
+        <twig:block name="actions"><twig:Button>Save</twig:Button></twig:block>
+        <twig:block name="tabs">
+            <nav aria-label="Workspace tabs" class="flex items-center gap-6 border-b border-hairline">
+                <a href="#page-headers" aria-current="page" class="-mb-px border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand">Overview</a>
+                <a href="#page-headers" class="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">Members</a>
+                <a href="#page-headers" class="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">Billing</a>
+            </nav>
+        </twig:block>
+    </twig:PageHeader>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="page-headers" title="Page headers" :sample="sample|trim" :components="['PageHeader', 'Button', 'DropdownMenu']">
+    <twig:block name="description">
+        <p>
+            The titled banner at the top of a page's main area: the page's one <code>&lt;h1&gt;</code>, optional supporting copy, and a flexible right-hand actions slot.
+            An optional <code>tabs</code> block appends sub navigation beneath the title row.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Every primary page inside the shell.</li>
+            <li>Primary action last (far right), secondary actions to its left.</li>
+            <li>The "with tabs" variant when the page has sub-views.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Dialog and sheet content: use their own title component.</li>
+            <li>Dense list toolbars with many filters: use a thinner toolbar.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><strong>Props</strong>: <code>title</code> (required), <code>description</code>. <strong>Blocks</strong>: <code>actions</code>, <code>tabs</code>.</li>
+            <li><strong>Single-item view</strong>: put the settings menu (an ellipsis <code>Button</code> with <code>variant="ghost" size="icon"</code>) in <code>actions</code>.</li>
+            <li><strong>Breadcrumb</strong>: put a small breadcrumb row above the component, not inside it.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

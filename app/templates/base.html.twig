@@ -5,6 +5,9 @@
         <meta name="viewport" content="width=device-width, initial-scale=1">
         <title>{% block title %}Fleet{% endblock %}</title>
         {% block head_extra %}{% endblock %}
+        {# symfony-design-system:start #}
+        {{ include('_partials/head_theme_boot.html.twig') }}
+        {# symfony-design-system:end #}
         {{ importmap('app') }}
     </head>
     <body>

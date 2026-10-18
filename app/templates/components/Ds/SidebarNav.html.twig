@@ -1,0 +1,28 @@
+{# symfony-design-system:start #}
+{%- props
+    ## array<int, array{label: string, items: array<int, array{id: string, label: string}>}> The catalog groups.
+    groups,
+    ## string Accessible name; two navs on one page need different names.
+    label = 'Design system sections',
+    ## boolean Close the surrounding Sheet when a link is followed.
+    closing = false
+-%}
+<nav aria-label="{{ label }}" class="flex flex-col gap-6 text-sm">
+    {%- for group in groups %}
+        <div>
+            <p class="mb-2 px-2 text-xs font-semibold tracking-wider text-ink-muted uppercase">{{ group.label }}</p>
+            <ul class="flex flex-col gap-0.5">
+                {%- for item in group['items'] %}
+                    <li>
+                        <a
+                            href="#{{ item.id }}"
+                            {% if closing %}data-action="click->dialog#close"{% endif %}
+                            class="flex min-h-11 items-center rounded-md px-2 text-ink-body hover:bg-surface hover:text-ink-display hover:no-underline lg:min-h-0 lg:py-1.5"
+                        >{{ item.label }}</a>
+                    </li>
+                {%- endfor %}
+            </ul>
+        </div>
+    {%- endfor %}
+</nav>
+{# symfony-design-system:end #}

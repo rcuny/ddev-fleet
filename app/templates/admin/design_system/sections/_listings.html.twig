@@ -1,0 +1,103 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+{% set items = [
+    {id: 1, title: 'fleet-dev--main', subtitle: 'Updated 2 hours ago', status: 'Running'},
+    {id: 2, title: 'osce--search', subtitle: 'Updated yesterday', status: 'Stopped'},
+    {id: 3, title: 'portfolio--dev', subtitle: 'Deploy failed 3 days ago', status: 'Failed'},
+] %}
+<div class="space-y-10">
+    {# Rows: icon, title and metadata, status badge, item settings menu. #}
+    <ul class="divide-y divide-hairline overflow-hidden rounded-md border border-hairline bg-page">
+        {% for item in items %}
+            <li class="flex items-center gap-3 px-4 py-2 hover:bg-surface">
+                <a href="#listings" class="flex min-h-11 min-w-0 flex-1 items-center gap-3 hover:no-underline">
+                    <twig:ux:icon name="lucide:folder" class="size-4 shrink-0 text-ink-muted" />
+                    <span class="min-w-0 flex-1">
+                        <span class="block truncate text-sm font-medium text-ink-display">{{ item.title }}</span>
+                        <span class="block truncate text-xs text-ink-muted">{{ item.subtitle }}</span>
+                    </span>
+                    <twig:Badge variant="outline">{{ item.status }}</twig:Badge>
+                </a>
+                <twig:DropdownMenu id="ds-listing-{{ item.id }}" align="end">
+                    <twig:DropdownMenu:Trigger>
+                        <twig:Button variant="ghost" size="icon" class="size-11 md:size-8" aria-label="Settings for {{ item.title }}" {{ ...dropdown_menu_trigger_attrs }}>
+                            <twig:ux:icon name="lucide:ellipsis" />
+                        </twig:Button>
+                    </twig:DropdownMenu:Trigger>
+                    <twig:DropdownMenu:Content>
+                        <twig:DropdownMenu:Item>Stop</twig:DropdownMenu:Item>
+                        <twig:DropdownMenu:Item variant="destructive">Destroy</twig:DropdownMenu:Item>
+                    </twig:DropdownMenu:Content>
+                </twig:DropdownMenu>
+            </li>
+        {% endfor %}
+    </ul>
+
+    {# Dense tabular data. #}
+    <twig:Table>
+        <twig:Table:Caption>Recent deploys</twig:Table:Caption>
+        <twig:Table:Header>
+            <twig:Table:Row>
+                <twig:Table:Head>Instance</twig:Table:Head>
+                <twig:Table:Head>Status</twig:Table:Head>
+                <twig:Table:Head class="text-right">Duration</twig:Table:Head>
+            </twig:Table:Row>
+        </twig:Table:Header>
+        <twig:Table:Body>
+            {% for item in items %}
+                <twig:Table:Row>
+                    <twig:Table:Cell class="font-medium">{{ item.title }}</twig:Table:Cell>
+                    <twig:Table:Cell>{{ item.status }}</twig:Table:Cell>
+                    <twig:Table:Cell class="text-right">{{ item.id * 41 }} s</twig:Table:Cell>
+                </twig:Table:Row>
+            {% endfor %}
+        </twig:Table:Body>
+    </twig:Table>
+
+    {# Key/value rows for the fields of one record. #}
+    <dl class="divide-y divide-hairline border-y border-hairline">
+        <div class="grid gap-1 py-3 md:grid-cols-4">
+            <dt class="text-sm font-medium text-ink-display md:col-span-1">Status</dt>
+            <dd class="md:col-span-3"><twig:Badge class="bg-brand-faded text-brand-darker dark:text-brand">Running</twig:Badge></dd>
+        </div>
+        <div class="grid gap-1 py-3 md:grid-cols-4">
+            <dt class="text-sm font-medium text-ink-display md:col-span-1">Branch</dt>
+            <dd class="md:col-span-3">main</dd>
+        </div>
+        <div class="grid gap-1 py-3 md:grid-cols-4">
+            <dt class="text-sm font-medium text-ink-display md:col-span-1">Updated</dt>
+            <dd class="md:col-span-3">18 October 2026, 14:27</dd>
+        </div>
+    </dl>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="listings" title="Listings" :sample="sample|trim" :components="['Table', 'Badge', 'DropdownMenu']">
+    <twig:block name="description">
+        <p>
+            Three ways to show collections. <strong>Rows</strong> are the workhorse of indexes: an icon, a title with metadata, a status badge and a settings menu.
+            A <strong>table</strong> shows dense multi-column data. <strong>Key/value rows</strong> summarise the fields of one record and stack on phones.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Rows for resources (instances, projects, members), search results and activity feeds.</li>
+            <li>A table when users compare values across columns.</li>
+            <li>Key/value rows for read-only record details.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Option lists inside a menu: use <code>DropdownMenu</code>.</li>
+            <li>Editable fields: use the form components.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li>Wrap a row in an <code>&lt;a&gt;</code> to navigate, or a <code>&lt;button&gt;</code> for in-page selection; keep the settings menu outside the link.</li>
+            <li><code>truncate</code> on title and subtitle prevents overflow; the row target is at least 44 px high.</li>
+            <li><strong>Item settings menu</strong>: a ghost icon <code>Button</code> with an ellipsis, as in the Dropdown menu section.</li>
+            <li>Tables scroll horizontally inside their container on narrow screens; the page itself never does.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

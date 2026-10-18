@@ -279,3 +279,25 @@ it. Neither role has a `core/` Python module of its own.
   policy, session logging, memory routing). This repo receives only product
   code; session logs/specs/plans for work done here live under the
   companion's `.claude/user/docs/` and `.claude/user/logs/`, not in this repo.
+
+<!-- symfony-design-system:start -->
+## Design system
+
+The UI has a design system documented at [`/admin/design-system`](/admin/design-system) (route `admin_design_system`, admins only). The page previews every primitive - colours, typography, structure, base styles and elements - and shows the exact Twig to use.
+
+When implementing UI:
+
+1. **Check the design system first.** Before writing markup or styles, read `/admin/design-system` and the components in `templates/components/`. Use the tokens (`bg-page`, `bg-surface`, `text-ink-body`, `text-ink-display`, `text-ink-muted`, `border-hairline`, `bg-brand`, `text-brand-darker dark:text-brand`) and the components (`<twig:Button>`, `<twig:Input>`, `<twig:Label>`, `<twig:Badge>`, `<twig:Card>`, `<twig:Alert>`, `<twig:Dialog>`, `<twig:Sheet>`, `<twig:DropdownMenu>`, `<twig:Table>`, `<twig:ThemeToggle>`, `<twig:PageHeader>`).
+
+2. **Do not invent ad-hoc styles.** No raw hex values, no default palette colours (`bg-gray-50`, `text-blue-600`), no raw font sizes or one-off utilities when a token or component exists, no new variant systems beside the kit's.
+
+3. **Use bare semantic HTML for text elements.** `<h1>` to `<h6>`, `<p>`, `<a>`, `<strong>`, `<blockquote>`, `<ul>`, `<ol>`, `<hr>`, `<label>` and `<legend>` get their size, colour, weight and spacing from the base styles. Do not put `text-xl`, `font-semibold`, `text-ink-display` or `tracking-tight` on them: write `<h1>Projects</h1>`, not `<h1 class="text-2xl font-semibold">Projects</h1>`. A page's title is one `<h1>` (use `<twig:PageHeader>`). Layout utilities (`mt-4`, `max-w-md`, `flex`) are fine. A label wrapping a checkbox or radio takes `font-normal text-ink-body`.
+
+4. **Meet the contrast pairings.** Text on a `*-faded` background is `text-*-darker dark:text-*` (for example `bg-brand-faded text-brand-darker dark:text-brand`). Details are in the Colors section of the page.
+
+5. **Every page works at 390 px.** No horizontal scroll, tap targets at least 44 px (`h-11 md:h-8`).
+
+6. **If a needed element is missing, propose it as a design-system addition** before building a one-off, for example: "There is no component for X. Add it to the design system (a component plus a section on `/admin/design-system`) or do a one-off?" Default to the addition.
+
+7. **Re-run the `symfony-design-system` skill** to add sections, refresh tokens or re-scan for UI that bypasses the system; it merges without touching anything outside its markers.
+<!-- symfony-design-system:end -->

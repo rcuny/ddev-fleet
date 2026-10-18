@@ -1,0 +1,80 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<form class="max-w-md space-y-4" action="#forms" method="get">
+    <div class="space-y-2">
+        <twig:Label for="ds-form-email">Email</twig:Label>
+        <twig:Input id="ds-form-email" name="email" type="email" placeholder="you@example.com" aria-describedby="ds-form-email-help" />
+        <p id="ds-form-email-help" class="text-xs text-ink-muted">Only used for account notifications.</p>
+    </div>
+
+    <div class="space-y-2">
+        <twig:Label for="ds-form-country">Country</twig:Label>
+        <twig:NativeSelect id="ds-form-country" name="country">
+            <twig:NativeSelect:Option value="">Choose one…</twig:NativeSelect:Option>
+            <twig:NativeSelect:Option value="fr">France</twig:NativeSelect:Option>
+            <twig:NativeSelect:Option value="be">Belgium</twig:NativeSelect:Option>
+        </twig:NativeSelect>
+    </div>
+
+    <fieldset class="space-y-2">
+        <legend>Plan</legend>
+        <twig:RadioGroup>
+            <div class="flex items-center gap-3">
+                <twig:RadioGroup:Item id="ds-form-plan-free" name="plan" value="free" checked />
+                <twig:Label for="ds-form-plan-free">Free</twig:Label>
+            </div>
+            <div class="flex items-center gap-3">
+                <twig:RadioGroup:Item id="ds-form-plan-team" name="plan" value="team" />
+                <twig:Label for="ds-form-plan-team">Team</twig:Label>
+            </div>
+        </twig:RadioGroup>
+    </fieldset>
+
+    <div class="flex items-start gap-3">
+        <twig:Checkbox id="ds-form-updates" name="updates" checked class="mt-0.5" />
+        <div class="space-y-1">
+            <twig:Label for="ds-form-updates">Send me product updates</twig:Label>
+            <p class="text-xs text-ink-muted">Roughly one email per month.</p>
+        </div>
+    </div>
+
+    <div class="space-y-2">
+        <twig:Label for="ds-form-name">Name</twig:Label>
+        <twig:Input id="ds-form-name" name="name" aria-invalid="true" aria-describedby="ds-form-name-error" value="" />
+        <p id="ds-form-name-error" class="text-xs text-danger-darker dark:text-danger">Enter a name.</p>
+    </div>
+
+    <twig:Button type="submit">Save</twig:Button>
+</form>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="forms" title="Forms" :sample="sample|trim" :components="['Input', 'Label', 'Checkbox', 'NativeSelect', 'RadioGroup', 'Button']">
+    <twig:block name="description">
+        <p>
+            Forms compose <code>Input</code>, <code>NativeSelect</code>, <code>Checkbox</code>, <code>RadioGroup</code> and <code>Label</code> with helper text and a
+            <code>Button</code>. Space fields with <code>space-y-4</code> and a field's own parts with <code>space-y-2</code>. Native controls keep
+            browser validation, autofill and keyboard behaviour.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>All data entry.</li>
+            <li>A <code>Label</code> (or <code>&lt;label for&gt;</code>) bound to every control by <code>id</code>.</li>
+            <li><code>fieldset</code> + <code>legend</code> around radio groups.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Inline filters in a toolbar: use compact controls.</li>
+            <li>A single call to action that does not POST: no form wrapper.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><strong>Helper text</strong>: <code>text-xs text-ink-muted</code> directly under the control, linked with <code>aria-describedby</code>.</li>
+            <li><strong>Errors</strong>: <code>aria-invalid="true"</code> on the control and a <code>text-xs text-danger-darker dark:text-danger</code> message in the helper slot.</li>
+            <li><strong>Placeholders</strong> never replace labels.</li>
+            <li><strong>Symfony forms</strong>: render widgets with these components in a form theme so server-side errors reuse the same markup.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

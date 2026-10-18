@@ -1,0 +1,13 @@
+{# symfony-design-system:start #}
+{# This inline script needs a CSP that allows it (a nonce or hash) if the app ever sets a strict script policy. Theme boot: runs before the stylesheet so the first paint already has the right mode. Mirrors assets/controllers/theme_controller.js (storage key fleet-theme, values light|dark|system, default system). #}
+<script>
+    (function () {
+        try {
+            var stored = localStorage.getItem('fleet-theme');
+            var theme = stored === 'light' || stored === 'dark' || stored === 'system' ? stored : 'system';
+            var dark = theme === 'system' ? window.matchMedia('(prefers-color-scheme: dark)').matches : theme === 'dark';
+            document.documentElement.classList.toggle('dark', dark);
+        } catch (e) {}
+    })();
+</script>
+{# symfony-design-system:end #}
