@@ -31,7 +31,7 @@ final class HealthCheckerTest extends TestCase
     {
         $home = $this->useFreshFleetHome();
 
-        $report = new HealthChecker(new FleetPaths($home), self::memoryConnection(), self::memoryConnection())->check();
+        $report = new HealthChecker(new FleetPaths($home, $home.'/caddy'), self::memoryConnection(), self::memoryConnection())->check();
 
         self::assertTrue($report->isOk());
         self::assertSame(
@@ -44,7 +44,7 @@ final class HealthCheckerTest extends TestCase
     public function testReportsFailWhenHomeNotWritable(): void
     {
         // mkdir under /proc fails for every user, root included.
-        $report = new HealthChecker(new FleetPaths('/proc/nonexistent'), self::memoryConnection(), self::memoryConnection())->check();
+        $report = new HealthChecker(new FleetPaths('/proc/nonexistent', '/proc/nonexistent/caddy'), self::memoryConnection(), self::memoryConnection())->check();
 
         self::assertFalse($report->isOk());
         self::assertSame(
@@ -67,7 +67,7 @@ final class HealthCheckerTest extends TestCase
         };
         $broken = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'path' => '/proc/nonexistent/x.sqlite']);
 
-        $report = new HealthChecker(new FleetPaths($home), self::memoryConnection(), $broken, $logger)->check();
+        $report = new HealthChecker(new FleetPaths($home, $home.'/caddy'), self::memoryConnection(), $broken, $logger)->check();
 
         self::assertFalse($report->isOk());
         self::assertCount(1, $logger->records);
@@ -81,7 +81,7 @@ final class HealthCheckerTest extends TestCase
         $home = $this->useFreshFleetHome();
         $broken = DriverManager::getConnection(['driver' => 'pdo_sqlite', 'path' => '/proc/nonexistent/x.sqlite']);
 
-        $report = new HealthChecker(new FleetPaths($home), self::memoryConnection(), $broken)->check();
+        $report = new HealthChecker(new FleetPaths($home, $home.'/caddy'), self::memoryConnection(), $broken)->check();
 
         self::assertSame('ok', $report->toArray()['checks']['fleet_db']);
         self::assertSame('fail', $report->toArray()['checks']['queue_db']);

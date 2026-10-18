@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Security;
 use App\Security\FleetUser;
 use App\Security\StandIn\StandInAuthenticator;
 use App\Security\StandIn\StandInSettings;
+use App\Security\TrustedProxyChecker;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\Security\Core\Exception\AuthenticationException;
@@ -101,6 +102,19 @@ final class StandInAuthenticatorTest extends TestCase
     public function testNeverSupportsARequestCarryingRemoteUser(): void
     {
         self::assertFalse($this->authenticator()->supports($this->request(['HTTP_REMOTE_USER' => 'alice'])));
+    }
+
+    public function testIgnoresRequestsThatCameThroughTheProxy(): void
+    {
+        $authenticator = $this->authenticator('admin');
+
+        // Behind Caddy every request carries the FastCGI param, whatever its value: it must never get a stand-in identity.
+        foreach (['a-secret', ''] as $value) {
+            $server = [TrustedProxyChecker::PROXY_PARAM => $value];
+            self::assertFalse($authenticator->supports($this->request($server)));
+            self::assertFalse($authenticator->supports($this->request($server, [StandInSettings::COOKIE => 'admin'])));
+            self::assertFalse($authenticator->supports($this->request($server + ['HTTP_X_FLEET_STAND_IN_ROLE' => 'admin'])));
+        }
     }
 
     public function testAuthenticateWithoutAnIdentityFails(): void

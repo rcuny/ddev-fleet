@@ -13,7 +13,7 @@ class Kernel extends BaseKernel
 
     public function boot(): void
     {
-        ProductionGuard::assertSafe($this->environment, ProductionGuard::currentVars());
+        ProductionGuard::assertSafe($this->environment, ProductionGuard::currentVars() + ['PROJECT_DIR' => $this->getProjectDir()]);
 
         parent::boot();
     }

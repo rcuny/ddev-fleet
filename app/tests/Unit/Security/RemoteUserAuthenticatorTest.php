@@ -16,19 +16,22 @@ use Symfony\Component\Security\Http\Authenticator\Passport\Passport;
 
 final class RemoteUserAuthenticatorTest extends TestCase
 {
+    private const string SECRET = 'a-proxy-secret-of-at-least-32-characters-long';
+
     private RemoteUserAuthenticator $authenticator;
 
     protected function setUp(): void
     {
-        $this->authenticator = new RemoteUserAuthenticator(new TrustedProxyChecker('127.0.0.1,::1'), 'fleet-admins');
+        $this->authenticator = new RemoteUserAuthenticator(new TrustedProxyChecker('127.0.0.1,::1', self::SECRET), 'fleet-admins');
     }
 
     /**
      * @param array<string, string> $headers
+     * @param array<string, string> $params  extra server parameters (FastCGI params such as FLEET_PROXY_AUTH)
      */
-    private function request(array $headers, string $peer = '127.0.0.1'): Request
+    private function request(array $headers, string $peer = '127.0.0.1', array $params = []): Request
     {
-        $server = ['REMOTE_ADDR' => $peer];
+        $server = ['REMOTE_ADDR' => $peer] + $params;
         foreach ($headers as $name => $value) {
             $server['HTTP_'.strtoupper(str_replace('-', '_', $name))] = $value;
         }
@@ -149,6 +152,50 @@ final class RemoteUserAuthenticatorTest extends TestCase
         $this->expectException(AuthenticationException::class);
 
         $this->authenticator->authenticate($this->request(['Remote-User' => 'alice', 'X-Forwarded-For' => '127.0.0.1'], '203.0.113.9'));
+    }
+
+    public function testAcceptsIdentityFromUnixSocketPeerCarryingTheProxySecret(): void
+    {
+        // Behind Caddy's php_fastcgi REMOTE_ADDR is the real client; the secret FastCGI param is the proof of the proxy.
+        $request = $this->request(
+            ['Remote-User' => 'alice', 'Remote-Groups' => 'fleet-admins'],
+            '203.0.113.9',
+            [TrustedProxyChecker::PROXY_PARAM => self::SECRET],
+        );
+
+        $user = self::userOf($this->authenticator->authenticate($request));
+
+        self::assertSame('alice', $user->getUserIdentifier());
+        self::assertContains('ROLE_ADMIN', $user->getRoles());
+    }
+
+    public function testRejectsSameRequestWithoutTheParam(): void
+    {
+        $this->expectException(AuthenticationException::class);
+
+        $this->authenticator->authenticate($this->request(['Remote-User' => 'alice', 'Remote-Groups' => 'fleet-admins'], '203.0.113.9'));
+    }
+
+    public function testRejectsAWrongParamAndAClientSentHeader(): void
+    {
+        foreach ([
+            $this->request(['Remote-User' => 'alice'], '203.0.113.9', [TrustedProxyChecker::PROXY_PARAM => 'wrong']),
+            $this->request(['Remote-User' => 'alice', 'Fleet-Proxy-Auth' => self::SECRET, 'FLEET_PROXY_AUTH' => self::SECRET], '203.0.113.9'),
+        ] as $request) {
+            try {
+                $this->authenticator->authenticate($request);
+                self::fail('The request should have been rejected.');
+            } catch (AuthenticationException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testAcceptsAnIpv4MappedLoopbackPeer(): void
+    {
+        $user = self::userOf($this->authenticator->authenticate($this->request(['Remote-User' => 'alice'], '::ffff:127.0.0.1')));
+
+        self::assertSame('alice', $user->getUserIdentifier());
     }
 
     public function testFailureAndEntryPointAnswer401PlainText(): void

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Security\StandIn;
 
+use App\Security\TrustedProxyChecker;
 use Symfony\Component\DependencyInjection\Attribute\When;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -16,7 +17,8 @@ use Symfony\Component\Security\Http\Authenticator\Passport\SelfValidatingPasspor
 
 /**
  * Development/test only: authenticates as the configured admin/member identity so the app works without
- * a proxy. Never runs when a Remote-User header is present (that request belongs to RemoteUserAuthenticator).
+ * a proxy. Never runs when a Remote-User header is present (that request belongs to RemoteUserAuthenticator) or when the request
+ * came through the proxy.
  */
 #[When(env: 'dev')]
 #[When(env: 'test')]
@@ -29,6 +31,12 @@ final class StandInAuthenticator extends AbstractAuthenticator
     public function supports(Request $request): bool
     {
         if ($request->headers->has('Remote-User')) {
+            return false;
+        }
+
+        // A request that came through the proxy (the FastCGI param exists only behind Caddy) is never a stand-in
+        // request, even if a dev/test kernel is misdeployed behind it.
+        if ($request->server->has(TrustedProxyChecker::PROXY_PARAM)) {
             return false;
         }
 

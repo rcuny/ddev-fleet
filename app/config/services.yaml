@@ -13,6 +13,8 @@ parameters:
     fleet.admin_group: '%env(FLEET_ADMIN_GROUP)%'
     # Peers (IPs/CIDRs) allowed to assert identity headers.
     fleet.trusted_proxies: '%env(FLEET_TRUSTED_PROXIES)%'
+    # Shared secret Caddy passes as the FastCGI parameter FLEET_PROXY_AUTH (K26). Under 32 characters = disabled.
+    fleet.proxy_secret: '%env(FLEET_PROXY_SECRET)%'
     # The dev/test stand-in authenticator and role switch; never true in prod.
     fleet.stand_in_enabled: false
 
@@ -45,6 +47,7 @@ services:
         public: true
         arguments:
             $home: '%env(resolve:FLEET_HOME)%'
+            $caddyDir: '%env(resolve:FLEET_CADDY_DIR)%'
 
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.

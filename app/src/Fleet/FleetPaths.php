@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Fleet;
 
+use App\Domain\Ssh\SshKeyRole;
+
 /**
  * Single source of truth for where fleet state lives under FLEET_HOME.
  *
@@ -14,22 +16,17 @@ final readonly class FleetPaths
     private const string ID_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/D';
 
     private string $home;
+    private string $caddyDir;
 
-    public function __construct(string $home)
+    /**
+     * @param string $caddyDir the directory Caddy imports the fleet snippets from (FLEET_CADDY_DIR, /etc/caddy/fleet in
+     *                         production). It is deliberately a required argument: a default would let a test or a
+     *                         misconfigured service silently write into the real directory.
+     */
+    public function __construct(string $home, string $caddyDir)
     {
-        if (!str_starts_with($home, '/') || str_contains($home, "\0")) {
-            throw new \InvalidArgumentException('FLEET_HOME must be an absolute path.');
-        }
-        $home = rtrim($home, '/');
-        if ('' === $home) {
-            throw new \InvalidArgumentException('FLEET_HOME must not be the filesystem root.');
-        }
-        foreach (explode('/', $home) as $segment) {
-            if ('.' === $segment || '..' === $segment) {
-                throw new \InvalidArgumentException('FLEET_HOME must be a normalised path.');
-            }
-        }
-        $this->home = $home;
+        $this->home = self::absoluteDir($home, 'FLEET_HOME');
+        $this->caddyDir = self::absoluteDir($caddyDir, 'FLEET_CADDY_DIR');
     }
 
     public function home(): string
@@ -104,6 +101,65 @@ final readonly class FleetPaths
     }
 
     /**
+     * Where the app renders config for the root helper (`apply <target>`) to validate and install. Owner only.
+     */
+    public function stagingDir(): string
+    {
+        return $this->home.'/staging';
+    }
+
+    public function stagingFile(string $target, string $name): string
+    {
+        return $this->stagingDir().'/'.self::id($target, 'staging target').'/'.self::id($name, 'staging file');
+    }
+
+    /**
+     * Authelia's users file lives here; the Authelia service reads it through a group, so it is not owner-only.
+     */
+    public function autheliaDir(): string
+    {
+        return $this->home.'/authelia';
+    }
+
+    public function usersFile(): string
+    {
+        return $this->autheliaDir().'/users.yml';
+    }
+
+    public function caddySnippetDir(): string
+    {
+        return $this->caddyDir;
+    }
+
+    public function gateFile(): string
+    {
+        return $this->caddyDir.'/gate.conf';
+    }
+
+    /**
+     * The main Caddyfile sits next to the snippet directory (/etc/caddy/Caddyfile for /etc/caddy/fleet).
+     */
+    public function caddyMainFile(): string
+    {
+        return rtrim(\dirname($this->caddyDir), '/').'/Caddyfile';
+    }
+
+    public function knownHostsFile(): string
+    {
+        return $this->sshDir().'/known_hosts';
+    }
+
+    public function sshPrivateKey(SshKeyRole $role): string
+    {
+        return $this->sshDir().'/'.$role->value.'_ed25519';
+    }
+
+    public function sshPublicKey(SshKeyRole $role): string
+    {
+        return $this->sshPrivateKey($role).'.pub';
+    }
+
+    /**
      * Creates the directory skeleton. Modes are applied with chmod so they are exact under any umask.
      */
     public function ensureLayout(): void
@@ -123,6 +179,11 @@ final readonly class FleetPaths
             $this->logsDir().'/instances' => [0o750, true],
             $this->home.'/assets' => [0o750, true],
             $this->instancesDir() => [0o750, true],
+            // Owner only: rendered config (may carry credentials) waits here for the root helper.
+            $this->stagingDir() => [0o700, true],
+            // Created by the installer as fleet:authelia 2750 (setgid); a dev checkout gets plain 0750. Never repaired,
+            // so the installer's group and setgid bit survive.
+            $this->autheliaDir() => [0o750, false],
         ];
 
         foreach ($dirs as $dir => [$mode, $repair]) {
@@ -137,6 +198,24 @@ final readonly class FleetPaths
                 throw new \RuntimeException(\sprintf('Cannot set mode %04o on "%s".', $mode, $dir));
             }
         }
+    }
+
+    private static function absoluteDir(string $path, string $what): string
+    {
+        if (!str_starts_with($path, '/') || str_contains($path, "\0")) {
+            throw new \InvalidArgumentException(\sprintf('%s must be an absolute path.', $what));
+        }
+        $path = rtrim($path, '/');
+        if ('' === $path) {
+            throw new \InvalidArgumentException(\sprintf('%s must not be the filesystem root.', $what));
+        }
+        foreach (explode('/', $path) as $segment) {
+            if ('.' === $segment || '..' === $segment) {
+                throw new \InvalidArgumentException(\sprintf('%s must be a normalised path.', $what));
+            }
+        }
+
+        return $path;
     }
 
     private static function id(string $value, string $what): string

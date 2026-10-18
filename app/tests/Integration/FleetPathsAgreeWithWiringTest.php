@@ -38,4 +38,17 @@ final class FleetPathsAgreeWithWiringTest extends KernelTestCase
         self::assertSame($paths->fleetDb(), $fleet->getParams()['path'] ?? null);
         self::assertSame($paths->queueDb(), $queue->getParams()['path'] ?? null);
     }
+
+    public function testTheCaddyDirDefaultsToAFolderUnderFleetHome(): void
+    {
+        $home = $this->useFreshFleetHome();
+        self::bootKernel();
+
+        $paths = self::getContainer()->get(FleetPaths::class);
+        self::assertInstanceOf(FleetPaths::class, $paths);
+
+        self::assertSame($home.'/caddy', $paths->caddySnippetDir());
+        self::assertSame($home.'/caddy/gate.conf', $paths->gateFile());
+        self::assertSame($home.'/Caddyfile', $paths->caddyMainFile());
+    }
 }
