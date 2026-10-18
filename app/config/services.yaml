@@ -108,3 +108,20 @@ when@test:
         fleet.test_alias.caddyfile_renderer:
             alias: App\Fleet\System\CaddyfileRenderer
             public: true
+
+        # The setup domain is only consumed by controllers (M0.02 task 8) and commands; keep it reachable for the wiring test.
+        fleet.test_alias.setup_finisher:
+            alias: App\Setup\SetupFinisher
+            public: true
+        fleet.test_alias.setup_state:
+            alias: App\Setup\SetupState
+            public: true
+        fleet.test_alias.setup_cookie:
+            alias: App\Setup\SetupCookie
+            public: true
+        fleet.test_alias.setup_token_service:
+            alias: App\Setup\SetupTokenService
+            public: true
+        fleet.test_alias.setup_attempt_limiter:
+            alias: App\Setup\SetupAttemptLimiter
+            public: true

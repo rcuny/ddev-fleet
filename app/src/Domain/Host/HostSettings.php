@@ -136,6 +136,15 @@ class HostSettings
         $this->touch($this->setupCompletedAt);
     }
 
+    /**
+     * Setup is open again (fleet:setup:reset). The caller mints a new token; the old one is gone.
+     */
+    public function reopenSetup(): void
+    {
+        $this->setupCompletedAt = null;
+        $this->clearSetupToken();
+    }
+
     public function isSetupComplete(): bool
     {
         return null !== $this->setupCompletedAt;

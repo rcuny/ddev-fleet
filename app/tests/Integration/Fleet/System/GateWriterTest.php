@@ -207,4 +207,12 @@ final class GateWriterTest extends TestCase
 
         $this->writer($dir)->write(GateMode::Setup);
     }
+
+    public function testWithoutReloadOnlyTheFileIsWritten(): void
+    {
+        $this->writer()->write(GateMode::Setup, false);
+
+        self::assertFileExists($this->gate($this->root.'/srv/caddy'));
+        self::assertSame([], $this->runner->calls(), 'Caddy is not running yet when the installer renders the gate');
+    }
 }

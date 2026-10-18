@@ -209,4 +209,41 @@ final class SystemRendererTest extends KernelTestCase
 
         self::assertSame(GateMode::Setup, $renderer->renderGate($host, GateMode::Setup));
     }
+
+    public function testAssertRenderableWritesNothingAndFailsLikeARender(): void
+    {
+        $renderer = $this->renderer(new RecordingApplier());
+
+        $renderer->assertRenderable(self::host());
+        self::assertSame([], $this->staged());
+        self::assertFileDoesNotExist($this->paths->gateFile());
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('ovh_');
+        $renderer->assertRenderable(self::host(TlsMode::OvhDns));
+    }
+
+    public function testAWriteFailureHalfWayDiscardsWhatWasStaged(): void
+    {
+        $this->storeOvh();
+        $renderer = $this->renderer(new RecordingApplier());
+        // The env file cannot be created: a directory sits where it goes.
+        mkdir($this->paths->stagingFile('caddy', 'env'), 0o700, true);
+
+        try {
+            $renderer->renderStaging(self::host(TlsMode::OvhDns));
+            self::fail('Expected a failure.');
+        } catch (\Throwable) {
+        }
+
+        self::assertSame([], array_filter($this->staged(), static fn (string $f): bool => 'caddy/env' !== $f), 'no config file waits for the helper');
+    }
+
+    public function testRenderGateWithoutReloadDoesNotTouchCaddy(): void
+    {
+        $this->renderer(new RecordingApplier())->renderGate(self::host(), null, false);
+
+        self::assertSame([], $this->runner->calls());
+        self::assertFileExists($this->paths->gateFile());
+    }
 }

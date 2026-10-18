@@ -18,6 +18,9 @@ final readonly class CaddyReloader
 {
     private const float TIMEOUT = 30.0;
 
+    /** Seconds validate and reload can take together at most (each has its own timeout). */
+    public const float MAX_SECONDS = 2 * self::TIMEOUT;
+
     public function __construct(
         private CommandRunner $runner,
         private FleetPaths $paths,

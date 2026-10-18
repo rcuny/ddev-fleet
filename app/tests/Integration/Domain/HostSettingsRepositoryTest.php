@@ -112,4 +112,22 @@ final class HostSettingsRepositoryTest extends KernelTestCase
             date_default_timezone_set($previous);
         }
     }
+
+    public function testReopenSetupClearsCompletionAndTheToken(): void
+    {
+        $settings = $this->repository->getOrCreate('fleet.example.com');
+        $settings->storeSetupToken(str_repeat('a', 64), new \DateTimeImmutable('+1 day'));
+        $settings->markSetupComplete();
+        $this->repository->save($settings);
+
+        $settings->reopenSetup();
+        $this->repository->save($settings);
+        $this->entityManager()->clear();
+
+        $reloaded = $this->repository->get();
+        self::assertNotNull($reloaded);
+        self::assertFalse($reloaded->isSetupComplete());
+        self::assertNull($reloaded->setupTokenHash());
+        self::assertNull($reloaded->setupTokenExpiresAt());
+    }
 }

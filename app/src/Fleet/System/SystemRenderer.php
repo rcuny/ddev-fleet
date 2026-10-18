@@ -51,11 +51,34 @@ final readonly class SystemRenderer
             $files[] = ['authelia', 'configuration.yml', $this->authelia->render($host), self::CONFIG_MODE];
         }
 
-        foreach ($files as [$target, $name, $contents, $mode]) {
-            $path = $this->paths->stagingFile($target, $name);
-            $this->ensureDir(\dirname($path));
-            AtomicFile::write($path, $contents, $mode);
+        try {
+            foreach ($files as [$target, $name, $contents, $mode]) {
+                $path = $this->paths->stagingFile($target, $name);
+                $this->ensureDir(\dirname($path));
+                AtomicFile::write($path, $contents, $mode);
+            }
+        } catch (\Throwable $e) {
+            // A half-staged set (a Caddyfile without its env file) must not wait for a helper run; nor may a
+            // credential file survive a failure.
+            foreach (null === $only ? ApplyTarget::cases() : [$only] as $target) {
+                $this->discardStaging($target);
+            }
+
+            throw $e;
         }
+    }
+
+    /**
+     * Renders everything in memory, writes and reloads nothing: lets a caller find out before its first side effect
+     * whether the install could render at all (a missing OVH secret, a value of an unsafe shape).
+     *
+     * @throws \RuntimeException|\InvalidArgumentException when something cannot be rendered
+     */
+    public function assertRenderable(HostSettings $host): void
+    {
+        $this->caddyfile->render($host);
+        $this->caddyEnv->render($host);
+        $this->authelia->render($host);
     }
 
     /**
@@ -90,12 +113,13 @@ final readonly class SystemRenderer
     /**
      * Writes the Caddy gate for the current state of setup and reloads Caddy (see GateWriter::write()).
      *
-     * @param GateMode|null $force use this mode whatever the setup state (null: Setup until setup is complete)
+     * @param GateMode|null $force  use this mode whatever the setup state (null: Setup until setup is complete)
+     * @param bool          $reload false: only write the file (see GateWriter::write())
      */
-    public function renderGate(HostSettings $host, ?GateMode $force = null): GateMode
+    public function renderGate(HostSettings $host, ?GateMode $force = null, bool $reload = true): GateMode
     {
         $mode = $force ?? ($host->isSetupComplete() ? GateMode::Authelia : GateMode::Setup);
-        $this->gate->write($mode);
+        $this->gate->write($mode, $reload);
 
         return $mode;
     }

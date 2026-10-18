@@ -39,10 +39,13 @@ final readonly class GateWriter
     }
 
     /**
+     * @param bool $reload false only writes the file: the installer renders the gate before the main Caddyfile is
+     *                     installed, when there is no Caddy to validate against or reload
+     *
      * @throws \RuntimeException when the snippet directory is unusable, the file cannot be written, or Caddy refuses
      *                           the result (the previous gate is restored first)
      */
-    public function write(GateMode $mode): void
+    public function write(GateMode $mode, bool $reload = true): void
     {
         $contents = $this->render($mode);
         $this->ensureSnippetDir();
@@ -56,6 +59,9 @@ final readonly class GateWriter
             }
 
             AtomicFile::write($file, $contents, self::MODE);
+            if (!$reload) {
+                return;
+            }
             try {
                 $this->reloader->validateAndReload();
             } catch (\Throwable $e) {
