@@ -1,0 +1,58 @@
+{% extends 'base.html.twig' %}
+
+{#- Pages extend this and fill "setup_content". The wizard has no app shell: nobody is signed in yet. -#}
+{% block title %}Setup · {{ step is defined ? step.label : 'Fleet' }} · Fleet{% endblock %}
+
+{% block body %}
+    {# Turbo Drive stays off here: Finish answers a POST with a page, which Drive would ignore. #}
+    <div data-turbo="false" class="min-h-dvh bg-page">
+        <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-3 focus:left-3 focus:z-50 focus:rounded-md focus:bg-page focus:px-4 focus:py-3 focus:text-ink-display focus:ring-2 focus:ring-ring">Skip to content</a>
+        <div class="mx-auto flex w-full max-w-xl flex-col gap-6 px-4 pt-6 pb-[calc(env(safe-area-inset-bottom)+2rem)] md:pt-10">
+            <header class="flex items-center justify-between gap-3">
+                <div class="flex items-center gap-2">
+                    <span class="flex size-7 items-center justify-center rounded-md bg-brand-faded font-display text-sm font-semibold text-brand-darker dark:text-brand" aria-hidden="true">F</span>
+                    <span class="font-display text-sm font-semibold text-ink-display">Fleet setup</span>
+                </div>
+                <twig:ThemeToggle />
+            </header>
+
+            {% block stepper %}
+            {% if step is defined %}
+                <nav aria-label="Setup progress">
+                    <ol class="flex items-stretch gap-1" data-testid="setup-stepper">
+                        {% for s in steps %}
+                            {% set current = s == step %}
+                            <li class="min-w-0 flex-1">
+                                <a href="{{ path(s.route) }}"{% if current %} aria-current="step"{% endif %} class="flex min-h-11 w-full min-w-0 flex-col items-center justify-center gap-0.5 rounded-md px-1 text-xs hover:no-underline {{ current ? 'bg-brand-faded text-brand-darker dark:text-brand' : (s.position < step.position ? 'text-ink-body hover:bg-surface' : 'text-ink-muted hover:bg-surface') }}">
+                                    <span class="font-medium">{{ s.position }}</span>
+                                    <span class="max-w-full truncate">{{ s.shortLabel }}</span>
+                                </a>
+                            </li>
+                        {% endfor %}
+                    </ol>
+                </nav>
+            {% endif %}
+            {% endblock %}
+
+            <main id="main" class="grid gap-4">
+                {% for type, messages in app.flashes %}
+                    {% for message in messages %}
+                        {% if type == 'warning' %}
+                            <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">
+                                <twig:ux:icon name="lucide:triangle-alert" />
+                                <twig:Alert:Description class="text-ink-body">{{ message }}</twig:Alert:Description>
+                            </twig:Alert>
+                        {% else %}
+                            <twig:Alert class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">
+                                <twig:ux:icon name="lucide:check" />
+                                <twig:Alert:Description class="text-ink-body">{{ message }}</twig:Alert:Description>
+                            </twig:Alert>
+                        {% endif %}
+                    {% endfor %}
+                {% endfor %}
+
+                {% block setup_content %}{% endblock %}
+            </main>
+        </div>
+    </div>
+{% endblock %}

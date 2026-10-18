@@ -1,0 +1,27 @@
+{% extends 'setup/base.html.twig' %}
+
+{# Setup is over: the steps are gone, so no stepper. #}
+{% block stepper %}{% endblock %}
+
+{% block setup_content %}
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>Setup finished</h1>
+            <p data-testid="setup-done">Fleet is ready on <strong>{{ result.domain }}</strong>.</p>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-4">
+            <ul class="grid gap-2" data-testid="setup-steps-done">
+                {% for done in result.steps %}
+                    <li class="flex items-center gap-2">
+                        <twig:ux:icon name="lucide:check" class="size-4 text-brand-darker dark:text-brand" />
+                        <span>{{ {users: 'Administrator written to the sign-in service', authelia: 'Sign-in service restarted', gate: 'Sign-in gate switched on', caddy: 'Certificate settings applied', complete: 'Setup marked complete'}[done]|default(done) }}</span>
+                    </li>
+                {% endfor %}
+            </ul>
+            <p>Sign-in is now handled by Authelia. Use the administrator you just created.</p>
+        </twig:Card:Content>
+        <twig:Card:Footer>
+            <twig:Button as="a" href="{{ path('home') }}" class="h-11 w-full md:h-8 md:w-auto" data-testid="setup-sign-in">Sign in</twig:Button>
+        </twig:Card:Footer>
+    </twig:Card>
+{% endblock %}

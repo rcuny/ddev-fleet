@@ -20,7 +20,14 @@ final class OutputTail
 
     public static function of(CommandResult $result): string
     {
-        $text = '' !== trim($result->stderr) ? $result->stderr : $result->stdout;
+        return self::text('' !== trim($result->stderr) ? $result->stderr : $result->stdout);
+    }
+
+    /**
+     * The same treatment for any text that may end up in front of a person (an exception message from a setup step).
+     */
+    public static function text(string $text): string
+    {
         $text = (string) preg_replace('/\b(OVH_[A-Z_]+|FLEET_PROXY_SECRET|[A-Z_]*(?:SECRET|TOKEN|PASSWORD|KEY))=\S*/', '$1=[redacted]', $text);
         $text = trim($text);
         $text = (string) preg_replace('/[^\x20-\x7E\n\t]/', '?', $text);

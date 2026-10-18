@@ -1,0 +1,19 @@
+{% extends 'setup/base.html.twig' %}
+
+{#- One fixed body for every refusal that is not a CSRF or throttle case: nothing here depends on the request. -#}
+{% block setup_content %}
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>{% if throttled|default(false) %}Too many attempts{% elseif csrf|default(false) %}This form could not be verified{% else %}Setup link needed{% endif %}</h1>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            {% if throttled|default(false) %}
+                <p>Wait a few minutes, then open the setup link again.</p>
+            {% elseif csrf|default(false) %}
+                <p>The form expired or was sent from another site. Go back, reload the page and try again.</p>
+            {% else %}
+                <p>This page needs the one-time setup link, and it may have expired. Run <code>fleet:setup:token</code> on the server for a fresh one.</p>
+            {% endif %}
+        </twig:Card:Content>
+    </twig:Card>
+{% endblock %}

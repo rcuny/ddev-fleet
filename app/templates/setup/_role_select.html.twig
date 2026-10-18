@@ -1,0 +1,8 @@
+{#- Which of the two SSH keys an action applies to. Needs "id". -#}
+<div class="grid gap-2">
+    <twig:Label for="{{ id }}">Key</twig:Label>
+    <twig:NativeSelect id="{{ id }}" name="role" class="w-full h-11 md:h-8">
+        <twig:NativeSelect:Option value="deploy">Deploy key</twig:NativeSelect:Option>
+        <twig:NativeSelect:Option value="push">Push key</twig:NativeSelect:Option>
+    </twig:NativeSelect>
+</div>
