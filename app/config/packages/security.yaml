@@ -16,6 +16,8 @@ security:
             stateless: true
             provider: users_in_memory
             entry_point: App\Security\RemoteUserAuthenticator
+            # A signed-in user without the role sees the 403 inside the app shell.
+            access_denied_handler: App\Security\ForbiddenHandler
             # custom_authenticators is set per environment below (lists would otherwise concatenate).
 
     # Note: Only the *first* matching rule is applied

@@ -1,0 +1,14 @@
+<div class="flex h-14 shrink-0 items-center gap-2 border-b border-hairline px-4">
+    <a href="{{ path('home') }}" class="flex items-center gap-2 hover:no-underline">
+        <span class="flex size-7 items-center justify-center rounded-md bg-brand-faded font-display text-sm font-semibold text-brand-darker dark:text-brand" aria-hidden="true">F</span>
+        <span class="font-display text-sm font-semibold text-ink-display">Fleet</span>
+    </a>
+</div>
+<div class="flex-1 overflow-y-auto p-2">
+    <twig:MainNav />
+</div>
+{% if fleet_stand_in_enabled %}
+    <div class="border-t border-hairline p-3">
+        {{ include('_shell/stand_in_switch.html.twig') }}
+    </div>
+{% endif %}

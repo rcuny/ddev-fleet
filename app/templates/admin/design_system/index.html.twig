@@ -3,10 +3,10 @@
 
 {% block title %}Design system · {{ parent() }}{% endblock %}
 
-{% block body %}
-    <div class="mx-auto flex w-full max-w-7xl gap-10 px-4 py-8 sm:px-6 lg:px-8">
+{% block content %}
+    <div class="mx-auto flex w-full max-w-7xl gap-10">
         <aside class="hidden w-56 shrink-0 lg:block">
-            <div class="sticky top-6 max-h-[calc(100vh-3rem)] overflow-y-auto pb-6">
+            <div class="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto pb-6">
                 <twig:Ds:SidebarNav :groups="groups" />
             </div>
         </aside>
