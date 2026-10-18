@@ -84,7 +84,8 @@
             "@auto-scripts"
         ],
         "assets": [
-            "@php bin/console importmap:install"
+            "@php bin/console importmap:install",
+            "@php bin/console tailwind:build"
         ],
         "cs": "@php vendor/bin/php-cs-fixer check --diff",
         "stan": [

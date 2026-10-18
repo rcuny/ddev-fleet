@@ -26,12 +26,13 @@ final class ProdKernelSecurityTest extends TestCase
 
     private string $cacheDir = '';
     private ?Kernel $kernel = null;
-    private string|false $previousSecret = false;
+    private ?string $previousSecret = null;
 
     protected function setUp(): void
     {
         $this->useFreshFleetHome();
-        $this->previousSecret = getenv('APP_SECRET');
+        // Dotenv fills $_SERVER/$_ENV but not getenv(), so restore from $_SERVER.
+        $this->previousSecret = isset($_SERVER['APP_SECRET']) && \is_string($_SERVER['APP_SECRET']) ? $_SERVER['APP_SECRET'] : null;
         self::setEnv('APP_SECRET', 'prod-kernel-test-secret');
 
         $this->cacheDir = sys_get_temp_dir().'/fleet-prod-cache-'.bin2hex(random_bytes(6));
@@ -68,7 +69,7 @@ final class ProdKernelSecurityTest extends TestCase
     {
         $this->kernel?->shutdown();
         new Filesystem()->remove($this->cacheDir);
-        self::setEnv('APP_SECRET', false === $this->previousSecret ? null : $this->previousSecret);
+        self::setEnv('APP_SECRET', $this->previousSecret);
         $this->restoreFleetHome();
     }
 

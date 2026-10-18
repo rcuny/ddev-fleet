@@ -28,4 +28,6 @@ return [
     '@symfony/stimulus-bundle' => ['path' => './vendor/symfony/stimulus-bundle/assets/dist/loader.js'],
     '@symfony/ux-live-component' => ['path' => './vendor/symfony/ux-live-component/assets/dist/live_controller.js'],
     '@hotwired/turbo' => ['version' => '8.0.23'],
+    'shadcn/dist/tailwind.css' => ['version' => '4.22.1', 'type' => 'css'],
+    'tw-animate-css/dist/tw-animate.css' => ['version' => '1.4.0', 'type' => 'css'],
 ];
