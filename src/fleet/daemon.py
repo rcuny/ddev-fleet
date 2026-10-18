@@ -27,8 +27,15 @@ from fleet.core import bitbucket as bitbucket_mod
 from fleet.core import bulk as bulk_mod
 from fleet.core import caddyauth, caddyports, hostinfo, locks, naming, routermirror, sysinfo
 from fleet.core import instances as instances_mod
+from fleet.core import schedules as schedules_mod
 from fleet.core import webhooks as webhooks_mod
-from fleet.core.errors import CaddyPortsError, DeployError, FleetError, ValidationError
+from fleet.core.errors import (
+    CaddyPortsError,
+    DeployError,
+    FleetError,
+    ScheduleStateError,
+    ValidationError,
+)
 from fleet.core.secretstore import SecretStore
 from fleet.jobs import JobManager
 
@@ -115,6 +122,43 @@ def _push_deploy_job(
         )
 
     return run
+
+
+async def _submit_redeploy_job(jobs: JobManager, paths, registry, instance_id: str):
+    """Submit an in-place redeploy of `instance_id` as a background job with its live
+    log: the ONE path shared by the web UI's Redeploy button and the scheduler (FLE-31),
+    so a scheduled run shows up in the same job list with the same log."""
+    log_path = str(paths.logs / instance_id / "deploy.log")
+
+    def run_redeploy():
+        return instances_mod.redeploy(paths, registry, instance_id)
+
+    return await jobs.submit("redeploy", instance_id, run_redeploy, log_path=log_path)
+
+
+class _ScheduleRunner:
+    """The scheduler's `Runner` backed by the daemon's `JobManager` (FLE-31)."""
+
+    def __init__(self, jobs_getter, load) -> None:
+        self._jobs = jobs_getter
+        self._load = load
+
+    async def start(self, schedule):
+        if schedule.action != "redeploy":
+            return schedules_mod.StartOutcome("failed", f"unsupported action {schedule.action!r}")
+        paths, registry = self._load()
+        # Missing instance -> failed, held lock -> skipped (probed, never queued behind).
+        pre = await asyncio.to_thread(schedules_mod.precheck_instance, paths, schedule.instance)
+        if pre is not None:
+            return pre
+        job = await _submit_redeploy_job(self._jobs(), paths, registry, schedule.instance)
+        return schedules_mod.StartOutcome("started", None, job.id)
+
+    def job_state(self, job_id: str):
+        job = self._jobs().get(job_id)
+        if job is None:
+            return None
+        return schedules_mod.JobState(job.state, job.detail)
 
 
 def _validate_instance_id(instance_id: str) -> None:
@@ -282,10 +326,37 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
                 )
             except Exception:
                 logger.exception("startup router port-mirror sync failed")
-        yield
+        # FLE-31: the in-daemon scheduler for the `schedules:` in fleet.yml. It re-reads the
+        # registry every tick, so it starts even when the registry is broken right now.
+        stopping = False
+
+        def spawn_scheduler() -> None:
+            task = asyncio.create_task(app.state.scheduler.run_forever(), name="fleet-scheduler")
+            app.state.scheduler_task = task
+            task.add_done_callback(on_scheduler_done)
+
+        def on_scheduler_done(task: asyncio.Task) -> None:
+            if stopping or task.cancelled():
+                return
+            logger.error("scheduler task ended unexpectedly (%r); restarting it", task.exception())
+            spawn_scheduler()
+
+        spawn_scheduler()
+        try:
+            yield
+        finally:
+            stopping = True
+            task = app.state.scheduler_task
+            task.cancel()
+            try:
+                await task
+            except asyncio.CancelledError:
+                pass
 
     app = FastAPI(lifespan=lifespan)
     app.state.jobs = JobManager()
+    schedule_runner = _ScheduleRunner(lambda: app.state.jobs, _paths_and_registry)
+    app.state.scheduler = schedules_mod.Scheduler(load=_paths_and_registry, runner=schedule_runner)
     app.state.ws_secret = os.urandom(32)
     app.mount("/static", StaticFiles(directory=_STATIC_DIR), name="static")
 
@@ -1153,6 +1224,126 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         )
         return templates.TemplateResponse(request, "partials/webhook_table.html", context)
 
+    # --- Scheduled jobs screen (FLE-31) ------------------------------------------
+    # The definitions are read-only here (they live in fleet.yml `schedules:`); the screen
+    # offers Run now and Pause/Resume. Pages and partials are GET; the three mutating
+    # routes are POSTs under /ui/, so the same-origin middleware above refuses cross-site
+    # writes, and Caddy's auth covers them like every other /ui/* route. Every value is
+    # rendered through Jinja autoescape; no inline script or handler.
+
+    def _schedules_context(notice: str | None = None, notice_kind: str = "ok") -> dict:
+        paths, registry = _paths_and_registry()
+        store = schedules_mod.ScheduleStore(paths.schedules)
+        now = schedules_mod.utcnow()
+        # An unreadable/corrupt/unwritable state never makes the page a 500: the definitions
+        # (from fleet.yml) are still listed, under a banner naming the path and the fix.
+        state_error: str | None = None
+        try:
+            state = store.load_state()
+        except ScheduleStateError as exc:
+            state, state_error = None, exc.message
+        views = schedules_mod.build_views(registry, store, schedule_runner, now, state)
+        history = list(reversed(store.tail_history(schedules_mod.HISTORY_VIEW_LIMIT)))
+        # Link only what exists right now: names in the history outlive their instances.
+        instance_urls: dict[str, str] = {}
+        log_instances: set[str] = set()
+        names = {v.schedule.instance for v in views} | {h.get("instance") for h in history}
+        for instance_id in names:
+            if not isinstance(instance_id, str) or not _INSTANCE_ID_RE.fullmatch(instance_id):
+                continue
+            if (paths.instances / instance_id).is_dir():
+                instance_urls[instance_id] = f"https://{instance_id}.{registry.domain}"
+            if (paths.logs / instance_id / "deploy.log").is_file():
+                log_instances.add(instance_id)
+        return {
+            "views": views,
+            "history": history,
+            "instance_urls": instance_urls,
+            "log_instances": log_instances,
+            "notice": notice,
+            "notice_kind": notice_kind,
+            "state_error": state_error,
+        }
+
+    @app.get("/schedules")
+    async def schedules_page(request: Request):
+        context = await asyncio.to_thread(_schedules_context)
+        return templates.TemplateResponse(request, "schedules.html", context)
+
+    @app.get("/ui/schedules/table")
+    async def ui_schedules_table(request: Request):
+        context = await asyncio.to_thread(_schedules_context)
+        return templates.TemplateResponse(request, "partials/schedule_table.html", context)
+
+    def _schedule_table(request: Request, notice: str, kind: str, status_code: int = 200):
+        context = _schedules_context(notice, kind)
+        return templates.TemplateResponse(
+            request, "partials/schedule_table.html", context, status_code=status_code
+        )
+
+    def _find_schedule(name: str):
+        """(schedule, paths, registry); the schedule is None for an unknown name."""
+        paths, registry = _paths_and_registry()
+        found = next((s for s in registry.schedules if s.name == name), None)
+        return found, paths, registry
+
+    def _schedule_failure(request: Request, exc: FleetError):
+        """A refused action: 404 unknown schedule, otherwise 400. A state error is shown by
+        the table's banner (the template does not repeat the same message)."""
+        if isinstance(exc, ScheduleStateError):
+            return _schedule_table(request, exc.message, "error", 400)
+        status = 404 if exc.message.startswith("unknown schedule") else 400
+        return _schedule_table(request, exc.message, "error", status)
+
+    @app.post("/ui/schedules/{name}/run")
+    async def ui_schedule_run(request: Request, name: str):
+        try:
+            record = await app.state.scheduler.run_now(name, "manual-ui")
+        except FleetError as exc:
+            return _schedule_failure(request, exc)
+        result, reason = record["result"], record.get("reason")
+        if result == "started":
+            notice = f"Started {name}: redeploying {record['instance']} (job {record['job_id']})."
+            kind = "ok"
+        else:
+            notice = f"Run of {name} {result}: {reason}"
+            kind = "error" if result == "failed" else "warn"
+        return _schedule_table(request, notice, kind)
+
+    @app.post("/ui/schedules/{name}/pause")
+    async def ui_schedule_pause(request: Request, name: str):
+        found, paths, registry = _find_schedule(name)
+        if found is None:
+            return _schedule_table(request, f"unknown schedule {name!r}", "error", 404)
+        if not schedules_mod.applies_here(found, registry.domain):
+            return _schedule_table(
+                request, f"schedule {name!r} is not on this server", "error", 400
+            )
+        try:
+            schedules_mod.ScheduleStore(paths.schedules).set_paused(name, True)
+        except FleetError as exc:
+            return _schedule_failure(request, exc)
+        return _schedule_table(request, f"Paused {name}.", "ok")
+
+    @app.post("/ui/schedules/{name}/resume")
+    async def ui_schedule_resume(request: Request, name: str):
+        found, paths, registry = _find_schedule(name)
+        if found is None:
+            return _schedule_table(request, f"unknown schedule {name!r}", "error", 404)
+        if not schedules_mod.applies_here(found, registry.domain):
+            return _schedule_table(
+                request, f"schedule {name!r} is not on this server", "error", 400
+            )
+        # Occurrences that fell during the pause are never caught up.
+        fired = schedules_mod.latest_occurrence(found.cron, found.timezone, schedules_mod.utcnow())
+        try:
+            schedules_mod.ScheduleStore(paths.schedules).set_paused(
+                name, False, fired=fired, cron=found.cron, timezone=found.timezone
+            )
+        except FleetError as exc:
+            return _schedule_failure(request, exc)
+        return _schedule_table(request, f"Resumed {name}.", "ok")
+
     @app.get("/ui/deploy/templates")
     async def ui_deploy_templates(request: Request, project: str = Query(...)):
         # Backs the Project select's `hx-get` (instances.html): re-renders
@@ -1211,12 +1402,7 @@ def create_app(fleet_home: Path, *, heartbeat_every: float = _HEARTBEAT_EVERY) -
         # the two forms of "long job with a live log" never drift apart.
         _validate_instance_id(instance_id)
         paths, registry = _paths_and_registry()
-        log_path = str(paths.logs / instance_id / "deploy.log")
-
-        def run_redeploy():
-            return instances_mod.redeploy(paths, registry, instance_id)
-
-        job = await app.state.jobs.submit("redeploy", instance_id, run_redeploy, log_path=log_path)
+        job = await _submit_redeploy_job(app.state.jobs, paths, registry, instance_id)
         ws_token = _job_ws_token(app.state.ws_secret, job)
         return templates.TemplateResponse(
             request, "partials/job_panel.html", {"job": job, "ws_token": ws_token}

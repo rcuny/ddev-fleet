@@ -186,6 +186,13 @@ template is a reusable named `post_deploy` (`exec`/`tty1`/`tty2`) recipe, and bo
 deploy` args), never stored in the registry. Assets live alongside it at
 `/srv/fleet/config/assets`.
 
+A top-level `schedules:` mapping (FLE-31) declares periodic jobs the fleet
+daemon runs itself: `name: {cron: "0 3 * * *", timezone: Europe/Paris,
+action: redeploy, instance: <id>, servers: [<fleet domain>], enabled: true}`
+(`servers` and `enabled` optional). They are shown on the web UI's Scheduled jobs
+tab and managed with `fleet schedule`; runtime state is in
+`/srv/fleet/schedules/`. See `docs/README-schedules.md`.
+
 Running instance id = `<project-key>--<label>` (double-dash), where `label`
 defaults to the slugified branch. This is the DDEV project name, the Docker
 Compose project prefix, and the hostname label under the fleet wildcard
@@ -211,6 +218,7 @@ registry load with an actionable message naming the bad key.
 | `fleet webhook secret <project>` | `[--rotate] [--source=jira\|bitbucket]` | Creates/rotates the project's Jira webhook secret (`webhooks/secrets.env`, 0600), printed once with the hook URL; see `docs/README-webhooks.md` |
 | `fleet webhook bitbucket-token <project>` | (token via stdin / hidden prompt) | Stores the Bitbucket `pipeline:write` token for `bitbucket_hooks` rules |
 | `fleet webhook log` | `[--project=<p>] [-n=20] [--source=jira\|bitbucket]` | Last N webhook deliveries from `logs/webhooks/jira.jsonl` (or `bitbucket.jsonl`) |
+| `fleet schedule list\|run <name>\|history [<name>] [-n]\|pause <name>\|resume <name>` | — | Scheduled jobs from `fleet.yml`'s top-level `schedules:` (cron + IANA timezone + `action: redeploy` + `instance`, optional `servers:`/`enabled:`). `run` redeploys now in-process (instance lock respected); pause/resume edit `schedules/state.json`; see `docs/README-schedules.md` |
 | `fleet snapshot <instance-id>` | `[--dest-rel=dumps/default-<instance-id>.sql]` | `ddev export-db --gzip=false` into the project's asset tree; refuses to write `dumps/default.sql` |
 | `fleet refresh-claude-token` | `[--restart]` | Rotates `CLAUDE_CODE_OAUTH_TOKEN` fleet-wide, rewrites every instance's `config.fleet.yaml`; restarts running instances only if `--restart` |
 | `fleet set-claude-token <token>` | `[--restart]` | Same propagation as `refresh-claude-token` for a token you already have, instead of running `claude setup-token` |

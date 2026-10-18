@@ -101,7 +101,19 @@ projects:
         #   tty1: [<string>, ...]          #   typed once into the new window's MIDDLE pane
         #   tty2: [<string>, ...]          #   typed once into the new window's RIGHT pane
         # tty1/tty2 directly under the template are DEPRECATED (still accepted, with a warning)
+
+schedules:                                 # optional — periodic jobs (FLE-31, docs/README-schedules.md)
+  <schedule-name>:
+    cron: "<5-field expression>"           # required
+    timezone: <IANA name>                  # required, e.g. Europe/Paris
+    action: redeploy                       # required; v1: only redeploy
+    instance: <instance-id>                # required for redeploy
+    servers: [<fleet domain>, ...]         # optional — absent = every server
+    enabled: true                          # optional, default true
 ```
+
+`schedules:` is a top-level key, not part of a project. The scheduler, the cron
+syntax, the DST rules and the missed-run policy are in `docs/README-schedules.md`.
 
 ## The `fleet:` block
 

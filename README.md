@@ -139,6 +139,7 @@ Full detail (both credential types, the underlying mechanism): `docs/operations.
 | `docs/client-side-encryption.md` | The Secrets page: browser-side OpenPGP.js encryption, the GnuPG host key, and the threat model |
 | `docs/architecture.md` | Native-not-in-DDEV design, module map, the daemon/CLI split |
 | `docs/README-typesense.md` | The Typesense browser-search exposure worked example |
+| `docs/README-schedules.md` | Scheduled jobs: the `schedules:` registry key, cron and DST rules, the missed-run policy, the web UI tab and `fleet schedule` |
 | `CONTRIBUTING.md` | Dev setup, code style, and how to submit a change |
 | `docs/RELEASING.md` | Versioning, CHANGELOG conventions, and how a release or hotfix is cut |
 | `docs/README-ci.md` | Bitbucket Pipelines: gates, ansible-lint, the systemd security check (offline + live), baseline updates |

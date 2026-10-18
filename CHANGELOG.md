@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-18
+
+### Added
+- **FLE-31: scheduled jobs.** New top-level `schedules:` key in `fleet.yml` (name, 5-field `cron`, IANA `timezone`, `action`, `instance`, optional `servers` fleet-domain filter and `enabled`), validated at load time (`Registry.schedules`, frozen `Schedule` dataclasses). The v1 action is `redeploy <instance>`, the same in-place rebuild as `fleet redeploy`. An in-daemon asyncio scheduler (ticks every 30 s, started with `fleet.service`, restarted if it ever dies) fires the schedules through the daemon's `JobManager`, so a run appears in the job list with its live `deploy.log`. In-house cron (`core/schedules.py`, no new dependency): `*`, numbers, ranges, steps, lists, Vixie day-of-month/day-of-week OR; evaluated in the schedule's local time, a nonexistent DST time is skipped and an ambiguous one fires once. Runtime state lives in `<fleet home>/schedules/` (`state.json` with pause flag, last fired occurrence and last run, written atomically; `history.jsonl`). Missed-run policy: an occurrence is claimed (compare-and-set under the state lock, with a `claimed` history line) before it runs (no double run across a restart or a second process), catch-up within 60 minutes, an edited `cron`/`timezone` is re-baselined (no catch-up), older ones are recorded as `missed`, a new/re-enabled/resumed schedule never fires immediately, one run per schedule at a time, a missing instance is `failed` and a locked one `skipped` (never queued). An unreadable, corrupt or unwritable `state.json` fails closed: nothing fires, the UI shows a banner naming the path and the fix, the actions and the CLI refuse, and the file is never overwritten. New **Scheduled jobs** tab (`GET /schedules`, partial `GET /ui/schedules/table`, `POST /ui/schedules/<name>/run|pause|resume`) after Webhooks, and `fleet schedule list|run|history|pause|resume`. See `docs/README-schedules.md`.
+
 ## [0.19.0] - 2026-10-18
 
 ### Added
@@ -445,7 +450,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/rcuny/ddev-fleet/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/rcuny/ddev-fleet/compare/v0.16.0...v0.17.0
