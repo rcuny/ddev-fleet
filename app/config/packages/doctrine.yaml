@@ -17,9 +17,13 @@ doctrine:
                 connection: default
                 validate_xml_mapping: true
                 naming_strategy: doctrine.orm.naming_strategy.underscore
-                # No entity exists yet; entities live under App\Domain\<Area>\ and are mapped per area
-                # (one `mappings:` entry each) as they arrive.
-                mappings: {}
+                # Entities live under App\Domain\<Area>\ (attribute mapping, one namespace root).
+                mappings:
+                    Domain:
+                        type: attribute
+                        is_bundle: false
+                        dir: '%kernel.project_dir%/src/Domain'
+                        prefix: 'App\Domain'
 
 when@prod:
     doctrine:

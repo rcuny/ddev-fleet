@@ -121,4 +121,29 @@ final class FleetPathsTest extends TestCase
             @rmdir($home);
         }
     }
+
+    public function testEnsureLayoutRepairsLooseModesOnExistingDirectories(): void
+    {
+        $home = sys_get_temp_dir().'/fleet-paths-'.bin2hex(random_bytes(4));
+        $previous = umask(0o000);
+
+        try {
+            foreach (['keys', 'ssh', 'var'] as $dir) {
+                mkdir($home.'/'.$dir, 0o755, true);
+            }
+
+            new FleetPaths($home)->ensureLayout();
+
+            clearstatcache();
+            self::assertSame(0o700, fileperms($home.'/keys') & 0o777);
+            self::assertSame(0o700, fileperms($home.'/ssh') & 0o777);
+            self::assertSame(0o750, fileperms($home.'/var') & 0o777);
+        } finally {
+            umask($previous);
+            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs', 'assets', 'instances'] as $dir) {
+                @rmdir($home.'/'.$dir);
+            }
+            @rmdir($home);
+        }
+    }
 }

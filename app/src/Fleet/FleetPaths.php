@@ -104,24 +104,27 @@ final readonly class FleetPaths
      */
     public function ensureLayout(): void
     {
+        // dir => [mode, repair]: `repair` directories (state and secrets) get their mode corrected
+        // even when they already exist; the others are only chmod'ed when created here.
         $dirs = [
-            $this->home => 0o755,
-            $this->varDir() => 0o750,
-            $this->keysDir() => 0o700,
-            $this->sshDir() => 0o700,
-            $this->locksDir() => 0o755,
-            $this->logsDir() => 0o755,
-            $this->logsDir().'/jobs' => 0o755,
-            $this->home.'/assets' => 0o755,
-            $this->instancesDir() => 0o755,
+            $this->home => [0o755, false],
+            $this->varDir() => [0o750, true],
+            $this->keysDir() => [0o700, true],
+            $this->sshDir() => [0o700, true],
+            $this->locksDir() => [0o755, false],
+            $this->logsDir() => [0o755, false],
+            $this->logsDir().'/jobs' => [0o755, false],
+            $this->home.'/assets' => [0o755, false],
+            $this->instancesDir() => [0o755, false],
         ];
 
-        foreach ($dirs as $dir => $mode) {
-            if (is_dir($dir)) {
-                continue;
-            }
-            if (!@mkdir($dir, $mode, true) && !is_dir($dir)) {
+        foreach ($dirs as $dir => [$mode, $repair]) {
+            $existed = is_dir($dir);
+            if (!$existed && !@mkdir($dir, $mode, true) && !is_dir($dir)) {
                 throw new \RuntimeException(\sprintf('Cannot create directory "%s".', $dir));
+            }
+            if (($existed && !$repair) || (@fileperms($dir) & 0o777) === $mode) {
+                continue;
             }
             if (!@chmod($dir, $mode)) {
                 throw new \RuntimeException(\sprintf('Cannot set mode %04o on "%s".', $mode, $dir));
