@@ -26,3 +26,20 @@ services:
         public: true
         arguments:
             $home: '%env(resolve:FLEET_HOME)%'
+
+    # Command seam: both runners are shared services; FLEET_RUNNER picks the CommandRunner.
+    App\Fleet\Shell\ProcessCommandRunner: ~
+    App\Fleet\Shell\RecordingCommandRunner: ~
+    App\Fleet\Shell\CommandRunner:
+        factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'create']
+        arguments: ['%env(FLEET_RUNNER)%']
+
+when@test:
+    services:
+        # Public so integration tests can fetch the seam and the shared recorder from the container.
+        App\Fleet\Shell\RecordingCommandRunner:
+            public: true
+        App\Fleet\Shell\CommandRunner:
+            public: true
+            factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'create']
+            arguments: ['%env(FLEET_RUNNER)%']
