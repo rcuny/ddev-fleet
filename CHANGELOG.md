@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- FLE-30 follow-up: Webhooks page filter **Hide ignored hooks** (unchecked by default) hides deliveries whose result is `ignored`.
+
 ## [0.18.0] - 2026-10-18
 
 ### Added

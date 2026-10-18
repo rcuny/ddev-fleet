@@ -127,6 +127,27 @@ def test_limit_truncates_after_filtering(store):
     assert store.recent(limit=0) == []
 
 
+def test_hide_ignored_excludes_ignored_before_the_limit(store):
+    for n in range(10):
+        _jira(
+            store,
+            f"2026-10-18T10:00:{n:02d}+00:00",
+            n=n,
+            result="ignored" if n >= 6 else "accepted",
+        )
+    ids = lambda **kw: [e["n"] for e in store.recent(**kw)]  # noqa: E731
+    # Default keeps ignored entries.
+    assert ids(limit=3) == [9, 8, 7]
+    # Hidden: the limit counts only the non-ignored rows (not 3 of the newest 3 minus ignored).
+    assert ids(limit=3, hide_ignored=True) == [5, 4, 3]
+    assert ids(limit=100, hide_ignored=True) == [5, 4, 3, 2, 1, 0]
+    entries, _ = store.recent_with_options(limit=3, hide_ignored=True)
+    assert [e["n"] for e in entries] == [5, 4, 3]
+    # Explicit result=ignored together with hide gives nothing.
+    assert ids(result="ignored", hide_ignored=True) == []
+    assert ids(result="ignored") == [9, 8, 7, 6]
+
+
 def test_window_is_bounded_but_covers_a_generous_multiple_of_limit(store):
     total = webhooks_mod._RECENT_WINDOW_MIN + 50
     store.log_path.parent.mkdir(parents=True)

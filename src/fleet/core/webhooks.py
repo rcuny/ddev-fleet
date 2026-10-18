@@ -587,13 +587,18 @@ class WebhookStore:
 
     @staticmethod
     def _select(
-        entries: list[dict], project: str | None, result: str | None, limit: int
+        entries: list[dict],
+        project: str | None,
+        result: str | None,
+        limit: int,
+        hide_ignored: bool = False,
     ) -> list[dict]:
         picked = [
             e
             for e in entries
             if (project is None or e.get("project") == project)
             and (result is None or e.get("result") == result)
+            and not (hide_ignored and e.get("result") == "ignored")
         ]
         return picked[: max(limit, 0)]
 
@@ -603,10 +608,12 @@ class WebhookStore:
         source: str | None = None,
         project: str | None = None,
         result: str | None = None,
+        hide_ignored: bool = False,
     ) -> list[dict]:
         """The newest `limit` deliveries of BOTH logs (Jira and Bitbucket),
         newest first by `ts`, each tagged with `source`; optionally only one
-        source / project / result. Filters apply to a bounded tail of each log
+        source / project / result; `hide_ignored` drops entries whose result is
+        `ignored` before the limit is applied. Filters apply to a bounded tail of each log
         (`_RECENT_WINDOW_FACTOR` x `limit` lines, at least `_RECENT_WINDOW_MIN`),
         not to the whole history. Missing files, torn lines and entries from
         before a field existed are tolerated; an unknown filter value just
@@ -614,7 +621,7 @@ class WebhookStore:
         if source is not None and source not in _SOURCES:
             return []
         sources = _SOURCES if source is None else (source,)
-        return self._select(self._window(limit, sources), project, result, limit)
+        return self._select(self._window(limit, sources), project, result, limit, hide_ignored)
 
     def recent_with_options(
         self,
@@ -622,6 +629,7 @@ class WebhookStore:
         source: str | None = None,
         project: str | None = None,
         result: str | None = None,
+        hide_ignored: bool = False,
     ) -> tuple[list[dict], dict[str, list[str]]]:
         """`recent()` plus the values the page's filter dropdowns offer, read
         from the same unfiltered window: `sources` (both, always), `projects`
@@ -638,4 +646,4 @@ class WebhookStore:
         if source is not None and source not in _SOURCES:
             return [], options
         entries = [e for e in window if source is None or e["source"] == source]
-        return self._select(entries, project, result, limit), options
+        return self._select(entries, project, result, limit, hide_ignored), options
