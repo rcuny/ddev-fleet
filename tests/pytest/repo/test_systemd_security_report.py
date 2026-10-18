@@ -536,7 +536,7 @@ def test_live_develop_commits_with_the_bot_identity_and_pushes(live):
         "-c",
         "user.name=ddev-fleet security check",
         "-c",
-        "user.email=security-check@noreply.fleet.pm",
+        "user.email=security-check@noreply.example.com",
     ]
     assert commit[4:6] == ["commit", "-m"]
     assert re.fullmatch(r"chore\(security\): systemd security report \d{4}-\d\d-\d\d", commit[6])

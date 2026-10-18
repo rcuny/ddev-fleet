@@ -12,12 +12,22 @@ use PHPUnit\Framework\TestCase;
  */
 final class RepoHygieneTest extends TestCase
 {
-    /** Directories that are generated, vendored or local state, at any depth. */
-    private const SKIP_DIRS = [
-        '.git', 'node_modules', 'vendor', 'var', '.venv', '__pycache__', 'instances',
-        '.pytest_cache', '.ruff_cache', '.ansible', '.mypy_cache', '.phpunit.cache', '.php-cs-fixer.cache',
-        'test-results', 'playwright-report', '.run', '.superpowers',
+    /**
+     * Generated, vendored or local state, as exact paths relative to the repository root. A directory with the
+     * same name anywhere else (app/templates/instances, app/src/Var, ...) is real code and is scanned.
+     */
+    private const SKIP_PATHS = [
+        '.git', '.venv', '.pytest_cache', '.ruff_cache', '.ansible', '.mypy_cache', '.superpowers',
+        'node_modules', 'instances', 'reports',
+        'app/vendor', 'app/var', 'app/.phpunit.cache', 'app/public/assets', 'app/public/bundles', 'app/assets/vendor',
+        'tests/playwright/node_modules', 'tests/playwright/test-results', 'tests/playwright/playwright-report',
+        'tests/playwright/blob-report', 'tests/playwright/.run', 'tests/playwright/.auth',
+        // Lock files carry third-party package metadata; the baseline names the live host the owner probes.
+        'app/composer.lock', 'app/symfony.lock', 'tests/playwright/package-lock.json', 'ci/systemd-security-baseline.json',
     ];
+
+    /** Compiled bytecode directories exist at any depth and hold nothing readable. */
+    private const SKIP_ANYWHERE = ['__pycache__'];
 
     /** Whole repository: strings that identified the maintainer's own deployments (ported from the Python test). */
     private const PERSONAL_DENYLIST = [
@@ -45,34 +55,64 @@ final class RepoHygieneTest extends TestCase
 
     public function testNoPersonalLeakage(): void
     {
-        $hits = $this->scan([self::root()], $this->literals(self::PERSONAL_DENYLIST), self::SKIP_DIRS);
+        $hits = $this->scan(self::root(), [''], $this->literals(self::PERSONAL_DENYLIST), self::SKIP_PATHS);
 
         self::assertSame([], $hits, "personal/deployment-specific data leaked:\n".implode("\n", $hits));
     }
 
     public function testNoCompanionOrOwnerReferencesInNewCode(): void
     {
-        // Root documentation (CLAUDE.md, README.md, CONTRIBUTING.md, docs/*.md, tests/README-tests.md) joins this list
-        // in the commit that rewrites it (M0.01 Task 12); until then it still describes the Python app.
-        $roots = [];
-        foreach ([
-            'app/src', 'app/templates', 'app/config', 'app/assets/controllers', 'app/tests',
-            'tests/playwright',
+        // Not scanned yet: ansible/ (reshaped in M0.02) and the root documentation (CLAUDE.md, README.md,
+        // CONTRIBUTING.md, docs/*.md, tests/README-tests.md), which M0.01 Task 12 rewrites and then adds here.
+        // Missing paths (docs/development.md, docs/README.md until Task 12) are skipped.
+        $roots = [
+            'app', 'ci', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright',
             'docs/development.md', 'docs/README.md',
-        ] as $relative) {
-            if (file_exists(self::root().'/'.$relative)) {
-                $roots[] = self::root().'/'.$relative;
-            }
-        }
-        self::assertContains(self::root().'/app/src', $roots, 'app/src must be scanned');
-
-        $patterns = [...$this->literals(self::OWNER_DENYLIST), ...array_map(
-            static fn (string $word): string => '/\b'.preg_quote($word, '/').'\b/i',
-            self::OWNER_WORDS,
-        )];
-        $hits = $this->scan($roots, $patterns, self::SKIP_DIRS);
+        ];
+        $hits = $this->scan(self::root(), $roots, $this->ownerPatterns(), self::SKIP_PATHS);
 
         self::assertSame([], $hits, "companion or owner references in public code:\n".implode("\n", $hits));
+    }
+
+    public function testNestedDirectoriesNamedLikeSkippedOnesAreStillScanned(): void
+    {
+        $base = sys_get_temp_dir().'/hygiene-'.bin2hex(random_bytes(6));
+        foreach (['app/templates/instances', 'app/src/var', 'app/var', 'app/vendor/x', 'instances'] as $dir) {
+            mkdir($base.'/'.$dir, 0o700, true);
+        }
+        $leak = "host: demo.fleet.pm\n";
+        foreach (['app/templates/instances/x.twig', 'app/src/var/y.php', 'app/var/z.log', 'app/vendor/x/v.php', 'instances/i.txt'] as $file) {
+            file_put_contents($base.'/'.$file, $leak);
+        }
+
+        try {
+            $hits = $this->scan($base, [''], $this->ownerPatterns(), self::SKIP_PATHS);
+        } finally {
+            new \Symfony\Component\Process\Process(['rm', '-rf', $base])->mustRun();
+        }
+
+        $files = array_map(static fn (string $hit): string => explode(':', $hit)[0], $hits);
+        sort($files);
+        self::assertSame(['app/src/var/y.php', 'app/templates/instances/x.twig'], $files);
+    }
+
+    public function testOwnerWordsMatchWholeWordsOnly(): void
+    {
+        $patterns = $this->ownerPatterns();
+        $matches = static function (string $line) use ($patterns): bool {
+            foreach ($patterns as $pattern) {
+                if (1 === preg_match($pattern, $line)) {
+                    return true;
+                }
+            }
+
+            return false;
+        };
+
+        self::assertTrue($matches('the osce project'));
+        self::assertTrue($matches('open the Portfolio page'));
+        self::assertFalse($matches('a portfolios list, or prosecute'));
+        self::assertFalse($matches('ddev10 and ddev5'));
     }
 
     public function testPythonAppIsGone(): void
@@ -89,6 +129,17 @@ final class RepoHygieneTest extends TestCase
     }
 
     /**
+     * @return list<string>
+     */
+    private function ownerPatterns(): array
+    {
+        return [...$this->literals(self::OWNER_DENYLIST), ...array_map(
+            static fn (string $word): string => '/\b'.preg_quote($word, '/').'\b/i',
+            self::OWNER_WORDS,
+        )];
+    }
+
+    /**
      * @param list<string> $needles
      *
      * @return list<string> case-insensitive literal patterns
@@ -101,21 +152,24 @@ final class RepoHygieneTest extends TestCase
     /**
      * Every text file under the given files/directories whose lines match any pattern.
      *
-     * @param list<string> $roots    absolute files or directories; missing ones are skipped
-     * @param list<string> $patterns PCRE patterns
-     * @param list<string> $skipDirs directory names skipped at any depth
+     * @param string       $base      absolute directory the roots and skip paths are relative to
+     * @param list<string> $roots     files or directories relative to $base ('' = all of it); missing ones are skipped
+     * @param list<string> $patterns  PCRE patterns
+     * @param list<string> $skipPaths paths relative to $base that are skipped (exact, not by name)
      *
      * @return list<string> "relative/path:line: matched ..." (empty = clean)
      */
-    private function scan(array $roots, array $patterns, array $skipDirs): array
+    private function scan(string $base, array $roots, array $patterns, array $skipPaths): array
     {
         $self = realpath(__FILE__);
         $hits = [];
         foreach ($roots as $root) {
-            if (!file_exists($root)) {
+            $absolute = '' === $root ? $base : $base.'/'.$root;
+            if (!file_exists($absolute)) {
                 continue;
             }
-            foreach ($this->files($root, $skipDirs) as $file) {
+            foreach ($this->files($base, $absolute, $skipPaths) as $relative) {
+                $file = $base.'/'.$relative;
                 if (realpath($file) === $self) {
                     continue;
                 }
@@ -126,7 +180,7 @@ final class RepoHygieneTest extends TestCase
                 foreach (explode("\n", $text) as $number => $line) {
                     foreach ($patterns as $pattern) {
                         if (1 === preg_match($pattern, $line)) {
-                            $hits[] = \sprintf('%s:%d: matched %s: %s', substr($file, \strlen(self::root()) + 1), $number + 1, $pattern, trim($line));
+                            $hits[] = \sprintf('%s:%d: matched %s: %s', $relative, $number + 1, $pattern, trim($line));
                         }
                     }
                 }
@@ -137,24 +191,30 @@ final class RepoHygieneTest extends TestCase
     }
 
     /**
-     * @param list<string> $skipDirs
+     * @param list<string> $skipPaths
      *
-     * @return \Generator<string>
+     * @return \Generator<string> paths relative to $base
      */
-    private function files(string $root, array $skipDirs): \Generator
+    private function files(string $base, string $start, array $skipPaths): \Generator
     {
-        if (is_file($root)) {
-            yield $root;
+        $relative = static fn (string $path): string => ltrim(substr($path, \strlen($base)), '/');
+        $skipped = static fn (\SplFileInfo $entry): bool => \in_array($relative($entry->getPathname()), $skipPaths, true)
+            || ($entry->isDir() && \in_array($entry->getFilename(), self::SKIP_ANYWHERE, true));
+
+        if (is_file($start)) {
+            if (!$skipped(new \SplFileInfo($start))) {
+                yield $relative($start);
+            }
 
             return;
         }
         $iterator = new \RecursiveIteratorIterator(new \RecursiveCallbackFilterIterator(
-            new \RecursiveDirectoryIterator($root, \FilesystemIterator::SKIP_DOTS),
-            static fn (\SplFileInfo $entry): bool => !($entry->isDir() && \in_array($entry->getFilename(), $skipDirs, true)),
+            new \RecursiveDirectoryIterator($start, \FilesystemIterator::SKIP_DOTS),
+            static fn (\SplFileInfo $entry): bool => !$skipped($entry),
         ));
         foreach ($iterator as $entry) {
             if ($entry->isFile() && !$entry->isLink()) {
-                yield $entry->getPathname();
+                yield $relative($entry->getPathname());
             }
         }
     }

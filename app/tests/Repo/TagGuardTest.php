@@ -155,6 +155,41 @@ final class TagGuardTest extends TestCase
         self::assertStringStartsWith('ERROR:', $err);
     }
 
+    public function testTagMovedAfterTheTriggerIsRefused(): void
+    {
+        $base = $this->commit('base');
+        $moved = $this->commit('moved to');
+        $this->setRemote('main', $base);
+        $this->setRemote('develop', $moved);
+
+        // v1: the pipeline was triggered for $base, but the fetched tag now points at $moved (both are on develop).
+        [$status, $out, $err] = $this->guard('v1.0.0', $base, $moved);
+        self::assertSame(1, $status);
+        self::assertSame('', $out);
+        self::assertStringContainsString('moved after the trigger', $err);
+
+        // v0: same with main.
+        $this->setRemote('main', $base);
+        [$status, $out, $err] = $this->guard('v0.7.0', $base, $moved);
+        self::assertSame(1, $status);
+        self::assertSame('', $out);
+        self::assertStringStartsWith('ERROR:', $err);
+    }
+
+    public function testTagThatWasNotFetchedIsRefused(): void
+    {
+        $base = $this->commit('base');
+        $this->setRemote('main', $base);
+        $this->setRemote('develop', $base);
+
+        $process = new Process(['bash', self::script(), 'v1.0.0', $base], $this->repo);
+        $process->run();
+
+        self::assertSame(1, $process->getExitCode());
+        self::assertSame('', trim($process->getOutput()));
+        self::assertStringContainsString('does not exist', $process->getErrorOutput());
+    }
+
     public function testUnknownCommitAndWrongArgumentCountAreRejected(): void
     {
         $base = $this->commit('base');
@@ -179,8 +214,17 @@ final class TagGuardTest extends TestCase
     /**
      * @return array{int, string, string} exit code, trimmed stdout, trimmed stderr
      */
-    private function guard(string $tag, string $commit): array
+    private function guard(string $tag, string $commit, ?string $tagAt = null): array
     {
+        // The pipeline fetches the tag before calling the guard: by default it points at the triggering commit.
+        // Names git refuses (spaces, ';') cannot exist as tags, the guard rejects those by name first.
+        if ('' !== $tag && 1 === preg_match('/^[0-9A-Za-z.\-]+$/', $tag) && !str_ends_with($tag, '.lock') && !str_contains($tag, '..')) {
+            $target = $tagAt ?? (1 === preg_match('/^[0-9a-f]{40}$/', $commit) ? $commit : null);
+            if (null !== $target) {
+                new Process(['git', 'tag', '-f', $tag, $target], $this->repo)->run();
+            }
+        }
+
         $process = new Process(['bash', self::script(), $tag, $commit], $this->repo);
         $process->run();
 

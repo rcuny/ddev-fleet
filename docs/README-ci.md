@@ -195,7 +195,7 @@ only moves on releases.
 artifact (`reports/SYSTEMD-SECURITY-REPORT.md`) and commits nothing.
 
 - The commit is `chore(security): systemd security report <YYYY-MM-DD>` by
-  `ddev-fleet security check <security-check@noreply.fleet.pm>`, and only when
+  `ddev-fleet security check <security-check@noreply.example.com>` (override the address with the repository variable `SECURITY_CHECK_GIT_EMAIL`), and only when
   the file changed. There is no `[skip ci]`: the `develop` pipeline is what
   mirrors the commit to GitHub. That cannot loop, because the `develop` push
   pipeline does not run the live check (pinned by `app/tests/Repo/PipelineConfigTest.php`).
@@ -237,7 +237,7 @@ alert not configured, skipping` and carries on, so forks stay inert:
 
 | Variable | Value |
 |---|---|
-| `JIRA_ALERT_SITE` | the Jira Cloud site name, `renaudcuny` for `renaudcuny.atlassian.net` |
+| `JIRA_ALERT_SITE` | the Jira Cloud site name, `your-site` for `your-site.atlassian.net` |
 | `JIRA_ALERT_EMAIL` | the e-mail of the Jira account that **posts** the comment |
 | `JIRA_ALERT_TOKEN` | **secured**; that account's API token |
 | `JIRA_ALERT_ISSUE` | the issue to comment on, e.g. `FLE-17` |
@@ -299,11 +299,11 @@ No credential is stored in the repository.
    is also in `site.yml` (after `security_hardening`) and does nothing there
    without keys.
 3. **Known hosts.** Repository settings > Pipelines > SSH keys > Known hosts:
-   add the server (e.g. `ddev3.fleet.pm`) and fetch its fingerprint. The check
+   add the server (e.g. `fleet.example.com`) and fetch its fingerprint. The check
    uses `StrictHostKeyChecking=yes`, so an unknown host fails.
 4. **Repository variable** (Repository settings > Pipelines > Repository
    variables): `SECURITY_PROBE_TARGETS`, space-separated `name=user@host`
-   entries, e.g. `ddev3=fleet-probe@ddev3.fleet.pm`. The name selects the
+   entries, e.g. `ddev3=fleet-probe@fleet.example.com`. The name selects the
    baseline environment. Unset or empty: the pipeline skips and succeeds.
 5. **Schedule** (Pipelines > Schedules): branch `develop`, custom pipeline
    `systemd-security-live`, weekly.
@@ -312,7 +312,7 @@ No credential is stored in the repository.
 
 Try it first with a manual run of the custom pipeline (Run pipeline > Custom:
 `systemd-security-live`). Test by hand, from a machine holding the key:
-`ssh -i key fleet-probe@ddev3.fleet.pm anything | python3 -m json.tool | head`.
+`ssh -i key fleet-probe@fleet.example.com anything | python3 -m json.tool | head`.
 
 Other servers: add the key and run the playbook there too, then add
 `name=fleet-probe@host` to the variable. ddev2 has colleagues: get an explicit

@@ -156,6 +156,54 @@ final class PipelineConfigTest extends TestCase
         self::assertContains('reports/**', $infra[0]['artifacts']);
     }
 
+    public function testEveryScriptItemOfEveryStepIsAString(): void
+    {
+        $steps = [];
+        foreach ($this->pipelines['definitions']['steps'] as $definition) {
+            $steps[] = $definition['step'];
+        }
+        foreach ($this->pipelines['pipelines'] as $triggers) {
+            foreach ($triggers as $items) {
+                foreach ($this->flatSteps($items) as $step) {
+                    $steps[] = $step;
+                }
+            }
+        }
+
+        self::assertGreaterThanOrEqual(10, \count($steps));
+        foreach ($steps as $step) {
+            self::assertArrayHasKey('script', $step, (string) $step['name']);
+            self::assertNotSame('', $this->script($step));
+            foreach (['after-script'] as $key) {
+                foreach ($step[$key] ?? [] as $item) {
+                    self::assertIsString($item);
+                }
+            }
+        }
+    }
+
+    public function testTagPublishFailsClosed(): void
+    {
+        $script = $this->script($this->lastStep($this->pipelines['pipelines']['tags']['v*']));
+
+        // Bitbucket does not guarantee errexit inside a multi-line block: it is switched on explicitly.
+        self::assertMatchesRegularExpression('/^\s*set -eu\s*$/m', $script);
+        self::assertLessThan(strpos($script, 'ci/tag-guard.sh'), strpos($script, 'set -eu'));
+        self::assertStringContainsString('ci/tag-guard.sh "$BITBUCKET_TAG" "$BITBUCKET_COMMIT") || exit 1', $script);
+        self::assertStringContainsString('[ -z "$refspecs" ]', $script);
+        self::assertLessThan(strpos($script, 'git push'), strpos($script, '[ -z "$refspecs" ]'));
+    }
+
+    public function testNodeSourceDownloadCannotFeedAnEmptyScript(): void
+    {
+        foreach ($this->flatSteps($this->pipelines['pipelines']['pull-requests']['**']) as $step) {
+            if (str_starts_with((string) $step['name'], 'Gates')) {
+                $script = $this->script($step);
+                self::assertLessThan(strpos($script, 'setup_22.x'), strpos($script, 'set -o pipefail'));
+            }
+        }
+    }
+
     public function testRenovateMergeStepUsesPython(): void
     {
         $steps = $this->flatSteps($this->pipelines['pipelines']['custom']['renovate-merge']);
@@ -385,6 +433,12 @@ final class PipelineConfigTest extends TestCase
      */
     private static function scriptOf(array $step): string
     {
-        return implode("\n", array_map('strval', $step['script']));
+        self::assertIsList($step['script'], 'script must be a list');
+        foreach ($step['script'] as $index => $item) {
+            // A plain scalar containing ": " parses as a mapping, which Bitbucket rejects for the whole file.
+            self::assertIsString($item, \sprintf('script item %d of "%s" is not a string: %s', $index, (string) ($step['name'] ?? '?'), json_encode($item)));
+        }
+
+        return implode("\n", $step['script']);
     }
 }

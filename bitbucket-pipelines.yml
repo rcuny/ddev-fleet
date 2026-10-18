@@ -81,9 +81,12 @@
 #                      the account behind RENOVATE_PASSWORD.
 #   SECURITY_PROBE_TARGETS
 #                      Space-separated name=user@host entries for the live
-#                      systemd check, e.g. ddev3=fleet-probe@ddev3.fleet.pm.
+#                      systemd check, e.g. server1=fleet-probe@fleet.example.com.
 #                      Unset/empty = the live pipeline skips.
-#   JIRA_ALERT_SITE    Jira Cloud site name (renaudcuny for renaudcuny.atlassian.net).
+#   SECURITY_CHECK_GIT_EMAIL
+#                      optional: author e-mail of the SYSTEMD-SECURITY-REPORT.md
+#                      commit. Default security-check@noreply.example.com.
+#   JIRA_ALERT_SITE    Jira Cloud site name (your-site for your-site.atlassian.net).
 #   JIRA_ALERT_EMAIL   e-mail of the Jira account that POSTS the comment. Not the
 #                      mentioned person: Jira never notifies you of your own actions.
 #   JIRA_ALERT_TOKEN   (secured) API token of that account (a scoped token needs
@@ -134,10 +137,13 @@ definitions:
             php8.4-cli php8.4-sqlite3 php8.4-intl php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip
             composer git unzip curl ca-certificates gnupg > /dev/null
           # Node 22 for Playwright and @axe-core/playwright (>= 22.12); Debian 13's Node is 20.
+          # pipefail: a failed download must stop the step, not feed an empty script to bash.
+          - set -o pipefail
           - curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null
           - apt-get install -y -qq --no-install-recommends nodejs > /dev/null
-          - node -v && npm -v && php -v | head -1
-          - node -e 'process.exit(process.versions.node.split(".").map(Number)[0] >= 22 ? 0 : 1)'
+          - node -v && npm -v && php -v
+          # No "? :" in a plain YAML scalar: ": " would turn the script item into a mapping.
+          - node -e "if (Number(process.versions.node.split('.')[0]) < 22) process.exit(1)"
           - (cd app && composer install --no-interaction --prefer-dist)
           # Assets (importmap, Tailwind), php-cs-fixer, phpstan level 8, Twig/YAML/container lint, Doctrine
           # schema validation and phpunit (Unit, Integration, Functional, Repo).
@@ -240,6 +246,7 @@ pipelines:
             depth: full
           script:
             - |
+              set -eu
               if [ -z "${GITHUB_MIRROR_URL:-}" ]; then
                 echo "GITHUB_MIRROR_URL not set, skipping mirror"
                 exit 0
@@ -248,7 +255,11 @@ pipelines:
               # ci/tag-guard.sh prints the refspecs this tag may publish, or fails:
               #   v1.X.Y must be on origin/develop and pushes only the tag;
               #   v0.X.Y must be the tip of origin/main and also fast-forwards GitHub's main.
-              refspecs=$(ci/tag-guard.sh "$BITBUCKET_TAG" "$BITBUCKET_COMMIT")
+              refspecs=$(ci/tag-guard.sh "$BITBUCKET_TAG" "$BITBUCKET_COMMIT") || exit 1
+              if [ -z "$refspecs" ]; then
+                echo "ERROR: the tag guard printed no refspec; refusing to push" >&2
+                exit 1
+              fi
               echo "publishing: $refspecs"
               git push "$GITHUB_MIRROR_URL" $refspecs
 
