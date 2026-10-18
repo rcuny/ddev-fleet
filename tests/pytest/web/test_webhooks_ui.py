@@ -168,6 +168,33 @@ def test_filters_via_query_string(env, url):
     assert count(limit="banana") == 3  # falls back to the default
 
 
+@pytest.mark.parametrize("url", ["/webhooks", "/ui/webhooks/table"])
+def test_hide_ignored_filters_out_ignored_deliveries(env, url):
+    _, store, client = env
+    _seed(store)  # 3 deliveries, one of them ignored
+    count = lambda **p: len(_rows(client.get(url, params=p).text))  # noqa: E731
+    assert count() == 3
+    assert count(hide_ignored="1") == 2
+    assert "bb-delivery-1" not in client.get(url, params={"hide_ignored": "1"}).text
+    assert "bb-delivery-1" in client.get(url).text
+    assert count(hide_ignored="1", result="ignored") == 0
+    # The limit counts only non-ignored rows: newest are triggered, ignored, accepted.
+    body = client.get(url, params={"hide_ignored": "1", "limit": "2"}).text
+    assert len(_rows(body)) == 2 and "jira-delivery-1" in body
+
+
+def test_hide_ignored_checkbox_is_unchecked_by_default_and_stays_checked(env):
+    _, store, client = env
+    _seed(store)
+
+    def box(html):
+        return re.search(r'<input type="checkbox" name="hide_ignored"[^>]*>', html).group(0)
+
+    assert "Hide ignored hooks" in client.get("/webhooks").text
+    assert " checked" not in box(client.get("/webhooks").text)
+    assert " checked" in box(client.get("/webhooks", params={"hide_ignored": "1"}).text)
+
+
 def test_partial_is_a_fragment_with_the_swap_target(env):
     _, store, client = env
     _seed(store)

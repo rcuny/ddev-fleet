@@ -38,6 +38,10 @@
       {% endfor %}
     </select>
   </label>
+  <label class="webhook-hide-ignored">
+    <input type="checkbox" name="hide_ignored" value="1"{% if hide_ignored %} checked{% endif %}>
+    Hide ignored hooks
+  </label>
   <button type="submit">Apply</button>
   <button type="button" id="webhook-refresh" hx-get="/ui/webhooks/table"
           hx-include="#webhook-filters" hx-target="#webhook-table" hx-swap="outerHTML">Refresh</button>
