@@ -17,6 +17,9 @@ from ruamel.yaml import YAML
 
 from fleet.core.errors import RegistryError, ValidationError
 from fleet.core.naming import instance_id, slugify, validate_part
+from fleet.core.schedules import ACTIONS as _SCHEDULE_ACTIONS
+from fleet.core.schedules import SCHEDULE_NAME_RE as _SCHEDULE_NAME_RE
+from fleet.core.schedules import CronError, parse_cron, parse_timezone
 
 logger = logging.getLogger(__name__)
 
@@ -134,6 +137,27 @@ _BITBUCKET_EVENT_RE = re.compile(r"(pullrequest|repo):[a-z_]+")
 # `workspace/slug`: also what the pipeline-trigger URL is built from, so keep
 # it to characters Bitbucket allows in both parts.
 _BITBUCKET_REPO_RE = re.compile(r"[A-Za-z0-9._~-]+/[A-Za-z0-9._~-]+")
+
+
+@dataclass(frozen=True)
+class Schedule:
+    """One top-level `schedules.<name>` entry (FLE-31): run `action` (v1: only
+    "redeploy" of `instance`) whenever the 5-field `cron` expression fires in the
+    local time of the IANA `timezone`. `servers` lists the fleet domains the schedule
+    runs on (empty = every server). Consumed by `core/schedules.py`."""
+
+    name: str
+    cron: str
+    timezone: str
+    action: str
+    instance: str | None
+    servers: tuple[str, ...] = ()
+    enabled: bool = True
+
+
+_SCHEDULE_KEYS = frozenset({"cron", "timezone", "action", "instance", "servers", "enabled"})
+_SCHEDULE_INSTANCE_RE = re.compile(r"^[a-z0-9][a-z0-9-]*$")
+_SCHEDULE_SERVER_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9.-]*$")
 
 _TYPESENSE_LEGACY_DEFAULT = PortProfile(name="typesense", public=9108, router=8108)
 
@@ -528,6 +552,8 @@ class Registry:
                 f"fleet.port_mirror: must be true or false, got {fleet_block['port_mirror']!r}"
             )
 
+        self._validate_schedules(data.get("schedules"))
+
         projects = data.get("projects") or {}
         self._validate_users(projects)
         for project_key, project_block in projects.items():
@@ -631,6 +657,71 @@ class Registry:
                         f"projects.{project_key}.ports: unknown port name {port_name!r} "
                         "(not defined in fleet.ports)"
                     )
+
+    @staticmethod
+    def _validate_schedules(schedules) -> None:
+        """Validate the top-level `schedules:` mapping (FLE-31). Same strictness as the
+        hook rules: unknown keys are rejected and every error names the schedule."""
+        if schedules is None:
+            return
+        if not isinstance(schedules, dict):
+            raise RegistryError("schedules: must be a mapping of schedule name -> definition")
+        for name, block in schedules.items():
+            where = f"schedules.{name}"
+            if not isinstance(name, str) or not _SCHEDULE_NAME_RE.fullmatch(name):
+                raise RegistryError(
+                    f"{where}: invalid schedule name (lowercase letters, digits and '-', "
+                    "starting with a letter or digit, at most 63 characters)"
+                )
+            if not isinstance(block, dict):
+                raise RegistryError(f"{where}: must be a mapping")
+            unknown = sorted(str(k) for k in set(block) - _SCHEDULE_KEYS)
+            if unknown:
+                raise RegistryError(
+                    f"{where}: unknown key(s) {unknown} (allowed: {sorted(_SCHEDULE_KEYS)})"
+                )
+            for required in ("cron", "timezone", "action"):
+                if required not in block:
+                    raise RegistryError(f"{where}.{required}: missing")
+            try:
+                parse_cron(block["cron"])
+            except CronError as exc:
+                raise RegistryError(f"{where}.cron: {exc.message}") from exc
+            try:
+                parse_timezone(block["timezone"])
+            except CronError as exc:
+                raise RegistryError(f"{where}.timezone: {exc.message}") from exc
+            action = block["action"]
+            if action not in _SCHEDULE_ACTIONS:
+                raise RegistryError(
+                    f"{where}.action: unknown action {action!r} "
+                    f"(supported: {', '.join(_SCHEDULE_ACTIONS)})"
+                )
+            instance = block.get("instance")
+            if action == "redeploy" and instance is None:
+                raise RegistryError(f"{where}.instance: required for action 'redeploy'")
+            if instance is not None and (
+                not isinstance(instance, str) or not _SCHEDULE_INSTANCE_RE.fullmatch(instance)
+            ):
+                raise RegistryError(
+                    f"{where}.instance: must be an instance id (lowercase letters, digits, "
+                    f"'-'), got {instance!r}"
+                )
+            if "servers" in block:
+                servers = block["servers"]
+                if (
+                    not isinstance(servers, list)
+                    or not servers
+                    or not all(
+                        isinstance(s, str) and _SCHEDULE_SERVER_RE.fullmatch(s) for s in servers
+                    )
+                ):
+                    raise RegistryError(
+                        f"{where}.servers: must be a non-empty list of fleet domains "
+                        "(bare hostnames, e.g. ddev3.fleet.pm); omit it to run on every server"
+                    )
+            if "enabled" in block and not isinstance(block["enabled"], bool):
+                raise RegistryError(f"{where}.enabled: must be true or false")
 
     def _validate_template_commands(
         self, project_key: str, template_key: str, template_block: dict
@@ -964,6 +1055,23 @@ class Registry:
                 strip_suffix=opt(rule, "strip_suffix"),
             )
             for rule in (block.get("bitbucket_hooks") or [])
+        ]
+
+    @property
+    def schedules(self) -> list[Schedule]:
+        """The validated top-level `schedules:` entries (FLE-31), in file order; `[]` when
+        there are none."""
+        return [
+            Schedule(
+                name=str(name),
+                cron=" ".join(str(block["cron"]).split()),
+                timezone=str(block["timezone"]),
+                action=str(block["action"]),
+                instance=str(block["instance"]) if block.get("instance") is not None else None,
+                servers=tuple(str(s) for s in (block.get("servers") or [])),
+                enabled=block.get("enabled", True) is not False,
+            )
+            for name, block in (self._data.get("schedules") or {}).items()
         ]
 
     def port_profile(self, name: str) -> PortProfile:

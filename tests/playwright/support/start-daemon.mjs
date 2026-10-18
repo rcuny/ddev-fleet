@@ -36,6 +36,26 @@ projects:
       custom:
         post_deploy:
           - echo instance-override
+
+# FLE-31: schedules for schedules.spec.ts (none fires during a test: 03:00 / Mondays 04:30).
+schedules:
+  e2e-nightly:
+    cron: "0 3 * * *"
+    timezone: Europe/Paris
+    action: redeploy
+    instance: demo--e2e-sched
+  e2e-disabled:
+    cron: "30 4 * * 1"
+    timezone: UTC
+    action: redeploy
+    instance: demo--e2e-sched
+    enabled: false
+  e2e-elsewhere:
+    cron: "0 5 * * *"
+    timezone: UTC
+    action: redeploy
+    instance: demo--e2e-sched
+    servers: [other.example.test]
 `;
 
 const { values } = parseArgs({

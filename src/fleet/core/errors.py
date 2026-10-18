@@ -60,3 +60,8 @@ class AutheliaError(FleetError):
 
 class DiskSpaceError(FleetError):
     """Insufficient free disk space to proceed with a bulk deploy."""
+
+
+class ScheduleStateError(FleetError):
+    """The scheduled-jobs state (`<fleet home>/schedules/`) is unreadable, corrupt or not
+    writable. The scheduler fails closed: it fires nothing and never overwrites the file."""

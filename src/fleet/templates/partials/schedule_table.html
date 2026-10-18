@@ -1,0 +1,95 @@
+<div id="schedule-table">
+  {% if state_error %}
+  <p class="schedule-notice schedule-notice-error schedule-state-error" role="alert">{{ state_error }}</p>
+  {% endif %}
+  {% if notice and notice != state_error %}
+  <p class="schedule-notice schedule-notice-{{ notice_kind }}" role="status">{{ notice }}</p>
+  {% endif %}
+  {% if views %}
+  <table class="schedule-table">
+    <thead>
+      <tr>
+        <th>Name</th><th>Schedule</th><th>Action</th><th>Next run</th><th>Last run</th>
+        <th>State</th><th></th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for v in views %}
+      {% set s = v.schedule %}
+      <tr class="schedule-row" id="schedule-{{ s.name }}">
+        <td><code>{{ s.name }}</code></td>
+        <td><code>{{ s.cron }}</code> <span class="schedule-detail">{{ s.timezone }}</span>
+          {%- if s.servers %}<br><span class="schedule-detail">on {{ s.servers|join(", ") }}</span>{% endif %}</td>
+        <td>
+          {{ s.action }}
+          {%- if s.instance %}
+          {% set url = instance_urls.get(s.instance) -%}
+          {%- if url %}<a href="{{ url }}">{{ s.instance }}</a>{% else %}{{ s.instance }}{% endif %}
+          {%- endif %}
+        </td>
+        <td>
+          {%- if v.next_run %}<span title="{{ v.next_run.isoformat() }}">{{ v.next_local }}</span>
+          <span class="schedule-detail">{{ v.next_hint }}</span>{% else %}-{% endif %}
+        </td>
+        <td>
+          {%- if v.last_run %}
+          <span title="{{ v.last_run.ts }}">{{ v.last_run.ts|webhook_time }}</span>
+          <span class="schedule-result schedule-result-{{ v.last_run.result }}">{{ v.last_run.result }}</span>
+          <span class="schedule-detail">{{ v.last_run.trigger }}</span>
+          {%- if v.last_run.reason %}<br><span class="schedule-detail">{{ v.last_run.reason }}</span>{% endif -%}
+          {%- if v.last_run.job_id %}<br><span class="schedule-detail">job <code>{{ v.last_run.job_id }}</code></span>{% endif -%}
+          {%- if v.last_run.instance in log_instances and v.last_run.result in ("started", "succeeded", "failed") %}
+          <a class="schedule-log" href="/ui/instances/{{ v.last_run.instance }}/log" target="_blank" rel="noopener">log</a>
+          {%- endif -%}
+          {%- else %}-{% endif %}
+        </td>
+        <td><span class="schedule-state schedule-state-{{ v.state_slug }}">{{ v.state }}</span>
+          {%- if v.paused and v.state != "paused" %} <span class="schedule-detail">(paused)</span>{% endif %}</td>
+        <td>
+          {% if v.actionable %}
+          <button class="schedule-run" hx-post="/ui/schedules/{{ s.name }}/run"
+                  hx-target="#schedule-table" hx-swap="outerHTML"
+                  hx-confirm="Run {{ s.name }} now? This redeploys {{ s.instance }}: it DESTROYS the instance (containers and disk state) and rebuilds it from scratch.">
+            Run now
+          </button>
+          {% if v.paused %}
+          <button class="schedule-resume" hx-post="/ui/schedules/{{ s.name }}/resume"
+                  hx-target="#schedule-table" hx-swap="outerHTML">Resume</button>
+          {% else %}
+          <button class="schedule-pause" hx-post="/ui/schedules/{{ s.name }}/pause"
+                  hx-target="#schedule-table" hx-swap="outerHTML">Pause</button>
+          {% endif %}
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="schedule-empty">No schedule is declared in <code>fleet.yml</code> (<code>schedules:</code>).</p>
+  {% endif %}
+
+  <h3>Recent runs</h3>
+  {% if history %}
+  <table class="schedule-history">
+    <thead>
+      <tr><th>Time</th><th>Schedule</th><th>Trigger</th><th>Instance</th><th>Result</th><th>Reason</th><th>Job</th></tr>
+    </thead>
+    <tbody>
+      {% for h in history %}
+      <tr class="schedule-history-row">
+        <td title="{{ h.ts }}">{{ h.ts|webhook_time }}</td>
+        <td><code>{{ h.schedule if h.schedule else "-" }}</code></td>
+        <td>{{ h.trigger if h.trigger else "-" }}</td>
+        <td>{{ h.instance if h.instance else "-" }}</td>
+        <td><span class="schedule-result schedule-result-{{ h.result }}">{{ h.result if h.result else "-" }}</span></td>
+        <td>{{ h.reason if h.reason else "" }}</td>
+        <td>{% if h.job_id %}<code>{{ h.job_id }}</code>{% else %}-{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p class="schedule-empty">No scheduled run has been recorded yet.</p>
+  {% endif %}
+</div>

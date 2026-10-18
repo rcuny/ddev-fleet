@@ -68,7 +68,7 @@ test('the page loads under the CSP with the nav link and both sources, newest fi
   expect(response?.headers()['content-security-policy']).toContain("script-src 'self'");
 
   const nav = page.locator('nav.main-nav a');
-  await expect(nav).toHaveText(['Instances', 'Secrets', 'Webhooks']);
+  await expect(nav).toHaveText(['Instances', 'Secrets', 'Webhooks', 'Scheduled jobs']);
   await expect(page.getByRole('heading', { name: 'Webhooks' })).toBeVisible();
 
   const rows = page.locator('tr.webhook-row');

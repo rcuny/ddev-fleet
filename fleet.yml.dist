@@ -49,3 +49,13 @@ projects:
       #     tty1: ['ddev exec claude "/jira pull [[issue-id]] --create-branch"']  # typed ONCE by the deploy
       #                                          #   into the middle pane (never after a reboot)
       #     tty2: [ddev drush watchdog:tail]      # typed once into the right pane
+
+# schedules:                                # OPTIONAL — periodic jobs run by the fleet daemon (FLE-31,
+#                                           # see docs/README-schedules.md). v1 action: redeploy.
+#   pw-baseline-nightly:                    # name: [a-z0-9][a-z0-9-]{0,62}
+#     cron: "0 3 * * *"                     # 5 fields (min hour dom month dow), no names/@macros
+#     timezone: Europe/Paris                # IANA name, required; the cron runs in this local time
+#     action: redeploy                      # in-place rebuild, same as `fleet redeploy`
+#     instance: osce--pw-regression         # required for redeploy
+#     servers: [ddev3.fleet.pm]             # optional: fleet domains it runs on (absent = every server)
+#     enabled: true                         # optional, default true
