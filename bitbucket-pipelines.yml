@@ -1,13 +1,27 @@
 # Bitbucket Pipelines — the canonical CI for ddev-fleet (Bitbucket is the
 # source of truth; GitHub is a read-only public mirror published from here).
 #
-#   pull request (any branch)  -> gates (pytest, ruff, black, browser E2E, offline systemd
-#                                 security check) in parallel with a
-#                                 non-blocking ansible-lint/yamllint step
-#   push to develop            -> the same parallel pair, then mirror develop
-#                                 to GitHub
-#   tag v*  (release)          -> gates, then publish main + the tag to GitHub
-#   custom: renovate           -> dependency-update PRs against develop.
+# The product is a Symfony 8.1 app in app/ (PHP 8.4) with a Playwright browser
+# suite in tests/playwright/; the Ansible roles, the systemd sandbox tests and
+# the Renovate helper are kept from the 0.x line.
+#
+#   pull request (any branch)  -> in parallel: gates (php-cs-fixer, phpstan,
+#                                 Twig/YAML/container lint, Doctrine schema,
+#                                 phpunit, Playwright), infra tests (pytest for
+#                                 the Ansible roles and tooling + the offline
+#                                 systemd security check) and a non-blocking
+#                                 ansible-lint/yamllint step
+#   push to develop            -> the same three, then mirror develop to GitHub
+#   push to feature/** release/** -> gates + infra tests (no mirror)
+#   tag v*  (release)          -> gates + infra tests, then publish to the
+#                                 GitHub mirror through ci/tag-guard.sh:
+#                                 v1.X.Y must be on develop and pushes only the
+#                                 tag; v0.X.Y must be the tip of main and also
+#                                 fast-forwards GitHub's main. Anything else is
+#                                 rejected.
+#   custom: renovate           -> dependency-update PRs against develop
+#                                 (composer, npm, pip requirements, Ansible
+#                                 collections, pipeline images).
 #                                 When it runs is decided ONLY here in
 #                                 Bitbucket (Pipelines -> Schedules: branch
 #                                 develop, custom: renovate, daily) or by a
@@ -33,11 +47,15 @@
 #                                 that cannot be fetched, also posts a Jira
 #                                 comment with an @mention (JIRA_ALERT_*).
 #
-# The gates image is Debian 13 (trixie) with systemd installed on purpose: the
-# systemd sandbox tests and `ci/systemd_security.py offline` score the rendered
-# units with systemd-analyze (same systemd 257 as the servers) and must not be
-# skipped (FLEET_REQUIRE_SYSTEMD_ANALYZE=1). Reports land in reports/** as
-# artifacts. Procedure and baseline updates: docs/README-ci.md.
+# The gates run on Debian 13 (trixie) with PHP 8.4 from the distribution and
+# Node 22 from NodeSource (@axe-core/playwright needs Node >= 22.12; Debian's
+# own Node is 20). Playwright drives headless Chromium that the step installs
+# with its system libraries. The infra step uses a Debian 13 Python image with
+# systemd installed on purpose: the systemd sandbox tests and
+# `ci/systemd_security.py offline` score the rendered units with
+# systemd-analyze (same systemd 257 as the servers) and must not be skipped
+# (FLEET_REQUIRE_SYSTEMD_ANALYZE=1). Reports land in reports/** as artifacts.
+# Procedure and baseline updates: docs/README-ci.md.
 #   custom: renovate-merge     -> merges ONE approved, green, up-to-date Renovate
 #                                 PR into develop (scripts/renovate_merge.py),
 #                                 then runs Renovate again so the remaining PRs
@@ -93,40 +111,59 @@
 # Mirror pushes are never forced: if GitHub has diverged, the step fails
 # loudly instead of rewriting public history.
 
-image: python:3.11-trixie # full Debian 13 image on purpose: the tests run real `git`
+image: debian:trixie # gates image; steps that need Python name their own python:*-trixie image
 
 definitions:
+  caches:
+    composer-cache: ~/.cache/composer
+    npm-cache: ~/.npm
   steps:
     - step: &gates
-        name: Gates (pytest, ruff, black, browser E2E, systemd security)
+        name: Gates (php-cs-fixer, phpstan, lint, phpunit, Playwright)
+        caches:
+          - composer-cache
+          - npm-cache
+        script:
+          # Bitbucket runners default to umask 000; keep files created by the build private to the group.
+          - umask 022
+          - export DEBIAN_FRONTEND=noninteractive COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1
+          # PHP 8.4 and Composer come from Debian 13. git: Composer source fallbacks and the tag-guard tests
+          # build real repositories. unzip: Composer. gnupg: NodeSource's key.
+          - >-
+            apt-get update -qq && apt-get install -y -qq --no-install-recommends
+            php8.4-cli php8.4-sqlite3 php8.4-intl php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip
+            composer git unzip curl ca-certificates gnupg > /dev/null
+          # Node 22 for Playwright and @axe-core/playwright (>= 22.12); Debian 13's Node is 20.
+          - curl -fsSL https://deb.nodesource.com/setup_22.x | bash - > /dev/null
+          - apt-get install -y -qq --no-install-recommends nodejs > /dev/null
+          - node -v && npm -v && php -v | head -1
+          - node -e 'process.exit(process.versions.node.split(".").map(Number)[0] >= 22 ? 0 : 1)'
+          - (cd app && composer install --no-interaction --prefer-dist)
+          # Assets (importmap, Tailwind), php-cs-fixer, phpstan level 8, Twig/YAML/container lint, Doctrine
+          # schema validation and phpunit (Unit, Integration, Functional, Repo).
+          - (cd app && composer run gates)
+          # Browser E2E: Playwright starts the app itself (php -S, a throw-away FLEET_HOME) because
+          # FLEET_E2E_BASE_URL is unset. It needs headless Chromium plus its system libraries (apt, as root)
+          # and fails outright when the browser is missing. A subshell keeps the working directory at the root.
+          - (cd tests/playwright && npm ci && npx playwright install --with-deps --only-shell chromium && npm run typecheck && npx playwright test)
+        artifacts:
+          - tests/playwright/test-results/**
+          - tests/playwright/playwright-report/**
+    # The Python side that survives the port: pytest for the Ansible roles, the systemd scoring and the Renovate
+    # helper, plus the offline systemd security check.
+    - step: &infra-tests
+        name: Infra tests (pytest, systemd security)
+        image: python:3.11-trixie # full Debian 13 image on purpose: the tests run real `git`
         caches:
           - pip
         script:
-          # Bitbucket runners default to umask 000; systemd-analyze warns about
-          # world-writable unit files, which the scoring tests treat as failure.
+          # systemd-analyze warns about world-writable unit files, which the scoring tests treat as failure.
           - umask 022
-          # rsync: core/assets.py shells out to it (asset injection tests)
           # systemd: systemd-analyze scores the rendered units (FLE-8)
-          # gnupg + nodejs: the secrets tests run the real gpg and a real node against the
-          #   vendored OpenPGP.js (FLE-22); Debian 13's node 20 is enough.
-          # npm: Debian ships it as a separate package; it installs tests/playwright's
-          #   dependencies (FLE-24). @playwright/test 1.63 needs Node >= 20, so no newer Node.
-          - apt-get update -qq && apt-get install -y -qq --no-install-recommends rsync systemd gnupg nodejs npm > /dev/null
+          - apt-get update -qq && apt-get install -y -qq --no-install-recommends systemd > /dev/null
+          - pip install -q -r ci/requirements-dev.txt
           # The systemd scoring tests fail instead of skipping when systemd-analyze is missing.
-          - export FLEET_REQUIRE_SYSTEMD_ANALYZE=1
-          # Likewise the gpg/node interop tests fail instead of skipping (FLE-22).
-          - export FLEET_REQUIRE_PGP_TOOLS=1
-          - pip install -q -e ".[dev]"
-          - pytest -q
-          - ruff check .
-          - black --check .
-          # Glob form: `node --test tests/node/` (a directory) fails on Node 22.
-          - node --test tests/node/*.test.mjs
-          # Browser E2E (FLE-24): TypeScript @playwright/test in its own npm package. It starts the
-          # daemons itself with the `python3` of this image (the package is pip-installed above),
-          # needs headless Chromium plus its system libraries (apt, as root), and fails outright
-          # when the browser is missing. A subshell keeps the working directory at the repo root.
-          - (cd tests/playwright && npm ci && npx playwright install --with-deps --only-shell chromium && npx playwright test)
+          - FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest
           - python ci/systemd_security.py offline --out reports/offline.json
           - >-
             python ci/systemd_security.py compare --env offline --current reports/offline.json
@@ -140,12 +177,12 @@ definitions:
     # a hard gate by dropping the `|| echo` once it is clean.
     - step: &ansible-lint
         name: Ansible lint (non-blocking)
-        # The [infra] extra pins ansible-core >= 2.21, which needs Python >= 3.12.
+        # ansible-core >= 2.21 (ci/requirements-infra.txt) needs Python >= 3.12.
         image: python:3.13-trixie
         caches:
           - pip
         script:
-          - pip install -q -e ".[infra]" || { echo "could not install the [infra] extra (non-blocking)"; exit 0; }
+          - pip install -q -r ci/requirements-infra.txt || { echo "could not install ci/requirements-infra.txt (non-blocking)"; exit 0; }
           - ansible-lint ansible/ || echo "ansible-lint reported findings (non-blocking)"
           - yamllint ansible/ || echo "yamllint reported findings (non-blocking)"
 
@@ -154,12 +191,14 @@ pipelines:
     "**":
       - parallel:
           - step: *gates
+          - step: *infra-tests
           - step: *ansible-lint
 
   branches:
     develop:
       - parallel:
           - step: *gates
+          - step: *infra-tests
           - step: *ansible-lint
       - step:
           name: Mirror develop to GitHub
@@ -179,9 +218,21 @@ pipelines:
               fi
               git push "$GITHUB_MIRROR_URL" "$BITBUCKET_COMMIT:refs/heads/develop"
 
+    "feature/**":
+      - parallel:
+          - step: *gates
+          - step: *infra-tests
+
+    "release/**":
+      - parallel:
+          - step: *gates
+          - step: *infra-tests
+
   tags:
     "v*":
-      - step: *gates
+      - parallel:
+          - step: *gates
+          - step: *infra-tests
       - step:
           name: Publish release to GitHub mirror
           image: atlassian/default-image:5
@@ -193,14 +244,13 @@ pipelines:
                 echo "GITHUB_MIRROR_URL not set, skipping mirror"
                 exit 0
               fi
-              git fetch origin "+refs/heads/main:refs/remotes/origin/main" "+refs/tags/$BITBUCKET_TAG:refs/tags/$BITBUCKET_TAG"
-              # Releases are tagged on main. A tag on any other commit would
-              # fast-forward GitHub's main to it, and servers deploy main.
-              if [ "$(git rev-parse origin/main)" != "$BITBUCKET_COMMIT" ]; then
-                echo "ERROR: tag $BITBUCKET_TAG ($BITBUCKET_COMMIT) is not the tip of main; refusing to publish" >&2
-                exit 1
-              fi
-              git push "$GITHUB_MIRROR_URL" "$BITBUCKET_COMMIT:refs/heads/main" "refs/tags/$BITBUCKET_TAG"
+              git fetch origin "+refs/heads/main:refs/remotes/origin/main" "+refs/heads/develop:refs/remotes/origin/develop" "+refs/tags/$BITBUCKET_TAG:refs/tags/$BITBUCKET_TAG"
+              # ci/tag-guard.sh prints the refspecs this tag may publish, or fails:
+              #   v1.X.Y must be on origin/develop and pushes only the tag;
+              #   v0.X.Y must be the tip of origin/main and also fast-forwards GitHub's main.
+              refspecs=$(ci/tag-guard.sh "$BITBUCKET_TAG" "$BITBUCKET_COMMIT")
+              echo "publishing: $refspecs"
+              git push "$GITHUB_MIRROR_URL" $refspecs
 
   custom:
     renovate:
@@ -216,6 +266,8 @@ pipelines:
     renovate-merge:
       - step:
           name: Merge an approved Renovate PR
+          # scripts/renovate_merge.py is standard-library Python: the default image has no python3.
+          image: python:3.13-trixie
           # One run at a time: a second run waits (FIFO) and then re-reads
           # develop, so two runs cannot merge two PRs onto the same head.
           concurrency-group: renovate-merge
@@ -243,6 +295,7 @@ pipelines:
     # SECURITY_PROBE_TARGETS is unset and checks every target before failing.
     # The full image has git (the report is committed) and, with systemd, scores
     # the shipped units offline for the report; jinja2 renders their templates.
+    # ci/systemd_security.py is standard-library Python except that jinja2 import.
     systemd-security-live:
       - step:
           name: Live systemd security check
@@ -251,10 +304,10 @@ pipelines:
             - pip
           script:
             # systemd-analyze warns about world-writable unit files (Bitbucket's
-            # default umask is 000), see the gates.
+            # default umask is 000), see the infra tests.
             - umask 022
             - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client systemd > /dev/null
-            - pip install -q -e .
+            - pip install -q jinja2 PyYAML
             - bash ci/systemd-security-live.sh
           artifacts:
             - reports/**

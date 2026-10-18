@@ -1,49 +1,73 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-07
+Last updated: 2026-10-18
 Type: documentation
 ---
 
-# CI: Bitbucket Pipelines and the systemd security check
+# CI: Bitbucket Pipelines, tag guard and the systemd security check
 
 Bitbucket Pipelines (`bitbucket-pipelines.yml`) is the only CI. GitHub is a
 read-only mirror published by a pipeline step and has no workflow of its own.
-The default image is Debian 13 (`python:3.11-trixie`), the same release and the
-same systemd (257) as the servers.
+The product is a Symfony 8.1 app (PHP 8.4) in `app/` with a Playwright browser
+suite in `tests/playwright/`. The gates run on Debian 13 (`debian:trixie`), the
+same release as the servers; Python steps use `python:*-trixie` images.
 
 ## The pipelines
 
 | Trigger | What runs |
 |---|---|
-| Pull request (any branch) | in parallel: **gates** and **ansible lint** |
-| Push to `develop` | the same parallel pair, then **mirror develop** to GitHub |
-| Tag `v*` (release) | **gates**, then **publish main + the tag** to GitHub |
+| Pull request (any branch) | in parallel: **gates**, **infra tests**, **ansible lint** |
+| Push to `develop` | the same three, then **mirror develop** to GitHub |
+| Push to `feature/**`, `release/**` | **gates** and **infra tests** |
+| Tag `v*` | **gates** and **infra tests**, then **publish to the mirror** through `ci/tag-guard.sh` |
 | Custom `renovate` | Renovate (daily schedule): dependency-update PRs against `develop` |
+| Custom `renovate-merge` | merges one approved, green Renovate PR, then runs Renovate (`docs/README-renovate.md`) |
 | Custom `systemd-security-live` | the live systemd security check, the published report and the Jira alert (weekly schedule) |
 
-- **Gates**: `pytest -q`, `ruff check .`, `black --check .`,
-  `node --test tests/node/*.test.mjs` (the OpenPGP.js browser-crypto tests), the
-  browser E2E suite (below), then the offline systemd security check (below). The
-  image has `systemd` installed and `FLEET_REQUIRE_SYSTEMD_ANALYZE=1` is set, so the systemd scoring tests fail
-  instead of skipping if `systemd-analyze` is ever missing. The image also gets
-  `gnupg` and `nodejs`, and `FLEET_REQUIRE_PGP_TOOLS=1` is set so the gpg/node
-  interop tests fail instead of skipping if either tool is missing.
-  The step also runs the browser E2E suite (`tests/playwright`, a TypeScript
-  `@playwright/test` npm package driving real daemons in headless Chromium with the CSP
-  enforced): `npm ci`, `npx playwright install --with-deps --only-shell chromium` and
-  `npx playwright test`, run from that folder after the Node tests. The image gets the
-  Debian `npm` package next to `nodejs` (Debian 13 ships Node 20, which Playwright 1.63
-  supports). The runner has no skip mode: a missing browser fails the step.
-- **Ansible lint (non-blocking)**: `ansible-lint ansible/` and `yamllint
-  ansible/` (the `infra` extra). Findings are printed but never fail the run;
-  drop the `|| echo` in the step to promote it to a hard gate.
-- **Mirror / publish**: see `docs/RELEASING.md` and the header of
-  `bitbucket-pipelines.yml` (`GITHUB_MIRROR_URL`, the deploy key).
-- **Renovate**: `renovate-config.json`; see `CONTRIBUTING.md`.
+- **Gates** (`Gates (php-cs-fixer, phpstan, lint, phpunit, Playwright)`): installs PHP 8.4
+  and Composer from Debian, Node 22 from NodeSource (`@axe-core/playwright` needs Node
+  >= 22.12 and Debian 13 ships Node 20; the step prints `node -v` and fails below 22),
+  then `composer install` and `composer run gates` in `app/` (importmap and Tailwind
+  assets, php-cs-fixer, PHPStan level 8, Twig/YAML/container lint, Doctrine schema
+  validation, PHPUnit including the `Repo` suite that pins this CI configuration), then
+  in `tests/playwright/`: `npm ci`, `npx playwright install --with-deps --only-shell
+  chromium`, `npm run typecheck` and `npx playwright test`. With no
+  `FLEET_E2E_BASE_URL` Playwright starts the app itself (`php -S`, throw-away
+  `FLEET_HOME`). A missing browser fails the step. Artifacts: the Playwright report and traces.
+- **Infra tests** (`python:3.11-trixie` with `systemd`): `pip install -r
+  ci/requirements-dev.txt`, `FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest`
+  (Ansible role templates, systemd sandbox scoring, the Renovate merge helper), then the
+  offline systemd security check below. Artifacts: `reports/**`.
+- **Ansible lint (non-blocking)** (`python:3.13-trixie`, `ci/requirements-infra.txt`):
+  `ansible-lint ansible/` and `yamllint ansible/`. Findings are printed but never fail the
+  run; drop the `|| echo` in the step to promote it to a hard gate.
+- **Mirror / publish**: see below, `docs/RELEASING.md` and the header of
+  `bitbucket-pipelines.yml` (`GITHUB_MIRROR_URL`, the deploy key). Pushes are never forced.
+- **Renovate**: `renovate-config.json` (composer groups `symfony`, `symfony ux`,
+  `doctrine`, `php dev tooling`; npm group `playwright`; pip group `python ci tooling`; Ansible
+  collections). Bumps of the `debian` and `python` pipeline images and of the `php` platform
+  constraint are disabled on purpose. See `CONTRIBUTING.md`.
 
 Alerts are Bitbucket's built-in "pipeline failed" email and, for the live check, a Jira comment
 (see "The published report and the Jira alert" below).
+
+## Tag guard (`ci/tag-guard.sh`)
+
+`ci/tag-guard.sh <tag> <commit>` decides what a release tag may publish. It runs in the
+tag pipeline's last step, after the step fetched `origin/main`, `origin/develop` and the tag,
+and prints the refspecs for one non-forced `git push` to the mirror:
+
+| Tag | Required | Pushed to GitHub |
+|---|---|---|
+| `v1.X.Y`, `v1.X.Y-<prerelease>` | the commit is on `origin/develop` (its tip or an ancestor) | the tag only; GitHub's `main` never moves |
+| `v0.X.Y` (the Python 0.x line) | the commit is the tip of `origin/main` | `<commit>:refs/heads/main` and the tag |
+| anything else | - | rejected (`ERROR: ...` on stderr, exit 1) |
+
+A tag pipeline runs the `bitbucket-pipelines.yml` of the tagged commit, and `main` still
+carries the Python pipeline, so the `v0.*` branch is a documented safety net, not a path
+this pipeline reaches. `app/tests/Repo/TagGuardTest.php` runs the script against throw-away
+repositories.
 
 ## The systemd security check (FLE-8)
 
@@ -174,7 +198,7 @@ artifact (`reports/SYSTEMD-SECURITY-REPORT.md`) and commits nothing.
   `ddev-fleet security check <security-check@noreply.fleet.pm>`, and only when
   the file changed. There is no `[skip ci]`: the `develop` pipeline is what
   mirrors the commit to GitHub. That cannot loop, because the `develop` push
-  pipeline does not run the live check (pinned by `tests/pytest/repo/test_ci_config.py`).
+  pipeline does not run the live check (pinned by `app/tests/Repo/PipelineConfigTest.php`).
 - It is committed **even when a host regressed**; the step then still fails. A
   host that cannot be fetched is listed as such and the other hosts are
   published.
@@ -297,17 +321,18 @@ OK before touching it.
 ## Local runs
 
 ```bash
-.venv/bin/pytest -q tests/pytest/ansible/test_systemd_sandbox.py tests/pytest/repo/test_systemd_security_ci.py \
-  tests/pytest/ansible/test_security_probe_role.py
+# Symfony app (PHP 8.4): the same gates as the pipeline
+cd app && php8.4 "$(command -v composer)" run gates
+# Pipeline, tag guard and repository hygiene tests only
+cd app && php8.4 vendor/bin/phpunit --testsuite Repo
+# Browser E2E: install once, then run (Playwright starts the app when FLEET_E2E_BASE_URL is unset)
+cd tests/playwright && npm ci && npx playwright install --only-shell chromium   # add --with-deps as root
+cd tests/playwright && env -u FLEET_E2E_BASE_URL npx playwright test
+# Infrastructure tests (Python)
+pip install -r ci/requirements-dev.txt
+pytest -q tests/pytest
 python ci/systemd_security.py offline --out /tmp/offline.json   # needs systemd-analyze
 ```
 
-`FLEET_REQUIRE_SYSTEMD_ANALYZE=1` turns "systemd-analyze missing" from a skip
-into a failure, as in the pipeline. Likewise `FLEET_REQUIRE_PGP_TOOLS=1` turns a
-missing `gpg` or `node` into a failure instead of a skip for the OpenPGP interop
-tests (`tests/pytest/secrets/test_pgp_interop.py`, `tests/pytest/web/test_secrets_ui.py`,
-`tests/pytest/secrets/test_vendored_openpgp.py`); run `node --test tests/node/*.test.mjs` for the
-browser-crypto tests. The browser E2E suite (`tests/playwright`) has no such flag: it never
-skips. Locally, install it once with `cd tests/playwright && npm ci && npx playwright install
---only-shell chromium` (add `--with-deps` or run `npx playwright install-deps chromium` with
-root for the system libraries), then run `npx playwright test` from that folder.
+`FLEET_REQUIRE_SYSTEMD_ANALYZE=1` turns "systemd-analyze missing" from a skip into a failure,
+as in the pipeline.

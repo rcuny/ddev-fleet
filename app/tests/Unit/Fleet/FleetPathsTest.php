@@ -20,7 +20,7 @@ final class FleetPathsTest extends TestCase
         self::assertSame('/srv/fleet/keys', $paths->keysDir());
         self::assertSame('/srv/fleet/keys/secret.key', $paths->secretKey());
         self::assertSame('/srv/fleet/ssh', $paths->sshDir());
-        self::assertSame('/srv/fleet/assets/osce', $paths->assetsDir('osce'));
+        self::assertSame('/srv/fleet/assets/demo', $paths->assetsDir('demo'));
         self::assertSame('/srv/fleet/instances', $paths->instancesDir());
         self::assertSame('/srv/fleet/instances/demo--main', $paths->instanceDir('demo--main'));
         self::assertSame('/srv/fleet/logs', $paths->logsDir());
