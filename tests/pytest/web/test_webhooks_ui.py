@@ -90,11 +90,16 @@ def _rows(html):
     return re.findall(r'<tr class="webhook-row">', html)
 
 
-def test_nav_links_instances_secrets_webhooks(env):
+def test_nav_links_instances_secrets_webhooks_schedules(env):
     _, _, client = env
     nav = re.search(r'<nav class="main-nav">(.*?)</nav>', client.get("/webhooks").text, re.S)
     links = re.findall(r'<a href="([^"]+)">([^<]+)</a>', nav.group(1))
-    assert links == [("/", "Instances"), ("/secrets", "Secrets"), ("/webhooks", "Webhooks")]
+    assert links == [
+        ("/", "Instances"),
+        ("/secrets", "Secrets"),
+        ("/webhooks", "Webhooks"),
+        ("/schedules", "Scheduled jobs"),
+    ]
     assert 'href="/webhooks"' in client.get("/").text
 
 

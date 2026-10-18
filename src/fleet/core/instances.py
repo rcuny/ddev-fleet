@@ -71,6 +71,7 @@ class FleetPaths:
     authelia_users: Path
     webhooks: Path
     webhook_log: Path
+    schedules: Path
 
     @classmethod
     def from_home(cls, home: Path) -> "FleetPaths":
@@ -111,6 +112,9 @@ class FleetPaths:
             # EnvironmentFile: its keys would leak into every subprocess).
             webhooks=home / "webhooks",
             webhook_log=logs_dir / "webhooks" / "jira.jsonl",
+            # Scheduled jobs' runtime state (FLE-31): state.json + history.jsonl.
+            # The definitions themselves live in fleet.yml (`schedules:`).
+            schedules=home / "schedules",
         )
 
 

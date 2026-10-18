@@ -45,3 +45,17 @@ form.secret-form { margin: 1rem 0; display: flex; gap: 0.5rem; align-items: end;
 .webhook-table td { vertical-align: top; overflow-wrap: anywhere; }
 .webhook-detail { color: #666; font-size: 0.85rem; }
 .webhook-empty { color: #666; }
+
+/* Scheduled jobs screen (FLE-31) */
+.schedule-table td, .schedule-history td { vertical-align: top; overflow-wrap: anywhere; }
+.schedule-detail { color: #666; font-size: 0.85rem; }
+.schedule-empty { color: #666; }
+.schedule-notice { border: 1px solid #ccc; padding: 0.5rem 0.8rem; }
+.schedule-notice-ok { border-color: #060; color: #060; }
+.schedule-notice-warn { border-color: #960; color: #960; }
+.schedule-notice-error { border-color: #b00; color: #b00; background: #fff0f0; }
+.schedule-state-paused, .schedule-state-disabled, .schedule-state-elsewhere { color: #666; }
+.schedule-state-active { color: #060; }
+.schedule-result-failed, .schedule-result-missed { color: #b00; }
+.schedule-result-succeeded { color: #060; }
+.schedule-result-skipped { color: #960; }

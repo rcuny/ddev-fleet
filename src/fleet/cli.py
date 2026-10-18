@@ -20,6 +20,7 @@ from fleet.core import instances as instances_mod
 from fleet.core import pgp as pgp_mod
 from fleet.core import reboot as reboot_mod
 from fleet.core import registry as registry_mod
+from fleet.core import schedules as schedules_mod
 from fleet.core import shell as shell_mod
 from fleet.core import tmux as tmux_mod
 from fleet.core.errors import FleetError
@@ -275,6 +276,29 @@ def _build_parser() -> argparse.ArgumentParser:
         help="which webhook's delivery log to show (default: jira)",
     )
 
+    schedule_parser = subparsers.add_parser(
+        "schedule", help="scheduled jobs declared in fleet.yml (FLE-31)"
+    )
+    schedule_subparsers = schedule_parser.add_subparsers(dest="schedule_command", required=True)
+    schedule_subparsers.add_parser("list", help="schedules, their state and next run")
+    schedule_run_parser = schedule_subparsers.add_parser(
+        "run", help="run a schedule's action now, in this process"
+    )
+    schedule_run_parser.add_argument("name")
+    schedule_history_parser = schedule_subparsers.add_parser("history", help="recent run outcomes")
+    schedule_history_parser.add_argument("name", nargs="?", default=None)
+    schedule_history_parser.add_argument(
+        "-n", type=int, default=20, help="entries to show (default 20)"
+    )
+    schedule_pause_parser = schedule_subparsers.add_parser(
+        "pause", help="stop firing a schedule (until resumed)"
+    )
+    schedule_pause_parser.add_argument("name")
+    schedule_resume_parser = schedule_subparsers.add_parser(
+        "resume", help="resume a paused schedule (no catch-up for the pause)"
+    )
+    schedule_resume_parser.add_argument("name")
+
     snapshot_parser = subparsers.add_parser("snapshot")
     snapshot_parser.add_argument("instance_id")
     snapshot_parser.add_argument(
@@ -393,6 +417,8 @@ def main(argv: list[str] | None = None) -> int:
             _cmd_keys(fleet_home, args)
         elif args.command == "webhook":
             _cmd_webhook(fleet_home, args)
+        elif args.command == "schedule":
+            return _cmd_schedule(fleet_home, args)
         elif args.command == "snapshot":
             _cmd_snapshot(fleet_home, args)
         elif args.command == "refresh-claude-token":
@@ -1024,6 +1050,100 @@ def _cmd_webhook(fleet_home: Path, args: argparse.Namespace) -> None:
                     ]
                 )
             )
+
+
+def _schedule_here(registry, name: str):
+    """The named schedule, which must be declared in fleet.yml AND run on this server."""
+    found = next((s for s in registry.schedules if s.name == name), None)
+    if found is None:
+        known = ", ".join(s.name for s in registry.schedules) or "none declared"
+        raise FleetError(f"unknown schedule {name!r} (known: {known})")
+    if not schedules_mod.applies_here(found, registry.domain):
+        raise FleetError(
+            f"schedule {name!r} is not on this server "
+            f"(servers: {', '.join(found.servers)}; this one is {registry.domain})"
+        )
+    return found
+
+
+def _cmd_schedule(fleet_home: Path, args: argparse.Namespace) -> int:
+    """`fleet schedule list | run | history | pause | resume` (FLE-31). The definitions live
+    in fleet.yml; state and history under `<fleet home>/schedules/`. Run it as the same user
+    as the daemon (the `fleet` wrapper does), or the state file changes owner."""
+    paths = instances_mod.FleetPaths.from_home(fleet_home)
+    registry = instances_mod.load_registry(paths)
+    store = schedules_mod.ScheduleStore(paths.schedules)
+    command = args.schedule_command
+
+    if command == "list":
+        views = schedules_mod.build_views(registry, store, None, schedules_mod.utcnow())
+        if not views:
+            print("no schedules declared in fleet.yml")
+            return 0
+        rows = [("NAME", "STATE", "CRON", "TIMEZONE", "ACTION", "NEXT RUN", "LAST RUN")]
+        for view in views:
+            sched = view.schedule
+            nxt = f"{view.next_local} ({view.next_hint})" if view.next_run else "-"
+            last = view.last_run
+            last_text = "-"
+            if last:
+                last_text = f"{last.get('ts', '-')} {last.get('result', '-')}"
+                if last.get("reason"):
+                    last_text += f" ({last['reason']})"
+            action = f"{sched.action} {sched.instance}" if sched.instance else sched.action
+            rows.append(
+                (sched.name, view.state, sched.cron, sched.timezone, action, nxt, last_text)
+            )
+        widths = [max(len(row[i]) for row in rows) for i in range(len(rows[0]) - 1)]
+        for row in rows:
+            cells = [cell.ljust(widths[i]) for i, cell in enumerate(row[:-1])]
+            print("  ".join([*cells, row[-1]]))
+        return 0
+
+    if command == "history":
+        entries = store.tail_history(args.n, args.name)
+        if not entries:
+            print("no scheduled runs recorded")
+            return 0
+        for entry in entries:
+            print(
+                "  ".join(
+                    [
+                        str(entry.get("ts", "-")),
+                        str(entry.get("schedule", "-")),
+                        str(entry.get("trigger") or "-"),
+                        str(entry.get("instance") or "-"),
+                        str(entry.get("result", "-")),
+                        str(entry.get("reason") or entry.get("job_id") or "-"),
+                    ]
+                )
+            )
+        return 0
+
+    sched = _schedule_here(registry, args.name)
+    if command == "pause":
+        store.set_paused(sched.name, True)
+        print(f"paused {sched.name}")
+        return 0
+    if command == "resume":
+        # Occurrences that fell during the pause are never caught up.
+        fired = schedules_mod.latest_occurrence(sched.cron, sched.timezone, schedules_mod.utcnow())
+        store.set_paused(sched.name, False, fired=fired, cron=sched.cron, timezone=sched.timezone)
+        print(f"resumed {sched.name}")
+        return 0
+
+    # run: in this process, output streamed to the terminal, like `fleet redeploy`.
+    def _redeploy(paths_, registry_, instance_id: str):
+        return instances_mod.redeploy(paths_, registry_, instance_id, create_tmux_session=True)
+
+    record = schedules_mod.run_blocking(
+        store, paths, registry, sched, _redeploy, trigger="manual-cli"
+    )
+    if record["result"] == "succeeded":
+        print(f"{sched.name}: succeeded")
+        return 0
+    print(f"{sched.name}: {record['result']}: {record['reason']}", file=sys.stderr)
+    return 1
 
 
 def _cmd_snapshot(fleet_home: Path, args: argparse.Namespace) -> None:
