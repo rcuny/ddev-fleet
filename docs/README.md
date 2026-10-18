@@ -22,10 +22,15 @@ Type: documentation
 | [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
 | [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the `v1.*` tag guard, the systemd security check and baseline |
 | [`RELEASING.md`](RELEASING.md) | 0.x flow valid; 1.x section added | Versioning, CHANGELOG conventions, release and hotfix procedure. The section "1.x during the port" covers `v1.*` tags on `develop`; the document is rewritten at v1.0.0 (milestone M0.04) |
-| [`README-renovate.md`](README-renovate.md) | 0.x, valid | Hands-off merge of approved Renovate PRs (the pipeline is unchanged by the port; the automatic webhook trigger returns in M0.08) |
 | [`../tests/README-tests.md`](../tests/README-tests.md) | Current | Test suites, counts and how to run them |
 | [`../CLAUDE.md`](../CLAUDE.md) | Current | Agent-facing guide: branches, namespaces, seams, commands |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Current | Contribution workflow, CI, mirror, dependency updates |
+
+## 0.x, valid (shared tooling)
+
+| Document | Status | Covers |
+|---|---|---|
+| [`README-renovate.md`](README-renovate.md) | 0.x, valid | Hands-off merge of approved Renovate PRs (the pipeline is unchanged by the port; the automatic webhook trigger returns in M0.08) |
 
 ## 0.x reference (`v0/`)
 

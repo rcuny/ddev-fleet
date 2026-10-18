@@ -173,7 +173,7 @@ final class RepoHygieneTest extends TestCase
      * Every text file under the given files/directories whose lines match any pattern.
      *
      * @param string       $base      absolute directory the roots and skip paths are relative to
-     * @param list<string> $roots     files or directories relative to $base ('' = all of it); missing ones are skipped
+     * @param list<string> $roots     files or directories relative to $base ('' = all of it); each must exist and a directory must yield a file
      * @param list<string> $patterns  PCRE patterns
      * @param list<string> $skipPaths paths relative to $base that are skipped (exact, not by name)
      *
@@ -185,10 +185,10 @@ final class RepoHygieneTest extends TestCase
         $hits = [];
         foreach ($roots as $root) {
             $absolute = '' === $root ? $base : $base.'/'.$root;
-            if (!file_exists($absolute)) {
-                continue;
-            }
+            self::assertFileExists($absolute, \sprintf('hygiene root "%s" does not exist, so it would be silently unscanned', $root));
+            $visited = 0;
             foreach ($this->files($base, $absolute, $skipPaths) as $relative) {
+                ++$visited;
                 $file = $base.'/'.$relative;
                 if (realpath($file) === $self) {
                     continue;
@@ -204,6 +204,9 @@ final class RepoHygieneTest extends TestCase
                         }
                     }
                 }
+            }
+            if (is_dir($absolute)) {
+                self::assertGreaterThan(0, $visited, \sprintf('hygiene root "%s" yielded no file to scan', $root));
             }
         }
 

@@ -106,7 +106,7 @@ curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh 
 Version-pinned (recommended for anything beyond a first try):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo FLEET_REPO_VERSION=v1.0.0 bash
+curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo FLEET_REPO_VERSION=v0.20.0 bash
 ```
 
 The installer will:

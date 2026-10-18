@@ -39,6 +39,7 @@ Bare-metal / VPS host
 ├── Authelia (systemd) — the login portal; asserts Remote-User / Remote-Groups
 ├── PHP-FPM — the Symfony app: web UI (Twig, Turbo, Stimulus) and /health
 ├── Messenger workers (systemd) — run ddev / git / docker for queued jobs
+├── Mercure hub — pushes live job output to the browser
 ├── SQLite under FLEET_HOME — fleet.sqlite (domain data), queue.sqlite (job queue)
 └── Docker (DDEV)
     ├── ddev-router (shared Traefik, loopback only)
@@ -48,7 +49,7 @@ Bare-metal / VPS host
 The web request never runs `ddev`, `git` or `docker`: it stores a job, a worker picks it up
 through the `CommandRunner` seam and the browser follows the log live (Mercure). Of this
 picture, the app, the seams, header authentication, the SQLite wiring and the shell exist
-today; Caddy, Authelia, the workers and the jobs arrive in M0.02 to M0.04.
+today; Caddy, Authelia, the Mercure hub, the workers and the jobs arrive in M0.02 to M0.04.
 
 ## Quickstart for contributors
 
