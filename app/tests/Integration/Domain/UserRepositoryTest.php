@@ -33,7 +33,7 @@ final class UserRepositoryTest extends KernelTestCase
      */
     private static function user(string $username, array $groups = [], bool $enabled = true): User
     {
-        $user = new User($username, ucfirst($username), $username.'@example.com', '$argon2id$stub', $groups);
+        $user = new User($username, ucfirst($username), $username.'@example.com', '$argon2id$v=19$m=65536,t=4,p=1$c2FsdHNhbHRzYWx0$ZGlnZXN0ZGlnZXN0ZGlnZXN0', $groups);
         $user->setEnabled($enabled);
 
         return $user;

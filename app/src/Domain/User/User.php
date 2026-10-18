@@ -57,6 +57,7 @@ class User
         string $username,
         string $displayName,
         string $email,
+        #[\SensitiveParameter]
         string $passwordHash,
         array $groups = [],
         ?\DateTimeImmutable $now = null,
@@ -64,6 +65,7 @@ class User
         if (1 !== preg_match(self::USERNAME_PATTERN, $username)) {
             throw new \InvalidArgumentException(\sprintf('Invalid username "%s".', $username));
         }
+        PasswordHash::assertArgon2id($passwordHash);
         $this->username = $username;
         $this->displayName = $displayName;
         $this->email = $email;
@@ -122,8 +124,9 @@ class User
         $this->touch();
     }
 
-    public function changePasswordHash(string $passwordHash): void
+    public function changePasswordHash(#[\SensitiveParameter] string $passwordHash): void
     {
+        PasswordHash::assertArgon2id($passwordHash);
         $this->passwordHash = $passwordHash;
         $this->touch();
     }

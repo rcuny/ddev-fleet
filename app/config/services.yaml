@@ -39,6 +39,8 @@ services:
             # The concrete runners are not autowirable on purpose: consumers type-hint CommandRunner (the seam).
             - '../src/Fleet/Shell/ProcessCommandRunner.php'
             - '../src/Fleet/Shell/RecordingCommandRunner.php'
+            # Wired through the explicit Applier alias below, never autowired by class.
+            - '../src/Fleet/System/UnavailableApplier.php'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones
@@ -48,6 +50,12 @@ services:
         arguments:
             $home: '%env(resolve:FLEET_HOME)%'
             $caddyDir: '%env(resolve:FLEET_CADDY_DIR)%'
+
+    # TASK 6 (M0.02): point this at App\Fleet\System\PrivilegedApply and delete UnavailableApplier. Until then every
+    # apply() throws, so nothing can claim to have installed config that was never installed.
+    App\Fleet\System\UnavailableApplier: ~
+    App\Fleet\System\Applier:
+        alias: App\Fleet\System\UnavailableApplier
 
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.

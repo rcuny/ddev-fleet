@@ -1,0 +1,158 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Unit\Fleet\Auth;
+
+use App\Domain\User\User;
+use App\Fleet\Auth\AutheliaUsersRenderer;
+use PHPUnit\Framework\TestCase;
+use Symfony\Component\Yaml\Yaml;
+
+final class AutheliaUsersRendererTest extends TestCase
+{
+    public const string HASH_A = '$argon2id$v=19$m=65536,t=4,p=1$c2FsdHNhbHRzYWx0$ZGlnZXN0ZGlnZXN0ZGlnZXN0';
+    public const string HASH_B = '$argon2id$v=19$m=65536,t=4,p=1$b3RoZXJzYWx0b3RoZXI$b3RoZXJkaWdlc3RvdGhlcmRpZ2VzdA';
+
+    /**
+     * @param list<string> $groups
+     */
+    private static function user(string $username, string $name = 'Alice', string $email = 'alice@example.com', array $groups = ['fleet-admins'], string $hash = self::HASH_A): User
+    {
+        return new User($username, $name, $email, $hash, $groups);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private static function parse(string $yaml): array
+    {
+        $parsed = Yaml::parse($yaml);
+        self::assertIsArray($parsed);
+
+        return $parsed;
+    }
+
+    public function testGoldenOutput(): void
+    {
+        $out = new AutheliaUsersRenderer()->render([
+            self::user('bob', 'Bob Builder', 'bob@example.com', ['dev', 'ops'], self::HASH_B),
+            self::user('alice'),
+        ]);
+
+        // Pins the dumper's real output: every key and string double-quoted, two-space indent, users sorted.
+        $expected = <<<'YAML'
+            "users":
+              "alice":
+                "disabled": false
+                "displayname": "Alice"
+                "password": "$argon2id$v=19$m=65536,t=4,p=1$c2FsdHNhbHRzYWx0$ZGlnZXN0ZGlnZXN0ZGlnZXN0"
+                "email": "alice@example.com"
+                "groups":
+                  - "fleet-admins"
+              "bob":
+                "disabled": false
+                "displayname": "Bob Builder"
+                "password": "$argon2id$v=19$m=65536,t=4,p=1$b3RoZXJzYWx0b3RoZXI$b3RoZXJkaWdlc3RvdGhlcmRpZ2VzdA"
+                "email": "bob@example.com"
+                "groups":
+                  - "dev"
+                  - "ops"
+
+            YAML;
+        self::assertSame($expected, $out);
+        self::assertSame($out, new AutheliaUsersRenderer()->render([
+            self::user('alice'),
+            self::user('bob', 'Bob Builder', 'bob@example.com', ['dev', 'ops'], self::HASH_B),
+        ]), 'input order does not matter');
+    }
+
+    public function testQuotesColonsAndApostrophes(): void
+    {
+        $name = "O'Brien: \"the\" #1 \\ {x} [y] - !z & *w | > % @ `v`";
+        $out = new AutheliaUsersRenderer()->render([self::user('alice', $name, 'a+b@example.com')]);
+
+        $parsed = self::parse($out);
+        self::assertSame($name, $parsed['users']['alice']['displayname']);
+        self::assertSame('a+b@example.com', $parsed['users']['alice']['email']);
+        self::assertSame(['users'], array_keys($parsed));
+        self::assertSame(['disabled', 'displayname', 'password', 'email', 'groups'], array_keys($parsed['users']['alice']));
+    }
+
+    public function testNewlinesInProfileCannotAddStructure(): void
+    {
+        $out = new AutheliaUsersRenderer()->render([self::user('alice', "Alice\n  evil:\n    groups: [fleet-admins]", "a@example.com\n")]);
+
+        $parsed = self::parse($out);
+        self::assertSame(['alice'], array_keys($parsed['users']));
+        self::assertSame(['fleet-admins'], $parsed['users']['alice']['groups']);
+        self::assertSame(['disabled', 'displayname', 'password', 'email', 'groups'], array_keys($parsed['users']['alice']));
+    }
+
+    public function testDisabledUser(): void
+    {
+        $user = self::user('alice');
+        $user->setEnabled(false);
+
+        $parsed = self::parse(new AutheliaUsersRenderer()->render([$user, self::user('bob')]));
+
+        self::assertTrue($parsed['users']['alice']['disabled']);
+        self::assertFalse($parsed['users']['bob']['disabled']);
+    }
+
+    public function testPlaintextNeverRendered(): void
+    {
+        $plain = 'plain-secret-passphrase';
+        $hash = password_hash($plain, \PASSWORD_ARGON2ID);
+        $out = new AutheliaUsersRenderer()->render([self::user('alice', hash: $hash)]);
+
+        self::assertStringNotContainsString($plain, $out);
+        self::assertSame($hash, self::parse($out)['users']['alice']['password']);
+        self::assertTrue(password_verify($plain, self::parse($out)['users']['alice']['password']));
+    }
+
+    public function testUsernamesThatLookLikeYamlScalarsStayStringKeys(): void
+    {
+        $names = ['123', '1e3', '1.5', 'null', 'true', 'yes', 'on', '0x1f', '007', 'a.b-c_d'];
+        $users = array_map(static fn (string $name): User => self::user($name), $names);
+
+        $out = new AutheliaUsersRenderer()->render($users);
+        $parsed = self::parse($out);
+
+        // Compare as strings: PHP turns the integer-like keys of a parsed map back into ints.
+        $keys = array_map('strval', array_keys($parsed['users']));
+        sort($keys, \SORT_STRING);
+        $expected = $names;
+        sort($expected, \SORT_STRING);
+        self::assertSame($expected, $keys);
+        // A float-like key (1.5, 1e3) must be quoted or Authelia's Go parser would read a number, not a string.
+        self::assertStringContainsString("'1.5':", $out);
+        self::assertStringContainsString("'1e3':", $out);
+    }
+
+    public function testEmptyListRendersAnEmptyUsersMap(): void
+    {
+        $out = new AutheliaUsersRenderer()->render([]);
+
+        self::assertSame(['users' => []], self::parse($out));
+    }
+
+    public function testRefusesAHashThatIsNotArgon2id(): void
+    {
+        // A User can only be built with an argon2id hash, so reach a tampered row the way the ORM does.
+        $user = new \ReflectionClass(User::class)->newInstanceWithoutConstructor();
+        foreach (['username' => 'alice', 'displayName' => 'Alice', 'email' => 'a@example.com', 'passwordHash' => 'letmein', 'groups' => [], 'enabled' => true] as $property => $value) {
+            new \ReflectionProperty(User::class, $property)->setValue($user, $value);
+        }
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessageMatches('/^((?!letmein).)*$/s');
+        new AutheliaUsersRenderer()->render([$user]);
+    }
+
+    public function testRefusesDuplicateUsernames(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        new AutheliaUsersRenderer()->render([self::user('alice'), self::user('alice')]);
+    }
+}
