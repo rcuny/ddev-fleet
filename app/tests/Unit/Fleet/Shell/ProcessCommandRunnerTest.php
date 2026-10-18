@@ -56,6 +56,60 @@ final class ProcessCommandRunnerTest extends TestCase
         }
     }
 
+    public function testAppSecretsAreNotInheritedByChildren(): void
+    {
+        $secrets = ['APP_SECRET' => 's3cret', 'MERCURE_JWT_SECRET' => 'jwt', 'DATABASE_URL' => 'sqlite:///x', 'FLEET_HOME' => '/x', 'RANDOM_OTHER' => '1'];
+        $kept = ['DDEV_TEST_X' => 'd', 'DOCKER_TEST_X' => 'k', 'GIT_TEST_X' => 'g'];
+        $all = $secrets + $kept;
+        $previous = [];
+        foreach ($all as $name => $value) {
+            $previous[$name] = [getenv($name), $_SERVER[$name] ?? null, $_ENV[$name] ?? null];
+            putenv($name.'='.$value);
+            $_SERVER[$name] = $_ENV[$name] = $value;
+        }
+
+        try {
+            $result = new ProcessCommandRunner()->run(['env']);
+        } finally {
+            foreach ($previous as $name => [$process, $server, $env]) {
+                false === $process ? putenv($name) : putenv($name.'='.$process);
+                if (null !== $server) {
+                    $_SERVER[$name] = $server;
+                }
+                if (null !== $env) {
+                    $_ENV[$name] = $env;
+                }
+                if (null === $server) {
+                    unset($_SERVER[$name]);
+                }
+                if (null === $env) {
+                    unset($_ENV[$name]);
+                }
+            }
+        }
+
+        self::assertTrue($result->isSuccess(), $result->stderr);
+        $childEnv = [];
+        foreach (explode("\n", trim($result->stdout)) as $line) {
+            [$name, $value] = explode('=', $line, 2) + [1 => ''];
+            $childEnv[$name] = $value;
+        }
+        foreach (array_keys($secrets) as $name) {
+            self::assertArrayNotHasKey($name, $childEnv, $name.' leaked into the child');
+        }
+        foreach ($kept as $name => $value) {
+            self::assertSame($value, $childEnv[$name] ?? null, $name);
+        }
+        self::assertArrayHasKey('PATH', $childEnv);
+    }
+
+    public function testExplicitEnvOverridesThePolicy(): void
+    {
+        $result = new ProcessCommandRunner()->run(['sh', '-c', 'printf %s "$APP_SECRET"'], null, ['APP_SECRET' => 'explicit']);
+
+        self::assertSame('explicit', $result->stdout);
+    }
+
     public function testMissingBinaryGivesExit127(): void
     {
         $result = new ProcessCommandRunner()->run(['fleet-definitely-not-a-binary', '--x']);

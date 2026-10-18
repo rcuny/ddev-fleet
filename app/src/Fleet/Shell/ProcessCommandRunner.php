@@ -15,6 +15,12 @@ use Symfony\Component\Process\Process;
  */
 final class ProcessCommandRunner implements CommandRunner
 {
+    /** Inherited by every child. Everything else in the app's environment (APP_SECRET, DATABASE_URL, ...) is not. */
+    private const array INHERITED_NAMES = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'USER', 'SSH_AUTH_SOCK'];
+
+    /** Inherited by every child: the tools the runner exists to drive read their configuration from these. */
+    private const array INHERITED_PREFIXES = ['DDEV_', 'DOCKER_', 'GIT_'];
+
     public function run(
         array $argv,
         ?string $cwd = null,
@@ -27,7 +33,7 @@ final class ProcessCommandRunner implements CommandRunner
             throw new CommandRunnerException(\sprintf('Working directory "%s" does not exist.', $cwd));
         }
 
-        $process = new Process($argv, $cwd, $env ?: null, null, $timeout);
+        $process = new Process($argv, $cwd, $this->childEnvironment($env), null, $timeout);
         $started = microtime(true);
         $callback = null === $onOutput
             ? null
@@ -64,6 +70,42 @@ final class ProcessCommandRunner implements CommandRunner
             $process->getErrorOutput(),
             microtime(true) - $started,
         );
+    }
+
+    /**
+     * The child gets the allow-listed part of the app's environment plus the caller's $env; Symfony's Process
+     * would otherwise copy everything, so every other inherited variable is explicitly removed (false).
+     *
+     * @param array<string, string> $extra
+     *
+     * @return array<string, string|false>
+     */
+    private function childEnvironment(array $extra): array
+    {
+        $names = array_merge(array_keys(getenv()), array_keys($_ENV), array_keys($_SERVER));
+        $env = [];
+        foreach ($names as $name) {
+            $name = (string) $name;
+            if (!self::isInherited($name)) {
+                $env[$name] = false;
+            }
+        }
+
+        return $extra + $env;
+    }
+
+    private static function isInherited(string $name): bool
+    {
+        if (\in_array($name, self::INHERITED_NAMES, true)) {
+            return true;
+        }
+        foreach (self::INHERITED_PREFIXES as $prefix) {
+            if (str_starts_with($name, $prefix)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
