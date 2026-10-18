@@ -87,9 +87,13 @@ final readonly class FleetPaths
         return $this->home.'/logs';
     }
 
+    /**
+     * Job logs: `logs/jobs/<job>.log` for fleet-level jobs, `logs/instances/<instance>/<job>.log` for jobs that
+     * belong to an instance. The two fixed directory names cannot collide with an instance id.
+     */
     public function jobLog(string $jobId, ?string $instanceId = null): string
     {
-        $dir = null === $instanceId ? 'jobs' : self::id($instanceId, 'instance');
+        $dir = null === $instanceId ? 'jobs' : 'instances/'.self::id($instanceId, 'instance');
 
         return $this->logsDir().'/'.$dir.'/'.self::id($jobId, 'job').'.log';
     }
@@ -106,16 +110,19 @@ final readonly class FleetPaths
     {
         // dir => [mode, repair]: `repair` directories (state and secrets) get their mode corrected
         // even when they already exist; the others are only chmod'ed when created here.
+        // Everything that may hold secrets (DB dumps, injected .env files, job logs that echo them) is 0750 or
+        // tighter. Which user and group own the tree is decided in M0.02 (php-fpm and the worker must both write).
         $dirs = [
-            $this->home => [0o755, false],
+            $this->home => [0o750, false],
             $this->varDir() => [0o750, true],
             $this->keysDir() => [0o700, true],
             $this->sshDir() => [0o700, true],
             $this->locksDir() => [0o755, false],
-            $this->logsDir() => [0o755, false],
-            $this->logsDir().'/jobs' => [0o755, false],
-            $this->home.'/assets' => [0o755, false],
-            $this->instancesDir() => [0o755, false],
+            $this->logsDir() => [0o750, true],
+            $this->logsDir().'/jobs' => [0o750, true],
+            $this->logsDir().'/instances' => [0o750, true],
+            $this->home.'/assets' => [0o750, true],
+            $this->instancesDir() => [0o750, true],
         ];
 
         foreach ($dirs as $dir => [$mode, $repair]) {

@@ -25,7 +25,7 @@ final class FleetPathsTest extends TestCase
         self::assertSame('/srv/fleet/instances/demo--main', $paths->instanceDir('demo--main'));
         self::assertSame('/srv/fleet/logs', $paths->logsDir());
         self::assertSame('/srv/fleet/logs/jobs/42.log', $paths->jobLog('42'));
-        self::assertSame('/srv/fleet/logs/demo--main/42.log', $paths->jobLog('42', 'demo--main'));
+        self::assertSame('/srv/fleet/logs/instances/demo--main/42.log', $paths->jobLog('42', 'demo--main'));
         self::assertSame('/srv/fleet/locks', $paths->locksDir());
     }
 
@@ -86,16 +86,18 @@ final class FleetPathsTest extends TestCase
             $paths->ensureLayout();
 
             clearstatcache();
-            foreach (['var' => 0o750, 'keys' => 0o700, 'ssh' => 0o700] as $dir => $mode) {
+            self::assertSame(0o750, fileperms($home) & 0o777, 'home');
+            $modes = [
+                'var' => 0o750, 'keys' => 0o700, 'ssh' => 0o700, 'assets' => 0o750, 'instances' => 0o750,
+                'logs' => 0o750, 'logs/jobs' => 0o750, 'logs/instances' => 0o750, 'locks' => 0o755,
+            ];
+            foreach ($modes as $dir => $mode) {
                 self::assertDirectoryExists($home.'/'.$dir);
                 self::assertSame($mode, fileperms($home.'/'.$dir) & 0o777, $dir);
             }
-            foreach (['locks', 'logs', 'logs/jobs', 'assets', 'instances'] as $dir) {
-                self::assertDirectoryExists($home.'/'.$dir);
-            }
         } finally {
             umask($previous);
-            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs', 'assets', 'instances'] as $dir) {
+            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs/instances', 'logs', 'assets', 'instances'] as $dir) {
                 @rmdir($home.'/'.$dir);
             }
             @rmdir($home);
@@ -113,9 +115,11 @@ final class FleetPathsTest extends TestCase
             clearstatcache();
             self::assertSame(0o750, fileperms($home.'/var') & 0o777);
             self::assertSame(0o700, fileperms($home.'/keys') & 0o777);
+            self::assertSame(0o750, fileperms($home) & 0o777);
+            self::assertSame(0o750, fileperms($home.'/logs') & 0o777);
         } finally {
             umask($previous);
-            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs', 'assets', 'instances'] as $dir) {
+            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs/instances', 'logs', 'assets', 'instances'] as $dir) {
                 @rmdir($home.'/'.$dir);
             }
             @rmdir($home);
@@ -128,7 +132,7 @@ final class FleetPathsTest extends TestCase
         $previous = umask(0o000);
 
         try {
-            foreach (['keys', 'ssh', 'var'] as $dir) {
+            foreach (['keys', 'ssh', 'var', 'assets', 'instances', 'logs'] as $dir) {
                 mkdir($home.'/'.$dir, 0o755, true);
             }
 
@@ -138,12 +142,25 @@ final class FleetPathsTest extends TestCase
             self::assertSame(0o700, fileperms($home.'/keys') & 0o777);
             self::assertSame(0o700, fileperms($home.'/ssh') & 0o777);
             self::assertSame(0o750, fileperms($home.'/var') & 0o777);
+            foreach (['assets', 'instances', 'logs'] as $dir) {
+                self::assertSame(0o750, fileperms($home.'/'.$dir) & 0o777, $dir);
+            }
         } finally {
             umask($previous);
-            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs', 'assets', 'instances'] as $dir) {
+            foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs/instances', 'logs', 'assets', 'instances'] as $dir) {
                 @rmdir($home.'/'.$dir);
             }
             @rmdir($home);
         }
+    }
+
+    public function testInstanceLogsCannotCollideWithTheJobLogDirectory(): void
+    {
+        $paths = new FleetPaths('/srv/fleet');
+
+        // An instance literally named "jobs" or "instances" stays under logs/instances/.
+        self::assertSame('/srv/fleet/logs/instances/jobs/1.log', $paths->jobLog('1', 'jobs'));
+        self::assertSame('/srv/fleet/logs/instances/instances/1.log', $paths->jobLog('1', 'instances'));
+        self::assertSame('/srv/fleet/logs/jobs/1.log', $paths->jobLog('1'));
     }
 }
