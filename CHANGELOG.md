@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Production safety for the Symfony app: a `prod` kernel refuses to boot with an empty `APP_SECRET` or `FLEET_RUNNER=recording`; the committed `.env` stand-in role is `none`; host commands run with an allow-listed environment (no `APP_SECRET`, `DATABASE_URL`, ...); a repo test keeps process execution inside `ProcessCommandRunner`; `composer run prod-check` (also a CI step) builds and probes the production path in a throw-away copy.
 - A public `GET /health` endpoint (fleet database, queue database, writable `FLEET_HOME`).
 - The design system and responsive app shell: design tokens with dark mode, the UX Toolkit shadcn kit, reusable Twig components, sidebar and phone bottom navigation, and a reference page at `/admin/design-system`.
-- A Playwright suite (36 specs at 1280 px and 390 px: app shell, navigation, dark mode, accessibility with axe in both themes, design-system page) and the PHPUnit suites (`Unit`, `Integration`, `Functional`, `Repo`).
+- A Playwright suite (38 specs at 1280 px and 390 px: app shell, navigation, dark mode, accessibility with axe in both themes, design-system page) and the PHPUnit suites (`Unit`, `Integration`, `Functional`, `Repo`).
 
 ## [0.20.0] - 2026-10-18
 

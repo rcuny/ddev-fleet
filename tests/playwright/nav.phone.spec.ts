@@ -76,8 +76,11 @@ test.describe('phone navigation (390 px)', () => {
     await page.goto('/');
     await bottomNav(page).getByRole('button', { name: 'More' }).click();
     await expect(moreSheet(page)).toBeVisible();
+    // Open before the rotation: otherwise the hidden checks below would be vacuous.
+    await expect(page.locator('#sheet-more')).toBeVisible();
 
     await page.setViewportSize({ width: 844, height: 390 });
+    await expect(page.locator('#sheet-more')).toBeHidden();
 
     // At md and up the sidebar replaces the bottom bar; the modal sheet must not keep the page inert.
     await page.getByRole('navigation', { name: 'Main' }).getByRole('link', { name: 'Instances' }).click();

@@ -16,14 +16,14 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 
 | Suite | Where | Count |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 101 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 22 tests |
+| PHPUnit `Unit` | `app/tests/Unit/` | 114 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 25 tests |
 | PHPUnit `Functional` | `app/tests/Functional/` | 70 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 52 tests |
-| Playwright | `tests/playwright/` | 36 (6 spec files; each spec runs on the `desktop` and the `phone` project where it applies) |
+| PHPUnit `Repo` | `app/tests/Repo/` | 63 tests |
+| Playwright | `tests/playwright/` | 38 (6 spec files; each spec runs on the `desktop` and the `phone` project where it applies) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 245 tests. Update this table when the numbers change.
+PHPUnit totals 272 tests. Update this table when the numbers change.
 
 ## Layout
 

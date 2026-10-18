@@ -9,6 +9,7 @@ use App\Security\StandIn\StandInAuthenticator;
 use App\Security\StandIn\StandInController;
 use App\Security\StandIn\StandInSettings;
 use App\Tests\Support\TempFleetHome;
+use App\Ui\ProfilerToolbarSwitch;
 use Monolog\Handler\StreamHandler;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\DependencyInjection\Compiler\CompilerPassInterface;
@@ -141,7 +142,7 @@ final class ProdKernelSecurityTest extends TestCase
         $this->kernel->boot();
         $container = $this->kernel->getContainer();
 
-        foreach ([StandInAuthenticator::class, StandInController::class, StandInSettings::class] as $class) {
+        foreach ([StandInAuthenticator::class, StandInController::class, StandInSettings::class, ProfilerToolbarSwitch::class] as $class) {
             self::assertFalse($container->has($class), $class);
         }
 
@@ -153,11 +154,14 @@ final class ProdKernelSecurityTest extends TestCase
             if (!$file->isFile() || 'removed-ids.php' === $file->getFilename() || str_contains($file->getFilename(), '.meta')) {
                 continue;
             }
-            if (str_contains((string) file_get_contents($file->getPathname()), 'StandIn')) {
-                $offenders[] = substr($file->getPathname(), \strlen($this->cacheDir));
+            $contents = (string) file_get_contents($file->getPathname());
+            foreach (['StandIn', 'ProfilerToolbarSwitch'] as $needle) {
+                if (str_contains($contents, $needle)) {
+                    $offenders[] = substr($file->getPathname(), \strlen($this->cacheDir)).' mentions '.$needle;
+                }
             }
         }
-        self::assertSame([], $offenders, 'the prod container must not reference the stand-in');
+        self::assertSame([], $offenders, 'the prod container must not reference the stand-in or the profiler toolbar switch');
     }
 
     public function testTheSwitchRouteDoesNotExist(): void
