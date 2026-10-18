@@ -1,6 +1,9 @@
 doctrine:
     dbal:
         default_connection: default
+        types:
+            # UTC wall-clock datetimes: SQLite has no timezone-aware column (see the class comment).
+            utc_datetime_immutable: App\Doctrine\UtcDateTimeImmutableType
         connections:
             # Domain data (projects, instances, jobs, audit ...): FLEET_HOME/var/fleet.sqlite
             default:
