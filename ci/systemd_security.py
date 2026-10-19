@@ -94,6 +94,9 @@ STANDALONE_UNITS = (
     ("fleet-boot.service", "fleet_service", "fleet-boot.service.j2"),
     ("fleet-reboot-notify.service", "security_hardening", "fleet-reboot-notify.service.j2"),
 )
+# fleet-tmux.service and fleet-mercure.service (plain files under install/etc) are deliberately NOT here: the offline sets
+# must score <= 2.5 and they do not (tmux owns operator shells, so it is unsandboxed on purpose). Their measured scores are
+# recorded under "install_units" in systemd-security-baseline.json and checked by tests/pytest/repo/test_systemd_security_ci.py.
 CADDY_DROPIN = ("caddy", "caddy-sandbox.conf.j2")
 CADDY_DROPIN_PATH = Path("caddy.service.d") / "50-fleet-sandbox.conf"
 
