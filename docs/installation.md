@@ -99,6 +99,7 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | user `fleet` | home `/home/fleet`, group `docker` | Runs php-fpm, the workers, DDEV and the CLI. |
 | `/opt/ddev-fleet` | `fleet:fleet` 0755 | The git checkout of the product. Stays `fleet`-owned. |
 | `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/` (0750; `fleet.sqlite` and `queue.sqlite`, 0644 inside it), `locks/`, `logs/`, `assets/`, `instances/` (0750). |
+| `/srv/fleet/backups` | `fleet:fleet` 0700 | Database backups written by `fleet-backup.timer` (files 0600; see "Backup and restore" in section 5). |
 | `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
 | `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
 | `/srv/fleet/staging` | `fleet:fleet` 0700 | Rendered configuration waiting for the root helper (`caddy/`, `authelia/`). Empty at rest: it is filled only for the moment before an `apply`, and emptied after every apply, every failed install step and every plain `fleet:host:render`, because the staged Caddy environment file holds the OVH credentials in clear text. Leave it out of backups. |
@@ -125,6 +126,7 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
 | `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
 | `fleet-worker@1` | | One Messenger worker (`messenger:consume jobs`). More can be enabled as `fleet-worker@2` and so on. |
+| `fleet-backup.timer` | | Starts `fleet-backup.service` (a oneshot running `fleet:backup:create`) once a day, at a random time within an hour of midnight. `Persistent`: a backup missed while the host was off runs at the next boot. See "Backup and restore" in section 5. |
 | `fleet-mercure` | `127.0.0.1:3000` | A standalone Mercure hub (version 1.1.2, legacy protocol mode as `symfony/mercure-bundle` mints). Caddy proxies `/.well-known/mercure` to it. Subscribers need a JWT: an anonymous request to the hub answers 401. |
 | `docker`, DDEV | router on 8080 and 8443 (once an instance runs) | The installer configures the router ports but starts no project, so nothing listens on 8080/8443 until the first instance exists (a later milestone). It does not set `router_bind_all_interfaces`, so DDEV keeps its default (loopback only). |
 
@@ -238,9 +240,65 @@ The remaining commands exist mostly for the installer:
 |---|---|
 | `fleet:host:init --domain=<fqdn> [--acme-email=] [--tls-mode=http01\|ovh_dns] [--force]` | Create the state directories, the secret key and the host settings. Idempotent. Changing the domain or the TLS mode after setup needs `--force`. |
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
+| `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
 | `fleet:setup:token` | Mint a setup token and print the URL. |
 | `fleet:setup:reset [--yes]` | See above. |
 | `fleet:user:reset-password <username> [--no-apply]` | See above. |
+
+### Host settings page
+
+Administrators find the host's own settings under **Settings** (`/admin/host`), in five tabs (a select with a Go button on a phone):
+
+| Tab | What you can do |
+|---|---|
+| General | See the domain and TLS mode (read-only; the page names the commands that change them) and edit the ACME contact e-mail. After saving, apply it to Caddy with `sudo fleet host:render --apply`. |
+| Git identity | The default author name and e-mail of the commits the fleet makes in instances. Both or neither; the name has no control characters, `<` or `>` and at most 100 characters. |
+| Claude token | Store or replace the Claude Code token (the same secret the setup wizard writes). It is write-only: the page shows only "Set" or "Not set" and when it was last written. |
+| Notifications | The SMTP relay (host, port, user, password), sender and recipient for the host's e-mails. The password is stored encrypted, write-only, and can be removed with a checkbox. Nothing sends mail yet, and there is no test-mail button. |
+| Backups | The database backups (see below): list and download them, "Back up now", and the retention in days (1 to 3650). |
+
+A **reboot notice** appears at the top of every page for administrators when Debian has left `/run/reboot-required`
+(the packages that asked for it, from `/run/reboot-required.pkgs`, are listed). The fleet never reboots the host by itself.
+
+### Backup and restore
+
+**What is backed up.** `fleet-backup.timer` runs `fleet:backup:create` once a day. It writes a consistent snapshot
+(SQLite `VACUUM INTO`, taken while the app keeps running, checked with `PRAGMA quick_check` and renamed into place
+atomically) of the two databases into `/srv/fleet/backups/` (directory 0700, files 0600, owned by `fleet`):
+
+| File | Holds |
+|---|---|
+| `fleet-YYYYmmdd-HHMMSS.sqlite` | The fleet database: host settings, users (argon2id hashes), SSH key metadata and the encrypted secrets. The one you restore. |
+| `queue-YYYYmmdd-HHMMSS.sqlite` | The Messenger queue (pending and failed jobs). Only transient work; you rarely want it back. |
+
+The timestamp is UTC. **`/srv/fleet/keys/secret.key` is not part of a backup**, and the encrypted secrets cannot be
+read without it: copy it somewhere safe once (and again if it ever changes), apart from the backups. Instances,
+assets and the SSH keys under `/srv/fleet/ssh` are not backed up either.
+
+**Retention.** Backups older than the retention (14 days by default; `backupRetentionDays` in the host settings)
+are deleted after every run, except that the newest backup of each kind is always kept. The backups live on the
+same disk as the databases: copy `/srv/fleet/backups` to another machine (`rsync`, `restic`, ...) for a real
+disaster recovery.
+
+**Back up now.** The Backups tab of the host settings page (`/admin/host?tab=backups`) lists the fleet database backups,
+downloads one (an attachment, never cached) and has a "Back up now" button. On the host, `sudo fleet backup:create` prints the name of the new file (it is short for
+`fleet fleet:backup:create`); a failure exits non-zero. `systemctl list-timers fleet-backup.timer` shows the next
+run and `journalctl -u fleet-backup.service` the last ones.
+
+**Restore.** Stop everything that writes to the database, put the file back and start again. Replace
+`fleet-20261019-083015.sqlite` with the backup you chose:
+
+```bash
+sudo systemctl stop php8.4-fpm 'fleet-worker@*'
+sudo rm -f /srv/fleet/var/fleet.sqlite-wal /srv/fleet/var/fleet.sqlite-shm      # leftovers of the old database
+sudo install -m 0600 -o fleet -g fleet /srv/fleet/backups/fleet-20261019-083015.sqlite /srv/fleet/var/fleet.sqlite
+sudo systemctl start php8.4-fpm fleet-worker@1
+sudo fleet doctrine:migrations:migrate -n                                       # only if the backup is from an older version
+```
+
+Check `https://<domain>/health`. If `keys/secret.key` was lost, the restored secrets cannot be decrypted: set the
+OVH credentials and the Claude token again. To restore the queue as well, copy `queue-<same stamp>.sqlite` to
+`/srv/fleet/var/queue.sqlite` the same way (and remove its `-wal` and `-shm` files); otherwise leave the current one.
 
 ## 6. Upgrading and re-running
 

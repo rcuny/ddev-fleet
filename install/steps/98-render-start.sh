@@ -110,6 +110,8 @@ step_main() {
     run systemctl start fleet-worker@1
   fi
   run systemctl restart caddy
+  # The daily backup timer (the units are written by step 95). enable --now is a no-op when it already runs.
+  run systemctl enable --now fleet-backup.timer
 
   wait_until_healthy
 

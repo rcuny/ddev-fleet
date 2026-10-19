@@ -1,0 +1,20 @@
+{# The "reboot required" banner of the app shell (App\Fleet\Host\RebootSignal); administrators only, nothing when no reboot is pending. #}
+{% set notice = this.notice %}
+{% if notice is not null %}
+    <twig:Alert {{ ...attributes.defaults({'data-testid': 'reboot-banner', class: 'mb-6 border-transparent bg-signal-faded text-signal-darker dark:text-signal'}) }}>
+        <twig:ux:icon name="lucide:triangle-alert" />
+        <twig:Alert:Title>This host needs a reboot</twig:Alert:Title>
+        <twig:Alert:Description class="text-ink-body">
+            <p>Updated system packages are waiting for a restart to take effect. The fleet never reboots the host by itself: reboot it from a shell at a quiet moment, because the running instances stop with it.</p>
+            {% if notice.packages is not empty %}
+                <p class="mt-2">Packages that asked for it:</p>
+                <ul class="mt-1 flex list-none flex-wrap gap-x-3 gap-y-1 p-0" data-testid="reboot-packages">
+                    {% for package in notice.packages %}
+                        <li class="min-w-0 text-sm break-all">{{ package }}</li>
+                    {% endfor %}
+                    {% if notice.truncated %}<li class="text-sm">and more</li>{% endif %}
+                </ul>
+            {% endif %}
+        </twig:Alert:Description>
+    </twig:Alert>
+{% endif %}
