@@ -10,9 +10,4 @@ final class NoInstanceGuard implements ProjectInstanceGuard
     {
         return [];
     }
-
-    public function instanceCount(Project $project): int
-    {
-        return 0;
-    }
 }

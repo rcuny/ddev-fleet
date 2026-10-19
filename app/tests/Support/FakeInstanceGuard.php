@@ -29,9 +29,4 @@ final class FakeInstanceGuard implements ProjectInstanceGuard
 
         return $ids;
     }
-
-    public function instanceCount(Project $project): int
-    {
-        return \count($this->instanceIds($project));
-    }
 }

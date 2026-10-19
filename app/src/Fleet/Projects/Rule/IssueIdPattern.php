@@ -160,6 +160,9 @@ final class IssueIdPattern
             $c = $pattern[$i];
             if ('\\' === $c) {
                 $next = $pattern[$i + 1] ?? '';
+                if ('Q' === $next || 'E' === $next) {
+                    return 'literal quoting (\\Q...\\E) is not allowed in the pattern';
+                }
                 if ('g' === $next || 'k' === $next || ($next >= '1' && $next <= '9')) {
                     return 'backreferences are not allowed in the pattern';
                 }

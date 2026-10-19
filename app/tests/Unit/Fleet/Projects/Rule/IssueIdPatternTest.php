@@ -35,6 +35,9 @@ final class IssueIdPatternTest extends TestCase
     {
         $cases = [
             '(a+)+$',
+            '\\Q(a+)+\\E$',
+            '\\Qabc',
+            'a\\E',
             '(.*)*x',
             '(a|aa)+$',
             '(\d+)*-',

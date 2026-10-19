@@ -25,6 +25,9 @@ final class GitUrlTest extends TestCase
             'git@git.example.com:/srv/git/blog.git',
             'https://git.example.com/team/blog%2Bx.git',
             'ssh://deploy_1@git.example.com/~acme/blog',
+            'https://gitlab.com/group/subgroup/project.git',
+            'https://dev.azure.com/org/project/_git/repo',
+            'ssh://git@bitbucket.example.com:7999/proj/repo.git',
         ] as $url) {
             yield $url => [$url];
         }
@@ -35,6 +38,8 @@ final class GitUrlTest extends TestCase
     {
         $cases = [
             'http://example.com/a.git',
+            'https:/example.com/a.git',
+            'ssh:/example.com/a.git',
             'git://example.com/a.git',
             'file:///srv/a',
             '/srv/a',

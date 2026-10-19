@@ -21,7 +21,7 @@ final class BranchNameTest extends TestCase
     /** @return iterable<string, array{mixed}> */
     public static function rejected(): iterable
     {
-        foreach (['-x', 'a..b', 'a//b', 'a/', 'a.', 'a.lock', 'a/b.lock', 'a.lock/b', 'a b', 'a@{1}', '.hidden', 'a/.b', '', str_repeat('a', 201), "main\n", "ma\0in", 'a~1', 'a^', 'a:b', 'a\\b', 'a?b', 'a*b', 'a[b', 'é', 5, null] as $i => $branch) {
+        foreach (['-x', 'a..b', 'a//b', 'a/', 'a.', 'a.lock', 'a/b.lock', 'a.lock/b', 'a b', 'a@{1}', '.hidden', 'a/.b', '', str_repeat('a', 201), "main\n", "ma\0in", 'HEAD', 'refs/heads/x', 'a~1', 'a^', 'a:b', 'a\\b', 'a?b', 'a*b', 'a[b', 'é', 5, null] as $i => $branch) {
             yield '#'.$i.' '.(\is_string($branch) ? addcslashes(substr($branch, 0, 20), "\0..\37") : get_debug_type($branch)) => [$branch];
         }
     }

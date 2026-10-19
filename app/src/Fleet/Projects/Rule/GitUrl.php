@@ -95,6 +95,10 @@ final class GitUrl
         }
         $authority = substr($url, 0, $colon);
         $path = substr($url, $colon + 1);
+        // `https:/host/x` (a mistyped scheme) would otherwise read as host "https"
+        if (\in_array(strtolower($authority), ['http', 'https', 'ssh', 'git', 'file', 'ftp', 'ext'], true)) {
+            return 'Only https://, ssh:// and scp-like (git@host:path) URLs are accepted.';
+        }
         $parts = explode('@', $authority);
         if (\count($parts) > 2) {
             return 'The URL is not valid.';
