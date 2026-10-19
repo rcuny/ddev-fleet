@@ -9,6 +9,9 @@
 parameters:
     # Symfony profiler toolbar in dev (see App\Ui\ProfilerToolbarSwitch); the Playwright suite sets 0 so it cannot cover the phone bottom bar.
     env(FLEET_PROFILER_TOOLBAR): '1'
+    # Finished jobs and their logs are deleted after this many days (fleet:job:prune, and the status watcher once a day).
+    env(FLEET_JOB_RETENTION_DAYS): '90'
+    fleet.job_retention_days: '%env(int:FLEET_JOB_RETENTION_DAYS)%'
     # Authorisation: members of this group get ROLE_ADMIN; everyone else authenticated is ROLE_MEMBER.
     fleet.admin_group: '%env(FLEET_ADMIN_GROUP)%'
     # Peers (IPs/CIDRs) allowed to assert identity headers.
