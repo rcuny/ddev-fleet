@@ -5,6 +5,9 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Command\Port;
 
 use App\Domain\Port\NamedPortRepository;
+use App\Fleet\PortMirror\TraefikDirectory;
+use App\Fleet\Shell\RecordingCommandRunner;
+use App\Tests\Support\FakeLiveEntrypoints;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RunsFleetCommands;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -129,11 +132,106 @@ final class PortCommandsTest extends KernelTestCase
     {
         $json = $this->cli('fleet:port:refresh', ['--json' => true]);
         self::assertSame(0, $json->getStatusCode(), $json->getErrorOutput());
-        self::assertSame(['rewritten' => 0, 'failed' => []], $this->json($json));
+        $document = $this->json($json);
+        self::assertSame(0, $document['rewritten']);
+        self::assertSame([], $document['failed']);
+        // No ~/.ddev/traefik in the test home: nothing to mirror, so nothing pending.
+        self::assertSame('live', $document['mirror']['state']);
+        self::assertSame([], $document['mirror']['mirrored']);
+        self::assertStringContainsString('does not exist', $document['mirror']['skipped'][0]);
 
         $human = $this->cli('fleet:port:refresh');
         self::assertSame(0, $human->getStatusCode());
         self::assertStringContainsString('0 Caddy site(s) rewritten.', $human->getDisplay());
+        self::assertStringContainsString('router mirror: live', $human->getDisplay());
+    }
+
+    private function traefik(): TraefikDirectory
+    {
+        $traefik = self::getContainer()->get(TraefikDirectory::class);
+        self::assertInstanceOf(TraefikDirectory::class, $traefik);
+        mkdir($traefik->dir(), 0o755, true);
+
+        return $traefik;
+    }
+
+    private function live(): FakeLiveEntrypoints
+    {
+        $live = self::getContainer()->get(FakeLiveEntrypoints::class);
+        self::assertInstanceOf(FakeLiveEntrypoints::class, $live);
+
+        return $live;
+    }
+
+    public function testRefreshWritesTheMirrorFilesClearsTheMarkerAndReportsPendingOrLive(): void
+    {
+        $traefik = $this->traefik();
+        file_put_contents($traefik->markerFile(), "9108\n");
+        $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9108', '--router' => '8108']);
+        $this->cli('fleet:port:create', ['name' => 'mail', '--public' => '8025', '--router' => '18025']);
+
+        $pending = $this->cli('fleet:port:refresh', ['--json' => true]);
+
+        self::assertSame(0, $pending->getStatusCode(), $pending->getErrorOutput());
+        $document = $this->json($pending);
+        self::assertSame('pending', $document['mirror']['state'], 'the router is not up: never restarted from here');
+        self::assertSame([9108], $document['mirror']['mirrored']);
+        self::assertCount(1, $document['mirror']['skipped']);
+        self::assertStringContainsString('port "mail" (public 8025) not mirrored', $document['mirror']['skipped'][0]);
+        self::assertFileExists($traefik->staticFile());
+        self::assertFileDoesNotExist($traefik->markerFile(), 'port:refresh is the explicit retry');
+
+        $this->live()->script(['http-80', 'fleet-mirror-9108']);
+        $human = $this->cli('fleet:port:refresh');
+        self::assertSame(0, $human->getStatusCode());
+        self::assertStringContainsString('router mirror: live', $human->getDisplay());
+        self::assertStringContainsString('port "mail" (public 8025) not mirrored', $human->getDisplay());
+        self::assertSame([], $this->recorded(), 'port:refresh never restarts the router');
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private function recorded(): array
+    {
+        $runner = self::getContainer()->get('fleet.test_alias.recording_command_runner');
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+
+        return array_map(static fn ($call): array => $call->argv, $runner->calls());
+    }
+
+    public function testMirrorShowsAndSwitchesTheSetting(): void
+    {
+        $traefik = $this->traefik();
+        $this->cli('fleet:host:init', ['--domain' => 'fleet.example.com']);
+        $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9108', '--router' => '8108']);
+        $this->cli('fleet:port:refresh');
+        self::assertFileExists($traefik->staticFile());
+
+        $shown = $this->cli('fleet:port:mirror', ['--json' => true]);
+        self::assertSame(0, $shown->getStatusCode(), $shown->getErrorOutput());
+        self::assertSame(['enabled' => true, 'mirrored' => [9108], 'skipped' => []], $this->json($shown));
+
+        $off = $this->cli('fleet:port:mirror', ['state' => 'off', '--json' => true]);
+        self::assertSame(0, $off->getStatusCode(), $off->getErrorOutput());
+        self::assertSame(['enabled' => false, 'mirrored' => [], 'skipped' => []], $this->json($off));
+        self::assertFileDoesNotExist($traefik->staticFile());
+        self::assertStringContainsString('port mirror: off', $this->cli('fleet:port:mirror')->getDisplay());
+
+        $on = $this->cli('fleet:port:mirror', ['state' => 'on', '--json' => true]);
+        self::assertSame(['enabled' => true, 'mirrored' => [9108], 'skipped' => []], $this->json($on));
+        self::assertFileExists($traefik->staticFile());
+
+        $bad = $this->cli('fleet:port:mirror', ['state' => 'maybe']);
+        self::assertSame(1, $bad->getStatusCode());
+    }
+
+    public function testMirrorSwitchOnAnUninitialisedHostIsRefused(): void
+    {
+        $refused = $this->cli('fleet:port:mirror', ['state' => 'off']);
+
+        self::assertSame(2, $refused->getStatusCode());
+        self::assertStringContainsString('not initialised', $refused->getErrorOutput());
     }
 
     public function testRefreshOfAnUnknownProjectExits3(): void

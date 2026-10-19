@@ -162,6 +162,8 @@ $ echo $?
 | `fleet port:create <name> --public=<port> --router=<port>` | Adds a port to the catalogue. |
 | `fleet port:delete <name> [--yes]` | Removes a port that no project uses. |
 | `fleet port:refresh [--project=<name>]` | Rewrites the Caddy sites of the instances so they carry their projects' ports. |
+| `fleet port:mirror [<state>]` | Shows, or with `on` or `off` switches, the in-network mirror of the named ports (the host settings' Networking tab does the same). |
+| `fleet port:firewall` | Lists the public ports to open in the host firewall (80, 443 and the ports in use) with a `ufw allow` line each; see [`networking.md`](networking.md). |
 
 **Project options** (`project:create` and `project:update`):
 
@@ -282,8 +284,8 @@ the instance. The certificate is the one of the plain host (HTTP-01 per host, or
 A site that Caddy refuses is rolled back and reported as a warning: the assignment stays saved, the other sites are
 rewritten. Fix the cause and run `fleet port:refresh [--project=<name>] [--json]`, which rewrites the sites on demand and
 prints how many (exit `2` when some failed). A public port may not be 22, 80, 443, 2019, 3000, 8080, 8443, 8765 or 9091
-(Caddy or the DDEV router already listens there). Opening the host firewall for the public port, and mirroring the port
-inside the DDEV network, are part of M0.07b.
+(Caddy or the DDEV router already listens there). `fleet port:firewall` lists the public ports to open in the host firewall; the installer does not open them. More in
+[`networking.md`](networking.md).
 
 ## Upgrading
 

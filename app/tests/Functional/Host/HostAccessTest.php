@@ -27,6 +27,8 @@ final class HostAccessTest extends HostPageTestCase
         yield 'git' => ['POST', '/admin/host/git'];
         yield 'claude' => ['POST', '/admin/host/claude'];
         yield 'notifications' => ['POST', '/admin/host/notifications'];
+        yield 'network tab' => ['GET', '/admin/host?tab=network'];
+        yield 'port mirror' => ['POST', '/admin/host/network'];
         yield 'uploads tab' => ['GET', '/admin/host?tab=uploads'];
         yield 'upload limit' => ['POST', '/admin/host/uploads'];
         yield 'backup now' => ['POST', '/admin/host/backups'];

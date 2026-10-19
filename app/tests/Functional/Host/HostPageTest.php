@@ -27,14 +27,14 @@ final class HostPageTest extends HostPageTestCase
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-general]'));
 
         $tabs = $crawler->filter('[data-testid=host-tabs] a');
-        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Uploads', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
+        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Networking', 'Uploads', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
         self::assertSame('page', $crawler->filter('[data-testid=host-tabs] a[aria-current]')->attr('aria-current'));
         // The phone version of the tabs: a native select with a Go button, no script needed.
-        self::assertCount(6, $crawler->filter('[data-testid=host-tab-select] option'));
+        self::assertCount(7, $crawler->filter('[data-testid=host-tab-select] option'));
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-select] button[type=submit]'));
         self::assertCount(0, $crawler->filter('main script'));
 
-        foreach (['git', 'claude', 'notifications', 'uploads', 'backups'] as $tab) {
+        foreach (['git', 'claude', 'notifications', 'network', 'uploads', 'backups'] as $tab) {
             $crawler = $this->open('/admin/host?tab='.$tab);
             self::assertResponseStatusCodeSame(200, $tab);
             self::assertCount(1, $crawler->filter('[data-testid=host-tab-'.$tab.']'), $tab);
@@ -211,6 +211,9 @@ final class HostPageTest extends HostPageTestCase
         self::assertResponseStatusCodeSame(422);
         $this->client->request('POST', '/admin/host/uploads', ['host_upload_limit' => ['megabytes' => '1', 'save' => '', '_token' => 'csrf-token']]);
         self::assertResponseStatusCodeSame(422);
+        $this->client->request('POST', '/admin/host/network', ['host_port_mirror' => ['save' => '', '_token' => 'csrf-token']]);
+        self::assertResponseStatusCodeSame(422);
+        self::assertTrue($this->host()->portMirror());
         $this->client->request('POST', '/admin/host/backups', ['_token' => 'csrf-token']);
         self::assertResponseStatusCodeSame(422);
         // A missing or wrong token fails the same way, even same-origin.
@@ -408,6 +411,38 @@ final class HostPageTest extends HostPageTestCase
         $this->submit('backups', 'Save', ['host_backup_retention[days]' => '3650']);
         self::assertResponseRedirects();
         self::assertSame(3650, $this->host()->backupRetentionDays());
+    }
+
+    public function testThePortMirrorSwitchRoundTripsAndSyncsTheFiles(): void
+    {
+        $crawler = $this->open('/admin/host?tab=network');
+        self::assertTrue($this->host()->portMirror(), 'on by default');
+        self::assertCount(1, $crawler->filter('input[name="host_port_mirror[enabled]"][checked]'));
+
+        // The mirror files go to the test's own "fleet user home" (never a real ~/.ddev).
+        $traefik = self::getContainer()->get(\App\Fleet\PortMirror\TraefikDirectory::class);
+        self::assertInstanceOf(\App\Fleet\PortMirror\TraefikDirectory::class, $traefik);
+        mkdir($traefik->dir(), 0o755, true);
+        file_put_contents(\dirname($traefik->dir()).'/global_config.yaml', "router_https_port: 8443\n");
+
+        $this->submit('network', 'Save', ['host_port_mirror[enabled]' => false]);
+        self::assertResponseRedirects('/admin/host?tab=network');
+        self::assertFalse($this->host()->portMirror());
+        self::assertFileDoesNotExist($traefik->staticFile());
+
+        $crawler = $this->client->followRedirect();
+        self::assertCount(1, $crawler->filter('input[name="host_port_mirror[enabled]"]'));
+        self::assertCount(0, $crawler->filter('input[name="host_port_mirror[enabled]"][checked]'));
+        self::assertStringContainsString('The mirror is off', $crawler->filter('[data-testid=host-mirror-ports]')->text());
+
+        $this->submit('network', 'Save', ['host_port_mirror[enabled]' => '1']);
+        self::assertResponseRedirects('/admin/host?tab=network');
+        self::assertTrue($this->host()->portMirror());
+        self::assertFileExists($traefik->staticFile(), 'switching on writes the :443 entry at once');
+        self::assertStringContainsString('fleet-mirror-443', (string) file_get_contents($traefik->staticFile()));
+
+        $crawler = $this->client->followRedirect();
+        self::assertStringContainsString('443', $crawler->filter('[data-testid=host-mirror-ports]')->text());
     }
 
     public function testTheUploadCapIsEditedInMebibytesAndBounded(): void

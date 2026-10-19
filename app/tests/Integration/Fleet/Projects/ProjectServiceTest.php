@@ -76,6 +76,104 @@ final class ProjectServiceTest extends KernelTestCase
         parent::tearDown();
     }
 
+    // --- typesense flag <-> `typesense` port (FLE-92)
+
+    /**
+     * @return list<string>
+     */
+    private function portNamesOf(string $project): array
+    {
+        $this->em->clear();
+        $names = array_map(static fn (NamedPort $p): string => $p->name(), ($this->projects->findByName($project) ?? self::fail())->ports());
+        sort($names);
+
+        return $names;
+    }
+
+    public function testTheFlagAssignsTheTypesensePortAndClearingItUnassigns(): void
+    {
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
+        $this->ports->save(new NamedPort('mail', 8025, 18025));
+        $this->service->create($this->valid()->with(['ports' => ['mail']]));
+
+        $this->service->update('blog', $this->valid()->with(['ports' => ['mail'], 'typesense' => true]));
+        self::assertSame(['mail', 'typesense'], $this->portNamesOf('blog'));
+        self::assertTrue(($this->projects->findByName('blog') ?? self::fail())->typesense());
+
+        $this->service->update('blog', $this->valid()->with(['ports' => ['mail', 'typesense'], 'typesense' => false]));
+        self::assertSame(['mail'], $this->portNamesOf('blog'));
+        self::assertFalse(($this->projects->findByName('blog') ?? self::fail())->typesense());
+    }
+
+    public function testAssigningOrUnassigningThePortFlipsTheFlag(): void
+    {
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
+        $this->service->create($this->valid());
+
+        $this->service->update('blog', $this->valid()->with(['ports' => ['typesense']]));
+        self::assertTrue(($this->projects->findByName('blog') ?? self::fail())->typesense());
+        self::assertSame(['typesense'], $this->portNamesOf('blog'));
+
+        $this->service->update('blog', $this->valid()->with(['ports' => [], 'typesense' => true]));
+        self::assertFalse(($this->projects->findByName('blog') ?? self::fail())->typesense());
+        self::assertSame([], $this->portNamesOf('blog'));
+    }
+
+    public function testCreateWithEitherSideSetsBoth(): void
+    {
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
+
+        $this->service->create($this->valid()->with(['typesense' => true]));
+        self::assertSame(['typesense'], $this->portNamesOf('blog'));
+
+        $this->service->create($this->valid()->with(['name' => 'shop', 'ports' => ['typesense']]));
+        self::assertTrue(($this->projects->findByName('shop') ?? self::fail())->typesense());
+    }
+
+    public function testTheFlagWithoutACataloguePortIsAFieldError(): void
+    {
+        try {
+            $this->service->create($this->valid()->with(['typesense' => true]));
+            self::fail('expected a validation error');
+        } catch (ValidationFailed $failed) {
+            self::assertSame(['typesense'], array_keys($failed->errors));
+        }
+        self::assertNull($this->projects->findByName('blog'));
+
+        $this->service->create($this->valid());
+        try {
+            $this->service->update('blog', $this->valid()->with(['typesense' => true]));
+            self::fail('expected a validation error');
+        } catch (ValidationFailed $failed) {
+            self::assertSame(['typesense'], array_keys($failed->errors));
+        }
+    }
+
+    public function testALegacyFlagWithoutTheCatalogueEntryDoesNotBlockAnUnrelatedSave(): void
+    {
+        $project = new Project('blog', self::GIT);
+        $project->changeTypesense(true);
+        $this->projects->save($project);
+
+        $this->service->update('blog', ProjectInput::fromProject($project)->with(['defaultBranch' => 'develop']));
+
+        $found = $this->projects->findByName('blog') ?? self::fail();
+        self::assertSame('develop', $found->defaultBranch());
+        self::assertTrue($found->typesense());
+    }
+
+    public function testALegacyFlagIsHealedWhenTheCatalogueHasThePort(): void
+    {
+        $project = new Project('blog', self::GIT);
+        $project->changeTypesense(true);
+        $this->projects->save($project);
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
+
+        $this->service->update('blog', ProjectInput::fromProject($project));
+
+        self::assertSame(['typesense'], $this->portNamesOf('blog'));
+    }
+
     public function testCreatePersistsNormalisedValues(): void
     {
         $this->ports->save(new NamedPort('typesense', 9108, 8108));
@@ -284,8 +382,9 @@ final class ProjectServiceTest extends KernelTestCase
 
         $found = $this->projects->findByName('blog') ?? self::fail();
         self::assertSame(['admin'], $found->additionalHostnames());
+        // The port list dropped typesense (the flag did not move), so the flag follows: flag and port are one fact.
         self::assertSame(['mail'], array_map(static fn (NamedPort $p): string => $p->name(), $found->ports()));
-        self::assertTrue($found->typesense());
+        self::assertFalse($found->typesense());
         self::assertGreaterThanOrEqual($found->createdAt(), $found->updatedAt());
     }
 
@@ -307,10 +406,11 @@ final class ProjectServiceTest extends KernelTestCase
 
     public function testFromProjectAndWithRoundTrip(): void
     {
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
         $project = $this->service->create($this->valid()->with(['defaultBranch' => 'develop', 'typesense' => true]));
 
         $input = ProjectInput::fromProject($project);
-        self::assertEquals($this->valid()->with(['defaultBranch' => 'develop', 'typesense' => true]), $input);
+        self::assertEquals($this->valid()->with(['defaultBranch' => 'develop', 'typesense' => true, 'ports' => ['typesense']]), $input);
         self::assertSame('x', $input->with(['git' => 'x'])->git);
 
         $this->expectException(\InvalidArgumentException::class);

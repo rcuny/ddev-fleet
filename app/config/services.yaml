@@ -60,6 +60,11 @@ services:
         arguments:
             $home: '%env(default::FLEET_USER_HOME)%'
 
+    # The port mirror writes into the same ~/.ddev as ddev.
+    App\Fleet\PortMirror\TraefikDirectory:
+        arguments:
+            $home: '%env(default::FLEET_USER_HOME)%'
+
     App\Fleet\Host\RebootSignal:
         arguments:
             $flagFile: '%fleet.reboot_flag_file%'
@@ -123,6 +128,12 @@ when@dev:
         fleet.reboot_flag_file: '%env(resolve:FLEET_HOME)%/test-reboot-required'
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
+    services:
+        # Never the developer's real ~/.ddev: a dev app that wrote router files there would change their DDEV router.
+        App\Fleet\PortMirror\TraefikDirectory:
+            arguments:
+                $home: '%env(resolve:FLEET_HOME)%/user-home'
+
 when@test:
     parameters:
         fleet.stand_in_enabled: true
@@ -131,6 +142,11 @@ when@test:
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
     services:
+        # Never the real ~/.ddev: the port mirror writes under the test's own FLEET_HOME.
+        App\Fleet\PortMirror\TraefikDirectory:
+            arguments:
+                $home: '%env(resolve:FLEET_HOME)%/user-home'
+
         # Public so functional tests can swap in a stub.
         App\Health\HealthChecker:
             autowire: true
@@ -152,6 +168,13 @@ when@test:
             public: true
         App\Domain\Project\ProjectInstanceGuard:
             alias: App\Tests\Support\FakeInstanceGuard
+            public: true
+
+        # The suite never talks to a router: a test scripts the live entrypoints on the fake (public to fetch it).
+        App\Tests\Support\FakeLiveEntrypoints:
+            public: true
+        App\Fleet\PortMirror\LiveEntrypoints:
+            alias: App\Tests\Support\FakeLiveEntrypoints
             public: true
 
         # The suite never touches DNS; a test that needs a resolution sets its own HostResolver.

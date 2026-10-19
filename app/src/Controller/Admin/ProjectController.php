@@ -10,6 +10,7 @@ use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Instances\InstanceSiteRefresher;
+use App\Fleet\PortMirror\PortMirrorSwitch;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
@@ -30,7 +31,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * The admin project pages: list, create, the General tab (edit), the read-only Ports tab and delete. All rules live
+ * The admin project pages: list, create, the General tab (edit), the Ports tab (assignment) and delete. All rules live
  * in ProjectService; this class maps forms to inputs and service errors to field errors. Every action is behind the
  * `^/admin` access rule and asks ProjectVoter::SETTINGS as well (defence in depth).
  *
@@ -48,6 +49,7 @@ final class ProjectController extends AbstractController
         private readonly CurrentActor $actor,
         private readonly ProjectAccessRefresher $access,
         private readonly InstanceSiteRefresher $sites,
+        private readonly PortMirrorSwitch $mirror,
     ) {
     }
 
@@ -147,18 +149,52 @@ final class ProjectController extends AbstractController
         ]);
     }
 
-    #[Route('/admin/projects/{name}/ports', name: 'project_ports', requirements: ['name' => self::NAME], methods: ['GET'])]
-    public function ports(string $name): Response
+    #[Route('/admin/projects/{name}/ports', name: 'project_ports', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
+    public function ports(Request $request, string $name): Response
     {
         $project = $this->load($name);
-
         $assigned = array_map(static fn (NamedPort $port): string => $port->name(), $project->ports());
+        $errors = [];
+        $status = Response::HTTP_OK;
+
+        if ($request->isMethod('POST')) {
+            if (!$this->isCsrfTokenValid('submit', (string) $request->request->get('_token'))) {
+                throw $this->createAccessDeniedException('Invalid CSRF token.');
+            }
+
+            $selected = [];
+            foreach ($request->request->all('ports') as $port) {
+                if (\is_string($port)) {
+                    $selected[] = $port;
+                }
+            }
+            try {
+                $this->projects->update($name, ProjectInput::fromProject($project)->with(['ports' => $selected]));
+                $after = array_map(static fn (NamedPort $port): string => $port->name(), $this->projects->get($name)->ports());
+                if ($after === $assigned) {
+                    $this->addFlash('success', 'No change: the ports were already assigned like this.');
+                } else {
+                    $this->addFlash('success', 'Ports saved.');
+                    $this->flashSitesWarning();
+                    $this->flashMirrorWarning();
+                }
+
+                return $this->redirectToRoute('project_ports', ['name' => $name], Response::HTTP_SEE_OTHER);
+            } catch (ValidationFailed $failed) {
+                $errors = array_values($failed->errors);
+                $assigned = $selected;
+                $status = Response::HTTP_UNPROCESSABLE_ENTITY;
+            } catch (NotFound) {
+                throw new NotFoundHttpException();
+            }
+        }
 
         return $this->render('admin/projects/ports.html.twig', [
             'project' => $project,
             'catalogue' => $this->ports->list(),
             'assigned' => $assigned,
-        ]);
+            'errors' => $errors,
+        ], new Response(status: $status));
     }
 
     #[Route('/admin/projects/{name}/delete', name: 'project_delete', requirements: ['name' => self::NAME], methods: ['POST'])]
@@ -202,6 +238,17 @@ final class ProjectController extends AbstractController
     private function flashSitesWarning(): void
     {
         $warning = $this->sites->takeWarning();
+        if (null !== $warning) {
+            $this->addFlash('warning', $warning);
+        }
+    }
+
+    /**
+     * The port assignment is saved and the mirror files may not have followed (PortMirrorSwitch::sync()).
+     */
+    private function flashMirrorWarning(): void
+    {
+        $warning = $this->mirror->sync();
         if (null !== $warning) {
             $this->addFlash('warning', $warning);
         }

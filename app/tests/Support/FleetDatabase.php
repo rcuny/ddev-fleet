@@ -20,12 +20,19 @@ trait FleetDatabase
 {
     use TempFleetHome;
 
-    private function setUpFleetDatabase(): EntityManagerInterface
+    /**
+     * @param bool $keepSeed keep the catalogue rows the migrations seed (the `typesense` port, FLE-92). By default the
+     *                       catalogue starts empty, so a test creates exactly the ports it needs
+     */
+    private function setUpFleetDatabase(bool $keepSeed = false): EntityManagerInterface
     {
         $this->useFreshFleetHome();
         self::bootKernel();
         self::getContainer()->get(FleetPaths::class)->ensureLayout();
         $this->console('doctrine:migrations:migrate', ['--no-interaction' => true]);
+        if (!$keepSeed) {
+            $this->entityManager()->getConnection()->executeStatement('DELETE FROM named_port');
+        }
 
         return $this->entityManager();
     }

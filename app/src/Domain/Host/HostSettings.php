@@ -58,6 +58,10 @@ class HostSettings
     #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_BACKUP_RETENTION_DAYS])]
     private int $backupRetentionDays = self::DEFAULT_BACKUP_RETENTION_DAYS;
 
+    /** Whether ddev-router mirrors the catalogue's public ports (and :443) inside the Docker network (FLE-29, FLE-32). */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => true])]
+    private bool $portMirror = true;
+
     /** Default identity for commits the fleet makes in instances (the git bot). */
     #[ORM\Column(type: Types::STRING, length: 100, nullable: true)]
     private ?string $gitUserName = null;
@@ -216,6 +220,17 @@ class HostSettings
             throw new \InvalidArgumentException(\sprintf('The backup retention must be between 1 and %d days.', self::MAX_BACKUP_RETENTION_DAYS));
         }
         $this->backupRetentionDays = $days;
+        $this->touch();
+    }
+
+    public function portMirror(): bool
+    {
+        return $this->portMirror;
+    }
+
+    public function changePortMirror(bool $enabled): void
+    {
+        $this->portMirror = $enabled;
         $this->touch();
     }
 

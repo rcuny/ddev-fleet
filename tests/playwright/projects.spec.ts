@@ -113,12 +113,13 @@ test.describe('projects and templates', () => {
         await expect(projectRow).toContainText(GIT_URL);
       });
 
-      // The ports section is read only until M0.07.
+      // The ports section lists the catalogue with a checkbox per port (project-ports.spec.ts covers assigning).
       await timed('ports tab', async () => {
         await follow(page, page.getByTestId('project-row').filter({ hasText: name }).getByRole('link'));
         await openSection(page, 'Ports');
         await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/ports$`));
-        await expect(page.getByTestId('ports-note')).toContainText('M0.07');
+        await expect(page.getByTestId('ports-note')).toBeVisible();
+        await expect(page.getByTestId('ports-note')).not.toContainText('M0.07');
       });
 
       // Make web the default template (General tab).

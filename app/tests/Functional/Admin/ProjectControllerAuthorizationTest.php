@@ -57,7 +57,7 @@ final class ProjectControllerAuthorizationTest extends AdminTestCase
             'index' => static fn (ProjectController $c): mixed => $c->index(),
             'new' => fn (ProjectController $c): mixed => $c->new($this->request('POST')),
             'edit' => fn (ProjectController $c): mixed => $c->edit($this->request('POST'), 'blog'),
-            'ports' => static fn (ProjectController $c): mixed => $c->ports('blog'),
+            'ports' => fn (ProjectController $c): mixed => $c->ports($this->request('POST'), 'blog'),
             'delete' => fn (ProjectController $c): mixed => $c->delete($this->request('POST'), 'blog'),
         ];
     }
@@ -90,6 +90,6 @@ final class ProjectControllerAuthorizationTest extends AdminTestCase
         // The list and the ports tab render; they only need the voter to say yes.
         $this->request();
         self::assertSame(200, $this->controller()->index()->getStatusCode());
-        self::assertSame(200, $this->controller()->ports('blog')->getStatusCode());
+        self::assertSame(200, $this->controller()->ports(new Request(), 'blog')->getStatusCode());
     }
 }

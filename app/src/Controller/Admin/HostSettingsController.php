@@ -15,6 +15,8 @@ use App\Fleet\Host\ClaudeTokenRule;
 use App\Fleet\Host\GitIdentityRule;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Host\NotificationMailRule;
+use App\Fleet\PortMirror\PortMirror;
+use App\Fleet\PortMirror\PortMirrorSwitch;
 use App\Fleet\Secrets\SecretConflict;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\System\ConfigValue;
@@ -25,6 +27,7 @@ use App\Form\Host\HostClaudeTokenType;
 use App\Form\Host\HostGeneralType;
 use App\Form\Host\HostGitIdentityType;
 use App\Form\Host\HostNotificationType;
+use App\Form\Host\HostPortMirrorType;
 use App\Form\Host\HostUploadLimitType;
 use App\Health\HostHealthReport;
 use Psr\Log\LoggerInterface;
@@ -39,7 +42,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * The host settings page (/admin/host, administrators only: the ^/admin access rule decides): ACME contact, git bot
- * identity, Claude token, notification e-mail, the asset upload limit and database backups, one tab each. Secrets are write-only: the page
+ * identity, Claude token, notification e-mail, the port mirror switch, the asset upload limit and database backups, one tab each. Secrets are write-only: the page
  * shows whether one is set and when it was last written, never the value, and no value reaches a flash message, a log
  * line or an exception message here.
  */
@@ -50,6 +53,7 @@ final class HostSettingsController extends AbstractController
         'git' => 'Git identity',
         'claude' => 'Claude token',
         'notifications' => 'Notifications',
+        'network' => 'Networking',
         'uploads' => 'Uploads',
         'backups' => 'Backups',
     ];
@@ -60,6 +64,8 @@ final class HostSettingsController extends AbstractController
         private readonly BackupService $backups,
         private readonly ClaudeTokenRotation $rotation,
         private readonly WorkspaceCheck $workspace,
+        private readonly PortMirror $portMirror,
+        private readonly PortMirrorSwitch $portMirrorSwitch,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -221,6 +227,28 @@ final class HostSettingsController extends AbstractController
         return $this->show('notifications', $host, $form);
     }
 
+    #[Route('/admin/host/network', name: 'settings_network', methods: ['POST'])]
+    public function network(Request $request): Response
+    {
+        if (null === $host = $this->settings->get()) {
+            return $this->notInitialised();
+        }
+        $form = $this->form('network', $host);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $warning = $this->portMirrorSwitch->set((bool) $form->get('enabled')->getData());
+            $this->addFlash('success', 'Port mirror setting saved.');
+            if (null !== $warning) {
+                $this->addFlash('error', $warning);
+            }
+
+            return $this->back('network');
+        }
+
+        return $this->show('network', $host, $form);
+    }
+
     #[Route('/admin/host/uploads', name: 'settings_uploads', methods: ['POST'])]
     public function uploads(Request $request): Response
     {
@@ -340,6 +368,7 @@ final class HostSettingsController extends AbstractController
                 'passwordStored' => $this->secrets->hasFleetWide(HostSecrets::SMTP_PASSWORD),
                 'action' => $this->generateUrl('settings_notifications'),
             ]),
+            'network' => $this->createForm(HostPortMirrorType::class, ['enabled' => $host->portMirror()], ['action' => $this->generateUrl('settings_network')]),
             'uploads' => $this->createForm(HostUploadLimitType::class, ['megabytes' => intdiv($host->assetUploadMaxBytes(), 1_048_576)], ['action' => $this->generateUrl('settings_uploads')]),
             default => $this->createForm(HostBackupRetentionType::class, ['days' => $host->backupRetentionDays()], ['action' => $this->generateUrl('settings_backup_retention')]),
         };
@@ -371,11 +400,22 @@ final class HostSettingsController extends AbstractController
             // An identity saved before the rules were tightened (FLE-59) fails its next save: say so up front.
             'gitStoredInvalid' => 'git' === $tab && null === $submitted && [] !== GitIdentityRule::violations($host->gitUserName(), $host->gitUserEmail()),
             'workspace' => $this->workspace->run()->toArray(),
+            'mirror' => 'network' === $tab ? $this->mirrorView() : null,
             'secrets' => [
                 'claude' => $this->rotation->lastRotated(),
                 'smtp' => $this->secrets->fleetWideUpdatedAt(HostSecrets::SMTP_PASSWORD),
             ],
         ], new Response('', $status));
+    }
+
+    /**
+     * @return array{ports: list<int>, skipped: list<string>}
+     */
+    private function mirrorView(): array
+    {
+        $plan = $this->portMirror->plan();
+
+        return ['ports' => $plan->publicPorts(), 'skipped' => $plan->skipped];
     }
 
     /**

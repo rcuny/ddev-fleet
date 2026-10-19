@@ -11,37 +11,49 @@
 
     <div class="mt-6 grid max-w-2xl gap-4">
         <p class="text-sm text-ink-body" data-testid="ports-note">
-            These are the named ports the host offers; the ones this project uses are marked. Assigning ports in the browser arrives with M0.07; until then use <code>fleet project:update --port</code>.
+            These are the named ports the host offers. Tick the ones this project uses: each becomes a public port on every instance of the project.
         </p>
+
+        {% if errors|length > 0 %}
+            <twig:Alert variant="destructive" data-testid="ports-errors" id="ports-errors">
+                {% for error in errors %}
+                    <p>{{ error }}</p>
+                {% endfor %}
+            </twig:Alert>
+        {% endif %}
 
         {% if catalogue|length == 0 %}
             <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="ports-empty">The host has no named ports in its catalogue yet.</p>
         {% else %}
-            <twig:Table>
-                <twig:Table:Caption class="sr-only">Named ports</twig:Table:Caption>
-                <twig:Table:Header>
-                    <twig:Table:Row>
-                        <twig:Table:Head>Name</twig:Table:Head>
-                        <twig:Table:Head>Public port</twig:Table:Head>
-                        <twig:Table:Head>Router port</twig:Table:Head>
-                        <twig:Table:Head>This project</twig:Table:Head>
-                    </twig:Table:Row>
-                </twig:Table:Header>
-                <twig:Table:Body>
-                    {% for port in catalogue %}
-                        <twig:Table:Row data-testid="port-row">
-                            <twig:Table:Cell class="font-medium">{{ port.name }}</twig:Table:Cell>
-                            <twig:Table:Cell>{{ port.publicPort }}</twig:Table:Cell>
-                            <twig:Table:Cell>{{ port.routerPort }}</twig:Table:Cell>
-                            <twig:Table:Cell>
-                                {% if port.name in assigned %}
-                                    <twig:Badge data-testid="port-assigned" class="bg-brand-faded text-brand-darker dark:text-brand">Assigned</twig:Badge>
-                                {% endif %}
-                            </twig:Table:Cell>
+            <form method="post" action="{{ path('project_ports', {name: project.name}) }}" novalidate class="grid gap-4" data-testid="ports-form">
+                {{ include('setup/_csrf.html.twig') }}
+                <twig:Table>
+                    <twig:Table:Caption class="sr-only">Named ports</twig:Table:Caption>
+                    <twig:Table:Header>
+                        <twig:Table:Row>
+                            <twig:Table:Head>Use</twig:Table:Head>
+                            <twig:Table:Head>Name</twig:Table:Head>
+                            <twig:Table:Head>Public port</twig:Table:Head>
+                            <twig:Table:Head>Router port</twig:Table:Head>
                         </twig:Table:Row>
-                    {% endfor %}
-                </twig:Table:Body>
-            </twig:Table>
+                    </twig:Table:Header>
+                    <twig:Table:Body>
+                        {% for port in catalogue %}
+                            <twig:Table:Row data-testid="port-row">
+                                <twig:Table:Cell>
+                                    <twig:Checkbox id="port-{{ port.name }}" name="ports[]" value="{{ port.name }}" :checked="port.name in assigned" aria-label="Use port {{ port.name }}" data-testid="port-checkbox" aria-invalid="{{ errors|length > 0 ? 'true' : 'false' }}" />
+                                </twig:Table:Cell>
+                                <twig:Table:Cell class="font-medium"><label for="port-{{ port.name }}">{{ port.name }}</label></twig:Table:Cell>
+                                <twig:Table:Cell>{{ port.publicPort }}</twig:Table:Cell>
+                                <twig:Table:Cell>{{ port.routerPort }}</twig:Table:Cell>
+                            </twig:Table:Row>
+                        {% endfor %}
+                    </twig:Table:Body>
+                </twig:Table>
+                <div>
+                    <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto">Save ports</twig:Button>
+                </div>
+            </form>
         {% endif %}
     </div>
 {% endblock %}
