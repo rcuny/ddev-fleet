@@ -12,6 +12,8 @@
     <div class="mt-6 grid max-w-2xl gap-8">
         {{ include('admin/projects/_form.html.twig', {form: form, create: false}) }}
 
+        <twig:IssueIdPreview :pattern="project.issueIdRegexp ?? ''" />
+
         <twig:Card data-testid="danger-zone">
             <twig:Card:Header>
                 <twig:Card:Title>Danger zone</twig:Card:Title>
