@@ -21,13 +21,19 @@ use Symfony\Component\Messenger\Stamp\DelayStamp;
  * release the lock. The lock comes before the claim, so a `running` job always has a live holder (JobReaper relies on it).
  *
  * A job whose instance is busy, or whose sequential batch has an earlier unfinished job, goes back on the queue with a
- * delay and stays `queued`; after 30 minutes it fails.
+ * delay and stays `queued`; after 30 minutes it fails. The 30 minutes count from when the job became eligible to run
+ * (JobRepository::eligibleSince): a member of a sequential batch is not failed for waiting on its predecessors, only
+ * for waiting on a busy instance once its turn has come.
  */
-final readonly class JobExecutor
+final class JobExecutor
 {
     public const int BUSY_DELAY_MS = 3000;
     public const int GATED_DELAY_MS = 5000;
     public const int GIVE_UP_SECONDS = 1800;
+    /** How deep a re-queue may nest: a `sync://` transport ignores the delay and runs the message at once. */
+    private const int MAX_REQUEUE_DEPTH = 3;
+
+    private int $requeueDepth = 0;
 
     public function __construct(
         private JobRepository $jobs,
@@ -55,7 +61,8 @@ final readonly class JobExecutor
         }
 
         if ($job->isSequential() && $this->jobs->hasEarlierActiveInBatch($job)) {
-            $this->requeueOrGiveUp($job, self::GATED_DELAY_MS);
+            // Waiting for a predecessor never counts against the job; every predecessor ends (or is swept as stale).
+            $this->requeue($job, self::GATED_DELAY_MS);
 
             return;
         }
@@ -134,6 +141,7 @@ final readonly class JobExecutor
                 $this->tryLine($log, $error);
             }
 
+            $this->tryFinishLog($log);
             $this->service->finish($job, $status, $exitCode, $error);
         } finally {
             $lock->release();
@@ -142,19 +150,45 @@ final readonly class JobExecutor
 
     private function requeueOrGiveUp(Job $job, int $delayMs): void
     {
-        $waited = $this->clock->now()->getTimestamp() - $job->createdAt()->getTimestamp();
+        $waited = $this->clock->now()->getTimestamp() - $this->jobs->eligibleSince($job)->getTimestamp();
         if ($waited >= self::GIVE_UP_SECONDS) {
             $this->service->finish($job, JobStatus::Failed, null, 'Gave up waiting for the instance to be free.');
 
             return;
         }
 
-        $this->bus->dispatch(new RunJob((int) $job->id()), [new DelayStamp($delayMs)]);
+        $this->requeue($job, $delayMs);
+    }
+
+    private function requeue(Job $job, int $delayMs): void
+    {
+        if ($this->requeueDepth >= self::MAX_REQUEUE_DEPTH) {
+            // Only a transport that ignores the delay (sync://, dev and test) nests this deep: waiting would recurse.
+            $this->service->finish($job, JobStatus::Failed, null, 'The instance is busy and this queue cannot wait for it.');
+
+            return;
+        }
+
+        ++$this->requeueDepth;
+        try {
+            $this->bus->dispatch(new RunJob((int) $job->id()), [new DelayStamp($delayMs)]);
+        } finally {
+            --$this->requeueDepth;
+        }
     }
 
     private function lockFor(Job $job): SharedLockInterface
     {
         return $this->locks->createLock('instance.'.($job->instanceId() ?? 'fleet'));
+    }
+
+    private function tryFinishLog(?JobLog $log): void
+    {
+        try {
+            $log?->finish();
+        } catch (\Throwable) {
+            // As above: the status carries the outcome.
+        }
     }
 
     private function tryLine(?JobLog $log, string $message): void

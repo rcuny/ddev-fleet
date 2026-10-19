@@ -123,4 +123,43 @@ final class JobReaperTest extends JobTestCase
         self::assertSame(0, $this->reaper()->reap());
         self::assertSame(JobStatus::Queued, $job->status());
     }
+
+    public function testAnOrphanedQueuedJobIsFailedAndItsInstanceReleased(): void
+    {
+        $projects = new ProjectRepository($this->em);
+        $project = new Project('acme', 'https://git.example.com/acme/blog.git');
+        $projects->save($project);
+        $instance = new Instance($project, 'main', 'full', 'develop', 'admin');
+        $instance->changeState(InstanceState::Deploying);
+        $this->instances->save($instance);
+        $job = $this->queuedJob();
+        $this->clock->modify('+41 minutes');
+
+        self::assertSame(1, $this->reaper()->reap());
+
+        self::assertSame(JobStatus::Failed, $job->status());
+        self::assertStringContainsString('never started', (string) $job->error());
+        self::assertSame(InstanceState::Failed, $this->instances->find('acme--main')?->state());
+        self::assertSame([], $this->jobs->activeInstanceIds(['acme--main']));
+    }
+
+    public function testAQueuedJobStillInItsGiveUpWindowIsLeftAlone(): void
+    {
+        $job = $this->queuedJob();
+        $this->clock->modify('+31 minutes');
+
+        self::assertSame(0, $this->reaper()->reap());
+        self::assertSame(JobStatus::Queued, $job->status());
+    }
+
+    public function testAQueuedBatchMemberWaitingForAnActivePredecessorIsLeftAlone(): void
+    {
+        $this->queuedJob('deploy', 'acme--a', 'b1', true);
+        $second = $this->queuedJob('deploy', 'acme--b', 'b1', true);
+        $this->clock->modify('+3 hours');
+
+        // The first member is the orphan; the second waits for it and is judged on its own once it is gone.
+        self::assertSame(1, $this->reaper()->reap());
+        self::assertSame(JobStatus::Queued, $second->status());
+    }
 }

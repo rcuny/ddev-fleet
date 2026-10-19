@@ -64,7 +64,7 @@ final readonly class LogReader
                 // A line still being written: wait for its newline.
                 return ['text' => '', 'next' => $from, 'done' => false];
             } else {
-                $raw = self::withoutPartialCharacter($raw);
+                $raw = self::withoutPartialEscape(self::withoutPartialCharacter($raw));
             }
         }
 
@@ -92,6 +92,23 @@ final readonly class LogReader
         }
 
         return $text;
+    }
+
+    /**
+     * Drops an unfinished ANSI escape sequence (CSI or OSC) from the end of a piece that was cut by size; the rest of it
+     * comes with the next piece. Nothing is dropped when the piece is all escape.
+     */
+    private static function withoutPartialEscape(string $raw): string
+    {
+        $start = strrpos($raw, "\e");
+        if (false === $start || \strlen($raw) - $start > 512) {
+            return $raw;
+        }
+        if (1 === preg_match('/^(?:\e\[[0-?]*[ -\/]*[@-~]|\e\][^\a\e]*(?:\a|\e\\\\)|\e[@-Z\\\\^_])$/D', substr($raw, $start))) {
+            return $raw;
+        }
+
+        return 0 === $start ? $raw : substr($raw, 0, $start);
     }
 
     /**

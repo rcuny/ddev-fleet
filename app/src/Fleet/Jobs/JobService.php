@@ -11,6 +11,7 @@ use App\Domain\Job\JobTrigger;
 use App\Fleet\Projects\Refused;
 use App\Message\RunJob;
 use Psr\Clock\ClockInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
 
 /**
@@ -24,12 +25,14 @@ final readonly class JobService
         private JobFeed $feed,
         private LogReader $logs,
         private ClockInterface $clock,
+        private LoggerInterface $logger,
     ) {
     }
 
     /**
-     * Persists the job as queued, then dispatches it. A dispatch failure fails the job instead of leaving it queued
-     * for ever.
+     * Persists the job as queued, then dispatches it. A dispatch failure is logged and fails the job instead of
+     * leaving it queued for ever, but only while the job is still queued: with a transport that runs the message at
+     * once (sync://) the job may already have run, and its outcome must stand.
      */
     public function enqueue(Job $job): void
     {
@@ -38,8 +41,12 @@ final readonly class JobService
 
         try {
             $this->bus->dispatch(new RunJob((int) $job->id()));
-        } catch (\Throwable) {
-            $this->finish($job, JobStatus::Failed, null, 'The job could not be queued.');
+        } catch (\Throwable $e) {
+            $this->logger->error('Job {id} could not be dispatched.', ['id' => $job->id(), 'exception' => $e]);
+            $this->jobs->refresh($job);
+            if (JobStatus::Queued === $job->status()) {
+                $this->finish($job, JobStatus::Failed, null, 'The job could not be queued.');
+            }
         }
     }
 

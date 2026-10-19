@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Fleet\Jobs;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
 use App\Fleet\Jobs\LogMasker;
+use App\Fleet\Jobs\TailAwareLogMasker;
 use App\Tests\Support\JobTestCase;
 use Psr\Log\NullLogger;
 use Symfony\Component\Mercure\HubInterface;
@@ -58,5 +59,33 @@ final class JobLogTest extends JobTestCase
         $second = new JobLog($path, new \App\Fleet\Jobs\NoLogMasker(), $this->feed, $job);
 
         self::assertSame(4, $second->size());
+    }
+
+    public function testASecretSplitAcrossTwoChunksIsMasked(): void
+    {
+        $job = $this->queuedJob();
+        $masker = new class implements TailAwareLogMasker {
+            public function mask(string $text): string
+            {
+                return str_replace('hunter2', '***', $text);
+            }
+
+            public function longestSecret(): int
+            {
+                return 7;
+            }
+        };
+        $path = $this->paths->jobLog((string) $job->id(), 'acme--main');
+        $log = new JobLog($path, $masker, $this->feed, $job);
+
+        $log->output('stdout', 'password hun');
+        self::assertStringNotContainsString('hun', (string) @file_get_contents($path), 'the possible start of a secret is held back');
+        $log->output('stdout', "ter2 and more\n");
+        $log->output('stdout', 'tail hunt');
+        $log->finish();
+
+        $text = (string) file_get_contents($path);
+        self::assertSame("password *** and more\ntail hunt", $text);
+        self::assertSame(\strlen($text), $log->size());
     }
 }

@@ -95,10 +95,10 @@ final class JobRepositoryTest extends KernelTestCase
     public function testHasEarlierActiveInBatch(): void
     {
         $finished = $this->job(batch: 'b1', status: JobStatus::Succeeded);
-        $first = $this->job(batch: 'b1');
-        $second = $this->job(batch: 'b1');
-        $otherBatch = $this->job(batch: 'b2');
-        $lone = $this->job();
+        $first = $this->job(instance: 'blog--a', batch: 'b1');
+        $second = $this->job(instance: 'blog--b', batch: 'b1');
+        $otherBatch = $this->job(instance: 'blog--c', batch: 'b2');
+        $lone = $this->job(instance: 'blog--d');
 
         self::assertFalse($this->jobs->hasEarlierActiveInBatch($finished));
         self::assertFalse($this->jobs->hasEarlierActiveInBatch($first), 'a finished earlier job does not count');
@@ -116,7 +116,7 @@ final class JobRepositoryTest extends KernelTestCase
 
     public function testLatestPerInstance(): void
     {
-        $this->job(instance: 'blog--main');
+        $this->job(instance: 'blog--main', status: JobStatus::Succeeded, finishedAt: new \DateTimeImmutable('2026-10-01 08:00:00'));
         $newest = $this->job(instance: 'blog--main', type: 'redeploy');
         $shop = $this->job(instance: 'shop--main');
         $this->job(instance: 'shop--other');
@@ -141,7 +141,7 @@ final class JobRepositoryTest extends KernelTestCase
         $ids[1400] = 'docs--main';
         $expected = [];
         foreach (['blog--main', 'shop--main', 'docs--main'] as $instance) {
-            $this->job(instance: $instance);
+            $this->job(instance: $instance, status: JobStatus::Succeeded, finishedAt: new \DateTimeImmutable('2026-10-01 08:00:00'));
             $expected[$instance] = $this->job(instance: $instance)->id();
         }
         $this->em->clear();
@@ -161,7 +161,7 @@ final class JobRepositoryTest extends KernelTestCase
         $this->job(instance: 'shop--main');
         $this->job(type: 'prune', instance: null, status: JobStatus::Succeeded);
         for ($i = 0; $i < 5; ++$i) {
-            $this->job(instance: 'shop--page');
+            $this->job(instance: 'shop--page'.$i);
         }
 
         $all = $this->jobs->search([], 1);
@@ -190,7 +190,7 @@ final class JobRepositoryTest extends KernelTestCase
         $oldFailed = $this->job(status: JobStatus::Failed, finishedAt: $old);
         $recent = $this->job(status: JobStatus::Succeeded, finishedAt: new \DateTimeImmutable('2026-09-01 00:00:00'));
         $queued = $this->job();
-        $running = $this->job(status: JobStatus::Running);
+        $running = $this->job(instance: 'blog--other', status: JobStatus::Running);
 
         $pruned = $this->jobs->pruneFinishedBefore($cut);
 
@@ -227,5 +227,21 @@ final class JobRepositoryTest extends KernelTestCase
 
         $this->expectException(\LogicException::class);
         $job->finish(JobStatus::Interrupted, null, 'late', new \DateTimeImmutable('2026-10-01 09:00:00'));
+    }
+
+    public function testTheDatabaseAllowsOneActiveJobPerInstance(): void
+    {
+        $this->jobs->add($this->job('start', 'blog--main'));
+
+        $this->expectException(\Doctrine\DBAL\Exception\UniqueConstraintViolationException::class);
+        $this->jobs->add($this->job('stop', 'blog--main'));
+    }
+
+    public function testAFinishedJobDoesNotBlockTheNextOne(): void
+    {
+        $this->jobs->add($this->job('start', 'blog--main', status: JobStatus::Succeeded, finishedAt: new \DateTimeImmutable('2026-10-01 08:00:00')));
+        $this->jobs->add($this->job('stop', 'blog--main'));
+
+        self::assertSame(['blog--main'], $this->jobs->activeInstanceIds(['blog--main']));
     }
 }

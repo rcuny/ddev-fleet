@@ -68,4 +68,50 @@ final class JobServiceTest extends JobTestCase
 
         $this->service->retry($this->queuedJob(), 'admin', JobTrigger::Ui);
     }
+
+    public function testADispatchFailureIsLoggedWithTheException(): void
+    {
+        $logger = new class extends \Psr\Log\AbstractLogger {
+            /** @var list<array{string, array<string, mixed>}> */
+            public array $records = [];
+
+            public function log($level, string|\Stringable $message, array $context = []): void
+            {
+                $this->records[] = [(string) $message, $context];
+            }
+        };
+        $service = new \App\Fleet\Jobs\JobService($this->jobs, $this->bus, $this->feed, $this->reader, $this->clock, $logger);
+        $this->bus->failWith = new \RuntimeException('queue is down');
+
+        $service->enqueue(new \App\Domain\Job\Job('deploy', 'acme--main', 'acme', JobTrigger::Ui, 'admin'));
+
+        self::assertCount(1, $logger->records);
+        self::assertInstanceOf(\RuntimeException::class, $logger->records[0][1]['exception']);
+    }
+
+    public function testADispatchFailureDoesNotOverwriteAJobThatAlreadyRan(): void
+    {
+        $job = new \App\Domain\Job\Job('deploy', 'acme--main', 'acme', JobTrigger::Ui, 'admin');
+        $bus = new class($this->jobs, $this->service) implements \Symfony\Component\Messenger\MessageBusInterface {
+            public function __construct(private readonly \App\Domain\Job\JobRepository $jobs, private readonly \App\Fleet\Jobs\JobService $service)
+            {
+            }
+
+            public function dispatch(object $message, array $stamps = []): \Symfony\Component\Messenger\Envelope
+            {
+                \assert($message instanceof RunJob);
+                $this->jobs->claim($message->jobId, new \DateTimeImmutable());
+                $job = $this->jobs->find($message->jobId);
+                \assert(null !== $job);
+                $this->service->finish($job, JobStatus::Succeeded, 0, null); // the sync:// handler ran it ...
+                throw new \RuntimeException('... and something later in the chain threw');
+            }
+        };
+        $service = new \App\Fleet\Jobs\JobService($this->jobs, $bus, $this->feed, $this->reader, $this->clock, new \Psr\Log\NullLogger());
+
+        $service->enqueue($job);
+
+        self::assertSame(JobStatus::Succeeded, $job->status());
+        self::assertNull($job->error());
+    }
 }

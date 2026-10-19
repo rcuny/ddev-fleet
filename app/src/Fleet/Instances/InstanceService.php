@@ -20,6 +20,7 @@ use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\Rule\BranchName;
 use App\Fleet\Projects\ValidationFailed;
+use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 use Doctrine\ORM\EntityManagerInterface;
 use Doctrine\Persistence\ManagerRegistry;
 use Psr\Clock\ClockInterface;
@@ -118,7 +119,11 @@ final class InstanceService
         foreach ($jobs as $job) {
             $this->em->persist($job);
         }
-        $this->em->flush();
+        try {
+            $this->em->flush();
+        } catch (UniqueConstraintViolationException) {
+            throw self::busyAtTheSameTime();
+        }
         foreach ($jobs as $job) {
             $this->jobService->enqueue($job);
         }
@@ -140,10 +145,28 @@ final class InstanceService
         $instance = $this->instances->find($id) ?? throw NotFound::instance($id);
         $this->refuseIfBusy([$instance]);
 
-        $instance->changeState('destroy' === $failed->type() ? InstanceState::Destroying : InstanceState::Deploying, $this->clock->now());
-        $this->instances->save($instance);
+        // A start or stop has no transitional state: the instance stays as it was until the job's outcome is known.
+        $state = match ($failed->type()) {
+            'destroy' => InstanceState::Destroying,
+            'deploy', 'redeploy' => InstanceState::Deploying,
+            default => null,
+        };
+        if (null !== $state) {
+            $instance->changeState($state, $this->clock->now());
+        }
 
-        return $this->jobService->retry($failed, $by, $trigger);
+        // The state change is flushed together with the new job (JobService::retry persists it), so a request that
+        // loses the race for the instance changes nothing.
+        try {
+            return $this->jobService->retry($failed, $by, $trigger);
+        } catch (UniqueConstraintViolationException) {
+            throw self::busyAtTheSameTime();
+        }
+    }
+
+    private static function busyAtTheSameTime(): Refused
+    {
+        return new Refused('Busy: another request just queued a job for this instance. Nothing was started.');
     }
 
     /**
