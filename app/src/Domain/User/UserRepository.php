@@ -47,10 +47,8 @@ final readonly class UserRepository
      * Runs $work in one database transaction: committed when it returns, rolled back (and the entity manager
      * cleared, so nothing half-changed stays in memory) when it throws. The entity manager stays usable.
      *
-     * The write lock is taken when the transaction starts, not when the first write happens: SQLite cannot upgrade a
-     * read lock to a write lock once another connection has committed in between (SQLITE_BUSY at once, no waiting), so
-     * two concurrent changes that read first would fail with "database is locked". Taking the lock first makes the
-     * second one wait for the first (up to the connection's busy timeout).
+     * The write lock is taken when the transaction starts (SqliteImmediateTransactionMiddleware), so two concurrent
+     * changes that read first do not fail with "database is locked": the second waits for the first.
      *
      * @template T
      *
@@ -63,9 +61,6 @@ final readonly class UserRepository
         $connection = $this->em->getConnection();
         $connection->beginTransaction();
         try {
-            // A write that matches no row still takes the database write lock (SQLite's BEGIN IMMEDIATE, which DBAL
-            // cannot issue because the entity manager opens and tracks its own transactions).
-            $connection->executeStatement(\sprintf('DELETE FROM %s WHERE 0', $this->em->getClassMetadata(User::class)->getTableName()));
             $result = $work();
             $this->em->flush();
             $connection->commit();
