@@ -8,7 +8,7 @@ use App\Domain\Job\Job;
 use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 
 /**
- * What a job does. One implementation per job type name: 'deploy', 'redeploy', 'start', 'stop' or 'destroy'.
+ * What a job does. One implementation per job type name: 'deploy', 'redeploy', 'start', 'stop', 'restart' or 'destroy'.
  */
 #[AutoconfigureTag('fleet.job_type')]
 interface JobType

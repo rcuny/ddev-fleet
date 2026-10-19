@@ -173,7 +173,7 @@ final class WorkspaceCommandsTest extends KernelTestCase
     {
         $missing = $this->cli('fleet:workspace:check', ['--json' => true]);
         self::assertSame(1, $missing->getStatusCode());
-        self::assertSame(['push_key' => false, 'git_identity' => false, 'claude_token' => false], $this->json($missing));
+        self::assertSame(['push_key' => false, 'git_identity' => false, 'claude_token' => false, 'tmux_server' => true], $this->json($missing));
 
         $paths = self::getContainer()->get(FleetPaths::class);
         @mkdir($paths->sshDir(), 0o700, true);
@@ -192,6 +192,18 @@ final class WorkspaceCommandsTest extends KernelTestCase
         foreach (['PRIVATE-KEY-BODY', self::TOKEN, 'bot@fleet', 'AAAA'] as $value) {
             self::assertStringNotContainsString($value, $present->getDisplay().$present->getErrorOutput());
         }
+    }
+
+    public function testTheCheckReportsADeadTmuxServer(): void
+    {
+        $this->store()->putFleetWide('claude_oauth_token', self::TOKEN, 'admin');
+        $this->runner()->expect(['tmux', '-L', 'fleet', 'has-session'], new CommandResult(1, '', 'no server running'));
+
+        $run = $this->cli('fleet:workspace:check', ['--json' => true]);
+
+        self::assertSame(1, $run->getStatusCode());
+        self::assertFalse($this->json($run)['tmux_server']);
+        self::assertTrue($this->json($run)['claude_token']);
     }
 
     // --- fleet:tmux:*

@@ -17,8 +17,8 @@ use Psr\Log\LoggerInterface;
 
 /**
  * Replaces the fleet-wide Claude token. The storage is the host settings page's (SecretStore, fleet scope); this adds the
- * shape check, the audit entry and the list of instances that will pick the token up. Handing it to the instances is the
- * deploy step's job (FLE-56), not done here. No message, log line or return value carries the token.
+ * shape check, the audit entry and the list of instances that will pick the token up. Handing it to running instances is
+ * ClaudeTokenApplier's job, on request; a new deploy reads it by itself. No message, log line or return value carries the token.
  */
 final readonly class ClaudeTokenRotation
 {
