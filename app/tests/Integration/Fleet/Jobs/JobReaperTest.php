@@ -11,6 +11,10 @@ use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Fleet\Jobs\JobReaper;
 use App\Tests\Support\JobTestCase;
+use Symfony\Component\Lock\Key;
+use Symfony\Component\Lock\LockFactory;
+use Symfony\Component\Lock\PersistingStoreInterface;
+use Symfony\Component\Lock\Store\FlockStore;
 
 final class JobReaperTest extends JobTestCase
 {
@@ -64,6 +68,52 @@ final class JobReaperTest extends JobTestCase
 
         self::assertSame(JobStatus::Running, $job->status());
         $holder->release();
+    }
+
+    public function testAJobTheExecutorFinishedMeanwhileIsNotInterrupted(): void
+    {
+        $job = $this->runningJobOn('deploy', InstanceState::Deploying);
+        $connection = $this->em->getConnection();
+        $instances = $this->instances;
+
+        // The executor finishes the job and the instance after the reaper listed the job as running, just before the
+        // reaper gets the lock (a store that does the executor's write at that moment).
+        $store = new class(new FlockStore($this->paths->locksDir()), static function () use ($connection, $job): void {
+            $connection->executeStatement('UPDATE job SET status = :status WHERE id = :id', ['status' => JobStatus::Succeeded->value, 'id' => $job->id()]);
+            $connection->executeStatement("UPDATE instance SET state = 'running'");
+        }) implements PersistingStoreInterface {
+            public function __construct(private FlockStore $inner, private \Closure $beforeSave)
+            {
+            }
+
+            public function save(Key $key): void
+            {
+                ($this->beforeSave)();
+                $this->inner->save($key);
+            }
+
+            public function delete(Key $key): void
+            {
+                $this->inner->delete($key);
+            }
+
+            public function exists(Key $key): bool
+            {
+                return $this->inner->exists($key);
+            }
+
+            public function putOffExpiration(Key $key, float $ttl): void
+            {
+                $this->inner->putOffExpiration($key, $ttl);
+            }
+        };
+        $reaper = new JobReaper($this->jobs, $instances, $this->service, new LockFactory($store), $this->clock);
+
+        self::assertSame(0, $reaper->reap());
+
+        self::assertSame(JobStatus::Succeeded, $job->status());
+        $this->em->clear();
+        self::assertSame(InstanceState::Running, $instances->find('acme--main')?->state());
     }
 
     public function testQueuedJobsAreNotTouched(): void

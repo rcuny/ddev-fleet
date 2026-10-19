@@ -21,7 +21,7 @@ final class DdevTest extends TestCase
     protected function setUp(): void
     {
         $this->runner = new RecordingCommandRunner();
-        $this->ddev = new Ddev($this->runner);
+        $this->ddev = new Ddev($this->runner, '/home/fleet');
         $this->tmp = sys_get_temp_dir().'/fleet-ddev-'.bin2hex(random_bytes(5));
         mkdir($this->tmp, 0o750, true);
     }
@@ -47,7 +47,7 @@ final class DdevTest extends TestCase
         self::assertSame(['ddev', 'start'], $start->argv);
         self::assertSame(['ddev', 'stop'], $stop->argv);
         self::assertSame('/srv/fleet/instances/acme--dev', $start->cwd);
-        self::assertSame(['DDEV_NONINTERACTIVE' => 'true', 'DDEV_NO_INSTRUMENTATION' => 'true'], $start->env);
+        self::assertSame(['HOME' => '/home/fleet', 'DDEV_NONINTERACTIVE' => 'true', 'DDEV_NO_INSTRUMENTATION' => 'true'], $start->env);
         self::assertSame(Ddev::START_TIMEOUT, $start->timeout);
         self::assertSame(90.0, $stop->timeout);
     }
@@ -107,7 +107,7 @@ final class DdevTest extends TestCase
 
         $call = $this->runner->calls()[0];
         self::assertSame(['ddev', 'drush', 'cr'], $call->argv);
-        self::assertSame(['SITE' => 'x', 'DDEV_NONINTERACTIVE' => 'true', 'DDEV_NO_INSTRUMENTATION' => 'true'], $call->env);
+        self::assertSame(['SITE' => 'x', 'HOME' => '/home/fleet', 'DDEV_NONINTERACTIVE' => 'true', 'DDEV_NO_INSTRUMENTATION' => 'true'], $call->env);
     }
 
     public function testListParsesRawAndPlainShapes(): void
@@ -152,6 +152,36 @@ final class DdevTest extends TestCase
         $this->ddev->list();
     }
 
+    public function testEveryDdevCallCarriesTheConfiguredHome(): void
+    {
+        $ddev = new Ddev($this->runner, '/home/other');
+        $this->runner->expect(['ddev', 'list'], new CommandResult(0, '{"raw":[]}'));
+
+        $ddev->start('/srv/fleet/instances/acme--dev', $this->noop());
+        $ddev->list();
+
+        foreach ($this->runner->calls() as $call) {
+            self::assertSame('/home/other', $call->env['HOME']);
+            self::assertSame('true', $call->env['DDEV_NONINTERACTIVE']);
+        }
+    }
+
+    public function testHomeFallsBackToTheProcessHomeAndMustBeAbsolute(): void
+    {
+        $previous = getenv('HOME');
+        putenv('HOME=/home/from-env');
+        try {
+            $fromEnv = new Ddev($this->runner);
+            $fromEnv->start('/srv/fleet/instances/acme--dev', $this->noop());
+            self::assertSame('/home/from-env', $this->runner->calls()[0]->env['HOME']);
+
+            $this->expectException(\LogicException::class);
+            new Ddev($this->runner, 'relative/home');
+        } finally {
+            false === $previous ? putenv('HOME') : putenv('HOME='.$previous);
+        }
+    }
+
     public function testListTimeoutThrowsDdevUnavailable(): void
     {
         $ddev = new Ddev(new class implements CommandRunner {
@@ -159,7 +189,7 @@ final class DdevTest extends TestCase
             {
                 throw new CommandTimedOut('too slow');
             }
-        });
+        }, '/home/fleet');
 
         $this->expectException(DdevUnavailable::class);
         $ddev->list();

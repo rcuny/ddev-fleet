@@ -10,7 +10,7 @@ use App\Fleet\Shell\CommandRunner;
 
 /**
  * The ddev and docker calls the fleet makes, all through the CommandRunner. Every ddev call runs without prompts and
- * without telemetry; HOME comes from the worker's environment (the unit sets it to the fleet user's home).
+ * without telemetry, and with the fleet user's HOME so a CLI run through sudo never reads another user's ~/.ddev.
  */
 final readonly class Ddev
 {
@@ -21,8 +21,19 @@ final readonly class Ddev
 
     private const array ENV = ['DDEV_NONINTERACTIVE' => 'true', 'DDEV_NO_INSTRUMENTATION' => 'true'];
 
-    public function __construct(private CommandRunner $runner)
+    /** @var array<string, string> */
+    private array $env;
+
+    /**
+     * @param string|null $home the fleet user's home (FLEET_USER_HOME); the process's own HOME when null or empty
+     */
+    public function __construct(private CommandRunner $runner, ?string $home = null)
     {
+        $home = null === $home || '' === $home ? (string) getenv('HOME') : $home;
+        if (!str_starts_with($home, '/')) {
+            throw new \LogicException('Set FLEET_USER_HOME (or HOME) to the fleet user\'s home directory.');
+        }
+        $this->env = ['HOME' => $home] + self::ENV;
     }
 
     /**
@@ -30,7 +41,7 @@ final readonly class Ddev
      */
     public function start(string $dir, callable $onOutput, ?float $timeout = null): CommandResult
     {
-        return $this->runner->run(['ddev', 'start'], $dir, self::ENV, $onOutput, $timeout ?? self::START_TIMEOUT);
+        return $this->runner->run(['ddev', 'start'], $dir, $this->env, $onOutput, $timeout ?? self::START_TIMEOUT);
     }
 
     /**
@@ -38,7 +49,7 @@ final readonly class Ddev
      */
     public function stop(string $dir, callable $onOutput, ?float $timeout = null): CommandResult
     {
-        return $this->runner->run(['ddev', 'stop'], $dir, self::ENV, $onOutput, $timeout ?? self::START_TIMEOUT);
+        return $this->runner->run(['ddev', 'stop'], $dir, $this->env, $onOutput, $timeout ?? self::START_TIMEOUT);
     }
 
     /**
@@ -55,13 +66,13 @@ final readonly class Ddev
         $base = ['ddev', 'delete', '--omit-snapshot', '--yes'];
 
         if (is_file($dir.'/.ddev/config.yaml')) {
-            $result = $this->runner->run($base, $dir, self::ENV, $onOutput, self::DELETE_TIMEOUT);
+            $result = $this->runner->run($base, $dir, $this->env, $onOutput, self::DELETE_TIMEOUT);
             if ($result->isSuccess()) {
                 return $result;
             }
         }
 
-        return $this->runner->run([...$base, $project], null, self::ENV, $onOutput, self::DELETE_TIMEOUT);
+        return $this->runner->run([...$base, $project], null, $this->env, $onOutput, self::DELETE_TIMEOUT);
     }
 
     /**
@@ -73,7 +84,7 @@ final readonly class Ddev
      */
     public function run(string $dir, array $argv, array $env, callable $onOutput): CommandResult
     {
-        return $this->runner->run($argv, $dir, $env + self::ENV, $onOutput, self::START_TIMEOUT);
+        return $this->runner->run($argv, $dir, $env + $this->env, $onOutput, self::START_TIMEOUT);
     }
 
     /**
@@ -84,7 +95,7 @@ final readonly class Ddev
     public function list(): array
     {
         try {
-            $result = $this->runner->run(['ddev', 'list', '--json-output'], null, self::ENV, null, self::LIST_TIMEOUT);
+            $result = $this->runner->run(['ddev', 'list', '--json-output'], null, $this->env, null, self::LIST_TIMEOUT);
         } catch (\Throwable $e) {
             throw new DdevUnavailable('ddev list did not answer.', 0, $e);
         }

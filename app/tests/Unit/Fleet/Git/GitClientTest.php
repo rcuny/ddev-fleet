@@ -72,6 +72,11 @@ final class GitClientTest extends TestCase
         yield 'empty branch' => ['https://git.example.com/x.git', '', '/srv/fleet/instances/a--b'];
         yield 'whitespace in url' => ['https://git.example.com/x.git --foo', 'main', '/srv/fleet/instances/a--b'];
         yield 'newline in branch' => ['https://git.example.com/x.git', "main\nx", '/srv/fleet/instances/a--b'];
+        yield 'dir with dot-dot' => ['https://git.example.com/x.git', 'main', '/srv/fleet/instances/../x'];
+        yield 'dir with dot-dot after the id' => ['https://git.example.com/x.git', 'main', '/srv/fleet/instances/a--b/../c--d'];
+        yield 'dir nested below an instance' => ['https://git.example.com/x.git', 'main', '/srv/fleet/instances/a--b/sub'];
+        yield 'dir with a trailing slash' => ['https://git.example.com/x.git', 'main', '/srv/fleet/instances/a--b/'];
+        yield 'dir with an invalid id' => ['https://git.example.com/x.git', 'main', '/srv/fleet/instances/A B'];
         yield 'dir outside instances' => ['https://git.example.com/x.git', 'main', '/tmp/a--b'];
         yield 'dir is instances itself' => ['https://git.example.com/x.git', 'main', '/srv/fleet/instances'];
     }

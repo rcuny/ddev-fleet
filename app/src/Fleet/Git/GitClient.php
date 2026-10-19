@@ -23,7 +23,7 @@ final readonly class GitClient
     }
 
     /**
-     * Clones $branch of $url into $dir (inside instances/), authenticated with the host's deploy key.
+     * Clones $branch of $url into $dir (exactly FleetPaths::instanceDir() of a valid instance id), authenticated with the host's deploy key.
      *
      * @param callable(string, string): void $onOutput
      *
@@ -36,8 +36,9 @@ final readonly class GitClient
                 throw new \InvalidArgumentException(\sprintf('The %s is not valid.', $what));
             }
         }
-        if (!str_starts_with($dir, $this->paths->instancesDir().'/')) {
-            throw new \InvalidArgumentException('The target directory is not inside the instances directory.');
+        $id = basename($dir);
+        if (1 !== preg_match(FleetPaths::INSTANCE_ID_PATTERN, $id) || $dir !== $this->paths->instanceDir($id)) {
+            throw new \InvalidArgumentException('The target directory is not an instance directory.');
         }
 
         $ssh = \sprintf(

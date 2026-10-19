@@ -43,6 +43,11 @@ final readonly class JobReaper
                 continue;
             }
             try {
+                // The executor may have finished the job between running() and the lock: judge the row as it is now.
+                $this->jobs->refresh($job);
+                if (JobStatus::Running !== $job->status()) {
+                    continue;
+                }
                 $this->service->finish($job, JobStatus::Interrupted, null, 'The worker stopped while the job was running.');
                 $instance = $this->instances->find($instanceId);
                 if (null !== $instance) {

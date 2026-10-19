@@ -52,6 +52,11 @@ services:
             $home: '%env(resolve:FLEET_HOME)%'
             $caddyDir: '%env(resolve:FLEET_CADDY_DIR)%'
 
+    # ddev reads ~/.ddev: FLEET_USER_HOME (optional) pins the fleet user's home; without it the process's HOME is used.
+    App\Fleet\Ddev\Ddev:
+        arguments:
+            $home: '%env(default::FLEET_USER_HOME)%'
+
     App\Fleet\Host\RebootSignal:
         arguments:
             $flagFile: '%fleet.reboot_flag_file%'
