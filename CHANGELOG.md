@@ -7,6 +7,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-20
+
+### Added
+- **FLE-79: Named ports are served by Caddy (M0.07a).** Every instance's Caddy site now also carries one block per
+  named port of its project (`<instance host>:<public port>`, aliases included), behind the same Authelia gate and
+  proxied to the port on ddev's router. Assigning or unassigning a port rewrites the sites of that project's
+  instances; a site Caddy refuses is rolled back and reported as a warning. New command `fleet port:refresh
+  [--project=<name>] [--json]` rewrites them on demand.
+
+
+- **FLE-45: the agent workspace deploy step** (milestone M0.11b). A deploy now creates the instance's tmux window and types the template's `tty1` and `tty2` commands into it, with `[[tokens]]` substituted (`TmuxWindowStep`). A command with an unresolved token is skipped with a `WARNING` in the job log, and a tmux problem never fails the deploy. Destroy and redeploy close the window. Tests cover the v0 line `ddev exec claude --model sonnet "/jira work FLE-9"` and prove the Claude token is only written to `config.fleet.yaml`, never to tmux keys, process arguments, the job log or the audit log.
+- `fleet claude:token:apply [--instance=<id>|--all] [--json]` and `fleet claude:token:set --apply` restart running instances (a new `restart` job per instance, one sequential batch) so they pick up a rotated token. Never automatic. Audit action `claude.token.apply`. See `docs/agent-workspace.md`.
+- `fleet workspace:check` also reports whether the tmux server is alive.
+
+
+- **FLE-84: a deploy seeds the new instance from the project's assets.** `AssetsSeedStep` copies the assets into the
+  checkout before `ddev start`, substitutes `[[token]]` in text files up to 1 MiB, hard-links `dumps/` and keeps
+  everything out of `git status`, as 0.x did. The database import stays the project's `post_deploy` command.
+
+### Changed
+- **FLE-70: A truncated audit field ends in an ellipsis.** Actor, action and subject are still cut on a character boundary, now with `…` so the cut shows.
+
+- The DDEV router's own ports (8080, 8443) are now refused as a public port too.
+
+- `fleet-tmux.service` documents why it has no `Restart=` (a oneshot cannot supervise the tmux server); the systemd security baseline records the measured scores of `fleet-tmux.service` and `fleet-mercure.service` (`install_units`).
+- Integration test with a real tmux (skipped when it is not installed) checks that the sidebar command receives its arguments unchanged.
+
+- **FLE-81:** Playwright: axe checks in both themes (shared `expectNoBlockingViolations` helper) on the jobs specs, the phone instance specs and the phone navigation pages.
+
+- **FLE-85: webhooks cleanup.** `RuleMatcher::label` now delegates to the new `Labels::slugOrNull`, so there is one slug
+  implementation. `docs/webhooks.md` states that two Jira deliveries with different bodies give `fle-3` then `fle-3-1`, and
+  that a failed or refused action consumes the delivery id and body hash (the sender's retry is a `duplicate`).
+
+
+- **FLE-87: deploy-time `[[token]]` substitution resolves managed secrets.** The post-deploy commands and the seeded asset files now go through `Secrets\TokenRenderer` (built-in tokens first, then the project secret over the fleet-wide one), and every inserted value is registered with the job log masker before the first log line that could hold it. The second renderer (`Instances\TokenRenderer`) is gone. An unresolved token in a post-deploy line still fails the deploy before anything is changed; in an asset file it stays as written, with a log line naming it. `tty1`/`tty2` commands still take only the built-in tokens: a secret is never typed into a tmux pane, whose scrollback would keep it, and the command is skipped with a `WARNING`. See `docs/secrets.md`.
+
+- **FLE-90: `fleet claude:token:apply --all` asks for confirmation** (or `--yes`/`-y`); non-interactive and `--json` runs refuse without `--yes`, like the other destructive commands.
+
+### Fixed
+- **FLE-78: A long secret name no longer widens the phone layout.** The flash message after saving a secret with a 64-character name did not wrap, so the page overflowed sideways on a phone and zoomed out. Flash messages now break long words.
+
+- **FLE-81: M0.04 follow-ups.** Authelia: a project's alias prefix no longer swallows another project's own hosts (project `blog` with the hostname `x` no longer matches the instances of project `x-blog`; the colliding alias is left out of the rule). Mercure: instance changes go to the per-project topic `/instances/<project>` and the page's cookie authorises only the projects the user may operate, so a member no longer receives events about other projects' instances. The instance page's job link is underlined (axe `link-in-text-block`).
+
+
+- **FLE-83: Playwright schedules spec no longer flakes on a slow machine.** The dark-theme axe check now runs through a shared `expectNoBlockingViolations` helper that switches transitions off before measuring, and the empty-state test no longer depends on test order.
+
+- **FLE-85: a fixed-label webhook redeploy follows the rule's branch.** When the rule's branch differs from the
+  instance's, the redeploy job carries it (optional `branch` param, so queued jobs still run) and the instance switches.
+
+- **FLE-88: Playwright specs wait for the Turbo render after a form submit.** A new `submitAndWait` helper
+  (next to `navigate()`) clicks and waits for the response to render; the webhook, schedule and user specs use it,
+  which removes the stale-flash flake of the phone webhook-actions spec.
+
+- **FLE-89: a password reset no longer looks broken when Authelia has banned the user.** Authelia's regulation
+  (`max_retries`, `find_time`, `ban_time`) is now rendered explicitly (3 failures in 2 minutes, 5 minute ban) and
+  documented in `docs/installation.md` (Troubleshooting). `fleet user:reset-password` and the Users page "set a new
+  password" now say that Authelia may keep blocking the user for up to 5 minutes and that retrying extends the ban.
+
+- **FLE-90: the agent workspace works on an installed host.** The installer now installs the `tmux` package and installs, enables and starts `fleet-tmux.service` (idempotently, never restarting it); the uninstaller removes the unit. The pipeline image installs `tmux` so `TmuxRealTest` runs instead of skipping.
+
+
+- **FLE-93: the job log no longer fails the axe `aria-prohibited-attr` check.** The log `<pre>` carried an `aria-label` without a role that allows a name. It now has `role="log"` and `aria-live="off"` (the live tail appends often, so screen readers are not flooded; the status line above it still announces). No other `aria-label` in `app/templates` sits on an element without a permitting role.
+
+### Security
+- **FLE-70: Secrets used by a deploy are masked in the job log.** The Claude token written to the instance configuration and every secret `TokenRenderer` inserts are registered with the job log masker, so they never reach the job log, the live tail or a job's error text. Only `[masked]` is written.
+- **FLE-70: Secret reveals are throttled.** A user may reveal 10 values per minute. A refused reveal answers 429 with `Retry-After` and is audited as `secret.reveal-refused`.
+
 ## [1.0.0] - 2026-10-19
 
 ### Added
@@ -538,7 +605,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/rcuny/ddev-fleet/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...v1.0.0
 [0.20.0]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...v0.19.0
