@@ -46,7 +46,8 @@ final class TokenRenderer
     }
 
     /**
-     * The lenient variant for files: an unresolved placeholder stays as written (an asset may hold `[[...]]` of its
+     * The lenient variant for files (note FLE-87: masking of secret values in the job log is its business, this method
+     * returns only names of unresolved tokens and never logs): an unresolved placeholder stays as written (an asset may hold `[[...]]` of its
      * own) and only its name is returned, never a value.
      *
      * @param array<string, string> $tokens

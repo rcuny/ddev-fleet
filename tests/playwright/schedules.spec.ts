@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blockingViolations } from './support/axe';
+import { expectNoBlockingViolations } from './support/axe';
 import { externalBaseURL } from './support/env';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -34,16 +34,6 @@ function instanceRow(action: 'insert' | 'delete', project: string, label: string
   `;
   const result = spawnSync('php', ['-r', script, fleetHome(), action, project, label], { encoding: 'utf8' });
   expect(result.status, `instance ${action}: ${result.stderr}`).toBe(0);
-}
-
-async function expectNoBlockingViolations(page: Page): Promise<void> {
-  // Park the pointer away from any button: a hovered default Button blends to bg-primary/80, which fails axe contrast.
-  await page.mouse.move(0, 0);
-  expect(await blockingViolations(page)).toEqual([]);
-  // Flip the theme class in place: a reload would repeat a POST page and lose what the test typed.
-  await page.evaluate(() => document.documentElement.classList.add('dark'));
-  expect(await blockingViolations(page)).toEqual([]);
-  await page.evaluate(() => document.documentElement.classList.remove('dark'));
 }
 
 async function expectTall(page: Page, testId: string): Promise<void> {

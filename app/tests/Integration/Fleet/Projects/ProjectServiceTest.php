@@ -32,6 +32,7 @@ use App\Fleet\Secrets\SecretStore;
 use App\Tests\Support\FakeInstanceGuard;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\InstanceFixtures;
+use App\Tests\Support\RevealThrottles;
 use App\Tests\Support\SecondWriter;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -65,6 +66,7 @@ final class ProjectServiceTest extends KernelTestCase
             $this->projects,
             new AuditLog(new AuditEntryRepository($this->em), new NativeClock()),
             new PlaceholderScanner(self::getContainer()->get(FleetPaths::class)),
+            RevealThrottles::make(),
         ));
     }
 

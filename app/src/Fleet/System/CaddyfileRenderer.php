@@ -24,7 +24,8 @@ final readonly class CaddyfileRenderer
     public const string HUB = '127.0.0.1:3000';
     public const string AUTHELIA = '127.0.0.1:9091';
     /** ddev's shared router: plain HTTP on loopback, routing by Host (the instance sites proxy to it). */
-    public const string DDEV_ROUTER = '127.0.0.1:8080';
+    public const string DDEV_ROUTER_HOST = '127.0.0.1';
+    public const string DDEV_ROUTER = self::DDEV_ROUTER_HOST.':8080';
 
     /** The identity headers the app trusts from Caddy (see RemoteUserAuthenticator). */
     public const array IDENTITY_FIELDS = ['User', 'Groups', 'Name', 'Email'];

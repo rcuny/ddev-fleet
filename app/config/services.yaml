@@ -92,6 +92,12 @@ services:
     App\Fleet\Webhooks\WebhookAction:
         alias: App\Fleet\Webhooks\RuleWebhookAction
 
+    # One masker serves the job log and the code that registers the secrets a deploy uses (FLE-70); JobExecutor clears it after each job.
+    App\Fleet\Jobs\LogMasker:
+        alias: App\Fleet\Jobs\RegisteredSecretsMasker
+    App\Fleet\Jobs\SecretRegistry:
+        alias: App\Fleet\Jobs\RegisteredSecretsMasker
+
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
     fleet.command_runner.process:

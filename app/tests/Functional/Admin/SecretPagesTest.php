@@ -236,6 +236,24 @@ final class SecretPagesTest extends AdminTestCase
         self::assertStringNotContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
     }
 
+    public function testTheEleventhRevealInAMinuteIsRefusedAndAudited(): void
+    {
+        $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
+        for ($i = 0; $i < 10; ++$i) {
+            $this->post('/admin/secrets/API_KEY/reveal', []);
+            self::assertResponseStatusCodeSame(200);
+        }
+
+        $this->post('/admin/secrets/API_KEY/reveal', []);
+
+        self::assertResponseStatusCodeSame(429);
+        self::assertGreaterThanOrEqual(1, (int) $this->client->getResponse()->headers->get('Retry-After'));
+        self::assertStringNotContainsString(self::VALUE, $this->body());
+        self::assertStringContainsString('Too many reveals', $this->body());
+        self::assertSame('secret.reveal-refused', $this->audit()[0][1]);
+        self::assertSame('fleet/API_KEY', $this->audit()[0][2]);
+    }
+
     public function testRevealOfAnUnknownSecretIsA404AndNotAudited(): void
     {
         $this->post('/admin/secrets/NOPE/reveal', []);

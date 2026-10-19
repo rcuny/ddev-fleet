@@ -173,6 +173,26 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         self::assertNotContains('ddev start', $this->commandNames());
     }
 
+    public function testRenderedFilesGetTheirFinalModeEvenUnderAnOpenUmask(): void
+    {
+        file_put_contents($this->assets.'/.env', 'K=[[project]]');
+        chmod($this->assets.'/.env', 0o600);
+        file_put_contents($this->assets.'/blob.bin', "\x00x");
+        chmod($this->assets.'/blob.bin', 0o640);
+        $old = umask(0o000);
+        try {
+            $this->deploy();
+            self::assertSame(0o000, umask(), 'the step restores the umask');
+        } finally {
+            umask($old);
+        }
+
+        clearstatcache();
+        self::assertSame(0o600, fileperms($this->dir().'/.env') & 0o777);
+        self::assertSame(0o640, fileperms($this->dir().'/blob.bin') & 0o777);
+        self::assertSame([], glob($this->dir().'/*.fleet-seed-*') ?: []);
+    }
+
     public function testTheSeedRunsBeforeDdevStartAndBeforeAnAfterStartStep(): void
     {
         file_put_contents($this->assets.'/.env', 'A=1');

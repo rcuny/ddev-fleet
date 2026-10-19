@@ -1,4 +1,4 @@
-import { expect, type Locator, type Page, type Response } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 
 /** A git URL that passes the rules (https, no credentials). Neutral host: the public product names no owner. */
@@ -38,20 +38,32 @@ export async function deleteProjectViaUi(page: Page, name: string): Promise<void
   await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
 }
 
-const isHtmlGet = (response: Response): boolean =>
-  response.request().method() === 'GET' && (response.headers()['content-type'] ?? '').includes('text/html');
-
 /**
- * Clicks (or otherwise triggers) a visit and returns once the new page is really on screen. Turbo first shows a cached
- * preview of a page visited before (html[data-turbo-preview]) and the URL already changes; a test that typed into that
- * preview would lose its input to the real render. The first HTML response is the visit itself.
+ * Clicks (or otherwise triggers) a visit and returns once the new page is really on screen. Two things look like
+ * "the page arrived" and are not: Turbo shows a cached preview of a page visited before (html[data-turbo-preview]) and
+ * the URL already changes, and Turbo prefetches a link on hover/mousedown, so an HTML response can come back before
+ * the visit has rendered anything. A test that opened a dialog or typed into the old page would lose it to the real
+ * render (the element "was detached from the DOM"). So the visit is waited for by what it does to the page: a marker
+ * on <html> (which Turbo keeps) is cleared by the next page or frame render, and the preview flag must be gone. A full page load
+ * (data-turbo="false") replaces <html>, which drops the marker as well.
  */
 export async function navigate(page: Page, trigger: () => Promise<unknown>): Promise<void> {
-  const loaded = page.waitForResponse(isHtmlGet);
-  loaded.catch(() => undefined);
+  await page.evaluate(() => {
+    const html = document.documentElement;
+    html.dataset.navPending = '1';
+    // A form inside a <turbo-frame> renders the frame only (turbo:frame-render), a visit renders the page.
+    const done = (): void => {
+      delete html.dataset.navPending;
+      document.removeEventListener('turbo:render', done);
+      document.removeEventListener('turbo:frame-render', done);
+    };
+    document.addEventListener('turbo:render', done);
+    document.addEventListener('turbo:frame-render', done);
+  });
   await trigger();
-  await loaded;
-  await expect(page.locator('html')).not.toHaveAttribute('data-turbo-preview');
+  const html = page.locator('html');
+  await expect(html).not.toHaveAttribute('data-nav-pending');
+  await expect(html).not.toHaveAttribute('data-turbo-preview');
 }
 
 /** Follows a link or button that starts a visit, see {@link navigate}. */

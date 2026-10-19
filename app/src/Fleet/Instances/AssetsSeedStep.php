@@ -162,15 +162,13 @@ final class AssetsSeedStep implements DeployStep
             if ([] !== $missing) {
                 $context->log->line(\sprintf('assets: "%s" has unresolved token(s) left as written: %s', $this->printable($path), implode(', ', array_map(static fn (string $n): string => '[['.$n.']]', $missing))));
             }
-            $this->replace($dst, $path, static fn (string $tmp): bool => false !== @file_put_contents($tmp, $rendered));
-            @chmod($dst, $mode);
+            $this->replace($dst, $path, $mode, static fn (string $tmp): bool => false !== @file_put_contents($tmp, $rendered));
             ++$counts['substituted'];
 
             return;
         }
 
-        $this->replace($dst, $path, static fn (string $tmp): bool => @copy($src, $tmp));
-        @chmod($dst, $mode);
+        $this->replace($dst, $path, $mode, static fn (string $tmp): bool => @copy($src, $tmp));
         ++$counts['copied'];
     }
 
@@ -189,7 +187,7 @@ final class AssetsSeedStep implements DeployStep
                 }
             }
             if (!@link($src, $dst)) {
-                $this->replace($dst, $path, static fn (string $tmp): bool => @copy($src, $tmp));
+                $this->replace($dst, $path, null, static fn (string $tmp): bool => @copy($src, $tmp));
             }
         }
         ++$counts['linked'];
@@ -199,15 +197,29 @@ final class AssetsSeedStep implements DeployStep
      * Writes through a temporary file next to the target and renames it over it, so a stale file or a symbolic link at
      * the destination is replaced, never written through.
      *
+     * The temporary file is created private (0600) and given its final mode before the rename, so a file with secrets
+     * is never readable by others, not even briefly; a failed chmod fails the step.
+     *
      * @param \Closure(string): bool $write
      */
-    private function replace(string $dst, string $path, \Closure $write): void
+    private function replace(string $dst, string $path, ?int $mode, \Closure $write): void
     {
         if (is_dir($dst) && !is_link($dst)) {
             throw new \RuntimeException(\sprintf('"%s" is a folder in the checkout where the assets have a file', $this->printable($path)));
         }
         $tmp = $dst.'.fleet-seed-'.bin2hex(random_bytes(4));
-        if (!$write($tmp) || !@rename($tmp, $dst)) {
+        $old = umask(0o077);
+        try {
+            $written = $write($tmp);
+        } finally {
+            umask($old);
+        }
+        if ($written && null !== $mode && !@chmod($tmp, $mode)) {
+            @unlink($tmp);
+
+            throw new \RuntimeException(\sprintf('cannot set the mode of "%s"', $this->printable($path)));
+        }
+        if (!$written || !@rename($tmp, $dst)) {
             @unlink($tmp);
 
             throw new \RuntimeException(\sprintf('cannot write "%s"', $this->printable($path)));

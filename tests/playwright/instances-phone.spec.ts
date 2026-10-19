@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
+import { expectNoBlockingViolations } from './support/axe';
 import { createDeployableProject, deployOne, runFakeJob } from './support/instances';
 import { hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -35,21 +36,25 @@ test.describe('instances on a phone', () => {
     await page.goto('/instances');
     await expectNoOverflow(page, 'the list');
     await expectTouchTargets('list', [page.getByTestId('deploy-link'), page.getByTestId('filter-submit'), page.getByLabel('Search instances'), page.getByLabel(`Select ${id}`).locator('xpath=ancestor::label'), page.getByRole('button', { name: 'Stop' })]);
+    await expectNoBlockingViolations(page, 'phone, the list');
 
     await page.goto(`/instances/new?project=${project}`);
     await expectNoOverflow(page, 'the deploy form');
     const form = page.getByTestId('deploy-form');
     await expectTouchTargets('deploy form', [form.getByRole('button', { name: 'Deploy' }), form.getByLabel('Label'), form.getByLabel('How many')]);
+    await expectNoBlockingViolations(page, 'phone, the deploy form');
 
     await page.goto(`/instances/${id}`);
     await expectNoOverflow(page, 'the detail page');
     await expectTouchTargets('detail', [page.getByTestId('instance-actions').getByRole('button')]);
+    await expectNoBlockingViolations(page, 'phone, the detail page');
 
     await page.goto(`/instances/${id}`);
     await page.getByTestId('timeline-job').filter({ hasText: 'fake' }).first().getByRole('link').click();
     await expect(page.getByTestId('job-log')).toContainText('fake line 3 of 3');
     await expect(page.getByTestId('job-log')).toContainText('x'.repeat(150));
     await expectNoOverflow(page, 'the job page');
+    await expectNoBlockingViolations(page, 'phone, the job page');
   });
 
   test('a failed job page keeps Retry reachable', async ({ page, context, baseURL }) => {
@@ -59,6 +64,7 @@ test.describe('instances on a phone', () => {
     await page.goto(`/instances/${id}`);
     await page.getByTestId('timeline-job').filter({ hasText: 'fake' }).first().getByRole('link').click();
     await expectNoOverflow(page, 'the failed job page');
+    await expectNoBlockingViolations(page, 'phone, the failed job page');
     await expectTouchTargets('failed job', [page.getByTestId('job-retry')]);
   });
 });

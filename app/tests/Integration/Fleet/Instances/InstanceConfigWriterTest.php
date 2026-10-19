@@ -15,6 +15,7 @@ use App\Fleet\Instances\DomainGitIdentity;
 use App\Fleet\Instances\GitIdentityResolver;
 use App\Fleet\Instances\InstanceConfigWriter;
 use App\Fleet\Instances\InstanceHostnames;
+use App\Fleet\Jobs\RegisteredSecretsMasker;
 use App\Fleet\Secrets\SecretBox;
 use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Secrets\SecretStore;
@@ -29,6 +30,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
 
     private SecretStore $secrets;
     private InstanceConfigWriter $writer;
+    private RegisteredSecretsMasker $registry;
     private string $dir;
 
     protected function setUp(): void
@@ -42,7 +44,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
             new SecretBox(new SecretKeyFile(self::getContainer()->get(FleetPaths::class))),
             new MockClock('2026-10-19 10:00:00 UTC'),
         );
-        $this->writer = new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $this->secrets);
+        $this->writer = new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $this->secrets, $this->registry = new RegisteredSecretsMasker());
         $this->dir = $this->tempHome.'/checkout';
         mkdir($this->dir, 0o750, true);
     }
@@ -111,6 +113,15 @@ final class InstanceConfigWriterTest extends KernelTestCase
         $environment = $this->written($this->project())['web_environment'];
 
         self::assertSame('CLAUDE_CODE_OAUTH_TOKEN=tok-1', $environment[2]);
+    }
+
+    public function testTheClaudeTokenIsRegisteredWithTheLogMasker(): void
+    {
+        $this->secrets->putFleetWide(HostSecrets::CLAUDE_TOKEN, 'tok-secret-77', 'admin');
+
+        $this->written($this->project());
+
+        self::assertSame('ran [masked]', $this->registry->mask('ran tok-secret-77'));
     }
 
     public function testDisabledIdentityWritesNoGitVars(): void

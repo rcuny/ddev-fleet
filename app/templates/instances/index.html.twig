@@ -17,7 +17,8 @@
     <div class="mt-6"
          data-controller="instance-list"
          data-instance-list-url-value="{{ path('instances') }}"
-         data-instance-list-mercure-value="{{ mercure() }}">
+         data-instance-list-mercure-value="{{ topics is empty ? '' : mercure() }}"
+         data-instance-list-topics-value="{{ topics|json_encode }}">
         <turbo-frame id="instances" data-testid="instances-frame">
             {{ include('instances/_table.html.twig') }}
         </turbo-frame>
