@@ -16,6 +16,14 @@ final class CommandLines
     public const int MAX_LINE = 2000;
 
     /**
+     * The most characters a command list may have as one text (a textarea or a CLI option) before it is split: the
+     * largest valid list, every line at its maximum, with a CRLF between lines (browsers submit CRLF). The web form
+     * and the CLI both refuse a longer text with textError(), and the textarea's maxlength is this value, so a list
+     * one of them can store is never refused by the other.
+     */
+    public const int MAX_TEXT = self::MAX_LINES * (self::MAX_LINE + 2);
+
+    /**
      * Splits a textarea into lines, trims spaces and tabs at both ends and drops the blank lines. Nothing else is
      * removed: what error() must refuse is left in place.
      *
@@ -34,6 +42,12 @@ final class CommandLines
         return $lines;
     }
 
+    /** The bound check for a command list as one text, before normalise(). */
+    public static function textError(mixed $text): ?string
+    {
+        return TextBlock::error($text, self::MAX_TEXT);
+    }
+
     public static function error(mixed $lines): ?string
     {
         if (!\is_array($lines) || !array_is_list($lines)) {
@@ -50,7 +64,7 @@ final class CommandLines
             if (\strlen($line) > self::MAX_LINE * 4 || !mb_check_encoding($line, 'UTF-8')) {
                 return \sprintf('Command line %d is too long or is not valid UTF-8.', $n);
             }
-            if ('' === trim($line)) {
+            if (1 === preg_match('/^[\p{Z}\s]*$/u', $line)) {
                 return \sprintf('Command line %d is empty.', $n);
             }
             if (mb_strlen($line, 'UTF-8') > self::MAX_LINE) {
