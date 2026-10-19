@@ -14,6 +14,7 @@ use App\Domain\Ssh\SshKeyRole;
 final readonly class FleetPaths
 {
     private const string ID_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/D';
+    private const string UPLOAD_ID_PATTERN = '/^[0-9a-f]{32}$/D';
     /** An instance id is `{project}--{label}`: lowercase words joined by single dashes, at most 63 characters (a DNS label). */
     public const string INSTANCE_ID_PATTERN = '/^(?=.{3,63}$)[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$/D';
 
@@ -77,6 +78,27 @@ final readonly class FleetPaths
     public function assetsDir(string $project): string
     {
         return $this->home.'/assets/'.self::id($project, 'project');
+    }
+
+    /**
+     * Where browser uploads are staged until they are assembled into `assets/<project>/`: one directory per upload
+     * under `uploads/<id>/`. Owner only.
+     */
+    public function uploadsDir(): string
+    {
+        return $this->home.'/uploads';
+    }
+
+    /**
+     * @param string $id the 32 hexadecimal characters of an upload id
+     */
+    public function uploadDir(string $id): string
+    {
+        if (1 !== preg_match(self::UPLOAD_ID_PATTERN, $id)) {
+            throw new \InvalidArgumentException('Invalid upload id.');
+        }
+
+        return $this->uploadsDir().'/'.$id;
     }
 
     public function instancesDir(): string
@@ -225,6 +247,8 @@ final readonly class FleetPaths
             $this->logsDir().'/jobs' => [0o750, true],
             $this->logsDir().'/instances' => [0o750, true],
             $this->home.'/assets' => [0o750, true],
+            // Owner only: chunks of a browser upload wait here until they are assembled (they may be database dumps).
+            $this->uploadsDir() => [0o700, true],
             $this->instancesDir() => [0o750, true],
             // Owner only: rendered config (may carry credentials) waits here for the root helper.
             $this->stagingDir() => [0o700, true],

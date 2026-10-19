@@ -21,6 +21,7 @@ Type: documentation
 |---|---|---|
 | [`installation.md`](installation.md) | Current | Installing 1.x on a Debian 13 host: prerequisites, `install.sh` and its flags, the setup wizard, what is installed where, recovery (`fleet setup:reset`, `fleet user:reset-password`), upgrades, the security model, uninstalling, troubleshooting |
 | [`projects-and-templates.md`](projects-and-templates.md) | Current | Projects and templates in the browser and with `fleet project\|template\|port`: concepts, every field and limit, the screens, CLI reference (exit codes, `--json`), permissions, deleting, named ports, differences from 0.x |
+| [`assets.md`](assets.md) | Current | A project's assets: the Assets tab (browser, upload, download, delete, folders, rescan), chunked resumable upload and its 2 GiB cap, copying large files over SSH, path and symbolic-link rules, `fleet asset:list` and `fleet asset:gc` (exit codes, `--json`), limits |
 | [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
 | [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the `v1.*` tag guard, the systemd security check and baseline |
 | [`RELEASING.md`](RELEASING.md) | 0.x flow valid; 1.x section added | Versioning, CHANGELOG conventions, release and hotfix procedure. The section "1.x during the port" covers `v1.*` tags on `develop`; the document is rewritten at v1.0.0 (milestone M0.04) |

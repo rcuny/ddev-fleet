@@ -1,0 +1,175 @@
+---
+Author: Claude Code
+Reviewer: none
+Last updated: 2026-10-19
+Type: documentation
+---
+
+# Assets (1.x)
+
+A project's **assets** are the seed data its instances start from: database dumps, a tarball of the public files,
+`.env` templates. They live as plain files in one directory per project on the host,
+`/srv/fleet/assets/<project>/` (owned by the `fleet` user), and you manage them from the project's **Assets** tab in
+the browser, with the `fleet asset:*` commands, or with `scp` and `rsync`. There is no index: what the tab shows is what
+is on disk.
+
+Deploying an instance from the assets arrives with instances (M0.04); snapshotting a running instance's database into
+a new dump arrives with M0.06b. Until then the assets are a place to keep and manage the files.
+
+Contents: [the screen](#the-screen) · [uploading in the browser](#uploading-in-the-browser) ·
+[copying over SSH](#copying-over-ssh) · [names, paths and symbolic links](#names-paths-and-symbolic-links) ·
+[the command line](#the-command-line) · [limits](#limits) · [permissions](#permissions) · [troubleshooting](#troubleshooting)
+
+## The screen
+
+Open **Projects**, pick a project, then the **Assets** tab (`/admin/projects/<project>/assets`).
+
+| Part | What it does |
+|---|---|
+| Folder path | Where you are (`Assets / dumps / 2026`); every part is a link. |
+| **Upload files** | Choose one or more files; they are sent one after another into the folder you are in. |
+| **Create folder** | Makes a folder inside the current one (up to 8 folders deep). |
+| **Rescan** | Reloads the list from the disk, to show files copied in over SSH. The list is read from the filesystem on every visit; there is no cache to refresh. |
+| The list | Folders first, then files: name, size, modified time (UTC). On a phone the size and time sit under the name. A folder opens when you click its name. |
+| **Download** | Sends the file as an attachment. Folders cannot be downloaded. |
+| **Delete** | Asks for confirmation in a dialog, then removes the file. A folder is deleted only when it is empty. |
+
+Entries the screen cannot handle are listed but have no buttons: a **symbolic link** is shown as "symbolic link,
+ignored" and never followed, and a file copied in with a name outside the allowed characters is shown as "name not
+supported here" (rename it on the host). A folder with more than 2000 items shows the first 2000.
+
+## Uploading in the browser
+
+The browser cuts each file into **chunks of up to 8 MiB** and sends them one request at a time, so neither php-fpm nor
+Caddy ever sees a request bigger than a chunk. The server keeps the chunks in a staging area, checks every one, and
+when the last has arrived it **assembles** them into a hidden temporary file next to the target and moves that into
+place with one atomic rename. A half-finished file never appears in the list. When it is done the screen shows the
+file's **sha256**, computed on the server while assembling, so you can compare it with `sha256sum` on your side.
+
+- **Limit per file:** 2 GiB by default (`asset_upload_max_bytes` in the host settings table, in bytes). A bigger file is
+  refused before anything is sent, with a message naming the limit and the directory to copy it into instead (see the
+  next section). There is no screen or command to change the limit yet; it is stored so a later settings page can.
+- **Resuming:** if the connection drops or the page is closed, choose **the same file again** (same name, size and
+  modified time): the server tells the browser which chunks it already holds and only the missing ones are sent.
+  A chunk that fails is retried three times before the upload is reported as failed.
+- **Existing file:** if a file with that name exists, the browser asks before replacing it; without a yes nothing is
+  touched. The replacement is atomic as well.
+- **Staging area:** `/srv/fleet/uploads/<id>/` (owner only, mode 0700). Each chunk is written to a temporary file and
+  renamed, so sending a chunk twice is harmless and out-of-order chunks are fine. Assembling deletes each chunk as it is
+  copied, so the disk needs room for the file plus one chunk on top of the staged chunks. The check at the start of an
+  upload refuses it when the disk is too full.
+- **Abandoned uploads:** an upload nobody touched for 24 hours is deleted by the next upload that starts, and by
+  `fleet asset:gc`. Run `fleet asset:gc` from cron or by hand if uploads are rare and a big failed one is sitting there.
+
+Downloads go through php-fpm like every other page, so a download that runs longer than php-fpm's
+`request_terminate_timeout` (240 seconds in the installed pool) is cut. For a multi-gigabyte file use `scp` or `rsync`.
+
+## Copying over SSH
+
+For anything above the limit, or whenever you already have the files on another machine, copy them straight into the
+project's directory. The directory belongs to `fleet`, and php-fpm runs as `fleet`, so the files must be readable by
+that user. With an administrator account that may use `sudo`:
+
+```bash
+# once: the project's directory (the browser creates it on the first upload, too)
+ssh admin@fleet.example.com sudo -u fleet mkdir -p /srv/fleet/assets/blog
+
+# a file
+rsync -av --rsync-path="sudo rsync" --chown=fleet:fleet --chmod=D750,F640 \
+  ./blog-db.sql.gz admin@fleet.example.com:/srv/fleet/assets/blog/
+
+# a tree (keep the trailing slashes)
+rsync -av --rsync-path="sudo rsync" --chown=fleet:fleet --chmod=D750,F640 \
+  ./dumps/ admin@fleet.example.com:/srv/fleet/assets/blog/dumps/
+```
+
+Then press **Rescan** on the Assets tab, or run `fleet asset:list blog`. Do not copy symbolic links in (`rsync -a`
+keeps them; add `--no-links`): the screen ignores them. Use file names with letters, digits, spaces and
+`. _ - ( ) + @ , = ~` so the browser can download and delete them.
+
+## Names, paths and symbolic links
+
+Every path the browser or a command takes is relative to the project's directory and is checked before any file is
+touched. A path is refused when it:
+
+- is absolute, or has an empty, `.` or `..` part, or a backslash;
+- contains a NUL, a control character, or an invisible or direction-changing character (such as a right-to-left override);
+- has a part longer than 255 bytes, more than 8 parts, or more than 1024 bytes in total;
+- uses a character outside the allowed set: letters and digits of any script (with combining marks), space, and
+  `. _ - ( ) + @ , = ~`; a name may start with a dot (`.env`) but not with a space, may not end with a space, and may not
+  start with `.fleet-upload-` (the hidden temporary files).
+
+The same rules apply to names on disk that you copied in: a name outside the set is listed but cannot be addressed.
+
+**Symbolic links are never followed.** The project's directory itself may not be a link (mount what you need instead);
+a link anywhere on the way to a folder or file makes the request fail with "A symbolic link is in the way"; nothing is
+ever written through one. A link inside the directory is listed, can be deleted (the link, not what it points at) and is
+otherwise ignored.
+
+## The command line
+
+Run on the host as `fleet asset:<verb>` (the wrapper switches to the `fleet` user). Both accept
+`--format=table|json` (`--json` is the short form).
+
+### `fleet asset:list <project> [<path>]`
+
+Lists a folder of the project's assets (the top by default): type (`dir`, `file`, `link`), name, size and modified time.
+With `--format=json` the output is one document:
+
+```json
+{"project": "blog", "path": "dumps", "entries": [
+  {"name": "db.sql.gz", "path": "dumps/db.sql.gz", "type": "file", "size": 2048,
+   "modified": "2026-10-19T08:15:00Z", "usable": true}
+], "truncated": false}
+```
+
+`usable` is false for a link or a name the browser cannot address.
+
+### `fleet asset:gc`
+
+Deletes uploads that nobody touched for 24 hours and the hidden temporary files of an assembly that was killed (also
+older than 24 hours). Prints what it removed; with `--format=json`:
+`{"uploads": 1, "temporaryFiles": 0, "bytes": 52428800}`.
+
+### Exit codes
+
+| Code | Meaning |
+|---|---|
+| `0` | Done. |
+| `1` | A value was refused: the path breaks the rules above (reported as `<path>: message`). |
+| `2` | Not allowed now: a symbolic link is in the way. |
+| `3` | The project or the folder does not exist. |
+
+In JSON mode a failure is `{"error": "...", "fields": {...}}` on stdout, like the project commands.
+
+## Limits
+
+| Limit | Value |
+|---|---|
+| One browser upload | 2 GiB by default (`asset_upload_max_bytes`); at most 65 536 chunks |
+| One chunk | 64 KiB to 8 MiB (the browser sends 8 MiB) |
+| Folder depth, name, whole path | 8, 255 bytes, 1024 bytes |
+| Items shown in a folder | 2000 |
+| Staged upload kept | 24 hours after its last chunk |
+| Mode of what is created | folders 0750, files 0640, staging 0700 |
+
+## Permissions
+
+The Assets tab and every request behind it are for **administrators** (`ProjectVoter::SETTINGS`): a signed-in member
+gets 403 and an anonymous request 401, like the other project pages. The upload requests are made by the page with a
+CSRF token in the `X-CSRF-Token` header; forms (create folder, delete) carry it as `_token`; a cross-site request is
+refused. Assets can hold database dumps with personal data: the files are mode 0640 and the staging area 0700, and
+nothing here is served by Caddy directly.
+
+## Troubleshooting
+
+| Symptom | Cause and fix |
+|---|---|
+| "The file is X, more than the upload limit of Y" | Over the cap. Copy it in over SSH (the message names the directory). |
+| "There is not enough free disk space for that file" | The disk holding `/srv/fleet` is nearly full. Free space, or copy the file to a bigger disk and mount it. |
+| An upload stops at "The connection was lost" | Choose the same file again: it carries on from the last stored chunk. |
+| "The upload has expired" | Nothing arrived for 24 hours; start it again. |
+| A file copied in over SSH does not show | Press **Rescan**; check the owner (`fleet`) and that the path is under `/srv/fleet/assets/<project>/`. |
+| "A symbolic link is in the way" | A link on the path. Replace it with a real directory, or copy the data instead of linking it. |
+| "name not supported here" | The file name has characters outside the allowed set. Rename it on the host. |
+| Download cut after four minutes | php-fpm's request time limit. Use `scp` or `rsync` for big files. |

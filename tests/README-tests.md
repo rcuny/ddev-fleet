@@ -16,14 +16,14 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 
 | Suite | Where | Count |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 967 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 507 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 504 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 394 tests (13 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
-| Playwright | `tests/playwright/` | 161 (including `host-settings.spec.ts` and `users.spec.ts`; 133 run and 28 skip on a default run; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 69 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| PHPUnit `Unit` | `app/tests/Unit/` | 1061 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 576 tests |
+| PHPUnit `Functional` | `app/tests/Functional/` | 570 tests |
+| PHPUnit `Repo` | `app/tests/Repo/` | 401 tests (13 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
+| Playwright | `tests/playwright/` | 173 (13 spec files, including `host-settings.spec.ts`, `assets.spec.ts` and `users.spec.ts`; 145 run and 28 skip on a default run; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 89 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 2372 tests (13 skipped). Update this table when the numbers change.
+PHPUnit totals 2608 tests (13 skipped). Update this table when the numbers change.
 
 ## Layout
 
@@ -40,7 +40,8 @@ app/tests/
                      helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
                      InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code),
                      CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
-                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it)
+                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it),
+                     AssetDocsTest (the same for docs/assets.md and `fleet asset:list|gc`, and its limits match the code)
   Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
@@ -49,6 +50,7 @@ tests/playwright/    TypeScript @playwright/test, its own npm package
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
                          setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
                          users (an administrator adds a user to a project at 390 px, password, disable, delete, axe)
+                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe; 12 tests)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```
@@ -99,6 +101,12 @@ list, create, edit, templates, ports and delete dialog at both widths, the membe
 project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets and axe in both
 themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
 the controller answers, because a busy host loads them after the HTML is interactive.
+`assets.spec.ts` (FLE-52, written without a browser to run it in: first run it on the pipeline) uploads files through the page
+with `setInputFiles` after lowering the chunk size to 64 KiB (the controller reads `data-asset-upload-chunk-size-value` when an
+upload starts), so a 192 KiB file travels as four requests; it compares the sha256 the server shows with the one it computed,
+downloads the file and compares it, deletes through the dialog, creates and uses a folder, aborts chunk 2 with `page.route` to
+prove that choosing the same file again sends only chunks 2 and 3, and answers the replace prompt both ways. Files copied in over
+SSH ("Rescan") need the server's disk, so that case is covered by `AssetPagesTest` only. Each test deletes the files it uploaded.
 The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
 bottom bar, and the shell specs assert that no console error or uncaught page error was seen (`support/shell.ts`).
 
