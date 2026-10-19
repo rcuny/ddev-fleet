@@ -66,9 +66,9 @@ services:
     App\Setup\HostResolver:
         alias: App\Setup\DnsHostResolver
 
-    # Instances arrive in M0.04 (it re-points this alias); until then no project has any.
+    # A project with instance rows cannot be deleted (the real guard; the test environment swaps in a scripted one).
     App\Domain\Project\ProjectInstanceGuard:
-        alias: App\Domain\Project\NoInstanceGuard
+        alias: App\Domain\Instance\InstanceGuard
     # The per-project Authelia access rules come from the project_access rows (M0.10).
     App\Fleet\System\AccessRuleSource:
         alias: App\Fleet\Auth\ProjectAccessRules
@@ -120,7 +120,7 @@ when@test:
             alias: fleet.command_runner.recording
             public: true
 
-        # Tests script how many instances a project has (the real guard arrives with M0.04). Not under src/, so it is
+        # Tests script how many instances a project has (InstanceGuardTest covers the real one). Not under src/, so it is
         # defined here; public so a test can fetch it and call set().
         App\Tests\Support\FakeInstanceGuard:
             public: true

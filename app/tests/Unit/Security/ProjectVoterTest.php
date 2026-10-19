@@ -67,7 +67,7 @@ final class ProjectVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), null, [ProjectVoter::SETTINGS]));
     }
 
-    public function testMemberOperatesOnlyOnOwnProjects(): void
+    public function testMemberOperatesOnlyProjectsTheyBelongTo(): void
     {
         $own = new Project('acme', 'git@git.example.com:acme/blog.git');
         $other = new Project('blog', 'git@git.example.com:acme/other.git');
@@ -75,6 +75,22 @@ final class ProjectVoterTest extends TestCase
 
         self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote($this->member(), $own, [ProjectVoter::OPERATE]));
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $other, [ProjectVoter::OPERATE]));
+    }
+
+    public function testDeployAndDestroyAreAdminOnly(): void
+    {
+        $own = new Project('acme', 'git@git.example.com:acme/blog.git');
+        // Even a member of the project may neither deploy nor destroy.
+        $voter = $this->voter($own);
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote($this->admin(), $own, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote($this->admin(), null, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote($this->admin(), $own, [ProjectVoter::DESTROY]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $own, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), null, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $own, [ProjectVoter::DESTROY]));
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($this->admin(), null, [ProjectVoter::DESTROY]), 'destroy needs a project');
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), $own, [ProjectVoter::DEPLOY]));
     }
 
     public function testNoMembershipMakesNobodyAMember(): void

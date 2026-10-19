@@ -18,6 +18,7 @@ use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Security\FleetUser;
 use App\Security\ProjectVoter;
+use App\Security\StandIn\StandInProjectMembership;
 use App\Tests\Support\FakeInstanceGuard;
 use App\Tests\Support\FleetDatabase;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -60,6 +61,8 @@ final class ProjectMembershipVoterTest extends KernelTestCase
     }
 
     /**
+     * The group is deliberately not a project name: the test-env stand-in would make that user a member of it.
+     *
      * @param non-empty-string $username
      */
     private function signIn(string $username, string $group): void
@@ -88,14 +91,22 @@ final class ProjectMembershipVoterTest extends KernelTestCase
 
     public function testTheMembershipServiceIsTheRowBackedOne(): void
     {
-        self::assertInstanceOf(ProjectAccessMembership::class, self::getContainer()->get('fleet.test_alias.project_membership'));
-        self::assertInstanceOf(ProjectMembership::class, self::getContainer()->get('fleet.test_alias.project_membership'));
+        $membership = self::getContainer()->get('fleet.test_alias.project_membership');
+        self::assertInstanceOf(ProjectMembership::class, $membership);
+        // In test the dev/test-only stand-in decorates the row-backed service and defers to it (rows still decide).
+        if ($membership instanceof StandInProjectMembership) {
+            $inner = new \ReflectionProperty($membership, 'inner')->getValue($membership);
+            self::assertInstanceOf(ProjectAccessMembership::class, $inner);
+
+            return;
+        }
+        self::assertInstanceOf(ProjectAccessMembership::class, $membership);
     }
 
     public function testAMemberOperatesTheirProjectsOnly(): void
     {
         $this->access->grant('bob', 'blog');
-        $this->signIn('bob', 'demo');
+        $this->signIn('bob', 'staff');
 
         self::assertTrue($this->checker()->isGranted(ProjectVoter::OPERATE, $this->project('blog')));
         self::assertFalse($this->checker()->isGranted(ProjectVoter::OPERATE, $this->project('demo')));
@@ -104,7 +115,7 @@ final class ProjectMembershipVoterTest extends KernelTestCase
     public function testAMemberNeverGetsSettingsOrDelete(): void
     {
         $this->access->grant('bob', 'blog');
-        $this->signIn('bob', 'demo');
+        $this->signIn('bob', 'staff');
 
         self::assertFalse($this->checker()->isGranted(ProjectVoter::SETTINGS, $this->project('blog')));
         self::assertFalse($this->checker()->isGranted(ProjectVoter::SETTINGS, null));
@@ -113,7 +124,7 @@ final class ProjectMembershipVoterTest extends KernelTestCase
     public function testRevokingTakesEffectAtOnce(): void
     {
         $this->access->grant('bob', 'blog');
-        $this->signIn('bob', 'demo');
+        $this->signIn('bob', 'staff');
         self::assertTrue($this->checker()->isGranted(ProjectVoter::OPERATE, $this->project('blog')));
 
         $this->access->revoke('bob', 'blog');
@@ -132,7 +143,7 @@ final class ProjectMembershipVoterTest extends KernelTestCase
     public function testAnIdentityTheDatabaseDoesNotKnowIsNoMember(): void
     {
         $this->access->grant('bob', 'blog');
-        $this->signIn('mallory', 'demo');
+        $this->signIn('mallory', 'staff');
 
         self::assertFalse($this->checker()->isGranted(ProjectVoter::OPERATE, $this->project('blog')));
     }
