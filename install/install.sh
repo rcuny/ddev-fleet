@@ -86,7 +86,9 @@ USAGE
     fi
     "$@" </dev/null
   }
-  # Same apt options as lib/common.sh apt_get: non-interactive, keep existing configuration files, wait for the dpkg lock.
+  # Stage 1 runs before any checkout exists, so it cannot source lib/common.sh: this is a second copy of its apt_get
+  # and dpkg repair (same options). InstallerPackagesTest::testStageOneAndStageTwoUseIdenticalAptAndDpkgOptions keeps the
+  # two in step.
   apt_step() {
     step env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q \
       -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 "$@"
@@ -163,7 +165,7 @@ USAGE
   say "[stage 1] bootstrap for $domain (ref $ref)"
   # A run killed inside dpkg leaves it half configured; apt refuses to do anything until that is repaired.
   if [ "$dry_run" = 1 ] || [ -n "$(dpkg --audit 2>/dev/null || true)" ] || [ -n "$(find /var/lib/dpkg/updates -maxdepth 1 -type f 2>/dev/null || true)" ]; then
-    step dpkg --configure -a
+    step env DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a
     apt_step -f install
   fi
   apt_step update

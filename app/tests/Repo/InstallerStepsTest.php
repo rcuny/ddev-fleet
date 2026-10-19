@@ -304,14 +304,14 @@ final class InstallerStepsTest extends TestCase
         self::assertStringContainsString(' install foo', $clean);
 
         $audited = $run(['AUDIT' => '1']);
-        self::assertSame(1, substr_count($audited, 'dpkg --configure -a'), 'repaired once, not once per call');
-        self::assertLessThan(strpos($audited, ' install foo'), strpos($audited, 'dpkg --configure -a'), 'repair comes before the install');
+        self::assertSame(1, substr_count($audited, '--configure -a'), 'repaired once, not once per call');
+        self::assertLessThan(strpos($audited, ' install foo'), strpos($audited, '--configure -a'), 'repair comes before the install');
         self::assertStringContainsString('-f install', $audited);
         self::assertStringContainsString('--force-confold', $audited);
 
         touch($updates.'/0001');
         $pending = $run([]);
-        self::assertStringContainsString('dpkg --configure -a', $pending, 'a pending dpkg journal counts as interrupted');
+        self::assertStringContainsString('--configure -a', $pending, 'a pending dpkg journal counts as interrupted');
     }
 
     public function testStartPolicyIsOursToCreateAndRemoveOnly(): void
@@ -349,8 +349,8 @@ final class InstallerStepsTest extends TestCase
     {
         [, $out] = $this->dryRun();
 
-        self::assertSame(2, substr_count($out, "+ dpkg --configure -a\n"), 'stage 1 and stage 2 each repair first');
-        self::assertLessThan(strpos($out, ' update'), strpos($out, '+ dpkg --configure -a'));
+        self::assertSame(2, substr_count($out, "--force-confold --configure -a\n"), 'stage 1 and stage 2 each repair first');
+        self::assertLessThan(strpos($out, ' update'), strpos($out, '--configure -a'));
         self::assertStringContainsString('git -C /opt/ddev-fleet checkout --quiet --force -B develop origin/develop', $out);
         self::assertStringContainsString('git -C /opt/ddev-fleet cat-file -e HEAD:install/run.sh', $out);
         self::assertStringNotContainsString('--ff-only', $out, 'a rewritten branch must converge, not wedge on a fast-forward');
@@ -394,7 +394,7 @@ final class InstallerStepsTest extends TestCase
         [$status, , $err] = $this->bash($args, $env);
         self::assertSame(1, $status);
         self::assertStringContainsString('ERROR: boom', $err);
-        self::assertSame(1, substr_count($err, 'step "05-boom" failed (exit 1).'), $err);
+        self::assertSame(1, substr_count($err, 'step "05-boom" failed (exit 1, at 05-boom.sh:2).'), $err);
         self::assertSame(1, substr_count($err, 're-run the same command'), $err);
 
         file_put_contents($copy.'/install/steps/05-boom.sh', "step_main() {\n  local x\n  false\n}\n");

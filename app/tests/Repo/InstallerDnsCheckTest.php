@@ -196,6 +196,53 @@ final class InstallerDnsCheckTest extends TestCase
         self::assertSame(0, $status, $err);
     }
 
+    public function testAFailedLookupIsInconclusiveNotAnAbsentRecord(): void
+    {
+        // A SERVFAIL on the AAAA query must not read as "no AAAA record": a stale one may sit behind it.
+        $stubs = $this->dnsStubs(
+            [
+                self::DOMAIN => ['4' => ['203.0.113.7'], '6' => 'SERVFAIL'],
+                self::AUTH => ['4' => ['203.0.113.7']],
+            ],
+            localV4: ['203.0.113.7'],
+            publicV4: null,
+        );
+
+        [$status, $out, $err] = $this->check($stubs);
+
+        self::assertSame(2, $status);
+        self::assertStringNotContainsString('==>', $out);
+        self::assertStringContainsString('DNS check inconclusive', $err);
+        self::assertStringContainsString('AAAA record of fleet.example.com', $err);
+        self::assertStringContainsString('--skip-dns-check', $err);
+        self::assertStringNotContainsString('has no A record', $err);
+    }
+
+    public function testAFailedARecordLookupIsInconclusiveToo(): void
+    {
+        $stubs = $this->dnsStubs(
+            [self::DOMAIN => ['4' => 'SERVFAIL'], self::AUTH => ['4' => ['203.0.113.7']]],
+            localV4: ['203.0.113.7'],
+            publicV4: null,
+        );
+
+        [$status, , $err] = $this->check($stubs);
+
+        self::assertSame(2, $status);
+        self::assertStringContainsString('DNS check inconclusive: the lookup of the A record of fleet.example.com', $err);
+    }
+
+    public function testDigThatCannotReachAResolverIsInconclusive(): void
+    {
+        $stubs = $this->dnsStubs([], localV4: ['203.0.113.7'], publicV4: null);
+        file_put_contents($stubs.'/dig', "#!/bin/sh\nexit 9\n");
+
+        [$status, , $err] = $this->check($stubs);
+
+        self::assertSame(2, $status);
+        self::assertStringContainsString('DNS check inconclusive', $err);
+    }
+
     public function testSkipFlagBypasses(): void
     {
         $stubs = $this->dnsStubs(
@@ -227,21 +274,26 @@ final class InstallerDnsCheckTest extends TestCase
     }
 
     /**
-     * @param array<string, array<int, list<string>>> $records name => family (4 or 6) => addresses
-     * @param list<string>                            $localV4
-     * @param list<string>                            $localV6
+     * @param array<string, array<int, list<string>|string>> $records name => family (4 or 6) => addresses, or 'SERVFAIL' for a failed lookup
+     * @param list<string>                                   $localV4
+     * @param list<string>                                   $localV6
      */
     private function dnsStubs(array $records, array $localV4 = [], array $localV6 = [], ?string $publicV4 = null, ?string $publicV6 = null): string
     {
         $cases = '';
         foreach ($records as $name => $families) {
             foreach ($families as $family => $addresses) {
-                $lines = '';
-                foreach ($addresses as $address) {
-                    $lines .= \sprintf("echo '%s'\n", $address);
+                $type = 6 === $family ? 'AAAA' : 'A';
+                if (\is_string($addresses)) {
+                    $cases .= \sprintf("%s:%s) header %s;;\n", $type, $name, $addresses);
+                    continue;
                 }
-                // dig answers a CNAME chain with the target name first; the check must ignore those lines.
-                $cases .= \sprintf("%s:%s) echo 'target.example.net.'; %s;;\n", 6 === $family ? 'AAAA' : 'A', $name, $lines);
+                // The answer starts with a CNAME line, like a real chain; the check must only count the A/AAAA lines.
+                $lines = \sprintf("header NOERROR; echo '%s. 300 IN CNAME target.example.net.'; ", $name);
+                foreach ($addresses as $address) {
+                    $lines .= \sprintf("echo 'target.example.net. 300 IN %s %s'; ", $type, $address);
+                }
+                $cases .= \sprintf("%s:%s) %s;;\n", $type, $name, $lines);
             }
         }
         $ip = static function (array $addresses, string $family): string {
@@ -254,8 +306,9 @@ final class InstallerDnsCheckTest extends TestCase
         };
 
         return $this->stubs([
-            // dig +short +time=3 +tries=2 <A|AAAA> <name>
-            'dig' => "case \"\$4:\$5\" in\n".$cases."*) exit 0;;\nesac",
+            // dig +noall +comments +answer +time=3 +tries=2 <A|AAAA> <name>
+            'dig' => "header() { echo \";; ->>HEADER<<- opcode: QUERY, status: \$1, id: 1\"; echo ';; flags: qr rd ra; QUERY: 1'; echo; }\n".
+                "case \"\$6:\$7\" in\n".$cases."*) header NOERROR;;\nesac",
             // /etc/hosts says the name is this host, whatever the resolver answers.
             'getent' => 'echo "203.0.113.7 STREAM $2"',
             'ip' => "case \"\$2\" in\n-4) ".$ip($localV4, '4').";;\n-6) ".$ip($localV6, '6').";;\nesac",

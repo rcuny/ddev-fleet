@@ -64,9 +64,12 @@ log_warn() {
   printf 'WARNING: %s\n' "$*" >&2
 }
 
+# DIE_WHERE (the caller's file:line) is read by the exit trap in run.sh so that a die reports like a failed command.
+DIE_WHERE=
 die() {
   local code=$1
   shift
+  DIE_WHERE="${BASH_SOURCE[1]##*/}:${BASH_LINENO[0]}"
   printf 'ERROR: %s\n' "$*" >&2
   exit "$code"
 }
@@ -259,14 +262,21 @@ public_addr() {
 
 # DNS records of family 4 or 6 for a name, one per line. This asks the resolver (dig), not the name service switch:
 # `getent` would read /etc/hosts first, where Debian maps the host's own name to 127.0.1.1, and a line there could
-# also make a wrong public record look right. CNAME lines in the answer are dropped.
+# also make a wrong public record look right. Only A/AAAA answers count (CNAME lines are dropped). Returns 3 when the
+# lookup is inconclusive (timeout, SERVFAIL, REFUSED): "no records" (NOERROR or NXDOMAIN with an empty answer) is
+# an answer, a failed lookup is not.
 dns_records() {
-  local family=$1 name=$2 type=A pattern='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+  local family=$1 name=$2 type=A out status
   if [ "$family" = 6 ]; then
     type=AAAA
-    pattern='^[0-9a-fA-F:]*:[0-9a-fA-F:.]*$'
   fi
-  { dig +short +time=3 +tries=2 "$type" "$name" 2>/dev/null || true; } | { grep -E "$pattern" || true; } | tr 'A-F' 'a-f' | sort -u
+  out=$(dig +noall +comments +answer +time=3 +tries=2 "$type" "$name" 2>/dev/null) || return 3
+  status=$(printf '%s\n' "$out" | sed -n 's/.*status: \([A-Z]*\).*/\1/p;T;q')
+  case $status in
+    NOERROR | NXDOMAIN) ;;
+    *) return 3 ;;
+  esac
+  printf '%s\n' "$out" | awk -v t="$type" '$1 !~ /^;/ && $4 == t {print $5}' | tr 'A-F' 'a-f' | sort -u
 }
 
 # True when $1 is an entry of the newline-separated list $2.
@@ -287,11 +297,16 @@ check_dns() {
     for family in 4 6; do
       local_set=$(local_addrs "$family")
       public_set=
-      local recs
-      recs=$(dns_records "$family" "$name")
+      local recs lookup=0
+      recs=$(dns_records "$family" "$name") || lookup=$?
+      if [ "$lookup" != 0 ]; then
+        printf 'ERROR: DNS check inconclusive: the lookup of the %s record of %s failed (timeout, SERVFAIL or no resolver). Retry, or pass --skip-dns-check if you know the records are right.\n' "$([ "$family" = 4 ] && echo A || echo AAAA)" "$name" >&2
+        problems=$((problems + 1))
+        continue
+      fi
       if [ -z "$recs" ]; then
         if [ "$family" = 4 ]; then
-          printf 'ERROR: %s has no A record (or the DNS lookup failed).\n' "$name" >&2
+          printf 'ERROR: %s has no A record.\n' "$name" >&2
           problems=$((problems + 1))
         fi
         continue
@@ -413,7 +428,7 @@ dpkg_recover() {
   DPKG_CHECKED=1
   if is_dry || dpkg_interrupted; then
     log_info "dpkg was interrupted (or may have been): repairing before any apt action"
-    run dpkg --configure -a
+    run env DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a
     apt_get -f install
   fi
 }

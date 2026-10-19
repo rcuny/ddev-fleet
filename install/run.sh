@@ -90,7 +90,7 @@ on_exit() {
     policy_allow_start || true
   fi
   if [ "$code" -ne 0 ]; then
-    report_failure "$code" ""
+    report_failure "$code" "$DIE_WHERE"
   fi
 }
 

@@ -94,6 +94,46 @@ final class InstallerPackagesTest extends TestCase
         self::assertGreaterThanOrEqual(12, $calls, 'stage 1 and stage 2 both run apt');
     }
 
+    public function testDpkgRepairRunsNonInteractivelyKeepingConfigurationFiles(): void
+    {
+        [, $out] = $this->dryRun();
+
+        $repairs = array_values(array_filter(explode("\n", $out), static fn (string $l): bool => str_contains($l, 'dpkg --force-confdef')));
+        self::assertCount(2, $repairs, 'one repair line per stage');
+        foreach ($repairs as $line) {
+            self::assertSame('+ env DEBIAN_FRONTEND=noninteractive dpkg --force-confdef --force-confold --configure -a', $line);
+        }
+        self::assertStringNotContainsString("+ dpkg --configure -a\n", $out, 'no bare, promptable dpkg repair');
+    }
+
+    public function testStageOneAndStageTwoUseIdenticalAptAndDpkgOptions(): void
+    {
+        // install.sh cannot source lib/common.sh (no checkout yet), so it carries a copy; the two must not drift.
+        [, $out] = $this->dryRun();
+        $lines = explode("\n", $out);
+        $split = array_search('dry-run: nothing will be changed', $lines, true);
+        self::assertIsInt($split);
+        $options = static function (array $part): array {
+            $found = [];
+            foreach ($part as $line) {
+                if (1 === preg_match('/^\+ (env DEBIAN_FRONTEND=\S+ NEEDRESTART_MODE=\S+ apt-get .*?) (update|install|-f install)\b/', $line, $m)) {
+                    $found[] = $m[1];
+                }
+                if (str_contains($line, 'dpkg --force-confdef')) {
+                    $found[] = $line;
+                }
+            }
+
+            return array_values(array_unique($found));
+        };
+
+        $stageOne = $options(\array_slice($lines, 0, $split));
+        $stageTwo = $options(\array_slice($lines, $split));
+
+        self::assertCount(2, $stageOne, 'one apt option set and one dpkg repair line in stage 1');
+        self::assertSame($stageOne, $stageTwo);
+    }
+
     public function testAptGetIsOnlyCalledThroughTheTwoWrappers(): void
     {
         foreach (self::installFiles() as $file) {
