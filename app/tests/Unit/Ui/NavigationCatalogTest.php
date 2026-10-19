@@ -86,7 +86,7 @@ final class NavigationCatalogTest extends TestCase
             'projects' => null,
             'jobs' => 'M0.04',
             'webhooks' => null,
-            'schedules' => 'M0.09',
+            'schedules' => null,
             'secrets' => null,
             'users' => null,
             'settings' => null,
