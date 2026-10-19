@@ -134,7 +134,8 @@ test.describe('schedules', () => {
     }
   });
 
-  test('empty state is accessible', async ({ page }) => {
+  // Asserts nothing about which schedules exist (parallel tests own theirs), so it does not depend on test order.
+  test('schedules page is accessible with or without rows', async ({ page }) => {
     await page.goto('/admin/schedules');
     await expect(page.getByRole('heading', { level: 1, name: 'Schedules' })).toBeVisible();
     expect(await hasHorizontalOverflow(page)).toBe(false);
