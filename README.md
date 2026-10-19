@@ -20,7 +20,7 @@ in one place, and puts every instance under one wildcard domain with TLS and a l
 | Line | Branch | State |
 |---|---|---|
 | **0.x** (Python: FastAPI daemon, `fleet` CLI, `fleet.yml`) | `main` (tags `v0.*`) | Production line. Install and operate it from `main`; its documentation is kept in [`docs/v0/`](docs/v0/). |
-| **1.x** (Symfony 8, PHP 8.4, SQLite) | `develop` (tags `v1.*` from v1.0.0) | A rewrite in progress, developed milestone by milestone. This branch ships the foundation (app skeleton, command seam, the design system and app shell, tests and CI) and the **installer and setup wizard**: one command turns a fresh Debian 13 host into a fleet with HTTPS, a sign-in portal and a setup wizard. It cannot manage instances yet and is **not ready for production use**; install it on a test host. |
+| **1.x** (Symfony 8, PHP 8.4, SQLite) | `develop` (tags `v1.*` from v1.0.0) | A rewrite in progress, developed milestone by milestone. This branch ships the foundation (app skeleton, command seam, the design system and app shell, tests and CI), the **installer and setup wizard** (one command turns a fresh Debian 13 host into a fleet with HTTPS, a sign-in portal and a setup wizard) and **projects and templates** (what the fleet can deploy, in the browser or with `fleet project\|template\|port`, see [`docs/projects-and-templates.md`](docs/projects-and-templates.md)). It cannot manage instances yet and is **not ready for production use**; install it on a test host. |
 
 What each milestone brings back from 0.x (projects, instances and
 jobs, secrets, assets, networking, webhooks, schedules, users and access) is listed in the
@@ -108,6 +108,7 @@ executed. The merge gate is `composer run gates` in `app/`, plus the Playwright 
 |---|---|
 | [`docs/README.md`](docs/README.md) | Index of every document with its status |
 | [`docs/installation.md`](docs/installation.md) | Installing 1.x: prerequisites, the installer and its flags, the setup wizard, what is installed where, recovery, upgrades, security model, uninstalling |
+| [`docs/projects-and-templates.md`](docs/projects-and-templates.md) | Projects and templates: the pages, every field and limit, the `fleet project\|template\|port` commands, exit codes and JSON, differences from 0.x |
 | [`docs/development.md`](docs/development.md) | Prerequisites, first run, environment variables, recording runner, stand-in, gates, adding a component |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Workflow, code style, pull requests, CI and mirror |
 | [`docs/RELEASING.md`](docs/RELEASING.md) | Versioning, CHANGELOG conventions, release and hotfix procedure (0.x flow and 1.x during the port) |

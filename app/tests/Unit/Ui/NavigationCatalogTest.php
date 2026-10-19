@@ -83,7 +83,7 @@ final class NavigationCatalogTest extends TestCase
         self::assertSame([
             'home' => null,
             'instances' => 'M0.04',
-            'projects' => 'M0.03',
+            'projects' => null,
             'jobs' => 'M0.04',
             'webhooks' => 'M0.08',
             'schedules' => 'M0.09',

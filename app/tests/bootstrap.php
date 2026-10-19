@@ -2,6 +2,11 @@
 
 declare(strict_types=1);
 
+use App\Fleet\FleetPaths;
+use App\Kernel;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
+use Symfony\Component\Console\Input\ArrayInput;
+use Symfony\Component\Console\Output\BufferedOutput;
 use Symfony\Component\Dotenv\Dotenv;
 
 require dirname(__DIR__).'/vendor/autoload.php';
@@ -54,3 +59,24 @@ putenv('FLEET_HOME='.$fleetHome);
 register_shutdown_function(static function () use ($fleetHome, $removeTree): void {
     $removeTree($fleetHome);
 });
+
+// Build the process database with the real migrations once, so any test that renders a page backed by the project
+// tables works without setting up its own database (tests that need isolation still use FleetDatabase).
+(static function (): void {
+    $kernel = new Kernel('test', true);
+    $kernel->boot();
+
+    try {
+        $kernel->getContainer()->get(FleetPaths::class)->ensureLayout();
+        $application = new Application($kernel);
+        $application->setAutoExit(false);
+        $output = new BufferedOutput();
+        $exit = $application->run(new ArrayInput(['command' => 'doctrine:migrations:migrate', '--no-interaction' => true]), $output);
+        if (0 !== $exit) {
+            fwrite(\STDERR, "tests/bootstrap.php: migrating the test database failed:\n".$output->fetch());
+            exit(1);
+        }
+    } finally {
+        $kernel->shutdown();
+    }
+})();

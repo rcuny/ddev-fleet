@@ -53,6 +53,19 @@ final class FleetWrapperTest extends TestCase
         yield 'list passes through' => [['list'], 'bin/console list'];
         yield 'an option passes through' => [['--version'], 'bin/console --version'];
         yield 'help passes through' => [['help', 'setup:token'], 'bin/console help setup:token'];
+        yield 'project:list' => [['project:list', '--json'], 'bin/console fleet:project:list --json'];
+        yield 'two words' => [['project', 'list', '--json'], 'bin/console fleet:project:list --json'];
+        yield 'two words with arguments' => [['template', 'show', 'blog', 'web'], 'bin/console fleet:template:show blog web'];
+        yield 'two words, port group' => [['port', 'create', 'typesense', '--public=9108', '--router=9108'], 'bin/console fleet:port:create typesense --public=9108 --router=9108'];
+        yield 'two words, older group' => [['user', 'reset-password', 'bob'], 'bin/console fleet:user:reset-password bob'];
+        yield 'a group alone is not a command' => [['project'], 'bin/console project'];
+        yield 'a group and an option' => [['project', '--help'], 'bin/console project --help'];
+        yield 'help for a two word command' => [['help', 'project:list'], 'bin/console help project:list'];
+        yield 'list a namespace' => [['list', 'fleet'], 'bin/console list fleet'];
+        yield 'another namespace keeps its name' => [['doctrine:migrations:status'], 'bin/console doctrine:migrations:status'];
+        yield 'another namespace, two words, is not ours' => [['doctrine', 'migrations'], 'bin/console doctrine migrations'];
+        yield 'an unknown word pair is not prefixed' => [['instance', 'list'], 'bin/console instance list'];
+        yield 'a verb with an uppercase letter is not a verb' => [['project', 'List'], 'bin/console project List'];
     }
 
     /**
@@ -74,6 +87,29 @@ final class FleetWrapperTest extends TestCase
         self::assertSame(0, $status, $err);
         // The stub prints its arguments, then |APP_ENV|MARKER|HOME as seen by the child process.
         self::assertSame('|prod|from-env-file|/home/fleet'."\n", substr($out, (int) strpos($out, '|')));
+    }
+
+    public function testTheApplicationEnvironmentIsLoadedForEveryConsoleCommandIncludingTheOnesWeDoNotPrefix(): void
+    {
+        foreach ([['doctrine:migrations:status'], ['project', 'list'], ['cache:clear']] as $args) {
+            [$status, $out, $err] = $this->asFleet($args);
+
+            self::assertSame(0, $status, $err);
+            self::assertStringEndsWith('|prod|from-env-file|/home/fleet'."\n", $out, implode(' ', $args));
+        }
+    }
+
+    public function testAnEnvironmentValueIsNotExecuted(): void
+    {
+        $envFile = $this->scratch().'/fleet.env';
+        $marker = $this->scratch().'/executed';
+        file_put_contents($envFile, "APP_ENV=prod\nMARKER='\$(touch ".$marker.")'\n");
+
+        [$status, $out, $err] = $this->asFleet(['project', 'list'], $envFile);
+
+        self::assertSame(0, $status, $err);
+        self::assertFileDoesNotExist($marker);
+        self::assertStringContainsString('|prod|$(touch '.$marker.')|', $out);
     }
 
     public function testArgumentsWithSpacesAndGlobsSurvive(): void

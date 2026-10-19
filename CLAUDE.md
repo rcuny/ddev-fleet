@@ -64,19 +64,27 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `App\Domain\User` | `User` (argon2id hash, groups; `fleet-admins` is the admin group), `PasswordHash` (strict argon2id check), `UserRepository` |
 | `App\Domain\Ssh` | `SshKey` (public key and fingerprint per `SshKeyRole` deploy / push; private keys live on disk, never in the database) |
 | `App\Domain\Secret` | `Secret` (sealed ciphertext, nonce, key version, scope) and its repository |
+| `App\Domain\Project` | `Project` (name, git URL, defaults, hostnames, git identity mode `GitBotMode`, issue id pattern, submodule branch, Typesense; its ports and templates), `ProjectRepository`, `ProjectInstanceGuard` (the seam M0.04 implements: deletion is refused while `instanceIds()` is not empty; a no-op until then), `ProjectMembership` (who may operate a project; nobody is a member until M0.10) |
+| `App\Domain\Template` | `Template` (belongs to a project: Drupal environment and the `postDeploy`, `tty1`, `tty2` command lists) and its repository |
+| `App\Domain\Port` | `NamedPort` (the host-wide catalogue: name, public and router port) and its repository |
 | `App\Doctrine` | Doctrine plumbing: `SqlitePragmaMiddleware` (WAL, `busy_timeout=5000`, `foreign_keys=ON` on every connection), `UtcDateTimeImmutableType` (`utc_datetime_immutable`, always UTC: use it, not the stock datetime types, under SQLite) |
 | `App\Fleet` | `FleetPaths` and host-driving services; `App\Fleet\Shell` is the `CommandRunner` seam |
 | `App\Fleet\Secrets` | `SecretKeyFile` (`keys/secret.key`, 32 bytes, never overwritten), `SecretBox` (XChaCha20-Poly1305 with the scope and name as associated data), `SecretStore` (fleet-wide secrets: OVH credentials, Claude token) |
 | `App\Fleet\Ssh` | `SshKeyService` (generate / import / regenerate the deploy and push keys), `Ed25519KeyGenerator` (OpenSSH format in PHP, no process), `KnownHostsFile` (seeded provider keys, trust only after a fingerprint confirmation), `KnownHostScanner` (`ssh-keyscan` through the runner) |
 | `App\Fleet\Auth` | `UserService`, `PasswordPolicy`, `AutheliaUsersRenderer` / `AutheliaUsersFile` (the Authelia `users.yml`, written atomically under a lock) |
 | `App\Fleet\System` | The renderers (`CaddyfileRenderer`, `CaddyEnvRenderer`, `AutheliaConfigRenderer`; templates in `templates/system/`), `ConfigValue` (validates everything that is rendered), `SystemRenderer` (staging), `GateWriter` / `GateMode` (the Caddy gate snippet), `CaddyReloader`, and the `Applier` seam with `PrivilegedApply` (see "Privileged apply") |
+| `App\Fleet\Projects` | `ProjectService`, `TemplateService` and `NamedPortService` (the only code that creates, changes and deletes projects, templates and catalogue ports; each collects the first error of every field and throws one `ValidationFailed` carrying a `field => message` map, or `Refused` / `NotFound`), the inputs they take (`ProjectInput`, `TemplateInput`, `NamedPortInput`) and `ProjectSnapshot` (a project as plain data in the 0.x key names) |
+| `App\Fleet\Projects\Rule` | The pure validation rules, one class per concern: `ResourceName`, `GitUrl`, `BranchName`, `IssueIdPattern`, `CommandLines`, `DrupalEnv`, `GitIdentity`, `SubmodulePath`, `PortNumbers`, `TextBlock`. They return a message or null and never echo the input |
 | `App\Setup` | The setup wizard's domain: `SetupTokenService`, `SetupCookie`, `SetupState`, `SetupGate` / `SetupAccessSubscriber` (the guard), `SetupAttemptLimiter`, `SetupProgress`, `SetupFinisher`, `ScanTargetPolicy` |
 | `App\Health` | `HealthChecker` / `HealthReport` behind `GET /health`; `HostHealth` / `HostHealthReport` (memory, disk, reboot-required) for the Home card |
-| `App\Security` | `FleetUser`, `RemoteUserAuthenticator`, `TrustedProxyChecker`, `ForbiddenHandler`; `App\Security\StandIn` (dev/test only) |
-| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
+| `App\Security` | `FleetUser`, `RemoteUserAuthenticator`, `TrustedProxyChecker`, `ForbiddenHandler`, `ProjectVoter` (`SETTINGS` is admin-only; `OPERATE`, used from M0.04, is admin or a member of the project); `App\Security\StandIn` (dev/test only) |
+| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages, among them `ProjectController` and `TemplateController`); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
 | `App\Form\Setup` | The wizard's Symfony forms |
-| `App\Command` | The `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`) |
-| `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`) |
+| `App\Form\Project` | The project and template forms (`ProjectType`, `TemplateType`; plain Symfony forms, `novalidate`, errors come from the services through `ValidationErrorMapper`) |
+| `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be in `docs/installation.md` |
+| `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliDocsTest` against `docs/projects-and-templates.md`. A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
+| `App\Command\Support` | What those commands share: `JsonOutput` (`--format=table\|json`, `--json`, exit codes 0 done / 1 refused value / 2 not allowed now / 3 not found, the `{"error", "fields"}` document), `FieldErrors` (field name to `--option` or `<argument>`), `Shapes` (JSON for templates and ports). Not commands |
+| `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`, and `IssueIdPreview`, the one LiveComponent: admin-only through `#[IsGranted]`) |
 | `App\Ui` | UI support classes: `NavigationCatalog`, `NavItem`, `ProfilerToolbarSwitch` |
 | `App\Message`, `App\MessageHandler` | Reserved for Messenger messages and handlers (from M0.04) |
 
@@ -127,6 +135,21 @@ New work follows these namespaces; add a new one only with a reason.
 - **Dev/test stand-in** (does not exist in `prod`): identities from `FLEET_STAND_IN_*`; the role
   comes from the `X-Fleet-Stand-In-Role` header, else the `fleet_stand_in_role` cookie set by
   `GET /_dev/stand-in/{admin|member|none}?next=/path`, else `FLEET_STAND_IN_ROLE`.
+- **All project data validation lives in `App\Fleet\Projects\Rule`.** The pages (forms), the `fleet project|template|port`
+  commands and later milestones (webhooks, export) go through `ProjectService`, `TemplateService` and `NamedPortService`;
+  controllers, forms and commands never validate on their own. A new limit or rule is a `Rule` class plus a unit test, then
+  the field table in `docs/projects-and-templates.md`. Entities only store. Names are immutable. Git URLs, branches, command
+  lines and issue id patterns are hostile input: the rules are allow-lists, and a consumer must still pass them as argv, never
+  through a shell. `docs/projects-and-templates.md` is checked by `CliDocsTest` (commands, options, exit codes): change a
+  command, change the guide.
+- **Console commands**: `fleet <group>:<verb>` for groups the wrapper knows (`host`, `setup`, `user`, `project`, `template`,
+  `port`; `fleet project list` also works). Commands that read or write the database are tested with
+  `RunsFleetCommands` against a real migrated database; stderr assertions need `capture_stderr_separately`.
+- **Components beyond the managed list below.** `<twig:Textarea>` (several lines of text; the form theme renders Symfony's
+  `TextareaType` with it, so never write a raw `<textarea>`), `<twig:Checkbox>`, `<twig:NativeSelect>` and `<twig:RadioGroup>` are
+  installed and shown in the "Forms" section of `/admin/design-system`; `<twig:IssueIdPreview>` is a LiveComponent, not a
+  design-system primitive. A new primitive needs its entry in the page's component list (`DesignSystemPageTest` fails
+  otherwise).
 - **Pages** extend `base.html.twig` (the app shell). Every page works at 390 px: no horizontal
   scroll, tap targets of at least 44 px. Any change to a page, template or the JS it loads needs a
   Playwright spec.
@@ -251,6 +274,7 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 
 - `docs/README.md` — documentation index with the status of each document.
 - `docs/installation.md` — installing 1.x on a host: installer, setup wizard, recovery, security model, uninstalling.
+- `docs/projects-and-templates.md` — projects, templates and named ports: fields and limits, the pages, the `fleet project|template|port` commands, differences from 0.x.
 - `docs/development.md` — setup, environment variables, stand-in, adding a component.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
 - `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.

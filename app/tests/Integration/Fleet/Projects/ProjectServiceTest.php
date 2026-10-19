@@ -1,0 +1,400 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Tests\Integration\Fleet\Projects;
+
+use App\Domain\Port\NamedPort;
+use App\Domain\Port\NamedPortRepository;
+use App\Domain\Project\GitBotMode;
+use App\Domain\Project\Project;
+use App\Domain\Project\ProjectRepository;
+use App\Domain\Template\Template;
+use App\Domain\Template\TemplateRepository;
+use App\Fleet\Projects\NotFound;
+use App\Fleet\Projects\ProjectInput;
+use App\Fleet\Projects\ProjectService;
+use App\Fleet\Projects\Refused;
+use App\Fleet\Projects\ValidationFailed;
+use App\Tests\Support\FakeInstanceGuard;
+use App\Tests\Support\FleetDatabase;
+use App\Tests\Support\SecondWriter;
+use Doctrine\ORM\EntityManagerInterface;
+use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+
+final class ProjectServiceTest extends KernelTestCase
+{
+    use FleetDatabase;
+    use SecondWriter;
+
+    private const string GIT = 'https://git.example.com/acme/blog.git';
+
+    private EntityManagerInterface $em;
+    private ProjectRepository $projects;
+    private NamedPortRepository $ports;
+    private TemplateRepository $templates;
+    private FakeInstanceGuard $guard;
+    private ProjectService $service;
+
+    protected function setUp(): void
+    {
+        $this->em = $this->setUpFleetDatabase();
+        $this->projects = new ProjectRepository($this->em);
+        $this->ports = new NamedPortRepository($this->em);
+        $this->templates = new TemplateRepository($this->em);
+        $this->guard = new FakeInstanceGuard();
+        $this->service = new ProjectService($this->projects, $this->ports, $this->guard);
+    }
+
+    protected function tearDown(): void
+    {
+        $this->tearDownFleetDatabase();
+        parent::tearDown();
+    }
+
+    public function testCreatePersistsNormalisedValues(): void
+    {
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
+
+        $created = $this->service->create(new ProjectInput(
+            name: ' blog ',
+            git: "  https://git.example.com/acme/blog.git\n",
+            defaultBranch: '   ',
+            additionalHostnames: [' www ', '', "\t"],
+            ports: [' typesense ', 'typesense', ''],
+            issueIdRegexp: '',
+            displaySubmoduleBranch: ' web/modules/custom ',
+            typesense: true,
+        ));
+        $this->em->clear();
+
+        $found = $this->projects->findByName('blog') ?? self::fail('Not stored.');
+        self::assertSame($created->name(), $found->name());
+        self::assertSame(self::GIT, $found->git());
+        self::assertNull($found->defaultBranch());
+        self::assertNull($found->defaultTemplate());
+        self::assertSame(['www'], $found->additionalHostnames());
+        self::assertSame(['typesense'], array_map(static fn (NamedPort $p): string => $p->name(), $found->ports()));
+        self::assertNull($found->issueIdRegexp());
+        self::assertSame('web/modules/custom', $found->displaySubmoduleBranch());
+        self::assertTrue($found->typesense());
+        self::assertSame(GitBotMode::Inherit, $found->gitBotMode());
+        self::assertEquals($found->createdAt(), $found->updatedAt());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, mixed>, string}>
+     */
+    public static function badFields(): iterable
+    {
+        yield 'git over http' => [['git' => 'http://x.example.com/y'], 'git'];
+        yield 'name with capitals' => [['name' => 'Bad'], 'name'];
+        yield 'reserved name' => [['name' => 'new'], 'name'];
+        yield 'branch starting with a dash' => [['defaultBranch' => '-x'], 'defaultBranch'];
+        yield 'hostname with a dot' => [['additionalHostnames' => ['a.b']], 'additionalHostnames'];
+        yield 'eleven hostnames' => [['additionalHostnames' => ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', 'h10', 'h11']], 'additionalHostnames'];
+        yield 'duplicate hostnames' => [['additionalHostnames' => ['www', 'www']], 'additionalHostnames'];
+        yield 'unknown port' => [['ports' => ['nope']], 'ports'];
+        yield 'too many ports' => [['ports' => array_map(static fn (int $i): string => 'port'.$i, range(1, 51))], 'ports'];
+        yield 'nested quantifier' => [['issueIdRegexp' => '(a+)+$'], 'issueIdRegexp'];
+        yield 'path traversal' => [['displaySubmoduleBranch' => '../x'], 'displaySubmoduleBranch'];
+        yield 'override without name or email' => [['gitBotMode' => GitBotMode::Override, 'gitBotName' => ' ', 'gitBotEmail' => ''], 'gitBotName'];
+        yield 'override with a bad name' => [['gitBotMode' => GitBotMode::Override, 'gitBotName' => 'a<b>'], 'gitBotName'];
+        yield 'override with a bad email' => [['gitBotMode' => GitBotMode::Override, 'gitBotName' => 'Bot', 'gitBotEmail' => 'not-an-email'], 'gitBotEmail'];
+        yield 'default template on create' => [['defaultTemplate' => 'full'], 'defaultTemplate'];
+    }
+
+    /**
+     * @param array<string, mixed> $changes
+     */
+    #[DataProvider('badFields')]
+    public function testEveryRuleSurfacesAsAFieldError(array $changes, string $field): void
+    {
+        try {
+            $this->service->create($this->valid()->with($changes));
+            self::fail('The input was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame([$field], array_keys($e->errors));
+            self::assertNotSame('', $e->errors[$field]);
+        }
+        self::assertSame([], $this->projects->all());
+    }
+
+    public function testSeveralErrorsAreReportedTogether(): void
+    {
+        try {
+            $this->service->create($this->valid()->with([
+                'name' => 'Bad',
+                'git' => 'ext::sh -c x',
+                'defaultBranch' => '-x',
+                'issueIdRegexp' => '(a+)+$',
+            ]));
+            self::fail('The input was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['name', 'git', 'defaultBranch', 'issueIdRegexp'], array_keys($e->errors));
+        }
+    }
+
+    public function testMessagesNeverEchoSubmittedValues(): void
+    {
+        try {
+            $this->service->create(new ProjectInput(
+                name: 'zzqq Bad',
+                git: 'zzqq://x',
+                defaultBranch: '-zzqq',
+                additionalHostnames: ['zz.qq'],
+                ports: ['ZZQQ'],
+                gitBotMode: GitBotMode::Override,
+                gitBotName: 'zzqq<>',
+                gitBotEmail: 'zzqq',
+                issueIdRegexp: '(zzqq+)+$',
+                displaySubmoduleBranch: '../zzqq',
+            ));
+            self::fail('The input was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertCount(9, $e->errors);
+            foreach ($e->errors as $field => $message) {
+                self::assertStringNotContainsStringIgnoringCase('zzqq', $message, $field);
+            }
+            self::assertStringNotContainsStringIgnoringCase('zzqq', $e->getMessage());
+        }
+    }
+
+    public function testDuplicateNameIsAFieldError(): void
+    {
+        $this->service->create($this->valid());
+
+        try {
+            $this->service->create($this->valid());
+            self::fail('A duplicate was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['name' => 'A project with this name already exists.'], $e->errors);
+        }
+        self::assertCount(1, $this->projects->all());
+    }
+
+    public function testSimultaneousCreateBecomesAFieldError(): void
+    {
+        $second = $this->secondEntityManager($this->em);
+        $this->beforeNextPersist($this->em, static function () use ($second): void {
+            new ProjectRepository($second)->save(new Project('blog', 'https://git.example.com/other/blog.git'));
+        });
+
+        try {
+            $this->service->create($this->valid());
+            self::fail('The racing create was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['name' => 'A project with this name already exists.'], $e->errors);
+        }
+
+        $rows = $second->getConnection()->fetchAllAssociative('SELECT name, git FROM project');
+        self::assertSame([['name' => 'blog', 'git' => 'https://git.example.com/other/blog.git']], $rows);
+    }
+
+    public function testGitBotNamesAreDroppedUnlessOverride(): void
+    {
+        foreach ([GitBotMode::Inherit, GitBotMode::Disabled] as $i => $mode) {
+            $project = $this->service->create($this->valid()->with([
+                'name' => 'p'.$i,
+                'gitBotMode' => $mode,
+                'gitBotName' => 'Bot',
+                'gitBotEmail' => 'not even an email',
+            ]));
+            self::assertSame($mode, $project->gitBotMode());
+            self::assertNull($project->gitBotName());
+            self::assertNull($project->gitBotEmail());
+        }
+
+        $override = $this->service->create($this->valid()->with([
+            'name' => 'custom',
+            'gitBotMode' => GitBotMode::Override,
+            'gitBotName' => 'Fleet Bot',
+            'gitBotEmail' => '',
+        ]));
+        self::assertSame(GitBotMode::Override, $override->gitBotMode());
+        self::assertSame('Fleet Bot', $override->gitBotName());
+        self::assertNull($override->gitBotEmail());
+    }
+
+    public function testUpdateRejectsARename(): void
+    {
+        $this->service->create($this->valid());
+
+        try {
+            $this->service->update('blog', $this->valid()->with(['name' => 'shop']));
+            self::fail('A rename was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['name' => 'The name cannot be changed.'], $e->errors);
+        }
+        self::assertNull($this->projects->findByName('shop'));
+    }
+
+    public function testUpdateDefaultTemplateMustExist(): void
+    {
+        $project = $this->service->create($this->valid());
+        $this->templates->save(new Template($project, 'full'));
+
+        try {
+            $this->service->update('blog', $this->valid()->with(['defaultTemplate' => 'missing']));
+            self::fail('A missing default template was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['defaultTemplate'], array_keys($e->errors));
+        }
+
+        $updated = $this->service->update('blog', $this->valid()->with(['defaultTemplate' => 'full']));
+        self::assertSame('full', $updated->defaultTemplate());
+
+        $cleared = $this->service->update('blog', $this->valid()->with(['defaultTemplate' => '']));
+        self::assertNull($cleared->defaultTemplate());
+    }
+
+    public function testUpdateReplacesPortsAndHostnames(): void
+    {
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
+        $this->ports->save(new NamedPort('mail', 8025, 18025));
+        $this->service->create($this->valid()->with(['additionalHostnames' => ['www', 'app'], 'ports' => ['typesense']]));
+        $this->em->clear();
+
+        $this->service->update('blog', $this->valid()->with(['additionalHostnames' => ['admin'], 'ports' => ['mail'], 'typesense' => true]));
+        $this->em->clear();
+
+        $found = $this->projects->findByName('blog') ?? self::fail();
+        self::assertSame(['admin'], $found->additionalHostnames());
+        self::assertSame(['mail'], array_map(static fn (NamedPort $p): string => $p->name(), $found->ports()));
+        self::assertTrue($found->typesense());
+        self::assertGreaterThanOrEqual($found->createdAt(), $found->updatedAt());
+    }
+
+    public function testSavingGeneralKeepsPortAssignments(): void
+    {
+        $this->ports->save(new NamedPort('typesense', 9108, 8108));
+        $this->service->create($this->valid()->with(['ports' => ['typesense'], 'additionalHostnames' => ['www']]));
+        $this->em->clear();
+
+        $project = $this->service->get('blog');
+        $this->service->update('blog', ProjectInput::fromProject($project)->with(['git' => 'git@git.example.com:acme/blog.git']));
+        $this->em->clear();
+
+        $found = $this->projects->findByName('blog') ?? self::fail();
+        self::assertSame('git@git.example.com:acme/blog.git', $found->git());
+        self::assertSame(['typesense'], array_map(static fn (NamedPort $p): string => $p->name(), $found->ports()));
+        self::assertSame(['www'], $found->additionalHostnames());
+    }
+
+    public function testFromProjectAndWithRoundTrip(): void
+    {
+        $project = $this->service->create($this->valid()->with(['defaultBranch' => 'develop', 'typesense' => true]));
+
+        $input = ProjectInput::fromProject($project);
+        self::assertEquals($this->valid()->with(['defaultBranch' => 'develop', 'typesense' => true]), $input);
+        self::assertSame('x', $input->with(['git' => 'x'])->git);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $input->with(['nope' => 1]);
+    }
+
+    public function testDeleteCascadesTemplates(): void
+    {
+        $project = $this->service->create($this->valid());
+        $this->templates->save(new Template($project, 'full'));
+        $this->templates->save(new Template($project, 'light'));
+        $this->service->create($this->valid()->with(['name' => 'shop']));
+
+        $this->service->delete('blog');
+        $this->em->clear();
+
+        self::assertNull($this->projects->findByName('blog'));
+        self::assertNotNull($this->projects->findByName('shop'));
+        self::assertSame(0, (int) $this->em->getConnection()->fetchOne('SELECT COUNT(*) FROM template'));
+    }
+
+    public function testDeleteIsRefusedWhileInstancesExist(): void
+    {
+        $this->service->create($this->valid());
+        $this->guard->set('blog', 2);
+
+        try {
+            $this->service->delete('blog');
+            self::fail('A project with instances was deleted.');
+        } catch (Refused $e) {
+            self::assertStringContainsString('2 instance(s) exist: destroy them first', $e->getMessage());
+            self::assertStringContainsString('blog--i1', $e->getMessage());
+            self::assertStringContainsString('blog--i2', $e->getMessage());
+        }
+        self::assertNotNull($this->projects->findByName('blog'));
+
+        $this->guard->set('blog', 0);
+        $this->service->delete('blog');
+        self::assertNull($this->projects->findByName('blog'));
+    }
+
+    public function testRefusalListsAtMostTenInstances(): void
+    {
+        $this->service->create($this->valid());
+        $this->guard->set('blog', 13);
+
+        $this->expectException(Refused::class);
+        $this->expectExceptionMessageMatches('/^13 instance\(s\) exist: destroy them first \(blog--i1, .*blog--i10 and 3 more\)\.$/');
+        $this->service->delete('blog');
+    }
+
+    public function testUnknownProjectIsNotFound(): void
+    {
+        foreach ([
+            fn () => $this->service->get('nope'),
+            fn () => $this->service->update('nope', $this->valid()->with(['name' => 'nope'])),
+            fn () => $this->service->delete('nope'),
+        ] as $call) {
+            try {
+                $call();
+                self::fail('An unknown project was found.');
+            } catch (NotFound $e) {
+                self::assertSame('Project "nope" does not exist.', $e->getMessage());
+            }
+        }
+    }
+
+    public function testNotFoundMessageCutsAndCleansTheName(): void
+    {
+        try {
+            $this->service->get("a\e[31m".str_repeat('b', 100));
+            self::fail('Found.');
+        } catch (NotFound $e) {
+            self::assertStringNotContainsString("\e", $e->getMessage());
+            self::assertLessThan(120, \strlen($e->getMessage()));
+        }
+    }
+
+    public function testListIsOrderedByName(): void
+    {
+        foreach (['zeta', 'alpha'] as $name) {
+            $this->service->create($this->valid()->with(['name' => $name]));
+        }
+
+        self::assertSame(['alpha', 'zeta'], array_map(static fn (Project $p): string => $p->name(), $this->service->list()));
+    }
+
+    public function testAHugeInputIsRefusedNotStored(): void
+    {
+        try {
+            $this->service->create($this->valid()->with(['git' => 'https://git.example.com/'.str_repeat('a', 1_000_000)]));
+            self::fail('A 1 MB URL was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['git'], array_keys($e->errors));
+        }
+
+        try {
+            $this->service->create($this->valid()->with(['additionalHostnames' => [str_repeat('a', 1_000_000)]]));
+            self::fail('A 1 MB hostname was accepted.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['additionalHostnames'], array_keys($e->errors));
+        }
+        self::assertSame([], $this->projects->all());
+    }
+
+    private function valid(): ProjectInput
+    {
+        return new ProjectInput('blog', self::GIT);
+    }
+}

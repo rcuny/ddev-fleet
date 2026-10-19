@@ -1,0 +1,65 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Templates · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="project.name" :description="project.git">
+        <twig:block name="tabs">
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'templates'}) }}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid gap-4">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <p class="text-sm text-ink-body">A template says how an instance of this project is set up: the Drupal environment and the commands run after a deploy and in its terminals.</p>
+            <twig:Button as="a" href="{{ path('template_new', {name: project.name}) }}" class="h-11 shrink-0 md:h-8">
+                <twig:ux:icon name="lucide:plus" />
+                New template
+            </twig:Button>
+        </div>
+
+        {% if templates|length == 0 %}
+            <twig:Card data-testid="templates-empty" class="max-w-xl">
+                <twig:Card:Header>
+                    <twig:Card:Title>No templates yet</twig:Card:Title>
+                    <twig:Card:Description>Without a template an instance of {{ project.name }} gets no post-deploy commands and no terminal commands. Add one to describe a deploy.</twig:Card:Description>
+                </twig:Card:Header>
+            </twig:Card>
+        {% else %}
+            <twig:Table>
+                <twig:Table:Caption class="sr-only">Templates of {{ project.name }}</twig:Table:Caption>
+                <twig:Table:Header>
+                    <twig:Table:Row>
+                        <twig:Table:Head>Name</twig:Table:Head>
+                        <twig:Table:Head>Drupal environment</twig:Table:Head>
+                        <twig:Table:Head>Post-deploy</twig:Table:Head>
+                        <twig:Table:Head>Terminal 1</twig:Table:Head>
+                        <twig:Table:Head>Terminal 2</twig:Table:Head>
+                        <twig:Table:Head><span class="sr-only">Actions</span></twig:Table:Head>
+                    </twig:Table:Row>
+                </twig:Table:Header>
+                <twig:Table:Body>
+                    {% for template in templates %}
+                        <twig:Table:Row data-testid="template-row">
+                            <twig:Table:Cell class="font-medium">
+                                <span class="inline-flex items-center gap-2">
+                                    <span data-testid="template-name">{{ template.name }}</span>
+                                    {% if project.defaultTemplate == template.name %}
+                                        <twig:Badge data-testid="template-default" class="bg-brand-faded text-brand-darker dark:text-brand">Default</twig:Badge>
+                                    {% endif %}
+                                </span>
+                            </twig:Table:Cell>
+                            <twig:Table:Cell data-testid="template-env">{{ template.drupalEnv ?? '-' }}</twig:Table:Cell>
+                            <twig:Table:Cell data-testid="template-post-deploy">{{ template.postDeploy|length }}</twig:Table:Cell>
+                            <twig:Table:Cell data-testid="template-tty1">{{ template.tty1|length }}</twig:Table:Cell>
+                            <twig:Table:Cell data-testid="template-tty2">{{ template.tty2|length }}</twig:Table:Cell>
+                            <twig:Table:Cell class="text-end">
+                                <twig:Button as="a" href="{{ path('template_edit', {name: project.name, template: template.name}) }}" variant="outline" class="h-11 md:h-8" aria-label="Edit {{ template.name }}">Edit</twig:Button>
+                            </twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% endfor %}
+                </twig:Table:Body>
+            </twig:Table>
+        {% endif %}
+    </div>
+{% endblock %}

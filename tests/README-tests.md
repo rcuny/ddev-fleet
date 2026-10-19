@@ -16,20 +16,21 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 
 | Suite | Where | Count |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 443 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 233 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 175 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 349 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
-| Playwright | `tests/playwright/` | 46 (7 spec files; each spec runs on the `desktop` and the `phone` project where it applies). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 38 run, 8 skipped |
+| PHPUnit `Unit` | `app/tests/Unit/` | 896 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 401 tests |
+| PHPUnit `Functional` | `app/tests/Functional/` | 407 tests |
+| PHPUnit `Repo` | `app/tests/Repo/` | 391 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
+| Playwright | `tests/playwright/` | 90 (8 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 69 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 1200 tests. Update this table when the numbers change.
+PHPUnit totals 2095 tests (12 skipped). Update this table when the numbers change.
 
 ## Layout
 
 ```
 app/tests/
-  bootstrap.php      forces APP_ENV=test and gives each PHPUnit process its own FLEET_HOME
+  bootstrap.php      forces APP_ENV=test, gives each PHPUnit process its own FLEET_HOME and migrates its database once
+                     (any test may read the domain tables; isolated tests use FleetDatabase, which migrates a fresh home)
   Unit/              plain objects: FleetPaths, the command runners, health, security, navigation, tokens
   Integration/       kernel and container wiring: Doctrine/SQLite, Messenger, Lock, Mercure, prod security
   Functional/        HTTP through WebTestCase: access control, app shell, design-system page, health, stand-in
@@ -37,13 +38,16 @@ app/tests/
                      tag guard, the design-system block in CLAUDE.md, the Python app being gone, and the
                      installer: Installer*Test (flags, dry-run plan, DNS check, idempotency, safety), the root
                      helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
-                     InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code)
-  Support/           shared helpers (a temporary FLEET_HOME)
+                     InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code),
+                     CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
+                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it)
+  Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
-  support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts
+  support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts,
+                         projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
-                         setup-wizard.desktop (the setup wizard end to end)
+                         setup-wizard.desktop (the setup wizard end to end), projects (project and template pages)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```
@@ -88,6 +92,12 @@ ending in Finish, then what every wizard URL answers). It needs a host that is i
 self-started app provides, so it skips itself against an external server (the companion's served app keeps a persistent
 `FLEET_HOME`). `support/wizard.ts` (`completeWizard`, `readSetupUrl`) is shared with a live-server spec; `FLEET_LIVE_SETUP_URL`
 overrides the link file. Each run re-creates the setup link and clears the token-attempt throttle (`cache.rate_limiter`).
+`projects.spec.ts` creates its own data: every test owns a project with a unique name (`uniqueName()`) and deletes it
+in `finally`, so it passes repeatedly against the shared dev database of the companion and in parallel. It covers the
+list, create, edit, templates, ports and delete dialog at both widths, the member 403, the issue id tester, and (phone
+project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets and axe in both
+themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
+the controller answers, because a busy host loads them after the HTML is interactive.
 The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
 bottom bar, and the shell specs assert that no console error or uncaught page error was seen (`support/shell.ts`).
 

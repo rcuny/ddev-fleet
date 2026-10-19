@@ -203,6 +203,9 @@ gate is in front of `/setup` too); signed in, every `/setup` URL answers 404 "Se
 `https://<domain>/`: you are sent to `https://auth.<domain>/` to sign in with the administrator you created.
 Authelia's own self-service password reset is switched off until a later milestone (use section 5).
 
+Next, describe what the fleet can deploy: add your first project and its templates in the browser or on the host, see
+[`projects-and-templates.md`](projects-and-templates.md). (Instances arrive in a later milestone.)
+
 ## 5. Recovery
 
 All commands run on the host. `fleet` is the wrapper the installer puts in `/usr/local/bin`: it switches to the

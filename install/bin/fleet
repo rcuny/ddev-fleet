@@ -3,9 +3,11 @@
 #
 #   fleet setup:token              ->  php8.4 /opt/ddev-fleet/app/bin/console fleet:setup:token
 #   fleet user:reset-password bob  ->  ... fleet:user:reset-password bob
+#   fleet project list --json      ->  ... fleet:project:list --json   (a "<group> <verb>" pair works as "<group>:<verb>")
 #   fleet fleet:host:render        ->  an already prefixed name is accepted as it is
+#   fleet doctrine:migrations:status -> ... doctrine:migrations:status, with the application environment loaded
 #   fleet                          ->  lists the fleet:* commands
-#   fleet list | help <cmd> | ...  ->  anything without a "<group>:<verb>" first word goes to the console unchanged
+#   fleet list | help <cmd> | ...  ->  anything that does not start with one of our groups goes to the console unchanged
 #
 # Installed by install/steps/90-privileged.sh as /usr/local/bin/fleet (root:root 0755). Everyone but the `fleet` user
 # is re-executed as `fleet` through sudo (root and sudoers members); `fleet` itself loads /etc/ddev-fleet/fleet.env,
@@ -42,9 +44,14 @@ fi
 
 command=$1
 shift
+# Only these groups get the `fleet:` prefix (every other console command, doctrine:* for one, keeps its own name).
+# tests/Repo/CliGroupsTest.php keeps the list in step with the commands.
 if [[ $command =~ ^fleet:[a-z][a-z0-9:-]*$ ]]; then
   :
-elif [[ $command =~ ^[a-z][a-z0-9-]*:[a-z][a-z0-9:-]*$ ]]; then
+elif [[ $command =~ ^(host|setup|user|project|template|port):[a-z][a-z0-9:-]*$ ]]; then
   command="fleet:$command"
+elif [[ $command =~ ^(host|setup|user|project|template|port)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
+  command="fleet:$command:$1"
+  shift
 fi
 exec "$PHP" "$CONSOLE" "$command" "$@"
