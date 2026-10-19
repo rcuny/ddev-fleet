@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 # ddev-fleet uninstaller. NEVER run automatically: nothing in the installer calls it.
 #
-#   sudo bash /opt/ddev-fleet/install/uninstall.sh --yes [--keep-data] [--purge-packages] [--dry-run]
+#   sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes [--keep-data] [--purge-packages] [--dry-run]
+#
+# Run the ROOT-OWNED copy the installer keeps in /usr/local/lib/ddev-fleet-installer, never the one in the checkout
+# /opt/ddev-fleet (that directory belongs to the unprivileged `fleet` user, who could have changed the script). A real
+# run refuses to start from any file or directory that is not owned by root or is writable by group or others;
+# --dry-run changes nothing and works from anywhere.
 #
 # Removes what install.sh put on this host: the services and units, the configuration under /etc, the root helper,
 # the sudoers line and the `fleet` command, the checkout in /opt/ddev-fleet, the state in /srv/fleet and the `fleet`
@@ -45,6 +50,13 @@ main() {
   if [ "$dry" != 1 ] && [ "$(id -u)" -ne 0 ]; then
     printf 'ERROR: run as root (sudo), or add --dry-run to only list what would be removed.\n' >&2
     return 77
+  fi
+  if [ "$dry" != 1 ]; then
+    local problem
+    if ! problem=$(location_problem "${BASH_SOURCE[0]}" 0); then
+      printf 'ERROR: refusing to run as root from here: %s.\nRun the root-owned copy instead:\n  sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes [options]\n' "$problem" >&2
+      return 78
+    fi
   fi
 
   # Fixed layout, the same as install/lib/common.sh and the steps. Every path a removal uses is one of these (or built
@@ -219,4 +231,36 @@ main() {
   say "done"
 }
 
-main "$@"
+# location_problem <script path> <trusted uid>: prints why the script must not run as root from where it is, and returns 1;
+# prints nothing and returns 0 when the file and every directory above it are owned by the trusted uid and writable by
+# nobody else. (The check follows symlinks first, so the answer is about the real file.)
+location_problem() {
+  local path=${1:-} trusted=${2:-0} dir facts owner mode
+  dir=$(readlink -f -- "$path") || {
+    printf 'cannot resolve the location of this script'
+    return 1
+  }
+  while :; do
+    facts=$(stat -c '%u %a' -- "$dir") || {
+      printf 'cannot inspect %s' "$dir"
+      return 1
+    }
+    owner=${facts% *}
+    mode=${facts#* }
+    if [ "$owner" != "$trusted" ]; then
+      printf '%s is not owned by root' "$dir"
+      return 1
+    fi
+    if [ $((8#$mode & 8#022)) -ne 0 ]; then
+      printf '%s is writable by group or others' "$dir"
+      return 1
+    fi
+    [ "$dir" = / ] && return 0
+    dir=$(dirname -- "$dir")
+  done
+}
+
+# Sourcing the file (the tests do) defines the functions without running anything.
+if [ "${BASH_SOURCE[0]}" = "$0" ]; then
+  main "$@"
+fi

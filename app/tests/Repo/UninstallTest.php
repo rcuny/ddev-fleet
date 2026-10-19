@@ -207,6 +207,93 @@ final class UninstallTest extends TestCase
         }
     }
 
+    public function testHelpPointsAtTheRootOwnedCopyNotTheCheckout(): void
+    {
+        [$status, $out, $err] = $this->uninstall(['--help']);
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString('sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh', $out);
+        self::assertStringNotContainsString('sudo bash /opt/ddev-fleet', $out, 'the checkout belongs to the unprivileged fleet user');
+        $source = (string) file_get_contents(self::installDir().'/uninstall.sh');
+        self::assertStringNotContainsString('sudo bash /opt/ddev-fleet', $source);
+        self::assertStringContainsString('sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh', (string) file_get_contents(self::installDir().'/../docs/installation.md'));
+    }
+
+    public function testARealRunRefusesAScriptThatIsNotRootOwned(): void
+    {
+        // The copy in the scratch directory belongs to the test user, as the checkout belongs to `fleet`. `id` says root,
+        // so the refusal is the location check, not the missing-root check.
+        $copy = $this->scratch().'/uninstall-copy.sh';
+        copy(self::installDir().'/uninstall.sh', $copy);
+        $stubs = $this->stubs(['id' => 'echo 0']);
+
+        [$status, $out, $err] = $this->bash([$copy, '--yes'], [], null, $stubs);
+
+        self::assertSame(78, $status, $err);
+        self::assertStringContainsString('refusing to run as root from here', $err);
+        self::assertStringContainsString('is not owned by root', $err);
+        self::assertStringContainsString('/usr/local/lib/ddev-fleet-installer/install/uninstall.sh', $err, 'it names the copy to use');
+        self::assertStringNotContainsString('+ ', $out, 'nothing was planned, let alone removed');
+    }
+
+    public function testADryRunWorksFromAnywhere(): void
+    {
+        $copy = $this->scratch().'/uninstall-copy.sh';
+        copy(self::installDir().'/uninstall.sh', $copy);
+
+        [$status, , $err] = $this->bash([$copy, '--yes', '--dry-run']);
+
+        self::assertSame(0, $status, $err);
+    }
+
+    public function testLocationCheckAcceptsOnlyAPathOwnedByRootAndClosedToWriters(): void
+    {
+        $me = (string) posix_geteuid();
+        $good = $this->scratch().'/trusted';
+        mkdir($good, 0o755);
+        chmod($good, 0o755);
+        file_put_contents($good.'/script.sh', '#');
+        chmod($good.'/script.sh', 0o755);
+        $groupWritableFile = $this->scratch().'/trusted/gw.sh';
+        file_put_contents($groupWritableFile, '#');
+        chmod($groupWritableFile, 0o775);
+        $worldWritableDir = $this->scratch().'/open';
+        mkdir($worldWritableDir, 0o777);
+        chmod($worldWritableDir, 0o777);
+        file_put_contents($worldWritableDir.'/script.sh', '#');
+        chmod($worldWritableDir.'/script.sh', 0o755);
+
+        $check = static fn (string $path, string $uid): string => 'source '.escapeshellarg(self::installDir().'/uninstall.sh').'; location_problem '.escapeshellarg($path).' '.$uid.'; echo " rc=$?"';
+
+        // Everything above the scratch directory must be closed too, so only compare the verdict about our own parts.
+        [, $out] = $this->bash(['-c', $check($good.'/script.sh', $me)]);
+        self::assertStringNotContainsString($good, $out, 'owned by the trusted uid, no group/other write bit on the file or its directory');
+
+        [, $out] = $this->bash(['-c', $check($good.'/script.sh', '0')]);
+        if ('0' !== $me) {
+            self::assertStringContainsString('is not owned by root', $out, 'a file owned by someone else is refused');
+            self::assertStringContainsString('rc=1', $out);
+        }
+
+        [, $out] = $this->bash(['-c', $check($groupWritableFile, $me)]);
+        self::assertStringContainsString($groupWritableFile.' is writable by group or others', $out);
+        self::assertStringContainsString('rc=1', $out);
+
+        [, $out] = $this->bash(['-c', $check($worldWritableDir.'/script.sh', $me)]);
+        self::assertStringContainsString($worldWritableDir.' is writable by group or others', $out, 'a writable directory lets the file be swapped');
+        self::assertStringContainsString('rc=1', $out);
+
+        // The positive case: a system file, root-owned all the way up.
+        [, $out] = $this->bash(['-c', $check('/usr/bin/env', '0')]);
+        self::assertSame(" rc=0\n", $out);
+    }
+
+    public function testTheStageCopyIsNotGroupWritable(): void
+    {
+        // git archive stamps 0775; the root-owned copy the uninstaller runs from must not keep that.
+        self::assertStringContainsString('chmod -R go-w "$stage_dir.new"', (string) file_get_contents(self::installDir().'/install.sh'));
+    }
+
     public function testHelpExplainsTheFlags(): void
     {
         [$status, $out, $err] = $this->uninstall(['--help']);

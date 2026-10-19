@@ -209,6 +209,8 @@ USAGE
     rm -rf "$stage_dir.new"
     install -d -m 0755 -o root -g root "$stage_dir.new"
     runuser -u fleet -- env "HOME=$fleet_home" git -C "$opt_dir" archive --format=tar HEAD install | tar -x --no-same-owner -C "$stage_dir.new"
+    # git archive stamps 0775 on files (its tar.umask is 002); root-owned code must not be group-writable.
+    chmod -R go-w "$stage_dir.new"
     rm -rf "$stage_dir"
     mv "$stage_dir.new" "$stage_dir"
   fi
