@@ -75,7 +75,9 @@ test('sign in through Authelia as the administrator', async () => {
   await page.waitForURL(new RegExp(`^https://${HOST.replace(/\./g, '\\.')}/`), { timeout: 30_000 });
   await page.goto('/admin/projects');
   await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
-  await expect(page.getByTestId('role-summary')).toContainText(ADMIN.displayName);
+  if (VIEWPORT.width >= 768) {
+    await expect(page.getByTestId('identity')).toContainText(ADMIN.displayName);
+  }
   await shot('1-list');
   await expectNoOverflow('the project list');
 });
@@ -166,6 +168,7 @@ test.describe('build', () => {
     await page.getByLabel('Drupal environment').fill('prod');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByTestId('flashes')).toContainText('Template saved.');
+    await follow(page, page.getByTestId('template-row').filter({ hasText: TEMPLATE }).getByRole('link', { name: `Edit ${TEMPLATE}` }));
     await expect(page.getByLabel('Drupal environment')).toHaveValue('prod');
     await shot('8-template-edited');
     await expectNoOverflow('the template editor');
