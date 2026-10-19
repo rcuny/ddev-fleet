@@ -179,5 +179,6 @@ final class ProjectAccessServiceTest extends KernelTestCase
         self::assertSame(['blog', 'demo', 'shop'], array_map(static fn ($rule): string => $rule->project, $rules));
         self::assertSame([[], ['alice', 'bob'], []], array_map(static fn ($rule): array => $rule->users, $rules));
         self::assertSame('ops', $rules[0]->adminGroup);
+        self::assertSame([[], [], []], array_map(static fn ($rule): array => $rule->hostnames, $rules));
     }
 }

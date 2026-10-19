@@ -47,9 +47,9 @@ final class JobPrunerTest extends InstanceJobTestCase
 
     public function testKeepsQueuedAndRunning(): void
     {
-        $instance = $this->instance('main');
-        $queued = $this->job('deploy', $instance);
-        $running = $this->job('start', $instance);
+        // One active job per instance (uniq_job_active_instance): the queued and the running job need two instances.
+        $queued = $this->job('deploy', $this->instance('main'));
+        $running = $this->job('start', $this->instance('other'));
         $running->markRunning($this->clock->now()->modify('-300 days'));
         new JobRepository($this->em)->save($running);
         $this->clock->sleep(400 * 86400);

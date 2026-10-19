@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Fleet\Jobs\Type;
 
 use App\Domain\Instance\InstanceState;
 use App\Domain\Job\Job;
+use App\Domain\Job\JobStatus;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\Type\DestroyJob;
 use App\Tests\Support\InstanceJobTestCase;
@@ -38,6 +39,8 @@ final class DestroyJobTest extends InstanceJobTestCase
         $instance = $this->instance('main', 'develop', InstanceState::Destroying);
         $this->checkout($instance);
         $earlier = $this->job('deploy', $instance);
+        $earlier->finish(JobStatus::Succeeded, 0, null, $this->clock->now());
+        $this->em->flush();
         $job = $this->job('destroy', $instance);
 
         $this->destroy($job);

@@ -124,7 +124,7 @@ final class IdentitySyncTest extends KernelTestCase
         $rendered = Yaml::parse(self::getContainer()->get(AutheliaConfigRenderer::class)->render($this->host()));
 
         $rules = [];
-        foreach (\array_slice($rendered['access_control']['rules'], 3) as $rule) {
+        foreach (\array_slice($rendered['access_control']['rules'], 2, -1) as $rule) {
             self::assertIsArray($rule);
             $rules[] = $rule;
         }
