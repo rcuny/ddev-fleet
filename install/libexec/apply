@@ -1,0 +1,323 @@
+#!/usr/bin/env bash
+# Root helper of ddev-fleet: installs config that the app has rendered into its staging directory.
+#
+#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia>
+#
+# Installed by install/steps/90-privileged.sh as root:root 0755, reachable by the `fleet` user through one sudoers
+# line (install/etc/sudoers-fleet-apply). The only input is the target name; the files come from a fixed place,
+# /srv/fleet/staging/<target>/. The helper:
+#   - opens every staged file once and checks the opened file (regular, one link, owned by fleet, <= 256 KiB), then
+#     copies from that descriptor, so the file cannot change between the check and the copy;
+#   - never sources anything: the Caddy environment file is parsed line by line against an allowlist of keys and a
+#     value charset, and the validators get it through `env -i`;
+#   - validates the COPY with the real validator, as the service's own user, before anything is installed;
+#   - installs atomically (temp file + rename), reloads, and puts the previous files back when the reload fails;
+#   - deletes the staged files on every exit path (the Caddy environment file holds the OVH credentials).
+# `apply authelia` with no staged configuration only restarts Authelia (the password-reset path).
+#
+# Threat model, honestly: `fleet` is in the `docker` group, which is root-equivalent anyway. This helper keeps a
+# half-written or invalid config from reaching Caddy or Authelia; it is not a security boundary.
+#
+# Exit codes: 0 ok, 1 failed (previous config restored where there was one), 64 usage, 65 staged data refused,
+# 66 nothing staged, 77 not root. Output never contains a staged value.
+set -euo pipefail
+
+# The only targets. A repo test keeps this word list equal to App\Fleet\System\ApplyTarget and to the sudoers line.
+ALLOWED_TARGETS='caddy authelia'
+readonly ALLOWED_TARGETS
+readonly MAX_BYTES=262144
+readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_ENDPOINT OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
+# Secret files of the Authelia unit drop-in (install/etc/authelia-secrets.conf); `authelia config validate` needs them.
+readonly AUTHELIA_SECRET_FILES='AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/etc/authelia/secrets/reset_password_jwt_secret'
+# Budget: the app gives one apply 60 s. validate 15 + reload 15 + rollback reload 15 (authelia: 15 + 20 + 20).
+readonly T_VALIDATE=15 T_RELOAD=15 T_RESTART=20
+
+umask 077
+IFS=$' \t\n'
+unset BASH_ENV ENV CDPATH GLOBIGNORE
+
+fail() {
+  printf 'apply: %s\n' "$1" >&2
+  exit "${2:-1}"
+}
+
+# --- 1. arguments: exactly one known target -------------------------------------------------------------------
+[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia>' 64
+TARGET=$1
+case " $ALLOWED_TARGETS " in
+  *" $TARGET "*) ;;
+  *) fail 'unknown target (usage: apply <caddy|authelia>)' 64 ;;
+esac
+
+# --- 2. who may run this, and where the files are ---------------------------------------------------------------
+# Root runs on the real paths and reads NO environment variable. Only an unprivileged run (the unit tests) may
+# redirect everything into a scratch directory with FLEET_APPLY_TEST_ROOT; it can then install nothing real.
+if [ "$EUID" -eq 0 ]; then
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  export PATH
+  ROOT=''
+  AS_ROOT=1
+  STAGING_OWNER=fleet
+  WORK_PARENT=/run
+else
+  [ -n "${FLEET_APPLY_TEST_ROOT:-}" ] || fail 'must run as root (sudo -n /usr/local/libexec/fleet/apply <target>)' 77
+  if [ ! -d "$FLEET_APPLY_TEST_ROOT" ] || [[ $FLEET_APPLY_TEST_ROOT != /* ]]; then
+    fail 'FLEET_APPLY_TEST_ROOT must be an existing absolute directory' 77
+  fi
+  ROOT=${FLEET_APPLY_TEST_ROOT%/}
+  AS_ROOT=0
+  STAGING_OWNER=$(id -un)
+  WORK_PARENT=$ROOT
+fi
+readonly ROOT AS_ROOT STAGING_OWNER WORK_PARENT
+
+STAGE="$ROOT/srv/fleet/staging/$TARGET"
+CADDYFILE="$ROOT/etc/caddy/Caddyfile"
+CADDY_ENV="$ROOT/etc/caddy/fleet.env"
+AUTHELIA_CONFIG="$ROOT/etc/authelia/configuration.yml"
+readonly STAGE CADDYFILE CADDY_ENV AUTHELIA_CONFIG
+
+WORK=$(mktemp -d "$WORK_PARENT/fleet-apply.XXXXXX")
+# The validators run as the service user and must reach their copy; nothing secret is ever written here.
+chmod 0755 "$WORK"
+readonly WORK
+
+# Consumed or not, successful or not: nothing staged survives this run, and the work directory goes too.
+cleanup() {
+  local status=$?
+  trap - EXIT
+  if [ -d "$STAGE" ] && [ ! -L "$STAGE" ]; then
+    find "$STAGE" -mindepth 1 -maxdepth 1 ! -type d -delete 2>/dev/null || true
+  fi
+  rm -rf -- "$WORK"
+  exit "$status"
+}
+trap cleanup EXIT
+
+# --- 3. reading staged files ------------------------------------------------------------------------------------
+
+# stage_in <name> <dest>: copies STAGE/<name> to <dest>. Returns 1 when the file does not exist; refuses anything
+# unsafe. The checks are made on the opened descriptor, the copy is read from it.
+stage_in() {
+  local src="$STAGE/$1" dest=$2 path_id fd_id facts type owner links size
+  [ ! -L "$STAGE" ] || fail 'the staging directory is a symlink' 65
+  if [ -L "$src" ]; then
+    fail "staged file $1 is a symlink" 65
+  fi
+  [ -e "$src" ] || return 1
+  [ -f "$src" ] || fail "staged file $1 is not a regular file" 65
+  exec 3<"$src" || fail "cannot open staged file $1" 65
+  path_id=$(stat -c '%d:%i' -- "$src")
+  fd_id=$(stat -L -c '%d:%i' -- /proc/self/fd/3)
+  [ "$path_id" = "$fd_id" ] || fail "staged file $1 changed while it was being opened" 65
+  facts=$(stat -L -c '%F|%U|%h|%s' -- /proc/self/fd/3)
+  IFS='|' read -r type owner links size <<<"$facts"
+  case $type in
+    'regular file' | 'regular empty file') ;;
+    *) fail "staged file $1 is not a regular file" 65 ;;
+  esac
+  [ "$owner" = "$STAGING_OWNER" ] || fail "staged file $1 is not owned by $STAGING_OWNER" 65
+  [ "$links" = 1 ] || fail "staged file $1 has more than one hard link" 65
+  [ "$size" -le "$MAX_BYTES" ] || fail "staged file $1 is larger than $MAX_BYTES bytes" 65
+  [ "$size" -gt 0 ] || fail "staged file $1 is empty" 65
+  # Read at most MAX_BYTES+1 from the descriptor: a file that grows after the check is still refused.
+  head -c $((MAX_BYTES + 1)) <&3 >"$dest"
+  exec 3<&-
+  [ "$(stat -c %s -- "$dest")" -le "$MAX_BYTES" ] || fail "staged file $1 is larger than $MAX_BYTES bytes" 65
+  return 0
+}
+
+# parse_caddy_env <file>: validates the staged environment file and writes the canonical form to <file>.canon.
+# Only KEY=VALUE lines of known keys, each once, with a value of [A-Za-z0-9._~+/=-]. Never sourced, never echoed.
+CADDY_ENV_PAIRS=()
+parse_caddy_env() {
+  local file=$1 line key value secret n=0 have_ovh=0 k
+  local -A seen=()
+  CADDY_ENV_PAIRS=()
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    [ -n "$line" ] || continue
+    if ! [[ $line =~ ^([A-Z][A-Z_]*)=([A-Za-z0-9._~+/=-]{1,256})$ ]]; then
+      fail "the staged environment file has an unacceptable line ($n)" 65
+    fi
+    key=${BASH_REMATCH[1]}
+    value=${BASH_REMATCH[2]}
+    case " $CADDY_ENV_KEYS " in
+      *" $key "*) ;;
+      *) fail "the staged environment file has an unknown key on line $n" 65 ;;
+    esac
+    [ -z "${seen[$key]:-}" ] || fail "the staged environment file repeats a key (line $n)" 65
+    seen[$key]=$value
+  done <"$file"
+
+  secret=${seen[FLEET_PROXY_SECRET]:-}
+  if [ "${#secret}" -lt 32 ]; then
+    fail 'FLEET_PROXY_SECRET is missing or shorter than 32 characters' 65
+  fi
+  for k in OVH_ENDPOINT OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY; do
+    [ -z "${seen[$k]:-}" ] || have_ovh=$((have_ovh + 1))
+  done
+  if [ "$have_ovh" -ne 0 ] && [ "$have_ovh" -ne 4 ]; then
+    fail 'the OVH values must be all present or all absent' 65
+  fi
+  if [ "$have_ovh" -eq 4 ]; then
+    case ${seen[OVH_ENDPOINT]} in
+      ovh-eu | ovh-ca | ovh-us) ;;
+      *) fail 'OVH_ENDPOINT must be ovh-eu, ovh-ca or ovh-us' 65 ;;
+    esac
+  fi
+  : >"$file.canon"
+  for k in $CADDY_ENV_KEYS; do
+    if [ -n "${seen[$k]:-}" ]; then
+      printf '%s=%s\n' "$k" "${seen[$k]}" >>"$file.canon"
+      CADDY_ENV_PAIRS+=("$k=${seen[$k]}")
+    fi
+  done
+}
+
+# --- 4. running validators and installing -----------------------------------------------------------------------
+
+# validator_run <user|root> <timeout> <env assignment>... -- <command>...
+# Runs with an empty environment plus the given assignments and a throw-away HOME; as `user` when root.
+validator_run() {
+  local user=$1 limit=$2 assignments=() cmd=()
+  shift 2
+  while [ "$#" -gt 0 ] && [ "$1" != -- ]; do
+    assignments+=("$1")
+    shift
+  done
+  shift
+  cmd=("$@")
+  mkdir -p "$WORK/home"
+  if [ "$AS_ROOT" -eq 1 ] && [ "$user" != root ]; then
+    chown "$user" "$WORK/home"
+    timeout "$limit" runuser -u "$user" -- env -i "PATH=$PATH" "HOME=$WORK/home" "XDG_CONFIG_HOME=$WORK/home" "XDG_DATA_HOME=$WORK/home" "${assignments[@]}" "${cmd[@]}" </dev/null
+  else
+    timeout "$limit" env -i "PATH=$PATH" "HOME=$WORK/home" "XDG_CONFIG_HOME=$WORK/home" "XDG_DATA_HOME=$WORK/home" "${assignments[@]}" "${cmd[@]}" </dev/null
+  fi
+}
+
+# put_file <src> <dest> <mode> <owner> <group>: atomic install; ownership is only set when root.
+put_file() {
+  local src=$1 dest=$2 mode=$3 owner=$4 group=$5 tmp
+  tmp=$(mktemp "$dest.XXXXXX")
+  cat -- "$src" >"$tmp"
+  chmod "$mode" "$tmp"
+  if [ "$AS_ROOT" -eq 1 ]; then
+    chown "$owner:$group" "$tmp"
+  fi
+  mv -f -- "$tmp" "$dest"
+}
+
+# keep_previous <live file> <name>: remembers the live file for a rollback. $WORK/prev.<name>.present marks it.
+keep_previous() {
+  if [ -f "$1" ]; then
+    cat -- "$1" >"$WORK/prev.$2"
+    : >"$WORK/prev.$2.present"
+  fi
+}
+
+# restore_previous <live file> <name> <mode> <owner> <group>
+restore_previous() {
+  if [ -f "$WORK/prev.$2.present" ]; then
+    put_file "$WORK/prev.$2" "$1" "$3" "$4" "$5"
+  else
+    rm -f -- "$1"
+  fi
+}
+
+service_active() {
+  systemctl is-active --quiet "$1"
+}
+
+apply_caddy() {
+  local changed_env=0
+  stage_in Caddyfile "$WORK/Caddyfile" || fail 'nothing staged: Caddyfile is missing' 66
+  stage_in env "$WORK/env" || fail 'nothing staged: env is missing' 66
+  parse_caddy_env "$WORK/env"
+  chmod 0644 "$WORK/Caddyfile"
+
+  # Validate the copy, as caddy, before anything is installed. The environment is the parsed one.
+  if ! validator_run caddy "$T_VALIDATE" "${CADDY_ENV_PAIRS[@]}" -- caddy validate --config "$WORK/Caddyfile" --adapter caddyfile >"$WORK/validate.out" 2>&1; then
+    tail -n 5 "$WORK/validate.out" >&2 || true
+    fail 'caddy validate rejected the staged Caddyfile; nothing was installed'
+  fi
+
+  if ! cmp -s "$WORK/env.canon" "$CADDY_ENV" 2>/dev/null; then
+    changed_env=1
+  fi
+
+  keep_previous "$CADDYFILE" Caddyfile
+  keep_previous "$CADDY_ENV" env
+  put_file "$WORK/Caddyfile" "$CADDYFILE" 0644 root root
+  put_file "$WORK/env.canon" "$CADDY_ENV" 0640 root caddy
+
+  if service_active caddy; then
+    if ! timeout "$T_RELOAD" systemctl reload caddy; then
+      restore_previous "$CADDYFILE" Caddyfile 0644 root root
+      restore_previous "$CADDY_ENV" env 0640 root caddy
+      timeout "$T_RELOAD" systemctl reload caddy || printf 'apply: the reload after the rollback failed as well\n' >&2
+      fail 'caddy rejected the reload; the previous Caddyfile and environment were restored'
+    fi
+    # Caddy reads its environment only when it starts, and the reply to the caller must not be cut by a restart.
+    if [ "$changed_env" -eq 1 ]; then
+      systemd-run --on-active=3 --quiet systemctl restart caddy ||
+        fail 'the new files are installed, but the restart of caddy could not be scheduled; run: systemctl restart caddy'
+    fi
+  else
+    printf 'apply: caddy is not running; the files are installed and the next start uses them\n'
+  fi
+  printf 'apply: caddy installed\n'
+}
+
+authelia_account() {
+  AUTH_USER=root
+  AUTH_GROUP=root
+  if [ "$AS_ROOT" -eq 1 ]; then
+    AUTH_USER=$(systemctl show -p User --value authelia.service 2>/dev/null || true)
+    AUTH_GROUP=$(systemctl show -p Group --value authelia.service 2>/dev/null || true)
+    AUTH_USER=${AUTH_USER:-root}
+    AUTH_GROUP=${AUTH_GROUP:-root}
+  fi
+}
+
+apply_authelia() {
+  local staged=0 pair
+  local assignments=()
+  authelia_account
+  if stage_in configuration.yml "$WORK/configuration.yml"; then
+    staged=1
+  fi
+
+  if [ "$staged" -eq 1 ]; then
+    chmod 0644 "$WORK/configuration.yml"
+    for pair in $AUTHELIA_SECRET_FILES; do
+      assignments+=("${pair%%=*}=$ROOT${pair#*=}")
+    done
+    if ! validator_run "$AUTH_USER" "$T_VALIDATE" "${assignments[@]}" -- authelia config validate --config "$WORK/configuration.yml" >"$WORK/validate.out" 2>&1; then
+      tail -n 5 "$WORK/validate.out" >&2 || true
+      fail 'authelia config validate rejected the staged configuration; nothing was installed'
+    fi
+    keep_previous "$AUTHELIA_CONFIG" configuration.yml
+    put_file "$WORK/configuration.yml" "$AUTHELIA_CONFIG" 0640 "$AUTH_USER" "$AUTH_GROUP"
+  fi
+
+  if ! timeout "$T_RESTART" systemctl restart authelia; then
+    if [ "$staged" -eq 1 ]; then
+      restore_previous "$AUTHELIA_CONFIG" configuration.yml 0640 "$AUTH_USER" "$AUTH_GROUP"
+      timeout "$T_RESTART" systemctl restart authelia || printf 'apply: the restart after the rollback failed as well\n' >&2
+      fail 'authelia did not restart; the previous configuration was restored'
+    fi
+    fail 'authelia did not restart'
+  fi
+  if [ "$staged" -eq 1 ]; then
+    printf 'apply: authelia configuration installed, authelia restarted\n'
+  else
+    printf 'apply: nothing staged, authelia restarted\n'
+  fi
+}
+
+case $TARGET in
+  caddy) apply_caddy ;;
+  authelia) apply_authelia ;;
+esac
