@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Admin;
 
+use App\Domain\Host\HostSettings;
+use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
@@ -15,6 +17,8 @@ use App\Fleet\Projects\Rule\GitUrl;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\TemplateInput;
 use App\Fleet\Projects\TemplateService;
+use App\Fleet\Shell\CommandResult;
+use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DomCrawler\Crawler;
@@ -28,6 +32,23 @@ final class ProjectPagesTest extends AdminTestCase
         $service = $this->container()->get(ProjectService::class);
         self::assertInstanceOf(ProjectService::class, $service);
         $service->create($input ?? new ProjectInput($name, 'https://git.example.com/acme/'.$name.'.git'));
+    }
+
+    /**
+     * Setup is complete, so a project change installs the Authelia rules, and the root helper fails: the refresher
+     * keeps a warning for the page to flash (ProjectAccessRefresher::takeWarning()).
+     */
+    private function completeSetupWithFailingInstall(): void
+    {
+        $host = new HostSettings('fleet.example.com');
+        $host->markSetupComplete();
+        $settings = $this->container()->get(HostSettingsRepository::class);
+        self::assertInstanceOf(HostSettingsRepository::class, $settings);
+        $settings->save($host);
+
+        $runner = $this->container()->get('fleet.test_alias.recording_command_runner');
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        $runner->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
     }
 
     private function makeTemplate(string $project, string $name): void
@@ -108,6 +129,20 @@ final class ProjectPagesTest extends AdminTestCase
         // The flash is shown once.
         $crawler = $this->open('/admin/projects/blog');
         self::assertCount(0, $crawler->filter('[data-testid=flashes]'));
+    }
+
+    public function testCreateShowsTheAccessWarningLeftByTheRefresh(): void
+    {
+        $this->completeSetupWithFailingInstall();
+
+        $crawler = $this->open('/admin/projects/new');
+        $this->submit($crawler, 'Create project', ['project[name]' => 'blog', 'project[git]' => self::GIT, 'project[defaultBranch]' => 'main']);
+
+        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertNotNull($this->stored('blog'), 'the project stands');
+        $flashes = $this->client->followRedirect()->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('Project created.', $flashes);
+        self::assertStringContainsString('The project was saved, but the sign-in service was not updated', $flashes);
     }
 
     public function testBadInputReturns422WithFieldErrors(): void
@@ -312,9 +347,9 @@ final class ProjectPagesTest extends AdminTestCase
             $crawler = $this->open($path);
             $tabs = $crawler->filter('nav[aria-label="Project sections"]');
             self::assertCount(1, $tabs, $path);
-            self::assertSame(['General', 'Templates', 'Ports', 'Assets', 'Webhooks'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
+            self::assertSame(['General', 'Templates', 'Secrets', 'Ports', 'Assets', 'Webhooks'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
             self::assertSame(
-                ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/ports', '/admin/projects/blog/assets', '/admin/projects/blog/webhooks'],
+                ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/secrets', '/admin/projects/blog/ports', '/admin/projects/blog/assets', '/admin/projects/blog/webhooks'],
                 $tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('href')),
             );
             self::assertSame($active, trim($tabs->filter('a[aria-current="page"]')->text()), $path);
@@ -489,6 +524,20 @@ final class ProjectPagesTest extends AdminTestCase
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString('blog', $crawler->filter('[data-testid=flashes]')->text());
         self::assertStringContainsString('deleted', $crawler->filter('[data-testid=flashes]')->text());
+    }
+
+    public function testDeleteShowsTheAccessWarningLeftByTheRefresh(): void
+    {
+        $this->makeProject();
+        $this->completeSetupWithFailingInstall();
+
+        $crawler = $this->open('/admin/projects/blog');
+        $this->client->submit($crawler->filter('form[action="/admin/projects/blog/delete"]')->selectButton('Delete project')->form());
+        $crawler = $this->client->followRedirect();
+
+        $flashes = $crawler->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('deleted', $flashes);
+        self::assertStringContainsString('sign-in service was not updated', $flashes);
     }
 
     public function testDeleteIsRefusedWhileInstancesExist(): void

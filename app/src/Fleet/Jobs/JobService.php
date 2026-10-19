@@ -1,0 +1,101 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fleet\Jobs;
+
+use App\Domain\Job\Job;
+use App\Domain\Job\JobRepository;
+use App\Domain\Job\JobStatus;
+use App\Domain\Job\JobTrigger;
+use App\Fleet\Projects\Refused;
+use App\Message\RunJob;
+use Psr\Clock\ClockInterface;
+use Psr\Log\LoggerInterface;
+use Symfony\Component\Messenger\MessageBusInterface;
+
+/**
+ * Creates and finishes jobs. A request never runs a process: enqueue() stores the job and hands its id to the queue.
+ */
+final readonly class JobService
+{
+    public function __construct(
+        private JobRepository $jobs,
+        private MessageBusInterface $bus,
+        private JobFeed $feed,
+        private LogReader $logs,
+        private ClockInterface $clock,
+        private LoggerInterface $logger,
+    ) {
+    }
+
+    /**
+     * Persists the job as queued, then dispatches it. A dispatch failure is logged and fails the job instead of
+     * leaving it queued for ever, but only while the job is still queued: with a transport that runs the message at
+     * once (sync://) the job may already have run, and its outcome must stand.
+     */
+    public function enqueue(Job $job): void
+    {
+        $this->jobs->add($job);
+        $this->notify($job);
+
+        try {
+            $this->bus->dispatch(new RunJob((int) $job->id()));
+        } catch (\Throwable $e) {
+            $this->logger->error('Job {id} could not be dispatched.', ['id' => $job->id(), 'exception' => $e]);
+            $this->jobs->refresh($job);
+            if (JobStatus::Queued === $job->status()) {
+                $this->finish($job, JobStatus::Failed, null, 'The job could not be queued.');
+            }
+        }
+    }
+
+    public function finish(Job $job, JobStatus $status, ?int $exitCode, ?string $error): void
+    {
+        $job->finish($status, $exitCode, $error, $this->clock->now());
+        $this->jobs->save($job);
+        $this->notify($job);
+    }
+
+    /**
+     * A new job that repeats a failed one; retrying a failed deploy is a redeploy (the checkout may exist by now).
+     */
+    public function retry(Job $failed, string $requestedBy, JobTrigger $trigger): Job
+    {
+        $this->assertRetryable($failed);
+
+        $job = new Job(
+            'deploy' === $failed->type() ? 'redeploy' : $failed->type(),
+            $failed->instanceId(),
+            $failed->projectName(),
+            $trigger,
+            $requestedBy,
+            $failed->params(),
+            null,
+            false,
+            $failed->id(),
+            $this->clock->now(),
+        );
+        $this->enqueue($job);
+
+        return $job;
+    }
+
+    /**
+     * @throws Refused unless the job ended failed or interrupted
+     */
+    public function assertRetryable(Job $job): void
+    {
+        if (JobStatus::Failed !== $job->status() && JobStatus::Interrupted !== $job->status()) {
+            throw new Refused('Only a failed or interrupted job can be retried.');
+        }
+    }
+
+    private function notify(Job $job): void
+    {
+        $this->feed->jobChanged($job, $this->logs->size($job));
+        if (null !== $job->instanceId()) {
+            $this->feed->instanceChanged($job->instanceId());
+        }
+    }
+}

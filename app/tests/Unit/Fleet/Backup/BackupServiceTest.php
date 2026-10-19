@@ -73,6 +73,21 @@ final class BackupServiceTest extends TestCase
         self::assertSame('fleet-20261019-083015.sqlite', $backup->name);
     }
 
+    public function testTheRequestLimitCountsTheWalAndShmFiles(): void
+    {
+        $size = (int) filesize($this->paths->fleetDb());
+        file_put_contents($this->paths->fleetDb().'-wal', str_repeat('w', 1000));
+        file_put_contents($this->paths->fleetDb().'-shm', str_repeat('s', 500));
+
+        try {
+            $this->service->createWithinRequestLimit($size + 1499);
+            self::fail('The -wal and -shm files must count towards the limit.');
+        } catch (BackupTooLarge $e) {
+            self::assertSame($size + 1500, $e->size);
+        }
+        self::assertSame([], $this->names());
+    }
+
     public function testCopyIsASnapshotOfCommittedDataEvenInWalMode(): void
     {
         $live = new \PDO('sqlite:'.$this->paths->fleetDb(), null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);

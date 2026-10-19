@@ -17,13 +17,14 @@ use Psr\Clock\ClockInterface;
  */
 final readonly class BackupService
 {
-    /** The only names this service writes, lists, serves or deletes. */
     /**
      * "Back up now" runs inside the php-fpm request (`max_execution_time`), so it refuses databases above this size
-     * (fleet.sqlite plus queue.sqlite); the daily timer and `fleet fleet:backup:create` have no such limit.
+     * (fleet.sqlite plus queue.sqlite, each with its `-wal` and `-shm` files); the daily timer and
+     * `fleet fleet:backup:create` have no such limit.
      */
     public const int INTERACTIVE_MAX_BYTES = 256 * 1024 * 1024;
 
+    /** The only names this service writes, lists, serves or deletes. */
     private const string NAME_PATTERN = '/^(fleet|queue)-(\d{8})-(\d{6})\.sqlite$/D';
 
     public function __construct(
@@ -60,7 +61,9 @@ final readonly class BackupService
     {
         $size = 0;
         foreach ([$this->paths->fleetDb(), $this->paths->queueDb()] as $database) {
-            $size += is_file($database) ? (int) @filesize($database) : 0;
+            foreach (['', '-wal', '-shm'] as $suffix) {
+                $size += is_file($database.$suffix) ? (int) @filesize($database.$suffix) : 0;
+            }
         }
         if ($size > $maxBytes) {
             throw new BackupTooLarge($size, $maxBytes);

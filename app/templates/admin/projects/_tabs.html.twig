@@ -1,7 +1,8 @@
-{#- The project's sections. Needs: project, active ('general' | 'templates' | 'ports' | 'assets' | 'webhooks'). One tab strip at every width: no script needed, links of at least 44 px, scrolls inside its own container if it ever outgrows the screen. -#}
+{#- The project's sections. Needs: project, active ('general' | 'templates' | 'secrets' | 'ports' | 'assets' | 'webhooks'). One tab strip at every width: no script needed, links of at least 44 px, scrolls inside its own container if it ever outgrows the screen. -#}
 {% set sections = [
     {key: 'general', label: 'General', url: path('project_edit', {name: project.name})},
     {key: 'templates', label: 'Templates', url: path('project_templates', {name: project.name})},
+    {key: 'secrets', label: 'Secrets', url: path('project_secrets', {name: project.name})},
     {key: 'ports', label: 'Ports', url: path('project_ports', {name: project.name})},
     {key: 'assets', label: 'Assets', url: path('project_assets', {name: project.name})},
     {key: 'webhooks', label: 'Webhooks', url: path('project_webhooks', {name: project.name})},

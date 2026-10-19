@@ -6,6 +6,7 @@ namespace App\Domain\Job;
 
 use App\Doctrine\UtcDateTimeImmutableType;
 use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\Types\Type;
 use Doctrine\ORM\EntityManagerInterface;
 
 final readonly class JobRepository
@@ -31,6 +32,14 @@ final readonly class JobRepository
     {
         $this->em->persist($job);
         $this->em->flush();
+    }
+
+    /**
+     * Reloads the row: another process may have changed it since it was loaded.
+     */
+    public function refresh(Job $job): void
+    {
+        $this->em->refresh($job);
     }
 
     /**
@@ -69,6 +78,75 @@ final readonly class JobRepository
             'SELECT COUNT(*) FROM job WHERE batch_id = :batch AND id < :id AND status IN (:queued, :running)',
             ['batch' => $batch, 'id' => $job->id(), 'queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
         ) > 0;
+    }
+
+    /**
+     * When a queued job became eligible to run: its creation, or for a member of a sequential batch the moment the
+     * latest earlier member finished (whichever is later). The give-up clock counts from here.
+     */
+    public function eligibleSince(Job $job): \DateTimeImmutable
+    {
+        $batch = $job->batchId();
+        if (!$job->isSequential() || null === $batch || null === $job->id()) {
+            return $job->createdAt();
+        }
+
+        $latest = $this->em->getConnection()->fetchOne(
+            'SELECT MAX(finished_at) FROM job WHERE batch_id = :batch AND id < :id AND finished_at IS NOT NULL',
+            ['batch' => $batch, 'id' => $job->id()],
+        );
+        if (!\is_string($latest)) {
+            return $job->createdAt();
+        }
+        $finished = Type::getType(UtcDateTimeImmutableType::NAME)->convertToPHPValue($latest, $this->em->getConnection()->getDatabasePlatform());
+
+        return $finished instanceof \DateTimeImmutable && $finished > $job->createdAt() ? $finished : $job->createdAt();
+    }
+
+    /**
+     * Queued jobs created before $before, oldest first. The caller decides which of them are really stale.
+     *
+     * @return list<Job>
+     */
+    public function queuedCreatedBefore(\DateTimeImmutable $before): array
+    {
+        /** @var list<Job> $jobs */
+        $jobs = $this->em->createQuery(\sprintf('SELECT j FROM %s j WHERE j.status = :queued AND j.createdAt < :before ORDER BY j.id ASC', Job::class))
+            ->setParameter('queued', JobStatus::Queued)
+            ->setParameter('before', $before, UtcDateTimeImmutableType::NAME)
+            ->getResult();
+
+        return $jobs;
+    }
+
+    /**
+     * Which of the given instances have a queued or running job.
+     *
+     * @param list<string> $instanceIds
+     *
+     * @return list<string> ordered
+     */
+    public function activeInstanceIds(array $instanceIds): array
+    {
+        if ([] === $instanceIds) {
+            return [];
+        }
+
+        // Chunked: a bulk or `all` request can name more ids than SQLite takes as bound variables (999).
+        $busy = [];
+        foreach (array_chunk($instanceIds, self::CHUNK) as $chunk) {
+            /** @var list<string> $found */
+            $found = $this->em->getConnection()->fetchFirstColumn(
+                'SELECT DISTINCT instance_id FROM job WHERE instance_id IN (:ids) AND status IN (:queued, :running)',
+                ['ids' => $chunk, 'queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
+                ['ids' => ArrayParameterType::STRING],
+            );
+            array_push($busy, ...$found);
+        }
+        $busy = array_values(array_unique($busy));
+        sort($busy);
+
+        return $busy;
     }
 
     /**

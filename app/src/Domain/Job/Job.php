@@ -18,6 +18,8 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Index(name: 'idx_job_instance', columns: ['instance_id'])]
 #[ORM\Index(name: 'idx_job_batch', columns: ['batch_id'])]
 #[ORM\Index(name: 'idx_job_created', columns: ['created_at'])]
+// At most one queued or running job per instance: the database settles two requests that pass the busy check together.
+#[ORM\UniqueConstraint(name: 'uniq_job_active_instance', columns: ['active_instance_id'])]
 class Job
 {
     public const int ERROR_MAX = 500;
@@ -32,6 +34,13 @@ class Job
 
     #[ORM\Column(type: Types::STRING, length: 63, nullable: true)]
     private ?string $instanceId;
+
+    /**
+     * The instance id while the job is queued or running, null once it ended: a unique column, so two active jobs on
+     * one instance cannot exist. (A partial index would say the same, but Doctrine cannot map one under SQLite.).
+     */
+    #[ORM\Column(type: Types::STRING, length: 63, nullable: true)]
+    private ?string $activeInstanceId;
 
     #[ORM\Column(type: Types::STRING, length: 40, nullable: true)]
     private ?string $projectName;
@@ -90,6 +99,7 @@ class Job
     ) {
         $this->type = $type;
         $this->instanceId = $instanceId;
+        $this->activeInstanceId = $instanceId;
         $this->projectName = $projectName;
         $this->trigger = $trigger;
         $this->requestedBy = $requestedBy;
@@ -189,9 +199,16 @@ class Job
         $this->startedAt = $at;
     }
 
+    /**
+     * @throws \LogicException when the job is already finished (a late writer must not overwrite the outcome)
+     */
     public function finish(JobStatus $status, ?int $exitCode, ?string $error, \DateTimeImmutable $at): void
     {
+        if ($this->status->isFinal()) {
+            throw new \LogicException(\sprintf('Job %s is already %s.', (string) $this->id, $this->status->value));
+        }
         $this->status = $status;
+        $this->activeInstanceId = $status->isFinal() ? null : $this->instanceId;
         $this->exitCode = $exitCode;
         $this->error = null === $error ? null : mb_substr($error, 0, self::ERROR_MAX);
         $this->finishedAt = $at;

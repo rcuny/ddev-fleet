@@ -8,13 +8,17 @@ use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Security\ProjectVoter;
 use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
+use Symfony\Contracts\Service\ResetInterface;
 
 /**
  * The instances the current user may operate: an admin sees all, a member those of the projects they belong to.
  * Pages and controllers read instances through this class, so an instance of a foreign project is simply absent
  * (callers answer 404, never 403: its existence is not disclosed).
+ *
+ * The per-project decisions are remembered for one request or one Messenger message only: reset() clears them, so a
+ * long-lived worker never reuses a stale authorization decision.
  */
-final class VisibleInstances
+final class VisibleInstances implements ResetInterface
 {
     /** @var array<int, bool> project id => may operate, decided once per project per request */
     private array $operable = [];
@@ -41,6 +45,11 @@ final class VisibleInstances
         $instance = $this->instances->find($id);
 
         return null !== $instance && $this->mayOperate($instance) ? $instance : null;
+    }
+
+    public function reset(): void
+    {
+        $this->operable = [];
     }
 
     private function mayOperate(Instance $instance): bool

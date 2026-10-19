@@ -12,7 +12,7 @@ use Doctrine\ORM\Mapping as ORM;
  * One encrypted value (libsodium secretbox). Only ciphertext and nonce are stored; the key lives in a
  * file under FLEET_HOME/keys.
  *
- * scopeId is '' for the fleet scope rather than NULL: SQLite treats NULLs as distinct in a unique
+ * scopeId is the project name for the project scope and '' for the fleet scope rather than NULL: SQLite treats NULLs as distinct in a unique
  * index, which would allow duplicate (scope, name) rows.
  */
 #[ORM\Entity]
@@ -21,6 +21,7 @@ use Doctrine\ORM\Mapping as ORM;
 class Secret
 {
     public const string SCOPE_FLEET = 'fleet';
+    public const string SCOPE_PROJECT = 'project';
 
     #[ORM\Id]
     #[ORM\GeneratedValue]

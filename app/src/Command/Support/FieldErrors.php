@@ -34,6 +34,11 @@ final readonly class FieldErrors
         return new self(['project', 'name']);
     }
 
+    public static function secret(): self
+    {
+        return new self(['name', 'value']);
+    }
+
     public static function port(): self
     {
         return new self(['name']);

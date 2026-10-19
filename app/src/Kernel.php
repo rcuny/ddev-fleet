@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace App;
 
+use App\DependencyInjection\UniqueJobTypesPass;
 use Symfony\Bundle\FrameworkBundle\Kernel\MicroKernelTrait;
+use Symfony\Component\DependencyInjection\Compiler\PassConfig;
+use Symfony\Component\DependencyInjection\ContainerBuilder;
 use Symfony\Component\HttpKernel\Kernel as BaseKernel;
 
 class Kernel extends BaseKernel
@@ -16,6 +19,11 @@ class Kernel extends BaseKernel
         ProductionGuard::assertSafe($this->environment, ProductionGuard::currentVars() + ['PROJECT_DIR' => $this->getProjectDir()]);
 
         parent::boot();
+    }
+
+    protected function build(ContainerBuilder $container): void
+    {
+        $container->addCompilerPass(new UniqueJobTypesPass(), PassConfig::TYPE_OPTIMIZE);
     }
 
     /**

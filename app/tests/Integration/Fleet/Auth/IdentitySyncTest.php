@@ -302,7 +302,7 @@ final class IdentitySyncTest extends KernelTestCase
 
         $projectService->create(new ProjectInput(name: 'shop', git: 'https://git.example.com/acme/shop.git'));
         self::assertTrue($this->sync->refreshAccess(), 'a new project needs its rule (administrators open its sites)');
-        $projectService->delete('shop');
+        $projectService->delete('shop', 'tester');
         self::assertTrue($this->sync->refreshAccess(), 'a deleted project loses its rule');
         self::assertFalse($this->sync->refreshAccess());
     }
