@@ -18,7 +18,7 @@ final class EnvFileTest extends TestCase
     /** @var list<string> the keys of fleet.env, in file order */
     private const array KEYS = [
         'APP_ENV', 'APP_DEBUG', 'APP_SECRET', 'MERCURE_JWT_SECRET', 'FLEET_PROXY_SECRET', 'FLEET_HOME', 'FLEET_RUNNER',
-        'FLEET_TRUSTED_PROXIES', 'FLEET_ADMIN_GROUP', 'FLEET_CADDY_DIR', 'DEFAULT_URI',
+        'FLEET_TRUSTED_PROXIES', 'FLEET_ADMIN_GROUP', 'FLEET_CADDY_DIR', 'FLEET_JOB_RETENTION_DAYS', 'DEFAULT_URI',
     ];
 
     public function testGeneratesAllKeysWithSecretsOf64HexChars(): void
@@ -92,6 +92,20 @@ final class EnvFileTest extends TestCase
         }
         self::assertSame(1, substr_count((string) file_get_contents($dir.'/fleet.env'), 'APP_ENV='), 'no duplicate of an existing key');
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $env['MERCURE_JWT_SECRET'], 'a missing secret is generated');
+    }
+
+    public function testEnvStepAddsRetentionOnlyWhenMissing(): void
+    {
+        $dir = $this->scratch().'/etc-ddev-fleet';
+        mkdir($dir, 0o750);
+        file_put_contents($dir.'/fleet.env', "APP_ENV=prod\nFLEET_JOB_RETENTION_DAYS=30\n");
+
+        $this->runStep();
+        self::assertSame('30', $this->parse($dir.'/fleet.env')['FLEET_JOB_RETENTION_DAYS'], 'an operator value stays');
+
+        file_put_contents($dir.'/fleet.env', "APP_ENV=prod\n");
+        $this->runStep();
+        self::assertSame('90', $this->parse($dir.'/fleet.env')['FLEET_JOB_RETENTION_DAYS']);
     }
 
     public function testAnExistingEmptyValueCountsAsPresent(): void

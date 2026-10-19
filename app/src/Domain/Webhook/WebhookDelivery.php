@@ -20,6 +20,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Table(name: 'webhook_delivery')]
 #[ORM\Index(name: 'idx_webhook_delivery_project', columns: ['project_name', 'received_at'])]
 #[ORM\Index(name: 'idx_webhook_delivery_received', columns: ['received_at'])]
+#[ORM\Index(name: 'idx_webhook_delivery_body', columns: ['project_name', 'source', 'body_hash'])]
 #[ORM\UniqueConstraint(name: 'uniq_webhook_delivery_dedupe', columns: ['project_name', 'source', 'dedupe_id'])]
 class WebhookDelivery
 {
@@ -80,6 +81,10 @@ class WebhookDelivery
 
     #[ORM\Column(type: Types::INTEGER, nullable: true)]
     private ?int $jobId = null;
+
+    /** sha256 of the raw body, set on a delivery that matched a rule: a replayed body inside the window is a duplicate. */
+    #[ORM\Column(type: Types::STRING, length: 64, nullable: true)]
+    private ?string $bodyHash = null;
 
     public function __construct(
         \DateTimeImmutable $receivedAt,
@@ -183,6 +188,16 @@ class WebhookDelivery
         return $this->jobId;
     }
 
+    public function bodyHash(): ?string
+    {
+        return $this->bodyHash;
+    }
+
+    public function withBodyHash(string $hash): void
+    {
+        $this->bodyHash = $hash;
+    }
+
     /**
      * Marks the delivery as the one that consumed its id.
      */
@@ -198,6 +213,15 @@ class WebhookDelivery
     {
         $this->reason = self::cut($note, 200);
         $this->jobId = $jobId;
+    }
+
+    /**
+     * The action did not run or failed: the row says so (result `failed`) and the note says why.
+     */
+    public function recordFailure(string $note): void
+    {
+        $this->result = self::FAILED;
+        $this->reason = self::cut($note, 200);
     }
 
     private static function cut(?string $value, int $max): ?string

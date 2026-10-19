@@ -1,0 +1,9 @@
+{#- The live log of a job. Needs: job. It follows the tail unless the reader scrolled up (assets/controllers/job_log_controller.js). -#}
+<div data-controller="job-log"
+     data-job-log-url-value="{{ path('job_log', {id: job.id}) }}"
+     data-job-log-status-value="{{ job.status.value }}"
+     data-job-log-mercure-url-value="{{ mercure() }}"
+     data-job-log-topic-value="/jobs/{{ job.id }}">
+    <p class="mb-2 text-sm text-ink-muted" role="status" data-testid="job-log-indicator" data-job-log-target="indicator">Loading…</p>
+    <pre data-testid="job-log" data-job-log-target="output" tabindex="0" aria-label="Log of job #{{ job.id }}" class="max-h-[60vh] min-h-24 overflow-auto rounded-md border border-hairline bg-surface p-3 font-mono text-xs whitespace-pre-wrap [overflow-wrap:anywhere]"></pre>
+</div>

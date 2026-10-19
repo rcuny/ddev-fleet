@@ -12,12 +12,12 @@
     <div class="mt-6 grid gap-8">
         {{ include('admin/webhooks/_endpoints.html.twig', {rows: rows}) }}
 
-        {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('project_webhooks', {name: project.name}), showProject: false}) }}
+        {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('project_webhooks', {name: project.name}), showProject: false, filter: filter, results: results}) }}
 
         {% if page > 1 or hasMore %}
             <nav aria-label="Delivery pages" class="flex items-center justify-between gap-4 text-sm">
-                {% if page > 1 %}<a href="{{ path('project_webhooks', {name: project.name, page: page - 1, 'hide-ignored': hideIgnored ? 1 : null}) }}" class="inline-flex min-h-11 items-center">Newer</a>{% else %}<span></span>{% endif %}
-                {% if hasMore %}<a href="{{ path('project_webhooks', {name: project.name, page: page + 1, 'hide-ignored': hideIgnored ? 1 : null}) }}" class="inline-flex min-h-11 items-center">Older</a>{% endif %}
+                {% if page > 1 %}<a href="{{ path('project_webhooks', {name: project.name, page: page - 1, 'hide-ignored': hideIgnored ? 1 : null, source: filter.source, result: filter.result}) }}" class="inline-flex min-h-11 items-center">Newer</a>{% else %}<span></span>{% endif %}
+                {% if hasMore %}<a href="{{ path('project_webhooks', {name: project.name, page: page + 1, 'hide-ignored': hideIgnored ? 1 : null, source: filter.source, result: filter.result}) }}" class="inline-flex min-h-11 items-center">Older</a>{% endif %}
             </nav>
         {% endif %}
     </div>

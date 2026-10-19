@@ -40,13 +40,15 @@ final class WebhookCommandsTest extends KernelTestCase
 
     /**
      * @param array<string, mixed> $input
+     * @param list<string>         $answers standard input (the tests run non-interactively)
      */
-    private function cli(string $command, array $input): CommandTester
+    private function cli(string $command, array $input, array $answers = []): CommandTester
     {
         $kernel = self::$kernel;
         self::assertNotNull($kernel);
         $tester = new CommandTester(new Application($kernel)->find($command));
-        $tester->execute($input, ['capture_stderr_separately' => true]);
+        $tester->setInputs($answers);
+        $tester->execute($input, ['capture_stderr_separately' => true, 'interactive' => false]);
 
         return $tester;
     }
@@ -176,5 +178,65 @@ final class WebhookCommandsTest extends KernelTestCase
     public function testLogShowsDeliveriesNewestFirst(): void
     {
         self::assertStringContainsString('No webhook deliveries logged.', $this->cli('fleet:webhook:log', [])->getDisplay());
+    }
+
+    private const string TOKEN = 'ATCTT-a-pipeline-token-value';
+
+    public function testTheTokenIsReadFromStandardInputStoredSealedAndNeverPrinted(): void
+    {
+        self::assertSame(0, $this->cli('fleet:webhook:secret', ['project' => 'blog', '--source' => 'bitbucket'])->getStatusCode());
+
+        $set = $this->cli('fleet:webhook:token', ['project' => 'blog'], [self::TOKEN."\n"]);
+
+        self::assertSame(0, $set->getStatusCode(), $set->getErrorOutput());
+        self::assertStringContainsString('cannot be shown again', $set->getDisplay());
+        self::assertStringNotContainsString(self::TOKEN, $set->getDisplay().$set->getErrorOutput());
+        $row = $this->entityManager()->getConnection()->fetchAssociative('SELECT token_ciphertext, token_key_version FROM webhook_endpoint WHERE source = ?', ['bitbucket']);
+        self::assertIsArray($row);
+        self::assertNotNull($row['token_key_version']);
+        self::assertStringNotContainsString(self::TOKEN, (string) $row['token_ciphertext']);
+
+        $list = $this->cli('fleet:webhook:list', ['--json' => true]);
+        self::assertStringNotContainsString(self::TOKEN, $list->getDisplay());
+        $bitbucket = array_values(array_filter(self::jsonList($list), static fn (array $r): bool => 'bitbucket' === $r['source']));
+        self::assertTrue($bitbucket[0]['token']);
+
+        $cleared = $this->cli('fleet:webhook:token', ['project' => 'blog', '--clear' => true, '--json' => true]);
+        self::assertSame(['project' => 'blog', 'cleared' => true], self::json($cleared));
+        self::assertFalse(self::json($this->cli('fleet:webhook:token', ['project' => 'blog', '--clear' => true, '--json' => true]))['cleared']);
+    }
+
+    public function testTheTokenNeedsABitbucketSecretFirstAndAValidValue(): void
+    {
+        $noEndpoint = $this->cli('fleet:webhook:token', ['project' => 'blog'], [self::TOKEN]);
+        self::assertSame(3, $noEndpoint->getStatusCode());
+        self::assertStringContainsString('create its secret first', $noEndpoint->getErrorOutput());
+
+        $this->cli('fleet:webhook:secret', ['project' => 'blog', '--source' => 'bitbucket']);
+        $bad = $this->cli('fleet:webhook:token', ['project' => 'blog'], ["has a space\n"]);
+        self::assertSame(1, $bad->getStatusCode());
+        self::assertStringContainsString('token:', $bad->getErrorOutput());
+        self::assertStringNotContainsString('has a space', $bad->getDisplay().$bad->getErrorOutput());
+        self::assertSame(1, $this->cli('fleet:webhook:token', ['project' => 'blog'], [''])->getStatusCode(), 'empty');
+    }
+
+    public function testDeployRulesTakeALabelPrefixAndAStrippedSuffixButNotAFixedLabelWithThem(): void
+    {
+        $this->cli('fleet:webhook:secret', ['project' => 'blog', '--source' => 'bitbucket']);
+        $base = ['project' => 'blog', '--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--template' => 'jira-work'];
+
+        $ok = $this->cli('fleet:webhook:rule:add', $base + ['--match-branch' => '*--pw-run', '--label-prefix' => 'pw-', '--strip-suffix' => '--pw-run', '--json' => true]);
+        self::assertSame(0, $ok->getStatusCode(), $ok->getErrorOutput());
+        self::assertSame(['template' => 'jira-work', 'label_prefix' => 'pw-', 'strip_suffix' => '--pw-run'], self::json($ok)['params']);
+
+        $both = $this->cli('fleet:webhook:rule:add', $base + ['--match-branch' => 'a', '--label' => 'x', '--label-prefix' => 'pw-']);
+        self::assertSame(1, $both->getStatusCode());
+        self::assertStringContainsString('--label: A fixed label cannot be combined', $both->getErrorOutput());
+
+        $noPrefix = $this->cli('fleet:webhook:rule:add', $base + ['--match-branch' => '*--x', '--strip-suffix' => '--x']);
+        self::assertStringContainsString('--strip-suffix: A suffix to strip needs a label prefix', $noPrefix->getErrorOutput());
+
+        $wrongGlob = $this->cli('fleet:webhook:rule:add', $base + ['--match-branch' => '*--y', '--label-prefix' => 'p-', '--strip-suffix' => '--x']);
+        self::assertStringContainsString('--strip-suffix: The branch glob must end with the suffix', $wrongGlob->getErrorOutput());
     }
 }
