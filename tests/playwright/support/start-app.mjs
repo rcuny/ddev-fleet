@@ -75,7 +75,10 @@ setupUrl.protocol = localOrigin.protocol;
 setupUrl.host = localOrigin.host;
 writeFileSync(join(runDir, 'setup-url.txt'), `${setupUrl.href}\n`, { mode: 0o600 });
 
-const server = spawn(php, ['-S', `127.0.0.1:${port}`, '-t', 'public'], {
+// `-d variables_order=EGPCS`: some PHP builds (the CI image among them) ship `variables_order=GPCS`, so the
+// server's requests would not see the environment this launcher sets (FLEET_HOME, …) and Symfony would fall back
+// to the `.env` defaults: another database, without the migrations run above.
+const server = spawn(php, ['-d', 'variables_order=EGPCS', '-S', `127.0.0.1:${port}`, '-t', 'public'], {
   cwd: appDir,
   env: { ...env, PHP_CLI_SERVER_WORKERS: '4' },
   // php -S logs every request and every PHP error to stderr. Keep it: a 5xx must be diagnosable from the CI log.
