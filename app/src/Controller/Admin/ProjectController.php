@@ -13,15 +13,13 @@ use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
-use App\Fleet\Projects\Rule\CommandLines;
-use App\Fleet\Projects\Rule\TextBlock;
 use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
 use App\Form\Project\ProjectType;
+use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
 use App\Security\ProjectVoter;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
-use Symfony\Component\Form\FormError;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -68,7 +66,7 @@ final class ProjectController extends AbstractController
 
         if ($form->isSubmitted() && $form->isValid()) {
             $data = $this->formData($form);
-            $hostnames = $this->hostnames($form, $data);
+            $hostnames = TextLines::split($form, 'additionalHostnames', $data);
             if (null !== $hostnames) {
                 try {
                     $project = $this->projects->create(new ProjectInput(
@@ -106,7 +104,7 @@ final class ProjectController extends AbstractController
 
         if ($form->isSubmitted() && $form->isValid()) {
             $data = $this->formData($form);
-            $hostnames = $this->hostnames($form, $data);
+            $hostnames = TextLines::split($form, 'additionalHostnames', $data);
             if (null !== $hostnames) {
                 // Start from what is stored so the fields this tab does not show (port assignments) survive the save.
                 $input = ProjectInput::fromProject($project)->with([
@@ -239,28 +237,6 @@ final class ProjectController extends AbstractController
         }
 
         return $typed;
-    }
-
-    /**
-     * The hostnames textarea as a list. The raw text is bounded first (a megabyte must not be split); a refused text is a
-     * field error and the method returns null.
-     *
-     * @param FormInterface<mixed> $form
-     * @param array<string, mixed> $data
-     *
-     * @return list<string>|null
-     */
-    private function hostnames(FormInterface $form, array $data): ?array
-    {
-        $text = $data['additionalHostnames'] ?? '';
-        $text = \is_string($text) ? $text : '';
-        if (null !== $error = TextBlock::error($text)) {
-            $form->get('additionalHostnames')->addError(new FormError($error));
-
-            return null;
-        }
-
-        return CommandLines::normalise($text);
     }
 
     private static function text(mixed $value): string

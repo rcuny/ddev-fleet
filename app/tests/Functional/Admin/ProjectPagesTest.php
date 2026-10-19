@@ -301,14 +301,14 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject();
         $this->makeTemplate('blog', 'full');
 
-        foreach (['/admin/projects', '/admin/projects/new', '/admin/projects/blog', '/admin/projects/blog/ports'] as $path) {
+        foreach (['/admin/projects', '/admin/projects/new', '/admin/projects/blog', '/admin/projects/blog/ports', '/admin/projects/blog/templates'] as $path) {
             $crawler = $this->open($path);
             self::assertResponseStatusCodeSame(200, $path);
             self::assertCount(1, $crawler->filter('h1'), $path);
             self::assertCount(1, $crawler->filter('main#main'), $path);
         }
 
-        foreach (['/admin/projects/blog' => 'General', '/admin/projects/blog/ports' => 'Ports'] as $path => $active) {
+        foreach (['/admin/projects/blog' => 'General', '/admin/projects/blog/templates' => 'Templates', '/admin/projects/blog/ports' => 'Ports'] as $path => $active) {
             $crawler = $this->open($path);
             $tabs = $crawler->filter('nav[aria-label="Project sections"]');
             self::assertCount(1, $tabs, $path);
