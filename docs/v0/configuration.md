@@ -7,7 +7,7 @@ Type: documentation
 
 # Configuring ddev-fleet: the `fleet.yml` registry
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.03; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x port re-implements the projects and templates part of this in milestone M0.03 (done: [`../projects-and-templates.md`](../projects-and-templates.md)) and the rest in later milestones; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
 
 `fleet.yml` is the fleet's single source of truth for *what* it manages:
 which projects exist, where their git remotes live, what deploy templates

@@ -19,11 +19,11 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 | PHPUnit `Unit` | `app/tests/Unit/` | 882 tests |
 | PHPUnit `Integration` | `app/tests/Integration/` | 398 tests |
 | PHPUnit `Functional` | `app/tests/Functional/` | 405 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 384 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
+| PHPUnit `Repo` | `app/tests/Repo/` | 391 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
 | Playwright | `tests/playwright/` | 90 (8 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 69 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 2069 tests (12 skipped). Update this table when the numbers change.
+PHPUnit totals 2076 tests (12 skipped). Update this table when the numbers change.
 
 ## Layout
 
@@ -38,7 +38,9 @@ app/tests/
                      tag guard, the design-system block in CLAUDE.md, the Python app being gone, and the
                      installer: Installer*Test (flags, dry-run plan, DNS check, idempotency, safety), the root
                      helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
-                     InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code)
+                     InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code),
+                     CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
+                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it)
   Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
