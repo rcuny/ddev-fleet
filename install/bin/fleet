@@ -28,6 +28,9 @@ if [ ! -r "$ENV_FILE" ]; then
   exit 1
 fi
 export HOME=/home/fleet
+# Start from a directory the `fleet` user can always enter: the caller's (an administrator's home, say) is often closed
+# to it, and then every process the console starts fails ("posix_spawn() failed: Permission denied").
+cd "$HOME" 2>/dev/null || cd /
 set -a
 # shellcheck source=/dev/null
 . "$ENV_FILE"

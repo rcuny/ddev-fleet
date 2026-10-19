@@ -84,6 +84,26 @@ final class FleetWrapperTest extends TestCase
         self::assertStringStartsWith('php8.4 /app/bin/console fleet:user:reset-password a b *|', $out);
     }
 
+    public function testLeavesTheCallersWorkingDirectory(): void
+    {
+        $caller = $this->scratch().'/closed-to-fleet';
+        mkdir($caller);
+        $envFile = $this->scratch().'/fleet.env';
+        file_put_contents($envFile, "APP_ENV=prod\n");
+        $stubs = $this->stubs(['id' => 'echo fleet', 'sudo' => 'exit 9', 'php8.4' => 'pwd']);
+
+        $process = new Process(['bash', self::installDir().'/bin/fleet', 'setup:token'], $caller, [
+            'PATH' => $stubs.':'.(string) getenv('PATH'),
+            'FLEET_WRAPPER_ENV_FILE' => $envFile,
+            'FLEET_WRAPPER_CONSOLE' => '/app/bin/console',
+        ], null, 30);
+        $process->run();
+
+        self::assertSame(0, $process->getExitCode(), $process->getErrorOutput());
+        // The fleet user's home on a real host; the root directory where that does not exist (this test machine).
+        self::assertContains(trim($process->getOutput()), ['/home/fleet', '/']);
+    }
+
     public function testFailsClearlyWithoutTheEnvironmentFile(): void
     {
         [$status, , $err] = $this->asFleet(['setup:token'], envFile: $this->scratch().'/missing.env');
