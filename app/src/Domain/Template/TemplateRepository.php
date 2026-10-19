@@ -18,6 +18,19 @@ final readonly class TemplateRepository
         return $this->em->getRepository(Template::class)->findOneBy(['project' => $project, 'name' => $name]);
     }
 
+    /**
+     * @return list<Template> ordered by name
+     */
+    public function forProject(Project $project): array
+    {
+        return $this->em->getRepository(Template::class)->findBy(['project' => $project], ['name' => 'ASC']);
+    }
+
+    public function count(Project $project): int
+    {
+        return $this->em->getRepository(Template::class)->count(['project' => $project]);
+    }
+
     public function save(Template $template): void
     {
         $this->em->persist($template);
