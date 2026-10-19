@@ -200,6 +200,23 @@ final class UnitsTest extends TestCase
         self::assertSame('/etc/fleet-mercure/Caddyfile', $config);
     }
 
+    public function testTmuxWorkspaceUnitOwnsTheSessionInItsOwnCgroup(): void
+    {
+        $service = $this->unit('fleet-tmux.service')['Service'];
+
+        // The short-lived ensure client exits after starting the tmux server: RemainAfterExit keeps the unit (and so the
+        // server in its cgroup) alive, and a restart of php-fpm or the workers cannot reach it.
+        self::assertSame(['oneshot'], $service['Type']);
+        self::assertSame(['yes'], $service['RemainAfterExit']);
+        self::assertSame(['fleet'], $service['User']);
+        self::assertSame(['/etc/ddev-fleet/fleet.env'], $service['EnvironmentFile']);
+        self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:tmux:ensure'], $service['ExecStart']);
+        self::assertSame(['-/usr/bin/tmux -L fleet kill-session -t fleet'], $service['ExecStop']);
+        foreach (['NoNewPrivileges', 'ProtectSystem', 'PrivateTmp'] as $sandbox) {
+            self::assertArrayNotHasKey($sandbox, $service, 'the panes are operator shells and would inherit '.$sandbox);
+        }
+    }
+
     public function testMercureCaddyfile(): void
     {
         $caddyfile = (string) file_get_contents(self::installDir().'/etc/mercure.Caddyfile');

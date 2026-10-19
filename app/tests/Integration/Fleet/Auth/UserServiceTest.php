@@ -8,16 +8,20 @@ use App\Domain\User\PasswordHash;
 use App\Domain\User\User;
 use App\Domain\User\UserRepository;
 use App\Fleet\Auth\AdminGroup;
+use App\Fleet\Auth\InvalidUserInput;
 use App\Fleet\Auth\PasswordPolicy;
 use App\Fleet\Auth\UnknownUser;
 use App\Fleet\Auth\UserService;
+use App\Fleet\FleetPaths;
 use App\Tests\Support\FleetDatabase;
+use App\Tests\Support\SecondWriter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 final class UserServiceTest extends KernelTestCase
 {
     use FleetDatabase;
+    use SecondWriter;
 
     private const string PASSWORD = 'correct horse battery staple';
 
@@ -53,6 +57,40 @@ final class UserServiceTest extends KernelTestCase
         self::assertTrue(PasswordHash::isArgon2id($stored->passwordHash()));
         self::assertTrue(password_verify(self::PASSWORD, $stored->passwordHash()));
         self::assertStringNotContainsString(self::PASSWORD, $stored->passwordHash());
+    }
+
+    public function testCreateKeepsOtherWritersOutBetweenTheCheckAndTheSave(): void
+    {
+        $other = new \PDO('sqlite:'.self::getContainer()->get(FleetPaths::class)->fleetDb());
+        $other->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $other->setAttribute(\PDO::ATTR_TIMEOUT, 0);
+
+        // A parallel create that passed its own check would insert here; it must wait (here: fail at once) instead.
+        $blocked = false;
+        $this->beforeNextPersist($this->entityManager(), static function () use ($other, &$blocked): void {
+            try {
+                $other->exec("INSERT INTO fleet_user (username, display_name, email, password_hash, user_groups, enabled, created_at, updated_at) VALUES ('ada', 'Ada', 'a@example.com', 'x', '[]', 1, '2026-10-19 00:00:00', '2026-10-19 00:00:00')");
+            } catch (\PDOException) {
+                $blocked = true;
+            }
+        });
+
+        $this->service->create('ada', 'Ada', 'ada@example.com', self::PASSWORD);
+
+        self::assertTrue($blocked, 'the lock is held from before the existence check');
+    }
+
+    public function testALosingParallelCreateIsAnInvalidUserInput(): void
+    {
+        $second = $this->secondEntityManager($this->entityManager());
+        new UserRepository($second)->save(new User('ada', 'Ada', 'ada@example.com', '$argon2id$v=19$m=65536,t=4,p=1$c29tZXNhbHRzb21lc2FsdA$Zm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm9vYmFyZm8', []));
+
+        try {
+            $this->service->create('ada', 'Ada', 'ada@example.com', self::PASSWORD);
+            self::fail('The second create was accepted.');
+        } catch (InvalidUserInput $e) {
+            self::assertSame('username', $e->field);
+        }
     }
 
     public function testUpsertTwiceUpdatesInsteadOfDuplicating(): void

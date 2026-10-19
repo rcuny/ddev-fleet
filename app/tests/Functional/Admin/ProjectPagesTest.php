@@ -4,10 +4,11 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Admin;
 
+use App\Domain\Host\HostSettings;
+use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
-use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Projects\NamedPortInput;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\ProjectInput;
@@ -16,6 +17,8 @@ use App\Fleet\Projects\Rule\GitUrl;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\TemplateInput;
 use App\Fleet\Projects\TemplateService;
+use App\Fleet\Shell\CommandResult;
+use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DomCrawler\Crawler;
@@ -29,6 +32,23 @@ final class ProjectPagesTest extends AdminTestCase
         $service = $this->container()->get(ProjectService::class);
         self::assertInstanceOf(ProjectService::class, $service);
         $service->create($input ?? new ProjectInput($name, 'https://git.example.com/acme/'.$name.'.git'));
+    }
+
+    /**
+     * Setup is complete, so a project change installs the Authelia rules, and the root helper fails: the refresher
+     * keeps a warning for the page to flash (ProjectAccessRefresher::takeWarning()).
+     */
+    private function completeSetupWithFailingInstall(): void
+    {
+        $host = new HostSettings('fleet.example.com');
+        $host->markSetupComplete();
+        $settings = $this->container()->get(HostSettingsRepository::class);
+        self::assertInstanceOf(HostSettingsRepository::class, $settings);
+        $settings->save($host);
+
+        $runner = $this->container()->get('fleet.test_alias.recording_command_runner');
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        $runner->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
     }
 
     private function makeTemplate(string $project, string $name): void
@@ -109,6 +129,20 @@ final class ProjectPagesTest extends AdminTestCase
         // The flash is shown once.
         $crawler = $this->open('/admin/projects/blog');
         self::assertCount(0, $crawler->filter('[data-testid=flashes]'));
+    }
+
+    public function testCreateShowsTheAccessWarningLeftByTheRefresh(): void
+    {
+        $this->completeSetupWithFailingInstall();
+
+        $crawler = $this->open('/admin/projects/new');
+        $this->submit($crawler, 'Create project', ['project[name]' => 'blog', 'project[git]' => self::GIT, 'project[defaultBranch]' => 'main']);
+
+        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertNotNull($this->stored('blog'), 'the project stands');
+        $flashes = $this->client->followRedirect()->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('Project created.', $flashes);
+        self::assertStringContainsString('The project was saved, but the sign-in service was not updated', $flashes);
     }
 
     public function testBadInputReturns422WithFieldErrors(): void
@@ -495,10 +529,7 @@ final class ProjectPagesTest extends AdminTestCase
     public function testDeleteShowsTheAccessWarningLeftByTheRefresh(): void
     {
         $this->makeProject();
-        $refresher = $this->container()->get(ProjectAccessRefresher::class);
-        self::assertInstanceOf(ProjectAccessRefresher::class, $refresher);
-        // What a failed install leaves behind (see ProjectAccessRefresher::refresh()).
-        new \ReflectionProperty($refresher, 'warning')->setValue($refresher, 'The project was saved, but the sign-in service was not updated: boom');
+        $this->completeSetupWithFailingInstall();
 
         $crawler = $this->open('/admin/projects/blog');
         $this->client->submit($crawler->filter('form[action="/admin/projects/blog/delete"]')->selectButton('Delete project')->form());
@@ -506,7 +537,7 @@ final class ProjectPagesTest extends AdminTestCase
 
         $flashes = $crawler->filter('[data-testid=flashes]')->text();
         self::assertStringContainsString('deleted', $flashes);
-        self::assertStringContainsString('sign-in service was not updated: boom', $flashes);
+        self::assertStringContainsString('sign-in service was not updated', $flashes);
     }
 
     public function testDeleteIsRefusedWhileInstancesExist(): void
