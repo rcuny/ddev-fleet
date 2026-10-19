@@ -8,7 +8,7 @@ use App\Domain\Template\TemplateRepository;
 use App\Fleet\Instances\DeployContext;
 use App\Fleet\Instances\DeployStep;
 use App\Fleet\Instances\StepPhase;
-use App\Fleet\Instances\TokenRenderer;
+use App\Fleet\Secrets\TokenRenderer;
 use App\Fleet\Shell\CommandRunnerException;
 use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 
@@ -76,22 +76,28 @@ final readonly class TmuxWindowStep implements DeployStep
         }
         $label = strtolower($pane->name);
 
-        try {
-            $line = TokenRenderer::render($command, $context->tokens);
-        } catch (\InvalidArgumentException $e) {
-            $context->log->line(\sprintf('WARNING: skipped a %s command: %s', $label, $e->getMessage()));
+        // Only the built-in context tokens are typed: a secret would stay readable in the pane's scrollback, so a command
+        // that names anything else is skipped. Nothing is looked up here, so no secret is ever opened for a tty command.
+        preg_match_all(TokenRenderer::PATTERN, $command, $names);
+        $others = array_values(array_filter(array_unique($names[1]), static fn (string $name): bool => !isset($context->tokens[$name])));
+        if ([] !== $others) {
+            sort($others);
+            $context->log->line(\sprintf(
+                'WARNING: skipped a %s command: unresolved token(s): %s (tty commands take only the built-in tokens; a secret is never typed, the pane keeps it in its scrollback)',
+                $label,
+                implode(', ', array_map(static fn (string $name): string => '[['.$name.']]', $others)),
+            ));
 
             return null;
         }
-        preg_match_all('/\[\[([a-z0-9-]+)\]\]/', $command, $names);
         foreach (array_unique($names[1]) as $name) {
-            if (1 !== preg_match(self::SAFE_VALUE, $context->tokens[$name] ?? '')) {
+            if (1 !== preg_match(self::SAFE_VALUE, $context->tokens[$name])) {
                 $context->log->line(\sprintf('WARNING: skipped a %s command: the value of [[%s]] is not safe to type into a shell', $label, $name));
 
                 return null;
             }
         }
 
-        return $line;
+        return $context->render($command)->text;
     }
 }

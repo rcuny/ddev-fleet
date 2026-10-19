@@ -158,7 +158,9 @@ final class AssetsSeedStep implements DeployStep
             throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
         }
         if (\is_string($content) && !str_contains($content, "\0") && mb_check_encoding($content, 'UTF-8')) {
-            [$rendered, $missing] = TokenRenderer::renderLenient($content, $context->tokens);
+            $rendering = $context->render($content);
+            $rendered = $rendering->text;
+            $missing = $rendering->unresolved;
             if ([] !== $missing) {
                 $context->log->line(\sprintf('assets: "%s" has unresolved token(s) left as written: %s', $this->printable($path), implode(', ', array_map(static fn (string $n): string => '[['.$n.']]', $missing))));
             }

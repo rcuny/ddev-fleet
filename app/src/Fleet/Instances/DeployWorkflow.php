@@ -18,6 +18,9 @@ use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
+use App\Fleet\Secrets\SecretOpenFailed;
+use App\Fleet\Secrets\TokenRenderer;
+use App\Fleet\Secrets\UnresolvedTokens;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunnerException;
 use Psr\Clock\ClockInterface;
@@ -44,6 +47,7 @@ final class DeployWorkflow
         private readonly InstanceConfigWriter $config,
         private readonly DrupalSettingsWriter $drupal,
         private readonly ContextTokens $contextTokens,
+        private readonly TokenRenderer $secrets,
         private readonly InstanceHostnames $hostnames,
         private readonly InstanceSiteWriter $sites,
         private readonly Teardown $teardown,
@@ -96,7 +100,7 @@ final class DeployWorkflow
         } catch (Refused $e) {
             throw new JobFailed($e->getMessage().' Nothing was changed.');
         }
-        $postDeploy = $this->preparePostDeploy($template, $tokens);
+        $postDeploy = $this->preparePostDeploy($template, $project, $tokens);
         if ($replace) {
             try {
                 $this->sites->validate();
@@ -144,7 +148,7 @@ final class DeployWorkflow
         }
         GitExclude::add($dir, $written);
 
-        $context = new DeployContext($instance, $project, $dir, $tokens, $log);
+        $context = new DeployContext($instance, $project, $dir, $tokens, $log, $this->secrets);
 
         // 5-8. Steps, the site (never live without the gate), ddev, steps.
         $this->runSteps(StepPhase::BeforeStart, $context);
@@ -185,18 +189,24 @@ final class DeployWorkflow
 
     /**
      * Splits every line into argv and substitutes the tokens inside each word, so a value can never add shell syntax or
-     * split a word. All lines are done before the first one runs.
+     * split a word. All lines are done before the first one runs, in the preflight and so before the first log line that
+     * could hold a value: every secret inserted is registered with the masker by then. Context tokens win over secrets,
+     * a project secret over a fleet-wide one. An unresolved token fails the deploy before anything is changed.
      *
      * @param array<string, string> $tokens
      *
      * @return list<array{line: string, argv: list<string>}>
      */
-    private function preparePostDeploy(Template $template, array $tokens): array
+    private function preparePostDeploy(Template $template, Project $project, array $tokens): array
     {
         $prepared = [];
         foreach ($template->postDeploy() as $number => $line) {
             try {
-                $argv = array_map(static fn (string $word): string => TokenRenderer::render($word, $tokens), CommandLineSplitter::split($line));
+                $argv = array_map(fn (string $word): string => $this->secrets->renderStrict($word, $project->name(), $tokens), CommandLineSplitter::split($line));
+            } catch (UnresolvedTokens $e) {
+                throw new JobFailed(\sprintf('post_deploy line %d cannot run: unresolved token(s): %s. Nothing was changed.', $number + 1, implode(', ', array_map(static fn (string $t): string => '[['.$t.']]', $e->tokens))));
+            } catch (SecretOpenFailed) {
+                throw new JobFailed(\sprintf('post_deploy line %d cannot run: a secret it uses could not be opened. Nothing was changed.', $number + 1));
             } catch (\InvalidArgumentException $e) {
                 throw new JobFailed(\sprintf('post_deploy line %d cannot run: %s. Nothing was changed.', $number + 1, $e->getMessage()));
             }
