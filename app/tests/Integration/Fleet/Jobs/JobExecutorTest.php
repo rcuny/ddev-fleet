@@ -104,6 +104,29 @@ final class JobExecutorTest extends JobTestCase
         $holder->release();
     }
 
+    public function testTheBusyRequeueCarriesTheGiveUpClockAndTheNextDeliveryUsesIt(): void
+    {
+        $job = $this->queuedJob();
+        $created = $this->clock->now()->getTimestamp();
+        $holder = $this->locks->createLock('instance.acme--main');
+        self::assertTrue($holder->acquire());
+        $executor = $this->executor([$this->jobType('deploy', static fn () => null)]);
+
+        $executor->run((int) $job->id());
+
+        $message = $this->bus->sent[0]->getMessage();
+        self::assertInstanceOf(\App\Message\RunJob::class, $message);
+        self::assertSame($created, $message->eligibleSince);
+
+        // The carried clock decides; the database is not asked again.
+        $this->clock->modify('+31 minutes');
+        $executor->run((int) $job->id(), $message->eligibleSince);
+
+        self::assertSame(JobStatus::Failed, $job->status());
+        self::assertStringContainsString('Gave up waiting', (string) $job->error());
+        $holder->release();
+    }
+
     public function testSequentialBatchWaitsForTheEarlierJob(): void
     {
         $first = $this->queuedJob('deploy', 'acme--a', 'b1', true);
