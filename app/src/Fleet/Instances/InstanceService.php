@@ -69,9 +69,9 @@ final class InstanceService
         for ($attempt = 1;; ++$attempt) {
             try {
                 return $this->createDeployJobs($in, $trigger, $by, $branch, $template, $base);
-            } catch (LabelTaken $taken) {
+            } catch (LabelTaken) {
                 if ($attempt >= self::LABEL_ATTEMPTS) {
-                    throw new Refused('Another request took the same label at the same time: try again.', 0, $taken);
+                    throw new Refused('Another request took the same label at the same time: try again.');
                 }
                 // The failed flush closed the entity manager; a fresh one sees the winner's row.
                 $this->registry->resetManager();
