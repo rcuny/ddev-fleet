@@ -63,7 +63,7 @@ curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/develop/install/in
 ```
 
 It installs PHP 8.4, Docker, DDEV, Caddy, Authelia and a Mercure hub, creates the `fleet` user and `/srv/fleet`,
-starts the services and prints a one-time setup URL for the browser wizard (administrator, certificates, SSH
+starts the services and prints a setup URL (a credential for 24 hours) for the browser wizard (administrator, certificates, SSH
 keys, optional Claude token). Re-running the same command upgrades. Flags (`--ref`, `--repo-url`,
 `--skip-dns-check`, `--dry-run`), recovery (`fleet setup:reset`, `fleet user:reset-password`), the security
 model and uninstalling: [`docs/installation.md`](docs/installation.md).

@@ -24,7 +24,7 @@ Mercure hub, DDEV and Docker). Projects, instances and jobs arrive in later mile
 | Root | Run the installer as root (`sudo`). `--dry-run` works without root. |
 | DNS | A record (and AAAA, if you have IPv6) for **both** `<domain>` and `auth.<domain>` pointing at this host. One wildcard record `*.<domain>` covers `auth.<domain>`. The installer compares them with the host's own addresses and stops (exit 2) on a mismatch. |
 | Ports | 80 and 443 free and reachable from the Internet (Let's Encrypt uses port 80 for the HTTP-01 challenge, even if you later switch to DNS-01). |
-| Time | Several minutes. Run it inside `screen`, `tmux` or `systemd-run`: a dropped SSH session would interrupt it. If it is interrupted anyway, run the same command again. |
+| Time | A fresh install takes about five minutes, a re-run under half a minute. Run it inside `screen`, `tmux` or `systemd-run`: a dropped SSH session would interrupt it. If it is interrupted anyway, run the same command again. Some bare-metal servers take about **three minutes** to answer SSH again after a reboot: do not give up after 90 seconds. |
 
 `<domain>` is the public host name of this fleet, for example `fleet.example.com`: the fleet is served on
 `https://fleet.example.com/` and the sign-in portal on `https://auth.fleet.example.com/`. Both get their own
@@ -37,8 +37,16 @@ curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/develop/install/in
   | sudo bash -s -- --domain=fleet.example.com --acme-email=you@example.com
 ```
 
-At the end the installer prints a one-time **setup URL** on the terminal (it is never written to the install
-log). Open it in a browser and follow section 4.
+At the end the installer prints a **setup URL** on the terminal (it is never written to the install log). The URL
+is a credential for 24 hours (or until Finish): whoever opens it can create the administrator, so treat it like a
+password, open it yourself, and do not paste it into a chat, a ticket or a shared terminal log. Open it in a
+browser and follow section 4.
+
+> **Interim note.** The one-liner above downloads `install.sh` from the public GitHub mirror, which is
+> published from `develop` by the next green `develop` pipeline after this installer is merged. Until the
+> mirror carries `install/install.sh`, the command answers 404: copy the repository to the host (a clone, or a
+> `git bundle`) and run `sudo bash install/install.sh --domain=... --repo-url=<path or url> --ref=<branch>`
+> instead (the `fleet` user must be able to read the path).
 
 To inspect before you run: save the script, read it, and call it with `--dry-run`, which prints the complete
 plan and changes nothing.
@@ -84,25 +92,30 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 
 ## 3. What is installed where
 
-### Users and directories
+### Users, directories and file modes
 
 | Path | Owner and mode | Holds |
 |---|---|---|
 | user `fleet` | home `/home/fleet`, group `docker` | Runs php-fpm, the workers, DDEV and the CLI. |
 | `/opt/ddev-fleet` | `fleet:fleet` 0755 | The git checkout of the product. Stays `fleet`-owned. |
-| `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/fleet.sqlite` and `var/queue.sqlite`, `keys/secret.key` (the encryption key), `ssh/` (`deploy_ed25519`, `push_ed25519`, `known_hosts`), `staging/` (0700), `locks/`, `logs/`, `assets/`, `instances/`. |
-| `/srv/fleet/authelia` | `fleet:authelia` 2750 | `users.yml`, the sign-in portal's user file (written by the app). |
-| `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640, see below), `mercure.env` (`root:root` 0600), `installed-revision`. |
-| `/etc/caddy/Caddyfile` | root | Written by the root helper, never by the app. |
-| `/etc/caddy/fleet/` | `fleet:caddy` 2750 | `gate.conf`, the sign-in gate, written by the app; `instances/` and `ports/` for later milestones. |
-| `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret and, in DNS mode, the OVH credentials. Caddy reads it at start. |
-| `/etc/authelia/` | | `configuration.yml` (written by the helper), `secrets/` (`root:authelia` 0750, generated once). |
-| `/etc/fleet-mercure/Caddyfile` | root | The Mercure hub configuration (it lives apart from `/etc/ddev-fleet` because the hub runs as a dynamic user). |
+| `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/` (0750; `fleet.sqlite` and `queue.sqlite`, 0644 inside it), `locks/`, `logs/`, `assets/`, `instances/` (0750). |
+| `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
+| `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
+| `/srv/fleet/staging` | `fleet:fleet` 0700 | Rendered configuration waiting for the root helper (`caddy/`, `authelia/`); emptied after every apply. |
+| `/srv/fleet/authelia` | `fleet:authelia` 2750 | `users.yml` (0640, `fleet:authelia`), the sign-in portal's user file with the argon2id hashes, written by the app. |
+| `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640 `root:fleet`, see below), `mercure.env` (`root:root` 0600), `installed-revision` (0644). |
+| `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
+| `/etc/caddy/fleet/` | `fleet:caddy` 2750 | `gate.conf` (0640), the sign-in gate, written by the app; `instances/` and `ports/` for later milestones. |
+| `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret and, in DNS mode, the **OVH credentials in clear text** (Caddy reads them from its environment, so they cannot stay encrypted here). Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Caddy reads the file only at start, so a change of credentials restarts Caddy. |
+| `/etc/authelia/` | `authelia:authelia` | `configuration.yml` (0640, written by the helper); `secrets/` (`root:authelia` 0750, three secret files 0640, generated once). |
+| `/etc/fleet-mercure/Caddyfile` | `root:root` 0644 | The Mercure hub configuration (it lives apart from `/etc/ddev-fleet` because the hub runs as a dynamic user). |
 | `/run/php/fleet.sock` | `fleet:caddy` 0660 | The only way into the app. |
 | `/usr/local/libexec/fleet/apply` | `root:root` 0755 | The root helper. |
-| `/etc/sudoers.d/fleet-apply` | 0440 | The one sudoers line (section 7). |
-| `/usr/local/bin/fleet` | `root:root` 0755 | The `fleet` command (section 6). |
-| `/usr/local/bin/mercure` | root | The Mercure hub binary. |
+| `/etc/sudoers.d/fleet-apply` | `root:root` 0440 | The one sudoers line (section 7). |
+| `/usr/local/bin/fleet` | `root:root` 0755 | The `fleet` command (section 5). |
+| `/usr/local/bin/mercure` | `root:root` 0755 | The Mercure hub binary. |
+| `/usr/local/lib/ddev-fleet-installer/` | `root:root` | A root-owned copy of `install/`, from which the privileged files are installed and the uninstaller runs. |
+| `/var/log/ddev-fleet-install.log` | `root:root` 0600 | The installer's log (never contains the setup URL or a secret). |
 
 ### Units and ports
 
@@ -149,8 +162,11 @@ step is saved as you go, and the wizard works at phone width.
 2. **Domain and certificates.** The domain was set by the installer. Choose how certificates are obtained:
    - `http01` (default): Let's Encrypt HTTP-01 on port 80, for `<domain>` and `auth.<domain>`.
    - `ovh_dns`: DNS-01 through the OVH API. Enter the API endpoint (`ovh-eu`, `ovh-ca` or `ovh-us`), the
-     application key, the application secret and the consumer key. The credentials need `GET`, `POST`, `PUT`
-     and `DELETE` on `/domain/zone/<zone>/*` for your zone. They are stored encrypted (libsodium, key in
+     application key, the application secret and the consumer key. The credentials need these rights (the list the DNS
+     library behind Caddy's OVH module, [libdns/ovh](https://github.com/libdns/ovh#authenticating), documents;
+     `<zone>` is your DNS zone, or `*` for several): `GET` and `POST` on `/domain/zone/<zone>/record`, `GET`, `PUT` and
+     `DELETE` on `/domain/zone/<zone>/record/*`, `GET` on `/domain/zone/<zone>/soa`, and `POST` on
+     `/domain/zone/<zone>/refresh`. They are stored encrypted (libsodium, key in
      `/srv/fleet/keys/secret.key`) and never shown again. The endpoints of OVH's budget brands are not
      supported: create the credentials at one of the three endpoints above. Today this mode only changes how
      the two certificates are obtained; the wildcard certificate arrives with instance networking.
@@ -166,11 +182,12 @@ step is saved as you go, and the wizard works at phone width.
 5. **Finish.** A summary (domain, certificates, administrator, both key fingerprints, whether a Claude token is
    stored). Pressing *Finish setup* writes the administrator into the sign-in service, restarts Authelia,
    switches the Caddy gate from the setup gate to the sign-in gate, applies the certificate settings (DNS mode
-   only) and marks setup complete, **in that order and last**. It can take a minute or two; keep the page open.
+   only) and marks setup complete, **in that order and last**. It usually takes a few seconds (up to a few minutes when the host is slow; the request may run for 240 s); keep the page open.
    If a step fails, the page shows why, nothing is marked complete and the link still works: fix the cause and
    press Finish again.
 
-After Finish the setup token is gone and every `/setup` URL answers 404 "Setup is complete". Open
+After Finish the setup token is gone. Signed out you are sent to the sign-in page whatever you open (the sign-in
+gate is in front of `/setup` too); signed in, every `/setup` URL answers 404 "Setup is complete". Open
 `https://<domain>/`: you are sent to `https://auth.<domain>/` to sign in with the administrator you created.
 Authelia's own self-service password reset is switched off until a later milestone (use section 5).
 
@@ -181,7 +198,7 @@ All commands run on the host. `fleet` is the wrapper the installer puts in `/usr
 
 | Situation | Command |
 |---|---|
-| Lost the setup URL (setup not complete) | `sudo fleet setup:token` prints a new one-time URL; the old one stops working. It refuses once setup is complete. |
+| Lost the setup URL (setup not complete) | `sudo fleet setup:token` prints a new setup URL; the old one stops working. It refuses once setup is complete. |
 | Nobody can sign in, or a password is forgotten | `ssh -t admin@fleet.example.com sudo fleet user:reset-password alice` |
 | Start the wizard over (change certificates, replace the administrator, ...) | `sudo fleet setup:reset` |
 
@@ -194,7 +211,9 @@ every signed-in session**: all users must sign in again.
 
 **`fleet:setup:reset`** marks setup as not complete, mints a new token, prints the URL and puts the setup gate
 back, so until the wizard finishes again only the wizard, its assets and `/health` are reachable and nobody can
-sign in. Existing users, keys and secrets are kept and the wizard updates them. It asks for confirmation on a
+sign in. Existing users, keys and secrets are kept and the wizard updates them: the reopened wizard remembers its earlier
+answers, so the new link lands on Finish (the stepper links go back to any step, and the administrator's username
+stays fixed). It asks for confirmation on a
 real terminal; `--yes` skips the question (required without a terminal). It is logged. Finishing the wizard again
 restarts Authelia, so sessions are dropped here as well.
 
@@ -234,8 +253,13 @@ finish again.
   copies the verified identity back. The app trusts an identity only from a request that carries the shared
   secret as the FastCGI parameter `FLEET_PROXY_AUTH` (a client cannot set a FastCGI parameter) and refuses a secret
   shorter than 32 characters.
-- **Authelia** uses the one-factor policy for `<domain>`, bypasses its own portal and denies every other host by
-  default. Nothing under `*.<domain>` is served yet; instances and their per-project access arrive in later
+- **What needs no sign-in.** Only `/health` (a minimal status document) and `/hooks/*` (reserved for signed
+  webhooks, which will authenticate themselves; no such route exists yet and the path answers 404) bypass the
+  `forward_auth` gate. Caddy matches those paths case-insensitively, so `/HOOKS/x` is treated as `/hooks/x`;
+  Symfony's routing is case-sensitive, and the identity headers are stripped on these paths too, so nothing there
+  can act as a signed-in user. Everything else, `/setup` included, needs an Authelia session.
+- **Authelia** uses the `one_factor` policy (password only) for `<domain>`, bypasses its own portal and denies every
+  other host by default. Nothing under `*.<domain>` is served yet; instances and their per-project access arrive in later
   milestones.
 - **The root helper.** The app never runs as root. To install a rendered Caddy or Authelia configuration it writes
   the files into `/srv/fleet/staging/<target>/` and runs `sudo -n /usr/local/libexec/fleet/apply <target>`. The
@@ -248,7 +272,9 @@ finish again.
   a compromised `fleet` account or a compromised app. This is why php-fpm's unit sets `NoNewPrivileges=no`
   (a setuid `sudo` needs it), and the Finish request runs the helper from php-fpm for now.
 - **Secrets.** Generated once, kept in files with narrow modes (see section 3); the OVH credentials and the Claude
-  token are stored encrypted with a key that is only readable by `fleet`; the setup URL is not in the install log, and Caddy's
+  token are stored encrypted in the database with a key that is only readable by `fleet` (the OVH credentials
+  also sit in clear text in `/etc/caddy/fleet.env`, `root:caddy` 0640, because Caddy needs them in its
+  environment); the setup URL is not in the install log, and Caddy's
   log filter removes the `token` query parameter from every log line (there is no access log);
   secrets do not appear in command-line arguments.
 - **The Mercure hub** listens on loopback only and is reachable only through Caddy.
@@ -264,23 +290,33 @@ hardening guide for 1.x is planned with the host operations milestone. The Ansib
 
 ## 9. Uninstalling
 
-Nothing in the installer calls the uninstaller. Run it deliberately:
+Nothing in the installer calls the uninstaller. Run it deliberately, **from the root-owned copy** the installer
+keeps (the checkout in `/opt/ddev-fleet` belongs to the `fleet` user and is removed by the uninstaller itself; do
+not run root code from a directory another account can write):
 
 ```bash
-sudo bash /opt/ddev-fleet/install/uninstall.sh --yes [--keep-data] [--purge-packages] [--dry-run]
+sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes --dry-run     # review the plan first
+sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes [--keep-data] [--purge-packages]
 ```
+
+**Back up first.** Without `--keep-data` the uninstaller deletes `/srv/fleet` (databases, the secret key, the SSH
+keys, every instance) and `/etc/ddev-fleet` (the generated secrets), and `/etc/authelia/secrets`: none of it can
+be recreated. Copy at least `/srv/fleet` and `/etc/ddev-fleet` somewhere safe (as root, with `tar -C / -czpf
+backup.tgz srv/fleet etc/ddev-fleet etc/authelia/secrets`).
 
 | Flag | Effect |
 |---|---|
-| `--yes` | Required. Without it nothing is removed (and `--dry-run` alone is refused too). |
-| `--keep-data` | Keep `/srv/fleet` (databases, secret key, SSH keys, instances), Authelia's secrets and database, and the `fleet` user that owns them. |
+| `--yes` | Required. Without it nothing is removed. |
+| `--keep-data` | Keep `/srv/fleet` (databases, secret key, SSH keys, instances), Authelia's secrets, its database and the tmpfiles mask, and the `fleet` user that owns them. Everything else is removed, including `/etc/ddev-fleet` (so `fleet.env` and its generated secrets are gone: a later install generates new ones; copy `/etc/ddev-fleet` beforehand if you want them back). |
 | `--purge-packages` | Also purge Caddy, Authelia, DDEV and Docker CE and remove their repositories. Without it the packages stay installed. |
-| `--dry-run` | Print what would be removed. Works without root. |
+| `--dry-run` | Print what would be removed. Works without root, but still needs `--yes`. |
 
 It stops DDEV (`ddev poweroff`), disables and removes the units and configuration, restores the stock php-fpm pool
 and the packaged Caddy, removes the helper, the sudoers line, the `fleet` command, `/opt/ddev-fleet` and (unless
-`--keep-data`) `/srv/fleet` and the `fleet` user. It leaves `/var/log/ddev-fleet-install.log` and the apt packages
-(unless asked) in place.
+`--keep-data`) `/srv/fleet` and the `fleet` user. It never touches `sshd` or the firewall, so your SSH access is
+unaffected. It leaves `/var/log/ddev-fleet-install.log` and the apt packages (unless asked) in place.
+
+A failed or half-finished install needs no uninstall: run the install command again.
 
 ## 10. Troubleshooting
 

@@ -204,7 +204,7 @@ final class InstallerSafetyTest extends TestCase
         [, $out] = $this->dryRun();
 
         self::assertStringNotContainsString('token=', $out);
-        self::assertStringContainsString('(a real run prints the one-time setup URL for https://fleet.example.com/ here)', $out);
+        self::assertStringContainsString('(a real run prints the setup URL for https://fleet.example.com/ here)', $out);
     }
 
     public function testNothingPrintsTheSetupUrlExceptThroughTheFinalNotes(): void

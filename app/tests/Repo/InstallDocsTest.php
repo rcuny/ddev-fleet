@@ -85,23 +85,68 @@ final class InstallDocsTest extends TestCase
         }
     }
 
+    /**
+     * The other direction: nothing in the guide may name a flag or a command the code does not have.
+     */
+    public function testInstallationDocNamesNoFlagOrCommandThatDoesNotExist(): void
+    {
+        $doc = self::read('docs/installation.md');
+
+        $known = self::installerFlags();
+        preg_match_all('/^\s+(--[a-z][a-z-]*)\)/m', self::read('install/uninstall.sh'), $uninstallFlags);
+        $known = [...$known, ...$uninstallFlags[1]];
+        $commandNames = [];
+        foreach (glob(self::root().'/app/src/Command/*.php') ?: [] as $file) {
+            $source = (string) file_get_contents($file);
+            preg_match_all("/addOption\('([a-z][a-z-]*)'/", $source, $options);
+            foreach ($options[1] as $option) {
+                $known[] = '--'.$option;
+            }
+            if (1 === preg_match("/name: '(fleet:[a-z:-]+)'/", $source, $name)) {
+                $commandNames[] = $name[1];
+            }
+        }
+        // Flags of other programs the guide quotes.
+        $known = [...$known, '--no-dev', '--no-pager', '--help'];
+
+        // A flag is "--name" not glued to a word or a colon (`authelia:--x` is an ACL, not a flag).
+        preg_match_all('/(?<![\w:-])(--[a-z][a-z-]*)/', $doc, $flags);
+        self::assertSame([], array_values(array_diff(array_unique($flags[1]), $known)), 'docs/installation.md names flags nothing implements');
+
+        // `fleet:group:verb` is a console command; `fleet:fleet` and `fleet:caddy` are owner:group pairs.
+        preg_match_all('/\bfleet:[a-z]+:[a-z-]+/', $doc, $commands);
+        self::assertSame([], array_values(array_diff(array_unique($commands[0]), $commandNames)), 'docs/installation.md names commands that do not exist');
+    }
+
     public function testInstallationDocRecordsTheOperatorFacingLimits(): void
     {
         $doc = self::read('docs/installation.md');
 
         foreach ([
-            'ssh -t',                       // the password reset needs a terminal
-            'fleet setup:reset',            // recovery
+            'ssh -t',                                       // the password reset needs a terminal
+            'sudo fleet setup:reset',                       // recovery
             'user:reset-password',
-            'ovh-eu', 'ovh-ca', 'ovh-us',   // the OVH endpoint allow-list
-            'auth.fleet.example.com',       // HTTP-01 needs a record for the login host too
-            'sessions',                     // an Authelia restart drops every session
-            'uninstall.sh',
-            'sshd',                         // what the installer leaves alone
+            'ovh-eu', 'ovh-ca', 'ovh-us',                   // the OVH endpoint allow-list
+            'libdns/ovh',                                   // where the OVH rights list comes from
+            '/domain/zone/<zone>/refresh',                       // ... and the list itself
+            'auth.fleet.example.com',                       // HTTP-01 needs a record for the login host too
+            'every signed-in session',                      // an Authelia restart drops every session
+            'is a credential for 24 hours',                 // the setup URL is not "one-time"
+            'about **three minutes**',                      // a rebooted bare-metal box can be unreachable that long
+            '/usr/local/lib/ddev-fleet-installer/install/uninstall.sh', // the root-owned copy
+            '**Back up first.**',                           // uninstall deletes the data
+            '--keep-data',
+            'clear text',                                   // OVH credentials in /etc/caddy/fleet.env
+            '`root:caddy` 0640',
+            '`/hooks/*`',                                   // bypasses forward_auth
+            '`one_factor`',                                 // the Authelia policy
+            'sshd',                                         // what the installer leaves alone
             'ufw',
         ] as $needle) {
             self::assertStringContainsString($needle, $doc, "docs/installation.md should mention '$needle'");
         }
+        self::assertStringNotContainsString('one-time', $doc, 'the setup URL is a 24 hour credential, not one-time');
+        self::assertStringNotContainsString('/opt/ddev-fleet/install/uninstall.sh', $doc, 'root must run the uninstaller from the root-owned copy');
     }
 
     public function testReadmeMentionsInstallCommand(): void

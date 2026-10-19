@@ -61,10 +61,10 @@ announce_setup() {
     add_final_note "ddev-fleet is up at https://$DOMAIN/. Setup was already completed; nothing was reset."
   elif is_dry; then
     fleet_console fleet:setup:token
-    add_final_note "(a real run prints the one-time setup URL for https://$DOMAIN/ here)"
+    add_final_note "(a real run prints the setup URL for https://$DOMAIN/ here)"
   else
     url=$(fleet_console fleet:setup:token)
-    add_final_note "ddev-fleet is up. Open this one-time URL to create the administrator (valid 24 hours):"
+    add_final_note "ddev-fleet is up. Open this setup URL to create the administrator. It is a credential for 24 hours: keep it private."
     add_final_note ''
     add_final_note "    $url"
     add_final_note ''
