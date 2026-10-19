@@ -70,4 +70,47 @@ final class RecordingCommandRunnerTest extends TestCase
         self::assertSame([], $runner->calls());
         self::assertSame(0, $runner->run(['x'])->exitCode);
     }
+
+    public function testExpectEffectRunsOnMatch(): void
+    {
+        $seen = null;
+        $runner = new RecordingCommandRunner()
+            ->expect(['ddev', 'start'], new CommandResult(0), static function (array $argv, ?string $cwd) use (&$seen): void {
+                $seen = [$argv, $cwd];
+            });
+
+        $runner->run(['ddev', 'list']);
+        self::assertNull($seen, 'a call that does not match runs no effect');
+
+        $runner->run(['ddev', 'start'], '/srv/x');
+        self::assertSame([['ddev', 'start'], '/srv/x'], $seen);
+    }
+
+    public function testDefaultGitCloneCreatesTheDirectory(): void
+    {
+        $dir = sys_get_temp_dir().'/fleet-clone-'.bin2hex(random_bytes(5)).'/acme--dev';
+        $runner = new RecordingCommandRunner();
+
+        $runner->run(['git', '-c', 'protocol.ext.allow=never', 'clone', '--branch', 'develop', '--', 'https://git.example.com/acme/blog.git', $dir]);
+
+        self::assertDirectoryExists($dir.'/.git/info');
+        $runner->run(['git', 'clone', '--branch', 'develop', '--', 'https://git.example.com/x.git', 'relative-dir']);
+        self::assertDirectoryDoesNotExist('relative-dir', 'only absolute targets are created');
+
+        @rmdir($dir.'/.git/info');
+        @rmdir($dir.'/.git');
+        @rmdir($dir);
+        @rmdir(\dirname($dir));
+    }
+
+    public function testAScriptedCloneRuleWinsOverTheDefault(): void
+    {
+        $dir = sys_get_temp_dir().'/fleet-clone-'.bin2hex(random_bytes(5));
+        $runner = new RecordingCommandRunner()->expect(['git', 'clone'], new CommandResult(128, '', 'fatal'));
+
+        $result = $runner->run(['git', 'clone', '--', 'https://git.example.com/x.git', $dir]);
+
+        self::assertSame(128, $result->exitCode);
+        self::assertDirectoryDoesNotExist($dir);
+    }
 }
