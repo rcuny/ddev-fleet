@@ -83,7 +83,7 @@
             <twig:Card data-testid="active-job">
                 <twig:Card:Header>
                     <twig:Card:Title>Running now</twig:Card:Title>
-                    <twig:Card:Description><a href="{{ path('job_show', {id: active.id}) }}">Job #{{ active.id }}</a> is {{ active.status.value }}.</twig:Card:Description>
+                    <twig:Card:Description><a href="{{ path('job_show', {id: active.id}) }}" class="underline">Job #{{ active.id }}</a> is {{ active.status.value }}.</twig:Card:Description>
                 </twig:Card:Header>
                 <twig:Card:Content>
                     {{ include('jobs/_log.html.twig', {job: active}) }}

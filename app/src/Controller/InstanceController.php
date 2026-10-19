@@ -17,6 +17,7 @@ use App\Fleet\Instances\InstanceService;
 use App\Fleet\Instances\OperationOptions;
 use App\Fleet\Instances\Selector;
 use App\Fleet\Instances\VisibleInstances;
+use App\Fleet\Jobs\InstanceTopics;
 use App\Fleet\Jobs\LiveFeedCookie;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\Refused;
@@ -55,6 +56,7 @@ final class InstanceController extends AbstractController
         private readonly TemplateRepository $templates,
         private readonly CurrentActor $actor,
         private readonly LiveFeedCookie $feedCookie,
+        private readonly InstanceTopics $topics,
     ) {
     }
 
@@ -87,7 +89,9 @@ final class InstanceController extends AbstractController
         $projectNames = array_values(array_unique(array_map(static fn (Instance $i): string => $i->project()->name(), $all)));
         sort($projectNames);
 
+        $topics = $this->topics->forCurrentUser();
         $response = $this->render('instances/index.html.twig', [
+            'topics' => $topics,
             'rows' => $rows,
             'total' => \count($all),
             'projectNames' => $projectNames,
@@ -96,8 +100,8 @@ final class InstanceController extends AbstractController
             'canDeploy' => $this->isGranted(ProjectVoter::DEPLOY),
             'canDestroy' => $this->isGranted('ROLE_ADMIN'),
         ]);
-        if (!$request->headers->has('Turbo-Frame')) {
-            $this->feedCookie->attach($request, $response, ['/instances']);
+        if ([] !== $topics && !$request->headers->has('Turbo-Frame')) {
+            $this->feedCookie->attach($request, $response, $topics);
         }
 
         return $response;

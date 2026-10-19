@@ -29,7 +29,7 @@ final readonly class JobFeed
 
     public function instanceChanged(string $id): void
     {
-        $this->publish('/instances', ['id' => $id]);
+        $this->publish(InstanceTopics::ofInstance($id), ['id' => $id]);
     }
 
     /**

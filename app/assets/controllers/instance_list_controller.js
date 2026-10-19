@@ -3,13 +3,14 @@ import { Controller } from '@hotwired/stimulus';
 // The instance list: select-all and the bulk bar, and a refresh of the <turbo-frame id="instances"> when Mercure says
 // something changed or every few seconds. The refresh is paused while a dialog or a menu is open or a field has focus,
 // and the selection survives it.
-//   <div data-controller="instance-list" data-instance-list-url-value="/instances" data-instance-list-mercure-value="<hub url>">
+//   <div data-controller="instance-list" data-instance-list-url-value="/instances" data-instance-list-mercure-value="<hub url>" data-instance-list-topics-value='["/instances/blog"]'>
 export default class extends Controller {
     static targets = ['form', 'bar', 'count', 'all', 'row', 'ids'];
 
     static values = {
         url: String,
         mercure: String,
+        topics: { type: Array, default: [] },
         interval: { type: Number, default: 5000 },
     };
 
@@ -110,12 +111,14 @@ export default class extends Controller {
     }
 
     #subscribe() {
-        if (this.mercureValue === '' || typeof EventSource === 'undefined') {
+        if (this.mercureValue === '' || this.topicsValue.length === 0 || typeof EventSource === 'undefined') {
             return;
         }
         try {
             const hub = new URL(this.mercureValue, window.location.href);
-            hub.searchParams.append('topic', '/instances');
+            for (const topic of this.topicsValue) {
+                hub.searchParams.append('topic', topic);
+            }
             this.#source = new EventSource(hub, { withCredentials: true });
             this.#source.onmessage = () => {
                 clearTimeout(this.#wake);
