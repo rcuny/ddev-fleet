@@ -1,6 +1,6 @@
 ### Added
 
-- **FLE-41: Named ports are served by Caddy (M0.07a).** Every instance's Caddy site now also carries one block per
+- **FLE-79: Named ports are served by Caddy (M0.07a).** Every instance's Caddy site now also carries one block per
   named port of its project (`<instance host>:<public port>`, aliases included), behind the same Authelia gate and
   proxied to the port on ddev's router. Assigning or unassigning a port rewrites the sites of that project's
   instances; a site Caddy refuses is rolled back and reported as a warning. New command `fleet port:refresh
