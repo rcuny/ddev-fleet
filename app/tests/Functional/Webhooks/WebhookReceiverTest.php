@@ -328,7 +328,7 @@ final class WebhookReceiverTest extends AdminTestCase
     {
         $projects = $this->container()->get(ProjectService::class);
         self::assertInstanceOf(ProjectService::class, $projects);
-        $projects->delete('blog');
+        $projects->delete('blog', 'tester');
 
         $this->em();
         self::assertNull($this->repository()->endpoint('blog', WebhookSource::Jira));
