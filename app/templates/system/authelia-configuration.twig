@@ -45,4 +45,8 @@ access_control:
         - ['{{ subject }}']
 {% endfor %}
 {% endfor %}
+    - domain: '*.{{ domain }}'
+      policy: one_factor
+      subject:
+        - ['group:{{ admin_group }}']
 {% endautoescape %}

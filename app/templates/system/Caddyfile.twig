@@ -76,4 +76,7 @@ auth.{{ domain }} {
 
     reverse_proxy {{ authelia }}
 }
+
+# One site per instance, written by the worker as `<id>.conf`. An empty directory is fine.
+import {{ snippet_dir }}/instances/*.conf
 {% endautoescape %}

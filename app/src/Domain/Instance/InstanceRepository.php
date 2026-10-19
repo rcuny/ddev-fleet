@@ -104,6 +104,17 @@ final readonly class InstanceRepository
         $this->em->flush();
     }
 
+    /**
+     * @param list<Instance> $instances
+     */
+    public function saveAll(array $instances): void
+    {
+        foreach ($instances as $instance) {
+            $this->em->persist($instance);
+        }
+        $this->em->flush();
+    }
+
     public function remove(Instance $instance): void
     {
         $this->em->remove($instance);
