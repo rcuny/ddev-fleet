@@ -12,6 +12,6 @@
             {{ include('admin/webhooks/_endpoints.html.twig', {rows: rows}) }}
         {% endif %}
 
-        {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('webhooks'), showProject: true}) }}
+        {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('webhooks'), showProject: true, filter: filter, results: results}) }}
     </div>
 {% endblock %}

@@ -8,7 +8,8 @@ use App\Domain\Webhook\WebhookRule;
 
 /**
  * A decision to act: the rule that matched and the values resolved from the event. `label` is the instance label for
- * a deploy; `branch` the branch to deploy or the ref to build.
+ * a deploy; `branch` the branch to deploy or the ref to build; `replace` a deploy that rebuilds the instance of that
+ * label instead of allocating a free one (a rule with a fixed label).
  */
 final readonly class WebhookActionRequest
 {
@@ -17,6 +18,7 @@ final readonly class WebhookActionRequest
         public WebhookRule $rule,
         public ?string $label,
         public ?string $branch,
+        public bool $replace = false,
     ) {
     }
 }

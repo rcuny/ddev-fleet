@@ -21,6 +21,7 @@ use Psr\Clock\ClockInterface;
 final readonly class WebhookSecrets
 {
     private const string SCOPE = 'webhook';
+    private const string TOKEN_SCOPE = 'webhook-token';
 
     public function __construct(
         private WebhookRepository $webhooks,
@@ -56,16 +57,62 @@ final readonly class WebhookSecrets
      */
     public function accepts(WebhookEndpoint $endpoint, string $body, ?string $header): bool
     {
+        return SignatureVerdict::Valid === $this->verify($endpoint, $body, $header);
+    }
+
+    /**
+     * Like accepts(), but says why a delivery was refused: a bad signature is the sender's, a secret that cannot be
+     * opened is the host's.
+     */
+    public function verify(WebhookEndpoint $endpoint, string $body, ?string $header): SignatureVerdict
+    {
         try {
             $secret = $this->box->open(
                 new SealedSecret($endpoint->ciphertext(), $endpoint->nonce(), $endpoint->keyVersion()),
                 self::context($endpoint->project(), $endpoint->source()),
             );
         } catch (SecretOpenFailed) {
-            return false;
+            return SignatureVerdict::Unreadable;
         }
 
-        return Signature::valid($body, $header, $secret);
+        return Signature::valid($body, $header, $secret) ? SignatureVerdict::Valid : SignatureVerdict::Invalid;
+    }
+
+    /**
+     * Stores the Bitbucket `pipeline:write` token of a project's receiver, replacing any earlier one. The token is
+     * sealed and never returned by anything again except openToken(), which only the pipeline starter calls.
+     */
+    public function storeToken(WebhookEndpoint $endpoint, #[\SensitiveParameter] string $token): void
+    {
+        $sealed = $this->box->seal($token, self::tokenContext($endpoint->project()));
+        $endpoint->replaceToken($sealed->ciphertext, $sealed->nonce, $sealed->keyVersion, $this->clock->now());
+        $this->webhooks->saveEndpoint($endpoint);
+    }
+
+    public function forgetToken(WebhookEndpoint $endpoint): void
+    {
+        $endpoint->clearToken();
+        $this->webhooks->saveEndpoint($endpoint);
+    }
+
+    /**
+     * @return string|null the token, or null when none is stored
+     *
+     * @throws SecretOpenFailed when the stored token cannot be opened
+     */
+    public function openToken(WebhookEndpoint $endpoint): ?string
+    {
+        $sealed = $endpoint->sealedToken();
+        if (null === $sealed) {
+            return null;
+        }
+
+        return $this->box->open(new SealedSecret($sealed['ciphertext'], $sealed['nonce'], $sealed['keyVersion']), self::tokenContext($endpoint->project()));
+    }
+
+    private static function tokenContext(Project $project): string
+    {
+        return SecretStore::context(self::TOKEN_SCOPE, $project->name(), WebhookSource::Bitbucket->value);
     }
 
     private static function context(Project $project, WebhookSource $source): string

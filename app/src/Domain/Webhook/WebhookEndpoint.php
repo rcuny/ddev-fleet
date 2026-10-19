@@ -13,7 +13,8 @@ use Doctrine\ORM\Mapping as ORM;
 
 /**
  * One webhook receiver: a project and a source (Jira or Bitbucket). It owns the HMAC secret, sealed with SecretBox
- * (only ciphertext is stored; WebhookSecrets seals and opens it) and its rules. It disappears with its project, and so
+ * (only ciphertext is stored; WebhookSecrets seals and opens it), its rules and, on a Bitbucket receiver, the sealed
+ * `pipeline:write` token a run-pipeline rule calls the API with. It disappears with its project, and so
  * does its secret. The entity only stores.
  */
 #[ORM\Entity]
@@ -41,6 +42,18 @@ class WebhookEndpoint
 
     #[ORM\Column(type: Types::INTEGER)]
     private int $keyVersion;
+
+    #[ORM\Column(type: Types::BINARY, nullable: true)]
+    private ?string $tokenCiphertext = null;
+
+    #[ORM\Column(type: Types::BINARY, nullable: true)]
+    private ?string $tokenNonce = null;
+
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $tokenKeyVersion = null;
+
+    #[ORM\Column(type: UtcDateTimeImmutableType::NAME, nullable: true)]
+    private ?\DateTimeImmutable $tokenUpdatedAt = null;
 
     /** @var Collection<int, WebhookRule> */
     #[ORM\OneToMany(targetEntity: WebhookRule::class, mappedBy: 'endpoint', cascade: ['remove'])]
@@ -119,5 +132,43 @@ class WebhookEndpoint
         $this->nonce = $nonce;
         $this->keyVersion = $keyVersion;
         $this->rotatedAt = $now;
+    }
+
+    public function hasToken(): bool
+    {
+        return null !== $this->tokenKeyVersion;
+    }
+
+    /**
+     * @return array{ciphertext: string, nonce: string, keyVersion: int}|null the sealed token, or null while none is set
+     */
+    public function sealedToken(): ?array
+    {
+        if (null === $this->tokenCiphertext || null === $this->tokenNonce || null === $this->tokenKeyVersion) {
+            return null;
+        }
+
+        return ['ciphertext' => $this->tokenCiphertext, 'nonce' => $this->tokenNonce, 'keyVersion' => $this->tokenKeyVersion];
+    }
+
+    public function tokenUpdatedAt(): ?\DateTimeImmutable
+    {
+        return $this->tokenUpdatedAt;
+    }
+
+    public function replaceToken(string $ciphertext, string $nonce, int $keyVersion, \DateTimeImmutable $now): void
+    {
+        $this->tokenCiphertext = $ciphertext;
+        $this->tokenNonce = $nonce;
+        $this->tokenKeyVersion = $keyVersion;
+        $this->tokenUpdatedAt = $now;
+    }
+
+    public function clearToken(): void
+    {
+        $this->tokenCiphertext = null;
+        $this->tokenNonce = null;
+        $this->tokenKeyVersion = null;
+        $this->tokenUpdatedAt = null;
     }
 }

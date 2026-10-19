@@ -39,6 +39,33 @@
                         {% endif %}
                     {% endif %}
 
+                    {% if row.endpoint and row.source.value == 'bitbucket' %}
+                        <div class="grid gap-2" data-testid="webhook-token">
+                            <p class="text-sm" data-testid="webhook-token-state">
+                                {% if row.endpoint.hasToken %}Pipeline token set {{ row.endpoint.tokenUpdatedAt|date('Y-m-d H:i', 'UTC') }} UTC. It cannot be shown again.{% else %}No pipeline token: a <code>run-pipeline</code> rule starts nothing until one is set.{% endif %}
+                            </p>
+                            <details>
+                                <summary class="min-h-11 cursor-pointer py-2 text-sm">{{ row.endpoint.hasToken ? 'Replace the pipeline token' : 'Set the pipeline token' }}</summary>
+                                <form method="post" action="{{ path('webhook_token', {name: row.project.name}) }}" class="grid gap-3">
+                                    <p class="text-sm text-ink-body">A Bitbucket repository access token with the scope <strong>Pipelines: Write</strong> and nothing else.</p>
+                                    <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+                                    <div class="grid gap-2">
+                                        <twig:Label for="token-{{ id }}">Access token</twig:Label>
+                                        <twig:Input id="token-{{ id }}" type="password" name="token" required maxlength="2048" autocomplete="off" spellcheck="false" class="h-11 font-mono md:h-8" data-testid="webhook-token-input" />
+                                    </div>
+                                    <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-token-save">Save token</twig:Button>
+                                </form>
+                            </details>
+                            {% if row.endpoint.hasToken %}
+                                <form method="post" action="{{ path('webhook_token', {name: row.project.name}) }}">
+                                    <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+                                    <input type="hidden" name="clear" value="1">
+                                    <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-token-clear">Remove token</twig:Button>
+                                </form>
+                            {% endif %}
+                        </div>
+                    {% endif %}
+
                     {% if row.latest %}
                         <p class="text-xs text-ink-muted" data-testid="webhook-latest">Last delivery {{ row.latest.receivedAt|date('Y-m-d H:i', 'UTC') }} UTC: {{ row.latest.result }}.</p>
                     {% endif %}
