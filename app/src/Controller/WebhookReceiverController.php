@@ -29,7 +29,7 @@ final readonly class WebhookReceiverController
             $headers[strtolower($name)] = (string) ($values[0] ?? '');
         }
 
-        $result = $this->receiver->receive(WebhookSource::from($source), $project, $request->getContent(), $headers);
+        $result = $this->receiver->receive(WebhookSource::from($source), $project, static fn (): string => $request->getContent(), $headers);
         $response = new JsonResponse($result->body, $result->status);
         $response->headers->set('Cache-Control', 'no-store');
 

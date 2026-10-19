@@ -50,7 +50,7 @@ configuration they describe (`src/fleet/`, the `fleet` CLI, `fleet.yml`, `bootst
 | [`v0/cli.md`](v0/cli.md) | The `fleet` command reference | M0.04 |
 | [`v0/networking.md`](v0/networking.md) | Topology, every port, exposing a new one | M0.07 |
 | [`v0/README-typesense.md`](v0/README-typesense.md) | Typesense browser-search exposure | M0.07 |
-| [`webhooks.md`](webhooks.md) | 1.x, valid (receiving side: endpoints, secrets, rules, delivery log; the deploy action follows M0.04) | M0.08a |
+| [`webhooks.md`](webhooks.md) | 1.x, valid (endpoints, secrets, rules, the deploy and run-pipeline actions, the pipeline token, delivery log) | M0.08a, M0.08b |
 | [`v0/README-webhooks.md`](v0/README-webhooks.md) | Jira and Bitbucket webhooks, the 0.x reference | M0.08 |
 | [`v0/README-schedules.md`](v0/README-schedules.md) | Scheduled jobs | M0.09 |
 | [`v0/srv-fleet-CLAUDE.md`](v0/srv-fleet-CLAUDE.md) | Registry and CLI context for the host's Claude session | M0.11 |

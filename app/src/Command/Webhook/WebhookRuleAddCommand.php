@@ -21,7 +21,7 @@ final class WebhookRuleAddCommand extends Command
 {
     /** option name => [where it goes, key under its 0.x name] */
     private const array MATCH = ['on-status' => 'on_status', 'on-event' => 'on_event', 'repo' => 'repo', 'match-branch' => 'branch', 'state' => 'state', 'comment' => 'comment'];
-    private const array PARAMS = ['template' => 'template', 'branch' => 'branch', 'label' => 'label', 'pattern' => 'pattern', 'ref' => 'ref'];
+    private const array PARAMS = ['template' => 'template', 'branch' => 'branch', 'label' => 'label', 'label-prefix' => 'label_prefix', 'strip-suffix' => 'strip_suffix', 'pattern' => 'pattern', 'ref' => 'ref'];
 
     public function __construct(private readonly WebhookService $webhooks)
     {
@@ -42,6 +42,8 @@ final class WebhookRuleAddCommand extends Command
         $this->addOption('template', null, InputOption::VALUE_REQUIRED, 'deploy: the project template to deploy');
         $this->addOption('branch', null, InputOption::VALUE_REQUIRED, 'deploy (Jira): the branch to deploy, default the project\'s');
         $this->addOption('label', null, InputOption::VALUE_REQUIRED, 'deploy (Bitbucket): a fixed instance label, default derived from the branch');
+        $this->addOption('label-prefix', null, InputOption::VALUE_REQUIRED, 'deploy (Bitbucket): put this in front of the branch to form the label; never overwrites an instance');
+        $this->addOption('strip-suffix', null, InputOption::VALUE_REQUIRED, 'deploy (Bitbucket): text removed from the end of the branch first; needs --label-prefix, and the branch glob must end with it');
         $this->addOption('pattern', null, InputOption::VALUE_REQUIRED, 'run-pipeline: the custom pipeline name');
         $this->addOption('ref', null, InputOption::VALUE_REQUIRED, 'run-pipeline: the branch to run it on');
         JsonOutput::addOptions($this);
