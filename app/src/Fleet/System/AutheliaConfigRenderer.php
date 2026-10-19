@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\System;
 
 use App\Domain\Host\HostSettings;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use Twig\Environment;
 
@@ -25,6 +26,7 @@ final readonly class AutheliaConfigRenderer
     public function __construct(
         private Environment $twig,
         private FleetPaths $paths,
+        private AdminGroup $admins,
         private ?AccessRuleSource $rules = null,
         private ?AutheliaNotifier $notifier = null,
     ) {
@@ -37,6 +39,8 @@ final readonly class AutheliaConfigRenderer
 
         return $this->twig->render('system/authelia-configuration.twig', [
             'domain' => $domain,
+            // Every instance site is `<id>.<domain>`: until per-project rules (M0.10) it is admin-only.
+            'admin_group' => ConfigValue::group($this->admins->name()),
             'rules' => $this->projectRules($domain),
             'smtp' => $smtp,
             'reset_enabled' => null !== $smtp,

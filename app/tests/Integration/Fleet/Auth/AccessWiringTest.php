@@ -69,9 +69,9 @@ final class AccessWiringTest extends KernelTestCase
 
         $rules = $this->rendered()['access_control']['rules'];
 
-        self::assertCount(3, $rules);
-        self::assertSame('^blog--[a-z0-9-]+\.fleet\.example\.com$', $rules[2]['domain_regex']);
-        self::assertSame([['group:fleet-admins'], ['user:bob']], $rules[2]['subject']);
+        self::assertCount(4, $rules);
+        self::assertSame('^blog--[a-z0-9-]+\.fleet\.example\.com$', $rules[3]['domain_regex']);
+        self::assertSame([['group:fleet-admins'], ['user:bob']], $rules[3]['subject']);
     }
 
     public function testTheSelfServiceResetIsDisabledUntilAnSmtpServerIsConfigured(): void

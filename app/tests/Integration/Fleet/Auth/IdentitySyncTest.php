@@ -80,7 +80,7 @@ final class IdentitySyncTest extends KernelTestCase
         $this->applier = new RecordingApplier();
 
         $twig = SystemTemplates::twig();
-        $config = new AutheliaConfigRenderer($twig, $paths, new ProjectAccessRules($accessRepository, $admins));
+        $config = new AutheliaConfigRenderer($twig, $paths, $admins, new ProjectAccessRules($accessRepository, $admins));
         $runner = new RecordingCommandRunner();
         $store = new SecretStore(new SecretRepository($em), new SecretBox(new SecretKeyFile($paths)), new MockClock('2026-10-19 10:00:00 UTC'));
         $system = new SystemRenderer(
@@ -124,7 +124,7 @@ final class IdentitySyncTest extends KernelTestCase
         $rendered = Yaml::parse(self::getContainer()->get(AutheliaConfigRenderer::class)->render($this->host()));
 
         $rules = [];
-        foreach (\array_slice($rendered['access_control']['rules'], 2) as $rule) {
+        foreach (\array_slice($rendered['access_control']['rules'], 3) as $rule) {
             self::assertIsArray($rule);
             $rules[] = $rule;
         }

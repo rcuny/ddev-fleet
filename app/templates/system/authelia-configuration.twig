@@ -37,6 +37,10 @@ access_control:
       policy: bypass
     - domain: '{{ domain }}'
       policy: one_factor
+    - domain: '*.{{ domain }}'
+      policy: one_factor
+      subject:
+        - ['group:{{ admin_group }}']
 {% for rule in rules %}
     - domain_regex: '{{ rule.regex }}'
       policy: one_factor
