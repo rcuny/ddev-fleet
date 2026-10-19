@@ -1,0 +1,58 @@
+{% extends 'base.html.twig' %}
+
+{% set title = editing ? 'Edit ' ~ editing : 'New schedule' %}
+{% block title %}{{ title }} · Schedules · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="title" description="Cron fields: minute hour day-of-month month day-of-week, or an alias such as @daily. The timezone decides what the hours mean." />
+
+    <div class="mt-6 max-w-2xl">
+        <form method="post" action="{{ editing ? path('schedule_edit', {name: editing}) : path('schedule_new') }}" novalidate autocomplete="off" class="grid gap-6" data-testid="schedule-form">
+            {{ include('setup/_csrf.html.twig') }}
+
+            {% if editing is null %}
+                <div class="grid gap-2" data-slot="form-row">
+                    <twig:Label for="schedule-name">Name</twig:Label>
+                    <twig:Input id="schedule-name" name="name" value="{{ form.name }}" class="h-11 font-mono md:h-8" autocapitalize="none" spellcheck="false" maxlength="64" {{ ...(errors.name is defined ? {'aria-invalid': 'true', 'aria-describedby': 'schedule-name-error'} : {}) }} />
+                    {% if errors.name is defined %}<p id="schedule-name-error" class="text-sm text-destructive" data-testid="error-name">{{ errors.name }}</p>{% endif %}
+                </div>
+            {% endif %}
+
+            <div class="grid gap-2" data-slot="form-row">
+                <twig:Label for="schedule-cron">Cron expression</twig:Label>
+                <twig:Input id="schedule-cron" name="cron" value="{{ form.cron }}" placeholder="0 3 * * *" class="h-11 font-mono md:h-8" autocapitalize="none" spellcheck="false" {{ ...(errors.cron is defined ? {'aria-invalid': 'true', 'aria-describedby': 'schedule-cron-error'} : {}) }} />
+                {% if errors.cron is defined %}<p id="schedule-cron-error" class="text-sm text-destructive" data-testid="error-cron">{{ errors.cron }}</p>{% endif %}
+            </div>
+
+            <div class="grid gap-2" data-slot="form-row">
+                <twig:Label for="schedule-timezone">Timezone</twig:Label>
+                <twig:Input id="schedule-timezone" name="timezone" value="{{ form.timezone }}" list="schedule-timezones" class="h-11 md:h-8" autocapitalize="none" spellcheck="false" {{ ...(errors.timezone is defined ? {'aria-invalid': 'true', 'aria-describedby': 'schedule-timezone-error'} : {}) }} />
+                <datalist id="schedule-timezones">
+                    {% for zone in timezones %}<option value="{{ zone }}"></option>{% endfor %}
+                </datalist>
+                {% if errors.timezone is defined %}<p id="schedule-timezone-error" class="text-sm text-destructive" data-testid="error-timezone">{{ errors.timezone }}</p>{% endif %}
+            </div>
+
+            <div class="grid gap-2" data-slot="form-row">
+                <twig:Label for="schedule-action">Action</twig:Label>
+                <twig:NativeSelect id="schedule-action" name="action" class="h-11 md:h-8">
+                    {% for candidate in actions %}
+                        <twig:NativeSelect:Option {{ ...{value: candidate, selected: candidate == form.action ? true : null} }}>{{ candidate }}</twig:NativeSelect:Option>
+                    {% endfor %}
+                </twig:NativeSelect>
+                {% if errors.action is defined %}<p id="schedule-action-error" class="text-sm text-destructive" data-testid="error-action">{{ errors.action }}</p>{% endif %}
+            </div>
+
+            <div class="grid gap-2" data-slot="form-row">
+                <twig:Label for="schedule-instance">Instance</twig:Label>
+                <twig:Input id="schedule-instance" name="instance" value="{{ form.instance }}" placeholder="blog--main" class="h-11 font-mono md:h-8" autocapitalize="none" spellcheck="false" {{ ...(errors.instance is defined ? {'aria-invalid': 'true', 'aria-describedby': 'schedule-instance-error'} : {}) }} />
+                {% if errors.instance is defined %}<p id="schedule-instance-error" class="text-sm text-destructive" data-testid="error-instance">{{ errors.instance }}</p>{% endif %}
+            </div>
+
+            <div class="flex flex-col gap-2 md:flex-row">
+                <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="schedule-save">{{ editing ? 'Save schedule' : 'Create schedule' }}</twig:Button>
+                <twig:Button as="a" href="{{ path('schedules') }}" variant="outline" class="h-11 w-full md:h-8 md:w-auto">Cancel</twig:Button>
+            </div>
+        </form>
+    </div>
+{% endblock %}

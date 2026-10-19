@@ -17,6 +17,13 @@ final readonly class AuditLog
     public const string SECRET_DELETE = 'secret.delete';
     public const string SECRET_REVEAL = 'secret.reveal';
 
+    public const string SCHEDULE_CREATE = 'schedule.create';
+    public const string SCHEDULE_UPDATE = 'schedule.update';
+    public const string SCHEDULE_DELETE = 'schedule.delete';
+    public const string SCHEDULE_PAUSE = 'schedule.pause';
+    public const string SCHEDULE_RESUME = 'schedule.resume';
+    public const string SCHEDULE_RUN = 'schedule.run';
+
     /** The actor of changes made on the command line. */
     public const string CLI_ACTOR = 'cli';
 

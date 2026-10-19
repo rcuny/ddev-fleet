@@ -1,0 +1,45 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}History · {{ schedule.name }} · Schedules · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="'History of ' ~ schedule.name" description="The latest runs, newest first. Times are UTC.">
+        <twig:block name="actions">
+            <twig:Button as="a" variant="outline" href="{{ path('schedules') }}" class="h-11 md:h-8">Schedules</twig:Button>
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid gap-4">
+        {% if rows|length == 0 %}
+            <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="schedule-history-empty">This schedule has not run yet.</p>
+        {% else %}
+            <p class="text-sm text-ink-muted">The latest {{ limit }} runs at most.</p>
+            <div role="region" aria-label="Run history" tabindex="0" class="overflow-x-auto">
+                <twig:Table>
+                    <twig:Table:Caption class="sr-only">Runs of {{ schedule.name }}</twig:Table:Caption>
+                    <twig:Table:Header>
+                        <twig:Table:Row>
+                            <twig:Table:Head>Occurrence (UTC)</twig:Table:Head>
+                            <twig:Table:Head>Trigger</twig:Table:Head>
+                            <twig:Table:Head>Result</twig:Table:Head>
+                            <twig:Table:Head>Job</twig:Table:Head>
+                            <twig:Table:Head>Detail</twig:Table:Head>
+                        </twig:Table:Row>
+                    </twig:Table:Header>
+                    <twig:Table:Body>
+                        {% for row in rows %}
+                            {% set run = row.run %}
+                            <twig:Table:Row data-testid="schedule-run-row">
+                                <twig:Table:Cell>{{ run.occurrence|date('Y-m-d H:i:s', 'UTC') }}</twig:Table:Cell>
+                                <twig:Table:Cell data-testid="run-trigger">{{ run.trigger.value }}</twig:Table:Cell>
+                                <twig:Table:Cell data-testid="run-result">{{ row.result }}</twig:Table:Cell>
+                                <twig:Table:Cell class="font-mono" data-testid="run-job">{% if run.jobId %}#{{ run.jobId }}{% else %}-{% endif %}</twig:Table:Cell>
+                                <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ run.detail ?? '' }}</twig:Table:Cell>
+                            </twig:Table:Row>
+                        {% endfor %}
+                    </twig:Table:Body>
+                </twig:Table>
+            </div>
+        {% endif %}
+    </div>
+{% endblock %}
