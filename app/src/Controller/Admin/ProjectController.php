@@ -9,6 +9,7 @@ use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\ProjectAccessRefresher;
+use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
@@ -46,6 +47,7 @@ final class ProjectController extends AbstractController
         private readonly NamedPortService $ports,
         private readonly CurrentActor $actor,
         private readonly ProjectAccessRefresher $access,
+        private readonly InstanceSiteRefresher $sites,
     ) {
     }
 
@@ -127,6 +129,7 @@ final class ProjectController extends AbstractController
                 try {
                     $this->projects->update($name, $input);
                     $this->addFlash('success', 'Project saved.');
+                    $this->flashSitesWarning();
 
                     return $this->redirectToRoute('project_edit', ['name' => $name], Response::HTTP_SEE_OTHER);
                 } catch (ValidationFailed $failed) {
@@ -188,6 +191,17 @@ final class ProjectController extends AbstractController
     private function flashAccessWarning(): void
     {
         $warning = $this->access->takeWarning();
+        if (null !== $warning) {
+            $this->addFlash('warning', $warning);
+        }
+    }
+
+    /**
+     * The project change is saved, but a Caddy site may not have followed (InstanceSiteRefresher).
+     */
+    private function flashSitesWarning(): void
+    {
+        $warning = $this->sites->takeWarning();
         if (null !== $warning) {
             $this->addFlash('warning', $warning);
         }
