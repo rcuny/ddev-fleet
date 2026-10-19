@@ -26,15 +26,10 @@ final class DevOnlyServicesTest extends KernelTestCase
      * The stand-in membership exists in test (VisibleInstancesTest relies on it); ProdKernelSecurityTest pins that the
      * compiled prod container has neither the class nor a mention of it, so production keeps the real membership.
      */
-    public function testStandInMembershipIsAbsentInProd(): void
+    public function testStandInMembershipIsWiredInTest(): void
     {
         self::bootKernel();
-        self::assertInstanceOf(StandInProjectMembership::class, self::getContainer()->get(ProjectMembership::class));
 
-        $source = file_get_contents(\dirname(__DIR__, 2).'/src/Security/StandIn/StandInProjectMembership.php');
-        self::assertIsString($source);
-        self::assertStringContainsString("#[When(env: 'dev')]", $source);
-        self::assertStringContainsString("#[When(env: 'test')]", $source);
-        self::assertStringNotContainsString("#[When(env: 'prod')]", $source);
+        self::assertInstanceOf(StandInProjectMembership::class, self::getContainer()->get(ProjectMembership::class));
     }
 }

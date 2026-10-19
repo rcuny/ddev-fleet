@@ -12,18 +12,22 @@ Playwright in a real browser (`tests/playwright/`), and a small set of Python te
 for the CI tooling and the Ansible roles (`tests/pytest/`). The commands below are run from the
 repository root unless stated otherwise; use `php8.4` where the default `php` is older than 8.4.
 
-## Current counts (2026-10-19)
+## Counts
 
-| Suite | Where | Count |
+The numbers are not kept in this file: every feature branch edited them, so every merge conflicted.
+Print the current counts with:
+
+```bash
+ci/test-counts.sh      # PHPUnit per suite (--list-tests), Playwright (--list), pytest (--collect-only)
+```
+
+What the numbers include:
+
+| Suite | Where | Notes |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 1061 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 576 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 570 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 401 tests (13 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
-| Playwright | `tests/playwright/` | 173 (13 spec files, including `host-settings.spec.ts`, `assets.spec.ts` and `users.spec.ts`; 145 run and 28 skip on a default run; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 89 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
-| pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
-
-PHPUnit totals 2608 tests (13 skipped). Update this table when the numbers change.
+| PHPUnit `Unit`, `Integration`, `Functional`, `Repo` | `app/tests/<Suite>/` | `Repo` tests skip without their tool: `FLEET_CADDY_BIN`, `FLEET_MERCURE_BIN`, or when not run as root (one test only runs as root) |
+| Playwright | `tests/playwright/` | each spec runs on the `desktop` and the `phone` project where it applies (`projects.spec.ts` has phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| pytest | `tests/pytest/` | a test skips when an optional binary is missing |
 
 ## Layout
 
@@ -46,11 +50,10 @@ app/tests/
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
   support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts,
-                         projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation), users.ts (delete a user through the UI)
+                         projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
                          setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
-                         users (an administrator adds a user to a project at 390 px, password, disable, delete, axe)
-                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe; 12 tests)
+                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```

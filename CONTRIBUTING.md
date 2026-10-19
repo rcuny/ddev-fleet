@@ -36,7 +36,7 @@ cd tests/playwright && npm run typecheck && env -u FLEET_E2E_BASE_URL npx playwr
 `composer run gates` includes the `Repo` suite, which pins the pipeline configuration, the tag
 guard, the design-system block in `CLAUDE.md` and the hygiene rules below. Playwright starts the
 app itself when `FLEET_E2E_BASE_URL` is unset (the `env -u` makes sure). Never open a pull
-request with a red suite. Suites and counts: [`tests/README-tests.md`](tests/README-tests.md).
+request with a red suite. Suites and how to run them: [`tests/README-tests.md`](tests/README-tests.md); current counts: `ci/test-counts.sh`.
 
 ## Code style
 

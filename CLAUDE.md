@@ -216,8 +216,8 @@ runner seam), `Functional/` (HTTP through `WebTestCase`, the wizard included), `
 pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its bash
 steps, the root helper, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
 `FLEET_MERCURE_BIN`, `ssh-keygen`, `shellcheck`) or run only as an unprivileged user, and skip otherwise. Each PHPUnit
-process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Counts and run guide:
-`tests/README-tests.md`.
+process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `tests/README-tests.md`. Current counts:
+`ci/test-counts.sh` (never write counts into the docs).
 
 ## Production trust and the installer
 
@@ -285,7 +285,7 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
 - `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.
 - `docs/v0/` — the 0.x (Python) reference, re-implemented milestone by milestone.
-- `tests/README-tests.md` — suites and how to run them.
+- `tests/README-tests.md` — suites and how to run them (counts: `ci/test-counts.sh`).
 
 If a tool wrapper condenses command output (RTK), treat the condensed output as complete; re-run
 a command as `rtk bypass <cmd>` only when its result is unusable (empty when output was clearly

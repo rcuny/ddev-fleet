@@ -122,10 +122,12 @@ final class ProjectVoterTest extends TestCase
         $voter = $this->voter();
         $project = new Project('acme', 'git@git.example.com:acme/blog.git');
 
-        foreach ([ProjectVoter::SETTINGS, ProjectVoter::OPERATE] as $attribute) {
+        foreach ([ProjectVoter::SETTINGS, ProjectVoter::OPERATE, ProjectVoter::DEPLOY, ProjectVoter::DESTROY] as $attribute) {
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), $project, [$attribute]));
         }
-        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), null, [ProjectVoter::SETTINGS]));
+        foreach ([ProjectVoter::SETTINGS, ProjectVoter::DEPLOY] as $attribute) {
+            self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), null, [$attribute]));
+        }
     }
 
     public function testOtherAttributesAreAbstained(): void
