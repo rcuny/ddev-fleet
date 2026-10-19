@@ -6,6 +6,7 @@ namespace App\Tests\Functional\Host;
 
 use App\Domain\Host\HostSettings;
 use App\Domain\Host\HostSettingsRepository;
+use App\Domain\Ssh\SshKeyRole;
 use App\Fleet\Backup\BackupKind;
 use App\Fleet\Backup\BackupService;
 use App\Tests\Support\HostPageTestCase;
@@ -118,10 +119,50 @@ final class HostPageTest extends HostPageTestCase
         $crawler = $this->open('/admin/host?tab=claude');
         $status = $crawler->filter('[data-testid=host-claude-status]')->text();
         self::assertStringContainsString('Set', $status);
-        self::assertMatchesRegularExpression('/Updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/', $status);
+        self::assertMatchesRegularExpression('/Last rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/', $status);
         self::assertSame('', (string) $crawler->filter('input[type=password]')->attr('value'));
         self::assertStringNotContainsString(self::TOKEN, $this->body());
         self::assertStringNotContainsString($this->tail(self::TOKEN), $this->body());
+    }
+
+    public function testTheWorkspaceChecksShowPresentOrMissingWithoutValuesOnTheGitAndClaudeTabs(): void
+    {
+        foreach (['git', 'claude'] as $tab) {
+            $crawler = $this->open('/admin/host?tab='.$tab);
+            self::assertCount(1, $crawler->filter('[data-testid=host-workspace-checks]'), $tab);
+            foreach (['push-key', 'git-identity', 'claude-token'] as $check) {
+                self::assertStringContainsString('Missing', $crawler->filter('[data-testid=host-check-'.$check.']')->text(), $tab.' '.$check);
+            }
+        }
+
+        $paths = $this->paths();
+        @mkdir($paths->sshDir(), 0o700, true);
+        file_put_contents($paths->sshPrivateKey(SshKeyRole::Push), 'PRIVATE-KEY-BODY-unique');
+        file_put_contents($paths->sshPublicKey(SshKeyRole::Push), 'ssh-ed25519 AAAAunique push');
+        $this->submit('git', 'Save', ['host_git_identity[name]' => 'Fleet Bot', 'host_git_identity[email]' => 'bot@fleet.example.com']);
+        $this->submit('claude', 'Store token', ['host_claude_token[token]' => self::TOKEN]);
+
+        foreach (['git', 'claude'] as $tab) {
+            $crawler = $this->open('/admin/host?tab='.$tab);
+            foreach (['push-key', 'git-identity', 'claude-token'] as $check) {
+                self::assertStringContainsString('Present', $crawler->filter('[data-testid=host-check-'.$check.']')->text(), $tab.' '.$check);
+            }
+            foreach (['PRIVATE-KEY-BODY-unique', 'AAAAunique', self::TOKEN, 'bot@fleet.example.com'] as $value) {
+                self::assertStringNotContainsString($value, $crawler->filter('[data-testid=host-workspace-checks]')->html(), $tab);
+            }
+        }
+    }
+
+    public function testTheClaudeTabNamesTheRotationCommandAndRecordsTheRotationInTheAuditLog(): void
+    {
+        $crawler = $this->open('/admin/host?tab=claude');
+        self::assertStringContainsString('sudo fleet claude:token:set', $crawler->filter('[data-testid=host-claude-command]')->text());
+
+        $this->submit('claude', 'Store token', ['host_claude_token[token]' => self::TOKEN]);
+
+        $rows = $this->em()->getConnection()->fetchAllAssociative('SELECT action, subject FROM audit_entry');
+        self::assertSame([['action' => 'claude.token.rotate', 'subject' => 'fleet/claude_oauth_token']], $rows);
+        self::assertStringNotContainsString(self::TOKEN, json_encode($rows, \JSON_THROW_ON_ERROR));
     }
 
     public function testBadTokensAreRefusedWithoutEchoAndKeepTheStoredOne(): void
