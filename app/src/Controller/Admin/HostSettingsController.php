@@ -21,6 +21,7 @@ use App\Form\Host\HostClaudeTokenType;
 use App\Form\Host\HostGeneralType;
 use App\Form\Host\HostGitIdentityType;
 use App\Form\Host\HostNotificationType;
+use App\Form\Host\HostUploadLimitType;
 use App\Health\HostHealthReport;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -34,7 +35,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * The host settings page (/admin/host, administrators only: the ^/admin access rule decides): ACME contact, git bot
- * identity, Claude token, notification e-mail and database backups, one tab each. Secrets are write-only: the page
+ * identity, Claude token, notification e-mail, the asset upload limit and database backups, one tab each. Secrets are write-only: the page
  * shows whether one is set and when it was last written, never the value, and no value reaches a flash message, a log
  * line or an exception message here.
  */
@@ -45,6 +46,7 @@ final class HostSettingsController extends AbstractController
         'git' => 'Git identity',
         'claude' => 'Claude token',
         'notifications' => 'Notifications',
+        'uploads' => 'Uploads',
         'backups' => 'Backups',
     ];
 
@@ -215,6 +217,31 @@ final class HostSettingsController extends AbstractController
         return $this->show('notifications', $host, $form);
     }
 
+    #[Route('/admin/host/uploads', name: 'settings_uploads', methods: ['POST'])]
+    public function uploads(Request $request): Response
+    {
+        if (null === $host = $this->settings->get()) {
+            return $this->notInitialised();
+        }
+        $form = $this->form('uploads', $host);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $mebibytes = $form->get('megabytes')->getData();
+            if (!\is_int($mebibytes) || $mebibytes < 1 || $mebibytes > HostSettings::MAX_ASSET_UPLOAD_MEBIBYTES) {
+                $form->get('megabytes')->addError(new FormError(\sprintf('Enter a number of MiB from 1 to %d.', HostSettings::MAX_ASSET_UPLOAD_MEBIBYTES)));
+            } else {
+                $host->changeAssetUploadMaxBytes($mebibytes * 1_048_576);
+                $this->settings->save($host);
+                $this->addFlash('success', 'Upload limit saved.');
+
+                return $this->back('uploads');
+            }
+        }
+
+        return $this->show('uploads', $host, $form);
+    }
+
     #[Route('/admin/host/backups', name: 'settings_backup_create', methods: ['POST'])]
     public function backupNow(Request $request): Response
     {
@@ -304,6 +331,7 @@ final class HostSettingsController extends AbstractController
                 'passwordStored' => $this->secrets->hasFleetWide(HostSecrets::SMTP_PASSWORD),
                 'action' => $this->generateUrl('settings_notifications'),
             ]),
+            'uploads' => $this->createForm(HostUploadLimitType::class, ['megabytes' => intdiv($host->assetUploadMaxBytes(), 1_048_576)], ['action' => $this->generateUrl('settings_uploads')]),
             default => $this->createForm(HostBackupRetentionType::class, ['days' => $host->backupRetentionDays()], ['action' => $this->generateUrl('settings_backup_retention')]),
         };
     }

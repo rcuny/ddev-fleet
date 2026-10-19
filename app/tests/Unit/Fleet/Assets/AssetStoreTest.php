@@ -345,6 +345,40 @@ final class AssetStoreTest extends TestCase
         $this->secretIsUntouched();
     }
 
+    public function testDeleteRemovesAFolderHoldingOnlyStaleUploadTemporaries(): void
+    {
+        mkdir($this->root.'/stale');
+        $old = $this->root.'/stale/.fleet-upload-0123.tmp';
+        file_put_contents($old, 'x');
+        touch($old, time() - AssetStore::STALE_TEMPORARY_AFTER - 60);
+
+        $this->store->delete('blog', 'stale');
+
+        self::assertDirectoryDoesNotExist($this->root.'/stale');
+    }
+
+    public function testDeleteKeepsAFolderWithAFreshTemporaryOrAnyOtherHiddenFile(): void
+    {
+        mkdir($this->root.'/fresh');
+        file_put_contents($this->root.'/fresh/.fleet-upload-0123.tmp', 'x');
+        mkdir($this->root.'/hidden');
+        file_put_contents($this->root.'/hidden/.htaccess', 'x');
+        file_put_contents($this->root.'/hidden/.fleet-upload-old.tmp', 'x');
+        touch($this->root.'/hidden/.fleet-upload-old.tmp', time() - AssetStore::STALE_TEMPORARY_AFTER - 60);
+
+        foreach (['fresh', 'hidden'] as $folder) {
+            try {
+                $this->store->delete('blog', $folder);
+                self::fail('Deleted '.$folder);
+            } catch (Refused $refusal) {
+                self::assertSame(409, $refusal->getCode());
+            }
+        }
+        self::assertFileExists($this->root.'/fresh/.fleet-upload-0123.tmp');
+        // Nothing is removed from a folder that stays: the stale temporary is still there.
+        self::assertFileExists($this->root.'/hidden/.fleet-upload-old.tmp');
+    }
+
     public function testDeleteRefusesANonEmptyFolderTheTopAndAMissingPath(): void
     {
         mkdir($this->root.'/full');

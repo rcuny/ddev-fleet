@@ -91,7 +91,8 @@ export default class extends Controller {
             }),
             'application/json',
         );
-        if (response.status === 409 && !overwrite) {
+        // Only a file can be replaced; a folder (or link) with that name is an error the user must fix.
+        if (response.status === 409 && !overwrite && response.json?.reason === 'file-exists') {
             return { conflict: true };
         }
         if (!response.ok) {

@@ -319,6 +319,7 @@ final class UploadServiceTest extends KernelTestCase
             self::fail('Planned to replace a file without being told to.');
         } catch (Refused $refusal) {
             self::assertSame(UploadService::CONFLICT, $refusal->getCode());
+            self::assertSame(AssetStore::REASON_FILE_EXISTS, $refusal->reason);
         }
         self::assertSame('old', file_get_contents($this->assets('db.sql')));
 
@@ -346,8 +347,14 @@ final class UploadServiceTest extends KernelTestCase
     {
         mkdir($this->assets('dir'), 0o750, true);
 
-        $this->expectException(Refused::class);
-        $this->uploads->begin('blog', '', 'dir', 10, null, '', true);
+        try {
+            $this->uploads->begin('blog', '', 'dir', 10, null, '', true);
+            self::fail('Planned to upload over a folder.');
+        } catch (Refused $refusal) {
+            self::assertSame(UploadService::CONFLICT, $refusal->getCode());
+            // Not replaceable: the browser must not offer "Replace it?".
+            self::assertNull($refusal->reason);
+        }
     }
 
     // --- resuming
