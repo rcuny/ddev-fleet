@@ -62,6 +62,13 @@ console_(['cache:pool:clear', 'cache.rate_limiter']);
 // A host that is installed but not set up yet (what install.sh leaves behind), so /setup is open for the wizard spec.
 // FLEET_CADDY_DIR stays at its default under FLEET_HOME: the gate writer refuses a directory outside it.
 console_(['fleet:host:init', '--domain=fleet.example.com', '--tls-mode=http01']);
+// The projects the instance specs deploy: `acme` (admin work, and the project a member must not see) and `demo`, the
+// project of the stand-in member (its group is "demo", see .env.dev). Each has a default template.
+for (const project of ['acme', 'demo']) {
+  console_(['fleet:project:create', project, '--git=https://git.example.com/acme/blog.git', '--default-branch=main']);
+  console_(['fleet:template:create', project, 'default']);
+  console_(['fleet:project:update', project, '--default-template=default']);
+}
 const tokenLine = consoleOutput(['fleet:setup:token']).split('\n').find((line) => /\/setup\?token=/.test(line));
 if (!tokenLine) {
   console.error('start-app: fleet:setup:token printed no setup link');

@@ -13,8 +13,8 @@ use PHPUnit\Framework\TestCase;
  */
 final class CliGroupsTest extends TestCase
 {
-    /** Helpers of the commands, not command groups. */
-    private const array NOT_GROUPS = ['Support'];
+    /** Helpers of the commands, and the dev/test-only commands (fleet:dev:*, never registered in prod): not command groups. */
+    private const array NOT_GROUPS = ['Support', 'Dev'];
 
     private static function appDir(): string
     {
@@ -48,7 +48,7 @@ final class CliGroupsTest extends TestCase
             if ('php' !== $file->getExtension()) {
                 continue;
             }
-            if (1 === preg_match("/#\\[AsCommand\\(\\s*name: 'fleet:([a-z]+):/", (string) file_get_contents($file->getPathname()), $m)) {
+            if (1 === preg_match("/#\\[AsCommand\\(\\s*name: 'fleet:([a-z]+):/", (string) file_get_contents($file->getPathname()), $m) && 'dev' !== $m[1]) {
                 $groups[] = $m[1];
             }
         }

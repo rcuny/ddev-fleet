@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration;
 
+use App\Command\Dev\FakeJobCommand;
+use App\Fleet\Jobs\Dev\FakeJobType;
 use App\Kernel;
 use App\Security\StandIn\StandInAuthenticator;
 use App\Security\StandIn\StandInController;
@@ -143,7 +145,7 @@ final class ProdKernelSecurityTest extends TestCase
         $this->kernel->boot();
         $container = $this->kernel->getContainer();
 
-        foreach ([StandInAuthenticator::class, StandInController::class, StandInSettings::class, StandInProjectMembership::class, ProfilerToolbarSwitch::class] as $class) {
+        foreach ([StandInAuthenticator::class, StandInController::class, StandInSettings::class, StandInProjectMembership::class, ProfilerToolbarSwitch::class, FakeJobType::class, FakeJobCommand::class] as $class) {
             self::assertFalse($container->has($class), $class);
         }
 
@@ -156,7 +158,7 @@ final class ProdKernelSecurityTest extends TestCase
                 continue;
             }
             $contents = (string) file_get_contents($file->getPathname());
-            foreach (['StandIn', 'ProfilerToolbarSwitch'] as $needle) {
+            foreach (['StandIn', 'ProfilerToolbarSwitch', 'FakeJob'] as $needle) {
                 if (str_contains($contents, $needle)) {
                     $offenders[] = substr($file->getPathname(), \strlen($this->cacheDir)).' mentions '.$needle;
                 }
