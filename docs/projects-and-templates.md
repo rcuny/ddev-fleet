@@ -190,6 +190,12 @@ $ echo $?
 `project:delete`, `template:delete` and `port:delete` ask for confirmation on a terminal; `--yes` (`-y`) skips the
 question. Without a terminal, and in JSON mode, they never prompt: without `--yes` they stop with exit code `2`.
 
+### Selecting instances
+
+The instance commands (deploy, start, stop, redeploy, destroy) take one or more instance ids (`<id>`), or select with `--all`,
+`--project <name>` or `--state <state>`. They wait for their job by default and print its log; `--detach` only queues
+the job. The instances guide has the full reference.
+
 ### Examples
 
 ```console

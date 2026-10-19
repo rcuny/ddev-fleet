@@ -5,39 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Functional;
 
 use App\Ui\NavigationCatalog;
-use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 
 final class PlaceholderPagesTest extends WebTestCase
 {
-    /**
-     * @return iterable<string, array{string, string, string, string}>
-     */
-    public static function placeholders(): iterable
-    {
-        yield 'instances' => ['/instances', 'Instances', 'M0.04', 'instances'];
-        yield 'jobs' => ['/admin/jobs', 'Jobs', 'M0.04', 'jobs'];
-    }
-
-    #[DataProvider('placeholders')]
-    public function testAdminSeesThePlaceholder(string $path, string $label, string $milestone, string $routeName): void
+    public function testMemberSeesNoAdminPages(): void
     {
         $client = self::createClient();
-        $crawler = $client->request('GET', $path, server: ['HTTP_X_FLEET_STAND_IN_ROLE' => 'admin']);
-
-        self::assertResponseStatusCodeSame(200);
-        self::assertCount(1, $crawler->filter('h1'));
-        self::assertSame($label, trim($crawler->filter('h1')->text()));
-        self::assertStringContainsString('Planned for '.$milestone, $crawler->filter('[data-testid=placeholder]')->text());
-        self::assertSame($routeName, self::getContainer()->get('router')->match($path)['_route']);
-    }
-
-    public function testMemberSeesInstancesButNotAdminPages(): void
-    {
-        $client = self::createClient();
-
-        $client->request('GET', '/instances', server: ['HTTP_X_FLEET_STAND_IN_ROLE' => 'member']);
-        self::assertResponseStatusCodeSame(200);
 
         $catalog = self::getContainer()->get(NavigationCatalog::class);
         $adminPaths = [];

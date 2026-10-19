@@ -88,6 +88,16 @@ final class InstallDocsTest extends TestCase
     /**
      * The other direction: nothing in the guide may name a flag or a command the code does not have.
      */
+    public function testInstallationDocDescribesTheUnitsAndTheRetentionSetting(): void
+    {
+        $doc = self::read('docs/installation.md');
+
+        foreach (['fleet-status', 'fleet-boot', 'FLEET_JOB_RETENTION_DAYS', 'fleet-worker@2'] as $needle) {
+            self::assertStringContainsString($needle, $doc);
+        }
+        self::assertStringContainsString('fleet:instance:start --all --sequential', $doc);
+    }
+
     public function testInstallationDocNamesNoFlagOrCommandThatDoesNotExist(): void
     {
         $doc = self::read('docs/installation.md');
@@ -96,7 +106,7 @@ final class InstallDocsTest extends TestCase
         preg_match_all('/^\s+(--[a-z][a-z-]*)\)/m', self::read('install/uninstall.sh'), $uninstallFlags);
         $known = [...$known, ...$uninstallFlags[1]];
         $commandNames = [];
-        foreach (glob(self::root().'/app/src/Command/*.php') ?: [] as $file) {
+        foreach (glob(self::root().'/app/src/Command/{,*/}*.php', \GLOB_BRACE) ?: [] as $file) {
             $source = (string) file_get_contents($file);
             preg_match_all("/addOption\('([a-z][a-z-]*)'/", $source, $options);
             foreach ($options[1] as $option) {

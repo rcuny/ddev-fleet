@@ -69,6 +69,7 @@ step_main() {
     FLEET_TRUSTED_PROXIES= \
     FLEET_ADMIN_GROUP=fleet-admins \
     "FLEET_CADDY_DIR=$CADDY_FLEET_DIR" \
+    FLEET_JOB_RETENTION_DAYS=90 \
     "DEFAULT_URI=https://$DOMAIN"
   [ "$FILE_CHANGED" = 0 ] || ENV_CHANGED=1
 

@@ -90,6 +90,21 @@ final class UninstallTest extends TestCase
         self::assertStringNotContainsString('apt-get -y -q purge', $out, 'packages stay without --purge-packages');
     }
 
+    public function testRemovesTheNewUnits(): void
+    {
+        [$status, $out, $err] = $this->uninstall(['--yes', '--dry-run']);
+
+        self::assertSame(0, $status, $err);
+        foreach ([
+            '+ systemctl disable --now fleet-status.service',
+            '+ systemctl disable fleet-boot.service',
+            '+ rm -f -- /etc/systemd/system/fleet-status.service',
+            '+ rm -f -- /etc/systemd/system/fleet-boot.service',
+        ] as $line) {
+            self::assertStringContainsString($line, $out);
+        }
+    }
+
     public function testEveryWorkerInstanceIsStoppedAndDisabledByFullNameBeforeAnythingIsRemoved(): void
     {
         // systemctl lists loaded instances (one failed, one only loaded); the enabled fleet-worker@1 is always included.
