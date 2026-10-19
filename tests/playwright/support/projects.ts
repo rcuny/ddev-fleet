@@ -75,6 +75,6 @@ export async function openDialog(page: Page, trigger: Locator): Promise<Locator>
 }
 
 /** Opens one of the project sections through the tab strip (the same links at every width, no script involved). */
-export async function openSection(page: Page, section: 'General' | 'Templates' | 'Ports'): Promise<void> {
+export async function openSection(page: Page, section: 'General' | 'Templates' | 'Ports' | 'Assets'): Promise<void> {
   await follow(page, page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: section }));
 }

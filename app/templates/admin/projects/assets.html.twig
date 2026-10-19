@@ -1,0 +1,171 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Assets · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    {% set here = {name: project.name}|merge(listing.path != '' ? {path: listing.path} : {}) %}
+    <twig:PageHeader :title="project.name" :description="project.git">
+        <twig:block name="tabs">
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'assets'}) }}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div
+        class="mt-6 grid max-w-4xl gap-6"
+        data-controller="asset-upload"
+        data-asset-upload-url-value="{{ path('project_asset_upload_begin', {name: project.name}) }}"
+        data-asset-upload-csrf-value="{{ csrf_token('submit') }}"
+        data-asset-upload-path-value="{{ listing.path }}"
+        data-asset-upload-chunk-size-value="{{ chunkBytes }}"
+        data-asset-upload-max-bytes-value="{{ maxBytes }}"
+    >
+        {% if problem %}
+            <twig:Alert variant="destructive" data-testid="assets-problem">
+                <twig:ux:icon name="lucide:triangle-alert" />
+                <twig:Alert:Description>{{ problem }}</twig:Alert:Description>
+            </twig:Alert>
+        {% endif %}
+
+        <nav aria-label="Folder" class="flex flex-wrap items-center gap-x-2 text-sm" data-testid="asset-crumbs">
+            {% if listing.crumbs|length == 0 %}
+                <span aria-current="page" class="font-medium text-ink-display">Assets</span>
+            {% else %}
+                <a href="{{ path('project_assets', {name: project.name}) }}" class="inline-flex min-h-11 items-center md:min-h-8">Assets</a>
+                {% for crumb in listing.crumbs %}
+                    <span aria-hidden="true" class="text-ink-muted">/</span>
+                    {% if loop.last %}
+                        <span aria-current="page" class="font-medium text-ink-display [overflow-wrap:anywhere]">{{ crumb.name }}</span>
+                    {% else %}
+                        <a href="{{ path('project_assets', {name: project.name, path: crumb.path}) }}" class="inline-flex min-h-11 items-center md:min-h-8 [overflow-wrap:anywhere]">{{ crumb.name }}</a>
+                    {% endif %}
+                {% endfor %}
+            {% endif %}
+        </nav>
+
+        <twig:Card data-testid="asset-upload">
+            <twig:Card:Header>
+                <twig:Card:Title>Upload files</twig:Card:Title>
+                <twig:Card:Description>
+                    Up to {{ maxBytes|bytes }} per file, sent in pieces of up to {{ chunkBytes|bytes }}. If the connection drops, choose the same file again and the upload carries on. For bigger files, copy them into <code class="[overflow-wrap:anywhere]">{{ directory }}/</code> over SSH and press Rescan.
+                </twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <div class="grid gap-2">
+                    <twig:Label for="asset-files">Choose files to upload{% if listing.path != '' %} to {{ listing.path }}{% endif %}</twig:Label>
+                    <twig:Input
+                        id="asset-files"
+                        type="file"
+                        multiple
+                        class="h-11 md:h-8"
+                        data-testid="asset-input"
+                        data-asset-upload-target="input"
+                        data-action="change->asset-upload#start"
+                    />
+                </div>
+                <ul class="mt-4 grid gap-3" data-asset-upload-target="list" data-testid="asset-uploads" aria-live="polite"></ul>
+            </twig:Card:Content>
+        </twig:Card>
+
+        <section class="grid gap-3" aria-labelledby="asset-files-heading">
+            <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                <h2 id="asset-files-heading">Files</h2>
+                <div class="flex flex-col gap-2 sm:flex-row sm:items-end">
+                    <form method="post" action="{{ path('project_asset_folder', {name: project.name}) }}" class="grid gap-2 sm:flex sm:items-end" data-testid="asset-folder-form">
+                        <input type="hidden" name="path" value="{{ listing.path }}">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <div class="grid gap-2">
+                            <twig:Label for="asset-folder-name">New folder</twig:Label>
+                            <twig:Input id="asset-folder-name" name="name" required maxlength="255" autocomplete="off" class="h-11 sm:w-56 md:h-8" />
+                        </div>
+                        <twig:Button type="submit" variant="outline" class="h-11 md:h-8">Create folder</twig:Button>
+                    </form>
+                    <twig:Button as="a" href="{{ path('project_assets', here) }}" variant="outline" class="h-11 md:h-8" data-testid="asset-rescan">Rescan</twig:Button>
+                </div>
+            </div>
+
+            <div id="asset-listing" data-asset-upload-target="listing" data-testid="asset-listing">
+                {% if listing.entries|length == 0 %}
+                    <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="assets-empty">
+                        {{ listing.path == '' ? 'No files yet. Upload one above, or copy files in over SSH and press Rescan.' : 'This folder is empty.' }}
+                    </p>
+                {% else %}
+                    <twig:Table>
+                        <twig:Table:Caption class="sr-only">Files in {{ listing.path == '' ? 'the project\'s assets' : listing.path }}</twig:Table:Caption>
+                        <twig:Table:Header>
+                            <twig:Table:Row>
+                                <twig:Table:Head>Name</twig:Table:Head>
+                                <twig:Table:Head class="hidden sm:table-cell">Size</twig:Table:Head>
+                                <twig:Table:Head class="hidden sm:table-cell">Modified (UTC)</twig:Table:Head>
+                                <twig:Table:Head class="text-end"><span class="sr-only">Actions</span></twig:Table:Head>
+                            </twig:Table:Row>
+                        </twig:Table:Header>
+                        <twig:Table:Body>
+                            {% for entry in listing.entries %}
+                                {% set row = loop.index %}
+                                <twig:Table:Row data-testid="asset-row" data-kind="{{ entry.kind }}">
+                                    <twig:Table:Cell class="min-w-0 whitespace-normal py-2">
+                                        {% if entry.isDirectory and entry.usable %}
+                                            <a href="{{ path('project_assets', {name: project.name, path: entry.path}) }}" class="inline-flex min-h-11 items-center gap-2 font-medium [overflow-wrap:anywhere] md:min-h-8" data-testid="asset-name">
+                                                <twig:ux:icon name="lucide:folder" class="size-4 shrink-0 text-ink-muted" />
+                                                {{ entry.name }}
+                                            </a>
+                                        {% else %}
+                                            <span class="font-medium [overflow-wrap:anywhere]" data-testid="asset-name">{{ entry.name }}</span>
+                                            {% if entry.kind == 'link' %}
+                                                <twig:Badge variant="outline" class="ms-2">symbolic link, ignored</twig:Badge>
+                                            {% elseif not entry.usable %}
+                                                <twig:Badge variant="outline" class="ms-2">name not supported here</twig:Badge>
+                                            {% endif %}
+                                        {% endif %}
+                                        <span class="block text-xs text-ink-muted sm:hidden">
+                                            {% if entry.size is not null %}{{ entry.size|bytes }} · {% endif %}{{ entry.modified|date('Y-m-d H:i', 'UTC') }}
+                                        </span>
+                                    </twig:Table:Cell>
+                                    <twig:Table:Cell class="hidden sm:table-cell" data-testid="asset-size">{{ entry.size is null ? '-' : entry.size|bytes }}</twig:Table:Cell>
+                                    <twig:Table:Cell class="hidden sm:table-cell">{{ entry.modified|date('Y-m-d H:i', 'UTC') }}</twig:Table:Cell>
+                                    <twig:Table:Cell class="py-2 text-end">
+                                        {% if entry.usable %}
+                                            <div class="flex items-center justify-end gap-2">
+                                                {% if entry.isFile %}
+                                                    <twig:Button as="a" href="{{ path('project_asset_download', {name: project.name, path: entry.path}) }}" data-turbo="false" variant="outline" class="h-11 md:h-8" data-testid="asset-download">
+                                                        Download<span class="sr-only"> {{ entry.name }}</span>
+                                                    </twig:Button>
+                                                {% endif %}
+                                                <twig:Dialog id="delete-asset-{{ row }}">
+                                                    <twig:Dialog:Trigger>
+                                                        <twig:Button variant="destructive" class="h-11 md:h-8" data-testid="asset-delete" {{ ...dialog_trigger_attrs }}>
+                                                            Delete<span class="sr-only"> {{ entry.name }}</span>
+                                                        </twig:Button>
+                                                    </twig:Dialog:Trigger>
+                                                    <twig:Dialog:Content>
+                                                        <twig:Dialog:Header>
+                                                            <twig:Dialog:Title class="[overflow-wrap:anywhere]">Delete {{ entry.name }}?</twig:Dialog:Title>
+                                                            <twig:Dialog:Description>{{ entry.isDirectory ? 'The folder is deleted if it is empty.' : 'The file is removed from the assets directory. It cannot be undone.' }}</twig:Dialog:Description>
+                                                        </twig:Dialog:Header>
+                                                        <twig:Dialog:Footer>
+                                                            <twig:Dialog:Close>
+                                                                <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                                            </twig:Dialog:Close>
+                                                            <form method="post" action="{{ path('project_asset_delete', {name: project.name}) }}" class="contents">
+                                                                <input type="hidden" name="path" value="{{ entry.path }}">
+                                                                {{ include('setup/_csrf.html.twig') }}
+                                                                <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="asset-delete-confirm">Delete</twig:Button>
+                                                            </form>
+                                                        </twig:Dialog:Footer>
+                                                    </twig:Dialog:Content>
+                                                </twig:Dialog>
+                                            </div>
+                                        {% endif %}
+                                    </twig:Table:Cell>
+                                </twig:Table:Row>
+                            {% endfor %}
+                        </twig:Table:Body>
+                    </twig:Table>
+                    <p class="mt-2 text-xs text-ink-muted" data-testid="assets-summary">
+                        {{ listing.entries|length }} {{ listing.entries|length == 1 ? 'item' : 'items' }}, {{ listing.totalBytes|bytes }} in files{% if listing.truncated %}. Only the first items are shown; use <code>fleet asset:list</code> or the shell for the rest{% endif %}.
+                    </p>
+                {% endif %}
+            </div>
+        </section>
+    </div>
+{% endblock %}

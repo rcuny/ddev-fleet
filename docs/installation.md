@@ -103,6 +103,8 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
 | `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
 | `/srv/fleet/staging` | `fleet:fleet` 0700 | Rendered configuration waiting for the root helper (`caddy/`, `authelia/`). Empty at rest: it is filled only for the moment before an `apply`, and emptied after every apply, every failed install step and every plain `fleet:host:render`, because the staged Caddy environment file holds the OVH credentials in clear text. Leave it out of backups. |
+| `/srv/fleet/assets/<project>` | `fleet:fleet` 0750 | A project's seed files (database dumps, files archives, env templates), shown on the project's Assets tab; created by the first upload or by `mkdir`. Copy large files in here over SSH, see [`assets.md`](assets.md). Back it up with the databases. |
+| `/srv/fleet/uploads` | `fleet:fleet` 0700 | Chunks of browser uploads on their way to `assets/`, one directory per upload; emptied when an upload completes and by `fleet asset:gc` (after 24 hours). Leave it out of backups. |
 | `/srv/fleet/authelia` | `fleet:authelia` 2750 | `users.yml` (0640, `fleet:authelia`), the sign-in portal's user file with the argon2id hashes, written by the app. |
 | `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640 `root:fleet`, see below), `mercure.env` (`root:root` 0600), `installed-revision` (0644). |
 | `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
@@ -206,7 +208,7 @@ gate is in front of `/setup` too); signed in, every `/setup` URL answers 404 "Se
 Authelia's own self-service password reset is switched off until a later milestone (use section 5).
 
 Next, describe what the fleet can deploy: add your first project and its templates in the browser or on the host, see
-[`projects-and-templates.md`](projects-and-templates.md). (Instances arrive in a later milestone.)
+[`projects-and-templates.md`](projects-and-templates.md), and give them their seed data (database dumps, files) on the project's Assets tab or by copying over SSH, see [`assets.md`](assets.md). (Instances arrive in a later milestone.)
 
 ## 5. Recovery
 
