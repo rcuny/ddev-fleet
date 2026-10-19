@@ -250,7 +250,7 @@ Facts to keep true when editing it:
   Only `<domain>` and `auth.<domain>` are served; instance and wildcard sites arrive in M0.04 / M0.07.
 - **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
   workers when the code or env changed.
-- Not shipped yet (do not assume it exists): `fleet-scheduler`, `fleet-boot` / `fleet-tmux`, wildcard and instance Caddy
+- Not shipped yet (do not assume it exists): `fleet-boot` / `fleet-tmux`, wildcard and instance Caddy
   sites, instance sites that the Authelia access rules guard (the rules are rendered from `ProjectAccess` already; the hosts arrive with M0.04), host hardening. Authelia's self-service password reset is off until an SMTP server is configured (`docs/installation.md`; recovery: `fleet user:reset-password`).
 - Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
   install/bin/fleet` before committing a script.

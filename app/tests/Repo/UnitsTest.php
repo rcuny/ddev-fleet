@@ -167,6 +167,22 @@ final class UnitsTest extends TestCase
         self::assertArrayNotHasKey('Service', $unit);
     }
 
+    public function testSchedulerUnitIsInstalledAndEnabledByTheSteps(): void
+    {
+        $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
+        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $service = $this->unit('fleet-scheduler.service')['Service'];
+
+        self::assertStringContainsString('install_etc fleet-scheduler.service "$SYSTEMD_DIR/fleet-scheduler.service" 0644 root:root', $units);
+        self::assertMatchesRegularExpression('~systemctl enable [^\n]*\bfleet-scheduler\b~', $start);
+        self::assertStringContainsString('systemctl start fleet-scheduler', $start);
+        self::assertStringContainsString('systemctl restart fleet-scheduler', $start);
+        self::assertSame(['fleet'], $service['User']);
+        self::assertSame(['always'], $service['Restart']);
+        self::assertStringContainsString('messenger:consume scheduler_default', $service['ExecStart'][0]);
+        self::assertStringNotContainsString('NOT installed', (string) file_get_contents(self::installDir().'/etc/fleet-scheduler.service'));
+    }
+
     public function testBackupUnitsAreInstalledAndTheTimerEnabledByTheSteps(): void
     {
         $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
@@ -344,7 +360,7 @@ final class UnitsTest extends TestCase
 
     public function testEveryUnitFileSectionIsWellFormed(): void
     {
-        foreach (['php-fpm-env.conf', 'fleet-worker@.service', 'fleet-backup.service', 'fleet-mercure.service', 'caddy-sandbox.conf', 'caddy-env.conf', 'authelia-secrets.conf'] as $file) {
+        foreach (['php-fpm-env.conf', 'fleet-worker@.service', 'fleet-backup.service', 'fleet-scheduler.service', 'fleet-mercure.service', 'caddy-sandbox.conf', 'caddy-env.conf', 'authelia-secrets.conf'] as $file) {
             $unit = $this->unit($file);
             self::assertArrayHasKey('Service', $unit, $file);
         }
@@ -352,7 +368,7 @@ final class UnitsTest extends TestCase
 
     public function testNoWorldWritablePathsAreGrantedToServices(): void
     {
-        foreach (['fleet-worker@.service', 'fleet-backup.service', 'php-fpm-env.conf'] as $file) {
+        foreach (['fleet-worker@.service', 'fleet-backup.service', 'fleet-scheduler.service', 'php-fpm-env.conf'] as $file) {
             foreach ($this->unit($file)['Service']['ReadWritePaths'] ?? [] as $value) {
                 foreach (explode(' ', $value) as $path) {
                     self::assertNotContains($path, ['/', '/etc', '/usr', '/var', '/home', '/srv', '/opt'], $file);
