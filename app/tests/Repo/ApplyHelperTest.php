@@ -236,7 +236,7 @@ final class ApplyHelperTest extends TestCase
 
     public function testAFullOvhEnvironmentIsAccepted(): void
     {
-        $this->seedLive();
+        $this->seedLive(self::SECRET);
         $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n";
         $this->stage('Caddyfile', "example.com {\n}\n");
         $this->stage('env', $env);
@@ -244,8 +244,72 @@ final class ApplyHelperTest extends TestCase
         [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
 
         self::assertSame(0, $status, $err);
-        self::assertSame($env, file_get_contents($this->root.'/etc/caddy/fleet.env'));
+        // Caddy's environment keeps the proxy secret alone; each OVH value is its own file under /etc/caddy/ovh.
+        self::assertSame('FLEET_PROXY_SECRET='.self::SECRET."\n", file_get_contents($this->root.'/etc/caddy/fleet.env'));
         self::assertSame(0o640, fileperms($this->root.'/etc/caddy/fleet.env') & 0o777);
+        self::assertSame(0o750, fileperms($this->root.'/etc/caddy/ovh') & 0o777);
+        foreach (['endpoint' => 'ovh-eu', 'application_key' => 'abcdefgh12', 'application_secret' => 'ABCDEFGH12abcdefgh', 'consumer_key' => 'zzzzzzzz99'] as $name => $value) {
+            self::assertSame($value."\n", file_get_contents($this->root.'/etc/caddy/ovh/'.$name), $name);
+            self::assertSame(0o640, fileperms($this->root.'/etc/caddy/ovh/'.$name) & 0o777, $name);
+        }
+        self::assertSame([], glob($this->root.'/etc/caddy/ovh/*.??????') ?: [], 'no temp files left in /etc/caddy/ovh');
+        $log = (string) file_get_contents($this->log);
+        self::assertStringContainsString('systemctl reload caddy', $log, 'an OVH-only change is a reload');
+        self::assertStringNotContainsString('systemd-run', $log, 'no restart');
+    }
+
+    public function testOvhRotationReloadsAndOldEnvLinesAreDropped(): void
+    {
+        // An earlier apply left the OVH values in fleet.env; the new one moves them and does not restart for that.
+        file_put_contents($this->root.'/etc/caddy/fleet.env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=oldoldold1\nOVH_APPLICATION_SECRET=oldoldoldold\nOVH_CONSUMER_KEY=oldoldold2\n");
+        file_put_contents($this->root.'/etc/caddy/Caddyfile', "LIVE-CADDYFILE\n");
+        $this->stage('Caddyfile', "example.com {\n}\n");
+        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
+
+        [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
+
+        self::assertSame(0, $status, $err);
+        self::assertSame('FLEET_PROXY_SECRET='.self::SECRET."\n", file_get_contents($this->root.'/etc/caddy/fleet.env'));
+        self::assertStringNotContainsString('systemd-run', (string) file_get_contents($this->log));
+
+        // Applying the same thing again changes nothing (idempotent).
+        $this->stage('Caddyfile', "example.com {\n}\n");
+        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
+        [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
+        self::assertSame(0, $status, $err);
+        self::assertSame("abcdefgh12\n", file_get_contents($this->root.'/etc/caddy/ovh/application_key'));
+    }
+
+    public function testSwitchAwayFromDnsRemovesTheOvhFiles(): void
+    {
+        $this->seedLive(self::SECRET);
+        mkdir($this->root.'/etc/caddy/ovh', 0o750);
+        foreach (['endpoint', 'application_key', 'application_secret', 'consumer_key'] as $name) {
+            file_put_contents($this->root.'/etc/caddy/ovh/'.$name, "old\n");
+        }
+        $this->stageCaddy("new.example.com {\n}\n");
+
+        [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
+
+        self::assertSame(0, $status, $err);
+        self::assertDirectoryDoesNotExist($this->root.'/etc/caddy/ovh');
+    }
+
+    public function testReloadFailureRestoresThePreviousOvhFiles(): void
+    {
+        $this->seedLive(self::SECRET);
+        mkdir($this->root.'/etc/caddy/ovh', 0o750);
+        foreach (['endpoint', 'application_key', 'application_secret', 'consumer_key'] as $name) {
+            file_put_contents($this->root.'/etc/caddy/ovh/'.$name, "old-$name\n");
+        }
+        $this->stage('Caddyfile', "new.example.com {\n}\n");
+        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-ca\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
+
+        [$status] = $this->apply(['caddy'], $this->defaultStubs(reloadFailures: 1));
+
+        self::assertSame(1, $status);
+        self::assertSame("old-endpoint\n", file_get_contents($this->root.'/etc/caddy/ovh/endpoint'));
+        self::assertSame("old-consumer_key\n", file_get_contents($this->root.'/etc/caddy/ovh/consumer_key'));
     }
 
     public function testInstallsBothFilesAndReloads(): void
@@ -310,25 +374,25 @@ final class ApplyHelperTest extends TestCase
         self::assertStringNotContainsString('systemctl reload', $log, 'a changed environment is restarted, never reloaded');
     }
 
-    public function testSwitchingToTheDnsChallengeNeedsNoReloadThatCouldRejectEmptyCredentials(): void
+    public function testSwitchingToTheDnsChallengeIsAPlainReload(): void
     {
-        // Live: HTTP-01, only the proxy secret. Staged: the OVH block and its four variables (a first-time switch).
+        // Live: HTTP-01, only the proxy secret. Staged: the OVH block and its four values (a first-time switch). The
+        // values are files read at load time, so a reload sees them and no restart is needed.
         $this->seedLive(self::SECRET);
         $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n";
         $this->stage('Caddyfile', "example.com {\n}\n");
         $this->stage('env', $env);
-        // Were it reloaded, this Caddy (old environment) would refuse the new Caddyfile, as a module may with empty values.
-        $stubs = $this->defaultStubs(reloadFailures: 5);
+        $stubs = $this->defaultStubs();
 
         [$status, $out, $err] = $this->apply(['caddy'], $stubs);
 
         self::assertSame(0, $status, $err);
-        self::assertStringContainsString('restarts in 3 s', $out);
-        self::assertSame($env, file_get_contents($this->root.'/etc/caddy/fleet.env'));
+        self::assertStringNotContainsString('restarts in 3 s', $out);
+        self::assertSame('FLEET_PROXY_SECRET='.self::SECRET."\n", file_get_contents($this->root.'/etc/caddy/fleet.env'));
         self::assertSame("example.com {\n}\n", file_get_contents($this->root.'/etc/caddy/Caddyfile'));
         $log = (string) file_get_contents($this->log);
-        self::assertStringNotContainsString('systemctl reload', $log);
-        self::assertStringContainsString('systemctl restart caddy', $log);
+        self::assertStringNotContainsString('systemctl restart', $log);
+        self::assertStringContainsString('systemctl reload caddy', $log);
     }
 
     public function testAFailedRestartScheduleIsReportedNotSwallowed(): void
@@ -592,7 +656,7 @@ final class ApplyHelperTest extends TestCase
         }
         $seen = (string) file_get_contents($environment);
         self::assertStringContainsString('FLEET_PROXY_SECRET='.self::SECRET, $seen, 'but the validator does get them, in its environment');
-        self::assertStringContainsString('OVH_APPLICATION_SECRET=appsecret987654', $seen);
+        self::assertStringNotContainsString('OVH_', $seen, 'the OVH values are files now, not part of the environment');
         self::assertStringNotContainsString(self::SECRET, $err);
     }
 
@@ -627,7 +691,7 @@ final class ApplyHelperTest extends TestCase
         [$status, , $err] = $this->apply(['caddy'], $stubs);
 
         self::assertSame(1, $status);
-        self::assertStringContainsString('previous Caddyfile and environment were restored', $err);
+        self::assertStringContainsString('previous Caddyfile, environment and OVH credentials were restored', $err);
         self::assertSame("LIVE-CADDYFILE\n", file_get_contents($this->root.'/etc/caddy/Caddyfile'));
         self::assertSame('FLEET_PROXY_SECRET='.self::OLD_SECRET."\n", file_get_contents($this->root.'/etc/caddy/fleet.env'));
         self::assertSame([], glob($this->root.'/etc/caddy/*.??????') ?: [], 'no temp files');

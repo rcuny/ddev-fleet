@@ -11,7 +11,7 @@
 # closed. It is never written to the install log.
 
 HEALTH_TIMEOUT=${FLEET_INSTALL_HEALTH_TIMEOUT:-120}
-HEALTH_UNITS=(docker caddy authelia php8.4-fpm fleet-mercure fleet-worker@1)
+HEALTH_UNITS=(docker caddy authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-status)
 
 # restart_workers: every running fleet-worker@N (fleet-worker@1 is always among them).
 restart_workers() {
@@ -47,7 +47,7 @@ wait_until_healthy() {
     [ -z "$problems" ] && return 0
     if [ $((SECONDS - start)) -ge "$HEALTH_TIMEOUT" ]; then
       printf '%s\n' "$problems" >&2
-      die 1 "the install did not become healthy within ${HEALTH_TIMEOUT}s. Look at: journalctl -u caddy -u authelia -u php8.4-fpm -u fleet-mercure -u fleet-worker@1 -n 50 --no-pager"
+      die 1 "the install did not become healthy within ${HEALTH_TIMEOUT}s. Look at: journalctl -u caddy -u authelia -u php8.4-fpm -u fleet-mercure -u fleet-worker@1 -u fleet-status -n 50 --no-pager"
     fi
     sleep 3
   done
@@ -89,7 +89,7 @@ step_main() {
   run "$HELPER_DIR/apply" authelia
   run "$HELPER_DIR/apply" caddy
 
-  run systemctl enable authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-scheduler caddy
+  run systemctl enable authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-scheduler fleet-status fleet-boot caddy
 
   if [ "$FPM_CHANGED" = 1 ] || [ "$ENV_CHANGED" = 1 ]; then
     run systemctl restart php8.4-fpm
@@ -106,8 +106,10 @@ step_main() {
   run systemctl start authelia
   if [ "$CODE_CHANGED" = 1 ] || [ "$ENV_CHANGED" = 1 ] || [ "$WORKER_UNIT_CHANGED" = 1 ]; then
     restart_workers
+    run systemctl restart fleet-status
   else
     run systemctl start fleet-worker@1
+    run systemctl start fleet-status
   fi
   # The schedule ticker restarts with the workers' triggers: it runs the same code and environment.
   if [ "$CODE_CHANGED" = 1 ] || [ "$ENV_CHANGED" = 1 ] || [ "${SCHEDULER_UNIT_CHANGED:-0}" = 1 ]; then

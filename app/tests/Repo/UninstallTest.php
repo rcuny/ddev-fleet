@@ -69,6 +69,7 @@ final class UninstallTest extends TestCase
             '+ rm -rf --one-file-system -- /etc/ddev-fleet',
             '+ rm -rf --one-file-system -- /etc/caddy/fleet',
             '+ rm -f -- /etc/caddy/fleet.env',
+            '+ rm -rf --one-file-system -- /etc/caddy/ovh',
             '+ update-alternatives --remove caddy /usr/bin/caddy.custom',
             '+ dpkg-divert --rename --remove /usr/bin/caddy',
             '+ rm -f -- /etc/caddy/Caddyfile',
@@ -87,6 +88,21 @@ final class UninstallTest extends TestCase
             self::assertStringContainsString($line, $out);
         }
         self::assertStringNotContainsString('apt-get -y -q purge', $out, 'packages stay without --purge-packages');
+    }
+
+    public function testRemovesTheNewUnits(): void
+    {
+        [$status, $out, $err] = $this->uninstall(['--yes', '--dry-run']);
+
+        self::assertSame(0, $status, $err);
+        foreach ([
+            '+ systemctl disable --now fleet-status.service',
+            '+ systemctl disable fleet-boot.service',
+            '+ rm -f -- /etc/systemd/system/fleet-status.service',
+            '+ rm -f -- /etc/systemd/system/fleet-boot.service',
+        ] as $line) {
+            self::assertStringContainsString($line, $out);
+        }
     }
 
     public function testEveryWorkerInstanceIsStoppedAndDisabledByFullNameBeforeAnythingIsRemoved(): void

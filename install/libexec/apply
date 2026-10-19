@@ -18,8 +18,13 @@
 #     the validator through a file it reads itself, never through argv (any local user can read /proc/*/cmdline);
 #   - runs one at a time (flock);
 #   - installs atomically (temp file + rename), reloads, and puts the previous files back when the reload fails; when the
-#     Caddy environment file changed it restarts Caddy instead (deferred by 3 s: Caddy reads its environment only at start);
-#   - deletes the staged files on every exit path (the Caddy environment file holds the OVH credentials).
+#     Caddy environment file (the proxy secret) changed it restarts Caddy instead (deferred by 3 s: Caddy reads its
+#     environment only at start);
+#   - splits the staged environment file: the OVH credentials never go into Caddy's environment, they are written one
+#     value per file to /etc/caddy/ovh/ (root:caddy 0750, files root:caddy 0640), which the Caddyfile reads through
+#     {file.*} placeholders, so a rotation needs only a reload. /etc/caddy/fleet.env keeps the proxy secret alone, and
+#     any OVH_* line an older apply left there is dropped;
+#   - deletes the staged files on every exit path (the staged environment file holds the OVH credentials).
 # `apply authelia` with no staged configuration only restarts Authelia (the password-reset path).
 #
 # Threat model, honestly: `fleet` is in the `docker` group, which is root-equivalent anyway. This helper keeps a
@@ -34,6 +39,8 @@ ALLOWED_TARGETS='caddy authelia'
 readonly ALLOWED_TARGETS
 readonly MAX_BYTES=262144
 readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_ENDPOINT OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
+# Staged OVH key => file name under /etc/caddy/ovh/. The Caddyfile template names the same files (CaddyfileRenderer::OVH_DIR).
+readonly OVH_FILES='OVH_ENDPOINT:endpoint OVH_APPLICATION_KEY:application_key OVH_APPLICATION_SECRET:application_secret OVH_CONSUMER_KEY:consumer_key'
 # Secret files of the Authelia unit drop-in (install/etc/authelia-secrets.conf); `authelia config validate` needs them.
 readonly AUTHELIA_SECRET_FILES='AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/etc/authelia/secrets/reset_password_jwt_secret'
 # Budget: the app gives one apply 60 s. validate 15 + reload 15 + rollback reload 15 (authelia: 15 + 20 + 20).
@@ -90,9 +97,10 @@ STAGE="$ROOT/srv/fleet/staging/$TARGET"
 STAGE_EXPECTED="$REAL_ROOT/srv/fleet/staging/$TARGET"
 CADDYFILE="$ROOT/etc/caddy/Caddyfile"
 CADDY_ENV="$ROOT/etc/caddy/fleet.env"
+CADDY_OVH_DIR="$ROOT/etc/caddy/ovh"
 AUTHELIA_CONFIG="$ROOT/etc/authelia/configuration.yml"
 LOCK="$WORK_PARENT/fleet-apply.lock"
-readonly STAGE STAGE_EXPECTED CADDYFILE CADDY_ENV AUTHELIA_CONFIG LOCK
+readonly STAGE STAGE_EXPECTED CADDYFILE CADDY_ENV CADDY_OVH_DIR AUTHELIA_CONFIG LOCK
 
 # The file names each target consumes; cleanup removes exactly these from the pinned directory.
 case $TARGET in
@@ -228,12 +236,15 @@ parse_caddy_env() {
       *) fail 'OVH_ENDPOINT must be ovh-eu, ovh-ca or ovh-us' 65 ;;
     esac
   fi
-  : >"$file.canon"
-  for k in $CADDY_ENV_KEYS; do
-    if [ -n "${seen[$k]:-}" ]; then
-      printf '%s=%s\n' "$k" "${seen[$k]}" >>"$file.canon"
-    fi
-  done
+  # Caddy's environment gets the proxy secret only; each OVH value goes to its own file (no key, no newline games).
+  printf 'FLEET_PROXY_SECRET=%s\n' "$secret" >"$file.canon"
+  mkdir -p "$file.ovh"
+  if [ "$have_ovh" -eq 4 ]; then
+    local pair
+    for pair in $OVH_FILES; do
+      printf '%s\n' "${seen[${pair%%:*}]}" >"$file.ovh/${pair#*:}"
+    done
+  fi
 }
 
 # --- 5. running validators and installing -----------------------------------------------------------------------
@@ -297,24 +308,67 @@ service_active() {
   systemctl is-active --quiet "$1"
 }
 
+# The OVH credential files: the staged ones when DNS mode is on, otherwise none (stale ones are removed).
+ovh_names() {
+  local pair
+  for pair in $OVH_FILES; do
+    printf '%s\n' "${pair#*:}"
+  done
+}
+
+# install_ovh <staged dir>: creates /etc/caddy/ovh (root:caddy 0750) and installs the files in it, or removes them all
+# when none are staged. Returns 1 on the first failure; the caller restores.
+install_ovh() {
+  local dir=$1 name
+  if [ -z "$(ls -A -- "$dir")" ]; then
+    for name in $(ovh_names); do
+      rm -f -- "$CADDY_OVH_DIR/$name"
+    done
+    rmdir -- "$CADDY_OVH_DIR" 2>/dev/null || true
+    return 0
+  fi
+  mkdir -p -- "$CADDY_OVH_DIR" && chmod 0750 "$CADDY_OVH_DIR" || return 1
+  if [ "$AS_ROOT" -eq 1 ]; then
+    chown root:caddy "$CADDY_OVH_DIR" || return 1
+  fi
+  for name in $(ovh_names); do
+    put_file "$dir/$name" "$CADDY_OVH_DIR/$name" 0640 root caddy || return 1
+  done
+}
+
 restore_caddy() {
+  local name
   restore_previous "$CADDYFILE" Caddyfile 0644 root root
   restore_previous "$CADDY_ENV" env 0640 root caddy
+  for name in $(ovh_names); do
+    restore_previous "$CADDY_OVH_DIR/$name" "ovh.$name" 0640 root caddy
+  done
+  rmdir -- "$CADDY_OVH_DIR" 2>/dev/null || true
 }
 
 apply_caddy() {
-  local changed_env=0
+  local changed_env=0 name
   stage_in Caddyfile "$PRIV/Caddyfile" || fail 'nothing staged: Caddyfile is missing' 66
   stage_in env "$PRIV/env" || fail 'nothing staged: env is missing' 66
   parse_caddy_env "$PRIV/env"
 
-  # The validator's own copies: the config, and the environment as a file only the caddy user can read.
-  cat -- "$PRIV/Caddyfile" >"$PUB/Caddyfile"
+  # The validator's own copies: the config, the environment as a file only the caddy user can read, and the OVH files.
+  # The Caddyfile names the live OVH directory; the copy names the validator's own, so the staged credentials are
+  # what gets resolved ({file.*} is read when Caddy provisions the DNS module, which `caddy validate` does too).
+  local live_ovh="${CADDY_OVH_DIR#"$ROOT"}/" text
+  text=$(cat -- "$PRIV/Caddyfile"; printf x)
+  text=${text%x}
+  printf '%s' "${text//"$live_ovh"/$PUB/ovh/}" >"$PUB/Caddyfile"
   chmod 0644 "$PUB/Caddyfile"
   cat -- "$PRIV/env.canon" >"$PUB/env"
   chmod 0640 "$PUB/env"
+  mkdir -p "$PUB/ovh"
+  chmod 0750 "$PUB/ovh"
+  cp -- "$PRIV/env.ovh/"* "$PUB/ovh/" 2>/dev/null || true
+  chmod 0640 "$PUB/ovh/"* 2>/dev/null || true
   if [ "$AS_ROOT" -eq 1 ]; then
-    chown root:caddy "$PUB/env"
+    chown root:caddy "$PUB/env" "$PUB/ovh"
+    chown root:caddy "$PUB/ovh/"* 2>/dev/null || true
   fi
 
   if ! validator_run caddy "$T_VALIDATE" "$PUB/env" -- caddy validate --config "$PUB/Caddyfile" --adapter caddyfile >"$PRIV/validate.out" 2>&1; then
@@ -322,31 +376,35 @@ apply_caddy() {
     fail 'caddy validate rejected the staged Caddyfile; nothing was installed'
   fi
 
-  if ! cmp -s "$PRIV/env.canon" "$CADDY_ENV" 2>/dev/null; then
+  # Only the proxy secret needs a restart (Caddy reads its environment at start). The OVH files are read on every
+  # (re)load, and dropping the OVH_* lines an older apply left in the file changes nothing Caddy still uses.
+  if [ "$(grep -s '^FLEET_PROXY_SECRET=' "$CADDY_ENV" || true)" != "$(cat -- "$PRIV/env.canon")" ]; then
     changed_env=1
   fi
 
   keep_previous "$CADDYFILE" Caddyfile
   keep_previous "$CADDY_ENV" env
-  if ! put_file "$PRIV/Caddyfile" "$CADDYFILE" 0644 root root || ! put_file "$PRIV/env.canon" "$CADDY_ENV" 0640 root caddy; then
+  for name in $(ovh_names); do
+    keep_previous "$CADDY_OVH_DIR/$name" "ovh.$name"
+  done
+  if ! install_ovh "$PRIV/env.ovh" || ! put_file "$PRIV/Caddyfile" "$CADDYFILE" 0644 root root || ! put_file "$PRIV/env.canon" "$CADDY_ENV" 0640 root caddy; then
     restore_caddy
-    fail 'could not install the files; the previous Caddyfile and environment were restored'
+    fail 'could not install the files; the previous Caddyfile, environment and OVH credentials were restored'
   fi
 
   if service_active caddy; then
     if [ "$changed_env" -eq 1 ]; then
-      # Caddy reads its environment only when it starts. A reload would hand the new Caddyfile to a process that still has
-      # the old environment: every new {env.X} placeholder (the OVH credentials a switch to DNS-01 introduces) would resolve to
-      # nothing, and the module could reject the empty values, so the switch could never succeed. A restart loads Caddyfile
-      # and environment together; the validation above already ran with the new environment. It is deferred because the
-      # reply to the caller must not be cut by it (the caller is usually a request that Caddy proxies).
+      # Caddy reads its environment only when it starts, and the proxy secret is still an {env.X} placeholder. A reload
+      # would hand the new Caddyfile to a process that still has the old secret. A restart loads Caddyfile and environment
+      # together; the validation above already ran with the new environment. It is deferred because the reply to the
+      # caller must not be cut by it (the caller is usually a request that Caddy proxies).
       systemd-run --on-active=3 --quiet systemctl restart caddy ||
         fail 'the new files are installed, but the restart of caddy could not be scheduled; run: systemctl restart caddy'
       printf 'apply: caddy restarts in 3 s to load its new environment\n'
     elif ! timeout "$T_RELOAD" systemctl reload caddy; then
       restore_caddy
       timeout "$T_RELOAD" systemctl reload caddy || printf 'apply: the reload after the rollback failed as well\n' >&2
-      fail 'caddy rejected the reload; the previous Caddyfile and environment were restored'
+      fail 'caddy rejected the reload; the previous Caddyfile, environment and OVH credentials were restored'
     fi
   else
     printf 'apply: caddy is not running; the files are installed and the next start uses them\n'

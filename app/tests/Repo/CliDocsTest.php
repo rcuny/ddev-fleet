@@ -4,16 +4,31 @@ declare(strict_types=1);
 
 namespace App\Tests\Repo;
 
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/projects-and-templates.md must describe the project, template and port commands as they are: every command and
- * option is documented, and the guide names nothing the code does not have. The commands live in sub-directories of
+ * docs/projects-and-templates.md and docs/instances-and-jobs.md must describe their commands as they are: every command
+ * and option is documented, and the guide names nothing the code does not have. The commands live in sub-directories of
  * App\Command (so that InstallDocsTest, which covers the flat ones in docs/installation.md, stays out of it).
  */
 final class CliDocsTest extends TestCase
 {
-    private const string GUIDE = 'docs/projects-and-templates.md';
+    /** guide => the App\Command sub-directories it covers (the groups are the same names, lower case). */
+    private const array GUIDES = [
+        'docs/projects-and-templates.md' => ['Project', 'Template', 'Port'],
+        'docs/instances-and-jobs.md' => ['Instance', 'Job'],
+    ];
+
+    /**
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function guides(): iterable
+    {
+        foreach (self::GUIDES as $guide => $directories) {
+            yield $guide => [$guide, $directories];
+        }
+    }
 
     private static function root(): string
     {
@@ -29,12 +44,14 @@ final class CliDocsTest extends TestCase
     }
 
     /**
+     * @param list<string> $directories
+     *
      * @return array{commands: list<string>, options: list<string>, arguments: list<string>}
      */
-    private static function cli(): array
+    private static function cli(array $directories): array
     {
         $files = [];
-        foreach (['Project', 'Template', 'Port', 'Support'] as $directory) {
+        foreach ([...$directories, 'Support'] as $directory) {
             array_push($files, ...(glob(self::root().'/app/src/Command/'.$directory.'/*.php') ?: []));
         }
         self::assertNotEmpty($files);
@@ -56,9 +73,7 @@ final class CliDocsTest extends TestCase
             preg_match_all("/addArgument\('([a-z][a-z-]*)'/", $source, $found);
             array_push($arguments, ...$found[1]);
         }
-        self::assertGreaterThanOrEqual(13, \count($commands), 'every project, template and port command has an AsCommand name');
-        self::assertContains('--no-typesense', $options, 'a negatable option is also documented as --no-<name>');
-        self::assertContains('--yes', $options);
+        self::assertGreaterThanOrEqual(\count($directories) * 2, \count($commands), 'every command has an AsCommand name');
         self::assertContains('--json', $options);
 
         return [
@@ -68,10 +83,14 @@ final class CliDocsTest extends TestCase
         ];
     }
 
-    public function testEveryCommandAndOptionIsDocumented(): void
+    /**
+     * @param list<string> $directories
+     */
+    #[DataProvider('guides')]
+    public function testEveryCommandAndOptionIsDocumented(string $file, array $directories): void
     {
-        $guide = self::read(self::GUIDE);
-        $cli = self::cli();
+        $guide = self::read($file);
+        $cli = self::cli($directories);
 
         foreach ($cli['commands'] as $command) {
             // `fleet:project:create` is documented as the host command `fleet project:create`.
@@ -85,25 +104,30 @@ final class CliDocsTest extends TestCase
         }
     }
 
-    public function testTheGuideNamesNothingThatDoesNotExist(): void
+    /**
+     * @param list<string> $directories
+     */
+    #[DataProvider('guides')]
+    public function testTheGuideNamesNothingThatDoesNotExist(string $file, array $directories): void
     {
-        $guide = self::read(self::GUIDE);
-        $cli = self::cli();
+        $guide = self::read($file);
+        $cli = self::cli($directories);
 
         // Flags of other programs the guide mentions: none today.
         preg_match_all('/(?<![\w-])(--[a-z][a-z0-9-]*)/', $guide, $flags);
         self::assertSame([], array_values(array_diff(array_unique($flags[1]), $cli['options'])), 'the guide names options nothing implements');
 
         $known = array_map(static fn (string $command): string => substr($command, \strlen('fleet:')), $cli['commands']);
-        preg_match_all('/\bfleet:(?:project|template|port):[a-z-]+/', $guide, $full);
+        $groups = implode('|', array_map(strtolower(...), $directories));
+        preg_match_all('/\bfleet:(?:'.$groups.'):[a-z-]+/', $guide, $full);
         self::assertSame([], array_values(array_diff(array_unique($full[0]), $cli['commands'])), 'the guide names commands that do not exist');
-        preg_match_all('/\bfleet (?:project|template|port)[: ]([a-z-]+)/', $guide, $short, \PREG_SET_ORDER);
+        preg_match_all('/\bfleet (?:'.$groups.')[: ]([a-z-]+)/', $guide, $short, \PREG_SET_ORDER);
         foreach ($short as $match) {
-            $group = preg_replace('/^fleet (project|template|port).*$/', '$1', $match[0]);
+            $group = preg_replace('/^fleet ('.$groups.').*$/', '$1', $match[0]);
             self::assertContains($group.':'.$match[1], $known, "the guide shows `{$match[0]}`, which is not a command");
         }
         // The guide's own <argument> placeholders must be arguments or the documented values of an option.
-        preg_match_all('/`fleet (?:project|template|port):[a-z-]+((?: <[a-z-]+>| \[<[a-z-]+>\])*)/', $guide, $usages);
+        preg_match_all('/`fleet (?:'.$groups.'):[a-z-]+((?: <[a-z-]+>| \[<[a-z-]+>\])*)/', $guide, $usages);
         foreach ($usages[1] as $placeholders) {
             preg_match_all('/<([a-z-]+)>/', $placeholders, $names);
             foreach ($names[1] as $name) {
@@ -112,9 +136,13 @@ final class CliDocsTest extends TestCase
         }
     }
 
-    public function testEveryExitCodeAndFormatIsDocumented(): void
+    /**
+     * @param list<string> $directories
+     */
+    #[DataProvider('guides')]
+    public function testEveryExitCodeAndFormatIsDocumented(string $file, array $directories): void
     {
-        $guide = self::read(self::GUIDE);
+        $guide = self::read($file);
 
         $source = (string) file_get_contents(self::root().'/app/src/Command/Support/JsonOutput.php');
         preg_match_all('/public const int ([A-Z_]+) = (\d);/', $source, $codes, \PREG_SET_ORDER);
@@ -127,9 +155,13 @@ final class CliDocsTest extends TestCase
         }
     }
 
-    public function testExamplesAreNeutral(): void
+    /**
+     * @param list<string> $directories
+     */
+    #[DataProvider('guides')]
+    public function testExamplesAreNeutral(string $file, array $directories): void
     {
-        $guide = self::read(self::GUIDE);
+        $guide = self::read($file);
 
         // Owner host names and client names are caught by RepoHygieneTest, which scans this file too; here the generic rules.
         self::assertStringNotContainsString('/var/www', $guide);
@@ -167,5 +199,28 @@ final class CliDocsTest extends TestCase
         }
         // The convention that keeps the browser and the commands in step.
         self::assertStringContainsString('never validate on their own', $claude);
+    }
+
+    public function testTheChangelogDescribesTheInstancesAndJobs(): void
+    {
+        $unreleased = UnreleasedChangelog::text(self::root());
+
+        foreach (['FLE-38', 'fleet instance:', 'job:', 'docs/instances-and-jobs.md', 'Mercure'] as $needle) {
+            self::assertStringContainsString($needle, $unreleased, "[Unreleased] should mention $needle");
+        }
+    }
+
+    public function testTheIndexesAndAgentInstructionsPointAtTheInstancesGuide(): void
+    {
+        foreach (['README.md', 'docs/README.md', 'CLAUDE.md'] as $file) {
+            self::assertStringContainsString('instances-and-jobs.md', self::read($file), "$file should link the guide");
+        }
+        $claude = self::read('CLAUDE.md');
+        foreach ([
+            'App\Domain\Instance', 'App\Domain\Job', 'App\Fleet\Jobs', 'App\Fleet\Instances', 'App\Fleet\Git', 'App\Fleet\Ddev',
+            'App\Command\Instance', 'App\Command\Job', 'App\Message', 'InstanceService', 'JobExecutor', 'sync://',
+        ] as $needle) {
+            self::assertStringContainsString($needle, $claude, "CLAUDE.md should list $needle");
+        }
     }
 }

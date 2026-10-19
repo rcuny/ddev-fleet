@@ -1,0 +1,11 @@
+{#- The status badge of a job. Needs: status (JobStatus). -#}
+{%- set value = status.value -%}
+{%- if value == 'succeeded' -%}
+    <twig:Badge data-testid="job-status" data-status="{{ value }}" class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">{{ value }}</twig:Badge>
+{%- elseif value == 'failed' -%}
+    <twig:Badge data-testid="job-status" data-status="{{ value }}" variant="destructive">{{ value }}</twig:Badge>
+{%- elseif value == 'running' or value == 'interrupted' -%}
+    <twig:Badge data-testid="job-status" data-status="{{ value }}" class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">{{ value }}</twig:Badge>
+{%- else -%}
+    <twig:Badge data-testid="job-status" data-status="{{ value }}" variant="secondary">{{ value }}</twig:Badge>
+{%- endif -%}

@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { expectNoBlockingViolations } from './support/axe';
 import { setStandInRole } from './support/standIn';
 import { ADMIN_NAV, hasHorizontalOverflow } from './support/shell';
 
@@ -13,6 +14,7 @@ test.describe('phone navigation (390 px)', () => {
       await page.waitForLoadState('networkidle');
 
       expect(await hasHorizontalOverflow(page)).toBe(false);
+      await expectNoBlockingViolations(page, `phone, ${path}`);
     });
   }
 

@@ -34,6 +34,11 @@ final readonly class FieldErrors
         return new self(['project', 'name']);
     }
 
+    public static function instance(): self
+    {
+        return new self(['project', 'template', 'id']);
+    }
+
     public static function secret(): self
     {
         return new self(['name', 'value']);

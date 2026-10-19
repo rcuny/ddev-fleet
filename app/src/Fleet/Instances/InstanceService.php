@@ -272,9 +272,14 @@ final class InstanceService
     }
 
     /**
+     * The instances a selector names (explicit ids, or --all / a project / a state).
+     *
      * @return list<Instance>
+     *
+     * @throws ValidationFailed
+     * @throws NotFound
      */
-    private function resolve(Selector $selector): array
+    public function resolve(Selector $selector): array
     {
         $bySelector = $selector->all || null !== $selector->project || null !== $selector->state;
         if ([] !== $selector->ids && $bySelector) {

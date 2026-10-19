@@ -1,9 +1,31 @@
-{# The delivery log. Needs: deliveries, hideIgnored, filterUrl (the page without the filter query), showProject (bool). #}
+{# The delivery log. Needs: deliveries, hideIgnored, filterUrl (the page without the filter query), showProject (bool), filter ({source, result}), results (the result names). #}
 <section class="grid gap-4" aria-labelledby="deliveries-title" data-testid="webhook-deliveries">
     <div class="flex flex-wrap items-center justify-between gap-2">
         <h2 id="deliveries-title" class="text-lg">Deliveries</h2>
         <a href="{{ hideIgnored ? filterUrl : filterUrl ~ '?hide-ignored=1' }}" class="inline-flex min-h-11 items-center text-sm" data-testid="webhook-filter">{{ hideIgnored ? 'Show ignored' : 'Hide ignored' }}</a>
     </div>
+    <form method="get" action="{{ filterUrl }}" class="flex flex-wrap items-end gap-3" data-testid="delivery-filters" aria-label="Filter deliveries">
+        {% if hideIgnored %}<input type="hidden" name="hide-ignored" value="1">{% endif %}
+        <div class="grid gap-1">
+            <twig:Label for="filter-source">Source</twig:Label>
+            <twig:NativeSelect id="filter-source" name="source" class="h-11 md:h-8">
+                <twig:NativeSelect:Option value="">Any</twig:NativeSelect:Option>
+                <twig:NativeSelect:Option value="jira" :selected="filter.source == 'jira'">Jira</twig:NativeSelect:Option>
+                <twig:NativeSelect:Option value="bitbucket" :selected="filter.source == 'bitbucket'">Bitbucket</twig:NativeSelect:Option>
+            </twig:NativeSelect>
+        </div>
+        <div class="grid gap-1">
+            <twig:Label for="filter-result">Outcome</twig:Label>
+            <twig:NativeSelect id="filter-result" name="result" class="h-11 md:h-8">
+                <twig:NativeSelect:Option value="">Any</twig:NativeSelect:Option>
+                {% for r in results %}
+                    <twig:NativeSelect:Option :value="r" :selected="filter.result == r">{{ r|capitalize }}</twig:NativeSelect:Option>
+                {% endfor %}
+            </twig:NativeSelect>
+        </div>
+        <twig:Button type="submit" variant="outline" class="h-11 md:h-8" data-testid="delivery-filter-apply">Filter</twig:Button>
+        {% if filter.source or filter.result %}<a href="{{ hideIgnored ? filterUrl ~ '?hide-ignored=1' : filterUrl }}" class="inline-flex min-h-11 items-center text-sm" data-testid="delivery-filter-clear">Clear filters</a>{% endif %}
+    </form>
     {% if deliveries is empty %}
         <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="deliveries-empty">No delivery has arrived yet.</p>
     {% else %}
@@ -17,6 +39,7 @@
                     <twig:Table:Head>Subject</twig:Table:Head>
                     <twig:Table:Head>Result</twig:Table:Head>
                     <twig:Table:Head class="hidden md:table-cell">Decision</twig:Table:Head>
+                    <twig:Table:Head class="hidden md:table-cell">Outcome</twig:Table:Head>
                 </twig:Table:Row>
             </twig:Table:Header>
             <twig:Table:Body>
@@ -38,10 +61,13 @@
                             {% else %}
                                 <twig:Badge variant="outline">{{ d.result }}</twig:Badge>
                             {% endif %}
+                            {% if d.jobId %}<span class="block text-xs text-ink-muted" data-testid="delivery-job">job #{{ d.jobId }}</span>{% endif %}
+                            {% if d.reason %}<span class="block text-xs text-ink-muted [overflow-wrap:anywhere] md:hidden" data-testid="delivery-outcome-phone">{{ d.reason }}</span>{% endif %}
                         </twig:Table:Cell>
-                        <twig:Table:Cell class="hidden text-xs md:table-cell [overflow-wrap:anywhere]" data-testid="delivery-decision">
-                            {{ d.decision ?? d.reason }}
-                            {% if d.decision and d.reason %}<span class="block text-ink-muted">{{ d.reason }}</span>{% endif %}
+                        <twig:Table:Cell class="hidden text-xs md:table-cell [overflow-wrap:anywhere]" data-testid="delivery-decision">{{ d.decision }}</twig:Table:Cell>
+                        <twig:Table:Cell class="hidden text-xs md:table-cell [overflow-wrap:anywhere]" data-testid="delivery-outcome">
+                            {% if d.jobId %}<span class="block">job #{{ d.jobId }}</span>{% endif %}
+                            {{ d.reason }}
                         </twig:Table:Cell>
                     </twig:Table:Row>
                 {% endfor %}

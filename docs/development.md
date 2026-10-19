@@ -67,7 +67,7 @@ with `curl http://127.0.0.1:8000/health`:
 | `FLEET_PROFILER_TOOLBAR` | `1` | `0` hides the Symfony toolbar in `dev` (it would cover the phone bottom bar) |
 | `DATABASE_URL`, `QUEUE_DATABASE_URL` | `FLEET_HOME/var/fleet.sqlite`, `…/queue.sqlite` | The two SQLite databases |
 | `LOCK_DSN` | `flock://FLEET_HOME/locks` | Symfony Lock store |
-| `MERCURE_URL`, `MERCURE_PUBLIC_URL`, `MERCURE_JWT_SECRET`, `MERCURE_JWT_ISSUER` | hub on `127.0.0.1:3000`; dev/test secrets in `.env.dev` / `.env.test` | Mercure wiring. No hub is started by these commands and nothing publishes yet |
+| `MERCURE_URL`, `MERCURE_PUBLIC_URL`, `MERCURE_JWT_SECRET`, `MERCURE_JWT_ISSUER` | hub on `127.0.0.1:3000`; dev/test secrets in `.env.dev` / `.env.test` | Mercure wiring. No hub is started by these commands; the pages fall back to polling the log, and the job pages work without one |
 | `FLEET_E2E_BASE_URL` | unset | Playwright: target an already-running server instead of starting one |
 | `FLEET_E2E_PORT`, `FLEET_PHP`, `FLEET_E2E_IGNORE_HTTPS_ERRORS` | `8000`, `php8.4` or `php`, unset | Playwright: port of the self-started app, its PHP binary, accept a local certificate |
 

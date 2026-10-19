@@ -1,0 +1,80 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Jobs · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Jobs" description="Everything the fleet has run: deploys, starts, stops and the rest. Finished jobs are kept for 90 days." />
+
+    <form method="get" action="{{ path('jobs') }}" class="mt-6 mb-4 grid gap-2 md:grid-cols-[repeat(3,auto)_minmax(0,1fr)_auto]" data-testid="job-filters">
+        <twig:NativeSelect name="status" aria-label="Status" class="w-full md:w-40 [&_select]:h-11 md:[&_select]:h-8">
+            <twig:NativeSelect:Option value="">Any status</twig:NativeSelect:Option>
+            {% for status in statuses %}
+                <twig:NativeSelect:Option value="{{ status.value }}" selected="{{ filters.status == status.value ? 'selected' : null }}">{{ status.value|capitalize }}</twig:NativeSelect:Option>
+            {% endfor %}
+        </twig:NativeSelect>
+        <twig:NativeSelect name="trigger" aria-label="Trigger" class="w-full md:w-40 [&_select]:h-11 md:[&_select]:h-8">
+            <twig:NativeSelect:Option value="">Any trigger</twig:NativeSelect:Option>
+            {% for trigger in triggers %}
+                <twig:NativeSelect:Option value="{{ trigger.value }}" selected="{{ filters.trigger == trigger.value ? 'selected' : null }}">{{ trigger.value|capitalize }}</twig:NativeSelect:Option>
+            {% endfor %}
+        </twig:NativeSelect>
+        <twig:NativeSelect name="type" aria-label="Type" class="w-full md:w-40 [&_select]:h-11 md:[&_select]:h-8">
+            <twig:NativeSelect:Option value="">Any type</twig:NativeSelect:Option>
+            {% for type in types %}
+                <twig:NativeSelect:Option value="{{ type }}" selected="{{ filters.type == type ? 'selected' : null }}">{{ type|capitalize }}</twig:NativeSelect:Option>
+            {% endfor %}
+        </twig:NativeSelect>
+        <twig:Input type="search" name="q" value="{{ filters.q }}" placeholder="Job number, instance or project" aria-label="Search jobs" class="h-11 md:h-8" />
+        <twig:Button type="submit" variant="outline" class="h-11 md:h-8">Filter</twig:Button>
+        {% if filters.project %}<input type="hidden" name="project" value="{{ filters.project }}">{% endif %}
+        {% if filters.instance %}<input type="hidden" name="instance" value="{{ filters.instance }}">{% endif %}
+    </form>
+
+    {% if rows|length == 0 %}
+        <twig:Card data-testid="jobs-empty" class="max-w-xl">
+            <twig:Card:Header>
+                <twig:Card:Title>No jobs</twig:Card:Title>
+                <twig:Card:Description>{{ total == 0 and page == 1 ? 'Nothing has run yet, or no job matches the filters.' : 'There are no jobs on this page.' }}</twig:Card:Description>
+            </twig:Card:Header>
+        </twig:Card>
+    {% else %}
+        <div class="rounded-md border border-hairline">
+            <table class="block w-full text-sm md:table" data-testid="job-table">
+                <twig:Table:Header class="hidden md:table-header-group">
+                    <twig:Table:Row>
+                        <twig:Table:Head>Job</twig:Table:Head>
+                        <twig:Table:Head>Target</twig:Table:Head>
+                        <twig:Table:Head>Trigger</twig:Table:Head>
+                        <twig:Table:Head>Status</twig:Table:Head>
+                        <twig:Table:Head>Queued (UTC)</twig:Table:Head>
+                    </twig:Table:Row>
+                </twig:Table:Header>
+                <twig:Table:Body class="block divide-y divide-hairline md:table-row-group md:divide-y-0">
+                    {% for job in rows %}
+                        <twig:Table:Row data-testid="job-row" data-job="{{ job.id }}" class="flex flex-col gap-1 p-3 md:table-row md:p-0">
+                            <twig:Table:Cell class="block p-0 md:table-cell md:p-2">
+                                <a href="{{ path('job_show', {id: job.id}) }}" class="inline-flex min-h-11 items-center font-medium md:min-h-0">#{{ job.id }} {{ job.type }}</a>
+                            </twig:Table:Cell>
+                            <twig:Table:Cell class="block p-0 whitespace-normal [overflow-wrap:anywhere] md:table-cell md:p-2">{{ job.instanceId ?? job.projectName ?? '' }}</twig:Table:Cell>
+                            <twig:Table:Cell class="block p-0 md:table-cell md:p-2">{{ job.trigger.value }}</twig:Table:Cell>
+                            <twig:Table:Cell class="block p-0 md:table-cell md:p-2">{{ include('jobs/_status.html.twig', {status: job.status}) }}</twig:Table:Cell>
+                            <twig:Table:Cell class="block p-0 text-ink-muted md:table-cell md:p-2">{{ job.createdAt|date('Y-m-d H:i') }}</twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% endfor %}
+                </twig:Table:Body>
+            </table>
+        </div>
+    {% endif %}
+
+    {% if page > 1 or hasNext %}
+        <nav class="mt-4 flex items-center justify-between gap-2" aria-label="Pages">
+            {% if page > 1 %}
+                <twig:Button as="a" variant="outline" class="h-11 md:h-8" href="{{ path('jobs', filters|merge({page: page - 1})) }}" data-testid="jobs-previous">Previous</twig:Button>
+            {% else %}<span></span>{% endif %}
+            <span class="text-sm text-ink-muted">Page {{ page }}</span>
+            {% if hasNext %}
+                <twig:Button as="a" variant="outline" class="h-11 md:h-8" href="{{ path('jobs', filters|merge({page: page + 1})) }}" data-testid="jobs-next">Next</twig:Button>
+            {% else %}<span></span>{% endif %}
+        </nav>
+    {% endif %}
+{% endblock %}

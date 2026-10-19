@@ -36,6 +36,7 @@ final class WebhookListCommand extends Command
                 'project' => $e->project()->name(),
                 'source' => $e->source()->value,
                 'url' => $this->urls->url($e->source(), $e->project()->name()),
+                'token' => $e->hasToken(),
                 'rotated_at' => $e->rotatedAt()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'),
                 'rules' => array_map(static fn ($r): array => ['id' => $r->id(), 'action' => $r->action(), 'match' => $r->match(), 'params' => $r->params()], $e->rules()),
             ], $this->webhooks->endpoints());
@@ -45,8 +46,8 @@ final class WebhookListCommand extends Command
 
                     return;
                 }
-                $out->table(['PROJECT', 'SOURCE', 'URL', 'RULES'], array_map(
-                    static fn (array $r): array => [$r['project'], $r['source'], $r['url'], \count($r['rules'])],
+                $out->table(['PROJECT', 'SOURCE', 'URL', 'RULES', 'TOKEN'], array_map(
+                    static fn (array $r): array => [$r['project'], $r['source'], $r['url'], \count($r['rules']), $r['token'] ? 'set' : '-'],
                     $rows,
                 ));
             });

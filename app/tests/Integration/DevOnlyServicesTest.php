@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Tests\Integration;
 
 use App\Domain\Project\ProjectMembership;
+use App\Fleet\Jobs\Dev\FakeJobType;
+use App\Fleet\Jobs\JobTypeRegistry;
 use App\Security\StandIn\StandInProjectMembership;
 use App\Ui\ProfilerToolbarSwitch;
+use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 /**
@@ -31,5 +34,18 @@ final class DevOnlyServicesTest extends KernelTestCase
         self::bootKernel();
 
         self::assertInstanceOf(StandInProjectMembership::class, self::getContainer()->get(ProjectMembership::class));
+    }
+
+    /**
+     * The fake job and its command exist in test (the Playwright specs use them in dev); the prod container check is in
+     * ProdKernelSecurityTest.
+     */
+    public function testTheFakeJobIsRegisteredInTest(): void
+    {
+        $kernel = self::bootKernel();
+
+        self::assertInstanceOf(FakeJobType::class, self::getContainer()->get(JobTypeRegistry::class)->get('fake'));
+        $application = new Application($kernel);
+        self::assertTrue($application->has('fleet:dev:fake-job'));
     }
 }

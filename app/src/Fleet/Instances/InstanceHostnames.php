@@ -19,6 +19,20 @@ final readonly class InstanceHostnames
     {
     }
 
+    /**
+     * How many characters the longest alias adds in front of an instance id (`<hostname>-`): the id must be that much
+     * shorter than 63 for every alias to fit.
+     */
+    public static function longestPrefix(Project $project): int
+    {
+        $longest = 0;
+        foreach ($project->additionalHostnames() as $hostname) {
+            $longest = max($longest, \strlen($hostname) + 1);
+        }
+
+        return $longest;
+    }
+
     public function primary(string $id): string
     {
         return $id.'.'.$this->domain();

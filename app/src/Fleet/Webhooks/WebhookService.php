@@ -27,6 +27,9 @@ final readonly class WebhookService
     private const string PIPELINE_PATTERN = '/^[A-Za-z0-9_.-]{1,100}$/D';
     private const string STATE_PATTERN = '/^[A-Za-z_]{1,40}$/D';
     private const string LABEL_PATTERN = '/^[a-z0-9]([a-z0-9-]{0,38}[a-z0-9])?$/D';
+    private const string LABEL_PREFIX_PATTERN = '/^[a-z0-9][a-z0-9-]{0,19}$/D';
+    private const string SUFFIX_PATTERN = '/^[A-Za-z0-9._\/-]{1,60}$/D';
+    private const string TOKEN_PATTERN = '/^[\x21-\x7E]{1,2048}$/D';
     private const int TEXT_MAX = 200;
 
     public function __construct(
@@ -76,6 +79,51 @@ final readonly class WebhookService
         $this->webhooks->saveRule($rule);
 
         return $rule;
+    }
+
+    /**
+     * Stores the Bitbucket `pipeline:write` token a run-pipeline rule calls the API with (replacing any earlier one).
+     * The token is sealed and is not readable again by this service, a page, a command or a log.
+     *
+     * @throws NotFound
+     * @throws ValidationFailed
+     */
+    public function setPipelineToken(string $projectName, #[\SensitiveParameter] string $token): void
+    {
+        $endpoint = $this->bitbucketEndpoint($projectName);
+        $token = trim($token);
+        if (1 !== preg_match(self::TOKEN_PATTERN, $token)) {
+            // Never echoes the value: it is a secret even when it is the wrong one.
+            throw new ValidationFailed(['token' => 'Enter the access token: printable characters without spaces, at most 2048.']);
+        }
+        $this->secrets->storeToken($endpoint, $token);
+    }
+
+    /**
+     * @return bool whether a token was stored
+     *
+     * @throws NotFound
+     */
+    public function clearPipelineToken(string $projectName): bool
+    {
+        $endpoint = $this->bitbucketEndpoint($projectName);
+        if (!$endpoint->hasToken()) {
+            return false;
+        }
+        $this->secrets->forgetToken($endpoint);
+
+        return true;
+    }
+
+    /**
+     * @throws NotFound
+     */
+    private function bitbucketEndpoint(string $projectName): WebhookEndpoint
+    {
+        $this->project($projectName);
+
+        return $this->webhooks->endpoint($projectName, WebhookSource::Bitbucket)
+            ?? throw new NotFound(\sprintf('%s has no Bitbucket webhook yet: create its secret first.', $projectName));
     }
 
     /**
@@ -158,18 +206,22 @@ final readonly class WebhookService
             $errors['branch'] = 'A deploy rule needs the branch glob to deploy.';
         }
 
-        return $errors + $this->deployErrors($project, $params, true);
+        return $errors + $this->deployErrors($project, $params, true, $match);
     }
 
     /**
      * @param array<string, string> $params
+     * @param array<string, string> $match
      *
      * @return array<string, string>
      */
-    private function deployErrors(Project $project, array $params, bool $labelAllowed): array
+    private function deployErrors(Project $project, array $params, bool $labelAllowed, array $match = []): array
     {
         $errors = [];
         $template = $params['template'] ?? '';
+        if (!$labelAllowed && (isset($params['label_prefix']) || isset($params['strip_suffix']))) {
+            $errors['labelPrefix'] = 'A Jira rule names its instance after the issue key.';
+        }
         if (!\in_array($template, $this->projects->templateNames($project), true)) {
             $errors['template'] = 'Choose one of the project\'s templates.';
         }
@@ -178,6 +230,24 @@ final readonly class WebhookService
         }
         if (isset($params['label']) && (!$labelAllowed || 1 !== preg_match(self::LABEL_PATTERN, $params['label']))) {
             $errors['label'] = 'Use lowercase letters, digits and single dashes, at most 40 characters.';
+        }
+        if (!$labelAllowed) {
+            return $errors;
+        }
+        if (isset($params['label'], $params['label_prefix']) || isset($params['label'], $params['strip_suffix'])) {
+            $errors['label'] = 'A fixed label cannot be combined with a label prefix or a suffix to strip.';
+        }
+        if (isset($params['label_prefix']) && 1 !== preg_match(self::LABEL_PREFIX_PATTERN, $params['label_prefix'])) {
+            $errors['labelPrefix'] = 'Use lowercase letters, digits and dashes, at most 20 characters.';
+        }
+        if (isset($params['strip_suffix'])) {
+            if (1 !== preg_match(self::SUFFIX_PATTERN, $params['strip_suffix'])) {
+                $errors['stripSuffix'] = 'Enter the literal text to remove from the end of the branch.';
+            } elseif (!isset($params['label_prefix'])) {
+                $errors['stripSuffix'] = 'A suffix to strip needs a label prefix too.';
+            } elseif (!str_ends_with($match['branch'] ?? '', $params['strip_suffix'])) {
+                $errors['stripSuffix'] = 'The branch glob must end with the suffix to strip.';
+            }
         }
 
         return $errors;

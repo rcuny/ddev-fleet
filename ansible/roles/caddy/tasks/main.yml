@@ -427,7 +427,9 @@
     dest: "{{ fleet_caddy_snippet_dir }}/tls.conf"
     owner: root
     group: caddy
-    # 0644: no secrets inside (runtime {env.*} placeholders only), and the
+    # 0644: no secrets inside (runtime {env.*} placeholders only; the 1.x helper
+    # `apply caddy` uses {file.*} instead, FLE-49: this role serves the v0.x
+    # fleet on live hosts and stays on /etc/caddy/fleet.env), and the
     # fleet daemon's own `caddy validate` runs as `fleet`, which must read it.
     mode: "0644"
   notify: Reload caddy
