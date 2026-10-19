@@ -10,7 +10,9 @@ export default defineConfig({
   retries: 0,
   reporter: [['list'], ['html', { open: 'never' }]],
   outputDir: 'test-results',
-  expect: { timeout: 10_000 },
+  // Axe and the design-system page are CPU-heavy: next to other workers on a busy host (the companion shares its CPUs) a 5 s test passes 30 s.
+  timeout: 60_000,
+  expect: { timeout: 20_000 },
   use: {
     baseURL,
     trace: 'retain-on-failure',
