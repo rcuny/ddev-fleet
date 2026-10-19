@@ -33,7 +33,7 @@
                                 <twig:Table:Cell>{{ run.occurrence|date('Y-m-d H:i:s', 'UTC') }}</twig:Table:Cell>
                                 <twig:Table:Cell data-testid="run-trigger">{{ run.trigger.value }}</twig:Table:Cell>
                                 <twig:Table:Cell data-testid="run-result">{{ row.result }}</twig:Table:Cell>
-                                <twig:Table:Cell class="font-mono" data-testid="run-job">{% if run.jobId %}#{{ run.jobId }}{% else %}-{% endif %}</twig:Table:Cell>
+                                <twig:Table:Cell class="font-mono" data-testid="run-job">{% if run.jobId %}<a href="{{ path('job_show', {id: run.jobId}) }}" data-testid="run-job-link">#{{ run.jobId }}</a>{% else %}-{% endif %}</twig:Table:Cell>
                                 <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ run.detail ?? '' }}</twig:Table:Cell>
                             </twig:Table:Row>
                         {% endfor %}

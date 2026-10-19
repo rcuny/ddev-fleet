@@ -58,6 +58,7 @@ test.describe('schedules', () => {
 
       // Validation errors are shown next to the fields and nothing is created.
       await page.getByTestId('schedule-new').click();
+      await expect(page.getByTestId('schedule-actions')).toHaveText('Available actions: redeploy.');
       await page.getByLabel('Name', { exact: true }).fill(name);
       await page.getByLabel('Cron expression').fill('not a cron');
       await page.getByLabel('Timezone').fill('Mars/Base');
@@ -96,12 +97,14 @@ test.describe('schedules', () => {
       // Run now, then the history shows the manual run with its job.
       await submitAndWait(page, row.getByTestId('schedule-run'));
       await expect(page.getByTestId('flashes')).toContainText(/started job #\d+/);
+      await expect(row.getByTestId('schedule-last-job')).toHaveAttribute('href', /^\/jobs\/\d+$/);
       await row.getByTestId('schedule-history').click();
       await expect(page.getByRole('heading', { level: 1, name: `History of ${name}` })).toBeVisible();
       const run = page.getByTestId('schedule-run-row');
       await expect(run).toHaveCount(1);
       await expect(run.getByTestId('run-trigger')).toHaveText('manual');
       await expect(run.getByTestId('run-job')).toHaveText(/^#\d+$/);
+      await expect(run.getByTestId('run-job-link')).toHaveAttribute('href', /^\/jobs\/\d+$/);
       expect(await hasHorizontalOverflow(page), 'horizontal overflow on history').toBe(false);
       await expectNoBlockingViolations(page);
 

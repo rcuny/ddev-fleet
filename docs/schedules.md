@@ -32,14 +32,38 @@ All accept `--json`. Exit codes: `0` done, `1` a value was refused (`--cron`, `-
 - Cron times are read in the schedule's timezone. A time the spring-forward skips fires once, shifted past the gap. A
   time the fall-back repeats fires at its first pass when the expression names its hours (`30 2 * * *`); an expression
   that runs every hour (`0 * * * *`) keeps firing through the repeated hour.
-- The ticker runs every 30 seconds. An occurrence at most 90 seconds old is a `schedule` run. After downtime, only the
-  **most recent** missed occurrence fires, as a `catch-up` run, and only when it is at most 60 minutes old; an older one
-  is recorded as `missed` and nothing fires. Resuming a paused schedule and changing its timing never catch up.
+- The ticker runs every 30 seconds and records when each tick ended (table `scheduler_heartbeat`). An occurrence at most
+  90 seconds old is a `schedule` run. A `catch-up` run needs both: the occurrence is more than 90 seconds old **and** the
+  ticker was down, meaning the previous tick ended more than 90 seconds ago or there was none. A late occurrence while the
+  ticker was running (a slow tick, a retry after an error) stays a `schedule` run. After downtime, only the **most
+  recent** missed occurrence fires, as a `catch-up` run, and only when it is at most 60 minutes old; an older one is
+  recorded as `missed` and nothing fires. Resuming a paused schedule and changing its timing never catch up.
+- Orphaned runs: the ticker claims an occurrence, then queues the job. If it dies in between, the run stays `claimed`
+  with no job. Each tick finishes such a run, once it is older than 5 minutes, as `failed` with the detail "The ticker
+  stopped before the job was queued." It is never fired again (the claim consumed the occurrence), and a second tick
+  leaves it alone.
 - Each occurrence is claimed once (a unique key on schedule and occurrence), so two ticks racing fire one job.
 - Results, in the 0.x words: `claimed` (job queued), `started`, `succeeded`, `failed`, `skipped` (the instance was busy)
   and `missed`.
-- The only action is `redeploy` (the schedule's instance). Actions are a small registry
+- The only action is `redeploy` (the schedule's instance). The form and `fleet:schedule:create --help` list the
+  registered actions. Actions are a small registry
   (`App\Fleet\Schedules\ScheduleAction`, tag `fleet.schedule_action`); each builds its job through the generic job API.
+
+## Recipe: nightly redeploy
+
+Rebuild an instance every night at 03:00 Brussels time:
+
+```bash
+fleet schedule:create nightly-demo --cron "0 3 * * *" --timezone Europe/Brussels --action redeploy --instance demo--main
+fleet schedule:run nightly-demo     # try it now: prints "Started job N."
+fleet schedule:history nightly-demo # one row per night, with the job and how it ended
+```
+
+At 03:00 the ticker queues a `redeploy` job for the instance (trigger `schedule`, requested by `schedule:nightly-demo`)
+and the history row follows that job: `claimed` while queued, `started`, then `succeeded` or `failed`. If the instance
+has a queued or running job the run is `skipped` (with the reason); if the instance was destroyed it is `failed`. The
+history links each run to its job page. On the page, **Run now** does the same by hand and the schedule row links the
+last job.
 
 ## Running the ticker
 

@@ -109,6 +109,9 @@ final class SchedulePagesTest extends AdminTestCase
         self::assertResponseRedirects('/admin/schedules');
         $crawler = $this->client->followRedirect();
         self::assertMatchesRegularExpression('/started job #\d+/', $crawler->filter('[data-testid=flashes]')->text());
+        $lastJob = $crawler->filter('[data-testid=schedule-last-job]');
+        self::assertCount(1, $lastJob);
+        self::assertMatchesRegularExpression('#^/jobs/\d+$#', (string) $lastJob->attr('href'));
 
         $crawler = $this->open('/admin/schedules/nightly/history');
         self::assertResponseStatusCodeSame(200);
@@ -116,6 +119,14 @@ final class SchedulePagesTest extends AdminTestCase
         self::assertCount(1, $rows);
         self::assertSame('manual', trim($rows->filter('[data-testid=run-trigger]')->text()));
         self::assertMatchesRegularExpression('/^#\d+$/', trim($rows->filter('[data-testid=run-job]')->text()));
+        self::assertMatchesRegularExpression('#^/jobs/\d+$#', (string) $rows->filter('[data-testid=run-job-link]')->attr('href'));
+    }
+
+    public function testTheFormListsTheRegisteredActions(): void
+    {
+        $crawler = $this->open('/admin/schedules/new');
+
+        self::assertSame('Available actions: redeploy.', trim($crawler->filter('[data-testid=schedule-actions]')->text()));
     }
 
     public function testRunNowOfAVanishedInstanceFlashesTheFailure(): void
