@@ -131,7 +131,9 @@ final class ProdLogRedactionTest extends TestCase
         $this->console('doctrine:migrations:migrate');
         $this->console('fleet:host:init', ['--domain' => 'fleet.example.com']);
         $url = $this->console('fleet:setup:token');
-        self::assertSame(1, preg_match('/token=([A-Za-z0-9_-]+)/', $url, $match), 'the setup URL carries the token');
+        if (1 !== preg_match('/token=([A-Za-z0-9_-]+)/', $url, $match)) {
+            self::fail('The setup URL carries the token.');
+        }
         // Whatever the preparation logged is not the subject of the test.
         file_put_contents($this->logFile, '');
 

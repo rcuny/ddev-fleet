@@ -189,7 +189,7 @@ final class CaddyfileRendererTest extends TestCase
         $authAt = (int) strpos($out, "\nauth.fleet.example.com {");
         $domainAt = (int) strpos($out, "\nfleet.example.com {");
         $hsts = [];
-        preg_match_all('/Strict-Transport-Security "max-age=31536000"/', $out, $hsts, PREG_OFFSET_CAPTURE);
+        preg_match_all('/Strict-Transport-Security "max-age=31536000"/', $out, $hsts, \PREG_OFFSET_CAPTURE);
         self::assertGreaterThan($domainAt, $hsts[0][0][1]);
         self::assertLessThan($authAt, $hsts[0][0][1]);
         self::assertGreaterThan($authAt, $hsts[0][1][1]);
