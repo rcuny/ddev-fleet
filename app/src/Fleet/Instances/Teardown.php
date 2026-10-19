@@ -9,6 +9,7 @@ use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobLog;
+use App\Fleet\Workspace\Tmux;
 
 /**
  * Takes an instance's checkout and Caddy site away. Nothing here uses privilege: when files cannot be removed (a
@@ -22,6 +23,7 @@ final readonly class Teardown
         private FleetPaths $paths,
         private Ddev $ddev,
         private InstanceSiteWriter $sites,
+        private Tmux $tmux,
     ) {
     }
 
@@ -35,6 +37,7 @@ final readonly class Teardown
     {
         $dir = $this->paths->instanceDir($instance->id());
 
+        $this->closeWindow($instance, $log);
         if (is_dir($dir)) {
             try {
                 $result = $this->ddev->delete($dir, $instance->id(), $log->output(...));
@@ -47,6 +50,21 @@ final readonly class Teardown
         }
 
         $this->removeTree($dir, $log);
+    }
+
+    /**
+     * Closes the instance's tmux window. A destroy and a redeploy both pass here; the deploy builds a new window. A tmux
+     * that is missing or fails is a log line, never a failed job.
+     */
+    public function closeWindow(Instance $instance, JobLog $log): void
+    {
+        try {
+            if ($this->tmux->closeWindow($instance->id())) {
+                $log->line('closed the tmux window');
+            }
+        } catch (\Throwable $e) {
+            $log->line('WARNING: the tmux window could not be closed: '.$e->getMessage());
+        }
     }
 
     public function removeSite(Instance $instance): void

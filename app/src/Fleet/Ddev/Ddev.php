@@ -53,6 +53,14 @@ final readonly class Ddev
     }
 
     /**
+     * @param callable(string, string): void $onOutput
+     */
+    public function restart(string $dir, callable $onOutput, ?float $timeout = null): CommandResult
+    {
+        return $this->runner->run(['ddev', 'restart'], $dir, $this->env, $onOutput, $timeout ?? self::START_TIMEOUT);
+    }
+
+    /**
      * Removes the project's containers and database volume (the code stays). Runs in the checkout; when that has no
      * `.ddev/config.yaml`, or the first try fails, once more by project name. A failure is a result, not an exception.
      *

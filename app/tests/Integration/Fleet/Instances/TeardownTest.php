@@ -73,7 +73,7 @@ final class TeardownTest extends InstanceJobTestCase
 
         $this->teardown->removeCheckout($instance, $this->logFor($job));
 
-        self::assertSame([], $this->runner->calls(), 'nothing to delete, so ddev is not asked');
+        self::assertSame([], $this->runner->callsMatching(['ddev']), 'nothing to delete, so ddev is not asked');
     }
 
     public function testRemoveSiteDeletesTheSnippet(): void
