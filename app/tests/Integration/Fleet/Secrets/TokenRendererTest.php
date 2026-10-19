@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Fleet\Secrets;
 
+use App\Fleet\Jobs\RegisteredSecretsMasker;
 use App\Fleet\Secrets\SecretOpenFailed;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Secrets\TokenRenderer;
@@ -18,12 +19,13 @@ final class TokenRendererTest extends KernelTestCase
 
     private SecretStore $store;
     private TokenRenderer $renderer;
+    private RegisteredSecretsMasker $masker;
 
     protected function setUp(): void
     {
         $this->setUpFleetDatabase();
         $this->store = self::getContainer()->get(SecretStore::class);
-        $this->renderer = new TokenRenderer($this->store);
+        $this->renderer = new TokenRenderer($this->store, $this->masker = new RegisteredSecretsMasker());
     }
 
     protected function tearDown(): void
@@ -248,5 +250,24 @@ final class TokenRendererTest extends KernelTestCase
         $this->expectException(SecretOpenFailed::class);
 
         $this->renderer->render('[[api-key]]', null);
+    }
+
+    public function testEveryInsertedSecretIsRegisteredWithTheLogMasker(): void
+    {
+        $this->store->putManaged('blog', 'JIRA_CLAUDE_TOKEN', 'project-value-1', 'admin');
+        $this->store->putManaged(null, 'API_KEY', 'fleet-value-2', 'admin');
+
+        $this->renderer->render('[[jira-claude-token]] [[api-key]] [[builtin]] [[unknown]]', 'blog', ['builtin' => 'plain-built-in']);
+
+        self::assertSame('[masked] [masked] plain-built-in', $this->masker->mask('project-value-1 fleet-value-2 plain-built-in'));
+    }
+
+    public function testASecretThatIsNotUsedIsNotRegistered(): void
+    {
+        $this->store->putManaged(null, 'API_KEY', 'fleet-value-2', 'admin');
+
+        $this->renderer->render('no placeholder here', null);
+
+        self::assertSame('fleet-value-2', $this->masker->mask('fleet-value-2'));
     }
 }

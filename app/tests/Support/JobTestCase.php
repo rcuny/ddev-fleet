@@ -15,6 +15,7 @@ use App\Fleet\Jobs\JobLog;
 use App\Fleet\Jobs\JobService;
 use App\Fleet\Jobs\JobType;
 use App\Fleet\Jobs\JobTypeRegistry;
+use App\Fleet\Jobs\LogMasker;
 use App\Fleet\Jobs\LogReader;
 use App\Fleet\Jobs\NoLogMasker;
 use Doctrine\ORM\EntityManagerInterface;
@@ -70,7 +71,7 @@ abstract class JobTestCase extends KernelTestCase
     /**
      * @param list<JobType> $types
      */
-    protected function executor(array $types): JobExecutor
+    protected function executor(array $types, ?LogMasker $masker = null): JobExecutor
     {
         return new JobExecutor(
             $this->jobs,
@@ -79,7 +80,7 @@ abstract class JobTestCase extends KernelTestCase
             $this->locks,
             $this->bus,
             $this->paths,
-            new NoLogMasker(),
+            $masker ?? new NoLogMasker(),
             $this->feed,
             $this->clock,
             new NullLogger(),

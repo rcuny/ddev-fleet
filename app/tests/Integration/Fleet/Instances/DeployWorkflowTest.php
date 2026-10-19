@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Fleet\Instances;
 
 use App\Domain\Instance\InstanceState;
+use App\Fleet\Host\HostSecrets;
 use App\Fleet\Instances\DeployContext;
 use App\Fleet\Instances\DeployStep;
 use App\Fleet\Instances\StepPhase;
@@ -58,6 +59,24 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString(".ddev/config.fleet.yaml\n", $exclude);
         self::assertStringContainsString(".env\n", $exclude);
         self::assertFileExists($this->paths->instanceSiteFile('acme--main'));
+    }
+
+    public function testASecretTheDeployUsesNeverReachesTheJobLog(): void
+    {
+        $this->secretStore->putFleetWide(HostSecrets::CLAUDE_TOKEN, 'tok-claude-SECRET-99', 'admin');
+        $this->runner->expect(['ddev', 'start'], new CommandResult(0, "web: CLAUDE_CODE_OAUTH_TOKEN=tok-claude-SECRET-99\n", "warning: tok-claude-SECRET-99 is set\n"));
+
+        $instance = $this->instance();
+        $job = $this->job('deploy', $instance);
+        $jobLog = $this->logFor($job);
+        $this->workflow->run($instance, $this->project, false, $jobLog, false);
+        $jobLog->finish(); // JobExecutor does this: the masker holds back the last bytes until then
+
+        $log = $this->logText($job);
+        self::assertStringNotContainsString('tok-claude-SECRET-99', $log);
+        self::assertStringContainsString('CLAUDE_CODE_OAUTH_TOKEN=[masked]', $log);
+        self::assertStringContainsString('warning: [masked] is set', $log);
+        self::assertStringContainsString('deploy complete', $log);
     }
 
     public function testCloneFailureMarksTheInstanceFailed(): void

@@ -7,6 +7,8 @@ namespace App\Tests\Integration\Fleet\Jobs;
 use App\Domain\Job\JobStatus;
 use App\Fleet\Jobs\JobExecutor;
 use App\Fleet\Jobs\JobFailed;
+use App\Fleet\Jobs\JobLog;
+use App\Fleet\Jobs\RegisteredSecretsMasker;
 use App\Tests\Support\JobTestCase;
 
 final class JobExecutorTest extends JobTestCase
@@ -37,6 +39,27 @@ final class JobExecutorTest extends JobTestCase
         self::assertSame(JobStatus::Failed, $job->status());
         self::assertSame(128, $job->exitCode());
         self::assertSame('git clone failed', $job->error());
+    }
+
+    public function testARegisteredSecretIsMaskedInTheLogAndInTheErrorAndForgottenAfterTheJob(): void
+    {
+        $masker = new RegisteredSecretsMasker();
+        $job = $this->queuedJob();
+        $type = $this->jobType('deploy', static function ($job, JobLog $log) use ($masker): void {
+            $masker->register('tok-SECRET-42');
+            $log->line('using tok-SECRET-42');
+
+            throw new JobFailed('login with tok-SECRET-42 failed', 1);
+        });
+
+        $this->executor([$type], $masker)->run((int) $job->id());
+
+        self::assertSame('login with [masked] failed', $job->error());
+        $log = (string) file_get_contents($this->paths->jobLog((string) $job->id(), $job->instanceId()));
+        self::assertStringNotContainsString('tok-SECRET-42', $log);
+        self::assertStringContainsString('using [masked]', $log);
+        self::assertStringContainsString('login with [masked] failed', $log);
+        self::assertSame(0, $masker->longestSecret(), 'the next job starts with nothing registered');
     }
 
     public function testUnexpectedExceptionIsReportedWithoutItsText(): void
