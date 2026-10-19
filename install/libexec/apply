@@ -17,7 +17,8 @@
 #   - validates the COPY with the real validator, as the service's own user, before anything is installed; secrets reach
 #     the validator through a file it reads itself, never through argv (any local user can read /proc/*/cmdline);
 #   - runs one at a time (flock);
-#   - installs atomically (temp file + rename), reloads, and puts the previous files back when the reload fails;
+#   - installs atomically (temp file + rename), reloads, and puts the previous files back when the reload fails; when the
+#     Caddy environment file changed it restarts Caddy instead (deferred by 3 s: Caddy reads its environment only at start);
 #   - deletes the staged files on every exit path (the Caddy environment file holds the OVH credentials).
 # `apply authelia` with no staged configuration only restarts Authelia (the password-reset path).
 #
@@ -333,15 +334,19 @@ apply_caddy() {
   fi
 
   if service_active caddy; then
-    if ! timeout "$T_RELOAD" systemctl reload caddy; then
+    if [ "$changed_env" -eq 1 ]; then
+      # Caddy reads its environment only when it starts. A reload would hand the new Caddyfile to a process that still has
+      # the old environment: every new {env.X} placeholder (the OVH credentials a switch to DNS-01 introduces) would resolve to
+      # nothing, and the module could reject the empty values, so the switch could never succeed. A restart loads Caddyfile
+      # and environment together; the validation above already ran with the new environment. It is deferred because the
+      # reply to the caller must not be cut by it (the caller is usually a request that Caddy proxies).
+      systemd-run --on-active=3 --quiet systemctl restart caddy ||
+        fail 'the new files are installed, but the restart of caddy could not be scheduled; run: systemctl restart caddy'
+      printf 'apply: caddy restarts in 3 s to load its new environment\n'
+    elif ! timeout "$T_RELOAD" systemctl reload caddy; then
       restore_caddy
       timeout "$T_RELOAD" systemctl reload caddy || printf 'apply: the reload after the rollback failed as well\n' >&2
       fail 'caddy rejected the reload; the previous Caddyfile and environment were restored'
-    fi
-    # Caddy reads its environment only when it starts, and the reply to the caller must not be cut by a restart.
-    if [ "$changed_env" -eq 1 ]; then
-      systemd-run --on-active=3 --quiet systemctl restart caddy ||
-        fail 'the new files are installed, but the restart of caddy could not be scheduled; run: systemctl restart caddy'
     fi
   else
     printf 'apply: caddy is not running; the files are installed and the next start uses them\n'

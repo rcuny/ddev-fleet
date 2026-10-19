@@ -250,7 +250,7 @@ final class ApplyHelperTest extends TestCase
 
     public function testInstallsBothFilesAndReloads(): void
     {
-        $this->seedLive();
+        $this->seedLive(self::SECRET);
         $this->stageCaddy("new.example.com {\n}\n");
 
         [$status, $out, $err] = $this->apply(['caddy'], $this->defaultStubs());
@@ -268,7 +268,7 @@ final class ApplyHelperTest extends TestCase
 
     public function testReloadFailureRestoresPreviousConfig(): void
     {
-        $this->seedLive();
+        $this->seedLive(self::SECRET);
         $this->stageCaddy("new.example.com {\n}\n");
 
         [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs(reloadFailures: 1));
@@ -276,7 +276,7 @@ final class ApplyHelperTest extends TestCase
         self::assertSame(1, $status);
         self::assertStringContainsString('restored', $err);
         self::assertSame("LIVE-CADDYFILE\n", file_get_contents($this->root.'/etc/caddy/Caddyfile'));
-        self::assertSame('FLEET_PROXY_SECRET='.self::OLD_SECRET."\n", file_get_contents($this->root.'/etc/caddy/fleet.env'));
+        self::assertSame('FLEET_PROXY_SECRET='.self::SECRET."\n", file_get_contents($this->root.'/etc/caddy/fleet.env'));
         self::assertSame(2, substr_count((string) file_get_contents($this->log), 'systemctl reload caddy'), 'reloaded again after the rollback');
         self::assertStringNotContainsString('systemd-run', (string) file_get_contents($this->log), 'no deferred restart for a rejected config');
         self::assertSame([], $this->staged('caddy'));
@@ -284,13 +284,15 @@ final class ApplyHelperTest extends TestCase
 
     public function testReloadFailureWithoutPreviousFilesRemovesTheNewOnes(): void
     {
+        // A previous env file with the same content, but no Caddyfile: the env is unchanged, so Caddy is reloaded.
+        file_put_contents($this->root.'/etc/caddy/fleet.env', $this->envFile());
         $this->stageCaddy("new.example.com {\n}\n");
 
         [$status] = $this->apply(['caddy'], $this->defaultStubs(reloadFailures: 1));
 
         self::assertSame(1, $status);
         self::assertFileDoesNotExist($this->root.'/etc/caddy/Caddyfile');
-        self::assertFileDoesNotExist($this->root.'/etc/caddy/fleet.env');
+        self::assertSame($this->envFile(), file_get_contents($this->root.'/etc/caddy/fleet.env'));
     }
 
     public function testEnvChangeSchedulesDeferredRestart(): void
@@ -301,7 +303,32 @@ final class ApplyHelperTest extends TestCase
         [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
 
         self::assertSame(0, $status, $err);
-        self::assertStringContainsString('systemd-run --on-active=3 --quiet systemctl restart caddy', (string) file_get_contents($this->log));
+        $log = (string) file_get_contents($this->log);
+        self::assertStringContainsString('systemd-run --on-active=3 --quiet systemctl restart caddy', $log);
+        // A reload would give the new Caddyfile to a Caddy that still has the old environment: the new {env.OVH_*}
+        // placeholders would resolve to nothing. A restart loads both.
+        self::assertStringNotContainsString('systemctl reload', $log, 'a changed environment is restarted, never reloaded');
+    }
+
+    public function testSwitchingToTheDnsChallengeNeedsNoReloadThatCouldRejectEmptyCredentials(): void
+    {
+        // Live: HTTP-01, only the proxy secret. Staged: the OVH block and its four variables (a first-time switch).
+        $this->seedLive(self::SECRET);
+        $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n";
+        $this->stage('Caddyfile', "example.com {\n}\n");
+        $this->stage('env', $env);
+        // Were it reloaded, this Caddy (old environment) would refuse the new Caddyfile, as a module may with empty values.
+        $stubs = $this->defaultStubs(reloadFailures: 5);
+
+        [$status, $out, $err] = $this->apply(['caddy'], $stubs);
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString('restarts in 3 s', $out);
+        self::assertSame($env, file_get_contents($this->root.'/etc/caddy/fleet.env'));
+        self::assertSame("example.com {\n}\n", file_get_contents($this->root.'/etc/caddy/Caddyfile'));
+        $log = (string) file_get_contents($this->log);
+        self::assertStringNotContainsString('systemctl reload', $log);
+        self::assertStringContainsString('systemctl restart caddy', $log);
     }
 
     public function testAFailedRestartScheduleIsReportedNotSwallowed(): void
@@ -315,7 +342,7 @@ final class ApplyHelperTest extends TestCase
 
         self::assertSame(1, $status);
         self::assertStringContainsString('could not be scheduled', $err);
-        self::assertSame("new.example.com {\n}\n", file_get_contents($this->root.'/etc/caddy/Caddyfile'), 'the installed files stay: they validated and reloaded');
+        self::assertSame("new.example.com {\n}\n", file_get_contents($this->root.'/etc/caddy/Caddyfile'), 'the installed files stay: they validated');
     }
 
     public function testUnchangedEnvDoesNotRestart(): void
@@ -700,10 +727,10 @@ final class ApplyHelperTest extends TestCase
         $this->stage('env', $this->envFile());
     }
 
-    private function seedLive(): void
+    private function seedLive(string $secret = self::OLD_SECRET): void
     {
         file_put_contents($this->root.'/etc/caddy/Caddyfile', "LIVE-CADDYFILE\n");
-        file_put_contents($this->root.'/etc/caddy/fleet.env', $this->envFile(self::OLD_SECRET));
+        file_put_contents($this->root.'/etc/caddy/fleet.env', $this->envFile($secret));
     }
 
     /** @return list<string> */

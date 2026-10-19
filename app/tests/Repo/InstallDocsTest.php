@@ -107,7 +107,7 @@ final class InstallDocsTest extends TestCase
             }
         }
         // Flags of other programs the guide quotes.
-        $known = [...$known, '--no-dev', '--no-pager', '--help', '--exclude'];
+        $known = [...$known, '--no-dev', '--no-pager', '--help', '--exclude', '--config', '--adapter'];
 
         // A flag is "--name" not glued to a word or a colon (`authelia:--x` is an ACL, not a flag).
         preg_match_all('/(?<![\w:-])(--[a-z][a-z-]*)/', $doc, $flags);

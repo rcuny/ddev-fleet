@@ -27,8 +27,8 @@ use Symfony\Component\Lock\LockFactory;
  * last, so a failure anywhere leaves it open with the same token and a second Finish simply runs again.
  *
  * Order (pre-flight ruling D6): users file, `apply authelia`, gate flipped to Authelia (which reloads Caddy), then,
- * in DNS mode only, `apply caddy` (the helper restarts Caddy a few seconds later, so nothing may need Caddy after
- * it), then the completion mark. If `apply caddy` fails after the gate flipped, the setup gate is put back, so the
+ * in DNS mode only, `apply caddy` (the helper restarts Caddy a few seconds later, because Caddy reads its environment
+ * only at start; it does not reload first, so nothing may need Caddy after it), then the completion mark. If `apply caddy` fails after the gate flipped, the setup gate is put back, so the
  * wizard stays reachable for the retry.
  *
  * Time: the steps wait on external processes. A step is not started unless its worst case still fits in BUDGET_SECONDS

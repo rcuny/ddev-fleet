@@ -170,6 +170,18 @@ step is saved as you go, and the wizard works at phone width.
      `/srv/fleet/keys/secret.key`) and never shown again. The endpoints of OVH's budget brands are not
      supported: create the credentials at one of the three endpoints above. Today this mode only changes how
      the two certificates are obtained; the wildcard certificate arrives with instance networking.
+
+     **Implemented, not yet verified live.** Only `http01` has run end to end on a real host; the DNS-01 path is
+     covered by unit and helper tests with stand-ins, never against the OVH API. Finish installs the new Caddyfile
+     and `/etc/caddy/fleet.env` and then **restarts** Caddy a few seconds later (a reload would give the new
+     `{env.OVH_*}` placeholders to a Caddy that still has the old environment). What to check after choosing it:
+     `systemctl is-active caddy` a minute after Finish, `journalctl -u caddy -n 100 --no-pager` free of `ovh` or
+     `dns` errors, and `sudo -u caddy env -i bash -c 'set -a; . /etc/caddy/fleet.env; caddy validate --config
+     /etc/caddy/Caddyfile --adapter caddyfile'` succeeding. Caddy keeps the certificates it already has, so the first
+     DNS-01 issuance happens at the next renewal (about 30 days before expiry): to prove the credentials earlier,
+     move the certificate storage aside and restart Caddy while watching the journal. If Caddy does not come back
+     (the web UI is behind it, so the wizard cannot help), go back to HTTP-01 from the shell:
+     `sudo fleet host:init --tls-mode=http01 --force && sudo fleet host:render --apply && sudo systemctl restart caddy`.
 3. **SSH keys.** Fleet clones and pushes with two ed25519 keys, **deploy** (read) and **push** (write). Copy each
    public key and register it at your Git server (the push key with write access) before you finish. You can
    generate a new key or import an existing unencrypted private key; the old key then stops working wherever it

@@ -12,7 +12,7 @@
                 {{ form_row(form.mode) }}
                 <fieldset class="grid gap-4 rounded-lg border border-hairline p-3">
                     <legend class="px-1">OVH DNS credentials</legend>
-                    <p class="text-xs text-ink-muted">Only used in DNS mode. Stored encrypted; never shown again.</p>
+                    <p class="text-xs text-ink-muted">Only used in DNS mode. Stored encrypted; never shown again. DNS mode is implemented but not yet verified on a live host: prefer HTTP-01 unless you need DNS-01.</p>
                     {{ form_row(form.ovhEndpoint) }}
                     {{ form_row(form.ovhApplicationKey) }}
                     {{ form_row(form.ovhApplicationSecret) }}
