@@ -124,4 +124,22 @@ final class PortCommandsTest extends KernelTestCase
         self::assertSame(1, $bad->getStatusCode());
         self::assertStringStartsWith('--port: Unknown port(s): nope.', $bad->getErrorOutput());
     }
+
+    public function testRefreshWithNoInstancesRewritesNothing(): void
+    {
+        $json = $this->cli('fleet:port:refresh', ['--json' => true]);
+        self::assertSame(0, $json->getStatusCode(), $json->getErrorOutput());
+        self::assertSame(['rewritten' => 0, 'failed' => []], $this->json($json));
+
+        $human = $this->cli('fleet:port:refresh');
+        self::assertSame(0, $human->getStatusCode());
+        self::assertStringContainsString('0 Caddy site(s) rewritten.', $human->getDisplay());
+    }
+
+    public function testRefreshOfAnUnknownProjectExits3(): void
+    {
+        $tester = $this->cli('fleet:port:refresh', ['--project' => 'nope']);
+
+        self::assertSame(3, $tester->getStatusCode());
+    }
 }

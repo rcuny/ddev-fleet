@@ -131,7 +131,7 @@ final class JobExecutor
             } catch (JobFailed $e) {
                 $status = JobStatus::Failed;
                 $exitCode = $e->exitCode;
-                $error = $e->getMessage();
+                $error = $this->masker->mask($e->getMessage());
                 $this->tryLine($log, $error);
             } catch (\Throwable $e) {
                 $status = JobStatus::Failed;
@@ -142,6 +142,10 @@ final class JobExecutor
             }
 
             $this->tryFinishLog($log);
+            if ($this->masker instanceof SecretRegistry) {
+                // The values registered for this job are not meant for the next one.
+                $this->masker->clear();
+            }
             $this->service->finish($job, $status, $exitCode, $error);
         } finally {
             $lock->release();

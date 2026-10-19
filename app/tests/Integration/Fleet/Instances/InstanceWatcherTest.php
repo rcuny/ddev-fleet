@@ -142,7 +142,7 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         $watcher = $this->watcher();
 
         $watcher->tick($this->clock->now());
-        $instanceUpdates = fn (): int => \count(array_filter($this->published, static fn (string $p): bool => str_starts_with($p, '/instances ')));
+        $instanceUpdates = fn (): int => \count(array_filter($this->published, static fn (string $p): bool => str_starts_with($p, '/instances/acme ')));
         self::assertSame(1, $instanceUpdates());
 
         $this->clock->sleep(11);

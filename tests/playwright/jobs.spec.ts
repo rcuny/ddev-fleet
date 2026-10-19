@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { expectNoBlockingViolations } from './support/axe';
 import { ADMIN_PROJECT, deployOne, runFakeJob } from './support/instances';
 import { follow } from './support/projects';
 import { setStandInRole } from './support/standIn';
@@ -23,6 +24,7 @@ test.describe('jobs', () => {
     await expect(log).toContainText('fake line 12 of 12', { timeout: 30_000 });
     await running;
     await expect(page.getByTestId('active-job').getByTestId('job-log-indicator')).not.toContainText('Loading');
+    await expectNoBlockingViolations(page, 'instance page with a finished job');
   });
 
   test('a failed job shows its error and Retry makes a new job', async ({ page }) => {
@@ -34,6 +36,7 @@ test.describe('jobs', () => {
     const failedUrl = page.url();
     await expect(page.getByTestId('job-status')).toHaveAttribute('data-status', 'failed');
     await expect(page.getByTestId('job-log')).toContainText('Fake job failed on purpose.');
+    await expectNoBlockingViolations(page, 'failed job page');
 
     await page.getByTestId('job-retry').click();
     await expect(page).not.toHaveURL(failedUrl);
@@ -51,5 +54,6 @@ test.describe('jobs', () => {
     await expect(rows.filter({ hasText: 'fake' }).getByTestId('job-status')).toHaveCount(2);
     await expect(rows.locator('[data-status="succeeded"]').first()).toBeVisible();
     await expect(rows.locator('[data-status="failed"]')).toHaveCount(1);
+    await expectNoBlockingViolations(page, 'jobs page');
   });
 });

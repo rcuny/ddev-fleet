@@ -14,7 +14,7 @@ final class PortNumbersTest extends TestCase
     /** @return iterable<string, array{mixed}> */
     public static function badPublic(): iterable
     {
-        foreach ([0, 65536, -1, '9108', 9108.0, null, true, 22, 80, 443, 8765, 2019, 3000, 9091] as $i => $port) {
+        foreach ([0, 65536, -1, '9108', 9108.0, null, true, 22, 80, 443, 8765, 2019, 3000, 9091, 8080, 8443] as $i => $port) {
             yield '#'.$i.' '.var_export($port, true) => [$port];
         }
     }
@@ -27,7 +27,7 @@ final class PortNumbersTest extends TestCase
 
     public function testPublicAccepts(): void
     {
-        foreach ([9108, 65535, 1, 8080, 8443, 1024] as $port) {
+        foreach ([9108, 65535, 1, 8081, 8444, 1024] as $port) {
             self::assertNull(PortNumbers::publicError($port), (string) $port);
         }
     }

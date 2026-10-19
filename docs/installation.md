@@ -13,8 +13,9 @@ wizard, what ends up on the host, recovery, upgrades and uninstalling.
 
 The 1.x line is developed milestone by milestone and is **not a finished product yet**: this installer
 gives you the sign-in, the app shell and the host plumbing (Caddy, Authelia, PHP-FPM, the job worker, the
-Mercure hub, DDEV and Docker). Projects, instances and jobs arrive in later milestones (see
-[`README.md`](README.md)). The 0.x installation guide is kept in [`v0/installation.md`](v0/installation.md).
+Mercure hub, DDEV and Docker), and instances can be deployed from projects
+([`instances-and-jobs.md`](instances-and-jobs.md)). Later milestones add networking, webhook triggers and the agent
+workspace (see [`README.md`](README.md)). The 0.x installation guide is kept in [`v0/installation.md`](v0/installation.md).
 
 ## 1. Before you start
 
@@ -178,7 +179,7 @@ step is saved as you go, and the wizard works at phone width.
      `/domain/zone/<zone>/refresh`. They are stored encrypted (libsodium, key in
      `/srv/fleet/keys/secret.key`) and never shown again. The endpoints of OVH's budget brands are not
      supported: create the credentials at one of the three endpoints above. Today this mode only changes how
-     the two certificates are obtained; the wildcard certificate arrives with instance networking.
+     the certificates are obtained (the two host names and one per instance, see "Instances on the host" in section 6).
 
      **Implemented, not yet verified live.** Only `http01` has run end to end on a real host; the DNS-01 path is
      covered by unit and helper tests with stand-ins, never against the OVH API. Finish installs the new Caddyfile
@@ -231,7 +232,7 @@ sign in, so there is no other place to add them:
   an initial password (the same rules as everywhere: 12 to 128 characters), whether the person is an administrator, and
   the projects they work on (one tap-sized checkbox per project).
 - **Edit** (tap a user in the list): display name, email, the administrator role and the project checkboxes. A member can
-  operate the instances of the projects they are in (instances arrive in a later milestone), and cannot create or delete projects, change
+  operate the instances of the projects they are in (start, stop, redeploy, read logs; deploy and destroy stay with administrators), and cannot create or delete projects, change
   settings or open another project's instance sites. An administrator needs no memberships: every project is theirs.
 - **Set a new password** for the user (the person can also reset it from the sign-in page once outgoing mail is
   configured, see above), **Disable** or **Enable** the account (a disabled user cannot sign in; nothing is deleted)
@@ -248,7 +249,7 @@ these pages is checked on the server and protected against cross-site requests; 
 hashes and are never shown or logged.
 
 Next, describe what the fleet can deploy: add your first project and its templates in the browser or on the host, see
-[`projects-and-templates.md`](projects-and-templates.md), and give them their seed data (database dumps, files) on the project's Assets tab or by copying over SSH, see [`assets.md`](assets.md). (Instances arrive in a later milestone.)
+[`projects-and-templates.md`](projects-and-templates.md), and give them their seed data (database dumps, files) on the project's Assets tab or by copying over SSH, see [`assets.md`](assets.md). Then deploy an instance: [`instances-and-jobs.md`](instances-and-jobs.md).
 
 ## 5. Recovery
 
@@ -361,6 +362,28 @@ operation yet. `DEFAULT_URI` in `fleet.env` is not rewritten by a re-run either.
 Switching TLS mode after setup: run `sudo fleet setup:reset`, change the mode in the wizard's second step and
 finish again.
 
+### Instances on the host
+
+Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a few things from the host:
+
+- **Wildcard DNS.** Add one record `*.<domain>` (A, and AAAA if you use IPv6) pointing at this host. Every instance is
+  served at `https://<id>.<domain>`; without the record the deploy works and the site does not open.
+- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one), `fleet-status` keeps the
+  instance states true, and `fleet-boot` starts the instances one at a time after a reboot. `systemctl list-units` should show none of them as failed.
+- **Certificates.** Each instance site gets **its own certificate** from Caddy (HTTP-01, or DNS-01 in `ovh_dns` mode). Let's
+  Encrypt limits how many certificates one registered domain may obtain per week, so deploying dozens of new instances in
+  a week can hit the limit: the site then stays without a certificate until the limit passes. Reusing a label (redeploy)
+  reuses the certificate.
+- **Who can open a site.** The installer's Authelia rule for `*.<domain>` admits **administrators only**. Project members
+  can operate their instances in the app but cannot open the sites until per-project access rules are rendered
+  (users and access, milestone M0.10).
+- **Upgrading while a job runs.** Re-running the installer restarts the workers when the code changed. A job running at that
+  moment is marked `interrupted` (its worker is gone) and can be retried; wait for running deploys before upgrading when you can.
+- **Root-owned leftovers.** A container can leave files owned by root in an instance checkout. Destroy then fails with the
+  exact `sudo rm -rf <directory>` line; run it and retry the job.
+- **No rate limit on `/_components`.** The live components endpoint is open to every signed-in user, each component checks
+  the user's role itself, and no request rate limit is applied; Caddy and the sign-in gate are the only front line.
+
 ## 7. Security model
 
 - **Caddy is the only Internet-facing process.** It strips every `Remote-*` and `Remote_*` request header on every
@@ -444,6 +467,8 @@ A failed or half-finished install needs no uninstall: run the install command ag
 | After a reboot the sign-in portal answers 502 and nobody can sign in | Authelia could not read its secrets. The Authelia package ships a tmpfiles rule that strips the execute bit of `/etc/authelia/secrets` at every boot; the installer masks it with `/etc/tmpfiles.d/authelia.conf`. Check that file exists and `stat -c %a /etc/authelia/secrets` prints `750`; re-run the installer to repair it. |
 | Finish fails with "The Caddy snippet directory ... lost its setgid bit" | A directory under `/etc/caddy/fleet` lost its group or setgid bit, so Caddy could not read what the app writes. As root: `chgrp -R caddy /etc/caddy/fleet; find /etc/caddy/fleet -type d -exec chmod 2750 {} +; find /etc/caddy/fleet -type f -exec chmod 0640 {} +; systemctl restart caddy`. A re-run of the installer repairs it too. |
 | `https://<domain>/health` does not answer after the install | `journalctl -u caddy -u authelia -u php8.4-fpm -u fleet-mercure -u fleet-worker@1 -u fleet-status -n 50 --no-pager`. |
+| An instance deploys but its site does not open | The wildcard record `*.<domain>` is missing, you are not an administrator (members cannot open instance sites yet), or Let's Encrypt refused the certificate: `journalctl -u caddy -n 100`. |
+| A deploy or destroy job is `interrupted` or fails | See the troubleshooting table in [`instances-and-jobs.md`](instances-and-jobs.md). |
 | The wizard answers 403 | No valid session cookie: open the setup URL again (it is valid for 24 hours), or mint a new one with `sudo fleet setup:token`. 429 means too many attempts from this address; wait 15 minutes. |
 | The wizard answers 404 "Setup is complete" | It is complete. Sign in at `https://<domain>/`; to start over use `sudo fleet setup:reset`. |
 | `fleet user:reset-password` says it needs a terminal | Use `ssh -t` (section 5). |

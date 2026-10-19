@@ -30,7 +30,7 @@ use App\Fleet\Instances\InstanceSiteWriter;
 use App\Fleet\Instances\Teardown;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
-use App\Fleet\Jobs\NoLogMasker;
+use App\Fleet\Jobs\RegisteredSecretsMasker;
 use App\Fleet\Secrets\SecretBox;
 use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Secrets\SecretStore;
@@ -65,8 +65,9 @@ abstract class InstanceJobTestCase extends KernelTestCase
     protected InstanceSiteWriter $sites;
     protected Teardown $teardown;
     protected Tmux $tmux;
-    protected SecretStore $secrets;
     protected JobFeed $feed;
+    protected RegisteredSecretsMasker $masker;
+    protected SecretStore $secretStore;
     protected DeployWorkflow $workflow;
 
     /** @var \ArrayObject<int, DeployStep> */
@@ -75,6 +76,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
     protected function setUp(): void
     {
         $this->steps = new \ArrayObject();
+        $this->masker = new RegisteredSecretsMasker();
         $this->em = $this->setUpFleetDatabase();
         $paths = self::getContainer()->get(FleetPaths::class);
         self::assertInstanceOf(FleetPaths::class, $paths);
@@ -87,7 +89,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
         $host = new HostSettingsRepository($this->em);
         $host->getOrCreate('fleet.example.com');
         $hostnames = new InstanceHostnames($host);
-        $this->secrets = $secrets = new SecretStore(new SecretRepository($this->em), new SecretBox(new SecretKeyFile($this->paths)), $this->clock);
+        $this->secretStore = $secrets = new SecretStore(new SecretRepository($this->em), new SecretBox(new SecretKeyFile($this->paths)), $this->clock);
         $this->ddev = new Ddev($this->runner, '/home/fleet');
         $this->sites = new InstanceSiteWriter(
             SystemTemplates::twig(),
@@ -104,7 +106,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->templates,
             new GitClient($this->runner, $this->paths),
             $this->ddev,
-            new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $secrets),
+            new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $secrets, $this->masker),
             new DrupalSettingsWriter(),
             new ContextTokens($hostnames),
             $hostnames,
@@ -170,7 +172,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
 
     protected function logFor(Job $job): JobLog
     {
-        return new JobLog($this->paths->jobLog((string) $job->id(), $job->instanceId()), new NoLogMasker(), $this->feed, $job);
+        return new JobLog($this->paths->jobLog((string) $job->id(), $job->instanceId()), $this->masker, $this->feed, $job);
     }
 
     protected function logText(Job $job): string

@@ -57,8 +57,11 @@ final readonly class AutheliaConfigRenderer
     {
         $hostPattern = str_replace('.', '\\.', $domain);
 
+        $all = $this->rules?->rules() ?? [];
+        $projects = array_flip(array_map(static fn (AccessRule $rule): string => $rule->project, $all));
+
         $rules = [];
-        foreach ($this->rules?->rules() ?? [] as $rule) {
+        foreach ($all as $rule) {
             $subjects = ['group:'.ConfigValue::group($rule->adminGroup)];
             foreach ($rule->users as $username) {
                 $subjects[] = 'user:'.ConfigValue::username($username);
@@ -68,9 +71,16 @@ final readonly class AutheliaConfigRenderer
             // own hostnames listed (never a free prefix: "x" must not match the alias of project "blog-x"). The label
             // is one DNS label. Names cannot contain "--" or ".", so the project part is unambiguous, and the domain is
             // validated lowercase letters, digits, dots and dashes.
+            // The alias "<hostname>-<project>" of one project can spell another project's own name ("x" + "blog" vs the
+            // project "x-blog"): the host string is the same, and no regex can tell them apart (RE2 has no lookahead).
+            // That alias is left out, so the other project's hosts never match this rule (deny by default).
+            $hostnames = array_filter(
+                $rule->hostnames,
+                static fn (string $hostname): bool => !isset($projects[$hostname.'-'.$rule->project]),
+            );
             $prefix = '';
-            if ([] !== $rule->hostnames) {
-                $prefix = '(?:(?:'.implode('|', array_map(ConfigValue::hostnameLabel(...), $rule->hostnames)).')-)?';
+            if ([] !== $hostnames) {
+                $prefix = '(?:(?:'.implode('|', array_map(ConfigValue::hostnameLabel(...), $hostnames)).')-)?';
             }
 
             $rules[] = [

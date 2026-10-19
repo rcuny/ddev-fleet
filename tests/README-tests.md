@@ -26,7 +26,7 @@ What the numbers include:
 | Suite | Where | Notes |
 |---|---|---|
 | PHPUnit `Unit`, `Integration`, `Functional`, `Repo` | `app/tests/<Suite>/` | `Repo` tests skip without their tool: `FLEET_CADDY_BIN`, `FLEET_MERCURE_BIN`, or when not run as root (one test only runs as root) |
-| Playwright | `tests/playwright/` | each spec runs on the `desktop` and the `phone` project where it applies (`projects.spec.ts` has phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| Playwright | `tests/playwright/` | each spec runs on the `desktop` and the `phone` project where it applies (`projects.spec.ts` has phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-instances.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL`, `FLEET_LIVE_ADMIN_PASSWORD` and `FLEET_LIVE_GIT_URL`, a public DDEV repository; it deploys and destroys real instances) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | a test skips when an optional binary is missing |
 
 ## Layout
@@ -36,15 +36,16 @@ app/tests/
   bootstrap.php      forces APP_ENV=test, gives each PHPUnit process its own FLEET_HOME and migrates its database once
                      (any test may read the domain tables; isolated tests use FleetDatabase, which migrates a fresh home)
   Unit/              plain objects: FleetPaths, the command runners, health, security, navigation, tokens
-  Integration/       kernel and container wiring: Doctrine/SQLite, Messenger, Lock, Mercure, prod security
+  Integration/       kernel and container wiring: Doctrine/SQLite, Messenger (the `jobs` transport is `sync://` in dev and
+                     test, so a click runs its job in the request with the recording runner; prod is Doctrine, pinned by a test), Lock, Mercure, prod security
   Functional/        HTTP through WebTestCase: access control, app shell, design-system page, health, stand-in
   Repo/              repository rules: hygiene (no owner or workspace references), pipeline configuration,
                      tag guard, the design-system block in CLAUDE.md, the Python app being gone, and the
                      installer: Installer*Test (flags, dry-run plan, DNS check, idempotency, safety), the root
                      helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
                      InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code),
-                     CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
-                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it),
+                     CliDocsTest (docs/projects-and-templates.md and docs/instances-and-jobs.md document every project, template, port,
+                     instance and job command and option and name nothing else; CHANGELOG, indexes and CLAUDE.md point at them),
                      AssetDocsTest (the same for docs/assets.md and `fleet asset:list|gc`, and its limits match the code),
                      SecretsDocsTest (the same for docs/secrets.md and the secret commands),
                      ChangelogAssembleTest (ci/changelog-assemble.php merges changelog.d/ fragments and cuts a release),

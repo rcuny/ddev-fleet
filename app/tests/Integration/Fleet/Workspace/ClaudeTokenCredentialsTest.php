@@ -46,7 +46,7 @@ final class ClaudeTokenCredentialsTest extends InstanceJobTestCase
 
     public function testTheTokenIsOnlyInTheInstanceConfigFile(): void
     {
-        $this->secrets->putFleetWide(HostSecrets::CLAUDE_TOKEN, self::TOKEN, 'admin');
+        $this->secretStore->putFleetWide(HostSecrets::CLAUDE_TOKEN, self::TOKEN, 'admin');
 
         $job = $this->deploy();
 

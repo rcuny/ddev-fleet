@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Fleet\Secrets;
 
+use App\Fleet\Jobs\SecretRegistry;
+
 /**
  * Replaces `[[token]]` placeholders in a text (an asset file, a tty command) with values.
  *
@@ -15,13 +17,14 @@ namespace App\Fleet\Secrets;
  *   `[[x]]` is left alone. Values go in verbatim, with no quoting or escaping added (the 0.x quoting trap).
  * - Placeholders that stay unresolved are reported (render) or refused (renderStrict); the text keeps them as written.
  *
- * The deploy calls this (M0.04); nothing here touches the filesystem.
+ * Every secret value it inserts is registered with the job log masker, so a deploy that echoes it logs only the mask.
+ * Nothing here touches the filesystem.
  */
 final readonly class TokenRenderer
 {
     public const string PATTERN = '/\[\[([a-z0-9-]+)\]\]/';
 
-    public function __construct(private SecretStore $store)
+    public function __construct(private SecretStore $store, private SecretRegistry $registry)
     {
     }
 
@@ -49,6 +52,7 @@ final readonly class TokenRenderer
                 continue;
             }
             $values[$token] = $value;
+            $this->registry->register($value);
             $used[] = $name;
         }
         sort($unresolved);

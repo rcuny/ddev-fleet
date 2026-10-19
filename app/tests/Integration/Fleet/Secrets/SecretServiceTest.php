@@ -14,12 +14,14 @@ use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Secrets\PlaceholderScanner;
+use App\Fleet\Secrets\RevealThrottled;
 use App\Fleet\Secrets\SecretBox;
 use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Secrets\SecretOpenFailed;
 use App\Fleet\Secrets\SecretService;
 use App\Fleet\Secrets\SecretStore;
 use App\Tests\Support\FleetDatabase;
+use App\Tests\Support\RevealThrottles;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -27,6 +29,8 @@ use Symfony\Component\Clock\MockClock;
 final class SecretServiceTest extends KernelTestCase
 {
     use FleetDatabase;
+
+    private const int REVEAL_LIMIT = 10;
 
     private EntityManagerInterface $em;
     private SecretStore $store;
@@ -44,6 +48,7 @@ final class SecretServiceTest extends KernelTestCase
             new ProjectRepository($this->em),
             new AuditLog(new AuditEntryRepository($this->em), $clock),
             new PlaceholderScanner($this->paths),
+            RevealThrottles::make(self::REVEAL_LIMIT),
         );
         self::getContainer()->get(ProjectService::class)->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git'));
     }
@@ -136,6 +141,35 @@ final class SecretServiceTest extends KernelTestCase
         self::assertSame('reveal-me-123', $value);
         self::assertSame(['bob', 'secret.reveal', 'project:blog/API_KEY'], $this->audit()[0]);
         self::assertStringNotContainsString('reveal-me-123', json_encode($this->audit(), \JSON_THROW_ON_ERROR));
+    }
+
+    public function testRevealsBeyondTheLimitAreRefusedAndAudited(): void
+    {
+        $this->service->put('blog', 'API_KEY', 'reveal-me-123', 'alice');
+        for ($i = 0; $i < self::REVEAL_LIMIT; ++$i) {
+            $this->service->reveal('blog', 'API_KEY', 'bob');
+        }
+
+        try {
+            $this->service->reveal('blog', 'API_KEY', 'bob');
+            self::fail('expected RevealThrottled');
+        } catch (RevealThrottled $e) {
+            self::assertGreaterThanOrEqual(1, $e->retryAfter);
+            self::assertStringNotContainsString('reveal-me-123', $e->getMessage());
+        }
+
+        self::assertSame(['bob', 'secret.reveal-refused', 'project:blog/API_KEY'], $this->audit()[0]);
+        self::assertCount(self::REVEAL_LIMIT, array_filter($this->audit(), static fn (array $row): bool => 'secret.reveal' === $row[1]), 'only the allowed values were opened');
+    }
+
+    public function testTheLimitIsPerUser(): void
+    {
+        $this->service->put('blog', 'API_KEY', 'reveal-me-123', 'alice');
+        for ($i = 0; $i < self::REVEAL_LIMIT; ++$i) {
+            $this->service->reveal('blog', 'API_KEY', 'bob');
+        }
+
+        self::assertSame('reveal-me-123', $this->service->reveal('blog', 'API_KEY', 'carol'));
     }
 
     public function testRevealOfAMissingOrBadlyNamedSecretIsNotFoundAndNotAudited(): void

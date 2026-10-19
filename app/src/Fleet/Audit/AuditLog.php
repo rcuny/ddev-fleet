@@ -16,6 +16,7 @@ final readonly class AuditLog
     public const string SECRET_PUT = 'secret.put';
     public const string SECRET_DELETE = 'secret.delete';
     public const string SECRET_REVEAL = 'secret.reveal';
+    public const string SECRET_REVEAL_REFUSED = 'secret.reveal-refused';
     public const string ASSET_SNAPSHOT = 'asset.snapshot';
     public const string CLAUDE_TOKEN_ROTATE = 'claude.token.rotate';
     public const string CLAUDE_TOKEN_APPLY = 'claude.token.apply';
@@ -26,6 +27,8 @@ final readonly class AuditLog
     public const string SCHEDULE_PAUSE = 'schedule.pause';
     public const string SCHEDULE_RESUME = 'schedule.resume';
     public const string SCHEDULE_RUN = 'schedule.run';
+
+    private const string ELLIPSIS = '…';
 
     /** The actor of changes made on the command line. */
     public const string CLI_ACTOR = 'cli';
@@ -60,8 +63,15 @@ final readonly class AuditLog
         return $this->entries->actions();
     }
 
+    /**
+     * Cuts $text to $max bytes on a character boundary and ends a cut text with an ellipsis, so a truncation shows.
+     */
     private static function fit(string $text, int $max): string
     {
-        return mb_strcut($text, 0, $max);
+        if (\strlen($text) <= $max) {
+            return $text;
+        }
+
+        return mb_strcut($text, 0, $max - \strlen(self::ELLIPSIS)).self::ELLIPSIS;
     }
 }
