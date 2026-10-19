@@ -100,18 +100,21 @@ final readonly class JobRepository
             return [];
         }
 
-        /** @var list<Job> $jobs */
-        $jobs = $this->em->createQuery(
-            \sprintf(
-                'SELECT j FROM %1$s j WHERE j.id IN (SELECT MAX(j2.id) FROM %1$s j2 WHERE j2.instanceId IN (:ids) GROUP BY j2.instanceId)',
-                Job::class,
-            ),
-        )->setParameter('ids', $ids)->getResult();
-
         $latest = [];
-        foreach ($jobs as $job) {
-            if (null !== $job->instanceId()) {
-                $latest[$job->instanceId()] = $job;
+        // SQLite caps bound variables (999 on older builds): query the ids in chunks.
+        foreach (array_chunk($ids, 500) as $chunk) {
+            /** @var list<Job> $jobs */
+            $jobs = $this->em->createQuery(
+                \sprintf(
+                    'SELECT j FROM %1$s j WHERE j.id IN (SELECT MAX(j2.id) FROM %1$s j2 WHERE j2.instanceId IN (:ids) GROUP BY j2.instanceId)',
+                    Job::class,
+                ),
+            )->setParameter('ids', $chunk)->getResult();
+
+            foreach ($jobs as $job) {
+                if (null !== $job->instanceId()) {
+                    $latest[$job->instanceId()] = $job;
+                }
             }
         }
 

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional;
 
 use App\Security\FleetUser;
+use App\Security\ProjectVoter;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -34,8 +35,14 @@ final class ComponentsAccessTest extends WebTestCase
     public static function liveComponents(): iterable
     {
         $dir = \dirname(__DIR__, 2).'/src/Twig/Components';
-        foreach (glob($dir.'/*.php') ?: [] as $file) {
-            $class = 'App\\Twig\\Components\\'.basename($file, '.php');
+        $files = new \RecursiveIteratorIterator(new \RecursiveDirectoryIterator($dir, \FilesystemIterator::SKIP_DOTS));
+        foreach ($files as $file) {
+            \assert($file instanceof \SplFileInfo);
+            if ('php' !== $file->getExtension()) {
+                continue;
+            }
+            $relative = substr($file->getPathname(), \strlen($dir) + 1, -4);
+            $class = 'App\\Twig\\Components\\'.str_replace('/', '\\', $relative);
             if (!class_exists($class)) {
                 continue;
             }
@@ -53,7 +60,18 @@ final class ComponentsAccessTest extends WebTestCase
     {
         $reflection = new \ReflectionClass($class);
 
-        self::assertNotSame([], $reflection->getAttributes(IsGranted::class), $class.' must declare #[IsGranted] on the class');
+        $attributes = $reflection->getAttributes(IsGranted::class);
+        self::assertNotSame([], $attributes, $class.' must declare #[IsGranted] on the class');
+
+        $voterAttributes = array_values(new \ReflectionClass(ProjectVoter::class)->getConstants());
+        foreach ($attributes as $attribute) {
+            $granted = $attribute->newInstance()->attribute;
+            self::assertIsString($granted, $class.' must name a single attribute');
+            self::assertTrue(
+                \in_array($granted, $voterAttributes, true) || str_starts_with($granted, 'ROLE_') || str_starts_with($granted, 'IS_AUTHENTICATED'),
+                \sprintf('%s: "%s" is neither a ProjectVoter attribute nor a role', $class, $granted),
+            );
+        }
     }
 
     public function testThereIsAtLeastOneLiveComponentToCheck(): void
