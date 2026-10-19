@@ -21,6 +21,9 @@ class HostSettings
     public const int DEFAULT_BACKUP_RETENTION_DAYS = 14;
     public const int MAX_BACKUP_RETENTION_DAYS = 3650;
 
+    /** Browser uploads: the default cap per file, 2 GiB (design spec section 17). Bigger files go in over SSH. */
+    public const int DEFAULT_ASSET_UPLOAD_MAX_BYTES = 2_147_483_648;
+
     // SMALLINT, not INTEGER: a single-column INTEGER primary key is a rowid alias in SQLite, which DBAL
     // introspects as auto-increment and then reports as drift against this fixed (never generated) id.
     #[ORM\Id]
@@ -44,6 +47,10 @@ class HostSettings
 
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME, nullable: true)]
     private ?\DateTimeImmutable $setupCompletedAt = null;
+
+    // INTEGER holds 64 bits in SQLite; the PHP side is an int on the 64-bit builds the app requires.
+    #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_ASSET_UPLOAD_MAX_BYTES])]
+    private int $assetUploadMaxBytes = self::DEFAULT_ASSET_UPLOAD_MAX_BYTES;
 
     /** Days a database backup is kept (fleet:backup:create prunes older ones). */
     #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_BACKUP_RETENTION_DAYS])]
@@ -177,6 +184,23 @@ class HostSettings
     public function isSetupComplete(): bool
     {
         return null !== $this->setupCompletedAt;
+    }
+
+    /**
+     * The largest file the browser may upload into a project's assets, in bytes.
+     */
+    public function assetUploadMaxBytes(): int
+    {
+        return $this->assetUploadMaxBytes;
+    }
+
+    public function changeAssetUploadMaxBytes(int $bytes): void
+    {
+        if ($bytes < 1) {
+            throw new \InvalidArgumentException('The upload cap must be at least one byte.');
+        }
+        $this->assetUploadMaxBytes = $bytes;
+        $this->touch();
     }
 
     public function backupRetentionDays(): int
