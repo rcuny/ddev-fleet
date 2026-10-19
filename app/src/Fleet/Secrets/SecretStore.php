@@ -128,6 +128,17 @@ final readonly class SecretStore
         return null !== $this->secrets->find(Secret::SCOPE_FLEET, self::FLEET_SCOPE_ID, $name);
     }
 
+    /**
+     * When a fleet-wide secret was last written, or null when it is not set. Never opens (decrypts) the value, so a
+     * status display cannot leak it.
+     */
+    public function fleetWideUpdatedAt(string $name): ?\DateTimeImmutable
+    {
+        self::assertName($name);
+
+        return $this->secrets->find(Secret::SCOPE_FLEET, self::FLEET_SCOPE_ID, $name)?->updatedAt();
+    }
+
     public function forgetFleetWide(string $name): void
     {
         self::assertName($name);

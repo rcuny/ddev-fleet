@@ -242,6 +242,21 @@ The remaining commands exist mostly for the installer:
 | `fleet:setup:reset [--yes]` | See above. |
 | `fleet:user:reset-password <username> [--no-apply]` | See above. |
 
+### Host settings page
+
+Administrators find the host's own settings under **Settings** (`/admin/host`), in five tabs (a select with a Go button on a phone):
+
+| Tab | What you can do |
+|---|---|
+| General | See the domain and TLS mode (read-only; the page names the commands that change them) and edit the ACME contact e-mail. After saving, apply it to Caddy with `sudo fleet host:render --apply`. |
+| Git identity | The default author name and e-mail of the commits the fleet makes in instances. Both or neither; the name has no control characters, `<` or `>` and at most 100 characters. |
+| Claude token | Store or replace the Claude Code token (the same secret the setup wizard writes). It is write-only: the page shows only "Set" or "Not set" and when it was last written. |
+| Notifications | The SMTP relay (host, port, user, password), sender and recipient for the host's e-mails. The password is stored encrypted, write-only, and can be removed with a checkbox. Nothing sends mail yet, and there is no test-mail button. |
+| Backups | The database backups (see below): list and download them, "Back up now", and the retention in days (1 to 3650). |
+
+A **reboot notice** appears at the top of every page for administrators when Debian has left `/run/reboot-required`
+(the packages that asked for it, from `/run/reboot-required.pkgs`, are listed). The fleet never reboots the host by itself.
+
 ### Backup and restore
 
 **What is backed up.** `fleet-backup.timer` runs `fleet:backup:create` once a day. It writes a consistent snapshot
@@ -262,7 +277,8 @@ are deleted after every run, except that the newest backup of each kind is alway
 same disk as the databases: copy `/srv/fleet/backups` to another machine (`rsync`, `restic`, ...) for a real
 disaster recovery.
 
-**Back up now.** `sudo fleet backup:create` prints the name of the new file (it is short for
+**Back up now.** The Backups tab of the host settings page (`/admin/host?tab=backups`) lists the fleet database backups,
+downloads one (an attachment, never cached) and has a "Back up now" button. On the host, `sudo fleet backup:create` prints the name of the new file (it is short for
 `fleet fleet:backup:create`); a failure exits non-zero. `systemctl list-timers fleet-backup.timer` shows the next
 run and `journalctl -u fleet-backup.service` the last ones.
 

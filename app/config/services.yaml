@@ -17,6 +17,9 @@ parameters:
     fleet.proxy_secret: '%env(FLEET_PROXY_SECRET)%'
     # The dev/test stand-in authenticator and role switch; never true in prod.
     fleet.stand_in_enabled: false
+    # Where Debian leaves the "reboot required" flag and the packages that asked for it (App\Fleet\Host\RebootSignal).
+    fleet.reboot_flag_file: '/run/reboot-required'
+    fleet.reboot_packages_file: '/run/reboot-required.pkgs'
 
 services:
     # symfony-design-system:start
@@ -48,6 +51,11 @@ services:
         arguments:
             $home: '%env(resolve:FLEET_HOME)%'
             $caddyDir: '%env(resolve:FLEET_CADDY_DIR)%'
+
+    App\Fleet\Host\RebootSignal:
+        arguments:
+            $flagFile: '%fleet.reboot_flag_file%'
+            $packagesFile: '%fleet.reboot_packages_file%'
 
     # Callers type-hint Applier; the one implementation runs `sudo -n apply <target>` through the CommandRunner (a
     # recording runner in dev/test, so nothing privileged runs there).
@@ -82,6 +90,9 @@ when@dev:
 when@test:
     parameters:
         fleet.stand_in_enabled: true
+        # Never the real /run files: a test writes these (under its own FLEET_HOME) to simulate a pending reboot.
+        fleet.reboot_flag_file: '%env(resolve:FLEET_HOME)%/test-reboot-required'
+        fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
     services:
         # Public so functional tests can swap in a stub.
