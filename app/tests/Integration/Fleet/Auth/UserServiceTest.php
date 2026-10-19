@@ -80,6 +80,27 @@ final class UserServiceTest extends KernelTestCase
         self::assertTrue($blocked, 'the lock is held from before the existence check');
     }
 
+    public function testUpsertAdminKeepsOtherWritersOutBetweenTheLookupAndTheSave(): void
+    {
+        $other = new \PDO('sqlite:'.self::getContainer()->get(FleetPaths::class)->fleetDb());
+        $other->setAttribute(\PDO::ATTR_ERRMODE, \PDO::ERRMODE_EXCEPTION);
+        $other->setAttribute(\PDO::ATTR_TIMEOUT, 0);
+
+        // A parallel upsert that looked the name up before this one saved would insert here; it must be kept out.
+        $blocked = false;
+        $this->beforeNextPersist($this->entityManager(), static function () use ($other, &$blocked): void {
+            try {
+                $other->exec("INSERT INTO fleet_user (username, display_name, email, password_hash, user_groups, enabled, created_at, updated_at) VALUES ('ada', 'Ada', 'a@example.com', 'x', '[]', 1, '2026-10-19 00:00:00', '2026-10-19 00:00:00')");
+            } catch (\PDOException) {
+                $blocked = true;
+            }
+        });
+
+        $this->service->upsertAdmin('ada', 'Ada', 'ada@example.com', self::PASSWORD);
+
+        self::assertTrue($blocked, 'the lock is held from before the lookup');
+    }
+
     public function testALosingParallelCreateIsAnInvalidUserInput(): void
     {
         $second = $this->secondEntityManager($this->entityManager());
