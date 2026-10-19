@@ -61,7 +61,10 @@ final readonly class InstanceHostnames
         return 'https://'.$this->primary($id);
     }
 
-    private function domain(): string
+    /**
+     * @throws Refused when the host has no domain yet
+     */
+    public function domain(): string
     {
         return $this->host->get()?->domain() ?? throw new Refused('The host is not set up yet: there is no domain.');
     }

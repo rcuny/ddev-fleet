@@ -125,6 +125,18 @@ final class ConfigValue
         return $name;
     }
 
+    /**
+     * An additional hostname label of a project, the prefix of an instance alias (`<hostname>-<project>--<label>`).
+     */
+    public static function hostnameLabel(string $label): string
+    {
+        if (1 !== preg_match('/^[a-z0-9](?:[a-z0-9-]{0,60}[a-z0-9])?$/D', $label) || str_contains($label, '--')) {
+            throw new \InvalidArgumentException(\sprintf('"%s" is not a valid hostname label.', self::printable($label)));
+        }
+
+        return $label;
+    }
+
     public static function ovhEndpoint(string $endpoint): string
     {
         if (!\in_array($endpoint, self::OVH_ENDPOINTS, true)) {

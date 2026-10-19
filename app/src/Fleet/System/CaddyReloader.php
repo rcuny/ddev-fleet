@@ -28,6 +28,16 @@ final readonly class CaddyReloader
     }
 
     /**
+     * Whether Caddy accepts the config as it is on disk, without reloading it.
+     *
+     * @throws \RuntimeException with the end of Caddy's output when it rejects the config
+     */
+    public function validate(): void
+    {
+        $this->run('validate', 'validate');
+    }
+
+    /**
      * @throws \RuntimeException with the end of Caddy's output when it rejects the config or cannot be reached
      */
     public function validateAndReload(): void
