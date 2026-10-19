@@ -312,9 +312,9 @@ final class ProjectPagesTest extends AdminTestCase
             $crawler = $this->open($path);
             $tabs = $crawler->filter('nav[aria-label="Project sections"]');
             self::assertCount(1, $tabs, $path);
-            self::assertSame(['General', 'Templates', 'Ports'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
+            self::assertSame(['General', 'Templates', 'Secrets', 'Ports'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
             self::assertSame(
-                ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/ports'],
+                ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/secrets', '/admin/projects/blog/ports'],
                 $tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('href')),
             );
             self::assertSame($active, trim($tabs->filter('a[aria-current="page"]')->text()), $path);

@@ -19,7 +19,6 @@ final class PlaceholderPagesTest extends WebTestCase
         yield 'jobs' => ['/admin/jobs', 'Jobs', 'M0.04', 'jobs'];
         yield 'webhooks' => ['/admin/webhooks', 'Webhooks', 'M0.08', 'webhooks'];
         yield 'schedules' => ['/admin/schedules', 'Schedules', 'M0.09', 'schedules'];
-        yield 'secrets' => ['/admin/secrets', 'Secrets', 'M0.05', 'secrets'];
         yield 'users' => ['/admin/users', 'Users', 'M0.10', 'users'];
         yield 'settings' => ['/admin/settings', 'Settings', 'M0.12', 'settings'];
     }

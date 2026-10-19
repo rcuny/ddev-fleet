@@ -6,6 +6,7 @@ namespace App\Command\Project;
 
 use App\Command\Support\FieldErrors;
 use App\Command\Support\JsonOutput;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -40,7 +41,7 @@ final class ProjectDeleteCommand extends Command
             if (!$out->confirmed($input, \sprintf('Delete project "%s" with all its templates?', $name))) {
                 throw new Refused('Not deleted: pass --yes to confirm.');
             }
-            $this->projects->delete($name);
+            $this->projects->delete($name, AuditLog::CLI_ACTOR);
             $out->emit(['deleted' => $name], static function (JsonOutput $out) use ($name): void {
                 $out->success(\sprintf('Project "%s" deleted.', $name));
             });

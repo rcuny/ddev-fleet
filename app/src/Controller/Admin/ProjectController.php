@@ -18,6 +18,7 @@ use App\Fleet\Projects\ValidationFailed;
 use App\Form\Project\ProjectType;
 use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
+use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Form\FormInterface;
@@ -42,6 +43,7 @@ final class ProjectController extends AbstractController
         private readonly ProjectRepository $repository,
         private readonly TemplateService $templates,
         private readonly NamedPortService $ports,
+        private readonly CurrentActor $actor,
     ) {
     }
 
@@ -162,7 +164,7 @@ final class ProjectController extends AbstractController
         }
 
         try {
-            $this->projects->delete($name);
+            $this->projects->delete($name, $this->actor->name());
         } catch (Refused $refusal) {
             $this->addFlash('warning', 'The project was not deleted. '.$refusal->getMessage());
 
