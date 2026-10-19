@@ -145,6 +145,10 @@ final class UnitsTest extends TestCase
         // The command writes only the backups (FLEET_HOME), the databases' WAL files (FLEET_HOME/var) and the app's cache/logs.
         self::assertSame(['strict'], $service['ProtectSystem']);
         self::assertSame(['/srv/fleet /opt/ddev-fleet/app/var'], $service['ReadWritePaths']);
+        // The unit reads FLEET_HOME from fleet.env; ReadWritePaths cannot expand it, so it must name the installer's value.
+        self::assertStringContainsString("\nFLEET_SRV_DIR=/srv/fleet\n", (string) file_get_contents(\dirname(__DIR__, 3).'/install/lib/common.sh'));
+        self::assertStringContainsString('"FLEET_HOME=$FLEET_SRV_DIR"', (string) file_get_contents(\dirname(__DIR__, 3).'/install/steps/70-env.sh'));
+        self::assertStringStartsWith('/srv/fleet ', $service['ReadWritePaths'][0]);
         foreach (['NoNewPrivileges', 'PrivateTmp', 'PrivateDevices', 'ProtectHome', 'RestrictSUIDSGID', 'LockPersonality'] as $directive) {
             self::assertSame(['yes'], $service[$directive], $directive);
         }

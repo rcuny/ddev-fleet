@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Fleet\Host;
 
 use App\Fleet\Host\GitIdentityRule;
+use App\Fleet\Projects\Rule\GitIdentity;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
@@ -58,5 +59,15 @@ final class GitIdentityRuleTest extends TestCase
 
         self::assertArrayHasKey($field, $violations);
         self::assertNotSame('', $violations[$field]);
+    }
+
+    public function testValueRulesAreTheProjectOverridesRules(): void
+    {
+        self::assertSame(GitIdentity::NAME_MAX, GitIdentityRule::MAX_NAME_LENGTH);
+        self::assertSame(
+            ['name' => GitIdentity::nameError("Fleet\u{202E}Bot"), 'email' => GitIdentity::emailError('bot@localhost')],
+            GitIdentityRule::violations("Fleet\u{202E}Bot", 'bot@localhost'),
+            'a format character and a dotless domain are refused by both',
+        );
     }
 }
