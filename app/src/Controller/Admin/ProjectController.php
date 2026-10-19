@@ -8,6 +8,7 @@ use App\Domain\Port\NamedPort;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
@@ -42,6 +43,7 @@ final class ProjectController extends AbstractController
         private readonly ProjectRepository $repository,
         private readonly TemplateService $templates,
         private readonly NamedPortService $ports,
+        private readonly ProjectAccessRefresher $access,
     ) {
     }
 
@@ -82,6 +84,7 @@ final class ProjectController extends AbstractController
                         typesense: true === ($data['typesense'] ?? false),
                     ));
                     $this->addFlash('success', 'Project created.');
+                    $this->flashAccessWarning();
 
                     return $this->redirectToRoute('project_edit', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
                 } catch (ValidationFailed $failed) {
@@ -172,8 +175,20 @@ final class ProjectController extends AbstractController
         }
 
         $this->addFlash('success', \sprintf('Project "%s" deleted.', $name));
+        $this->flashAccessWarning();
 
         return $this->redirectToRoute('projects', [], Response::HTTP_SEE_OTHER);
+    }
+
+    /**
+     * The project change is saved, but the sign-in service may not have followed (ProjectAccessRefresher).
+     */
+    private function flashAccessWarning(): void
+    {
+        $warning = $this->access->takeWarning();
+        if (null !== $warning) {
+            $this->addFlash('warning', $warning);
+        }
     }
 
     private function load(string $name): Project
