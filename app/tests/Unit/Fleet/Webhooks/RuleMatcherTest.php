@@ -184,6 +184,24 @@ final class RuleMatcherTest extends TestCase
     }
 
     /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function labelGolden(): iterable
+    {
+        yield 'jira key' => ['PROJ-123', 'proj-123'];
+        yield 'empty' => ['', ''];
+        yield 'only symbols' => ['--//--', ''];
+        yield 'unicode is dropped' => ['Été-ÀB-12', 't-b-12'];
+        yield 'long key is cut, no trailing dash' => [str_repeat('abcd-', 12), 'abcd-abcd-abcd-abcd-abcd-abcd-abcd-abcd'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('labelGolden')]
+    public function testLabelGolden(string $text, string $expected): void
+    {
+        self::assertSame($expected, RuleMatcher::label($text));
+    }
+
+    /**
      * @param list<array<string, mixed>|null> $news the `new` side of each change (null = a deleted branch)
      *
      * @return array<string, mixed>

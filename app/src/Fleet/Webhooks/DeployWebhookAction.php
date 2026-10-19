@@ -42,8 +42,11 @@ final readonly class DeployWebhookAction
 
         try {
             $existing = null === $request->label ? null : InstanceNaming::compose($request->projectName, $request->label);
-            if ($request->replace && null !== $existing && null !== $this->repository->find($existing)) {
-                $jobs = $this->instances->request('redeploy', new Selector([$existing]), new OperationOptions(template: $template), JobTrigger::Webhook, $by);
+            $instance = null === $existing ? null : $this->repository->find($existing);
+            if ($request->replace && null !== $instance) {
+                // The rule's branch wins: a fixed label keeps one instance, but it follows the rule when the rule moves.
+                $branch = $request->branch !== $instance->branch() ? $request->branch : null;
+                $jobs = $this->instances->request('redeploy', new Selector([$existing]), new OperationOptions(template: $template, branch: $branch), JobTrigger::Webhook, $by);
                 $what = 'redeploy queued';
             } else {
                 $jobs = $this->instances->requestDeploy(new DeployInput($request->projectName, $template, $request->branch, $request->label), JobTrigger::Webhook, $by);

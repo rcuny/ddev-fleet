@@ -33,6 +33,13 @@ final class LabelsTest extends TestCase
         self::assertSame('feature-fle-12-login', Labels::slug('feature/FLE-12/login'));
     }
 
+    public function testSlugOrNullIsNullWhereSlugThrows(): void
+    {
+        self::assertNull(Labels::slugOrNull('!!!'));
+        self::assertNull(Labels::slugOrNull(''));
+        self::assertSame('feature-fle-12-login', Labels::slugOrNull('feature/FLE-12/login'));
+    }
+
     public function testNothingUsableIsAFieldError(): void
     {
         try {

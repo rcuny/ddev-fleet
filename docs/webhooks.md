@@ -87,13 +87,16 @@ row name the job and the instance: `deploy queued: blog--fle-66 (job 12)`.
 
 - **Jira.** The label is the lowercased issue key, so `FLE-3` gives `<project>--fle-3`, and `[[issue-id]]` resolves from
   the label as in a manual deploy. The branch is the rule's `--branch`, else the project's default branch. Moving the
-  same ticket into the status again is a new event: the deploy allocation gives `fle-3-1`, then `fle-3-2`.
+  same ticket into the status again is a new event: the deploy allocation gives `fle-3-1`, then `fle-3-2`. Two Jira
+  deliveries for the same issue entering the status twice with **different bodies** therefore create `fle-3`, then
+  `fle-3-1` (0.x parity); only identical retries are deduplicated (see "Deduplication").
 - **Bitbucket `repo:push`.** Bitbucket sends one entry per ref in `push.changes`. Each **created or updated branch** is
   matched against the rules on its own (first match wins); branch deletions and tags are skipped, so a push that only
   deletes is `ignored` (`no branch was created or updated`). One push can start several deploys; the answer then lists them
   under `actions`.
   - A rule with a fixed `--label` keeps **one** instance: when `<project>--<label>` exists the job is a **redeploy** of it
-    (it is rebuilt in place), otherwise a first deploy. A busy instance (a job queued or running) refuses the replace; the
+    (it is rebuilt in place), otherwise a first deploy. When the rule's branch differs from the instance's branch, the
+    redeploy switches the instance to the rule's branch. A busy instance (a job queued or running) refuses the replace; the
     delivery records `Busy: ...`.
   - A rule with `--label-prefix` (and optionally `--strip-suffix`, which the branch glob must end with) forms the label as
     prefix + branch minus suffix, slugified: `feature/ABC-1898-x--pw-run` gives `pw-feature-abc-1898-x`. It **never
@@ -161,6 +164,11 @@ Jira repeats `X-Atlassian-Webhook-Identifier` when it retries, Bitbucket repeats
 matched a rule consumes its id, so a retry answers `duplicate` and decides nothing twice, even across a restart. Only
 matched deliveries consume an id, a delivery without the header is never deduplicated, and ids are freed after 7 days.
 Delivery rows are kept for 60 days.
+
+**A failed or refused action still consumes the delivery.** The id and the one-hour body hash are claimed before the action
+runs, so a delivery that ends `failed` (template gone, instance busy, Bitbucket refusing the pipeline) is not given
+another chance: the sender's retry of it is answered `duplicate`. That is intended, not a bug. To recover, cause a fresh
+event (move the issue out of the status and back in, push again), or start the work by hand.
 
 **Replays.** The delivery id header is not covered by the signature, so someone holding a signed body could resend it with a
 fresh id. A matched delivery therefore also remembers the SHA-256 of its body: the same body arriving again within **one

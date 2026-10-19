@@ -108,7 +108,7 @@ final class InstanceService
         foreach ($instances as $instance) {
             $params = match ($op) {
                 'start', 'stop' => ['timeout' => $options->timeout, 'retryPortConflict' => $options->retryPortConflict],
-                'redeploy' => ['template' => $template ?? $instance->templateName(), 'force' => $options->force],
+                'redeploy' => ['template' => $template ?? $instance->templateName(), 'force' => $options->force] + (null === $options->branch ? [] : ['branch' => $options->branch]),
                 default => [],
             };
             if ('redeploy' === $op || 'destroy' === $op) {

@@ -247,6 +247,21 @@ final class WebhookActionsTest extends AdminTestCase
         self::assertSame(['deploy', 'redeploy'], $types);
     }
 
+    public function testAFixedLabelRedeployCarriesTheRuleBranchOnlyWhenItChanged(): void
+    {
+        $this->pushRule(['branch' => 'develop*'], ['label' => 'pw-regression']);
+        $receiver = $this->receiver();
+        $headers = ['x-event-key' => 'repo:push'];
+        $this->send($receiver, WebhookSource::Bitbucket, self::push([self::branch('develop')], 'a'), $headers + ['x-request-uuid' => 'u1']);
+        $this->send($receiver, WebhookSource::Bitbucket, self::push([self::branch('develop')], 'b'), $headers + ['x-request-uuid' => 'u2']);
+        $this->send($receiver, WebhookSource::Bitbucket, self::push([self::branch('develop-2')], 'c'), $headers + ['x-request-uuid' => 'u3']);
+
+        $jobs = $this->jobs();
+        self::assertSame(['deploy', 'redeploy', 'redeploy'], array_map(static fn (Job $j): string => $j->type(), $jobs));
+        self::assertArrayNotHasKey('branch', $jobs[1]->params(), 'same branch: the job is as before');
+        self::assertSame('develop-2', $jobs[2]->params()['branch']);
+    }
+
     public function testAPrefixedPushNeverOverwritesAndAllocatesTheNextLabel(): void
     {
         $this->pushRule(['branch' => '*--pw-run'], ['label_prefix' => 'pw-', 'strip_suffix' => '--pw-run']);
