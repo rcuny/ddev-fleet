@@ -7,7 +7,11 @@ namespace App\Fleet\Webhooks;
 use App\Domain\Project\Project;
 use App\Domain\Webhook\WebhookRule;
 use App\Domain\Webhook\WebhookSource;
+use App\Fleet\Instances\InstanceHostnames;
+use App\Fleet\Instances\InstanceNaming;
+use App\Fleet\Instances\Labels;
 use App\Fleet\Projects\Rule\IssueIdPattern;
+use App\Fleet\Projects\ValidationFailed;
 
 /**
  * Pure: reads the event and the rules and says which rule matched, with the label and branch the action would use.
@@ -24,6 +28,7 @@ final class RuleMatcher
      * @param list<WebhookRule>     $rules
      *
      * @throws PayloadInvalid
+     * @throws TargetUnresolvable
      */
     public function match(WebhookSource $source, Project $project, array $headers, array $payload, array $rules): RuleOutcome
     {
@@ -68,8 +73,9 @@ final class RuleMatcher
             }
             $label = self::label((string) $key);
             $branch = $rule->params()['branch'] ?? $project->defaultBranch();
+            $targets = null === $branch ? [] : [new DeployTarget($rule, $branch, self::fit($project, $label, (string) $key))];
 
-            return new RuleOutcome($event, $key, $change, $rule, null, $label, $branch, self::deployText($rule, $label, $branch));
+            return new RuleOutcome($event, $key, $change, $rule, null, $label, $branch, self::deployText($rule, $label, $branch), $targets);
         }
 
         return RuleOutcome::ignored($event, $key, $change, 'no rule for this status');
@@ -79,6 +85,8 @@ final class RuleMatcher
      * @param array<string, string> $headers
      * @param array<mixed>          $payload
      * @param list<WebhookRule>     $rules
+     *
+     * @throws TargetUnresolvable
      */
     private function bitbucket(Project $project, array $headers, array $payload, array $rules): RuleOutcome
     {
@@ -88,40 +96,217 @@ final class RuleMatcher
         }
 
         $repo = self::path($payload, ['repository', 'full_name']);
-        $branch = self::path($payload, ['pullrequest', 'source', 'branch', 'name'])
-            ?? self::path($payload, ['commit_status', 'refname'])
-            ?? self::path($payload, ['push', 'changes', 0, 'new', 'name']);
         $state = self::path($payload, ['commit_status', 'state']);
         $comment = self::path($payload, ['comment', 'content', 'raw']);
         $change = null === $state ? null : 'state '.$state;
 
+        if ('repo:push' === $event) {
+            return $this->push($project, $event, $repo, $payload, $rules);
+        }
+
+        $branch = self::path($payload, ['pullrequest', 'source', 'branch', 'name'])
+            ?? self::path($payload, ['commit_status', 'refname']);
         foreach ($rules as $rule) {
-            $match = $rule->match();
-            if (($match['on_event'] ?? '') !== $event
-                || 0 !== strcasecmp($match['repo'] ?? '', $repo ?? '')
-                || (isset($match['branch']) && (null === $branch || !fnmatch($match['branch'], $branch)))
-                || (isset($match['state']) && 0 !== strcasecmp($match['state'], $state ?? ''))
-                || (isset($match['comment']) && !self::hasLine($comment, $match['comment']))) {
+            if (!self::ruleMatches($rule, $event, $repo, $branch, $state, $comment)) {
                 continue;
             }
-            $params = $rule->params();
-            if (WebhookRule::ACTION_DEPLOY === $rule->action()) {
-                $label = $params['label'] ?? self::label((string) $branch);
 
-                return new RuleOutcome($event, $branch, $change, $rule, null, $label, $branch, self::deployText($rule, $label, $branch));
-            }
-            $ref = $params['ref'] ?? $project->defaultBranch();
-            $text = \sprintf('would run pipeline %s on %s (%s)', $params['pattern'] ?? '?', $ref ?? '?', $repo ?? '?');
-
-            return new RuleOutcome($event, $branch, $change, $rule, null, null, $ref, $text);
+            return $this->forRule($project, $rule, $event, $repo, $branch, $change);
         }
 
         return RuleOutcome::ignored($event, $branch, $change, 'no rule matches this event');
     }
 
+    /**
+     * A push names one entry per ref in `push.changes`. Each created or updated BRANCH is matched on its own (first
+     * rule wins, per branch); deletions and tags are skipped, so a push that only deletes is ignored. A run-pipeline
+     * rule that matches ends the search, as before: one pipeline per event.
+     *
+     * @param array<mixed>      $payload
+     * @param list<WebhookRule> $rules
+     *
+     * @throws TargetUnresolvable
+     */
+    private function push(Project $project, string $event, ?string $repo, array $payload, array $rules): RuleOutcome
+    {
+        $branches = self::pushedBranches($payload);
+        if ([] === $branches) {
+            // Nothing created or updated (a deletion, a tag): a rule with no branch condition may still want the event.
+            foreach ($rules as $rule) {
+                if (WebhookRule::ACTION_RUN_PIPELINE === $rule->action() && self::ruleMatches($rule, $event, $repo, null, null, null)) {
+                    return $this->forRule($project, $rule, $event, $repo, null, null);
+                }
+            }
+
+            return RuleOutcome::ignored($event, null, null, 'no branch was created or updated');
+        }
+
+        $targets = [];
+        $skipped = [];
+        $fixed = self::fixedLabels($rules);
+        foreach ($branches as $branch) {
+            foreach ($rules as $rule) {
+                if (!self::ruleMatches($rule, $event, $repo, $branch, null, null)) {
+                    continue;
+                }
+                if (WebhookRule::ACTION_DEPLOY !== $rule->action()) {
+                    return $this->forRule($project, $rule, $event, $repo, $branch, null);
+                }
+                $target = $this->deployTarget($project, $rule, $branch);
+                if (!$target->replace && \in_array($target->label, $fixed, true)) {
+                    $skipped[] = ['subject' => $branch, 'reason' => 'collides with a fixed-label rule'];
+                } elseif (!self::hasTarget($targets, $target)) {
+                    $targets[] = $target;
+                }
+                break;
+            }
+        }
+
+        if ([] === $targets) {
+            $reason = [] === $skipped ? 'no rule matches this event' : 'collides with a fixed-label rule';
+
+            return RuleOutcome::ignored($event, $branches[0], null, $reason);
+        }
+
+        $decisions = array_map(static fn (DeployTarget $t): string => self::deployText($t->rule, $t->label, $t->branch), $targets);
+        $first = $targets[0];
+
+        return new RuleOutcome($event, $first->branch, null, $first->rule, null, $first->label, $first->branch, implode('; ', $decisions), $targets, $skipped);
+    }
+
+    private function forRule(Project $project, WebhookRule $rule, string $event, ?string $repo, ?string $branch, ?string $change): RuleOutcome
+    {
+        if (WebhookRule::ACTION_DEPLOY === $rule->action()) {
+            if (null === $branch) {
+                throw new TargetUnresolvable('The event names no branch to deploy.');
+            }
+            $target = $this->deployTarget($project, $rule, $branch);
+
+            return new RuleOutcome($event, $branch, $change, $rule, null, $target->label, $branch, self::deployText($rule, $target->label, $branch), [$target]);
+        }
+
+        $params = $rule->params();
+        $ref = $params['ref'] ?? $project->defaultBranch();
+        $text = \sprintf('run pipeline %s on %s (%s)', $params['pattern'] ?? '?', $ref ?? '?', $repo ?? '?');
+
+        return new RuleOutcome($event, $branch, $change, $rule, null, null, $ref, $text);
+    }
+
+    /**
+     * The instance a deploy rule makes of a branch: a fixed `label`, or `label_prefix` + the branch minus
+     * `strip_suffix`, slugified, then fitted to 63 characters (the project's additional hostname aliases included; a
+     * derived label keeps room for a `-999` suffix).
+     *
+     * @throws TargetUnresolvable
+     */
+    private function deployTarget(Project $project, WebhookRule $rule, string $branch): DeployTarget
+    {
+        $params = $rule->params();
+        $alias = InstanceHostnames::longestPrefix($project);
+        try {
+            if (isset($params['label'])) {
+                $label = InstanceNaming::fitLabel($project->name(), Labels::slug($params['label']), $branch, $alias);
+
+                return new DeployTarget($rule, $branch, $label, true);
+            }
+            $text = $branch;
+            $suffix = $params['strip_suffix'] ?? '';
+            if ('' !== $suffix && str_ends_with($text, $suffix)) {
+                $text = substr($text, 0, -\strlen($suffix));
+            }
+            $label = InstanceNaming::fitLabel($project->name(), Labels::slug(($params['label_prefix'] ?? '').$text), $branch, $alias, 4);
+        } catch (ValidationFailed) {
+            throw new TargetUnresolvable('The branch cannot be turned into an instance label.');
+        }
+
+        return new DeployTarget($rule, $branch, $label);
+    }
+
+    private static function fit(Project $project, string $label, string $seed): string
+    {
+        try {
+            return InstanceNaming::fitLabel($project->name(), $label, $seed, InstanceHostnames::longestPrefix($project));
+        } catch (ValidationFailed) {
+            throw new TargetUnresolvable('The instance label does not fit the project name.');
+        }
+    }
+
+    /**
+     * @param list<DeployTarget> $targets
+     */
+    private static function hasTarget(array $targets, DeployTarget $target): bool
+    {
+        foreach ($targets as $known) {
+            if ($known->label === $target->label) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * The fixed labels of the deploy rules (slugified as the targets are).
+     *
+     * @param list<WebhookRule> $rules
+     *
+     * @return list<string>
+     */
+    private static function fixedLabels(array $rules): array
+    {
+        $labels = [];
+        foreach ($rules as $rule) {
+            if (WebhookRule::ACTION_DEPLOY === $rule->action() && isset($rule->params()['label'])) {
+                $labels[] = $rule->params()['label'];
+            }
+        }
+
+        return $labels;
+    }
+
+    /**
+     * The names of the branches a push created or updated, each once, in payload order.
+     *
+     * @param array<mixed> $payload
+     *
+     * @return list<string>
+     */
+    private static function pushedBranches(array $payload): array
+    {
+        $push = $payload['push'] ?? null;
+        $changes = \is_array($push) ? ($push['changes'] ?? null) : null;
+        if (!\is_array($changes)) {
+            return [];
+        }
+        $branches = [];
+        foreach ($changes as $change) {
+            $new = \is_array($change) ? ($change['new'] ?? null) : null;
+            if (!\is_array($new) || 'branch' !== ($new['type'] ?? null)) {
+                continue;
+            }
+            $name = self::string($new['name'] ?? null);
+            if (null !== $name && !\in_array($name, $branches, true)) {
+                $branches[] = $name;
+            }
+        }
+
+        return $branches;
+    }
+
+    private static function ruleMatches(WebhookRule $rule, string $event, ?string $repo, ?string $branch, ?string $state, ?string $comment): bool
+    {
+        $match = $rule->match();
+
+        return ($match['on_event'] ?? '') === $event
+            && 0 === strcasecmp($match['repo'] ?? '', $repo ?? '')
+            && (!isset($match['branch']) || (null !== $branch && fnmatch($match['branch'], $branch)))
+            && (!isset($match['state']) || 0 === strcasecmp($match['state'], $state ?? ''))
+            && (!isset($match['comment']) || self::hasLine($comment, $match['comment']));
+    }
+
     private static function deployText(WebhookRule $rule, ?string $label, ?string $branch): string
     {
-        $text = \sprintf('would deploy %s (template %s', $label ?? '?', $rule->params()['template'] ?? '?');
+        $text = \sprintf('deploy %s (template %s', $label ?? '?', $rule->params()['template'] ?? '?');
 
         return $text.(null === $branch ? ')' : ', branch '.$branch.')');
     }

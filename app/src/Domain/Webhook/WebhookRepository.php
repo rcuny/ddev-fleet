@@ -84,6 +84,22 @@ final readonly class WebhookRepository
     }
 
     /**
+     * Stores what an action did on a delivery. The action may have reset the entity manager (a label race in the
+     * instance service), which leaves the delivery detached: it is then loaded again by id.
+     */
+    public function recordOutcome(WebhookDelivery $delivery, string $note, ?int $jobId, bool $failed): void
+    {
+        if (!$this->em->contains($delivery) && null !== $delivery->id()) {
+            $delivery = $this->em->find(WebhookDelivery::class, $delivery->id()) ?? $delivery;
+        }
+        $delivery->recordAction($note, $jobId);
+        if ($failed) {
+            $delivery->recordFailure($note);
+        }
+        $this->em->flush();
+    }
+
+    /**
      * Whether a delivery with this id already consumed it (a retry of the same event).
      */
     public function dedupeSeen(string $projectName, WebhookSource $source, string $dedupeId): bool
@@ -100,11 +116,28 @@ final readonly class WebhookRepository
     }
 
     /**
-     * Newest first.
+     * Whether a delivery that matched a rule carried exactly this body since the cut-off (a replay of a signed body).
+     */
+    public function bodySeen(string $projectName, WebhookSource $source, string $bodyHash, \DateTimeImmutable $since): bool
+    {
+        $found = $this->em
+            ->createQuery(\sprintf('SELECT d.id FROM %s d WHERE d.projectName = :project AND d.source = :source AND d.bodyHash = :hash AND d.receivedAt >= :since', WebhookDelivery::class))
+            ->setParameter('project', $projectName)
+            ->setParameter('source', $source)
+            ->setParameter('hash', $bodyHash)
+            ->setParameter('since', $since, UtcDateTimeImmutableType::NAME)
+            ->setMaxResults(1)
+            ->getArrayResult();
+
+        return [] !== $found;
+    }
+
+    /**
+     * Newest first. `$source` and `$result` filter on that column when given.
      *
      * @return list<WebhookDelivery>
      */
-    public function deliveries(?string $projectName, bool $hideIgnored, int $limit, int $offset = 0): array
+    public function deliveries(?string $projectName, bool $hideIgnored, int $limit, int $offset = 0, ?WebhookSource $source = null, ?string $result = null): array
     {
         $dql = \sprintf('SELECT d FROM %s d WHERE 1 = 1', WebhookDelivery::class);
         if (null !== $projectName) {
@@ -113,12 +146,24 @@ final readonly class WebhookRepository
         if ($hideIgnored) {
             $dql .= ' AND d.result <> :ignored';
         }
+        if (null !== $source) {
+            $dql .= ' AND d.source = :source';
+        }
+        if (null !== $result) {
+            $dql .= ' AND d.result = :result';
+        }
         $query = $this->em->createQuery($dql.' ORDER BY d.receivedAt DESC, d.id DESC')->setMaxResults($limit)->setFirstResult($offset);
         if (null !== $projectName) {
             $query->setParameter('project', $projectName);
         }
         if ($hideIgnored) {
             $query->setParameter('ignored', WebhookDelivery::IGNORED);
+        }
+        if (null !== $source) {
+            $query->setParameter('source', $source);
+        }
+        if (null !== $result) {
+            $query->setParameter('result', $result);
         }
 
         /** @var list<WebhookDelivery> $rows */

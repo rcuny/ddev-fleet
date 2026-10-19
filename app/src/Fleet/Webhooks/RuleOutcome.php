@@ -7,7 +7,9 @@ namespace App\Fleet\Webhooks;
 use App\Domain\Webhook\WebhookRule;
 
 /**
- * What RuleMatcher made of one event: the facts for the log, and the matching rule (or why none matched).
+ * What RuleMatcher made of one event: the facts for the log, and the matching rule (or why none matched). A deploy
+ * rule also lists its targets (a Bitbucket push can name several branches); `skipped` are the branches that matched a
+ * rule but were left out, each with its reason, and get a delivery row of their own.
  */
 final readonly class RuleOutcome
 {
@@ -20,6 +22,10 @@ final readonly class RuleOutcome
         public ?string $label = null,
         public ?string $branch = null,
         public ?string $decision = null,
+        /** @var list<DeployTarget> */
+        public array $targets = [],
+        /** @var list<array{subject: string, reason: string}> */
+        public array $skipped = [],
     ) {
     }
 

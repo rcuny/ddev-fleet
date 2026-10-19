@@ -49,8 +49,8 @@ Bare-metal / VPS host
 The web request never runs `ddev`, `git` or `docker`: it stores a job, a worker picks it up
 through the `CommandRunner` seam and the browser follows the log live (Mercure). Of this
 picture, the app, the seams, header authentication, the SQLite wiring and the shell exist
-today, and so do Caddy, Authelia, the Mercure hub and the worker unit (installed by `install/`); the jobs that
-use them arrive in M0.04.
+today, and so do Caddy, Authelia, the Mercure hub, the job worker and the instance jobs (deploy, redeploy, start,
+stop, destroy) with their pages and `fleet instance:*` / `fleet job:*` commands.
 
 ## Install on a server (1.x)
 
@@ -110,6 +110,7 @@ executed. The merge gate is `composer run gates` in `app/`, plus the Playwright 
 | [`docs/installation.md`](docs/installation.md) | Installing 1.x: prerequisites, the installer and its flags, the setup wizard, what is installed where, recovery, upgrades, security model, uninstalling |
 | [`docs/assets.md`](docs/assets.md) | Assets: the project Assets tab, chunked browser upload and its cap, copying large files over SSH, path rules, the `fleet asset:*` commands |
 | [`docs/secrets.md`](docs/secrets.md) | Secrets: fleet-wide and project secrets, `[[token]]` placeholders, reveal and the audit log, the `fleet secret:list\|set\|unset` commands, the security model |
+| [`docs/instances-and-jobs.md`](docs/instances-and-jobs.md) | Instances and jobs: deploy, redeploy, start, stop, destroy, bulk work, the live log, the `fleet instance\|job` commands, exit codes, troubleshooting |
 | [`docs/projects-and-templates.md`](docs/projects-and-templates.md) | Projects and templates: the pages, every field and limit, the `fleet project\|template\|port` commands, exit codes and JSON, differences from 0.x |
 | [`docs/development.md`](docs/development.md) | Prerequisites, first run, environment variables, recording runner, stand-in, gates, adding a component |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Workflow, code style, pull requests, CI and mirror |

@@ -59,10 +59,11 @@ final class WebhookReceiverTest extends AdminTestCase
     /**
      * @return array<string, mixed>
      */
-    private static function event(string $key = 'FLE-66', string $to = 'Dispatched'): array
+    private static function event(string $key = 'FLE-66', string $to = 'Dispatched', int $timestamp = 1): array
     {
         return [
             'webhookEvent' => 'jira:issue_updated',
+            'timestamp' => $timestamp,
             'issue' => ['key' => $key],
             'changelog' => ['items' => [['field' => 'status', 'fromString' => 'To Do', 'toString' => $to]]],
         ];
@@ -113,9 +114,11 @@ final class WebhookReceiverTest extends AdminTestCase
         self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
         $json = $this->json();
         self::assertSame('accepted', $json['result']);
-        self::assertSame('would deploy fle-66 (template jira-work, branch develop)', $json['decision']);
-        self::assertFalse($json['performed']);
-        self::assertSame('deploy action not available until M0.04', $json['note']);
+        self::assertSame('deploy fle-66 (template jira-work, branch develop)', $json['decision']);
+        self::assertTrue($json['performed']);
+        self::assertSame('blog--fle-66', $json['instance']);
+        self::assertIsInt($json['job']);
+        self::assertSame(\sprintf('deploy queued: blog--fle-66 (job %d)', $json['job']), $json['note']);
 
         $rows = $this->deliveries();
         self::assertCount(1, $rows);
@@ -124,8 +127,9 @@ final class WebhookReceiverTest extends AdminTestCase
         self::assertSame('To Do -> Dispatched', $rows[0]->change());
         self::assertSame('on_status=Dispatched', $rows[0]->rule());
         self::assertSame('deploy', $rows[0]->action());
-        self::assertSame('would deploy fle-66 (template jira-work, branch develop)', $rows[0]->decision());
-        self::assertSame('deploy action not available until M0.04', $rows[0]->reason());
+        self::assertSame('deploy fle-66 (template jira-work, branch develop)', $rows[0]->decision());
+        self::assertSame(\sprintf('deploy queued: blog--fle-66 (job %d)', $json['job']), $rows[0]->reason());
+        self::assertSame($json['job'], $rows[0]->jobId());
         self::assertSame('abc-1', $rows[0]->dedupeId());
     }
 
@@ -193,18 +197,20 @@ final class WebhookReceiverTest extends AdminTestCase
         sort($results);
         self::assertSame(['accepted', 'duplicate'], $results);
 
-        // A deliberate second dispatch carries a new id and is accepted again.
-        self::assertSame(200, $this->call($body, $signature, headers: ['HTTP_X_ATLASSIAN_WEBHOOK_IDENTIFIER' => 'other-id']));
+        // A deliberate second dispatch is a new event (its own timestamp) with a new id, and is accepted again.
+        $again = (string) json_encode(self::event(timestamp: 2));
+        self::assertSame(200, $this->call($again, Signature::sign($again, $this->secret), headers: ['HTTP_X_ATLASSIAN_WEBHOOK_IDENTIFIER' => 'other-id']));
         self::assertSame('accepted', $this->json()['result']);
+        self::assertSame('blog--fle-66-1', $this->json()['instance'], 'the deploy allocation suffixes the second instance');
     }
 
     public function testADeliveryWithoutAnIdIsNotDeduplicated(): void
     {
-        $body = (string) json_encode(self::event());
-        $signature = Signature::sign($body, $this->secret);
+        $first = (string) json_encode(self::event(timestamp: 1));
+        $second = (string) json_encode(self::event(timestamp: 2));
 
-        $this->call($body, $signature);
-        $this->call($body, $signature);
+        $this->call($first, Signature::sign($first, $this->secret));
+        $this->call($second, Signature::sign($second, $this->secret));
 
         self::assertSame(['accepted', 'accepted'], array_map(static fn (WebhookDelivery $d): string => $d->result(), $this->deliveries()));
     }
@@ -319,7 +325,9 @@ final class WebhookReceiverTest extends AdminTestCase
         $status = $this->call($body, Signature::sign($body, $secret), source: 'bitbucket', headers: ['HTTP_X_EVENT_KEY' => 'pullrequest:approved', 'HTTP_X_REQUEST_UUID' => 'uuid-1']);
 
         self::assertSame(200, $status);
-        self::assertSame('would run pipeline renovate-merge on develop (acme/blog)', $this->json()['decision']);
+        self::assertSame('run pipeline renovate-merge on develop (acme/blog)', $this->json()['decision']);
+        self::assertSame('failed', $this->json()['result'], 'no pipeline token yet');
+        self::assertStringContainsString('no pipeline token', $this->json()['note']);
         self::assertSame(200, $this->call($body, Signature::sign($body, $secret), source: 'bitbucket', headers: ['HTTP_X_EVENT_KEY' => 'pullrequest:approved', 'HTTP_X_REQUEST_UUID' => 'uuid-1']));
         self::assertSame(['result' => 'duplicate'], $this->json());
     }

@@ -29,6 +29,31 @@ final class InstanceNaming
     }
 
     /**
+     * Cuts a label so the instance id (and, for a project with additional hostnames, the `<hostname>-<id>` alias) fits
+     * in 63 characters. A label that is cut ends in `-` and the first 6 hex of the SHA-1 of `$seed`, so the same seed
+     * always lands on the same id.
+     *
+     * @param int $aliasPrefix characters an alias adds in front of the id (`InstanceHostnames::longestPrefix()`)
+     * @param int $reserve     characters kept free behind the label, e.g. 4 for a `-999` allocation suffix
+     *
+     * @throws ValidationFailed when not even the hash fits
+     */
+    public static function fitLabel(string $project, string $label, string $seed, int $aliasPrefix = 0, int $reserve = 0): string
+    {
+        $budget = self::MAX - \strlen($project) - 2 - $aliasPrefix - $reserve;
+        if (\strlen($label) <= $budget) {
+            return $label;
+        }
+        $suffix = '-'.substr(sha1($seed), 0, 6);
+        $keep = $budget - \strlen($suffix);
+        if ($keep < 1) {
+            throw new ValidationFailed(['label' => 'The project name is too long to leave room for a label.']);
+        }
+
+        return rtrim(substr($label, 0, $keep), '-').$suffix;
+    }
+
+    /**
      * @param list<string> $taken instance ids that exist (database rows and checkouts on disk)
      *
      * @return string the label: $base when free, else the first free `$base-N`

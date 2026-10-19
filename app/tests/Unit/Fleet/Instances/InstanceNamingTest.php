@@ -65,4 +65,31 @@ final class InstanceNamingTest extends TestCase
         self::assertFalse(InstanceNaming::isInstanceId('../acme--x'));
         self::assertFalse(InstanceNaming::isInstanceId('Acme--x'));
     }
+
+    public function testALabelThatFitsIsLeftAlone(): void
+    {
+        self::assertSame('fle-3', InstanceNaming::fitLabel('blog', 'fle-3', 'seed'));
+    }
+
+    public function testALabelThatDoesNotFitIsCutAndEndsInTheSeedHash(): void
+    {
+        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 'feature/x');
+
+        self::assertSame(InstanceNaming::MAX, \strlen('blog--'.$label));
+        self::assertSame('-'.substr(sha1('feature/x'), 0, 6), substr($label, -7));
+        self::assertSame(substr($label, -7), substr(InstanceNaming::fitLabel('blog', str_repeat('b', 90), 'feature/x'), -7), 'only the seed decides the hash');
+    }
+
+    public function testTheAliasPrefixAndTheReservedSuffixTakeFromTheBudget(): void
+    {
+        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 's', aliasPrefix: 10, reserve: 4);
+
+        self::assertSame(InstanceNaming::MAX - 10 - 4, \strlen('blog--'.$label));
+    }
+
+    public function testAProjectNameWithNoRoomLeftIsRefused(): void
+    {
+        $this->expectException(ValidationFailed::class);
+        InstanceNaming::fitLabel(str_repeat('p', 40), str_repeat('a', 80), 's', aliasPrefix: 14, reserve: 4);
+    }
 }
