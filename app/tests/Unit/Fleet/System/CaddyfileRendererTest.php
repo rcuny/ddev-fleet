@@ -122,9 +122,18 @@ final class CaddyfileRendererTest extends TestCase
         $empty = self::renderer()->render(self::host(email: ''));
 
         self::assertStringNotContainsString('email', $without);
-        self::assertStringNotContainsString("\n{\n", $without, 'no empty global block');
-        self::assertStringContainsString("{\n    email ops@example.com\n}\n", $with);
+        self::assertStringContainsString("{\n    email ops@example.com\n", $with);
         self::assertSame($without, $empty);
+        // The global block is always there: it carries the log filter.
+        self::assertStringContainsString("\n{\n\n    # Caddy's error log", $without);
+    }
+
+    public function testTheSetupTokenIsFilteredOutOfEveryLogLine(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        self::assertStringContainsString("        format filter {\n            wrap json\n            fields {\n                request>uri query {\n                    delete token\n", $out);
+        self::assertStringNotContainsString("\n    log {", substr($out, (int) strpos($out, 'fleet.example.com {')), 'no access log: every request would otherwise be recorded');
     }
 
     public function testHooksBodyCapped(): void
@@ -180,6 +189,19 @@ final class CaddyfileRendererTest extends TestCase
                     application_key {env.OVH_APPLICATION_KEY}
                     application_secret {env.OVH_APPLICATION_SECRET}
                     consumer_key {env.OVH_CONSUMER_KEY}
+                }
+
+                # Caddy's error log (a 502 while php-fpm restarts, say) records the full request URI. The setup link carries its
+                # token in the query string, so the query parameter is removed from every log line.
+                log {
+                    format filter {
+                        wrap json
+                        fields {
+                            request>uri query {
+                                delete token
+                            }
+                        }
+                    }
                 }
             }
 
