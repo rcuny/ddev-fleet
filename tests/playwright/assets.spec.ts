@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -67,6 +67,17 @@ async function upload(page: Page, name: string, bytes: Buffer): Promise<void> {
   await page.getByTestId('asset-input').setInputFiles({ name, mimeType: 'application/octet-stream', buffer: bytes });
 }
 
+/**
+ * Chooses a file from disk. Unlike a `buffer`, whose last-modified time is "now" on every call, a file keeps its
+ * modification time, so choosing it again has the same fingerprint (name, size, last modified) and resumes the upload.
+ */
+async function uploadFromDisk(page: Page, name: string, bytes: Buffer): Promise<void> {
+  const path = test.info().outputPath(name);
+  writeFileSync(path, bytes);
+  utimesSync(path, 1_700_000_000, 1_700_000_000);
+  await page.getByTestId('asset-input').setInputFiles(path);
+}
+
 async function deleteRow(page: Page, row: Locator): Promise<void> {
   const dialog = await openDialog(page, row.getByTestId('asset-delete'));
   await dialog.getByTestId('asset-delete-confirm').click();
@@ -101,7 +112,7 @@ test.describe('assets', () => {
       const item = page.getByTestId('asset-upload-item');
       await expect(item).toHaveAttribute('data-state', 'done', { timeout: 60_000 });
       await expect(item.getByTestId('asset-sha256')).toHaveText(sha256(bytes));
-      await expect(item).toContainText('Uploaded, 192.0 KiB.');
+      await expect(item).toContainText('Uploaded, 200.0 KiB.');
       expect([...chunks].sort()).toEqual([0, 1, 2, 3]);
 
       // The listing was refreshed in place.
@@ -116,9 +127,9 @@ test.describe('assets', () => {
         await expectTall(rows.first().getByTestId('asset-delete'));
         // The size and the time sit under the name on a phone; the columns are hidden.
         await expect(rows.first().getByTestId('asset-size')).toBeHidden();
-        await expect(rows.first()).toContainText('192.0 KiB');
+        await expect(rows.first()).toContainText('200.0 KiB');
       } else {
-        await expect(rows.first().getByTestId('asset-size')).toHaveText('192.0 KiB');
+        await expect(rows.first().getByTestId('asset-size')).toHaveText('200.0 KiB');
       }
 
       // A reload (Rescan) shows the same thing: the list is the disk.
@@ -213,7 +224,7 @@ test.describe('assets', () => {
       // The connection "drops" at chunk 2.
       await page.route(/\/chunks\/2$/, (route) => route.abort('connectionreset'));
       const chunks = watchChunks(page);
-      await upload(page, 'big.sql', bytes);
+      await uploadFromDisk(page, 'big.sql', bytes);
       const item = page.getByTestId('asset-upload-item').first();
       await expect(item).toHaveAttribute('data-state', 'error', { timeout: 60_000 });
       await expect(item.getByTestId('asset-upload-status')).toContainText('Choose the same file again to resume.');
@@ -222,7 +233,7 @@ test.describe('assets', () => {
       // Back online: the same file again sends only chunks 2 and 3.
       await page.unroute(/\/chunks\/2$/);
       chunks.length = 0;
-      await upload(page, 'big.sql', bytes);
+      await uploadFromDisk(page, 'big.sql', bytes);
       const resumed = page.getByTestId('asset-upload-item').nth(1);
       await expect(resumed).toHaveAttribute('data-state', 'done', { timeout: 60_000 });
       await expect(resumed.getByTestId('asset-sha256')).toHaveText(sha256(bytes));

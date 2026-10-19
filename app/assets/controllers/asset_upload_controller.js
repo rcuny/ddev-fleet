@@ -128,11 +128,19 @@ export default class extends Controller {
     }
 
     async #call(method, url, body = undefined, contentType = undefined) {
-        const headers = { 'X-CSRF-Token': this.csrfValue, Accept: 'application/json' };
+        // The page's token is the cookie name (stateless CSRF, see csrf_protection_controller.js): double-submit it like
+        // the forms do. Origin info alone is refused once a form of the same session was accepted by double-submit.
+        const [token, forget] = this.#doubleSubmit();
+        const headers = { 'X-CSRF-Token': token, Accept: 'application/json' };
         if (contentType) {
             headers['Content-Type'] = contentType;
         }
-        const response = await fetch(url, { method, body, headers, credentials: 'same-origin' });
+        let response;
+        try {
+            response = await fetch(url, { method, body, headers, credentials: 'same-origin' });
+        } finally {
+            forget();
+        }
         let json = null;
         try {
             json = await response.json();
@@ -141,6 +149,25 @@ export default class extends Controller {
         }
 
         return { ok: response.ok, status: response.status, json };
+    }
+
+    // Same scheme as csrf_protection_controller.js: when the page's value is the cookie name, send a fresh random token
+    // and a matching cookie `<name>_<token>=<name>` (`__Host-` prefixed and secure over https). Returns the token and a
+    // function that expires the cookie again (the server clears it too; this covers a request that never got there).
+    #doubleSubmit() {
+        const name = this.csrfValue;
+        if (!/^[-_a-zA-Z0-9]{4,22}$/.test(name)) {
+            return [name, () => {}];
+        }
+        const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))));
+        const prefix = window.location.protocol === 'https:' ? '__Host-' : '';
+        const suffix = window.location.protocol === 'https:' ? '; secure' : '';
+        const cookie = `${prefix}${name}_${token}`;
+        document.cookie = `${cookie}=${name}; path=/; samesite=strict${suffix}`;
+
+        return [token, () => {
+            document.cookie = `${cookie}=0; path=/; samesite=strict; max-age=0${suffix}`;
+        }];
     }
 
     // The listing is server-rendered and escaped; swap in a fresh copy of it without leaving the page.

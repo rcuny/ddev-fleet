@@ -501,6 +501,34 @@ final class AssetPagesTest extends AdminTestCase
         self::assertSame([], $this->api('GET', "/admin/projects/blog/assets/uploads/$id")['received']);
     }
 
+    /**
+     * Regression (merge-gate browser failure): once a form of the session was accepted by double-submit (cookie + token,
+     * what csrf_protection_controller.js does), origin info alone is refused ("double-submit info was used in a previous
+     * request but is now missing"). The asset-upload controller must therefore double-submit too.
+     */
+    public function testUploadEndpointsNeedTheDoubleSubmitOnceTheSessionUsedIt(): void
+    {
+        $this->makeProject();
+        $this->put('keep.sql');
+        $token = 'abcdefghijklmnopqrstuvwxyz012345';
+        $json = json_encode(['path' => '', 'name' => 'e.sql', 'size' => 5], \JSON_THROW_ON_ERROR);
+
+        // A form post by double-submit (the cookie is set by the page's script, the token travels in the body).
+        $this->client->getCookieJar()->set(new \Symfony\Component\BrowserKit\Cookie('__Host-csrf-token_'.$token, 'csrf-token', null, '/', 'localhost', true));
+        $this->client->request('POST', self::BASE.'/admin/projects/blog/assets/delete', ['path' => 'keep.sql', '_token' => $token], [], $this->browserServer());
+        self::assertResponseRedirects();
+
+        // Origin info alone, the page's bare token: refused now.
+        $this->api('POST', '/admin/projects/blog/assets/uploads', $json);
+        self::assertResponseStatusCodeSame(403);
+
+        // A fresh random token with its cookie, as the Stimulus controller sends it: accepted.
+        $fresh = 'ZYXWVUTSRQPONMLKJIHGFEDCBA987654';
+        $this->client->getCookieJar()->set(new \Symfony\Component\BrowserKit\Cookie('__Host-csrf-token_'.$fresh, 'csrf-token', null, '/', 'localhost', true));
+        $this->api('POST', '/admin/projects/blog/assets/uploads', $json, ['HTTP_X_CSRF_TOKEN' => $fresh]);
+        self::assertResponseIsSuccessful();
+    }
+
     // --- access
 
     /**
