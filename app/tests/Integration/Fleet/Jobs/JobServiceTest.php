@@ -43,13 +43,13 @@ final class JobServiceTest extends JobTestCase
         $failed = $this->queuedJob('start');
         $this->service->finish($failed, JobStatus::Failed, 1, 'boom');
 
-        $retry = $this->service->retry($failed, 'cli:renaud', JobTrigger::Cli);
+        $retry = $this->service->retry($failed, 'cli:alice', JobTrigger::Cli);
 
         self::assertSame('start', $retry->type());
         self::assertSame($failed->id(), $retry->retryOf());
         self::assertSame('acme--main', $retry->instanceId());
         self::assertSame(JobTrigger::Cli, $retry->trigger());
-        self::assertSame('cli:renaud', $retry->requestedBy());
+        self::assertSame('cli:alice', $retry->requestedBy());
         self::assertSame(JobStatus::Queued, $retry->status());
         self::assertNotNull($retry->id());
     }

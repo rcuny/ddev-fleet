@@ -167,7 +167,7 @@ final class InstanceServiceTest extends JobTestCase
 
     public function testHostnameAliasesThatDoNotFitAreAFieldError(): void
     {
-        $this->project->changeHostnames(['pws']);
+        $this->project->changeHostnames(['edge']);
         new ProjectRepository($this->em)->save($this->project);
 
         $this->expectException(ValidationFailed::class);
@@ -274,7 +274,7 @@ final class InstanceServiceTest extends JobTestCase
         $this->deploy(new DeployInput('acme'));
         $this->markFinished();
 
-        $start = $this->service()->request('start', new Selector(['acme--develop']), new OperationOptions(timeout: 120.0, retryPortConflict: true), JobTrigger::Cli, 'cli:renaud');
+        $start = $this->service()->request('start', new Selector(['acme--develop']), new OperationOptions(timeout: 120.0, retryPortConflict: true), JobTrigger::Cli, 'cli:alice');
         self::assertSame('start', $start[0]->type());
         self::assertSame(['timeout' => 120.0, 'retryPortConflict' => true], $start[0]->params());
         self::assertNull($start[0]->batchId());

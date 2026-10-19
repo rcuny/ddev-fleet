@@ -45,8 +45,8 @@ final class InstanceHostnamesTest extends KernelTestCase
         self::assertSame('acme--dev.fleet.example.com', $hostnames->primary('acme--dev'));
         self::assertSame('https://acme--dev.fleet.example.com', $hostnames->siteUrl('acme--dev'));
         self::assertSame(
-            ['pws-acme--dev.fleet.example.com', 'shop-acme--dev.fleet.example.com'],
-            $hostnames->aliases($this->project('pws', 'shop'), 'acme--dev'),
+            ['edge-acme--dev.fleet.example.com', 'shop-acme--dev.fleet.example.com'],
+            $hostnames->aliases($this->project('edge', 'shop'), 'acme--dev'),
         );
         self::assertSame([], $hostnames->aliases($this->project(), 'acme--dev'));
     }
@@ -56,7 +56,7 @@ final class InstanceHostnamesTest extends KernelTestCase
         $this->host->getOrCreate('fleet.example.com');
 
         $this->expectException(ValidationFailed::class);
-        new InstanceHostnames($this->host)->aliases($this->project('pws'), 'acme--'.str_repeat('a', 56));
+        new InstanceHostnames($this->host)->aliases($this->project('edge'), 'acme--'.str_repeat('a', 56));
     }
 
     public function testBeforeTheHostIsSetUpThereIsNoDomain(): void
