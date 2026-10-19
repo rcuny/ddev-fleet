@@ -95,6 +95,7 @@ follow the design system. A refused value shows an error under its field and not
 | Project, General tab | `/admin/projects/<project>` | The same fields (the name is fixed) plus the default template. Below the form: the **issue id tester** (type a pattern, a sample instance label and a sample branch, and see the id a deploy would extract; nothing typed there is saved) and the **Danger zone** with the delete button and its confirmation dialog. |
 | Project, Templates tab | `/admin/projects/<project>/templates` | The project's templates with their counts of commands; the default one carries a badge. **New template**, edit and delete. |
 | Template form | `.../templates/new`, `.../templates/<template>` | Name, Drupal environment, and three text boxes with one command per line. |
+| Project, Secrets tab | `/admin/projects/<project>/secrets` | The project's secrets (names only), add or replace, reveal, delete, and a warning for a secret no asset file uses. See [`secrets.md`](secrets.md). |
 | Project, Ports tab | `/admin/projects/<project>/ports` | Read-only: the catalogue, with the ports this project uses marked. Assigning ports in the browser arrives with the networking milestone (M0.07); until then use `fleet project:update --port`. |
 
 ## The command line
@@ -245,7 +246,7 @@ later; changing a project's settings never can.
 
 ## Deleting
 
-Deleting a project deletes its templates and its port assignments (the catalogue entries stay). It is **refused
+Deleting a project deletes its templates, its port assignments (the catalogue entries stay) and its secrets (one audit entry each, see [`secrets.md`](secrets.md)). It is **refused
 while the project has instances**, with a message naming them; destroy the instances first. Until instances exist
 (M0.04) nothing blocks the deletion. A template can be deleted unless it is the project's default template: choose
 another default (or clear it with `--unset=default-template`) first. A named port cannot be removed while a project

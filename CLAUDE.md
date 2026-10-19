@@ -63,13 +63,15 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `App\Domain\Host` | `HostSettings` (single row: domain, ACME email, `TlsMode` http01 / ovh_dns, setup token hash and expiry, completion time) and its repository |
 | `App\Domain\User` | `User` (argon2id hash, groups; `fleet-admins` is the admin group), `PasswordHash` (strict argon2id check), `UserRepository` |
 | `App\Domain\Ssh` | `SshKey` (public key and fingerprint per `SshKeyRole` deploy / push; private keys live on disk, never in the database) |
-| `App\Domain\Secret` | `Secret` (sealed ciphertext, nonce, key version, scope) and its repository |
+| `App\Domain\Secret` | `Secret` (sealed ciphertext, nonce, key version, scope `fleet` or `project`; the scope id is the project name) and its repository |
+| `App\Domain\Audit` | `AuditEntry` (actor, action, subject, time; never a value) and its repository |
 | `App\Domain\Project` | `Project` (name, git URL, defaults, hostnames, git identity mode `GitBotMode`, issue id pattern, submodule branch, Typesense; its ports and templates), `ProjectRepository`, `ProjectInstanceGuard` (the seam M0.04 implements: deletion is refused while `instanceIds()` is not empty; a no-op until then), `ProjectMembership` (who may operate a project; nobody is a member until M0.10) |
 | `App\Domain\Template` | `Template` (belongs to a project: Drupal environment and the `postDeploy`, `tty1`, `tty2` command lists) and its repository |
 | `App\Domain\Port` | `NamedPort` (the host-wide catalogue: name, public and router port) and its repository |
 | `App\Doctrine` | Doctrine plumbing: `SqlitePragmaMiddleware` (WAL, `busy_timeout=5000`, `foreign_keys=ON` on every connection), `UtcDateTimeImmutableType` (`utc_datetime_immutable`, always UTC: use it, not the stock datetime types, under SQLite) |
 | `App\Fleet` | `FleetPaths` and host-driving services; `App\Fleet\Shell` is the `CommandRunner` seam |
-| `App\Fleet\Secrets` | `SecretKeyFile` (`keys/secret.key`, 32 bytes, never overwritten), `SecretBox` (XChaCha20-Poly1305 with the scope and name as associated data), `SecretStore` (fleet-wide secrets: OVH credentials, Claude token) |
+| `App\Fleet\Secrets` | `SecretKeyFile` (`keys/secret.key`, 32 bytes, never overwritten), `SecretBox` (XChaCha20-Poly1305 with the scope and name as associated data), `SecretStore` (two kinds in one table: the host's own secrets with lowercase names, written by the setup wizard, and the managed secrets with `UPPER_CASE` names, fleet-wide or per project, set by an admin), `SecretService` (the only path the pages and `fleet secret:*` use: validates, seals, audits put / delete / reveal), `SecretName` (the name rule and the kebab-case `[[token]]` of a name), `SecretValue` (text, 1 byte to 64 KiB, normalised, no wrapping quotes), `TokenRenderer` (`[[token]]` substitution for the deploy: project secret over fleet-wide, built-ins over both, verbatim, single pass, unresolved reported), `PlaceholderScanner` (which placeholders a project's asset files mention, for the "no placeholder" warning) |
+| `App\Fleet\Audit` | `AuditLog` (`record(actor, action, subject)`, `latest()`; actions `secret.put`, `secret.delete`, `secret.reveal`; the CLI actor is `cli`) |
 | `App\Fleet\Ssh` | `SshKeyService` (generate / import / regenerate the deploy and push keys), `Ed25519KeyGenerator` (OpenSSH format in PHP, no process), `KnownHostsFile` (seeded provider keys, trust only after a fingerprint confirmation), `KnownHostScanner` (`ssh-keyscan` through the runner) |
 | `App\Fleet\Auth` | `UserService`, `PasswordPolicy`, `AutheliaUsersRenderer` / `AutheliaUsersFile` (the Authelia `users.yml`, written atomically under a lock) |
 | `App\Fleet\System` | The renderers (`CaddyfileRenderer`, `CaddyEnvRenderer`, `AutheliaConfigRenderer`; templates in `templates/system/`), `ConfigValue` (validates everything that is rendered), `SystemRenderer` (staging), `GateWriter` / `GateMode` (the Caddy gate snippet), `CaddyReloader`, and the `Applier` seam with `PrivilegedApply` (see "Privileged apply") |
@@ -77,12 +79,13 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `App\Fleet\Projects\Rule` | The pure validation rules, one class per concern: `ResourceName`, `GitUrl`, `BranchName`, `IssueIdPattern`, `CommandLines`, `DrupalEnv`, `GitIdentity`, `SubmodulePath`, `PortNumbers`, `TextBlock`. They return a message or null and never echo the input |
 | `App\Setup` | The setup wizard's domain: `SetupTokenService`, `SetupCookie`, `SetupState`, `SetupGate` / `SetupAccessSubscriber` (the guard), `SetupAttemptLimiter`, `SetupProgress`, `SetupFinisher`, `ScanTargetPolicy` |
 | `App\Health` | `HealthChecker` / `HealthReport` behind `GET /health`; `HostHealth` / `HostHealthReport` (memory, disk, reboot-required) for the Home card |
-| `App\Security` | `FleetUser`, `RemoteUserAuthenticator`, `TrustedProxyChecker`, `ForbiddenHandler`, `ProjectVoter` (`SETTINGS` is admin-only; `OPERATE`, used from M0.04, is admin or a member of the project); `App\Security\StandIn` (dev/test only) |
-| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages, among them `ProjectController` and `TemplateController`); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
+| `App\Security` | `FleetUser`, `RemoteUserAuthenticator`, `TrustedProxyChecker`, `ForbiddenHandler`, `CurrentActor` (the signed-in user's name for the audit log and `updated_by`), `ProjectVoter` (`SETTINGS` is admin-only; `OPERATE`, used from M0.04, is admin or a member of the project); `App\Security\StandIn` (dev/test only) |
+| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages, among them `ProjectController`, `TemplateController`, `SecretController` and `AuditController`); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
 | `App\Form\Setup` | The wizard's Symfony forms |
 | `App\Form\Project` | The project and template forms (`ProjectType`, `TemplateType`; plain Symfony forms, `novalidate`, errors come from the services through `ValidationErrorMapper`) |
 | `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be in `docs/installation.md` |
 | `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliDocsTest` against `docs/projects-and-templates.md`. A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
+| `App\Command\Secret` | `fleet:secret:list\|set\|unset` (`--project=`; the value comes from a hidden prompt or standard input, never argv; actor `cli`), covered by `SecretsDocsTest` against `docs/secrets.md`; `SecretOptions` is not a command |
 | `App\Command\Support` | What those commands share: `JsonOutput` (`--format=table\|json`, `--json`, exit codes 0 done / 1 refused value / 2 not allowed now / 3 not found, the `{"error", "fields"}` document), `FieldErrors` (field name to `--option` or `<argument>`), `Shapes` (JSON for templates and ports). Not commands |
 | `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`, and `IssueIdPreview`, the one LiveComponent: admin-only through `#[IsGranted]`) |
 | `App\Ui` | UI support classes: `NavigationCatalog`, `NavItem`, `ProfilerToolbarSwitch` |
@@ -124,7 +127,10 @@ New work follows these namespaces; add a new one only with a reason.
   (`SetupFinisher`; php-fpm's `request_terminate_timeout` must stay >= `SetupFinisher::REQUIRED_REQUEST_TIMEOUT`, 240 s).
   Wizard forms carry the stateless CSRF token on top of the Strict cookie.
 - **Secrets** go through `SecretStore` (sealed with `SecretBox`, key in `keys/secret.key`, ciphertext bound to scope and
-  name), never into `.env`, logs, argv or the database in clear. The runner strips the app's secrets from child
+  name), never into `.env`, logs, argv or the database in clear. Pages and commands that manage them go through `SecretService`
+  (validation and the audit entry live there, controllers and commands never write the store themselves). A value is shown
+  only by the admin-only reveal (POST, CSRF, audited before it is handed out, `Cache-Control: no-store`); every parameter that
+  carries a value is `#[\SensitiveParameter]`. Only managed secrets (`UPPER_CASE`) are ever a `[[token]]`; host secrets never are. The runner strips the app's secrets from child
   environments. Private SSH keys are files (0600), the database holds only public keys and fingerprints.
 - **Privileged apply.** The app never runs as root. A change to `/etc/caddy` or `/etc/authelia` is rendered by
   `SystemRenderer` into `staging/<target>/` and installed by `PrivilegedApply` (`sudo -n /usr/local/libexec/fleet/apply
@@ -143,7 +149,7 @@ New work follows these namespaces; add a new one only with a reason.
   through a shell. `docs/projects-and-templates.md` is checked by `CliDocsTest` (commands, options, exit codes): change a
   command, change the guide.
 - **Console commands**: `fleet <group>:<verb>` for groups the wrapper knows (`host`, `setup`, `user`, `project`, `template`,
-  `port`; `fleet project list` also works). Commands that read or write the database are tested with
+  `port`, `secret`; `fleet project list` also works). Commands that read or write the database are tested with
   `RunsFleetCommands` against a real migrated database; stderr assertions need `capture_stderr_separately`.
 - **Components beyond the managed list below.** `<twig:Textarea>` (several lines of text; the form theme renders Symfony's
   `TextareaType` with it, so never write a raw `<textarea>`), `<twig:Checkbox>`, `<twig:NativeSelect>` and `<twig:RadioGroup>` are
@@ -275,6 +281,7 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 - `docs/README.md` — documentation index with the status of each document.
 - `docs/installation.md` — installing 1.x on a host: installer, setup wizard, recovery, security model, uninstalling.
 - `docs/projects-and-templates.md` — projects, templates and named ports: fields and limits, the pages, the `fleet project|template|port` commands, differences from 0.x.
+- `docs/secrets.md` — secrets: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, the `fleet secret:*` commands, the security model.
 - `docs/development.md` — setup, environment variables, stand-in, adding a component.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
 - `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.

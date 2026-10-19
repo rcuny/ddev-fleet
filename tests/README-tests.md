@@ -16,14 +16,14 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 
 | Suite | Where | Count |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 882 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 398 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 405 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 391 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
-| Playwright | `tests/playwright/` | 90 (8 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 69 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| PHPUnit `Unit` | `app/tests/Unit/` | 939 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 496 tests |
+| PHPUnit `Functional` | `app/tests/Functional/` | 457 tests |
+| PHPUnit `Repo` | `app/tests/Repo/` | 399 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
+| Playwright | `tests/playwright/` | 102 (9 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests and `secrets.spec.ts` one, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 81 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 2076 tests (12 skipped). Update this table when the numbers change.
+PHPUnit totals 2291 tests (13 skipped in a fleet instance, which lacks some of the optional tools). Update this table when the numbers change.
 
 ## Layout
 
@@ -40,14 +40,16 @@ app/tests/
                      helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
                      InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code),
                      CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
-                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it)
+                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it), SecretsDocsTest (the
+                     same for docs/secrets.md and the secret commands)
   Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
   support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts,
                          projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
-                         setup-wizard.desktop (the setup wizard end to end), projects (project and template pages)
+                         setup-wizard.desktop (the setup wizard end to end), projects (project and template pages), secrets (fleet-wide
+                         and project secrets, reveal, audit log)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```
