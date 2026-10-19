@@ -29,7 +29,8 @@ PHPUnit totals 1200 tests. Update this table when the numbers change.
 
 ```
 app/tests/
-  bootstrap.php      forces APP_ENV=test and gives each PHPUnit process its own FLEET_HOME
+  bootstrap.php      forces APP_ENV=test, gives each PHPUnit process its own FLEET_HOME and migrates its database once
+                     (any test may read the domain tables; isolated tests use FleetDatabase, which migrates a fresh home)
   Unit/              plain objects: FleetPaths, the command runners, health, security, navigation, tokens
   Integration/       kernel and container wiring: Doctrine/SQLite, Messenger, Lock, Mercure, prod security
   Functional/        HTTP through WebTestCase: access control, app shell, design-system page, health, stand-in
@@ -38,7 +39,7 @@ app/tests/
                      installer: Installer*Test (flags, dry-run plan, DNS check, idempotency, safety), the root
                      helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
                      InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code)
-  Support/           shared helpers (a temporary FLEET_HOME)
+  Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
   support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts

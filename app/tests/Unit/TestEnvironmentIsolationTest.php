@@ -23,4 +23,15 @@ final class TestEnvironmentIsolationTest extends TestCase
         self::assertSame($_SERVER['FLEET_HOME'], getenv('FLEET_HOME'));
         self::assertDirectoryExists((string) $_SERVER['FLEET_HOME']);
     }
+
+    public function testTheProcessDatabaseIsAlreadyMigrated(): void
+    {
+        $file = $_SERVER['FLEET_HOME'].'/var/fleet.sqlite';
+        self::assertFileExists($file);
+
+        $pdo = new \PDO('sqlite:'.$file);
+        $found = $pdo->query("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'project'");
+        self::assertNotFalse($found);
+        self::assertSame(1, (int) $found->fetchColumn());
+    }
 }
