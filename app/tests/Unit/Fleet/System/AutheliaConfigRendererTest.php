@@ -6,7 +6,10 @@ namespace App\Tests\Unit\Fleet\System;
 
 use App\Domain\Host\HostSettings;
 use App\Fleet\FleetPaths;
+use App\Fleet\System\AccessRule;
+use App\Fleet\System\AccessRuleSource;
 use App\Fleet\System\AutheliaConfigRenderer;
+use App\Fleet\System\AutheliaNotifier;
 use App\Tests\Support\SystemTemplates;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -101,5 +104,168 @@ final class AutheliaConfigRendererTest extends TestCase
         $this->expectException(\InvalidArgumentException::class);
 
         self::renderer("/srv/fl'eet")->render(new HostSettings('fleet.example.com'));
+    }
+
+    /**
+     * @param list<AccessRule> $rules
+     */
+    private static function withRules(array $rules, ?AutheliaNotifier $notifier = null): AutheliaConfigRenderer
+    {
+        $source = new class($rules) implements AccessRuleSource {
+            /**
+             * @param list<AccessRule> $rules
+             */
+            public function __construct(private readonly array $rules)
+            {
+            }
+
+            public function rules(): array
+            {
+                return $this->rules;
+            }
+        };
+
+        return new AutheliaConfigRenderer(SystemTemplates::twig(), new FleetPaths('/srv/fleet', '/etc/caddy/fleet'), $source, $notifier);
+    }
+
+    public function testRendersOneRulePerProjectAfterTheFixedRules(): void
+    {
+        $out = self::withRules([
+            new AccessRule('blog', 'fleet-admins', ['alice', 'bob']),
+            new AccessRule('demo', 'fleet-admins'),
+        ])->render(new HostSettings('fleet.example.com'));
+
+        $expected = <<<'YAML'
+            access_control:
+              default_policy: deny
+              rules:
+                - domain: 'auth.fleet.example.com'
+                  policy: bypass
+                - domain: 'fleet.example.com'
+                  policy: one_factor
+                - domain_regex: '^blog--[a-z0-9-]+\.fleet\.example\.com$'
+                  policy: one_factor
+                  subject:
+                    - ['group:fleet-admins']
+                    - ['user:alice']
+                    - ['user:bob']
+                - domain_regex: '^demo--[a-z0-9-]+\.fleet\.example\.com$'
+                  policy: one_factor
+                  subject:
+                    - ['group:fleet-admins']
+
+            YAML;
+        self::assertStringEndsWith($expected, $out);
+
+        $rules = Yaml::parse($out)['access_control']['rules'];
+        self::assertCount(4, $rules);
+        self::assertSame([['group:fleet-admins'], ['user:alice'], ['user:bob']], $rules[2]['subject']);
+    }
+
+    public function testTheRegexMatchesOnlyThatProjectsInstanceSites(): void
+    {
+        $out = self::withRules([new AccessRule('blog', 'fleet-admins', ['alice'])])->render(new HostSettings('fleet.example.com'));
+        $regex = Yaml::parse($out)['access_control']['rules'][2]['domain_regex'];
+        $matches = static fn (string $host): bool => 1 === preg_match('/'.str_replace('/', '\/', $regex).'/', $host);
+
+        self::assertTrue($matches('blog--main.fleet.example.com'));
+        self::assertTrue($matches('blog--feature-x.fleet.example.com'));
+        self::assertFalse($matches('blog.fleet.example.com'), 'the dashboard is not an instance site');
+        self::assertFalse($matches('demo--main.fleet.example.com'));
+        self::assertFalse($matches('myblog--main.fleet.example.com'), 'a project name is not a suffix match');
+        self::assertFalse($matches('blog--main.evil.fleet.example.com.attacker.org'));
+        self::assertFalse($matches('blog--a.b.fleet.example.com'), 'the label is a single DNS label');
+        self::assertFalse($matches('blog--main.fleetXexampleXcom'), 'the dots of the domain are literal');
+    }
+
+    public function testNoRuleSourceOrNoProjectsRendersOnlyTheFixedRules(): void
+    {
+        $plain = self::renderer()->render(new HostSettings('fleet.example.com'));
+
+        self::assertSame($plain, self::withRules([])->render(new HostSettings('fleet.example.com')));
+        self::assertStringNotContainsString('domain_regex', $plain);
+    }
+
+    public function testDuplicateSubjectsAreRenderedOnce(): void
+    {
+        $out = self::withRules([new AccessRule('blog', 'fleet-admins', ['alice', 'alice'])])->render(new HostSettings('fleet.example.com'));
+
+        self::assertSame(1, substr_count($out, 'user:alice'));
+    }
+
+    /**
+     * @return iterable<string, array{AccessRule}>
+     */
+    public static function hostileRules(): iterable
+    {
+        yield 'project with a quote' => [new AccessRule("blog'--x", 'fleet-admins')];
+        yield 'project with two dashes' => [new AccessRule('bl--og', 'fleet-admins')];
+        yield 'project with a dot' => [new AccessRule('blog.x', 'fleet-admins')];
+        yield 'project with a newline' => [new AccessRule("blog\n", 'fleet-admins')];
+        yield 'uppercase project' => [new AccessRule('Blog', 'fleet-admins')];
+        yield 'user with a quote' => [new AccessRule('blog', 'fleet-admins', ["alice'"])];
+        yield 'user with a newline' => [new AccessRule('blog', 'fleet-admins', ["alice\n    policy: bypass"])];
+        yield 'user with a bracket' => [new AccessRule('blog', 'fleet-admins', ['al]ice'])];
+        yield 'group with a quote' => [new AccessRule('blog', "fleet'admins")];
+    }
+
+    #[DataProvider('hostileRules')]
+    public function testRefusesAValueThatCouldChangeTheYamlStructure(AccessRule $rule): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        self::withRules([$rule])->render(new HostSettings('fleet.example.com'));
+    }
+
+    public function testSelfServiceResetIsDisabledWithoutANotifier(): void
+    {
+        foreach ([null, new AutheliaNotifier(), new AutheliaNotifier('', '', ''), new AutheliaNotifier(null, 'fleet@example.com')] as $notifier) {
+            $out = self::withRules([], $notifier)->render(new HostSettings('fleet.example.com'));
+            $parsed = Yaml::parse($out);
+
+            self::assertTrue($parsed['authentication_backend']['password_reset']['disable']);
+            self::assertSame(['filesystem' => ['filename' => '/var/lib/authelia/notification.txt']], $parsed['notifier']);
+        }
+    }
+
+    public function testSelfServiceResetIsEnabledWithAnSmtpNotifier(): void
+    {
+        $notifier = new AutheliaNotifier('submission://mail.example.com:587', 'fleet@example.com', 'fleet-mailer');
+
+        $out = self::withRules([], $notifier)->render(new HostSettings('fleet.example.com'));
+        $parsed = Yaml::parse($out);
+
+        self::assertFalse($parsed['authentication_backend']['password_reset']['disable']);
+        self::assertSame(['smtp' => ['address' => 'submission://mail.example.com:587', 'sender' => 'fleet@example.com', 'username' => 'fleet-mailer']], $parsed['notifier']);
+        self::assertStringNotContainsString('password:', $out, 'the SMTP password is supplied through AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE, never rendered');
+        self::assertTrue(new AutheliaNotifier('smtp://localhost', 'fleet@example.com')->isConfigured());
+    }
+
+    public function testTheSmtpUsernameIsOptional(): void
+    {
+        $out = self::withRules([], new AutheliaNotifier('smtp://localhost:25', 'fleet@example.com'))->render(new HostSettings('fleet.example.com'));
+
+        self::assertSame(['smtp' => ['address' => 'smtp://localhost:25', 'sender' => 'fleet@example.com']], Yaml::parse($out)['notifier']);
+    }
+
+    /**
+     * @return iterable<string, array{AutheliaNotifier}>
+     */
+    public static function badNotifiers(): iterable
+    {
+        yield 'sender missing' => [new AutheliaNotifier('smtp://mail.example.com', null)];
+        yield 'address without scheme' => [new AutheliaNotifier('mail.example.com', 'fleet@example.com')];
+        yield 'address with a path' => [new AutheliaNotifier('smtp://mail.example.com/x', 'fleet@example.com')];
+        yield 'address with a quote' => [new AutheliaNotifier("smtp://mail.example.com'", 'fleet@example.com')];
+        yield 'sender not an email' => [new AutheliaNotifier('smtp://mail.example.com', "fleet@example.com'\n")];
+        yield 'username with a quote' => [new AutheliaNotifier('smtp://mail.example.com', 'fleet@example.com', "me'")];
+    }
+
+    #[DataProvider('badNotifiers')]
+    public function testRefusesBadNotifierSettings(AutheliaNotifier $notifier): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        self::withRules([], $notifier)->render(new HostSettings('fleet.example.com'));
     }
 }

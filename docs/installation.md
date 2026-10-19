@@ -205,7 +205,42 @@ step is saved as you go, and the wizard works at phone width.
 After Finish the setup token is gone. Signed out you are sent to the sign-in page whatever you open (the sign-in
 gate is in front of `/setup` too); signed in, every `/setup` URL answers 404 "Setup is complete". Open
 `https://<domain>/`: you are sent to `https://auth.<domain>/` to sign in with the administrator you created.
-Authelia's own self-service password reset is switched off until a later milestone (use section 5).
+Authelia's own self-service password reset ("Forgot password?" on the sign-in page) is **switched off** until an SMTP
+server is configured, because without one its link could not be delivered; the recovery path is section 5. To switch it
+on, add to `/etc/ddev-fleet/fleet.env` (the installer keeps lines it did not write) `FLEET_AUTHELIA_SMTP_ADDRESS`
+(`smtp://host`, `submission://host:587` or `submissions://host:465`), `FLEET_AUTHELIA_SMTP_SENDER` (the From address) and,
+if the server wants a login, `FLEET_AUTHELIA_SMTP_USERNAME`. The SMTP password is never written by Fleet: give Authelia
+the path of a file holding it with `Environment=AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE=/etc/authelia/secrets/smtp_password`
+in a `systemd` drop-in of `authelia.service` (the file `root:authelia` 0640). Then run `sudo fleet host:render --apply`.
+With a server configured, Fleet keeps what Authelia changes: before every rewrite of the users file it adopts a password
+hash that Authelia changed (the user's self-service reset), unless an administrator set that user's password in Fleet
+in the meantime (Fleet then wins), so the next user change does not undo a reset. `users.yml` is then group-writable
+(0660) so Authelia can write it.
+
+### Users and project access
+
+Open **Users** (`https://<domain>/admin/users`, administrators only; it works on a phone). Fleet owns the people who may
+sign in, so there is no other place to add them:
+
+- **New user:** username (lowercase letters, digits, dot, underscore or dash; fixed afterwards), display name, email and
+  an initial password (the same rules as everywhere: 12 to 128 characters), whether the person is an administrator, and
+  the projects they work on (one tap-sized checkbox per project).
+- **Edit** (tap a user in the list): display name, email, the administrator role and the project checkboxes. A member can
+  operate the instances of the projects they are in (instances arrive in a later milestone), and cannot create or delete projects, change
+  settings or open another project's instance sites. An administrator needs no memberships: every project is theirs.
+- **Set a new password** for the user (the person can also reset it from the sign-in page once outgoing mail is
+  configured, see above), **Disable** or **Enable** the account (a disabled user cannot sign in; nothing is deleted)
+  and **Delete** it (with its project access).
+
+Every change is written to the Authelia users file before it is saved, and the per-project access rules are installed
+into Authelia when they changed (that restarts Authelia, so signed-in users sign in again; it happens only when the
+rules differ). If installing the rules fails the page says so: the change is saved and the next user or project change
+tries again.
+
+Safeguards: nobody can delete, disable or demote **themselves**, and the **last enabled administrator** can never be
+deleted, disabled or demoted (create or enable another one first), so the fleet cannot lock itself out. Everything on
+these pages is checked on the server and protected against cross-site requests; passwords are stored as argon2id
+hashes and are never shown or logged.
 
 Next, describe what the fleet can deploy: add your first project and its templates in the browser or on the host, see
 [`projects-and-templates.md`](projects-and-templates.md), and give them their seed data (database dumps, files) on the project's Assets tab or by copying over SSH, see [`assets.md`](assets.md). (Instances arrive in a later milestone.)
