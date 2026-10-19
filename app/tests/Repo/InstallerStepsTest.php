@@ -338,11 +338,28 @@ final class InstallerStepsTest extends TestCase
     {
         [, $out] = $this->dryRun();
 
-        $deny = $this->position($out, '+ write /usr/sbin/policy-rc.d 0755 root:root');
-        $install = $this->position($out, ' DPkg::Lock::Timeout=120 install authelia');
-        $allow = $this->position($out, '+ rm -f /usr/sbin/policy-rc.d');
-        self::assertLessThan($install, $deny);
-        self::assertLessThan($allow, $install);
+        $this->assertInstalledBetweenDenyAndAllow($out, ' DPkg::Lock::Timeout=120 install authelia');
+    }
+
+    public function testCaddyIsInstalledBetweenStartDenyAndAllow(): void
+    {
+        // The package would start its stock service on :80 with the default Caddyfile before step 98 configures it.
+        [, $out] = $this->dryRun();
+
+        $this->assertInstalledBetweenDenyAndAllow($out, ' DPkg::Lock::Timeout=120 install caddy');
+    }
+
+    private function assertInstalledBetweenDenyAndAllow(string $out, string $installLine): void
+    {
+        $deny = '+ write /usr/sbin/policy-rc.d 0755 root:root';
+        $allow = '+ rm -f /usr/sbin/policy-rc.d';
+        $install = $this->position($out, $installLine);
+
+        $denyBefore = strrpos(substr($out, 0, $install), $deny);
+        self::assertNotFalse($denyBefore, 'a start-deny precedes the install');
+        $allowAfter = strpos($out, $allow, $install);
+        self::assertNotFalse($allowAfter, 'a start-allow follows the install');
+        self::assertStringNotContainsString($allow, substr($out, $denyBefore, $install - $denyBefore), 'and nothing lifts the deny in between');
     }
 
     public function testDryRunPlansTheDpkgRepairBeforeTheFirstAptCallOfBothStages(): void

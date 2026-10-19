@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# The `fleet` command: runs the app's console commands on this host.
+#
+#   fleet setup:token              ->  php8.4 /opt/ddev-fleet/app/bin/console fleet:setup:token
+#   fleet user:reset-password bob  ->  ... fleet:user:reset-password bob
+#   fleet fleet:host:render        ->  an already prefixed name is accepted as it is
+#   fleet                          ->  lists the fleet:* commands
+#   fleet list | help <cmd> | ...  ->  anything without a "<group>:<verb>" first word goes to the console unchanged
+#
+# Installed by install/steps/90-privileged.sh as /usr/local/bin/fleet (root:root 0755). Everyone but the `fleet` user
+# is re-executed as `fleet` through sudo (root and sudoers members); `fleet` itself loads /etc/ddev-fleet/fleet.env,
+# the same configuration the web app and the workers run with, and starts the console.
+set -euo pipefail
+
+FLEET_USER=fleet
+# FLEET_WRAPPER_* exist for the unit tests only. They are read after the switch to `fleet` (sudo resets the
+# environment on the way), so they can never redirect a privileged run: this script has no privileges of its own.
+ENV_FILE=${FLEET_WRAPPER_ENV_FILE:-/etc/ddev-fleet/fleet.env}
+CONSOLE=${FLEET_WRAPPER_CONSOLE:-/opt/ddev-fleet/app/bin/console}
+PHP=${FLEET_WRAPPER_PHP:-php8.4}
+
+if [ "$(id -un)" != "$FLEET_USER" ]; then
+  exec sudo -u "$FLEET_USER" -- /usr/local/bin/fleet "$@"
+fi
+
+if [ ! -r "$ENV_FILE" ]; then
+  printf 'fleet: cannot read %s (is ddev-fleet installed on this host?)\n' "$ENV_FILE" >&2
+  exit 1
+fi
+export HOME=/home/fleet
+set -a
+# shellcheck source=/dev/null
+. "$ENV_FILE"
+set +a
+
+if [ "$#" -eq 0 ]; then
+  exec "$PHP" "$CONSOLE" list fleet
+fi
+
+command=$1
+shift
+if [[ $command =~ ^fleet:[a-z][a-z0-9:-]*$ ]]; then
+  :
+elif [[ $command =~ ^[a-z][a-z0-9-]*:[a-z][a-z0-9:-]*$ ]]; then
+  command="fleet:$command"
+fi
+exec "$PHP" "$CONSOLE" "$command" "$@"

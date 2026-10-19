@@ -31,7 +31,6 @@ main() {
   trap 'on_exit $?' EXIT
 
   LOCK_HELD=0
-  local tee_pid=''
   if is_dry; then
     printf 'dry-run: nothing will be changed\n'
   else
@@ -42,10 +41,7 @@ main() {
     # A policy-rc.d left by a killed run must not outlive it.
     policy_allow_start
     # Everything is logged (mode 0600). fd 3 stays the terminal for output that must not reach the log (term_print).
-    (umask 077 && : >>"$INSTALL_LOG")
-    exec 3>&1
-    exec > >(tee -a "$INSTALL_LOG") 2>&1
-    tee_pid=$!
+    log_start
     printf '%s installer start (domain %s)\n' "$(date -u +%FT%TZ)" "$DOMAIN"
   fi
 
@@ -69,10 +65,10 @@ main() {
     printf 'dry-run complete: nothing was changed\n'
   else
     printf 'install complete; log: %s\n' "$INSTALL_LOG"
-    # Let tee flush and exit before anything else writes to the terminal.
-    exec 1>&3 2>&3
-    wait "$tee_pid" 2>/dev/null || true
+    # Let tee flush and exit before anything else writes to the terminal, then print what must not be in the log.
+    log_stop
   fi
+  print_final_notes
 }
 
 # Failures: the ERR trap reports the failing command's file and line; die() and other explicit exits are caught by

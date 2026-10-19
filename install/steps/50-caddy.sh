@@ -104,7 +104,10 @@ step_main() {
 
   apt_repo caddy https://dl.cloudsmith.io/public/caddy/stable/gpg.key "$KEYRING_DIR/caddy.asc" \
     "deb [signed-by=$KEYRING_DIR/caddy.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+  # The package would start its stock service on :80 with the default Caddyfile; ours starts it once configured.
+  policy_deny_start
   apt_install caddy
+  policy_allow_start
 
   # Divert once (a kill between the divert and the alternatives below is repaired by the next run).
   diverted=$(dpkg-divert --list /usr/bin/caddy 2>/dev/null || true)

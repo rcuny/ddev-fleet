@@ -1,0 +1,20 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-mercure.service.
+# The Mercure hub (a Caddy build with the Mercure module), standalone on 127.0.0.1:3000; Caddy proxies
+# /.well-known/mercure to it. Its keys come from /etc/ddev-fleet/mercure.env (root:root 0600, read by systemd).
+[Unit]
+Description=ddev-fleet Mercure hub
+After=network.target
+
+[Service]
+DynamicUser=yes
+StateDirectory=fleet-mercure
+Environment=XDG_DATA_HOME=/var/lib/fleet-mercure XDG_CONFIG_HOME=/var/lib/fleet-mercure
+EnvironmentFile=/etc/ddev-fleet/mercure.env
+ExecStart=/usr/local/bin/mercure run --config /etc/fleet-mercure/Caddyfile --adapter caddyfile
+Restart=always
+NoNewPrivileges=yes
+ProtectSystem=strict
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

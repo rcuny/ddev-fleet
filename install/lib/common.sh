@@ -29,6 +29,11 @@ SYSTEMD_DIR=/etc/systemd/system
 KEYRING_DIR=/etc/apt/keyrings
 APT_SOURCES_DIR=/etc/apt/sources.list.d
 INSTALL_LOG=/var/log/ddev-fleet-install.log
+HELPER_DIR=/usr/local/libexec/fleet
+SUDOERS_DIR=/etc/sudoers.d
+MERCURE_ETC_DIR=/etc/fleet-mercure
+# The checkout stage 1 made (fleet-owned); install.sh exports it. Code runs from here, privileged files never do.
+: "${FLEET_SRC_DIR:=$FLEET_OPT_DIR}"
 
 # The custom Caddy (OVH DNS module) must be at least this version (the version the app's configs were validated with).
 # The build API ignores a requested version, so the installer cannot pin; it compares and refreshes instead.
@@ -45,6 +50,15 @@ SKIP_DNS_CHECK=0
 STEP_NAME=startup
 APT_DIRTY=0
 FILE_CHANGED=0
+
+# What changed during this run, for the restarts of step 98 (php-fpm and the workers keep running the code and the
+# environment they started with: opcache.validate_timestamps=0, and an EnvironmentFile is read only at start).
+CODE_CHANGED=0
+CODE_REVISION=
+ENV_CHANGED=0
+FPM_CHANGED=0
+WORKER_UNIT_CHANGED=0
+MERCURE_CHANGED=0
 
 is_dry() {
   [ "${FLEET_DRY_RUN:-0}" = 1 ]
@@ -98,6 +112,37 @@ term_print() {
   fi
 }
 
+# Everything the installer prints is teed into INSTALL_LOG (mode 0600). fd 3 stays the terminal, for output that must
+# never reach the log (term_print, the final notes). log_stop closes the tee, so what follows is terminal-only.
+TEE_PID=
+log_start() {
+  (umask 077 && : >>"$INSTALL_LOG")
+  exec 3>&1
+  exec > >(tee -a "$INSTALL_LOG") 2>&1
+  TEE_PID=$!
+}
+
+log_stop() {
+  exec 1>&3 2>&3
+  if [ -n "$TEE_PID" ]; then
+    wait "$TEE_PID" 2>/dev/null || true
+  fi
+}
+
+# Lines the installer prints on the terminal after the log is closed (the one-time setup URL among them). A step
+# adds them with add_final_note; run.sh prints them last. They are never written to the log.
+FINAL_NOTES=()
+add_final_note() {
+  FINAL_NOTES+=("$1")
+}
+
+print_final_notes() {
+  local note
+  for note in "${FINAL_NOTES[@]}"; do
+    printf '%s\n' "$note"
+  done
+}
+
 # Runs a command with stdin closed (an apt/ddev/mkcert prompt must never eat the installer's own input); in dry-run
 # prints it instead.
 run() {
@@ -113,6 +158,25 @@ run() {
 # Runs a command as the fleet user with a sane HOME. Never needed for root-only work.
 run_as_fleet() {
   run runuser -u "$FLEET_USER" -- env "HOME=$FLEET_HOME_DIR" DDEV_NONINTERACTIVE=true "$@"
+}
+
+# Runs a command as the fleet user in the app directory with the application environment (/etc/ddev-fleet/fleet.env)
+# loaded: exactly what the workers and the `fleet` wrapper run with.
+fleet_app_run() {
+  if is_dry; then
+    printf '+ as fleet, in %s/app with %s/fleet.env loaded:' "$FLEET_SRC_DIR" "$FLEET_ETC_DIR"
+    printf ' %q' "$@"
+    printf '\n'
+    return 0
+  fi
+  # shellcheck disable=SC2016  # the script is single-quoted on purpose: the inner shell expands $1, $2 and "$@"
+  run_as_fleet bash -c 'set -a; . "$1"; set +a; cd "$2" && shift 2 && exec "$@"' fleet-app \
+    "$FLEET_ETC_DIR/fleet.env" "$FLEET_SRC_DIR/app" "$@"
+}
+
+# `php8.4 bin/console <args>` through fleet_app_run.
+fleet_console() {
+  fleet_app_run php8.4 bin/console "$@"
 }
 
 # True in dry-run (so the plan is complete) or when the command is not installed yet.

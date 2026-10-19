@@ -128,6 +128,91 @@ final class InstallerSafetyTest extends TestCase
         self::assertSame([], $hits, "wget or pipe-to-shell:\n".implode("\n", $hits));
     }
 
+    public function testSetupUrlIsNotWrittenToTheLog(): void
+    {
+        $log = $this->scratch().'/install.log';
+        $calls = $this->scratch().'/calls.log';
+        $token = 'TOKEN-0123456789abcdefghijklmnopqrstuvwxyz';
+        // The token command prints the URL on stdout, like fleet:setup:token; the stub records that it ran.
+        $stubs = $this->stubs([
+            'runuser' => 'echo called >> '.escapeshellarg($calls).'; echo "https://fleet.example.com/setup?token='.$token.'"; echo "minted" >&2',
+        ]);
+        $driver = \sprintf(
+            '. "$INSTALL_DIR/steps/98-render-start.sh"; INSTALL_LOG=%s; DOMAIN=fleet.example.com; FLEET_DRY_RUN=0; SETUP_COMPLETE=0; '.
+            'log_start; echo "step output goes to the log"; announce_setup; echo "install complete"; log_stop; print_final_notes',
+            escapeshellarg($log),
+        );
+
+        [$status, $out, $err] = $this->withCommon($driver, [], $stubs);
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString($token, $out, 'the terminal gets the URL');
+        self::assertStringContainsString('sudo fleet setup:token', $out);
+        self::assertStringContainsString('step output goes to the log', (string) file_get_contents($log));
+        self::assertStringContainsString('install complete', (string) file_get_contents($log));
+        self::assertStringNotContainsString($token, (string) file_get_contents($log), 'the one-time URL must never land in the install log');
+        self::assertStringNotContainsString('setup?token', (string) file_get_contents($log));
+        self::assertSame(0o600, fileperms($log) & 0o777, 'the log is private');
+        self::assertSame(1, substr_count((string) file_get_contents($calls), 'called'));
+    }
+
+    public function testTheTerminalCopyOfTheUrlComesAfterTheLogIsClosed(): void
+    {
+        $log = $this->scratch().'/install.log';
+        $stubs = $this->stubs(['runuser' => 'echo "https://fleet.example.com/setup?token=ABC"']);
+        $driver = \sprintf(
+            '. "$INSTALL_DIR/steps/98-render-start.sh"; INSTALL_LOG=%s; DOMAIN=fleet.example.com; FLEET_DRY_RUN=0; SETUP_COMPLETE=0; '.
+            'log_start; announce_setup; echo "install complete"; log_stop; print_final_notes',
+            escapeshellarg($log),
+        );
+
+        [, $out] = $this->withCommon($driver, [], $stubs);
+
+        self::assertLessThan(strpos($out, 'token=ABC'), strpos($out, 'install complete'), 'the URL is the last thing on the terminal');
+    }
+
+    public function testNoTokenCommandRunsWhenSetupIsAlreadyComplete(): void
+    {
+        $calls = $this->scratch().'/calls.log';
+        $stubs = $this->stubs(['runuser' => 'echo called >> '.escapeshellarg($calls)]);
+
+        [$status, $out, $err] = $this->withCommon(
+            '. "$INSTALL_DIR/steps/98-render-start.sh"; DOMAIN=fleet.example.com; FLEET_DRY_RUN=0; SETUP_COMPLETE=1; announce_setup; print_final_notes',
+            [],
+            $stubs,
+        );
+
+        self::assertSame(0, $status, $err);
+        self::assertFileDoesNotExist($calls);
+        self::assertStringContainsString('Setup was already completed', $out);
+        self::assertStringContainsString('sudo fleet user:reset-password <name>', $out);
+        self::assertStringContainsString('sudo fleet setup:reset', $out);
+        self::assertStringNotContainsString('token=', $out);
+    }
+
+    public function testDryRunNeverPrintsAUrlOrRunsTheTokenCommand(): void
+    {
+        [, $out] = $this->dryRun();
+
+        self::assertStringNotContainsString('token=', $out);
+        self::assertStringContainsString('(a real run prints the one-time setup URL for https://fleet.example.com/ here)', $out);
+    }
+
+    public function testNothingPrintsTheSetupUrlExceptThroughTheFinalNotes(): void
+    {
+        // Only announce_setup handles the URL; no step echoes the output of fleet:setup:token into the stream.
+        foreach (self::installFiles() as $file) {
+            foreach (self::codeLines($file) as $number => $line) {
+                if (str_contains($line, 'fleet:setup:token') && !str_contains($file, '98-render-start.sh')) {
+                    self::fail($file.':'.$number.' runs the token command outside step 98');
+                }
+            }
+        }
+        $step = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        self::assertSame(1, preg_match('/url=\$\(fleet_console fleet:setup:token\)/', $step), 'the URL is captured, not streamed');
+        self::assertStringNotContainsString('term_print "$url"', $step);
+    }
+
     /**
      * @return list<string> "file:line: text" for every non-comment line matching the pattern
      */
