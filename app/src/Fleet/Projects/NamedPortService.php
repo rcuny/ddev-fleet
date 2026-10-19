@@ -40,6 +40,16 @@ final readonly class NamedPortService
     }
 
     /**
+     * The names of the projects that have the port assigned, ordered by name.
+     *
+     * @return list<string>
+     */
+    public function usedBy(NamedPort $port): array
+    {
+        return $this->ports->projectNamesUsing($port);
+    }
+
+    /**
      * @throws ValidationFailed
      */
     public function create(NamedPortInput $input): NamedPort
