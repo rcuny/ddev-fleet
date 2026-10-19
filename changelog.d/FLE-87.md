@@ -1,3 +1,0 @@
-### Changed
-
-- **FLE-87: deploy-time `[[token]]` substitution resolves managed secrets.** The post-deploy commands and the seeded asset files now go through `Secrets\TokenRenderer` (built-in tokens first, then the project secret over the fleet-wide one), and every inserted value is registered with the job log masker before the first log line that could hold it. The second renderer (`Instances\TokenRenderer`) is gone. An unresolved token in a post-deploy line still fails the deploy before anything is changed; in an asset file it stays as written, with a log line naming it. `tty1`/`tty2` commands still take only the built-in tokens: a secret is never typed into a tmux pane, whose scrollback would keep it, and the command is skipped with a `WARNING`. See `docs/secrets.md`.
