@@ -188,15 +188,12 @@ final class InstallDocsTest extends TestCase
 
     public function testChangelogUnreleasedDescribesTheInstaller(): void
     {
-        $changelog = self::read('CHANGELOG.md');
-        if (1 !== preg_match('/^## \[Unreleased\]\R(.*?)(?=^## \[|\z)/ms', $changelog, $match)) {
-            self::fail('CHANGELOG.md has no [Unreleased] section');
-        }
+        $unreleased = UnreleasedChangelog::text(self::root());
 
         foreach (['FLE-36', 'install.sh', 'setup wizard', 'fleet setup:reset', 'FLEET_PROXY_AUTH'] as $needle) {
-            self::assertStringContainsString($needle, $match[1], "[Unreleased] should mention $needle");
+            self::assertStringContainsString($needle, $unreleased, "[Unreleased] should mention $needle");
         }
-        self::assertStringNotContainsString('do not expose the 1.x app to the Internet yet', $match[1]);
+        self::assertStringNotContainsString('do not expose the 1.x app to the Internet yet', $unreleased);
     }
 
     /**

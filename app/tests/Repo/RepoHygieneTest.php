@@ -89,7 +89,7 @@ final class RepoHygieneTest extends TestCase
     public function testNoCompanionOrOwnerReferencesInNewCode(): void
     {
         // Not scanned: ansible/ (reshaped in M0.02), CHANGELOG.md (release history keeps what it recorded; its
-        // [Unreleased] section is scanned by testChangelogUnreleasedSectionIsClean), LICENSE (the copyright holder)
+        // [Unreleased] section and changelog.d/ are scanned by testChangelogUnreleasedSectionIsClean), LICENSE (the copyright holder)
         // and SYSTEMD-SECURITY-REPORT.md (generated from the maintainer's live hosts). docs/v0 is scanned too.
         $roots = [
             'app', 'ci', 'install', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright', 'tests/pytest',
@@ -103,13 +103,10 @@ final class RepoHygieneTest extends TestCase
 
     public function testChangelogUnreleasedSectionIsClean(): void
     {
-        $changelog = (string) file_get_contents(self::root().'/CHANGELOG.md');
-        if (1 !== preg_match('/^## \[Unreleased\]\R(.*?)(?=^## \[|\z)/ms', $changelog, $match)) {
-            self::fail('CHANGELOG.md has no [Unreleased] section');
-        }
+        $unreleased = UnreleasedChangelog::text(self::root());
 
         $hits = [];
-        foreach (explode("\n", $match[1]) as $number => $line) {
+        foreach (explode("\n", $unreleased) as $number => $line) {
             foreach ($this->ownerMatchers(self::OWNER_DIGESTS) as $matcher) {
                 if (null !== $label = $matcher($line)) {
                     $hits[] = \sprintf('[Unreleased] line %d matched %s', $number + 1, $label);

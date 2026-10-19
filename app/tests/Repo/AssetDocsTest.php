@@ -148,13 +148,10 @@ final class AssetDocsTest extends TestCase
 
     public function testChangelogHasAnUnreleasedEntry(): void
     {
-        $changelog = self::read('CHANGELOG.md');
-        if (1 !== preg_match('/^## \[Unreleased\]\R(.*?)(?=^## \[|\z)/ms', $changelog, $match)) {
-            self::fail('CHANGELOG.md has no [Unreleased] section');
-        }
+        $unreleased = UnreleasedChangelog::text(self::root());
 
         foreach (['FLE-52', 'fleet asset:list', 'asset:gc', '2 GiB', 'docs/assets.md', 'asset_upload_max_bytes'] as $needle) {
-            self::assertStringContainsString($needle, $match[1], "[Unreleased] should mention $needle");
+            self::assertStringContainsString($needle, $unreleased, "[Unreleased] should mention $needle");
         }
     }
 }

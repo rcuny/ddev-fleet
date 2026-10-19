@@ -34,10 +34,11 @@ Procedure, replacing `1.X.Y`:
 
 1. **Preflight.** `git status --short` prints nothing; `git fetch origin --tags`;
    `git rev-parse develop origin/develop` shows the same sha; the latest `develop` pipeline is
-   green; `## [Unreleased]` in `CHANGELOG.md` is not empty.
-2. **Release branch.** `git switch -c release/1.X.Y develop`. In `CHANGELOG.md` rename
-   `## [Unreleased]` to `## [1.X.Y] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above it
-   and update the compare links (conventions: section 3). The 1.x line has no version file yet:
+   green; `php ci/changelog-assemble.php` prints a non-empty changelog (fragments in `changelog.d/`).
+2. **Release branch.** `git switch -c release/1.X.Y develop`. Run
+   `php ci/changelog-assemble.php 1.X.Y`: it writes `## [1.X.Y] - YYYY-MM-DD` from `changelog.d/`
+   (and whatever is under `## [Unreleased]`), adds a fresh empty `## [Unreleased]` above it, updates the
+   compare links and deletes the fragments (conventions: section 3). The 1.x line has no version file yet:
    the annotated tag is the version. Commit as `chore(release): 1.X.Y`.
 3. **Gates.** `cd app && composer run gates`, then in `tests/playwright/`
    `npm run typecheck && env -u FLEET_E2E_BASE_URL npx playwright test`.
@@ -113,16 +114,22 @@ While the project is below 1.0:
 
 `CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
-- **Every feature or fix branch adds its own bullet under `## [Unreleased]`
-  in the same branch**, so the release step never has to reconstruct it.
-  Headline items start with the ticket key in bold, as existing entries do
-  (`- **FLE-6: ...**`).
+- **Every feature or fix branch adds its own fragment, `changelog.d/<KEY>.md`,
+  in the same branch** (not a line in `CHANGELOG.md`: two branches editing the same lines
+  conflicted on nearly every merge). A fragment starts with a `### <Section>` heading and holds the
+  bullets; see `changelog.d/README.md`. Headline items start with the ticket key in bold, as existing
+  entries do (`- **FLE-6: ...**`).
+- **The release step assembles them:** `php ci/changelog-assemble.php` previews the unreleased text,
+  `php ci/changelog-assemble.php X.Y.Z [YYYY-MM-DD]` cuts the release (sections merged in the order below,
+  fragments read in file name order, fragments deleted). Anything still under `## [Unreleased]` in
+  `CHANGELOG.md` is kept and comes first, so a hand edit or a hotfix entry is not lost.
 - Sections, in this order: `### Added`, `### Changed`, `### Deprecated`,
   `### Removed`, `### Fixed`, `### Security`, then the project-specific
   `### Dependencies` (last).
 - `### Dependencies` holds **one condensed bullet per merged Renovate
-  group**, for example `Python tooling: ruff 0.x -> 0.y, black ...`. Add it
-  when the Renovate PR is merged, or at the latest when cutting the
+  group**, for example `Python tooling: ruff 0.x -> 0.y, black ...`. Renovate does not
+  edit the changelog: add it as a fragment (`changelog.d/renovate-YYYY-MM-DD.md` with a
+  `### Dependencies` heading) when the Renovate PR is merged, or at the latest when cutting the
   release.
 - Renovate PRs merged into `develop` while a `release/*` branch is open
   simply ride the **next** release; Renovate is not paused.
@@ -146,7 +153,7 @@ the dev venv set up (`CONTRIBUTING.md`).
 
    - If there is no local `main`: `git branch main origin/main`.
    - The latest `develop` pipeline must be green.
-   - `## [Unreleased]` in `CHANGELOG.md` must not be empty.
+   - `php ci/changelog-assemble.php` must print a non-empty changelog.
 
 2. **Release branch, version and CHANGELOG.**
 
@@ -155,10 +162,10 @@ the dev venv set up (`CONTRIBUTING.md`).
    ```
 
    - Set `version = "X.Y.Z"` in `pyproject.toml`.
-   - In `CHANGELOG.md`: rename `## [Unreleased]` to
-     `## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above
-     it, point the `[Unreleased]` compare link at `vX.Y.Z...HEAD` and add
-     `[X.Y.Z]: .../compare/vPREV...vX.Y.Z`. Make sure `### Dependencies`
+   - In `CHANGELOG.md`: run `php ci/changelog-assemble.php X.Y.Z`. It writes
+     `## [X.Y.Z] - YYYY-MM-DD` from `changelog.d/`, adds a fresh empty `## [Unreleased]` above
+     it, points the `[Unreleased]` compare link at `vX.Y.Z...HEAD`, adds
+     `[X.Y.Z]: .../compare/vPREV...vX.Y.Z` and deletes the fragments. Make sure `### Dependencies`
      covers every Renovate group merged since the last release.
 
    ```bash
@@ -245,13 +252,14 @@ git switch -c hotfix/<slug> main
 
 1. Fix it, with a test.
 2. Add the CHANGELOG entry under a new `## [X.Y.Z+1] - YYYY-MM-DD` heading
-   (a PATCH bump) and update the compare links; bump `pyproject.toml`.
+   (a PATCH bump) and update the compare links; bump `pyproject.toml`. (`main` has no
+   `changelog.d/`: the hotfix writes its heading by hand.)
 3. Run the gates (section 4, step 3).
 4. `git switch main`, `git merge --no-ff hotfix/<slug>`, annotated tag
    `vX.Y.Z+1` (as in section 4, step 4).
 5. Back-merge: `git switch develop && git merge --no-ff hotfix/<slug>`. Resolve the
-   CHANGELOG conflict so `develop` keeps its `## [Unreleased]` on top, with
-   the hotfix section below it.
+   CHANGELOG conflict so `develop` keeps its empty `## [Unreleased]` on top (its entries live in
+   `changelog.d/`), with the hotfix section below it.
 6. Push with the same single command:
    `git push origin main develop vX.Y.Z+1`, and watch the pipelines.
 
