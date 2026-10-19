@@ -12,6 +12,7 @@ final readonly class OperationOptions
         public bool $sequential = false,
         public ?string $template = null,
         public bool $force = false,
+        public ?string $branch = null,
     ) {
     }
 }

@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace App\Fleet\Instances;
 
 use App\Fleet\Jobs\JobFailed;
-use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 
 /**
- * An extension point of a deploy (asset seeding, the push key, tmux sessions). None is registered by M0.04; later
- * milestones add implementations and the workflow runs every one of the phase, in service order.
+ * An extension point of a deploy (asset seeding, the push key, tmux sessions). The workflow runs every step of a phase
+ * in tag-priority order (higher first). An implementation tags itself, with its priority, on its own class:
+ * `#[AutoconfigureTag('fleet.deploy_step', ['priority' => 100])]`. The tag is not on this interface on purpose: an
+ * interface tag has no priority and would register a prioritised step twice. DeployStepRegistrationTest fails for a
+ * step that is not tagged. Order: AssetsSeedStep (BeforeStart, 100).
  */
-#[AutoconfigureTag('fleet.deploy_step')]
 interface DeployStep
 {
     public function phase(): StepPhase;

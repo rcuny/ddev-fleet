@@ -14,6 +14,10 @@ After=network.target
 # cgroup, the tmux server we just created. Remaining processes are only killed when the unit is stopped.
 Type=oneshot
 RemainAfterExit=yes
+# No Restart=: a oneshot is only "failed" when fleet:tmux:ensure itself fails, never when the tmux server it started later
+# dies (the unit stays active, exited). Restart=on-failure (allowed on systemd >= 244) would therefore supervise nothing,
+# and Restart=always is invalid for oneshot. A dead server is reported by `fleet workspace:check` (the "tmux server" line,
+# exit 1); `systemctl restart fleet-tmux` recreates the session, with fresh plain-shell windows.
 TimeoutStartSec=120
 User=fleet
 Group=fleet

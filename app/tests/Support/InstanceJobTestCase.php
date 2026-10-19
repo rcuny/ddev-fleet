@@ -36,6 +36,7 @@ use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Fleet\System\CaddyReloader;
+use App\Fleet\Workspace\Tmux;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\NullLogger;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -63,6 +64,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
     protected Ddev $ddev;
     protected InstanceSiteWriter $sites;
     protected Teardown $teardown;
+    protected Tmux $tmux;
     protected JobFeed $feed;
     protected RegisteredSecretsMasker $masker;
     protected SecretStore $secretStore;
@@ -96,7 +98,8 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $hostnames,
             new LockFactory(new FlockStore($this->paths->locksDir())),
         );
-        $this->teardown = new Teardown($this->paths, $this->ddev, $this->sites);
+        $this->tmux = new Tmux($this->runner, $this->paths, '/opt/ddev-fleet/app/bin/console');
+        $this->teardown = new Teardown($this->paths, $this->ddev, $this->sites, $this->tmux);
         $this->feed = new JobFeed($this->createStub(HubInterface::class), new NullLogger());
         $this->workflow = new DeployWorkflow(
             $this->instances,
@@ -204,6 +207,9 @@ abstract class InstanceJobTestCase extends KernelTestCase
      */
     protected function commandNames(): array
     {
+        // tmux calls (the workspace window, FLE-80) are bookkeeping; the tests that care read argvs().
+        $argvs = array_filter($this->argvs(), static fn (array $argv): bool => 'tmux' !== $argv[0]);
+
         return array_map(static function (array $argv): string {
             $words = [$argv[0]];
             foreach (\array_slice($argv, 1) as $word) {
@@ -215,6 +221,6 @@ abstract class InstanceJobTestCase extends KernelTestCase
             }
 
             return implode(' ', $words);
-        }, $this->argvs());
+        }, array_values($argvs));
     }
 }

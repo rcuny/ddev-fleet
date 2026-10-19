@@ -152,6 +152,12 @@ class Instance
         $this->updatedAt = $now ?? new \DateTimeImmutable();
     }
 
+    public function changeBranch(string $branch, ?\DateTimeImmutable $now = null): void
+    {
+        $this->branch = $branch;
+        $this->updatedAt = $now ?? new \DateTimeImmutable();
+    }
+
     public function markDeployed(\DateTimeImmutable $at): void
     {
         $this->deployedAt = $at;

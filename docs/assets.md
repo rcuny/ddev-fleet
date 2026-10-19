@@ -13,10 +13,10 @@ A project's **assets** are the seed data its instances start from: database dump
 the browser, with the `fleet asset:*` commands, or with `scp` and `rsync`. There is no index: what the tab shows is what
 is on disk.
 
-Deploying an instance from the assets arrives with instances (M0.04); snapshotting a running instance's database into
-a new dump arrives with M0.06b. Until then the assets are a place to keep and manage the files.
+A deploy seeds the new instance from these files ([deploying from the assets](#deploying-from-the-assets)), and a
+snapshot writes a running instance's database into `dumps/`.
 
-Contents: [the screen](#the-screen) · [uploading in the browser](#uploading-in-the-browser) ·
+Contents: [the screen](#the-screen) · [deploying from the assets](#deploying-from-the-assets) · [uploading in the browser](#uploading-in-the-browser) ·
 [copying over SSH](#copying-over-ssh) · [names, paths and symbolic links](#names-paths-and-symbolic-links) ·
 [the command line](#the-command-line) · [limits](#limits) · [permissions](#permissions) · [troubleshooting](#troubleshooting)
 
@@ -37,6 +37,26 @@ Open **Projects**, pick a project, then the **Assets** tab (`/admin/projects/<pr
 Entries the screen cannot handle are listed but have no buttons: a **symbolic link** is shown as "symbolic link,
 ignored" and never followed, and a file copied in with a name outside the allowed characters is shown as "name not
 supported here" (rename it on the host). A folder with more than 2000 items shows the first 2000.
+
+## Deploying from the assets
+
+Every deploy and redeploy copies the project's assets into the new checkout **before `ddev start`**, as 0.x did, so the
+project's own `post_deploy` lines find them (the `AssetsSeedStep`, phase `before_start`, tag priority 100). The job
+log shows `assets: seeded N file(s) ...`.
+
+| What | Rule |
+|---|---|
+| The tree | Copied below the checkout with the same relative paths (`.env`, `web/sites/default/settings.local.php`, ...). A file already there is replaced. |
+| Text files | A regular file of at most 1 MiB that has no NUL byte and is valid UTF-8 has its `[[token]]` placeholders substituted (the context tokens of [secrets](secrets.md)). An unresolved placeholder stays as written and is logged by name, never by value. |
+| Other files | A larger file, a binary file or a file that is not UTF-8 is copied byte for byte. |
+| `dumps/` | Never substituted. Each file is **hard-linked** into the checkout (a copy when the link is refused, for example across filesystems), so a big dump costs no disk. A stale file at the destination is replaced, and a second pass changes nothing. |
+| Skipped | Symbolic links and special files (logged), names the browser could not address, upload temporaries and anything named `.git`. Nothing is ever written into the checkout's `.git`. |
+| Git status | Everything copied is added to `.git/info/exclude` (`dumps/` as a whole), so the project's `git status` stays clean. |
+| Failure | An unreadable file, or a checkout folder that is a symbolic link where the assets have a folder, fails the deploy: the instance is `failed` and the log says which path. A project without an assets directory is a no-op with one log line. |
+
+Importing the database stays the project's own business: put the import in the template's `post_deploy` (the project's own import command, reading the
+file under `dumps/`). fleet does not run `ddev import-db` itself, and a files tarball
+(`files.tar.gz`) is **not extracted**; both are as in 0.x.
 
 ## Uploading in the browser
 

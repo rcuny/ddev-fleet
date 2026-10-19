@@ -13,12 +13,22 @@ use App\Fleet\Projects\ValidationFailed;
 final class Labels
 {
     /**
+     * The slug, or null when nothing usable is left.
+     */
+    public static function slugOrNull(string $text): ?string
+    {
+        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($text)), '-');
+
+        return '' === $slug ? null : $slug;
+    }
+
+    /**
      * @throws ValidationFailed when nothing usable is left
      */
     public static function slug(string $text): string
     {
-        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($text)), '-');
-        if ('' === $slug) {
+        $slug = self::slugOrNull($text);
+        if (null === $slug) {
             throw new ValidationFailed(['label' => 'The label needs at least one letter or digit.']);
         }
 

@@ -237,5 +237,20 @@
       }
     }
   },
+  "install_units": {
+    "note": "Units shipped as plain files under install/etc (not rendered from the Ansible templates), measured offline with `systemd-analyze security --offline=yes`. They are deliberately NOT in the sandboxed 'environments' sets above, which must score at most 2.5. tests/pytest/repo/test_systemd_security_ci.py re-measures them and fails when a score rises above the recorded one by more than the tolerance.",
+    "recorded": "2026-10-19",
+    "systemd": "257",
+    "units": {
+      "fleet-mercure.service": {
+        "reason": "Mercure hub: scored for regression only; hardening it is not part of FLE-80.",
+        "score": 8.2
+      },
+      "fleet-tmux.service": {
+        "reason": "Exempt on purpose: it owns the tmux server whose panes are operator shells (git, ddev, docker, sudo) and would inherit NoNewPrivileges or ProtectSystem; PrivateTmp would hide the tmux socket from the app.",
+        "score": 9.0
+      }
+    }
+  },
   "tolerance": 0.1
 }

@@ -343,9 +343,7 @@ final class RuleMatcher
      */
     public static function label(string $text): string
     {
-        $slug = trim((string) preg_replace('/[^a-z0-9]+/', '-', strtolower($text)), '-');
-
-        return rtrim(substr($slug, 0, self::LABEL_MAX), '-');
+        return rtrim(substr(Labels::slugOrNull($text) ?? '', 0, self::LABEL_MAX), '-');
     }
 
     private static function hasLine(?string $comment, string $wanted): bool
