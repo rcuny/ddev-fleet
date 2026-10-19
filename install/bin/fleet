@@ -48,9 +48,9 @@ shift
 # tests/Repo/CliGroupsTest.php keeps the list in step with the commands.
 if [[ $command =~ ^fleet:[a-z][a-z0-9:-]*$ ]]; then
   :
-elif [[ $command =~ ^(host|setup|user|project|template|port|backup|asset):[a-z][a-z0-9:-]*$ ]]; then
+elif [[ $command =~ ^(host|setup|user|project|template|port|backup|asset|secret):[a-z][a-z0-9:-]*$ ]]; then
   command="fleet:$command"
-elif [[ $command =~ ^(host|setup|user|project|template|port|backup|asset)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
+elif [[ $command =~ ^(host|setup|user|project|template|port|backup|asset|secret)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
   command="fleet:$command:$1"
   shift
 fi

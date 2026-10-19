@@ -22,6 +22,7 @@ Type: documentation
 | [`installation.md`](installation.md) | Current | Installing 1.x on a Debian 13 host: prerequisites, `install.sh` and its flags, the setup wizard, what is installed where, recovery (`fleet setup:reset`, `fleet user:reset-password`), upgrades, the security model, uninstalling, troubleshooting |
 | [`projects-and-templates.md`](projects-and-templates.md) | Current | Projects and templates in the browser and with `fleet project\|template\|port`: concepts, every field and limit, the screens, CLI reference (exit codes, `--json`), permissions, deleting, named ports, differences from 0.x |
 | [`assets.md`](assets.md) | Current | A project's assets: the Assets tab (browser, upload, download, delete, folders, rescan), chunked resumable upload and its 2 GiB cap, copying large files over SSH, path and symbolic-link rules, `fleet asset:list` and `fleet asset:gc` (exit codes, `--json`), limits |
+| [`secrets.md`](secrets.md) | Current | Secrets in the browser and with `fleet secret:list\|set\|unset`: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, exit codes and JSON, the security model, differences from 0.x |
 | [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
 | [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the `v1.*` tag guard, the systemd security check and baseline |
 | [`RELEASING.md`](RELEASING.md) | 0.x flow valid; 1.x section added | Versioning, CHANGELOG conventions, release and hotfix procedure. The section "1.x during the port" covers `v1.*` tags on `develop`; the document is rewritten at v1.0.0 (milestone M0.04) |
@@ -45,7 +46,7 @@ configuration they describe (`src/fleet/`, the `fleet` CLI, `fleet.yml`, `bootst
 |---|---|---|
 | [`v0/installation.md`](v0/installation.md) | First-run checklist: DNS, installer, deploy key, `fleet init`, first deploy | M0.02 (done: [`installation.md`](installation.md); the first deploy returns in M0.04) |
 | [`v0/README-authelia.md`](v0/README-authelia.md) | Authelia auth mode: login portal, users, rollout | M0.10 (the portal itself is installed by M0.02, see [`installation.md`](installation.md)) |
-| [`v0/configuration.md`](v0/configuration.md) | The `fleet.yml` registry schema | M0.03 (done for projects and templates: [`projects-and-templates.md`](projects-and-templates.md); the rest returns with M0.05 to M0.10) |
+| [`v0/configuration.md`](v0/configuration.md) | The `fleet.yml` registry schema | M0.03 (done for projects and templates: [`projects-and-templates.md`](projects-and-templates.md); secrets: [`secrets.md`](secrets.md); the rest returns with M0.06 to M0.10) |
 | [`v0/cli.md`](v0/cli.md) | The `fleet` command reference | M0.04 |
 | [`v0/networking.md`](v0/networking.md) | Topology, every port, exposing a new one | M0.07 |
 | [`v0/README-typesense.md`](v0/README-typesense.md) | Typesense browser-search exposure | M0.07 |

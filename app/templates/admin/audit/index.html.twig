@@ -1,0 +1,53 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Audit log · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Audit log" description="Who changed or revealed a secret, and when. Values are never recorded.">
+        <twig:block name="actions">
+            <twig:Button as="a" variant="outline" href="{{ path('secrets') }}" class="h-11 md:h-8">Secrets</twig:Button>
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid gap-4">
+        <form method="get" action="{{ path('audit') }}" class="flex flex-col gap-2 md:max-w-md md:flex-row md:items-end" data-testid="audit-filter">
+            <div class="grid flex-1 gap-2">
+                <twig:Label for="audit-action">Action</twig:Label>
+                <twig:NativeSelect id="audit-action" name="action" class="h-11 md:h-8">
+                    <twig:NativeSelect:Option value="">All actions</twig:NativeSelect:Option>
+                    {% for candidate in actions %}
+                        <twig:NativeSelect:Option {{ ...{value: candidate, selected: candidate == action ? true : null} }}>{{ candidate }}</twig:NativeSelect:Option>
+                    {% endfor %}
+                </twig:NativeSelect>
+            </div>
+            <twig:Button type="submit" variant="outline" class="h-11 md:h-8">Filter</twig:Button>
+        </form>
+
+        {% if entries|length == 0 %}
+            <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="audit-empty">Nothing has been recorded yet.</p>
+        {% else %}
+            <p class="text-sm text-ink-muted">The latest {{ limit }} entries, newest first.</p>
+            <twig:Table>
+                <twig:Table:Caption class="sr-only">Audit log</twig:Table:Caption>
+                <twig:Table:Header>
+                    <twig:Table:Row>
+                        <twig:Table:Head>When (UTC)</twig:Table:Head>
+                        <twig:Table:Head>Who</twig:Table:Head>
+                        <twig:Table:Head>Action</twig:Table:Head>
+                        <twig:Table:Head>Subject</twig:Table:Head>
+                    </twig:Table:Row>
+                </twig:Table:Header>
+                <twig:Table:Body>
+                    {% for entry in entries %}
+                        <twig:Table:Row data-testid="audit-row">
+                            <twig:Table:Cell>{{ entry.createdAt|date('Y-m-d H:i:s', 'UTC') }}</twig:Table:Cell>
+                            <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ entry.actor }}</twig:Table:Cell>
+                            <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ entry.action }}</twig:Table:Cell>
+                            <twig:Table:Cell class="font-mono [overflow-wrap:anywhere]">{{ entry.subject }}</twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% endfor %}
+                </twig:Table:Body>
+            </twig:Table>
+        {% endif %}
+    </div>
+{% endblock %}

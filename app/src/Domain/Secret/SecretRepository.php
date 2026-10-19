@@ -21,6 +21,17 @@ final readonly class SecretRepository
         ]);
     }
 
+    /**
+     * @return list<Secret> ordered by name
+     */
+    public function listFor(string $scope, string $scopeId): array
+    {
+        return $this->em->getRepository(Secret::class)->findBy(
+            ['scope' => $scope, 'scopeId' => $scopeId],
+            ['name' => 'ASC'],
+        );
+    }
+
     public function save(Secret $secret): void
     {
         $this->em->persist($secret);
