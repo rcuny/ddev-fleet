@@ -98,6 +98,10 @@ services:
 when@dev:
     parameters:
         fleet.stand_in_enabled: true
+        # Not the container's or the developer's real /run files: the Playwright reboot-banner spec writes these (under
+        # its FLEET_HOME) to simulate a pending reboot, as the PHPUnit tests do in the test environment.
+        fleet.reboot_flag_file: '%env(resolve:FLEET_HOME)%/test-reboot-required'
+        fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
 when@test:
     parameters:

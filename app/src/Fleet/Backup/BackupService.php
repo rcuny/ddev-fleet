@@ -18,6 +18,12 @@ use Psr\Clock\ClockInterface;
 final readonly class BackupService
 {
     /** The only names this service writes, lists, serves or deletes. */
+    /**
+     * "Back up now" runs inside the php-fpm request (`max_execution_time`), so it refuses databases above this size
+     * (fleet.sqlite plus queue.sqlite); the daily timer and `fleet fleet:backup:create` have no such limit.
+     */
+    public const int INTERACTIVE_MAX_BYTES = 256 * 1024 * 1024;
+
     private const string NAME_PATTERN = '/^(fleet|queue)-(\d{8})-(\d{6})\.sqlite$/D';
 
     public function __construct(
@@ -42,6 +48,25 @@ final readonly class BackupService
         }
 
         return $fleet;
+    }
+
+    /**
+     * Like create(), for a web request: refuses a database too large to copy within the request's time limit.
+     *
+     * @throws BackupTooLarge    nothing was written
+     * @throws \RuntimeException as create()
+     */
+    public function createWithinRequestLimit(int $maxBytes = self::INTERACTIVE_MAX_BYTES): BackupInfo
+    {
+        $size = 0;
+        foreach ([$this->paths->fleetDb(), $this->paths->queueDb()] as $database) {
+            $size += is_file($database) ? (int) @filesize($database) : 0;
+        }
+        if ($size > $maxBytes) {
+            throw new BackupTooLarge($size, $maxBytes);
+        }
+
+        return $this->create();
     }
 
     /**
