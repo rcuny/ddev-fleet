@@ -3,7 +3,8 @@
 #   - the tmpfiles mask (the package's `Z /etc/authelia/*` rule would strip the execute bit of the secrets
 #     directory on every boot and Authelia would not start after the first reboot), installed before the package;
 #   - the three secrets, each generated only when its own file is missing, atomically;
-#   - an empty but valid users.yml (so a start can never fall back to a default account), in a setgid directory so
+#   - a users.yml with one disabled placeholder user (Authelia refuses an empty map; a start can never fall back to a
+#     default account), in a setgid directory so
 #     the file the app writes later inherits Authelia's group.
 # Authelia's configuration.yml, the real users and the start are the later steps' and the wizard's business.
 
@@ -100,7 +101,12 @@ step_main() {
     run setfacl -m "u:$AUTHELIA_USER:x" "$FLEET_SRV_DIR"
   fi
   ensure_dir "$FLEET_SRV_DIR/authelia" 2750 "fleet:$AUTHELIA_GROUP"
-  write_file_once "$users_file" 0640 "fleet:$AUTHELIA_GROUP" <<<'"users": {}'
+  # Authelia 4.39 refuses an empty users map, so the file starts with one disabled placeholder entry (the same text the
+  # app renders for zero users; a test keeps them equal). An empty map left by an earlier revision is replaced.
+  if ! is_dry && [ -f "$users_file" ] && [ "$(tr -d '[:space:]' <"$users_file")" = '"users":{}' ]; then
+    rm -f "$users_file"
+  fi
+  write_file_once "$users_file" 0640 "fleet:$AUTHELIA_GROUP" <"$INSTALL_DIR/etc/authelia-users-empty.yml"
   authelia_assert_no_default_account "$users_file"
 
   # 6. Point the unit at the secrets.

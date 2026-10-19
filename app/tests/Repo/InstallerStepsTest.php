@@ -109,6 +109,14 @@ final class InstallerStepsTest extends TestCase
         self::assertMatchesRegularExpression('/systemctl reset-failed authelia\.service \|\| true/', $step);
     }
 
+    public function testStarterUsersFileIsThePlaceholderAndAnEmptyMapIsReplaced(): void
+    {
+        $step = (string) file_get_contents(self::installDir().'/steps/60-authelia.sh');
+
+        self::assertStringContainsString('etc/authelia-users-empty.yml', $step);
+        self::assertStringNotContainsString("<<<'\"users\": {}'", $step, 'Authelia 4.39 refuses an empty users map');
+    }
+
     public function testTmpfilesMaskKeepsOnlyTheDirectoryLine(): void
     {
         $lines = array_values(array_filter(

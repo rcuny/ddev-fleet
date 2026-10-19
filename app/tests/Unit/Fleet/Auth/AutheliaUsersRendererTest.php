@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Fleet\Auth;
 
+use App\Domain\User\PasswordHash;
 use App\Domain\User\User;
 use App\Fleet\Auth\AutheliaUsersRenderer;
 use PHPUnit\Framework\TestCase;
@@ -130,11 +131,31 @@ final class AutheliaUsersRendererTest extends TestCase
         self::assertStringContainsString("'1e3':", $out);
     }
 
-    public function testEmptyListRendersAnEmptyUsersMap(): void
+    public function testEmptyListRendersOneDisabledPlaceholderBecauseAutheliaRefusesAnEmptyMap(): void
     {
         $out = new AutheliaUsersRenderer()->render([]);
+        $parsed = self::parse($out);
 
-        self::assertSame(['users' => []], self::parse($out));
+        self::assertSame([AutheliaUsersRenderer::PLACEHOLDER_USERNAME], array_keys($parsed['users']));
+        $entry = $parsed['users'][AutheliaUsersRenderer::PLACEHOLDER_USERNAME];
+        self::assertTrue($entry['disabled'], 'the placeholder can never sign in');
+        self::assertSame([], $entry['groups'], 'and belongs to no group');
+        self::assertTrue(PasswordHash::isArgon2id($entry['password']));
+    }
+
+    public function testRealUsersNeverCarryThePlaceholder(): void
+    {
+        $out = new AutheliaUsersRenderer()->render([self::user('alice')]);
+
+        self::assertStringNotContainsString(AutheliaUsersRenderer::PLACEHOLDER_USERNAME, $out);
+    }
+
+    public function testTheInstallersStarterUsersFileEqualsWhatTheAppRendersForNoUsers(): void
+    {
+        self::assertSame(
+            new AutheliaUsersRenderer()->render([]),
+            file_get_contents(\dirname(__DIR__, 5).'/install/etc/authelia-users-empty.yml'),
+        );
     }
 
     public function testRefusesAHashThatIsNotArgon2id(): void
