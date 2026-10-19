@@ -72,6 +72,29 @@ final readonly class JobRepository
     }
 
     /**
+     * Which of the given instances have a queued or running job.
+     *
+     * @param list<string> $instanceIds
+     *
+     * @return list<string> ordered
+     */
+    public function activeInstanceIds(array $instanceIds): array
+    {
+        if ([] === $instanceIds) {
+            return [];
+        }
+
+        /** @var list<string> $busy */
+        $busy = $this->em->getConnection()->fetchFirstColumn(
+            'SELECT DISTINCT instance_id FROM job WHERE instance_id IN (:ids) AND status IN (:queued, :running) ORDER BY instance_id ASC',
+            ['ids' => $instanceIds, 'queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
+            ['ids' => ArrayParameterType::STRING],
+        );
+
+        return $busy;
+    }
+
+    /**
      * @return list<Job> ordered by id
      */
     public function running(): array

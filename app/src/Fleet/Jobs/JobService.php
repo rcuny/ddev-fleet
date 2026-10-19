@@ -55,9 +55,7 @@ final readonly class JobService
      */
     public function retry(Job $failed, string $requestedBy, JobTrigger $trigger): Job
     {
-        if (JobStatus::Failed !== $failed->status() && JobStatus::Interrupted !== $failed->status()) {
-            throw new Refused('Only a failed or interrupted job can be retried.');
-        }
+        $this->assertRetryable($failed);
 
         $job = new Job(
             'deploy' === $failed->type() ? 'redeploy' : $failed->type(),
@@ -74,6 +72,16 @@ final readonly class JobService
         $this->enqueue($job);
 
         return $job;
+    }
+
+    /**
+     * @throws Refused unless the job ended failed or interrupted
+     */
+    public function assertRetryable(Job $job): void
+    {
+        if (JobStatus::Failed !== $job->status() && JobStatus::Interrupted !== $job->status()) {
+            throw new Refused('Only a failed or interrupted job can be retried.');
+        }
     }
 
     private function notify(Job $job): void

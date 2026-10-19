@@ -94,4 +94,20 @@ final class VisibleInstancesTest extends KernelTestCase
         self::assertNull($visible->find('shop--i1'), 'exists, but is not theirs: indistinguishable from a missing one');
         self::assertNull($visible->find('shop--missing'));
     }
+
+    public function testResetForgetsTheMemoisedDecision(): void
+    {
+        $visible = $this->visibleTo(['blog']);
+        self::assertSame(['blog--i1', 'blog--i2'], self::ids($visible->all()));
+
+        // The user loses the project; the decision made earlier is still remembered until reset.
+        $storage = self::getContainer()->get('security.token_storage');
+        self::assertInstanceOf(TokenStorageInterface::class, $storage);
+        $user = new FleetUser('alice', 'Alice', null, [], 'fleet-admins');
+        $storage->setToken(new UsernamePasswordToken($user, 'main', $user->getRoles()));
+
+        self::assertSame(['blog--i1', 'blog--i2'], self::ids($visible->all()));
+        $visible->reset();
+        self::assertSame([], $visible->all());
+    }
 }
