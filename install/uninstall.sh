@@ -144,6 +144,7 @@ main() {
   do_cmd systemctl disable fleet-boot.service
   do_cmd systemctl disable --now fleet-scheduler.service
   do_cmd systemctl disable --now fleet-backup.timer
+  do_cmd systemctl disable --now fleet-tmux.service
   do_cmd systemctl disable --now fleet-mercure.service
   do_cmd systemctl disable --now caddy.service
   do_cmd systemctl disable --now authelia.service
@@ -156,6 +157,7 @@ main() {
   remove_file "${systemd_dir:?}/fleet-scheduler.service"
   remove_file "${systemd_dir:?}/fleet-backup.service"
   remove_file "${systemd_dir:?}/fleet-backup.timer"
+  remove_file "${systemd_dir:?}/fleet-tmux.service"
   remove_file "${systemd_dir:?}/fleet-mercure.service"
   remove_file "${systemd_dir:?}/php8.4-fpm.service.d/fleet-env.conf"
   remove_file "${systemd_dir:?}/caddy.service.d/10-fleet-sandbox.conf"

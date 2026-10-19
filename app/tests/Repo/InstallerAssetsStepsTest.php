@@ -123,6 +123,7 @@ final class InstallerAssetsStepsTest extends TestCase
             '+ write /etc/systemd/system/fleet-worker@.service 0644 root:root',
             '+ write /etc/systemd/system/fleet-backup.service 0644 root:root',
             '+ write /etc/systemd/system/fleet-backup.timer 0644 root:root',
+            '+ write /etc/systemd/system/fleet-tmux.service 0644 root:root',
             '+ write /etc/fleet-mercure/Caddyfile 0644 root:root',
             '+ write /etc/systemd/system/fleet-mercure.service 0644 root:root',
             '+ systemctl daemon-reload',
@@ -265,6 +266,7 @@ final class InstallerAssetsStepsTest extends TestCase
             '+ systemctl restart fleet-scheduler',
             '+ systemctl restart caddy',
             '+ systemctl enable --now fleet-backup.timer',
+            '+ systemctl enable --now fleet-tmux.service',
             '+ wait up to 120 s: curl -fsS https://fleet.example.com/health, curl -fsS http://127.0.0.1:3000/healthz, systemctl is-active docker caddy authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-status',
             'fleet:setup:token',
         ];

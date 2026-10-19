@@ -98,7 +98,7 @@ final class ClaudeTokenApplyTest extends KernelTestCase
     {
         [$one, $two, $three] = $this->fleet();
 
-        $run = $this->cli('fleet:claude:token:apply', ['--all' => true]);
+        $run = $this->cli('fleet:claude:token:apply', ['--all' => true, '--yes' => true]);
 
         self::assertSame(0, $run->getStatusCode(), $run->getDisplay().$run->getErrorOutput());
         self::assertSame([$this->fleetPaths->instanceDir($one), $this->fleetPaths->instanceDir($three)], $this->restarted());
@@ -115,6 +115,26 @@ final class ClaudeTokenApplyTest extends KernelTestCase
         self::assertTrue($jobs[0]->isSequential());
         self::assertStringNotContainsString(self::TOKEN, $run->getDisplay().$run->getErrorOutput());
         self::assertSame([], array_filter($jobs, static fn (Job $j): bool => str_contains(json_encode($j->params(), \JSON_THROW_ON_ERROR), self::TOKEN)));
+    }
+
+    public function testAllNeedsConfirmation(): void
+    {
+        $this->fleet();
+
+        $silent = $this->cli('fleet:claude:token:apply', ['--all' => true]);
+        $declined = $this->cli('fleet:claude:token:apply', ['--all' => true], ['no'], true);
+
+        foreach ([$silent, $declined] as $run) {
+            self::assertSame(1, $run->getStatusCode());
+            self::assertStringContainsString('pass --yes', $run->getErrorOutput().$run->getDisplay());
+        }
+        self::assertSame([], $this->restarted());
+        self::assertSame([], $this->jobs());
+
+        $accepted = $this->cli('fleet:claude:token:apply', ['--all' => true], ['yes'], true);
+
+        self::assertSame(0, $accepted->getStatusCode(), $accepted->getDisplay().$accepted->getErrorOutput());
+        self::assertCount(2, $this->jobs());
     }
 
     public function testOneInstanceAndTheAuditEntry(): void
@@ -158,7 +178,7 @@ final class ClaudeTokenApplyTest extends KernelTestCase
 
     public function testAllWithNoRunningInstance(): void
     {
-        $run = $this->cli('fleet:claude:token:apply', ['--all' => true]);
+        $run = $this->cli('fleet:claude:token:apply', ['--all' => true, '--yes' => true]);
 
         self::assertSame(0, $run->getStatusCode());
         self::assertStringContainsString('No instance is running', $run->getDisplay());
@@ -169,7 +189,7 @@ final class ClaudeTokenApplyTest extends KernelTestCase
         [$one, , $three] = $this->fleet();
         $this->runner->expect(['ddev', 'restart'], new CommandResult(1, '', 'docker is down'));
 
-        $this->cli('fleet:claude:token:apply', ['--all' => true]);
+        $this->cli('fleet:claude:token:apply', ['--all' => true, '--yes' => true]);
 
         $jobs = $this->jobs();
         self::assertSame('failed', $jobs[0]->status()->value);
