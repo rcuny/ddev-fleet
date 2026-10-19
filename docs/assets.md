@@ -111,9 +111,20 @@ a link anywhere on the way to a folder or file makes the request fail with "A sy
 ever written through one. A link inside the directory is listed, can be deleted (the link, not what it points at) and is
 otherwise ignored.
 
+## Snapshot a running instance
+
+The **Snapshot a running instance** card on the Assets tab lists the project's running instances. **Take snapshot** queues
+a job that runs `ddev export-db` in the instance's checkout and saves the dump as
+`dumps/default-<instance-id>-<UTC time>.sql.gz` (for example `dumps/default-blog--main-20261020T090000Z.sql.gz`), so it can
+seed later instances. The dump is written to a hidden temporary file first and only then linked into place: a partial file
+never shows under its name, and a snapshot never replaces an earlier one (two in the same second get a `-2` suffix). The job
+needs 512 MiB free on the assets filesystem and its output and any failure are in the job log. A stopped, unknown or busy
+instance is refused with a message. The card is for administrators, like the rest of the tab; press **Rescan** to see the
+new file once the job is done.
+
 ## The command line
 
-Run on the host as `fleet asset:<verb>` (the wrapper switches to the `fleet` user). Both accept
+Run on the host as `fleet asset:<verb>` (the wrapper switches to the `fleet` user). All accept
 `--format=table|json` (`--json` is the short form).
 
 ### `fleet asset:list <project> [<path>]`
@@ -136,14 +147,22 @@ Deletes uploads that nobody touched for 24 hours and the hidden temporary files 
 older than 24 hours). Prints what it removed; with `--format=json`:
 `{"uploads": 1, "temporaryFiles": 0, "bytes": 52428800}`.
 
+### `fleet asset:snapshot <instance-id>`
+
+Dumps a running instance's database into its project's assets, the same job as the Assets tab's **Take snapshot** button
+(see "Snapshot a running instance" below). The command queues a `snapshot` job and prints its number; a worker runs it.
+With `--format=json`: `{"job": 12, "instance": "blog--main", "project": "blog", "status": "queued"}`. A stopped, unknown
+or busy instance (it has a queued or running job) is refused with a message and the exit code of the table below, and
+nothing is queued.
+
 ### Exit codes
 
 | Code | Meaning |
 |---|---|
 | `0` | Done. |
 | `1` | A value was refused: the path breaks the rules above (reported as `<path>: message`). |
-| `2` | Not allowed now: a symbolic link is in the way. |
-| `3` | The project or the folder does not exist. |
+| `2` | Not allowed now: a symbolic link is in the way, or (`asset:snapshot`) the instance is not running or is busy. |
+| `3` | The project, the folder or the instance does not exist. |
 
 In JSON mode a failure is `{"error": "...", "fields": {...}}` on stdout, like the project commands.
 

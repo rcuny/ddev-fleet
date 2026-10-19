@@ -66,6 +66,33 @@
             </twig:Card:Content>
         </twig:Card>
 
+        <twig:Card data-testid="asset-snapshot">
+            <twig:Card:Header>
+                <twig:Card:Title>Snapshot a running instance</twig:Card:Title>
+                <twig:Card:Description>
+                    Dumps the instance's database into <code class="[overflow-wrap:anywhere]">dumps/</code> as <code class="[overflow-wrap:anywhere]">default-&lt;instance&gt;-&lt;time&gt;.sql.gz</code>. Earlier dumps are never replaced.
+                </twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                {% if runningInstances is empty %}
+                    <p class="text-sm text-ink-muted" data-testid="snapshot-empty">No instance of this project is running. Start one to take a snapshot.</p>
+                {% else %}
+                    <form method="post" action="{{ path('project_asset_snapshot', {name: project.name}) }}" class="grid gap-3 sm:flex sm:items-end" data-testid="snapshot-form">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <div class="grid gap-2">
+                            <twig:Label for="snapshot-instance">Running instance</twig:Label>
+                            <twig:NativeSelect id="snapshot-instance" name="instance" required data-testid="snapshot-instance" class="sm:w-72 [&_select]:h-11 md:[&_select]:h-8">
+                                {% for id in runningInstances %}
+                                    <twig:NativeSelect:Option value="{{ id }}">{{ id }}</twig:NativeSelect:Option>
+                                {% endfor %}
+                            </twig:NativeSelect>
+                        </div>
+                        <twig:Button type="submit" class="h-11 md:h-8" data-testid="snapshot-submit">Take snapshot</twig:Button>
+                    </form>
+                {% endif %}
+            </twig:Card:Content>
+        </twig:Card>
+
         <section class="grid gap-3" aria-labelledby="asset-files-heading">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
                 <h2 id="asset-files-heading">Files</h2>
