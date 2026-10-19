@@ -72,13 +72,14 @@ final readonly class UserRepository
     }
 
     /**
-     * Enabled administrators only: a disabled admin cannot sign in, so it does not count as one.
+     * Enabled members of the group only (the administrators, for the admin group): a disabled user cannot sign in, so
+     * it does not count.
      */
-    public function countAdmins(): int
+    public function countInGroup(string $group): int
     {
         return \count(array_filter(
             $this->em->getRepository(User::class)->findBy(['enabled' => true]),
-            static fn (User $user): bool => $user->isAdmin(),
+            static fn (User $user): bool => $user->isInGroup($group),
         ));
     }
 

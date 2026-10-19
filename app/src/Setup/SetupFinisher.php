@@ -10,6 +10,7 @@ use App\Domain\Host\TlsMode;
 use App\Domain\Ssh\SshKeyRepository;
 use App\Domain\Ssh\SshKeyRole;
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\AutheliaUsersFile;
 use App\Fleet\System\ApplyTarget;
 use App\Fleet\System\CaddyReloader;
@@ -57,6 +58,7 @@ final readonly class SetupFinisher
     public function __construct(
         private HostSettingsRepository $settings,
         private UserRepository $users,
+        private AdminGroup $admins,
         private SshKeyRepository $keys,
         private AutheliaUsersFile $usersFile,
         private SystemRenderer $system,
@@ -175,7 +177,7 @@ final readonly class SetupFinisher
         if ($host->isSetupComplete()) {
             throw new SetupRefused('Setup is already complete.');
         }
-        if (0 === $this->users->countAdmins()) {
+        if (0 === $this->users->countInGroup($this->admins->name())) {
             throw new SetupRefused('Create the administrator first.');
         }
         foreach (SshKeyRole::cases() as $role) {

@@ -59,9 +59,9 @@ final class UserRepositoryTest extends KernelTestCase
         self::assertNotNull($alice);
         self::assertNotNull($bob);
         self::assertSame(['fleet-admins', 'dev'], $alice->groups());
-        self::assertTrue($alice->isAdmin());
+        self::assertTrue($alice->isInGroup('fleet-admins'));
         self::assertSame(['dev'], $bob->groups());
-        self::assertFalse($bob->isAdmin());
+        self::assertFalse($bob->isInGroup('fleet-admins'));
         self::assertNull($this->repository->findByUsername('nobody'));
     }
 
@@ -78,13 +78,13 @@ final class UserRepositoryTest extends KernelTestCase
         ));
     }
 
-    public function testCountAdminsIgnoresDisabled(): void
+    public function testCountInGroupIgnoresDisabled(): void
     {
         $this->repository->save(self::user('alice', ['fleet-admins']));
         $this->repository->save(self::user('bob', ['fleet-admins'], false));
         $this->repository->save(self::user('carol', ['dev']));
 
-        self::assertSame(1, $this->repository->countAdmins());
+        self::assertSame(1, $this->repository->countInGroup('fleet-admins'));
     }
 
     /**

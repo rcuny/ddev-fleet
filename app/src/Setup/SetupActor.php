@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Setup;
 
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AdminGroup;
 
 /**
  * The name the wizard's changes are recorded under (secret store, SSH key audit, setup log): the administrator the
@@ -14,14 +15,14 @@ final readonly class SetupActor
 {
     public const string FALLBACK = 'setup';
 
-    public function __construct(private UserRepository $users)
+    public function __construct(private UserRepository $users, private AdminGroup $admins)
     {
     }
 
     public function name(): string
     {
         foreach ($this->users->all() as $user) {
-            if ($user->isAdmin() && $user->isEnabled()) {
+            if ($this->admins->includes($user) && $user->isEnabled()) {
                 return $user->username();
             }
         }

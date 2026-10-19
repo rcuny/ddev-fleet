@@ -9,6 +9,7 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Secret\SecretRepository;
 use App\Domain\Ssh\SshKeyRepository;
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\PasswordPolicy;
 use App\Fleet\Auth\UserService;
 use App\Fleet\FleetPaths;
@@ -161,7 +162,7 @@ abstract class WizardTestCase extends WebTestCase
 
     protected function createAdmin(string $username = 'root', string $password = self::PASSWORD): void
     {
-        new UserService($this->users(), new PasswordPolicy())->upsertAdmin($username, 'Root Admin', 'root@example.com', $password);
+        new UserService($this->users(), new PasswordPolicy(), new AdminGroup('fleet-admins'))->upsertAdmin($username, 'Root Admin', 'root@example.com', $password);
     }
 
     protected function completeSetupInDatabase(): void

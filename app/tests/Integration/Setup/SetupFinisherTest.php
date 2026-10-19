@@ -333,6 +333,7 @@ final class SetupFinisherTest extends KernelTestCase
         return new SetupFinisher(
             $this->fx->settings,
             $this->fx->users,
+            $this->fx->admins,
             $this->fx->keys,
             $this->fx->usersFile,
             $this->fx->system,

@@ -10,6 +10,7 @@ use App\Domain\Ssh\SshKeyRepository;
 use App\Domain\Ssh\SshKeyRole;
 use App\Domain\User\User;
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Secrets\SecretStore;
 
 /**
@@ -24,6 +25,7 @@ final readonly class SetupProgress
     public function __construct(
         private HostSettingsRepository $settings,
         private UserRepository $users,
+        private AdminGroup $admins,
         private SshKeyRepository $keys,
         private SecretStore $secrets,
     ) {
@@ -36,7 +38,7 @@ final readonly class SetupProgress
     public function admin(): ?User
     {
         foreach ($this->users->all() as $user) {
-            if ($user->isAdmin() && $user->isEnabled()) {
+            if ($this->admins->includes($user) && $user->isEnabled()) {
                 return $user;
             }
         }

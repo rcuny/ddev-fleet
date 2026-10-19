@@ -95,7 +95,7 @@ final class AdminStepTest extends WizardTestCase
         $users = $this->users()->all();
         self::assertCount(1, $users);
         self::assertSame('root', $users[0]->username());
-        self::assertTrue($users[0]->isAdmin());
+        self::assertTrue($users[0]->isInGroup('fleet-admins'));
         self::assertStringStartsWith('$argon2id$', $users[0]->passwordHash());
         self::assertTrue(password_verify(self::PASSWORD, $users[0]->passwordHash()));
         self::assertStringNotContainsString(self::PASSWORD, $users[0]->passwordHash());

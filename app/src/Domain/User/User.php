@@ -17,7 +17,6 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\UniqueConstraint(name: 'uniq_fleet_user_username', columns: ['username'])]
 class User
 {
-    public const string ADMIN_GROUP = 'fleet-admins';
     public const string USERNAME_PATTERN = '/^[a-z0-9][a-z0-9._-]{0,63}$/D';
 
     #[ORM\Id]
@@ -107,9 +106,13 @@ class User
         return $this->groups;
     }
 
-    public function isAdmin(): bool
+    /**
+     * Whether the user is in this group. Which group makes an administrator is configuration, not a property of the
+     * entity: ask App\Fleet\Auth\AdminGroup::includes().
+     */
+    public function isInGroup(string $group): bool
     {
-        return \in_array(self::ADMIN_GROUP, $this->groups, true);
+        return \in_array($group, $this->groups, true);
     }
 
     public function isEnabled(): bool

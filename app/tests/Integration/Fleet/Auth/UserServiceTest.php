@@ -7,6 +7,7 @@ namespace App\Tests\Integration\Fleet\Auth;
 use App\Domain\User\PasswordHash;
 use App\Domain\User\User;
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\PasswordPolicy;
 use App\Fleet\Auth\UnknownUser;
 use App\Fleet\Auth\UserService;
@@ -27,7 +28,7 @@ final class UserServiceTest extends KernelTestCase
     {
         $em = $this->setUpFleetDatabase();
         $this->repository = new UserRepository($em);
-        $this->service = new UserService($this->repository, new PasswordPolicy());
+        $this->service = new UserService($this->repository, new PasswordPolicy(), new AdminGroup('fleet-admins'));
     }
 
     protected function tearDown(): void
@@ -44,7 +45,7 @@ final class UserServiceTest extends KernelTestCase
         $stored = $this->repository->findByUsername('alice');
         self::assertNotNull($stored);
         self::assertSame(['fleet-admins'], $stored->groups());
-        self::assertTrue($stored->isAdmin());
+        self::assertTrue($stored->isInGroup('fleet-admins'));
         self::assertTrue($stored->isEnabled());
         self::assertSame('Alice A', $stored->displayName());
         self::assertSame($user->passwordHash(), $stored->passwordHash());

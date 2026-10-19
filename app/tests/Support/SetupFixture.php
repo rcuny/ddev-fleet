@@ -12,6 +12,7 @@ use App\Domain\Ssh\SshKey;
 use App\Domain\Ssh\SshKeyRepository;
 use App\Domain\Ssh\SshKeyRole;
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\AutheliaUsersFile;
 use App\Fleet\Auth\AutheliaUsersRenderer;
 use App\Fleet\Auth\PasswordPolicy;
@@ -62,18 +63,20 @@ final class SetupFixture
 
     /** @var array<string, \Throwable> apply target value => failure */
     public array $applyFails = [];
+    public readonly AdminGroup $admins;
     /** @var list<string> caddy sub-commands (validate|reload) that exit 1 */
     public array $caddyFails = [];
     /** @var (callable(string): void)|null called with each event as it happens */
     public $probe;
 
-    public function __construct(EntityManagerInterface $em, public readonly FleetPaths $paths)
+    public function __construct(EntityManagerInterface $em, public readonly FleetPaths $paths, string $adminGroup = 'fleet-admins')
     {
+        $this->admins = new AdminGroup($adminGroup);
         $this->clock = new MockClock('2026-10-19 10:00:00 UTC');
         $this->settings = new HostSettingsRepository($em);
         $this->users = new UserRepository($em);
         $this->keys = new SshKeyRepository($em);
-        $this->userService = new UserService($this->users, new PasswordPolicy());
+        $this->userService = new UserService($this->users, new PasswordPolicy(), $this->admins);
         $this->store = new SecretStore(new SecretRepository($em), new SecretBox(new SecretKeyFile($paths)), $this->clock);
         new SecretKeyFile($paths)->ensure();
 
@@ -118,6 +121,7 @@ final class SetupFixture
         $this->finisher = new SetupFinisher(
             $this->settings,
             $this->users,
+            $this->admins,
             $this->keys,
             $this->usersFile,
             $this->system,

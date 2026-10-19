@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Fleet\Auth;
 
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\AutheliaUsersFile;
 use App\Fleet\Auth\AutheliaUsersRenderer;
 use App\Fleet\Auth\PasswordPolicy;
@@ -27,7 +28,7 @@ final class AutheliaUsersFileSyncTest extends KernelTestCase
     {
         $em = $this->setUpFleetDatabase();
         $this->repository = new UserRepository($em);
-        $this->service = new UserService($this->repository, new PasswordPolicy());
+        $this->service = new UserService($this->repository, new PasswordPolicy(), new AdminGroup('fleet-admins'));
         $paths = self::getContainer()->get(FleetPaths::class);
         self::assertInstanceOf(FleetPaths::class, $paths);
         $this->paths = $paths;

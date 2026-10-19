@@ -141,7 +141,7 @@ The app, the workers and the CLI all read this file. Existing keys are never cha
 | `FLEET_HOME` | `/srv/fleet`. |
 | `FLEET_RUNNER` | `process` (commands really run). |
 | `FLEET_TRUSTED_PROXIES` | Empty on purpose: trust comes from the proxy secret, not from the peer address. |
-| `FLEET_ADMIN_GROUP` | `fleet-admins`. |
+| `FLEET_ADMIN_GROUP` | `fleet-admins`. The one group that makes an administrator: the wizard puts its administrator in it (and so into Authelia's `users.yml`), and the app grants `ROLE_ADMIN` to it. Set it (in `fleet.env`, then restart php-fpm and the workers) **before** the wizard creates the administrator; later changes do not regroup existing users. Letters, digits, `.`, `_`, `-`. |
 | `FLEET_CADDY_DIR` | `/etc/caddy/fleet`. |
 | `DEFAULT_URI` | `https://<domain>`. |
 
@@ -158,7 +158,7 @@ step is saved as you go, and the wizard works at phone width.
 
 1. **Administrator.** Username, display name, email and a password of 12 to 128 characters. The username is
    fixed once an administrator exists (saving again updates that account; the password must be entered again).
-   The account is created in the `fleet-admins` group.
+   The account is created in the administrator group (`FLEET_ADMIN_GROUP`, default `fleet-admins`).
 2. **Domain and certificates.** The domain was set by the installer. Choose how certificates are obtained:
    - `http01` (default): Let's Encrypt HTTP-01 on port 80, for `<domain>` and `auth.<domain>`.
    - `ovh_dns`: DNS-01 through the OVH API. Enter the API endpoint (`ovh-eu`, `ovh-ca` or `ovh-us`), the

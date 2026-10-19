@@ -19,6 +19,7 @@ final readonly class UserService
     public function __construct(
         private UserRepository $users,
         private PasswordPolicy $policy,
+        private AdminGroup $admins,
     ) {
     }
 
@@ -39,11 +40,11 @@ final readonly class UserService
 
         $user = $this->users->findByUsername($username);
         if (null === $user) {
-            $user = new User($username, $displayName, $email, $hash, [User::ADMIN_GROUP]);
+            $user = new User($username, $displayName, $email, $hash, [$this->admins->name()]);
         } else {
             $user->updateProfile($displayName, $email);
             $user->changePasswordHash($hash);
-            $user->changeGroups([...$user->groups(), User::ADMIN_GROUP]);
+            $user->changeGroups($this->admins->addedTo($user->groups()));
             $user->setEnabled(true);
         }
         $this->users->save($user);
