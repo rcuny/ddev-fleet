@@ -540,3 +540,26 @@ def test_live_check_rejects_a_malformed_target(live_env):
     work, env = live_env
     done = _live(work, env, SECURITY_PROBE_TARGETS="just-a-host")
     assert done.returncode == 1 and "bad SECURITY_PROBE_TARGETS entry" in done.stderr
+
+
+# --- units shipped as plain files under install/etc (FLE-80) -------------------------------
+
+
+def test_install_units_are_recorded_and_not_in_the_sandboxed_sets():
+    data = json.loads(BASELINE_FILE.read_text())
+    recorded = data["install_units"]["units"]
+    assert set(recorded) == {"fleet-mercure.service", "fleet-tmux.service"}
+    for unit in recorded:
+        assert (ROOT / "install" / "etc" / unit).is_file()
+        for env in data["environments"].values():
+            assert unit not in env["units"]
+    assert recorded["fleet-tmux.service"]["reason"].startswith("Exempt on purpose")
+
+
+@pytest.mark.parametrize("unit", ["fleet-mercure.service", "fleet-tmux.service"])
+def test_install_unit_scores_do_not_regress(analyze, unit):
+    data = json.loads(BASELINE_FILE.read_text())
+    recorded = data["install_units"]["units"][unit]["score"]
+    probe = ci.load_report_module()
+    score = probe.analyze_unit(str(ROOT / "install" / "etc" / unit), ["--offline=yes"])["score"]
+    assert score <= recorded + data["tolerance"], f"{unit} is now {score}, recorded {recorded}"
