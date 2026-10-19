@@ -30,7 +30,7 @@ final class MigrationsTest extends KernelTestCase
         self::assertStringContainsString('schema is in sync with the mapping files', $output);
 
         $tables = $em->getConnection()->createSchemaManager()->listTableNames();
-        foreach (['host_settings', 'fleet_user', 'ssh_key', 'secret', 'project', 'template', 'named_port', 'project_port'] as $table) {
+        foreach (['host_settings', 'fleet_user', 'ssh_key', 'secret', 'project', 'template', 'named_port', 'project_port', 'instance', 'job'] as $table) {
             self::assertContains($table, $tables);
         }
     }

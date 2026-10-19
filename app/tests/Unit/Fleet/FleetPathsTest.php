@@ -271,4 +271,38 @@ final class FleetPathsTest extends TestCase
         self::assertSame('/srv/fleet/logs/instances/instances/1.log', $paths->jobLog('1', 'instances'));
         self::assertSame('/srv/fleet/logs/jobs/1.log', $paths->jobLog('1'));
     }
+
+    public function testInstanceSiteFileLivesUnderTheCaddyInstancesDirectory(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+
+        self::assertSame('/etc/caddy/fleet/instances', $paths->caddyInstancesDir());
+        self::assertSame('/etc/caddy/fleet/instances/blog--main.conf', $paths->instanceSiteFile('blog--main'));
+        self::assertSame('/etc/caddy/fleet/instances/my-blog--fix-1.conf', $paths->instanceSiteFile('my-blog--fix-1'));
+    }
+
+    public function testInstanceSiteFileRejectsBadIds(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+
+        foreach (['../x', 'a/b', 'A--b', 'blog', 'blog-main', '--main', 'blog--', 'a---b', "a--b\n", '', str_repeat('a', 31).'--'.str_repeat('b', 31)] as $bad) {
+            try {
+                $paths->instanceSiteFile($bad);
+                self::fail(\sprintf('"%s" should have been rejected.', addcslashes($bad, "\0..\37")));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testInstanceSiteFileAcceptsTheLongestId(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+        $id = str_repeat('a', 30).'--'.str_repeat('b', 31); // 63 characters
+
+        self::assertSame(63, \strlen($id));
+        self::assertSame('/etc/caddy/fleet/instances/'.$id.'.conf', $paths->instanceSiteFile($id));
+        $this->expectException(\InvalidArgumentException::class);
+        $paths->instanceSiteFile($id.'c'); // 64
+    }
 }

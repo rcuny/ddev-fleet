@@ -29,12 +29,13 @@ security:
         # The setup wizard has its own gate (App\Setup\SetupAccessSubscriber: one-time token session, 404 once complete).
         - { path: ^/setup(/|$), roles: PUBLIC_ACCESS }
         - { path: ^/admin, roles: ROLE_ADMIN }
-        # The live component endpoint serves any registered component by name, so it is admin-only as a whole
-        # (M0.04 replaces this blanket rule by per-component checks before it ships a member-facing component).
+        # The live component endpoint serves any registered component by name. It only requires a signed-in user:
+        # every #[AsLiveComponent] class declares its own #[IsGranted] (ComponentsAccessTest fails a component
+        # without one), so a member-facing component never inherits an admin blanket and an admin one is not open.
         # Two rules, one decision: the route name survives any spelling of the path, the path also covers a
         # route that is renamed or re-mounted under the same prefix.
-        - { route: ux_live_component, roles: ROLE_ADMIN }
-        - { path: ^/_components, roles: ROLE_ADMIN }
+        - { route: ux_live_component, roles: IS_AUTHENTICATED_FULLY }
+        - { path: ^/_components, roles: IS_AUTHENTICATED_FULLY }
         - { path: ^/, roles: IS_AUTHENTICATED_FULLY }
 
 when@prod:

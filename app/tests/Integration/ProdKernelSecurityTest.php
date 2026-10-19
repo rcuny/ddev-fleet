@@ -7,6 +7,7 @@ namespace App\Tests\Integration;
 use App\Kernel;
 use App\Security\StandIn\StandInAuthenticator;
 use App\Security\StandIn\StandInController;
+use App\Security\StandIn\StandInProjectMembership;
 use App\Security\StandIn\StandInSettings;
 use App\Tests\Support\TempFleetHome;
 use App\Ui\ProfilerToolbarSwitch;
@@ -142,7 +143,7 @@ final class ProdKernelSecurityTest extends TestCase
         $this->kernel->boot();
         $container = $this->kernel->getContainer();
 
-        foreach ([StandInAuthenticator::class, StandInController::class, StandInSettings::class, ProfilerToolbarSwitch::class] as $class) {
+        foreach ([StandInAuthenticator::class, StandInController::class, StandInSettings::class, StandInProjectMembership::class, ProfilerToolbarSwitch::class] as $class) {
             self::assertFalse($container->has($class), $class);
         }
 
