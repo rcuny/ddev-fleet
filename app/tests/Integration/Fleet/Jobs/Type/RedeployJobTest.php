@@ -41,6 +41,29 @@ final class RedeployJobTest extends InstanceJobTestCase
         self::assertFileExists($this->paths->instanceSiteFile('acme--main'));
     }
 
+    public function testAnotherBranchInTheParamsChangesTheInstanceBranch(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Deploying);
+        $this->checkout($instance);
+        $this->saveTemplate('full', ['ddev init']);
+
+        $this->redeploy(['template' => 'full', 'branch' => 'release/2']);
+
+        self::assertSame('release/2', $instance->branch());
+        self::assertContains('release/2', $this->runner->callsMatching(['git'])[0]->argv);
+    }
+
+    public function testNoBranchInTheParamsKeepsTheInstanceBranch(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Deploying);
+        $this->checkout($instance);
+        $this->saveTemplate('full', ['ddev init']);
+
+        $this->redeploy(['template' => 'full']);
+
+        self::assertSame('develop', $instance->branch());
+    }
+
     public function testVanishedTemplateFailsWithoutDestroying(): void
     {
         $instance = $this->instance();
