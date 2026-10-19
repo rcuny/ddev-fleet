@@ -16,6 +16,12 @@
         </twig:NativeSelect>
     </div>
 
+    <div class="space-y-2">
+        <twig:Label for="ds-form-notes">Notes</twig:Label>
+        <twig:Textarea id="ds-form-notes" name="notes" rows="3" aria-describedby="ds-form-notes-help">Anything else we should know.</twig:Textarea>
+        <p id="ds-form-notes-help" class="text-xs text-ink-muted">One entry per line.</p>
+    </div>
+
     <fieldset class="space-y-2">
         <legend>Plan</legend>
         <twig:RadioGroup>
@@ -47,10 +53,10 @@
     <twig:Button type="submit">Save</twig:Button>
 </form>
 {% endverbatim %}{% endset %}
-<twig:Ds:Section id="forms" title="Forms" :sample="sample|trim" :components="['Input', 'Label', 'Checkbox', 'NativeSelect', 'RadioGroup', 'Button']">
+<twig:Ds:Section id="forms" title="Forms" :sample="sample|trim" :components="['Input', 'Textarea', 'Label', 'Checkbox', 'NativeSelect', 'RadioGroup', 'Button']">
     <twig:block name="description">
         <p>
-            Forms compose <code>Input</code>, <code>NativeSelect</code>, <code>Checkbox</code>, <code>RadioGroup</code> and <code>Label</code> with helper text and a
+            Forms compose <code>Input</code>, <code>Textarea</code> (several lines of text), <code>NativeSelect</code>, <code>Checkbox</code>, <code>RadioGroup</code> and <code>Label</code> with helper text and a
             <code>Button</code>. Space fields with <code>space-y-4</code> and a field's own parts with <code>space-y-2</code>. Native controls keep
             browser validation, autofill and keyboard behaviour.
         </p>

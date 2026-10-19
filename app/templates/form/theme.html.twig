@@ -38,6 +38,53 @@
     <twig:Input {{ ...merged }} />
 {%- endblock form_widget_simple %}
 
+{% block textarea_widget -%}
+    {%- set described = [] -%}
+    {%- if help is not empty %}{% set described = described|merge([id ~ '_help']) %}{% endif -%}
+    {%- if errors|length > 0 %}{% set described = described|merge([id ~ '_errors']) %}{% endif -%}
+    {%- set merged = attr|merge({
+        id: id,
+        name: full_name,
+        required: required,
+        disabled: disabled,
+        'aria-invalid': errors|length > 0 ? 'true' : null,
+        'aria-describedby': described is not empty ? described|join(' ') : null,
+    }) -%}
+    <twig:Textarea {{ ...merged }}>{{ value }}</twig:Textarea>
+{%- endblock textarea_widget %}
+
+{# A checkbox: the control, its label and the help text side by side, as in the design system's Forms section. #}
+{% block checkbox_widget -%}
+    {%- set described = [] -%}
+    {%- if help is not empty %}{% set described = described|merge([id ~ '_help']) %}{% endif -%}
+    {%- if errors|length > 0 %}{% set described = described|merge([id ~ '_errors']) %}{% endif -%}
+    {%- set merged = attr|merge({
+        id: id,
+        name: full_name,
+        value: value,
+        checked: checked ? true : null,
+        required: required,
+        disabled: disabled,
+        'aria-invalid': errors|length > 0 ? 'true' : null,
+        'aria-describedby': described is not empty ? described|join(' ') : null,
+        class: ('mt-0.5 ' ~ attr.class|default(''))|trim,
+    }) -%}
+    <twig:Checkbox {{ ...merged }} />
+{%- endblock checkbox_widget %}
+
+{% block checkbox_row -%}
+    <div class="grid gap-2" data-slot="form-row">
+        <div class="flex min-h-11 items-start gap-3 md:min-h-0">
+            {{- form_widget(form) -}}
+            <div class="grid gap-1">
+                {{- form_label(form, null, {label_attr: {class: 'font-normal text-ink-body'}}) -}}
+                {{- form_help(form) -}}
+            </div>
+        </div>
+        {{- form_errors(form) -}}
+    </div>
+{%- endblock checkbox_row %}
+
 {# Hidden fields (the CSRF token) stay plain: no control styling. #}
 {% block hidden_widget -%}
     <input type="hidden" {{ block('widget_attributes') }}{% if value is not empty %} value="{{ value }}"{% endif %}>

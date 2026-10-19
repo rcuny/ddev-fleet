@@ -25,7 +25,7 @@ final class DesignSystemPageTest extends WebTestCase
     ];
 
     private const array COMPONENTS = [
-        'Button', 'Input', 'Label', 'Badge', 'Card', 'Alert', 'Checkbox', 'NativeSelect', 'RadioGroup',
+        'Button', 'Input', 'Textarea', 'Label', 'Badge', 'Card', 'Alert', 'Checkbox', 'NativeSelect', 'RadioGroup',
         'Dialog', 'DropdownMenu', 'Sheet', 'Separator', 'Table', 'ThemeToggle', 'PageHeader',
     ];
 

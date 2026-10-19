@@ -1,0 +1,44 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ project.name }} · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="project.name" :description="project.git">
+        <twig:block name="tabs">
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'general'}) }}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-2xl gap-8">
+        {{ include('admin/projects/_form.html.twig', {form: form, create: false}) }}
+
+        <twig:Card data-testid="danger-zone">
+            <twig:Card:Header>
+                <twig:Card:Title>Danger zone</twig:Card:Title>
+                <twig:Card:Description>Deleting a project also deletes its templates and port assignments. It is refused while the project has instances.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <twig:Dialog id="delete-project">
+                    <twig:Dialog:Trigger>
+                        <twig:Button variant="destructive" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_trigger_attrs }}>Delete this project</twig:Button>
+                    </twig:Dialog:Trigger>
+                    <twig:Dialog:Content>
+                        <twig:Dialog:Header>
+                            <twig:Dialog:Title>Delete {{ project.name }}?</twig:Dialog:Title>
+                            <twig:Dialog:Description>This removes the project, its templates and its port assignments. It cannot be undone.</twig:Dialog:Description>
+                        </twig:Dialog:Header>
+                        <twig:Dialog:Footer>
+                            <twig:Dialog:Close>
+                                <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                            </twig:Dialog:Close>
+                            <form method="post" action="{{ path('project_delete', {name: project.name}) }}" class="contents">
+                                {{ include('setup/_csrf.html.twig') }}
+                                <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto">Delete project</twig:Button>
+                            </form>
+                        </twig:Dialog:Footer>
+                    </twig:Dialog:Content>
+                </twig:Dialog>
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

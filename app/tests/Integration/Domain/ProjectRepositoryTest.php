@@ -196,4 +196,21 @@ final class ProjectRepositoryTest extends KernelTestCase
         $found = $this->projects->findByName('blog') ?? self::fail();
         self::assertSame(['alpha', 'zeta'], array_map(static fn (Template $t): string => $t->name(), $found->templates()));
     }
+
+    public function testTemplateCountsComeFromOneQueryPerProject(): void
+    {
+        $blog = new Project('blog', 'https://git.example.com/acme/blog.git');
+        $shop = new Project('shop', 'https://git.example.com/acme/shop.git');
+        $this->projects->save($blog);
+        $this->projects->save($shop);
+        $this->projects->save(new Project('empty', 'https://git.example.com/acme/empty.git'));
+        $templates = new TemplateRepository($this->em);
+        foreach (['a', 'b', 'c'] as $name) {
+            $templates->save(new Template($blog, $name));
+        }
+        $templates->save(new Template($shop, 'a'));
+        $this->em->clear();
+
+        self::assertSame(['blog' => 3, 'shop' => 1], $this->projects->templateCounts());
+    }
 }

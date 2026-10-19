@@ -43,6 +43,27 @@ final readonly class ProjectRepository
         return array_column($rows, 'name');
     }
 
+    /**
+     * How many templates every project has, in one query (the project list page): project name => count. A project
+     * without templates is absent.
+     *
+     * @return array<string, int>
+     */
+    public function templateCounts(): array
+    {
+        /** @var list<array{name: string, total: int|string}> $rows */
+        $rows = $this->em
+            ->createQuery(\sprintf('SELECT p.name AS name, COUNT(t.id) AS total FROM %s t JOIN t.project p GROUP BY p.name', Template::class))
+            ->getArrayResult();
+
+        $counts = [];
+        foreach ($rows as $row) {
+            $counts[$row['name']] = (int) $row['total'];
+        }
+
+        return $counts;
+    }
+
     public function save(Project $project): void
     {
         $this->em->persist($project);

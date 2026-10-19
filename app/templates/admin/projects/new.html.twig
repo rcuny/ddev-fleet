@@ -1,0 +1,11 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}New project · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="New project" description="Templates are added on the next page, once the project exists." />
+
+    <div class="mt-6 max-w-2xl">
+        {{ include('admin/projects/_form.html.twig', {form: form, create: true}) }}
+    </div>
+{% endblock %}
