@@ -16,6 +16,7 @@ use App\Fleet\Projects\Rule\GitUrl;
 use App\Fleet\Projects\Rule\IssueIdPattern;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\Rule\SubmodulePath;
+use App\Fleet\Secrets\SecretService;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 
 /**
@@ -33,6 +34,7 @@ final readonly class ProjectService
         private ProjectRepository $projects,
         private NamedPortRepository $ports,
         private ProjectInstanceGuard $instances,
+        private SecretService $secrets,
     ) {
     }
 
@@ -97,12 +99,12 @@ final readonly class ProjectService
     }
 
     /**
-     * Deletes the project with its templates and port assignments.
+     * Deletes the project with its templates, port assignments and secrets ($by is recorded for each secret removed).
      *
      * @throws NotFound
      * @throws Refused  when the project still has instances
      */
-    public function delete(string $name): void
+    public function delete(string $name, string $by): void
     {
         $project = $this->get($name);
         $ids = $this->instances->instanceIds($project);
@@ -113,6 +115,7 @@ final readonly class ProjectService
             throw new Refused(\sprintf('%d instance(s) exist: destroy them first (%s%s).', \count($ids), implode(', ', $listed), $more > 0 ? \sprintf(' and %d more', $more) : ''));
         }
 
+        $this->secrets->removeAllOfProject($name, $by);
         $this->projects->remove($project);
     }
 
