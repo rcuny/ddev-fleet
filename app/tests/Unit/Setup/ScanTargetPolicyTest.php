@@ -54,6 +54,8 @@ final class ScanTargetPolicyTest extends TestCase
         yield 'under localhost' => ['git.localhost'];
         yield 'bracketed' => ['[127.0.0.1]:22'];
         yield 'bracketed localhost' => ['[localhost]:2222'];
+        yield 'trailing dot' => ['localhost.'];
+        yield 'trailing dot under localhost' => ['git.localhost.'];
     }
 
     #[DataProvider('refused')]
@@ -72,5 +74,35 @@ final class ScanTargetPolicyTest extends TestCase
     public function testNormalizeTrimsAndLowercases(): void
     {
         self::assertSame('git.example.com', ScanTargetPolicy::normalize("  Git.Example.COM \n"));
+    }
+
+    /**
+     * @return iterable<string, array{list<string>, bool}>
+     */
+    public static function resolutions(): iterable
+    {
+        yield 'unknown name' => [[], false];
+        yield 'public' => [['203.0.113.7'], false];
+        yield 'loopback' => [['127.0.0.1'], true];
+        yield 'loopback and public' => [['127.0.0.1', '203.0.113.7'], false];
+        yield 'link local' => [['169.254.169.254'], true];
+        yield 'unspecified' => [['0.0.0.0'], true];
+        yield 'ipv6 loopback' => [['::1'], true];
+        yield 'ipv6 unspecified' => [['::'], true];
+        yield 'ipv6 link local' => [['fe80::1'], true];
+        yield 'ipv6 mapped loopback' => [['::ffff:127.0.0.1'], true];
+        yield 'ipv6 public' => [['2001:db8::1'], false];
+        yield 'private network' => [['10.0.0.5'], false];
+        yield 'both loopbacks' => [['127.0.0.1', '::1'], true];
+        yield 'not an address' => [['garbage'], false];
+    }
+
+    /**
+     * @param list<string> $addresses
+     */
+    #[DataProvider('resolutions')]
+    public function testANameThatResolvesOnlyToThisMachineIsRefused(array $addresses, bool $refused): void
+    {
+        self::assertSame($refused, null !== ScanTargetPolicy::refusalForAddresses($addresses));
     }
 }

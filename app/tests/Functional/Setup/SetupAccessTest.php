@@ -116,6 +116,27 @@ final class SetupAccessTest extends WizardTestCase
         self::assertSelectorTextContains('h1', 'Create the administrator');
     }
 
+    public function testTheCrossSitePageCarriesNoTokenAndCleansTheAddress(): void
+    {
+        $this->client->request('GET', self::BASE.'/setup?token='.$this->token, server: $this->browserServer('cross-site'));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertStringNotContainsString($this->token, $this->body());
+        self::assertSame('no-referrer', $this->client->getResponse()->headers->get('Referrer-Policy'));
+        self::assertStringContainsString('no-store', (string) $this->client->getResponse()->headers->get('Cache-Control'));
+        $cleaner = $this->client->getCrawler()->filter('[data-controller=clean-url]');
+        self::assertCount(1, $cleaner);
+        self::assertSame('/setup', $cleaner->attr('data-clean-url-url-value'));
+        self::assertFileExists(__DIR__.'/../../../assets/controllers/clean_url_controller.js');
+    }
+
+    public function testRefusalPagesHaveASingleSetupTitle(): void
+    {
+        $this->client->request('GET', self::BASE.'/setup/admin');
+
+        self::assertSame('Setup · Fleet', $this->client->getCrawler()->filter('title')->text());
+    }
+
     public function testAValidSessionOnTheEntryForwardsToTheFirstOpenStep(): void
     {
         $this->signIn();
@@ -165,7 +186,7 @@ final class SetupAccessTest extends WizardTestCase
         $this->open('/setup/admin');
         self::assertResponseStatusCodeSame(200);
 
-        $this->container()->get('fleet.test_alias.setup_token_service')->mint();
+        $this->tokens()->mint();
 
         $this->open('/setup/admin');
         self::assertResponseStatusCodeSame(403);

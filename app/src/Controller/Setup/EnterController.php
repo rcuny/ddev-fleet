@@ -8,6 +8,7 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Setup\SetupAccessSubscriber;
 use App\Setup\SetupAttemptLimiter;
 use App\Setup\SetupCookie;
+use App\Setup\SetupGate;
 use App\Setup\SetupProgress;
 use App\Setup\SetupRefused;
 use App\Setup\SetupState;
@@ -33,19 +34,23 @@ final class EnterController extends AbstractSetupController
     ) {
     }
 
-    #[Route('/setup', name: SetupAccessSubscriber::ENTER_ROUTE, methods: ['GET'])]
+    // No method restriction: a router 405 (with its Allow header) would answer before the guard could.
+    #[Route('/setup', name: SetupAccessSubscriber::ENTER_ROUTE)]
     public function __invoke(Request $request): Response
     {
-        // The subscriber already answers 404 when setup is not open; this keeps the controller safe on its own.
-        if (!$this->state->isOpen()) {
-            throw $this->createNotFoundException();
+        // The subscriber has normally answered already; the token exchange itself is let through while setup is open.
+        if (null !== $refusal = $this->guard($request)) {
+            return $refusal;
+        }
+        if (!$request->isMethod('GET')) {
+            return $this->denied();
         }
 
         $token = $request->query->all()['token'] ?? null;
         if (\is_string($token) && '' !== $token) {
             return $this->exchange($request, $token);
         }
-        if ($this->state->permits(SetupAccessSubscriber::cookie($request))) {
+        if ($this->state->permits(SetupGate::cookie($request))) {
             return $this->redirectToRoute($this->progress->firstIncomplete()->route());
         }
 

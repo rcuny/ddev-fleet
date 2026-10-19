@@ -30,6 +30,10 @@ final class AdminController extends AbstractSetupController
     #[Route('/setup/admin', name: 'setup_admin', methods: ['GET', 'POST'])]
     public function __invoke(Request $request): Response
     {
+        if (null !== $refusal = $this->guard($request)) {
+            return $refusal;
+        }
+
         $admin = $this->progress->admin();
         $form = $this->createForm(
             AdminAccountType::class,

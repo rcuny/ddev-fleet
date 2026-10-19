@@ -1,7 +1,7 @@
 {% extends 'base.html.twig' %}
 
 {#- Pages extend this and fill "setup_content". The wizard has no app shell: nobody is signed in yet. -#}
-{% block title %}Setup · {{ step is defined ? step.label : 'Fleet' }} · Fleet{% endblock %}
+{% block title %}{{ step is defined ? 'Setup · ' ~ step.label ~ ' · Fleet' : 'Setup · Fleet' }}{% endblock %}
 
 {% block body %}
     {# Turbo Drive stays off here: Finish answers a POST with a page, which Drive would ignore. #}

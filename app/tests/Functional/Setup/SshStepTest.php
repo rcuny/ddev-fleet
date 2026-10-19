@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Setup;
 use App\Domain\Ssh\SshKeyRole;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Ssh\KnownHostEntry;
+use App\Setup\HostResolver;
 use App\Tests\Support\WizardTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
@@ -171,6 +172,28 @@ final class SshStepTest extends WizardTestCase
             self::assertResponseStatusCodeSame(422, $action);
         }
         self::assertSame([], $this->runner()->callsMatching(['ssh-keyscan']), 'nothing was scanned');
+    }
+
+    public function testANameThatResolvesOnlyToLoopbackIsRefusedForScanAndTrust(): void
+    {
+        $this->container()->set(HostResolver::class, new class implements HostResolver {
+            public function resolve(string $name): array
+            {
+                return 'rebind.example.com' === $name ? ['127.0.0.1', '::1'] : ['203.0.113.7'];
+            }
+        });
+        $this->keyscan('fine.example.com', self::randomEd25519());
+        $this->open('/setup/ssh');
+
+        foreach (['scan', 'trust'] as $action) {
+            $this->post('/setup/ssh', ['action' => $action, 'host' => 'rebind.example.com', 'fingerprints' => ['SHA256:x']]);
+            self::assertResponseStatusCodeSame(422, $action);
+            self::assertStringContainsString('points at this machine', $this->body());
+        }
+        self::assertSame([], $this->runner()->callsMatching(['ssh-keyscan']));
+
+        $this->post('/setup/ssh', ['action' => 'scan', 'host' => 'fine.example.com']);
+        self::assertResponseStatusCodeSame(200);
     }
 
     public function testAPublicIpAddressMayBeScanned(): void

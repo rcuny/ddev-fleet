@@ -38,6 +38,10 @@ final class FinishController extends AbstractSetupController
     #[Route('/setup/finish', name: 'setup_finish', methods: ['GET', 'POST'])]
     public function __invoke(Request $request): Response
     {
+        if (null !== $refusal = $this->guard($request)) {
+            return $refusal;
+        }
+
         $blocking = $this->progress->firstIncomplete();
         if (SetupStep::Finish !== $blocking) {
             $this->addFlash('warning', \sprintf('Finish this step first: %s.', $blocking->label()));
@@ -46,6 +50,7 @@ final class FinishController extends AbstractSetupController
         }
 
         $error = null;
+        $running = false;
         $status = Response::HTTP_OK;
         if ($request->isMethod('POST')) {
             if (!$this->csrfValid($request)) {
@@ -65,7 +70,8 @@ final class FinishController extends AbstractSetupController
                 return $response;
             } catch (SetupRefused $e) {
                 $error = $e->getMessage();
-                $status = Response::HTTP_UNPROCESSABLE_ENTITY;
+                $running = SetupFinisher::ALREADY_RUNNING === $error;
+                $status = $running ? Response::HTTP_CONFLICT : Response::HTTP_UNPROCESSABLE_ENTITY;
             } catch (\RuntimeException|\InvalidArgumentException $e) {
                 // SetupFinisher logged it. Messages from the setup steps carry a redacted output tail at most.
                 $error = OutputTail::text($e->getMessage());
@@ -76,7 +82,7 @@ final class FinishController extends AbstractSetupController
             }
         }
 
-        return $this->page('setup/finish.html.twig', SetupStep::Finish, ['error' => $error] + $this->summary(), $status);
+        return $this->page('setup/finish.html.twig', SetupStep::Finish, ['error' => $error, 'running' => $running] + $this->summary(), $status);
     }
 
     /**

@@ -54,6 +54,10 @@ services:
     App\Fleet\System\Applier:
         alias: App\Fleet\System\PrivilegedApply
 
+    # What a host name resolves to (the wizard's scan target check); the test environment swaps in a resolver without DNS.
+    App\Setup\HostResolver:
+        alias: App\Setup\DnsHostResolver
+
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
     fleet.command_runner.process:
@@ -93,6 +97,11 @@ when@test:
             public: true
         fleet.test_alias.recording_command_runner:
             alias: fleet.command_runner.recording
+            public: true
+
+        # The suite never touches DNS; a test that needs a resolution sets its own HostResolver.
+        App\Setup\HostResolver:
+            alias: App\Setup\NoHostResolver
             public: true
 
         # Reachable for the env -> container wiring tests (nothing consumes these services at run time yet).

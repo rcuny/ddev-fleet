@@ -1,7 +1,15 @@
 {% extends 'setup/base.html.twig' %}
 
 {% block setup_content %}
-    {% if error %}
+    {% if error and running %}
+        <twig:Alert data-testid="setup-finish-running">
+            <twig:ux:icon name="lucide:info" />
+            <twig:Alert:Title>Finish is already running</twig:Alert:Title>
+            <twig:Alert:Description>
+                <p>Another request is finishing the setup, and it may be done by now. Wait a minute, then open the site and sign in. If the sign-in page does not appear, come back to this page and press Finish again.</p>
+            </twig:Alert:Description>
+        </twig:Alert>
+    {% elseif error %}
         <twig:Alert variant="destructive" data-testid="setup-finish-error">
             <twig:ux:icon name="lucide:circle-alert" />
             <twig:Alert:Title>Setup did not finish</twig:Alert:Title>

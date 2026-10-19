@@ -55,6 +55,39 @@ final class SecretStoreTest extends KernelTestCase
         self::assertFalse($this->store->hasFleetWide('ovh_consumer_key'));
     }
 
+    public function testPutManyIsOneTransactionAllOrNothing(): void
+    {
+        $this->store->putManyFleetWide(['ovh_endpoint' => 'ovh-eu', 'ovh_consumer_key' => 'one'], 'alice');
+        $this->entityManager()->clear();
+        self::assertSame('ovh-eu', $this->store->getFleetWide('ovh_endpoint'));
+        self::assertSame('one', $this->store->getFleetWide('ovh_consumer_key'));
+
+        // The second name is invalid: nothing of this call is written, the old values stay.
+        $refused = null;
+        try {
+            $this->store->putManyFleetWide(['ovh_endpoint' => 'ovh-ca', 'Not A Valid Name' => 'x'], 'bob');
+        } catch (\Throwable $e) {
+            $refused = $e;
+        }
+        self::assertInstanceOf(\InvalidArgumentException::class, $refused, 'an invalid name must be refused');
+        $this->entityManager()->clear();
+        self::assertSame('ovh-eu', $this->store->getFleetWide('ovh_endpoint'));
+
+        // A failure while writing (the database refuses the second row) rolls the first one back too.
+        $connection = $this->entityManager()->getConnection();
+        $connection->executeStatement('CREATE TRIGGER refuse_second BEFORE INSERT ON secret WHEN NEW.name = \'ovh_application_secret\' BEGIN SELECT RAISE(ABORT, \'refused\'); END');
+        $failed = null;
+        try {
+            $this->store->putManyFleetWide(['ovh_endpoint' => 'ovh-us', 'ovh_application_secret' => 'y'], 'carol');
+        } catch (\Throwable $e) {
+            $failed = $e;
+        }
+        self::assertNotNull($failed, 'the database refused the write');
+        $connection->executeStatement('DROP TRIGGER refuse_second');
+        self::assertSame('alice', $connection->fetchOne('SELECT updated_by FROM secret WHERE name = \'ovh_endpoint\''), 'the first write of the failed call was rolled back');
+        self::assertSame(2, (int) $connection->fetchOne('SELECT COUNT(*) FROM secret'));
+    }
+
     public function testFleetScopeUsesAnEmptyScopeId(): void
     {
         $this->store->putFleetWide('ovh_endpoint', 'ovh-eu', 'admin');

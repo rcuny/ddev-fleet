@@ -16,10 +16,12 @@ use App\Fleet\Secrets\SecretBox;
 use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Shell\RecordingCommandRunner;
+use App\Setup\SetupTokenService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
 use Symfony\Component\Clock\Clock;
+use Symfony\Component\DependencyInjection\ContainerInterface;
 use Symfony\Component\DomCrawler\Crawler;
 
 /**
@@ -58,7 +60,7 @@ abstract class WizardTestCase extends WebTestCase
 
         $this->setUpFleetDatabase();
         $this->console('fleet:host:init', ['--domain' => 'fleet.example.com']);
-        $this->token = $this->container()->get('fleet.test_alias.setup_token_service')->mint();
+        $this->token = $this->tokens()->mint();
         self::ensureKernelShutdown();
 
         $this->client = self::createClient();
@@ -67,7 +69,7 @@ abstract class WizardTestCase extends WebTestCase
         // the attempts of one test never count against another.
         $this->clientIp = \sprintf('10.%d.%d.%d', random_int(0, 255), random_int(0, 255), random_int(1, 254));
         $this->client->setServerParameters($this->browserServer());
-        $this->container()->get('fleet.test_alias.recording_command_runner')->reset();
+        $this->runner()->reset();
     }
 
     protected function tearDown(): void
@@ -93,9 +95,12 @@ abstract class WizardTestCase extends WebTestCase
         ];
     }
 
-    protected function container(): \Psr\Container\ContainerInterface
+    protected function container(): ContainerInterface
     {
-        return self::getContainer();
+        $container = self::getContainer();
+        self::assertInstanceOf(ContainerInterface::class, $container);
+
+        return $container;
     }
 
     protected function em(): EntityManagerInterface
@@ -106,6 +111,14 @@ abstract class WizardTestCase extends WebTestCase
         $em->clear();
 
         return $em;
+    }
+
+    protected function tokens(): SetupTokenService
+    {
+        $tokens = $this->container()->get('fleet.test_alias.setup_token_service');
+        self::assertInstanceOf(SetupTokenService::class, $tokens);
+
+        return $tokens;
     }
 
     protected function runner(): RecordingCommandRunner

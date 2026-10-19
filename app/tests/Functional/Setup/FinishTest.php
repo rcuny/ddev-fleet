@@ -134,6 +134,36 @@ final class FinishTest extends WizardTestCase
         self::assertTrue($this->host()->isSetupComplete());
     }
 
+    public function testASecondFinishWhileOneRunsSaysSoAndDoesNotClaimNothingHappened(): void
+    {
+        $this->ready();
+        $lock = $this->container()->get('lock.factory')->createLock('setup-finish', 60, false);
+        self::assertTrue($lock->acquire(false));
+
+        $this->post('/setup/finish', []);
+        $lock->release();
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertSelectorExists('[data-testid=setup-finish-running]');
+        self::assertStringContainsString('may be done by now', $this->body());
+        self::assertStringNotContainsString('Nothing was marked complete', $this->body());
+        self::assertSelectorNotExists('[data-testid=setup-finish-error]');
+    }
+
+    public function testAfterCompletionTheFinishUrlExplainsInsteadOfJustFailing(): void
+    {
+        $this->ready();
+        $this->post('/setup/finish', []);
+        self::assertResponseStatusCodeSame(200);
+
+        // The browser that never got the result page (or double-submitted) reloads the URL.
+        $this->post('/setup/finish', []);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSelectorTextContains('[data-testid=setup-complete]', 'auth.fleet.example.com');
+        self::assertSame('/', $this->client->getCrawler()->filter('[data-testid=setup-complete-sign-in]')->attr('href'));
+    }
+
     public function testFinishWithoutAdminRedirectsToAdminStep(): void
     {
         $this->open('/setup/finish');

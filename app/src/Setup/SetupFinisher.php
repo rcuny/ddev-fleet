@@ -51,6 +51,9 @@ final readonly class SetupFinisher
      */
     public const int REQUIRED_REQUEST_TIMEOUT = 240;
 
+    /** The refusal for a second Finish while one runs (the first may complete a moment later, so setup may be done). */
+    public const string ALREADY_RUNNING = 'Finish is already running; wait for it to end.';
+
     public function __construct(
         private HostSettingsRepository $settings,
         private UserRepository $users,
@@ -81,7 +84,7 @@ final readonly class SetupFinisher
 
         $lock = $this->locks->createLock('setup-finish', self::REQUIRED_REQUEST_TIMEOUT, false);
         if (!$lock->acquire(false)) {
-            throw new SetupRefused('Finish is already running; wait for it to end.');
+            throw new SetupRefused(self::ALREADY_RUNNING);
         }
 
         try {

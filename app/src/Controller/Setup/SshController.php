@@ -11,6 +11,7 @@ use App\Fleet\Ssh\KnownHostScanner;
 use App\Fleet\Ssh\KnownHostScannerUnavailable;
 use App\Fleet\Ssh\KnownHostsFile;
 use App\Fleet\Ssh\SshKeyService;
+use App\Setup\HostResolver;
 use App\Setup\ScanTargetPolicy;
 use App\Setup\SetupActor;
 use App\Setup\SetupStep;
@@ -34,6 +35,7 @@ final class SshController extends AbstractSetupController
         private readonly KnownHostsFile $knownHosts,
         private readonly KnownHostScanner $scanner,
         private readonly SetupActor $actor,
+        private readonly HostResolver $resolver,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -41,6 +43,10 @@ final class SshController extends AbstractSetupController
     #[Route('/setup/ssh', name: 'setup_ssh', methods: ['GET', 'POST'])]
     public function __invoke(Request $request): Response
     {
+        if (null !== $refusal = $this->guard($request)) {
+            return $refusal;
+        }
+
         $outcome = ['errors' => [], 'scan' => null, 'host' => ''];
 
         if ($request->isMethod('POST')) {
@@ -220,6 +226,10 @@ final class SshController extends AbstractSetupController
             return null;
         }
         $refusal = ScanTargetPolicy::refusal($host);
+        if (null === $refusal && !filter_var(self::bareHost($host), \FILTER_VALIDATE_IP)) {
+            // A name: refuse it when it currently resolves only to this machine (an address literal was judged above).
+            $refusal = ScanTargetPolicy::refusalForAddresses($this->resolver->resolve(self::bareHost($host)));
+        }
         if (null !== $refusal) {
             $error = $refusal;
 
@@ -227,6 +237,11 @@ final class SshController extends AbstractSetupController
         }
 
         return $host;
+    }
+
+    private static function bareHost(string $host): string
+    {
+        return str_starts_with($host, '[') ? substr($host, 1, (int) strrpos($host, ']') - 1) : $host;
     }
 
     private function confirmed(Request $request): bool

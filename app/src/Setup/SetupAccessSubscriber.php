@@ -6,64 +6,61 @@ namespace App\Setup;
 
 use Symfony\Component\EventDispatcher\EventSubscriberInterface;
 use Symfony\Component\HttpFoundation\Request;
-use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\HttpKernel\Event\RequestEvent;
 use Symfony\Component\HttpKernel\Event\ResponseEvent;
-use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\HttpKernel\KernelEvents;
-use Twig\Environment;
 
 /**
- * The one guard in front of every path under /setup, run right after routing (before the firewall, so the answer does
- * not depend on any identity header):
+ * The guard in front of every request to the wizard (decision: SetupGate). It runs twice:
  *
- *  - setup complete, or the host not initialised: 404, as if the wizard did not exist;
- *  - setup open and no valid session cookie: 403 with one fixed body, whatever was wrong (no cookie, a forged one, an
- *    expired one, one from an older token), so the response is no oracle;
- *  - the token exchange (route setup_enter) is let through while setup is open: it checks the token itself.
+ *  1. before routing, on the decoded and normalised path, so an odd spelling of /setup (`/%73etup/admin`, `/Setup`,
+ *     `//setup`, double encoding) cannot get past, and a method the router would refuse with 405 does not reveal the
+ *     wizard either;
+ *  2. right after routing, on the matched route: any route whose name starts with `setup_` is guarded even if its path
+ *     was not recognised by 1 (a route added later under another prefix is still covered).
  *
- * Responses under /setup are never cached or indexed and leak no referrer.
+ * Both run before the firewall, so the answer does not depend on any identity header. Responses to the wizard are
+ * never cached or indexed and leak no referrer. The controllers ask the gate again themselves.
  */
 final readonly class SetupAccessSubscriber implements EventSubscriberInterface
 {
     public const string ENTER_ROUTE = 'setup_enter';
+    public const string ROUTE_PREFIX = 'setup_';
 
-    public function __construct(
-        private SetupState $state,
-        private Environment $twig,
-    ) {
+    private const string CHECKED = '_setup_gate_checked';
+
+    public function __construct(private SetupGate $gate)
+    {
     }
 
     public static function getSubscribedEvents(): array
     {
         return [
             // Routing is 32, the firewall 8.
-            KernelEvents::REQUEST => ['onRequest', 20],
+            KernelEvents::REQUEST => [['beforeRouting', 64], ['afterRouting', 20]],
             KernelEvents::RESPONSE => ['onResponse', -10],
         ];
     }
 
-    public function onRequest(RequestEvent $event): void
+    public function beforeRouting(RequestEvent $event): void
+    {
+        if ($event->isMainRequest() && SetupGate::covers($event->getRequest())) {
+            $this->check($event);
+        }
+    }
+
+    public function afterRouting(RequestEvent $event): void
     {
         $request = $event->getRequest();
-        if (!$event->isMainRequest() || !self::guards($request)) {
-            return;
-        }
-
-        if (!$this->state->isOpen()) {
-            throw new NotFoundHttpException();
-        }
-        if (self::ENTER_ROUTE === $request->attributes->get('_route')) {
-            return;
-        }
-        if (!$this->state->permits(self::cookie($request))) {
-            $event->setResponse(new Response($this->twig->render('setup/denied.html.twig'), Response::HTTP_FORBIDDEN));
+        if ($event->isMainRequest() && !$request->attributes->has(self::CHECKED) && self::isSetupRoute($request)) {
+            $this->check($event);
         }
     }
 
     public function onResponse(ResponseEvent $event): void
     {
-        if (!$event->isMainRequest() || !self::guards($event->getRequest())) {
+        $request = $event->getRequest();
+        if (!$event->isMainRequest() || !(SetupGate::covers($request) || self::isSetupRoute($request))) {
             return;
         }
         $response = $event->getResponse();
@@ -73,17 +70,21 @@ final readonly class SetupAccessSubscriber implements EventSubscriberInterface
         $response->headers->set('X-Robots-Tag', 'noindex, nofollow');
     }
 
-    public static function guards(Request $request): bool
+    private function check(RequestEvent $event): void
     {
-        $path = $request->getPathInfo();
+        $request = $event->getRequest();
+        $request->attributes->set(self::CHECKED, true);
 
-        return '/setup' === $path || str_starts_with($path, '/setup/');
+        $refusal = $this->gate->refusal($request);
+        if (null !== $refusal) {
+            $event->setResponse($refusal);
+        }
     }
 
-    public static function cookie(Request $request): ?string
+    private static function isSetupRoute(Request $request): bool
     {
-        $value = $request->cookies->all()[SetupCookie::NAME] ?? null;
+        $route = $request->attributes->get('_route');
 
-        return \is_string($value) ? $value : null;
+        return \is_string($route) && str_starts_with($route, self::ROUTE_PREFIX);
     }
 }

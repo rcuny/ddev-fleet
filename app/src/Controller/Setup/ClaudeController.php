@@ -36,6 +36,10 @@ final class ClaudeController extends AbstractSetupController
     #[Route('/setup/claude', name: 'setup_claude', methods: ['GET', 'POST'])]
     public function __invoke(Request $request): Response
     {
+        if (null !== $refusal = $this->guard($request)) {
+            return $refusal;
+        }
+
         $stored = $this->progress->claudeTokenStored();
         $form = $this->createForm(ClaudeTokenType::class, null, ['stored' => $stored]);
         $form->handleRequest($request);

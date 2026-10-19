@@ -46,36 +46,57 @@ final readonly class SecretStore
      */
     public function putFleetWide(string $name, #[\SensitiveParameter] string $plaintext, string $by): void
     {
-        self::assertName($name);
+        $this->putManyFleetWide([$name => $plaintext], $by);
+    }
+
+    /**
+     * Stores several fleet-wide secrets in ONE transaction: either all of them are written or none is (a failure
+     * midway leaves the previous values). Everything is validated and sealed before the first write.
+     *
+     * @param array<string, string> $values secret name => plaintext
+     *
+     * @throws SecretConflict when a concurrent writer created the same secret first
+     */
+    public function putManyFleetWide(#[\SensitiveParameter] array $values, string $by): void
+    {
         if ('' === $by || \strlen($by) > 64) {
             throw new \InvalidArgumentException('The updater must be 1 to 64 bytes.');
         }
+        $sealedValues = [];
+        foreach ($values as $name => $plaintext) {
+            $name = (string) $name;
+            self::assertName($name);
+            $sealedValues[$name] = $this->box->seal($plaintext, self::fleetContext($name));
+        }
+        if ([] === $sealedValues) {
+            return;
+        }
 
-        $sealed = $this->box->seal($plaintext, self::fleetContext($name));
         $now = $this->clock->now();
         try {
-            $this->secrets->transactional(function () use ($name, $sealed, $by, $now): void {
-                $existing = $this->secrets->find(Secret::SCOPE_FLEET, self::FLEET_SCOPE_ID, $name);
-                if (null === $existing) {
-                    $this->secrets->save(new Secret(
-                        Secret::SCOPE_FLEET,
-                        self::FLEET_SCOPE_ID,
-                        $name,
-                        $sealed->ciphertext,
-                        $sealed->nonce,
-                        $sealed->keyVersion,
-                        $by,
-                        $now,
-                    ));
+            $this->secrets->transactional(function () use ($sealedValues, $by, $now): void {
+                foreach ($sealedValues as $name => $sealed) {
+                    $existing = $this->secrets->find(Secret::SCOPE_FLEET, self::FLEET_SCOPE_ID, $name);
+                    if (null === $existing) {
+                        $this->secrets->save(new Secret(
+                            Secret::SCOPE_FLEET,
+                            self::FLEET_SCOPE_ID,
+                            $name,
+                            $sealed->ciphertext,
+                            $sealed->nonce,
+                            $sealed->keyVersion,
+                            $by,
+                            $now,
+                        ));
+                        continue;
+                    }
 
-                    return;
+                    $existing->replace($sealed->ciphertext, $sealed->nonce, $sealed->keyVersion, $by, $now);
+                    $this->secrets->save($existing);
                 }
-
-                $existing->replace($sealed->ciphertext, $sealed->nonce, $sealed->keyVersion, $by, $now);
-                $this->secrets->save($existing);
             });
         } catch (UniqueConstraintViolationException $e) {
-            throw new SecretConflict(\sprintf('The secret "%s" was stored concurrently; retry.', $name), 0, $e);
+            throw new SecretConflict(\sprintf('A secret of "%s" was stored concurrently; retry.', implode('", "', array_keys($sealedValues))), 0, $e);
         }
     }
 

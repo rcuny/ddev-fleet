@@ -43,6 +43,10 @@ final class TlsController extends AbstractSetupController
     #[Route('/setup/tls', name: 'setup_tls', methods: ['GET', 'POST'])]
     public function __invoke(Request $request): Response
     {
+        if (null !== $refusal = $this->guard($request)) {
+            return $refusal;
+        }
+
         $host = $this->settings->get() ?? throw $this->createNotFoundException();
         $stored = array_values(array_filter(
             array_map(static fn (array $c): string => $c[0], array_values(self::CREDENTIALS)),
@@ -63,9 +67,7 @@ final class TlsController extends AbstractSetupController
             [$values, $failures] = TlsMode::OvhDns === $mode ? $this->checkOvh($data, $stored) : [[], []];
             if ([] === $failures) {
                 try {
-                    foreach ($values as $name => $value) {
-                        $this->secrets->putFleetWide($name, $value, $this->actor->name());
-                    }
+                    $this->secrets->putManyFleetWide($values, $this->actor->name());
                     $host->changeTlsMode($mode);
                     $this->settings->save($host);
                     $this->addFlash('success', 'Certificate settings saved.');
