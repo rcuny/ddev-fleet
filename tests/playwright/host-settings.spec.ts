@@ -45,7 +45,8 @@ test.describe('host settings', () => {
 
     if (isPhone(testInfo)) {
       await expect(page.getByTestId('host-tabs')).toBeHidden();
-      const select = page.getByLabel('Section');
+      // Scoped: the desktop strip's aria-label ("Host settings sections") also contains "Section".
+      const select = page.getByTestId('host-tab-select').getByLabel('Section');
       await expect(select).toBeVisible();
       await select.selectOption('git');
       await page.getByTestId('host-tab-select').getByRole('button', { name: 'Go' }).click();
@@ -116,7 +117,10 @@ test.describe('host settings', () => {
 
   test('the git identity needs both fields and keeps the saved values', async ({ page }) => {
     await openTab(page, 'git');
+    // The host settings are shared by every test (and by the desktop and phone projects): an earlier run may have
+    // saved both fields, so empty the e-mail explicitly to get a name without an e-mail.
     await page.getByLabel('Name').fill('Fleet Bot');
+    await page.getByLabel('E-mail').fill('');
     await page.getByRole('button', { name: 'Save' }).click();
     await expect(page.getByTestId('host-tab-git')).toContainText('Set both the name and the e-mail address');
 
