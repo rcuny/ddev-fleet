@@ -102,9 +102,38 @@ test.describe('host settings', () => {
     await expect(page).toHaveURL(/\/admin\/host\?tab=claude$/);
     await expect(page.getByTestId('flashes')).toContainText('Claude token stored.');
     await expect(page.getByTestId('host-claude-status')).toContainText('Set');
-    await expect(page.getByTestId('host-claude-status')).toContainText(/Updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+    await expect(page.getByTestId('host-claude-status')).toContainText(/Last rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
     expect(await page.content()).not.toContain(TOKEN);
     await expect(page.getByLabel(/New Claude OAuth token/)).toHaveValue('');
+  });
+
+  test('the Claude tab names the rotation command and shows the workspace checks without values', async ({ page }) => {
+    await openTab(page, 'claude');
+    await page.getByLabel(/Claude OAuth token/).fill(TOKEN);
+    await page.getByRole('button', { name: /Store token|Replace token/ }).click();
+    await expect(page.getByTestId('flashes')).toContainText('Claude token stored.');
+
+    await expect(page.getByTestId('host-claude-command')).toContainText('sudo fleet claude:token:set');
+    await expect(page.getByTestId('host-claude-status')).toContainText(/Last rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
+    const checks = page.getByTestId('host-workspace-checks');
+    await expect(checks).toBeVisible();
+    await expect(checks.getByTestId('host-check-claude-token')).toContainText('Present');
+    // The push key may or may not exist on the machine running the suite: either way, a word and no value.
+    await expect(checks.getByTestId('host-check-push-key')).toContainText(/Present|Missing/);
+    await expect(checks.getByTestId('host-check-git-identity')).toContainText(/Present|Missing/);
+    expect(await checks.innerText()).not.toContain(TOKEN);
+    expect(await hasHorizontalOverflow(page)).toBe(false);
+  });
+
+  test('the Git identity tab shows the same workspace checks', async ({ page }) => {
+    await openTab(page, 'git');
+
+    const checks = page.getByTestId('host-workspace-checks');
+    await expect(checks).toBeVisible();
+    for (const key of ['push-key', 'git-identity', 'claude-token']) {
+      await expect(checks.getByTestId(`host-check-${key}`)).toContainText(/Present|Missing/);
+    }
+    expect(await hasHorizontalOverflow(page)).toBe(false);
   });
 
   test('a token with a space is refused and is not echoed', async ({ page }) => {

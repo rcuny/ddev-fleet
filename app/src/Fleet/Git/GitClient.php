@@ -69,4 +69,31 @@ final readonly class GitClient
 
         return $result->isSuccess() ? trim($result->stdout) : '';
     }
+
+    /**
+     * The local branches of a checkout, the checked-out one flagged; an empty list when they cannot be read. Never throws.
+     *
+     * @return list<array{name: string, current: bool}>
+     */
+    public function localBranches(string $dir): array
+    {
+        try {
+            $result = $this->runner->run(['git', 'for-each-ref', '--format=%(HEAD)%(refname:short)', 'refs/heads'], $dir, [], null, self::HEAD_TIMEOUT);
+        } catch (\Throwable) {
+            return [];
+        }
+        if (!$result->isSuccess()) {
+            return [];
+        }
+
+        $branches = [];
+        foreach (explode("\n", $result->stdout) as $line) {
+            $line = rtrim($line, "\r");
+            if ('' !== trim($line)) {
+                $branches[] = ['name' => ltrim($line, '* '), 'current' => str_starts_with($line, '*')];
+            }
+        }
+
+        return $branches;
+    }
 }
