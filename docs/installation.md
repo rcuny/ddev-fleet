@@ -85,7 +85,7 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. |
 | 85 app init | Migrations, the queue transport, `fleet:host:init` (domain, ACME email). |
 | 90 privileged | The root helper, its single sudoers line and the `fleet` command. |
-| 95 units | The `fleet` php-fpm pool, the job worker `fleet-worker@.service`, the standalone Mercure hub (pinned release, sha256-checked) and its unit. |
+| 95 units | The `fleet` php-fpm pool, the job worker `fleet-worker@.service`, the status watcher `fleet-status.service`, `fleet-boot.service`, the standalone Mercure hub (pinned release, sha256-checked) and its unit. |
 | 98 render and start | Renders the Caddy and Authelia configuration, installs it through the helper, starts everything, waits until `https://<domain>/health` and the hub answer, and prints the setup URL. |
 
 The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
@@ -127,7 +127,9 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `caddy` | 80, 443 | The only Internet-facing process; sandboxed by a drop-in. Reads `/etc/caddy/fleet.env`. |
 | `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
 | `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
-| `fleet-worker@1` | | One Messenger worker (`messenger:consume jobs`). More can be enabled as `fleet-worker@2` and so on. |
+| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Jobs of different instances therefore run one after another. |
+| `fleet-status` | | The status watcher (`fleet:instance:watch --interval=10`): keeps instance states and memory true to `ddev list` and `docker stats`, reaps dead jobs and prunes old ones. Restarted by an upgrade. |
+| `fleet-boot` | | A oneshot, enabled but never started by the installer: after a reboot it runs `fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict`, which starts every instance, stopped ones too (as 0.x did). |
 | `fleet-backup.timer` | | Starts `fleet-backup.service` (a oneshot running `fleet:backup:create`) once a day, at a random time within an hour of midnight. `Persistent`: a backup missed while the host was off runs at the next boot. See "Backup and restore" in section 5. |
 | `fleet-mercure` | `127.0.0.1:3000` | A standalone Mercure hub (version 1.1.2, legacy protocol mode as `symfony/mercure-bundle` mints). Caddy proxies `/.well-known/mercure` to it. Subscribers need a JWT: an anonymous request to the hub answers 401. |
 | `docker`, DDEV | router on 8080 and 8443 (once an instance runs) | The installer configures the router ports but starts no project, so nothing listens on 8080/8443 until the first instance exists (a later milestone). It does not set `router_bind_all_interfaces`, so DDEV keeps its default (loopback only). |
@@ -147,6 +149,7 @@ The app, the workers and the CLI all read this file. Existing keys are never cha
 | `FLEET_TRUSTED_PROXIES` | Empty on purpose: trust comes from the proxy secret, not from the peer address. |
 | `FLEET_ADMIN_GROUP` | `fleet-admins`. The one group that makes an administrator: the wizard puts its administrator in it (and so into Authelia's `users.yml`), and the app grants `ROLE_ADMIN` to it. Set it (in `fleet.env`, then restart php-fpm and the workers) **before** the wizard creates the administrator; later changes do not regroup existing users. Letters, digits, `.`, `_`, `-`. |
 | `FLEET_CADDY_DIR` | `/etc/caddy/fleet`. |
+| `FLEET_JOB_RETENTION_DAYS` | `90`. Finished jobs and their logs older than this are pruned daily by the status watcher (`fleet job:prune --days=N` does it by hand). |
 | `DEFAULT_URI` | `https://<domain>`. |
 
 ## 4. The setup wizard
@@ -326,10 +329,10 @@ run and `journalctl -u fleet-backup.service` the last ones.
 `fleet-20261019-083015.sqlite` with the backup you chose:
 
 ```bash
-sudo systemctl stop php8.4-fpm 'fleet-worker@*'
+sudo systemctl stop php8.4-fpm 'fleet-worker@*' fleet-status
 sudo rm -f /srv/fleet/var/fleet.sqlite-wal /srv/fleet/var/fleet.sqlite-shm      # leftovers of the old database
 sudo install -m 0600 -o fleet -g fleet /srv/fleet/backups/fleet-20261019-083015.sqlite /srv/fleet/var/fleet.sqlite
-sudo systemctl start php8.4-fpm fleet-worker@1
+sudo systemctl start php8.4-fpm fleet-worker@1 fleet-status
 sudo fleet doctrine:migrations:migrate -n                                       # only if the backup is from an older version
 ```
 
@@ -438,7 +441,7 @@ A failed or half-finished install needs no uninstall: run the install command ag
 | No certificate, the browser warns | Port 80 or 443 is closed, or DNS is wrong. `journalctl -u caddy -n 100 --no-pager`. In `ovh_dns` mode check the OVH credentials' rights and, if you restricted them to an IP address, that it is this host's. |
 | After a reboot the sign-in portal answers 502 and nobody can sign in | Authelia could not read its secrets. The Authelia package ships a tmpfiles rule that strips the execute bit of `/etc/authelia/secrets` at every boot; the installer masks it with `/etc/tmpfiles.d/authelia.conf`. Check that file exists and `stat -c %a /etc/authelia/secrets` prints `750`; re-run the installer to repair it. |
 | Finish fails with "The Caddy snippet directory ... lost its setgid bit" | A directory under `/etc/caddy/fleet` lost its group or setgid bit, so Caddy could not read what the app writes. As root: `chgrp -R caddy /etc/caddy/fleet; find /etc/caddy/fleet -type d -exec chmod 2750 {} +; find /etc/caddy/fleet -type f -exec chmod 0640 {} +; systemctl restart caddy`. A re-run of the installer repairs it too. |
-| `https://<domain>/health` does not answer after the install | `journalctl -u caddy -u authelia -u php8.4-fpm -u fleet-mercure -u fleet-worker@1 -n 50 --no-pager`. |
+| `https://<domain>/health` does not answer after the install | `journalctl -u caddy -u authelia -u php8.4-fpm -u fleet-mercure -u fleet-worker@1 -u fleet-status -n 50 --no-pager`. |
 | The wizard answers 403 | No valid session cookie: open the setup URL again (it is valid for 24 hours), or mint a new one with `sudo fleet setup:token`. 429 means too many attempts from this address; wait 15 minutes. |
 | The wizard answers 404 "Setup is complete" | It is complete. Sign in at `https://<domain>/`; to start over use `sudo fleet setup:reset`. |
 | `fleet user:reset-password` says it needs a terminal | Use `ssh -t` (section 5). |

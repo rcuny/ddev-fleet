@@ -258,13 +258,13 @@ final class InstallerAssetsStepsTest extends TestCase
             'fleet:host:render --gate=auto --no-reload --stage',
             '+ /usr/local/libexec/fleet/apply authelia',
             '+ /usr/local/libexec/fleet/apply caddy',
-            '+ systemctl enable authelia php8.4-fpm fleet-mercure fleet-worker@1 caddy',
+            '+ systemctl enable authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-status fleet-boot caddy',
             '+ systemctl restart php8.4-fpm',
             '+ systemctl restart fleet-mercure',
             '+ systemctl restart fleet-worker@1.service',
             '+ systemctl restart caddy',
             '+ systemctl enable --now fleet-backup.timer',
-            '+ wait up to 120 s: curl -fsS https://fleet.example.com/health, curl -fsS http://127.0.0.1:3000/healthz, systemctl is-active docker caddy authelia php8.4-fpm fleet-mercure fleet-worker@1',
+            '+ wait up to 120 s: curl -fsS https://fleet.example.com/health, curl -fsS http://127.0.0.1:3000/healthz, systemctl is-active docker caddy authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-status',
             'fleet:setup:token',
         ];
         $previous = -1;

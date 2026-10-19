@@ -128,6 +128,70 @@ final class UnitsTest extends TestCase
         }
     }
 
+    public function testOneWorkerIsEnabled(): void
+    {
+        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+
+        self::assertMatchesRegularExpression('/systemctl enable [^\n]*fleet-worker@1 /', $start);
+        self::assertStringNotContainsString('fleet-worker@2', $start, 'the SQLite queue cannot take a second consumer');
+        self::assertStringContainsString('fleet-worker@2', (string) file_get_contents(self::installDir().'/etc/fleet-worker@.service'), 'the unit says why not');
+    }
+
+    public function testStatusUnitRunsTheWatcherAsFleet(): void
+    {
+        $service = $this->unit('fleet-status.service')['Service'];
+
+        self::assertSame(['fleet'], $service['User']);
+        self::assertSame(['/etc/ddev-fleet/fleet.env'], $service['EnvironmentFile']);
+        self::assertSame(['HOME=/home/fleet'], $service['Environment']);
+        self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:instance:watch --interval=10'], $service['ExecStart']);
+        self::assertSame(['always'], $service['Restart']);
+        self::assertSame(['full'], $service['ProtectSystem']);
+        self::assertSame($this->unit('fleet-worker@.service')['Service']['ReadWritePaths'], $service['ReadWritePaths']);
+        self::assertSame(['multi-user.target'], $this->unit('fleet-status.service')['Install']['WantedBy']);
+    }
+
+    public function testBootUnitIsSequentialWithTimeoutAndRetry(): void
+    {
+        $unit = $this->unit('fleet-boot.service');
+        $service = $unit['Service'];
+
+        self::assertSame(['oneshot'], $service['Type']);
+        self::assertSame(['fleet'], $service['User']);
+        self::assertSame(['0'], $service['TimeoutStartSec']);
+        self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict'], $service['ExecStart']);
+        self::assertSame(['docker.service network-online.target fleet-worker@1.service'], $unit['Unit']['After']);
+        self::assertSame(['multi-user.target'], $unit['Install']['WantedBy']);
+    }
+
+    public function testBootUnitIsEnabledButNotStarted(): void
+    {
+        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+
+        self::assertMatchesRegularExpression('/systemctl enable [^\n]*fleet-boot/', $start);
+        self::assertDoesNotMatchRegularExpression('/systemctl (re)?start [^\n]*fleet-boot/', $start);
+        self::assertStringContainsString('install_etc fleet-boot.service', (string) file_get_contents(self::installDir().'/steps/95-units.sh'));
+        self::assertStringContainsString('install_etc fleet-status.service', (string) file_get_contents(self::installDir().'/steps/95-units.sh'));
+    }
+
+    public function testNewUnitsVerifyWhenSystemdAnalyzeIsAvailable(): void
+    {
+        $bin = trim((string) shell_exec('command -v systemd-analyze 2>/dev/null'));
+        if ('' === $bin) {
+            if ('1' === getenv('FLEET_REQUIRE_SYSTEMD_ANALYZE')) {
+                self::fail('systemd-analyze is required');
+            }
+            self::markTestSkipped('systemd-analyze is not installed');
+        }
+        foreach (['fleet-status.service', 'fleet-boot.service'] as $file) {
+            $process = new Process([$bin, 'verify', '--man=no', self::installDir().'/etc/'.$file]);
+            $process->run();
+            // The binaries and the fleet user do not exist on a dev machine: only syntax problems count.
+            self::assertStringNotContainsString('Unknown key', $process->getErrorOutput().$process->getOutput(), $file);
+            self::assertStringNotContainsString('Unknown section', $process->getErrorOutput().$process->getOutput(), $file);
+        }
+    }
+
     public function testBackupServiceRunsTheBackupCommandAsFleetInASandbox(): void
     {
         $unit = $this->unit('fleet-backup.service');
