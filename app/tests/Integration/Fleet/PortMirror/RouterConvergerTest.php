@@ -204,7 +204,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
         $instance = $this->instance();
         $dir = $this->checkout($instance);
         $job = $this->job('deploy', $instance);
-        $context = new DeployContext($instance, $this->project, $dir, [], $this->logFor($job));
+        $context = new DeployContext($instance, $this->project, $dir, [], $this->logFor($job), $this->secretRenderer);
 
         $sync->run($context);
         self::assertFileExists($this->traefik->staticFile());
@@ -227,7 +227,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
         $instance = $this->instance();
         $job = $this->job('deploy', $instance);
 
-        new PortMirrorConvergeStep($this->converger)->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job)));
+        new PortMirrorConvergeStep($this->converger)->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
 
         self::assertStringNotContainsString('port mirror', $this->logText($job));
         self::assertSame([], $this->argvs());
