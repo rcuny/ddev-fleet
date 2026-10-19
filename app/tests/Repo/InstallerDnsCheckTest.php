@@ -183,6 +183,42 @@ final class InstallerDnsCheckTest extends TestCase
         self::assertStringContainsString('192.0.2.1', $err);
     }
 
+    public function testLoopbackAnswerFromTheStubResolverIsRetriedAgainstAPublicResolver(): void
+    {
+        // systemd-resolved's stub serves /etc/hosts: on a stock Debian cloud image dig returns 127.0.1.1 for the
+        // host's own FQDN. The public resolvers know the real record.
+        $stubs = $this->dnsStubs([], localV4: ['203.0.113.7'], publicV4: null);
+        file_put_contents($stubs.'/dig', $this->loopbackDig('@1.1.1.1'));
+
+        [$status, $out, $err] = $this->check($stubs);
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString('DNS ok', $out);
+    }
+
+    public function testLoopbackAnswerStaysAnErrorWhenNoPublicResolverAnswers(): void
+    {
+        $stubs = $this->dnsStubs([], localV4: ['203.0.113.7'], publicV4: null);
+        file_put_contents($stubs.'/dig', $this->loopbackDig('@nobody'));
+
+        [$status, , $err] = $this->check($stubs);
+
+        self::assertSame(2, $status);
+        self::assertStringContainsString('fleet.example.com has the A record 127.0.1.1', $err);
+    }
+
+    public function testAPublicResolverThatDisagreesWinsOverTheLoopbackAnswer(): void
+    {
+        $stubs = $this->dnsStubs([], localV4: ['198.51.100.1'], publicV4: null);
+        file_put_contents($stubs.'/dig', $this->loopbackDig('@1.1.1.1'));
+
+        [$status, , $err] = $this->check($stubs);
+
+        self::assertSame(2, $status);
+        self::assertStringContainsString('fleet.example.com has the A record 203.0.113.7', $err);
+        self::assertStringNotContainsString('127.0.1.1', $err);
+    }
+
     public function testCnameLinesAreIgnored(): void
     {
         $stubs = $this->dnsStubs(
@@ -314,6 +350,21 @@ final class InstallerDnsCheckTest extends TestCase
             'ip' => "case \"\$2\" in\n-4) ".$ip($localV4, '4').";;\n-6) ".$ip($localV6, '6').";;\nesac",
             'curl' => "case \"\$1\" in\n-6) ".(null === $publicV6 ? 'exit 22' : "echo '{$publicV6}'").";;\n*) ".(null === $publicV4 ? 'exit 22' : "echo '{$publicV4}'").";;\nesac",
         ]);
+    }
+
+    /**
+     * A dig that answers 127.0.1.1 through the system resolver and 203.0.113.7 (A only) through the resolver named
+     * $good; any other @resolver fails.
+     */
+    private function loopbackDig(string $good): string
+    {
+        return "#!/bin/sh\n".
+            "echo ';; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1'; echo ';; flags: qr rd ra; QUERY: 1'; echo\n".
+            "case \"\$8\" in\n".
+            "'') ip=127.0.1.1;;\n".
+            $good.") ip=203.0.113.7;;\n".
+            "*) exit 9;;\nesac\n".
+            "[ \"\$6\" = A ] && echo \"\$7. 300 IN A \$ip\"\nexit 0\n";
     }
 
     /**

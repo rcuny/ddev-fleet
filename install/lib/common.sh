@@ -324,23 +324,50 @@ public_addr() {
   curl "$flag" -fsS --proto '=https' --tlsv1.2 --max-time 10 "$url" 2>/dev/null </dev/null | tr 'A-F' 'a-f' | tr -d '[:space:]' || true
 }
 
-# DNS records of family 4 or 6 for a name, one per line. This asks the resolver (dig), not the name service switch:
-# `getent` would read /etc/hosts first, where Debian maps the host's own name to 127.0.1.1, and a line there could
-# also make a wrong public record look right. Only A/AAAA answers count (CNAME lines are dropped). Returns 3 when the
-# lookup is inconclusive (timeout, SERVFAIL, REFUSED): "no records" (NOERROR or NXDOMAIN with an empty answer) is
-# an answer, a failed lookup is not.
-dns_records() {
-  local family=$1 name=$2 type=A out status
+# Public resolvers asked when the system resolver answers a loopback address (see dns_records).
+DNS_FALLBACK_RESOLVERS=${FLEET_DNS_FALLBACK_RESOLVERS:-"1.1.1.1 9.9.9.9"}
+
+# DNS records of family 4 or 6 for a name, one per line, from the resolver in $3 (default: the system one). This asks a
+# resolver (dig), not the name service switch: `getent` would read /etc/hosts first, where Debian maps the host's own
+# name to 127.0.1.1. Only A/AAAA answers count (CNAME lines are dropped). Returns 3 when the lookup is inconclusive
+# (timeout, SERVFAIL, REFUSED): "no records" (NOERROR or NXDOMAIN with an empty answer) is an answer, a failed
+# lookup is not.
+dns_records_from() {
+  local family=$1 name=$2 server=${3:-} type=A out status
+  local -a at=()
   if [ "$family" = 6 ]; then
     type=AAAA
   fi
-  out=$(dig +noall +comments +answer +time=3 +tries=2 "$type" "$name" 2>/dev/null) || return 3
+  [ -z "$server" ] || at=("@$server")
+  out=$(dig +noall +comments +answer +time=3 +tries=2 "$type" "$name" "${at[@]}" 2>/dev/null) || return 3
   status=$(printf '%s\n' "$out" | sed -n 's/.*status: \([A-Z]*\).*/\1/p;T;q')
   case $status in
     NOERROR | NXDOMAIN) ;;
     *) return 3 ;;
   esac
   printf '%s\n' "$out" | awk -v t="$type" '$1 !~ /^;/ && $4 == t {print $5}' | tr 'A-F' 'a-f' | sort -u
+}
+
+# The system resolver on a stock Debian cloud image is systemd-resolved's stub, which serves /etc/hosts too, so a
+# dig through it still returns 127.0.1.1 for the host's own FQDN (found on the first real install). A loopback answer
+# is never a valid public record: in that case the public resolvers are asked instead, and their answer wins.
+dns_records() {
+  local recs rc=0 server alt
+  recs=$(dns_records_from "$1" "$2") || rc=$?
+  if [ "$rc" = 0 ] && ! printf '%s\n' "$recs" | grep -Eq '^(127\.|::1$)'; then
+    printf '%s' "$recs"
+    [ -z "$recs" ] || printf '\n'
+    return 0
+  fi
+  for server in $DNS_FALLBACK_RESOLVERS; do
+    alt=$(dns_records_from "$1" "$2" "$server") || continue
+    printf '%s' "$alt"
+    [ -z "$alt" ] || printf '\n'
+    return 0
+  done
+  # No public resolver answered: keep what the system resolver said (a loopback address then fails the comparison).
+  [ "$rc" = 0 ] || return "$rc"
+  printf '%s\n' "$recs"
 }
 
 # True when $1 is an entry of the newline-separated list $2.
