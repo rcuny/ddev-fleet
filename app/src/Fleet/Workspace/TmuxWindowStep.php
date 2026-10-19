@@ -10,6 +10,7 @@ use App\Fleet\Instances\DeployStep;
 use App\Fleet\Instances\StepPhase;
 use App\Fleet\Instances\TokenRenderer;
 use App\Fleet\Shell\CommandRunnerException;
+use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 
 /**
  * Gives a deployed instance its tmux window and types the template's tty1 and tty2 commands into it (the v0 behaviour).
@@ -19,6 +20,7 @@ use App\Fleet\Shell\CommandRunnerException;
  * The commands carry context tokens only (ContextTokens), never a secret: the Claude token reaches the container as an
  * environment variable (InstanceConfigWriter), so `ddev exec claude ...` has no use for it on a command line.
  */
+#[AutoconfigureTag('fleet.deploy_step', ['priority' => 100])]
 final readonly class TmuxWindowStep implements DeployStep
 {
     /** A token value is typed into a shell: only these characters are accepted in it. */
