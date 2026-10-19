@@ -12,8 +12,8 @@ instance of that project is set up: the Drupal environment and the commands run 
 terminals. You manage both in the browser (`/admin/projects`) or with the `fleet` command on the host. There is no
 YAML file and no config repository: the fleet's database is the source of truth.
 
-Instances (the running copies of a project) arrive in a later milestone (M0.04). Until then a project is a
-description: you can create, edit and delete it, but nothing is deployed from it yet.
+Instances (the running copies of a project) are described in [`instances-and-jobs.md`](instances-and-jobs.md): a project
+is the description, an instance is one deployed branch of it.
 
 Contents: [concepts](#concepts) · [fields and limits](#fields-and-limits) · [the screens](#the-screens) ·
 [the command line](#the-command-line) · [permissions](#permissions) · [deleting](#deleting) ·
@@ -24,7 +24,7 @@ Contents: [concepts](#concepts) · [fields and limits](#fields-and-limits) · [t
 | Thing | What it is |
 |---|---|
 | **Project** | A name, a git URL, and optional defaults: branch, template, extra hostnames, git identity, issue id pattern, a submodule to show, a Typesense search server, assigned named ports. |
-| **Template** | Belongs to one project. A name, an optional Drupal environment, and three command lists: *post-deploy* (run inside the instance's web container with `ddev exec` after a deploy, so `composer install` or `drush deploy`, not `ddev composer install`), *terminal 1* and *terminal 2* (typed into the two terminal panes of the instance's window). A project has up to 50. One of them can be the project's **default template**. |
+| **Template** | Belongs to one project. A name, an optional Drupal environment, and three command lists: *post-deploy* (run on the host after a deploy, in the instance's checkout and without a shell, so `ddev composer install` or `ddev drush deploy`; to run something inside the web container write `ddev exec '...'`), *terminal 1* and *terminal 2* (typed into the two terminal panes of the instance's window). A project has up to 50. One of them can be the project's **default template**. |
 | **Named port** | An entry of the host-wide catalogue: a name, a *public* port Caddy listens on and a *router* port of the DDEV router the traffic is forwarded to (for example `typesense`, 9108 to 8108). A project lists the named ports it uses. The catalogue is managed with `fleet port:*` only. |
 
 Names of projects, templates and ports are **immutable**: an instance id is `<project>--<label>`, so a rename would
@@ -57,7 +57,7 @@ validation messages never echo what you typed (a "does not exist" message repeat
 |---|---|
 | Name | Same as a project name (1 to 40 characters, `new` reserved), unique within the project, fixed after creation. At most 50 templates per project. |
 | Drupal environment | Optional. 1 to 64 letters, digits, `.`, `_` or `-`. It is written verbatim as `DRUPAL_ENV=<value>` into the instance's `.env`, so quotes, spaces and shell characters are refused. Blank leaves the project's own value. |
-| Post-deploy, terminal 1, terminal 2 | Each a list of at most 50 command lines of at most 2000 characters. **One line per command:** every control character is refused (newline, tab, escape, NUL), as are Unicode line separators and format characters, and the text must be valid UTF-8. Blank lines are dropped and surrounding spaces trimmed. A line is never run through a host shell: **post-deploy lines run inside the instance's web container** (`ddev exec`), so write the command as you would type it in that container (`composer install`, `drush deploy`; a host-side `ddev ...` command does not exist there), and **terminal lines are typed on the host** into a terminal pane (`ddev logs -f` is fine there). Whether a failing post-deploy command stops the deploy is decided with the deploy itself (M0.04). A whole command list is also bounded as one text, to 100 100 characters (50 lines of 2000 characters with a line break between them): the browser text box and `--post-deploy`/`--tty1`/`--tty2` refuse a longer text with the same message, so every list one of them accepts the other accepts too. |
+| Post-deploy, terminal 1, terminal 2 | Each a list of at most 50 command lines of at most 2000 characters. **One line per command:** every control character is refused (newline, tab, escape, NUL), as are Unicode line separators and format characters, and the text must be valid UTF-8. Blank lines are dropped and surrounding spaces trimmed. A line is never run through a shell: **post-deploy lines run on the host as an argument list** in the instance's checkout (`ddev composer install`, `ddev drush deploy`), quotes and backslashes group words, and an unquoted `|`, `&`, `;`, `<`, `>`, `$`, backtick, `(`, `)`, `{` or `}` is refused when the deploy runs, with a hint to write `ddev exec '...'` for a command that needs the container's shell. `[[token]]` placeholders are substituted after splitting. **Terminal lines are typed on the host** into a terminal pane (`ddev logs -f` is fine there). A failing post-deploy command fails the deploy (see [`instances-and-jobs.md`](instances-and-jobs.md)).  A whole command list is also bounded as one text, to 100 100 characters (50 lines of 2000 characters with a line break between them): the browser text box and `--post-deploy`/`--tty1`/`--tty2` refuse a longer text with the same message, so every list one of them accepts the other accepts too. |
 
 ### Named port
 
@@ -248,14 +248,12 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
 Everything on this page is **administrator-only**: the pages need `ROLE_ADMIN` (the group `FLEET_ADMIN_GROUP`, see
 [`installation.md`](installation.md)), the issue id tester's endpoint is admin-only too, and every state change is a
 POST with a CSRF token. A member gets 403, a signed-out visitor is sent to sign in. The commands are for whoever can
-use `sudo fleet` on the host. Operating the instances of a project (from M0.04) can be given to non-administrators
-later; changing a project's settings never can.
+use `sudo fleet` on the host. Operating the instances of a project (start, stop, redeploy, logs) is open to the project's members; deploying and destroying are administrators only, and changing a project's settings never can be given away.
 
 ## Deleting
 
 Deleting a project deletes its templates, its port assignments (the catalogue entries stay) and its secrets (one audit entry each, see [`secrets.md`](secrets.md)). It is **refused
-while the project has instances**, with a message naming them; destroy the instances first. Until instances exist
-(M0.04) nothing blocks the deletion. A template can be deleted unless it is the project's default template: choose
+while the project has instances**, with a message naming them; destroy the instances first. Destroy them from the Instances page or with `fleet instance:destroy`. A template can be deleted unless it is the project's default template: choose
 another default (or clear it with `--unset=default-template`) first. A named port cannot be removed while a project
 uses it. A refused delete leaves everything as it was, in the browser (a warning) and on the command line (exit
 code `2`).

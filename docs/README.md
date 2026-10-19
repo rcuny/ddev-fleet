@@ -22,6 +22,7 @@ Type: documentation
 | [`installation.md`](installation.md) | Current | Installing 1.x on a Debian 13 host: prerequisites, `install.sh` and its flags, the setup wizard, what is installed where, recovery (`fleet setup:reset`, `fleet user:reset-password`), upgrades, the security model, uninstalling, troubleshooting |
 | [`schedules.md`](schedules.md) | Current | Schedules (1.x): cron and timezone rules, the 60-minute catch-up, run history, `fleet schedule:*`, running the ticker unit |
 | [`projects-and-templates.md`](projects-and-templates.md) | Current | Projects and templates in the browser and with `fleet project\|template\|port`: concepts, every field and limit, the screens, CLI reference (exit codes, `--json`), permissions, deleting, named ports, differences from 0.x |
+| [`instances-and-jobs.md`](instances-and-jobs.md) | Current | Instances and jobs: states, deploy (auto-suffix, count, disk check), redeploy, start, stop, destroy and root-owned leftovers, bulk work, roles, the pages and the live log, `fleet instance:*` and `fleet job:*` (exit codes, `--json`), retention, differences from 0.x, troubleshooting |
 | [`assets.md`](assets.md) | Current | A project's assets: the Assets tab (browser, upload, download, delete, folders, rescan), chunked resumable upload and its 2 GiB cap, copying large files over SSH, path and symbolic-link rules, `fleet asset:list` and `fleet asset:gc` (exit codes, `--json`), limits |
 | [`secrets.md`](secrets.md) | Current | Secrets in the browser and with `fleet secret:list\|set\|unset`: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, exit codes and JSON, the security model, differences from 0.x |
 | [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
@@ -45,10 +46,10 @@ configuration they describe (`src/fleet/`, the `fleet` CLI, `fleet.yml`, `bootst
 
 | Document | Covers | Rewritten in |
 |---|---|---|
-| [`v0/installation.md`](v0/installation.md) | First-run checklist: DNS, installer, deploy key, `fleet init`, first deploy | M0.02 (done: [`installation.md`](installation.md); the first deploy returns in M0.04) |
+| [`v0/installation.md`](v0/installation.md) | First-run checklist: DNS, installer, deploy key, `fleet init`, first deploy | M0.02 (done: [`installation.md`](installation.md); the first deploy: [`instances-and-jobs.md`](instances-and-jobs.md)) |
 | [`v0/README-authelia.md`](v0/README-authelia.md) | Authelia auth mode: login portal, users, rollout | M0.10 (the portal itself is installed by M0.02, see [`installation.md`](installation.md)) |
 | [`v0/configuration.md`](v0/configuration.md) | The `fleet.yml` registry schema | M0.03 (done for projects and templates: [`projects-and-templates.md`](projects-and-templates.md); secrets: [`secrets.md`](secrets.md); the rest returns with M0.06 to M0.10) |
-| [`v0/cli.md`](v0/cli.md) | The `fleet` command reference | M0.04 |
+| [`v0/cli.md`](v0/cli.md) | The `fleet` command reference | M0.04 (done for instances and jobs: [`instances-and-jobs.md`](instances-and-jobs.md); the other groups are in their own guides) |
 | [`v0/networking.md`](v0/networking.md) | Topology, every port, exposing a new one | M0.07 |
 | [`v0/README-typesense.md`](v0/README-typesense.md) | Typesense browser-search exposure | M0.07 |
 | [`webhooks.md`](webhooks.md) | 1.x, valid (endpoints, secrets, rules, the deploy and run-pipeline actions, the pipeline token, delivery log) | M0.08a, M0.08b |
