@@ -17,7 +17,7 @@
     <div class="mt-6"
          data-controller="instance-list"
          data-instance-list-url-value="{{ path('instances') }}"
-         data-instance-list-mercure-value="{{ mercure('/instances') }}">
+         data-instance-list-mercure-value="{{ mercure() }}">
         <turbo-frame id="instances" data-testid="instances-frame">
             {{ include('instances/_table.html.twig') }}
         </turbo-frame>

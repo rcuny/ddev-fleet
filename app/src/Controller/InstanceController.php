@@ -137,7 +137,7 @@ final class InstanceController extends AbstractController
                 ), JobTrigger::Ui, $this->actor->name());
 
                 if (1 === \count($jobs)) {
-                    return $this->redirect('/jobs/'.$jobs[0]->id(), Response::HTTP_SEE_OTHER);
+                    return $this->redirectToRoute('job_show', ['id' => $jobs[0]->id()], Response::HTTP_SEE_OTHER);
                 }
                 $this->addFlash('success', \sprintf('%d jobs queued.', \count($jobs)));
 
@@ -198,7 +198,7 @@ final class InstanceController extends AbstractController
     }
 
     #[Route('/instances/{id}', name: 'instance_show', requirements: ['id' => self::ID], methods: ['GET'])]
-    public function show(string $id): Response
+    public function show(Request $request, string $id): Response
     {
         $instance = $this->instance($id);
         $jobs = $this->jobs->forInstance($id);
@@ -217,7 +217,7 @@ final class InstanceController extends AbstractController
             // No domain yet, or an alias label that is too long: the primary URL (if any) is still shown.
         }
 
-        return $this->render('instances/show.html.twig', [
+        $response = $this->render('instances/show.html.twig', [
             'instance' => $instance,
             'url' => $this->siteUrl($instance),
             'aliases' => $aliases,
@@ -226,6 +226,11 @@ final class InstanceController extends AbstractController
             'latest' => $jobs[0] ?? null,
             'canDestroy' => $this->isGranted(ProjectVoter::DESTROY, $instance->project()),
         ]);
+        if (null !== $active) {
+            $this->feedCookie->attach($request, $response, ['/jobs/'.$active->id()]);
+        }
+
+        return $response;
     }
 
     #[Route('/instances/{id}/{action}', name: 'instance_action', requirements: ['id' => self::ID, 'action' => self::ACTIONS], methods: ['POST'])]
@@ -245,7 +250,7 @@ final class InstanceController extends AbstractController
             throw new NotFoundHttpException();
         }
 
-        return $this->redirect('/jobs/'.$jobs[0]->id(), Response::HTTP_SEE_OTHER);
+        return $this->redirectToRoute('job_show', ['id' => $jobs[0]->id()], Response::HTTP_SEE_OTHER);
     }
 
     private function instance(string $id): Instance

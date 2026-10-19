@@ -83,7 +83,7 @@
             <twig:Card data-testid="active-job">
                 <twig:Card:Header>
                     <twig:Card:Title>Running now</twig:Card:Title>
-                    <twig:Card:Description><a href="/jobs/{{ active.id }}">Job #{{ active.id }}</a> is {{ active.status.value }}.</twig:Card:Description>
+                    <twig:Card:Description><a href="{{ path('job_show', {id: active.id}) }}">Job #{{ active.id }}</a> is {{ active.status.value }}.</twig:Card:Description>
                 </twig:Card:Header>
                 <twig:Card:Content>
                     {{ include('jobs/_log.html.twig', {job: active}) }}
@@ -102,7 +102,7 @@
                     <ul class="divide-y divide-hairline">
                         {% for job in jobs %}
                             <li class="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm" data-testid="timeline-job">
-                                <a href="/jobs/{{ job.id }}" class="font-medium">#{{ job.id }} {{ job.type }}</a>
+                                <a href="{{ path('job_show', {id: job.id}) }}" class="font-medium">#{{ job.id }} {{ job.type }}</a>
                                 <span class="text-ink-muted">{{ job.status.value }} · {{ job.trigger.value }} · {{ job.createdAt|date('Y-m-d H:i') }} UTC</span>
                             </li>
                         {% endfor %}

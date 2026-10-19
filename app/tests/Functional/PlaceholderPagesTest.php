@@ -15,7 +15,6 @@ final class PlaceholderPagesTest extends WebTestCase
      */
     public static function placeholders(): iterable
     {
-        yield 'jobs' => ['/admin/jobs', 'Jobs', 'M0.04', 'jobs'];
         yield 'webhooks' => ['/admin/webhooks', 'Webhooks', 'M0.08', 'webhooks'];
         yield 'schedules' => ['/admin/schedules', 'Schedules', 'M0.09', 'schedules'];
     }
