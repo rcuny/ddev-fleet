@@ -72,6 +72,15 @@ export function follow(page: Page, target: Locator): Promise<void> {
 }
 
 /**
+ * Clicks a submit button (or a button that posts a form) and returns once the Turbo render of the response is on
+ * screen. Without it the next assertion can read the page from before the submit (a stale flash) and the next click
+ * can hit an element the render then replaces. Same wait as {@link navigate}.
+ */
+export function submitAndWait(page: Page, target: Locator): Promise<void> {
+  return navigate(page, () => target.click());
+}
+
+/**
  * Opens a dialog from its trigger. The controllers are loaded lazily and, on a busy host, after the HTML is
  * interactive: a click that came first does nothing, so it is repeated until the dialog shows (never while it is open).
  */

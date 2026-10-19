@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { blockingViolations } from './support/axe';
-import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
 import { deleteUserViaUi, PASSWORD } from './support/users';
@@ -121,20 +121,20 @@ test.describe('users and project access', () => {
 
       // Set a new password: refused when weak, accepted otherwise.
       await page.getByLabel('New password').fill('tiny');
-      await page.getByRole('button', { name: 'Set password' }).click();
+      await submitAndWait(page, page.getByRole('button', { name: 'Set password' }));
       await expect(page.getByTestId('password-form')).toContainText('The password must be at least 12 characters long.');
       await page.getByLabel('New password').fill('another long passphrase');
-      await page.getByRole('button', { name: 'Set password' }).click();
+      await submitAndWait(page, page.getByRole('button', { name: 'Set password' }));
       await expect(page.getByTestId('flashes')).toContainText(`The password of "${username}" was changed.`);
 
       // Disable and enable.
-      await page.getByRole('button', { name: 'Disable user' }).click();
+      await submitAndWait(page, page.getByRole('button', { name: 'Disable user' }));
       await expect(page.getByTestId('flashes')).toContainText(`User "${username}" disabled.`);
       await expect(page.getByTestId('user-status')).toContainText('Disabled');
       await page.goto('/admin/users');
       await expect(page.getByTestId('user-row').filter({ hasText: username }).getByTestId('user-disabled')).toBeVisible();
       await page.goto(`/admin/users/${username}/edit`);
-      await page.getByRole('button', { name: 'Enable user' }).click();
+      await submitAndWait(page, page.getByRole('button', { name: 'Enable user' }));
       await expect(page.getByTestId('flashes')).toContainText(`User "${username}" enabled.`);
 
       // The delete dialog fits on the screen and its buttons are tap-sized.
