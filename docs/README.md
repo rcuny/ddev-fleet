@@ -20,6 +20,7 @@ Type: documentation
 | Document | Status | Covers |
 |---|---|---|
 | [`installation.md`](installation.md) | Current | Installing 1.x on a Debian 13 host: prerequisites, `install.sh` and its flags, the setup wizard, what is installed where, recovery (`fleet setup:reset`, `fleet user:reset-password`), upgrades, the security model, uninstalling, troubleshooting |
+| [`schedules.md`](schedules.md) | Current | Schedules (1.x): cron and timezone rules, the 60-minute catch-up, run history, `fleet schedule:*`, running the ticker unit |
 | [`projects-and-templates.md`](projects-and-templates.md) | Current | Projects and templates in the browser and with `fleet project\|template\|port`: concepts, every field and limit, the screens, CLI reference (exit codes, `--json`), permissions, deleting, named ports, differences from 0.x |
 | [`assets.md`](assets.md) | Current | A project's assets: the Assets tab (browser, upload, download, delete, folders, rescan), chunked resumable upload and its 2 GiB cap, copying large files over SSH, path and symbolic-link rules, `fleet asset:list` and `fleet asset:gc` (exit codes, `--json`), limits |
 | [`secrets.md`](secrets.md) | Current | Secrets in the browser and with `fleet secret:list\|set\|unset`: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, exit codes and JSON, the security model, differences from 0.x |
@@ -50,7 +51,8 @@ configuration they describe (`src/fleet/`, the `fleet` CLI, `fleet.yml`, `bootst
 | [`v0/cli.md`](v0/cli.md) | The `fleet` command reference | M0.04 |
 | [`v0/networking.md`](v0/networking.md) | Topology, every port, exposing a new one | M0.07 |
 | [`v0/README-typesense.md`](v0/README-typesense.md) | Typesense browser-search exposure | M0.07 |
-| [`v0/README-webhooks.md`](v0/README-webhooks.md) | Jira and Bitbucket webhooks | M0.08 |
+| [`webhooks.md`](webhooks.md) | 1.x, valid (receiving side: endpoints, secrets, rules, delivery log; the deploy action follows M0.04) | M0.08a |
+| [`v0/README-webhooks.md`](v0/README-webhooks.md) | Jira and Bitbucket webhooks, the 0.x reference | M0.08 |
 | [`v0/README-schedules.md`](v0/README-schedules.md) | Scheduled jobs | M0.09 |
 | [`v0/srv-fleet-CLAUDE.md`](v0/srv-fleet-CLAUDE.md) | Registry and CLI context for the host's Claude session | M0.11 |
 | [`v0/architecture.md`](v0/architecture.md) | Module map and the daemon/CLI split | M0.12 |

@@ -17,8 +17,6 @@ final class PlaceholderPagesTest extends WebTestCase
     {
         yield 'instances' => ['/instances', 'Instances', 'M0.04', 'instances'];
         yield 'jobs' => ['/admin/jobs', 'Jobs', 'M0.04', 'jobs'];
-        yield 'webhooks' => ['/admin/webhooks', 'Webhooks', 'M0.08', 'webhooks'];
-        yield 'schedules' => ['/admin/schedules', 'Schedules', 'M0.09', 'schedules'];
     }
 
     #[DataProvider('placeholders')]

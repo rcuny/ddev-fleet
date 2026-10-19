@@ -1,0 +1,101 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Schedules · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Schedules" description="Run an action on a cron schedule, such as the nightly redeploy of an instance. All times are UTC unless stated.">
+        <twig:block name="actions">
+            <twig:Button as="a" href="{{ path('schedule_new') }}" class="h-11 md:h-8" data-testid="schedule-new">
+                <twig:ux:icon name="lucide:plus" />
+                New schedule
+            </twig:Button>
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6">
+        {% if rows|length == 0 %}
+            <twig:Card data-testid="schedules-empty" class="max-w-xl">
+                <twig:Card:Header>
+                    <twig:Card:Title>No schedules yet</twig:Card:Title>
+                    <twig:Card:Description>A schedule pairs a cron expression with an action. Create one to automate a routine task.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content>
+                    <twig:Button as="a" href="{{ path('schedule_new') }}" class="h-11 md:h-8">New schedule</twig:Button>
+                </twig:Card:Content>
+            </twig:Card>
+        {% else %}
+            <ul class="divide-y divide-hairline overflow-hidden rounded-md border border-hairline bg-page" aria-label="Schedules">
+                {% for row in rows %}
+                    {% set schedule = row.schedule %}
+                    <li data-testid="schedule-row" data-name="{{ schedule.name }}" class="grid gap-3 px-4 py-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
+                        <div class="min-w-0">
+                            <div class="flex flex-wrap items-center gap-2">
+                                <span class="text-sm font-medium text-ink-display [overflow-wrap:anywhere]" data-testid="schedule-name">{{ schedule.name }}</span>
+                                {% if schedule.enabled %}
+                                    <twig:Badge variant="outline" data-testid="schedule-state">Active</twig:Badge>
+                                {% else %}
+                                    <twig:Badge variant="secondary" data-testid="schedule-state">Paused</twig:Badge>
+                                {% endif %}
+                            </div>
+                            <p class="mt-1 text-xs text-ink-muted [overflow-wrap:anywhere]">
+                                <code data-testid="schedule-cron">{{ schedule.cron }}</code> · {{ schedule.timezone }} · {{ schedule.action }}{% if schedule.instanceId %} · <span class="font-mono">{{ schedule.instanceId }}</span>{% endif %}
+                            </p>
+                            <p class="mt-1 text-xs text-ink-muted">
+                                Next run: <span data-testid="schedule-next">{% if row.next %}{{ row.next|date('Y-m-d H:i', 'UTC') }} UTC{% else %}none (paused){% endif %}</span>
+                                · Last result: <span data-testid="schedule-last">{{ row.result ?? 'never run' }}</span>
+                            </p>
+                        </div>
+                        <div class="flex flex-wrap gap-2">
+                            {% if schedule.enabled %}
+                                <form method="post" action="{{ path('schedule_pause', {name: schedule.name}) }}" data-turbo="false" class="contents">
+                                    {{ include('setup/_csrf.html.twig') }}
+                                    <twig:Button type="submit" variant="outline" class="h-11 md:h-8" data-testid="schedule-pause">
+                                        <twig:ux:icon name="lucide:pause" />
+                                        Pause
+                                    </twig:Button>
+                                </form>
+                            {% else %}
+                                <form method="post" action="{{ path('schedule_resume', {name: schedule.name}) }}" data-turbo="false" class="contents">
+                                    {{ include('setup/_csrf.html.twig') }}
+                                    <twig:Button type="submit" variant="outline" class="h-11 md:h-8" data-testid="schedule-resume">
+                                        <twig:ux:icon name="lucide:play" />
+                                        Resume
+                                    </twig:Button>
+                                </form>
+                            {% endif %}
+                            <form method="post" action="{{ path('schedule_run', {name: schedule.name}) }}" data-turbo="false" class="contents">
+                                {{ include('setup/_csrf.html.twig') }}
+                                <twig:Button type="submit" variant="outline" class="h-11 md:h-8" data-testid="schedule-run">
+                                    <twig:ux:icon name="lucide:zap" />
+                                    Run now
+                                </twig:Button>
+                            </form>
+                            <twig:Button as="a" variant="outline" class="h-11 md:h-8" href="{{ path('schedule_edit', {name: schedule.name}) }}" data-testid="schedule-edit">Edit</twig:Button>
+                            <twig:Button as="a" variant="outline" class="h-11 md:h-8" href="{{ path('schedule_history', {name: schedule.name}) }}" data-testid="schedule-history">History</twig:Button>
+                            <twig:Dialog id="delete-schedule-{{ loop.index }}">
+                                <twig:Dialog:Trigger>
+                                    <twig:Button variant="destructive" class="h-11 md:h-8" data-testid="schedule-delete" {{ ...dialog_trigger_attrs }}>Delete</twig:Button>
+                                </twig:Dialog:Trigger>
+                                <twig:Dialog:Content>
+                                    <twig:Dialog:Header>
+                                        <twig:Dialog:Title class="[overflow-wrap:anywhere]">Delete {{ schedule.name }}?</twig:Dialog:Title>
+                                        <twig:Dialog:Description>The schedule and its run history are removed. Jobs already started are not affected.</twig:Dialog:Description>
+                                    </twig:Dialog:Header>
+                                    <twig:Dialog:Footer>
+                                        <twig:Dialog:Close>
+                                            <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                        </twig:Dialog:Close>
+                                        <form method="post" action="{{ path('schedule_delete', {name: schedule.name}) }}" class="contents">
+                                            {{ include('setup/_csrf.html.twig') }}
+                                            <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="schedule-delete-confirm">Delete schedule</twig:Button>
+                                        </form>
+                                    </twig:Dialog:Footer>
+                                </twig:Dialog:Content>
+                            </twig:Dialog>
+                        </div>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </div>
+{% endblock %}

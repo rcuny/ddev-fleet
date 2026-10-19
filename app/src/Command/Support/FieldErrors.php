@@ -44,6 +44,16 @@ final readonly class FieldErrors
         return new self(['name']);
     }
 
+    public static function schedule(): self
+    {
+        return new self(['name']);
+    }
+
+    public static function webhook(): self
+    {
+        return new self(['project']);
+    }
+
     public static function user(): self
     {
         return new self(['username']);

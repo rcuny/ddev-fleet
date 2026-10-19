@@ -96,6 +96,21 @@ final readonly class ProjectAccessRepository
         return $members;
     }
 
+    /**
+     * The additional hostname labels of every project, from the stored rows: project name => labels.
+     *
+     * @return array<string, list<string>>
+     */
+    public function hostnamesByProject(): array
+    {
+        /** @var list<array{name: string, additionalHostnames: list<string>}> $rows */
+        $rows = $this->em
+            ->createQuery(\sprintf('SELECT p.name AS name, p.additionalHostnames AS additionalHostnames FROM %s p', Project::class))
+            ->getArrayResult();
+
+        return array_column($rows, 'additionalHostnames', 'name');
+    }
+
     public function add(ProjectAccess $access): void
     {
         $this->em->persist($access);

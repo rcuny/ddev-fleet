@@ -146,6 +146,12 @@ class Instance
         $this->updatedAt = $now ?? new \DateTimeImmutable();
     }
 
+    public function changeTemplate(string $templateName, ?\DateTimeImmutable $now = null): void
+    {
+        $this->templateName = $templateName;
+        $this->updatedAt = $now ?? new \DateTimeImmutable();
+    }
+
     public function markDeployed(\DateTimeImmutable $at): void
     {
         $this->deployedAt = $at;

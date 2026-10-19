@@ -64,7 +64,7 @@ final class FleetWrapperTest extends TestCase
         yield 'list a namespace' => [['list', 'fleet'], 'bin/console list fleet'];
         yield 'another namespace keeps its name' => [['doctrine:migrations:status'], 'bin/console doctrine:migrations:status'];
         yield 'another namespace, two words, is not ours' => [['doctrine', 'migrations'], 'bin/console doctrine migrations'];
-        yield 'an unknown word pair is not prefixed' => [['instance', 'list'], 'bin/console instance list'];
+        yield 'an unknown word pair is not prefixed' => [['widget', 'list'], 'bin/console widget list'];
         yield 'a verb with an uppercase letter is not a verb' => [['project', 'List'], 'bin/console project List'];
     }
 

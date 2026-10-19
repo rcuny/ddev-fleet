@@ -1,0 +1,17 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Webhooks · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Webhooks" description="Where Jira and Bitbucket send events, for every project, and what arrived." />
+
+    <div class="mt-6 grid gap-8">
+        {% if rows is empty %}
+            <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="webhooks-empty">There are no projects yet. A webhook belongs to a project: <a href="{{ path('project_new') }}">create one</a> first.</p>
+        {% else %}
+            {{ include('admin/webhooks/_endpoints.html.twig', {rows: rows}) }}
+        {% endif %}
+
+        {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('webhooks'), showProject: true}) }}
+    </div>
+{% endblock %}

@@ -1,0 +1,67 @@
+{# One card per project and source. Needs: rows (project, source, url, endpoint, latest). The secret is never rendered here: it is shown once, by the page the create / rotate POST answers with. #}
+<ul class="grid gap-4 lg:grid-cols-2" data-testid="webhook-endpoints">
+    {% for row in rows %}
+        {% set id = row.project.name ~ '-' ~ row.source.value %}
+        <li data-testid="webhook-endpoint" data-project="{{ row.project.name }}" data-source="{{ row.source.value }}" class="min-w-0">
+            <twig:Card>
+                <twig:Card:Header>
+                    <twig:Card:Title class="flex flex-wrap items-center gap-2">
+                        <span>{{ row.source.label }}</span>
+                        <span class="text-ink-muted">·</span>
+                        <a href="{{ path('project_webhooks', {name: row.project.name}) }}" class="[overflow-wrap:anywhere]">{{ row.project.name }}</a>
+                        {% if row.endpoint %}
+                            <twig:Badge data-testid="webhook-secret-state" class="bg-brand-faded text-brand-darker dark:text-brand">Secret set</twig:Badge>
+                        {% else %}
+                            <twig:Badge variant="outline" data-testid="webhook-secret-state">No secret</twig:Badge>
+                        {% endif %}
+                    </twig:Card:Title>
+                </twig:Card:Header>
+                <twig:Card:Content class="grid gap-4">
+                    <div class="grid gap-2" data-controller="clipboard">
+                        <twig:Label for="url-{{ id }}">Address to give {{ row.source.label }}</twig:Label>
+                        <div class="flex gap-2">
+                            <twig:Input id="url-{{ id }}" readonly value="{{ row.url }}" data-clipboard-target="source" data-testid="webhook-url" class="h-11 min-w-0 flex-1 font-mono text-xs md:h-8" />
+                            <twig:Button variant="outline" data-action="clipboard#copy" class="h-11 md:h-8" data-testid="webhook-copy">Copy</twig:Button>
+                        </div>
+                        <p class="text-xs text-ink-muted"><span data-clipboard-target="status" aria-live="polite" class="text-brand-darker dark:text-brand"></span></p>
+                    </div>
+
+                    {% if row.endpoint %}
+                        <p class="text-xs text-ink-muted" data-testid="webhook-rotated">Secret created or rotated {{ row.endpoint.rotatedAt|date('Y-m-d H:i', 'UTC') }} UTC. It cannot be shown again.</p>
+                        {% if row.endpoint.rules %}
+                            <ul class="grid gap-1 text-sm" data-testid="webhook-rules">
+                                {% for rule in row.endpoint.rules %}
+                                    <li class="[overflow-wrap:anywhere]"><code>{{ rule.summary }}</code> → {{ rule.action }}{% if rule.params.template is defined %} <code>{{ rule.params.template }}</code>{% elseif rule.params.pattern is defined %} <code>{{ rule.params.pattern }}</code>{% endif %}</li>
+                                {% endfor %}
+                            </ul>
+                        {% else %}
+                            <p class="text-sm text-ink-muted" data-testid="webhook-no-rules">No rules yet: deliveries are logged and ignored. Add one with <code>fleet webhook:rule:add</code>.</p>
+                        {% endif %}
+                    {% endif %}
+
+                    {% if row.latest %}
+                        <p class="text-xs text-ink-muted" data-testid="webhook-latest">Last delivery {{ row.latest.receivedAt|date('Y-m-d H:i', 'UTC') }} UTC: {{ row.latest.result }}.</p>
+                    {% endif %}
+
+                    {# data-turbo="false": the answer is the page that shows the secret once, not a redirect. #}
+                    {% if row.endpoint %}
+                        <details data-testid="webhook-rotate-details">
+                            <summary class="min-h-11 cursor-pointer py-2 text-sm">Rotate secret</summary>
+                            <form method="post" action="{{ path('webhook_secret', {name: row.project.name, source: row.source.value}) }}" data-turbo="false" class="grid gap-3">
+                                <p class="text-sm text-ink-body">The old secret stops working at once. Update {{ row.source.label }} with the new one, or every delivery is refused.</p>
+                                <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+                                <input type="hidden" name="rotate" value="1">
+                                <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-rotate">Rotate now</twig:Button>
+                            </form>
+                        </details>
+                    {% else %}
+                        <form method="post" action="{{ path('webhook_secret', {name: row.project.name, source: row.source.value}) }}" data-turbo="false" class="flex">
+                            <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+                            <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-create">Create secret</twig:Button>
+                        </form>
+                    {% endif %}
+                </twig:Card:Content>
+            </twig:Card>
+        </li>
+    {% endfor %}
+</ul>

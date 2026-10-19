@@ -180,7 +180,7 @@ final readonly class JobRepository
 
         $latest = [];
         // SQLite caps bound variables (999 on older builds): query the ids in chunks.
-        foreach (array_chunk($ids, 500) as $chunk) {
+        foreach (array_chunk($ids, self::CHUNK) as $chunk) {
             /** @var list<Job> $jobs */
             $jobs = $this->em->createQuery(
                 \sprintf(
@@ -253,6 +253,28 @@ final readonly class JobRepository
             ->getResult();
 
         return ['rows' => $rows, 'total' => $total];
+    }
+
+    /**
+     * The finished jobs that ended before $before, to find their log files before the rows go.
+     *
+     * @return array<int, ?string> job id => instance id
+     */
+    public function finishedBefore(\DateTimeImmutable $before): array
+    {
+        /** @var list<array{id: int|string, instance_id: ?string}> $rows */
+        $rows = $this->em->getConnection()->fetchAllAssociative(
+            'SELECT id, instance_id FROM job WHERE status IN (:finals) AND finished_at < :before ORDER BY id ASC',
+            ['finals' => [JobStatus::Succeeded->value, JobStatus::Failed->value, JobStatus::Interrupted->value], 'before' => $before],
+            ['finals' => ArrayParameterType::STRING, 'before' => UtcDateTimeImmutableType::NAME],
+        );
+
+        $found = [];
+        foreach ($rows as $row) {
+            $found[(int) $row['id']] = $row['instance_id'];
+        }
+
+        return $found;
     }
 
     /**

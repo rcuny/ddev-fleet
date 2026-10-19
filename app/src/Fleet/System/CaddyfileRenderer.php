@@ -21,6 +21,8 @@ final readonly class CaddyfileRenderer
     public const string PHP_SOCKET = '/run/php/fleet.sock';
     public const string HUB = '127.0.0.1:3000';
     public const string AUTHELIA = '127.0.0.1:9091';
+    /** ddev's shared router: plain HTTP on loopback, routing by Host (the instance sites proxy to it). */
+    public const string DDEV_ROUTER = '127.0.0.1:8080';
 
     /** The identity headers the app trusts from Caddy (see RemoteUserAuthenticator). */
     public const array IDENTITY_FIELDS = ['User', 'Groups', 'Name', 'Email'];
@@ -59,6 +61,7 @@ final readonly class CaddyfileRenderer
             'email' => ConfigValue::acmeEmail($host->acmeEmail()),
             'ovh' => TlsMode::OvhDns === $host->tlsMode(),
             'stripped_headers' => self::strippedHeaders(),
+            'snippet_dir' => ConfigValue::path('The Caddy snippet directory', $this->paths->caddySnippetDir()),
             'gate_import' => ConfigValue::path('The Caddy snippet directory', $this->paths->caddySnippetDir()).'/gate.conf',
             'root' => ConfigValue::path('The project directory', $this->projectDir).'/public',
             'php_socket' => self::PHP_SOCKET,

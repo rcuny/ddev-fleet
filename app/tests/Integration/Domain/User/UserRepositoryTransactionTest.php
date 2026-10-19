@@ -87,29 +87,38 @@ final class UserRepositoryTransactionTest extends KernelTestCase
     public function testASecondWriterWaitsForTheLockInsteadOfFailing(): void
     {
         $db = self::getContainer()->get(FleetPaths::class)->fleetDb();
+        $flags = sys_get_temp_dir().'/'.uniqid('fleet-writer-', true);
         $script = <<<'PHP'
             $pdo = new PDO('sqlite:'.$argv[1]);
             $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $pdo->setAttribute(PDO::ATTR_TIMEOUT, 10);
-            $start = microtime(true);
+            $pdo->setAttribute(PDO::ATTR_TIMEOUT, 30);
+            touch($argv[2].'.started');
             $pdo->exec('BEGIN IMMEDIATE');
-            $waited = microtime(true) - $start;
+            touch($argv[2].'.acquired');
             $pdo->exec('ROLLBACK');
-            echo 'waited '.round($waited, 3);
             PHP;
-        $writer = new Process([\PHP_BINARY, '-r', $script, $db]);
+        $writer = new Process([\PHP_BINARY, '-r', $script, $db, $flags]);
 
-        $this->repository->transactional(static function () use ($writer): void {
-            // The second writer starts while this transaction holds the lock, and must still be waiting when it ends.
-            $writer->start();
-            usleep(1_000_000);
-            self::assertTrue($writer->isRunning(), 'the second writer is waiting for the lock');
-        });
-        $writer->wait();
+        try {
+            $this->repository->transactional(function () use ($writer, $flags): void {
+                // The second writer starts while this transaction holds the lock; it signals before it asks for it.
+                $writer->start();
+                $this->waitFor(static fn (): bool => is_file($flags.'.started') || !$writer->isRunning());
+                self::assertFileExists($flags.'.started', $writer->getErrorOutput().$writer->getOutput());
+                self::assertTrue($writer->isRunning(), 'the second writer is waiting for the lock');
+                self::assertFileDoesNotExist($flags.'.acquired', 'it cannot get the lock while this transaction holds it');
+            });
+            $writer->wait();
 
-        self::assertSame(0, $writer->getExitCode(), $writer->getErrorOutput().$writer->getOutput());
-        self::assertMatchesRegularExpression('/^waited \d+(\.\d+)?$/', $writer->getOutput());
-        self::assertGreaterThan(0.3, (float) substr($writer->getOutput(), 7), 'it waited for the first writer to commit');
+            self::assertSame(0, $writer->getExitCode(), $writer->getErrorOutput().$writer->getOutput());
+            self::assertFileExists($flags.'.acquired', 'it got the lock once the first writer committed');
+        } finally {
+            if ($writer->isRunning()) {
+                $writer->stop();
+            }
+            @unlink($flags.'.started');
+            @unlink($flags.'.acquired');
+        }
     }
 
     public function testTheLockIsReleasedAfterTheCommitAndAfterARollback(): void
@@ -158,5 +167,14 @@ final class UserRepositoryTransactionTest extends KernelTestCase
         }
 
         self::assertNull($this->repository->findByUsername('bob'), 'rolled back with the surrounding transaction');
+    }
+
+    /** Polls until the condition holds; a generous timeout, so a loaded runner only makes it slower, never red. */
+    private function waitFor(callable $condition, float $timeout = 30.0): void
+    {
+        $deadline = microtime(true) + $timeout;
+        while (!$condition() && microtime(true) < $deadline) {
+            usleep(10_000);
+        }
     }
 }

@@ -143,16 +143,13 @@ final class CliDocsTest extends TestCase
 
     public function testChangelogHasAnUnreleasedEntry(): void
     {
-        $changelog = self::read('CHANGELOG.md');
-        if (1 !== preg_match('/^## \[Unreleased\]\R(.*?)(?=^## \[|\z)/ms', $changelog, $match)) {
-            self::fail('CHANGELOG.md has no [Unreleased] section');
-        }
+        $unreleased = UnreleasedChangelog::text(self::root());
 
         foreach (['FLE-37', 'fleet project:', 'template:', 'port:', '--json', 'docs/projects-and-templates.md'] as $needle) {
-            self::assertStringContainsString($needle, $match[1], "[Unreleased] should mention $needle");
+            self::assertStringContainsString($needle, $unreleased, "[Unreleased] should mention $needle");
         }
         // The FLE-36 entry stays in the same section: this one is appended, not a rewrite.
-        self::assertStringContainsString('FLE-36', $match[1]);
+        self::assertStringContainsString('FLE-36', $unreleased);
     }
 
     public function testTheIndexesAndAgentInstructionsPointAtTheGuide(): void

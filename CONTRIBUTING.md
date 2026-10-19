@@ -57,7 +57,7 @@ request with a red suite. Suites and how to run them: [`tests/README-tests.md`](
 
 - Branch off `develop`: `feature/<KEY>-<slug>`; no double underscores or double dashes in the name.
 - Keep the suite green and describe *why*, not just *what*, in the description.
-- Add your entry under `## [Unreleased]` in `CHANGELOG.md` in the same branch; the conventions
+- Add your entry as a fragment, `changelog.d/<KEY>.md`, in the same branch (not in `CHANGELOG.md`); the conventions
   are in [`docs/RELEASING.md`](docs/RELEASING.md#3-changelog-conventions).
 - If you change `ansible/`, say whether you ran `ansible-lint` and `yamllint` locally
   (`pip install -r ci/requirements-infra.txt`); CI runs them non-blocking.

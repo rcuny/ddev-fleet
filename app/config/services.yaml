@@ -9,6 +9,9 @@
 parameters:
     # Symfony profiler toolbar in dev (see App\Ui\ProfilerToolbarSwitch); the Playwright suite sets 0 so it cannot cover the phone bottom bar.
     env(FLEET_PROFILER_TOOLBAR): '1'
+    # Finished jobs and their logs are deleted after this many days (fleet:job:prune, and the status watcher once a day).
+    env(FLEET_JOB_RETENTION_DAYS): '90'
+    fleet.job_retention_days: '%env(int:FLEET_JOB_RETENTION_DAYS)%'
     # Authorisation: members of this group get ROLE_ADMIN; everyone else authenticated is ROLE_MEMBER.
     fleet.admin_group: '%env(FLEET_ADMIN_GROUP)%'
     # Peers (IPs/CIDRs) allowed to assert identity headers.
@@ -77,9 +80,16 @@ services:
     # The per-project Authelia access rules come from the project_access rows (M0.10).
     App\Fleet\System\AccessRuleSource:
         alias: App\Fleet\Auth\ProjectAccessRules
+    # The git identity instances commit with by default (FLE-51 re-points this at the host page's setting).
+    App\Fleet\Instances\HostGitIdentity:
+        alias: App\Fleet\Instances\DomainGitIdentity
     # Members of a project are the rows of project_access (M0.10).
     App\Domain\Project\ProjectMembership:
         alias: App\Domain\Project\ProjectAccessMembership
+
+    # What a matched webhook rule does. M0.04 points this at the implementation that submits the deploy job.
+    App\Fleet\Webhooks\WebhookAction:
+        alias: App\Fleet\Webhooks\UnavailableWebhookAction
 
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.

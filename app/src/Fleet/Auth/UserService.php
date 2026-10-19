@@ -52,7 +52,9 @@ final readonly class UserService
             }
             $this->users->save($user);
         });
-        \assert($user instanceof User);
+        if (!$user instanceof User) {
+            throw new \LogicException('The locked change did not produce a user.');
+        }
 
         return $user;
     }
@@ -80,7 +82,9 @@ final readonly class UserService
             $user = new User($username, $displayName, $email, $hash, $admin ? [$this->admins->name()] : []);
             $this->users->save($user);
         });
-        \assert($user instanceof User);
+        if (!$user instanceof User) {
+            throw new \LogicException('The locked change did not produce a user.');
+        }
 
         return $user;
     }

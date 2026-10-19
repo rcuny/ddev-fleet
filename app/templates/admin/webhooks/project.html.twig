@@ -1,0 +1,24 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Webhooks · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="project.name" :description="project.git">
+        <twig:block name="tabs">
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'webhooks'}) }}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid gap-8">
+        {{ include('admin/webhooks/_endpoints.html.twig', {rows: rows}) }}
+
+        {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('project_webhooks', {name: project.name}), showProject: false}) }}
+
+        {% if page > 1 or hasMore %}
+            <nav aria-label="Delivery pages" class="flex items-center justify-between gap-4 text-sm">
+                {% if page > 1 %}<a href="{{ path('project_webhooks', {name: project.name, page: page - 1, 'hide-ignored': hideIgnored ? 1 : null}) }}" class="inline-flex min-h-11 items-center">Newer</a>{% else %}<span></span>{% endif %}
+                {% if hasMore %}<a href="{{ path('project_webhooks', {name: project.name, page: page + 1, 'hide-ignored': hideIgnored ? 1 : null}) }}" class="inline-flex min-h-11 items-center">Older</a>{% endif %}
+            </nav>
+        {% endif %}
+    </div>
+{% endblock %}
