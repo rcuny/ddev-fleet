@@ -32,7 +32,7 @@ Open **Projects**, pick a project, then the **Assets** tab (`/admin/projects/<pr
 | **Rescan** | Reloads the list from the disk, to show files copied in over SSH. The list is read from the filesystem on every visit; there is no cache to refresh. |
 | The list | Folders first, then files: name, size, modified time (UTC). On a phone the size and time sit under the name. A folder opens when you click its name. |
 | **Download** | Sends the file as an attachment. Folders cannot be downloaded. |
-| **Delete** | Asks for confirmation in a dialog, then removes the file. A folder is deleted only when it is empty. |
+| **Delete** | Asks for confirmation in a dialog, then removes the file. A folder is deleted only when it is empty; hidden leftovers of an upload assembly that was killed (older than an hour) do not count and go with it. |
 
 Entries the screen cannot handle are listed but have no buttons: a **symbolic link** is shown as "symbolic link,
 ignored" and never followed, and a file copied in with a name outside the allowed characters is shown as "name not
@@ -48,21 +48,26 @@ file's **sha256**, computed on the server while assembling, so you can compare i
 
 - **Limit per file:** 2 GiB by default (`asset_upload_max_bytes` in the host settings table, in bytes). A bigger file is
   refused before anything is sent, with a message naming the limit and the directory to copy it into instead (see the
-  next section). There is no screen or command to change the limit yet; it is stored so a later settings page can.
+  next section). Change it on the **Uploads** tab of the host settings page (`/admin/host?tab=uploads`), in MiB (1 to 1 048 576); it applies to the next upload.
 - **Resuming:** if the connection drops or the page is closed, choose **the same file again** (same name, size and
   modified time): the server tells the browser which chunks it already holds and only the missing ones are sent.
   A chunk that fails is retried three times before the upload is reported as failed.
 - **Existing file:** if a file with that name exists, the browser asks before replacing it; without a yes nothing is
-  touched. The replacement is atomic as well.
+  touched. The replacement is atomic as well. A folder (or link) with that name is never replaced: the upload fails
+  with a message and nothing is asked.
 - **Staging area:** `/srv/fleet/uploads/<id>/` (owner only, mode 0700). Each chunk is written to a temporary file and
   renamed, so sending a chunk twice is harmless and out-of-order chunks are fine. Assembling deletes each chunk as it is
   copied, so the disk needs room for the file plus one chunk on top of the staged chunks. The check at the start of an
-  upload refuses it when the disk is too full.
+  upload looks at the filesystem of `uploads/` and at the one of the project's assets directory (they may differ) and
+  refuses the upload when either is too full.
 - **Abandoned uploads:** an upload nobody touched for 24 hours is deleted by the next upload that starts, and by
   `fleet asset:gc`. Run `fleet asset:gc` from cron or by hand if uploads are rare and a big failed one is sitting there.
 
 Downloads go through php-fpm like every other page, so a download that runs longer than php-fpm's
 `request_terminate_timeout` (240 seconds in the installed pool) is cut. For a multi-gigabyte file use `scp` or `rsync`.
+
+Known gaps, kept on purpose: a download has no `Range` support (an interrupted one starts over), and an empty file
+cannot be uploaded (create it over SSH).
 
 ## Copying over SSH
 

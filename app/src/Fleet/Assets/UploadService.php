@@ -98,12 +98,16 @@ final readonly class UploadService
         }
 
         // Fails now, not after the whole file is sent, when the target cannot be written.
-        $this->store->prepareTarget($project, $dir, $name, $overwrite);
+        [$targetDirectory] = $this->store->prepareTarget($project, $dir, $name, $overwrite);
 
+        // The chunks are staged under uploads/ and the file is assembled next to its target under assets/: both may be
+        // different filesystems, so both need room (on one filesystem the parts are deleted as they are copied).
         $this->ensureUploadsDirectory();
-        $free = @disk_free_space($this->paths->uploadsDir());
-        if (false !== $free && $free < $size + self::MAX_CHUNK_BYTES) {
-            throw new Refused('There is not enough free disk space for that file.', self::NO_SPACE);
+        foreach ([$this->paths->uploadsDir(), $targetDirectory] as $where) {
+            $free = @disk_free_space($where);
+            if (false !== $free && $free < $size + self::MAX_CHUNK_BYTES) {
+                throw new Refused('There is not enough free disk space for that file.', self::NO_SPACE);
+            }
         }
 
         if ('' !== $fingerprint) {

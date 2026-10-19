@@ -29,6 +29,10 @@ final readonly class AssetStore
     /** Mode of the folders created here (the files are 0640). */
     public const int DIR_MODE = 0o750;
     public const int FILE_MODE = 0o640;
+    /** `Refused::$reason` of a name that is taken by a regular file: the only clash an upload may replace. */
+    public const string REASON_FILE_EXISTS = 'file-exists';
+    /** Seconds after which a hidden upload temporary file counts as the leftover of a killed assembly. */
+    public const int STALE_TEMPORARY_AFTER = 3600;
 
     private const int TYPE_MASK = 0o170000;
     private const int TYPE_DIR = 0o040000;
@@ -152,8 +156,22 @@ final readonly class AssetStore
         }
         if (self::TYPE_DIR === ($stat['mode'] & self::TYPE_MASK)) {
             $names = @scandir($absolute);
-            if (false === $names || \count($names) > 2) {
-                throw new Refused('The folder is not empty. Delete what is in it first.', 409);
+            if (false === $names) {
+                throw new Refused('The folder could not be read.');
+            }
+            $stale = [];
+            foreach ($names as $entry) {
+                if ('.' === $entry || '..' === $entry) {
+                    continue;
+                }
+                if (!$this->isStaleTemporary($absolute.'/'.$entry, $entry)) {
+                    throw new Refused('The folder is not empty. Delete what is in it first.', 409);
+                }
+                $stale[] = $absolute.'/'.$entry;
+            }
+            // Only hidden leftovers of an assembly that was killed: they are invisible in the listing, so they go with the folder.
+            foreach ($stale as $leftover) {
+                @unlink($leftover);
             }
             if (!@rmdir($absolute)) {
                 throw new Refused('The folder could not be deleted.');
@@ -248,6 +266,20 @@ final readonly class AssetStore
     }
 
     /**
+     * A hidden temporary file of an upload assembly that has not been touched for STALE_TEMPORARY_AFTER seconds: the
+     * assembly was killed (one that runs writes to it continuously, and php-fpm cuts a request after 240 s).
+     */
+    private function isStaleTemporary(string $path, string $name): bool
+    {
+        if (!str_starts_with($name, AssetPath::TEMP_PREFIX) || !str_ends_with($name, '.tmp')) {
+            return false;
+        }
+        $stat = @lstat($path);
+
+        return false !== $stat && self::TYPE_FILE === ($stat['mode'] & self::TYPE_MASK) && time() - $stat['mtime'] > self::STALE_TEMPORARY_AFTER;
+    }
+
+    /**
      * @throws Refused
      */
     private function checkTarget(string $target, bool $overwrite): void
@@ -261,7 +293,7 @@ final readonly class AssetStore
             throw new Refused(self::TYPE_DIR === $type ? 'A folder with that name exists.' : 'A symbolic link or special file with that name exists.', 409);
         }
         if (!$overwrite) {
-            throw new Refused('A file with that name exists already.', 409);
+            throw new Refused('A file with that name exists already.', 409, self::REASON_FILE_EXISTS);
         }
     }
 

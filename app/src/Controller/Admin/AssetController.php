@@ -298,7 +298,10 @@ final class AssetController extends AbstractController
         } catch (NotFound $missing) {
             $response = new JsonResponse(['error' => $missing->getMessage()], Response::HTTP_NOT_FOUND);
         } catch (Refused $refusal) {
-            $response = new JsonResponse(['error' => $refusal->getMessage()], 0 !== $refusal->getCode() ? $refusal->getCode() : Response::HTTP_CONFLICT);
+            $response = new JsonResponse(
+                ['error' => $refusal->getMessage()] + (null === $refusal->reason ? [] : ['reason' => $refusal->reason]),
+                0 !== $refusal->getCode() ? $refusal->getCode() : Response::HTTP_CONFLICT
+            );
         }
         $response->headers->set('Cache-Control', 'no-store');
 

@@ -1,6 +1,8 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { createHash } from 'node:crypto';
-import { readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -76,6 +78,21 @@ async function uploadFromDisk(page: Page, name: string, bytes: Buffer): Promise<
   writeFileSync(path, bytes);
   utimesSync(path, 1_700_000_000, 1_700_000_000);
   await page.getByTestId('asset-input').setInputFiles(path);
+}
+
+/**
+ * Where the app under test keeps its data: the throw-away home the launcher made (.run/fleet-home) when Playwright
+ * starts the app itself, else the FLEET_HOME of this environment (the DDEV dev app shares it with the tests).
+ */
+function fleetHome(): string {
+  if (!process.env.FLEET_E2E_BASE_URL) {
+    return fileURLToPath(new URL('./.run/fleet-home', import.meta.url));
+  }
+  if (!process.env.FLEET_HOME) {
+    test.skip(true, 'Rescan needs write access to the FLEET_HOME of the app under test.');
+  }
+
+  return process.env.FLEET_HOME as string;
 }
 
 async function deleteRow(page: Page, row: Locator): Promise<void> {
@@ -258,6 +275,39 @@ test.describe('assets', () => {
 
       await deleteRow(page, page.getByTestId('asset-row').first());
       expect(errors.filter((message) => !message.includes('connectionreset') && !message.includes('ERR_CONNECTION_RESET') && !message.includes('Failed to load resource'))).toEqual([]);
+    } finally {
+      await deleteProjectViaUi(page, name);
+    }
+  });
+
+  test('Rescan shows a file copied into the assets directory over SSH', async ({ page }) => {
+    const errors = collectBrowserErrors(page);
+    const name = uniqueName();
+    const directory = join(fleetHome(), 'assets', name);
+
+    try {
+      await createProjectViaUi(page, name);
+      await openAssets(page);
+      await expect(page.getByTestId('assets-empty')).toBeVisible();
+      if (isPhone()) {
+        await expectTall(page.getByTestId('asset-rescan'));
+      }
+
+      // "Over SSH": the file lands on disk without the page knowing.
+      mkdirSync(directory, { recursive: true });
+      writeFileSync(join(directory, 'from-ssh.sql'), 'copied over ssh');
+      await expect(page.getByTestId('asset-row')).toHaveCount(0);
+
+      await page.getByTestId('asset-rescan').click();
+      await expect(page).toHaveURL(/\/assets$/);
+      await expect(page.getByTestId('asset-row')).toHaveCount(1);
+      await expect(page.getByTestId('asset-row')).toContainText('from-ssh.sql');
+      await expect(page.getByTestId('assets-empty')).toHaveCount(0);
+      await expectNoOverflow(page, 'the Assets tab after a rescan');
+
+      await deleteRow(page, page.getByTestId('asset-row').first());
+      await expect(page.getByTestId('assets-empty')).toBeVisible();
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, name);
     }
