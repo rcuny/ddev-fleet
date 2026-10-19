@@ -44,4 +44,33 @@ final class TokenRenderer
 
         return $out;
     }
+
+    /**
+     * The lenient variant for files (note FLE-87: masking of secret values in the job log is its business, this method
+     * returns only names of unresolved tokens and never logs): an unresolved placeholder stays as written (an asset may hold `[[...]]` of its
+     * own) and only its name is returned, never a value.
+     *
+     * @param array<string, string> $tokens
+     *
+     * @return array{0: string, 1: list<string>} the text and the sorted names of the tokens left unresolved
+     */
+    public static function renderLenient(string $text, array $tokens): array
+    {
+        $missing = [];
+        $out = preg_replace_callback(self::TOKEN, static function (array $m) use ($tokens, &$missing): string {
+            if (!isset($tokens[$m[1]])) {
+                $missing[$m[1]] = $m[1];
+
+                return $m[0];
+            }
+
+            return $tokens[$m[1]];
+        }, $text);
+        if (null === $out) {
+            throw new \InvalidArgumentException('The text could not be searched for tokens.');
+        }
+        ksort($missing);
+
+        return [$out, array_values($missing)];
+    }
 }
