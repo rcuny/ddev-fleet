@@ -59,6 +59,7 @@ final class RecordingCommandRunner implements CommandRunner
         }
 
         self::pretendToClone($argv);
+        self::pretendToExport($argv);
 
         return new CommandResult(0);
     }
@@ -105,6 +106,24 @@ final class RecordingCommandRunner implements CommandRunner
         $dir = false === $separator ? null : ($argv[$separator + 2] ?? null);
         if (null !== $dir && str_starts_with($dir, '/') && !is_dir($dir.'/.git/info')) {
             @mkdir($dir.'/.git/info', 0o750, true);
+        }
+    }
+
+    /**
+     * An unscripted `ddev export-db --file=<path>` writes a tiny gzip there, so a snapshot in dev and test finds the dump
+     * it asked for.
+     *
+     * @param list<string> $argv
+     */
+    private static function pretendToExport(array $argv): void
+    {
+        if ('ddev' !== ($argv[0] ?? null) || 'export-db' !== ($argv[1] ?? null)) {
+            return;
+        }
+        foreach ($argv as $arg) {
+            if (str_starts_with($arg, '--file=/')) {
+                @file_put_contents(substr($arg, 7), (string) gzencode("-- recorded dump\n"));
+            }
         }
     }
 

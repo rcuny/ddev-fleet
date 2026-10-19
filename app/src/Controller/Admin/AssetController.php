@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Controller\Admin;
 
+use App\Domain\Job\JobStatus;
+use App\Domain\Job\JobTrigger;
 use App\Domain\Project\Project;
 use App\Fleet\Assets\AssetListing;
 use App\Fleet\Assets\AssetPath;
 use App\Fleet\Assets\AssetStore;
 use App\Fleet\Assets\ByteSize;
+use App\Fleet\Assets\SnapshotService;
 use App\Fleet\Assets\UploadService;
 use App\Fleet\Assets\UploadState;
 use App\Fleet\FleetPaths;
@@ -16,6 +19,7 @@ use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
+use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\HeaderUtils;
@@ -46,6 +50,8 @@ final class AssetController extends AbstractController
         private readonly AssetStore $assets,
         private readonly UploadService $uploads,
         private readonly FleetPaths $paths,
+        private readonly SnapshotService $snapshots,
+        private readonly CurrentActor $actor,
     ) {
     }
 
@@ -76,6 +82,7 @@ final class AssetController extends AbstractController
             'maxBytes' => $this->uploads->maxBytes(),
             'chunkBytes' => UploadService::MAX_CHUNK_BYTES,
             'directory' => $this->paths->assetsDir($name),
+            'runningInstances' => $this->snapshots->snapshottable($project),
         ]);
     }
 
@@ -155,6 +162,26 @@ final class AssetController extends AbstractController
         $parent = str_contains($path, '/') ? substr($path, 0, (int) strrpos($path, '/')) : '';
 
         return $this->back($name, $parent);
+    }
+
+    #[Route('/admin/projects/{name}/assets/snapshot', name: 'project_asset_snapshot', requirements: ['name' => self::NAME], methods: ['POST'])]
+    public function snapshot(Request $request, string $name): Response
+    {
+        $this->load($name);
+        $this->requireCsrf($request);
+
+        try {
+            $job = $this->snapshots->request((string) $request->request->get('instance', ''), JobTrigger::Ui, $this->actor->name(), $name);
+            $this->addFlash(JobStatus::Failed === $job->status() ? 'warning' : 'success', \sprintf(
+                JobStatus::Failed === $job->status() ? 'Snapshot job %d failed: %s' : 'Snapshot of %2$s queued as job %1$d. The dump appears under dumps/ when it is done: press Rescan.',
+                $job->id(),
+                JobStatus::Failed === $job->status() ? (string) $job->error() : (string) $job->instanceId(),
+            ));
+        } catch (NotFound|Refused $refusal) {
+            $this->addFlash('warning', 'No snapshot was started. '.$refusal->getMessage());
+        }
+
+        return $this->back($name, '');
     }
 
     /**

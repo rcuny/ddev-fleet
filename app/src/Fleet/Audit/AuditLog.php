@@ -16,6 +16,7 @@ final readonly class AuditLog
     public const string SECRET_PUT = 'secret.put';
     public const string SECRET_DELETE = 'secret.delete';
     public const string SECRET_REVEAL = 'secret.reveal';
+    public const string ASSET_SNAPSHOT = 'asset.snapshot';
 
     /** The actor of changes made on the command line. */
     public const string CLI_ACTOR = 'cli';
