@@ -52,10 +52,13 @@ final class UninstallTest extends TestCase
         self::assertStringContainsString('dry-run: nothing is changed', $out);
         foreach ([
             '+ systemctl disable --now fleet-worker@1.service',
+            '+ systemctl disable --now fleet-backup.timer',
             '+ systemctl disable --now fleet-mercure.service',
             '+ systemctl disable --now caddy.service',
             '+ systemctl disable --now authelia.service',
             '+ rm -f -- /etc/systemd/system/fleet-worker@.service',
+            '+ rm -f -- /etc/systemd/system/fleet-backup.service',
+            '+ rm -f -- /etc/systemd/system/fleet-backup.timer',
             '+ rm -f -- /etc/systemd/system/fleet-mercure.service',
             '+ rm -f -- /etc/systemd/system/php8.4-fpm.service.d/fleet-env.conf',
             '+ rm -f -- /etc/systemd/system/caddy.service.d/10-fleet-sandbox.conf',
