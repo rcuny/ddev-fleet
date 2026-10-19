@@ -321,16 +321,37 @@ final class SecretStoreTest extends KernelTestCase
 
     public function testPlaintextStaysOutOfExceptionTraces(): void
     {
-        $paths = self::getContainer()->get(FleetPaths::class);
-        $paths->ensureLayout();
-        file_put_contents($paths->secretKey(), 'x');
-        chmod($paths->secretKey(), 0o640);
-
+        // php.ini-production (and so possibly the suite) sets zend.exception_ignore_args=1, which drops every argument
+        // from traces and would make this test pass whatever the code does. Collect the arguments, as a default PHP does.
+        $previous = ini_set('zend.exception_ignore_args', '0');
         try {
-            $this->store->putFleetWide('claude_oauth_token', 'plaintext-in-a-frame', 'admin');
-            self::fail('A wide-mode key file must stop the put.');
-        } catch (\RuntimeException $e) {
-            self::assertStringNotContainsString('plaintext-in-a-frame', print_r($e->getTrace(), true));
+            self::assertSame('0', \ini_get('zend.exception_ignore_args'));
+
+            $paths = self::getContainer()->get(FleetPaths::class);
+            $paths->ensureLayout();
+            file_put_contents($paths->secretKey(), 'x');
+            chmod($paths->secretKey(), 0o640);
+
+            try {
+                $this->store->putFleetWide('claude_oauth_token', 'plaintext-in-a-frame', 'admin');
+                self::fail('A wide-mode key file must stop the put.');
+            } catch (\RuntimeException $e) {
+                $trace = $e->getTrace();
+                self::assertNotEmpty(array_filter($trace, static fn (array $frame): bool => isset($frame['args'])), 'arguments are being collected, so a leak would show');
+                // (not print_r: a frame may hold the whole container.) A leak is a string argument, bare or in an array.
+                $strings = [];
+                array_walk_recursive($trace, static function (mixed $value) use (&$strings): void {
+                    if (\is_string($value)) {
+                        $strings[] = $value;
+                    }
+                });
+                self::assertNotContains('plaintext-in-a-frame', $strings);
+                foreach ($strings as $string) {
+                    self::assertStringNotContainsString('plaintext-in-a-frame', $string);
+                }
+            }
+        } finally {
+            false !== $previous && ini_set('zend.exception_ignore_args', $previous);
         }
         self::assertCount(1, new \ReflectionMethod(SecretStore::class, 'putFleetWide')->getParameters()[1]->getAttributes(\SensitiveParameter::class));
     }
