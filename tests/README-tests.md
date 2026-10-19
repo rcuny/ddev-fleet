@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 Type: documentation
 ---
 
@@ -20,7 +20,7 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 | PHPUnit `Integration` | `app/tests/Integration/` | 25 tests |
 | PHPUnit `Functional` | `app/tests/Functional/` | 70 tests |
 | PHPUnit `Repo` | `app/tests/Repo/` | 63 tests |
-| Playwright | `tests/playwright/` | 38 (6 spec files; each spec runs on the `desktop` and the `phone` project where it applies) |
+| Playwright | `tests/playwright/` | 46 (7 spec files; each spec runs on the `desktop` and the `phone` project where it applies). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 38 run, 8 skipped |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
 PHPUnit totals 272 tests. Update this table when the numbers change.
@@ -38,8 +38,9 @@ app/tests/
   Support/           shared helpers (a temporary FLEET_HOME)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
-  support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts
-  *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes)
+  support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts
+  *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
+                         setup-wizard.desktop (the setup wizard end to end)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```
@@ -74,11 +75,17 @@ npx playwright show-report                         # the HTML report of the last
 ```
 
 With `FLEET_E2E_BASE_URL` unset, Playwright starts the app itself (`support/start-app.mjs`: a throw-away
-`FLEET_HOME`, `importmap:install`, `tailwind:build`, migrations, `php -S 127.0.0.1:8000`) and stops it
-afterwards. With it set to a URL, the suite targets that already-running server and starts nothing
+`FLEET_HOME`, `importmap:install`, `tailwind:build`, migrations, an initialised host with a fresh setup link
+written to `.run/setup-url.txt`, `php -S 127.0.0.1:8000`) and stops it afterwards. With it set to a URL, the suite targets that already-running server and starts nothing
 (`FLEET_E2E_IGNORE_HTTPS_ERRORS=1` accepts a local certificate; `*.ddev.site` hosts are accepted
 automatically). Other variables: `FLEET_E2E_PORT` (default 8000) and `FLEET_PHP` (the PHP binary of the
-launcher). The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
+launcher). `setup-wizard.desktop.spec.ts` walks the token-gated setup wizard once, in order, in one browser session (refusal without
+a cookie, token exchange and its Strict cookie, every step at 1280 px with axe in both themes, the real walk-through at 390 px
+ending in Finish, then what every wizard URL answers). It needs a host that is installed but not set up, which only the
+self-started app provides, so it skips itself against an external server (the companion's served app keeps a persistent
+`FLEET_HOME`). `support/wizard.ts` (`completeWizard`, `readSetupUrl`) is shared with a live-server spec; `FLEET_LIVE_SETUP_URL`
+overrides the link file. Each run re-creates the setup link and clears the token-attempt throttle (`cache.rate_limiter`).
+The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
 bottom bar, and the shell specs assert that no console error or uncaught page error was seen (`support/shell.ts`).
 
 ### pytest (CI tooling and Ansible roles)
