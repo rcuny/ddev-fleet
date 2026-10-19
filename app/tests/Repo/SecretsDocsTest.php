@@ -150,17 +150,14 @@ final class SecretsDocsTest extends TestCase
 
     public function testTheChangelogHasAnUnreleasedEntry(): void
     {
-        $changelog = self::read('CHANGELOG.md');
-        if (1 !== preg_match('/^## \[Unreleased\]\R(.*?)(?=^## \[|\z)/ms', $changelog, $match)) {
-            self::fail('CHANGELOG.md has no [Unreleased] section');
-        }
+        $unreleased = UnreleasedChangelog::text(self::root());
 
         foreach (['FLE-39', 'fleet secret:', '[[token]]', 'audit log', 'docs/secrets.md'] as $needle) {
-            self::assertStringContainsString($needle, $match[1], "[Unreleased] should mention $needle");
+            self::assertStringContainsString($needle, $unreleased, "[Unreleased] should mention $needle");
         }
         // The earlier entries stay in the same section: this one is added, not a rewrite.
-        self::assertStringContainsString('FLE-37', $match[1]);
-        self::assertStringContainsString('FLE-36', $match[1]);
+        self::assertStringContainsString('FLE-37', $unreleased);
+        self::assertStringContainsString('FLE-36', $unreleased);
     }
 
     public function testTheIndexesAndAgentInstructionsPointAtTheGuide(): void

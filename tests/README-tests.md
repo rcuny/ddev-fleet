@@ -46,7 +46,9 @@ app/tests/
                      CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
                      option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it),
                      AssetDocsTest (the same for docs/assets.md and `fleet asset:list|gc`, and its limits match the code),
-                     SecretsDocsTest (the same for docs/secrets.md and the secret commands)
+                     SecretsDocsTest (the same for docs/secrets.md and the secret commands),
+                     ChangelogAssembleTest (ci/changelog-assemble.php merges changelog.d/ fragments and cuts a release),
+                     CliGroupsTest (the FLEET_GROUPS list of the wrapper matches the command groups)
   Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
