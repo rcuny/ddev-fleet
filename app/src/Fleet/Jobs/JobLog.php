@@ -12,6 +12,11 @@ use App\Domain\Job\Job;
  *
  * With a TailAwareLogMasker the last (longest secret - 1) bytes are held back until more output arrives, because they
  * may be the start of a secret; finish() writes what is left. Call it when the job ends.
+ *
+ * Consequences of holding bytes back: a live tail lags by up to (longest secret - 1) bytes until more output arrives or
+ * the job ends, and those bytes exist only in memory, so they are lost if the process dies before finish() runs
+ * (SIGKILL, power loss). JobExecutor calls finish() on every path it controls, success, failure or exception; a
+ * destructor would not help on a hard kill and would write outside the executor's error handling, so none is added.
  */
 final class JobLog
 {
