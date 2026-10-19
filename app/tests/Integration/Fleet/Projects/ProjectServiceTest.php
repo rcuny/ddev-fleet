@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Fleet\Projects;
 
+use App\Domain\Audit\AuditEntryRepository;
 use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceGuard;
 use App\Domain\Instance\InstanceRepository;
@@ -13,13 +14,21 @@ use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
+use App\Domain\Secret\SecretRepository;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Audit\AuditLog;
+use App\Fleet\FleetPaths;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
+use App\Fleet\Secrets\PlaceholderScanner;
+use App\Fleet\Secrets\SecretBox;
+use App\Fleet\Secrets\SecretKeyFile;
+use App\Fleet\Secrets\SecretService;
+use App\Fleet\Secrets\SecretStore;
 use App\Tests\Support\FakeInstanceGuard;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\InstanceFixtures;
@@ -27,6 +36,7 @@ use App\Tests\Support\SecondWriter;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\NativeClock;
 
 final class ProjectServiceTest extends KernelTestCase
 {
@@ -50,7 +60,12 @@ final class ProjectServiceTest extends KernelTestCase
         $this->ports = new NamedPortRepository($this->em);
         $this->templates = new TemplateRepository($this->em);
         $this->guard = new FakeInstanceGuard();
-        $this->service = new ProjectService($this->projects, $this->ports, $this->guard);
+        $this->service = new ProjectService($this->projects, $this->ports, $this->guard, null, new SecretService(
+            new SecretStore(new SecretRepository($this->em), new SecretBox(new SecretKeyFile(self::getContainer()->get(FleetPaths::class))), new NativeClock()),
+            $this->projects,
+            new AuditLog(new AuditEntryRepository($this->em), new NativeClock()),
+            new PlaceholderScanner(self::getContainer()->get(FleetPaths::class)),
+        ));
     }
 
     protected function tearDown(): void
@@ -307,7 +322,7 @@ final class ProjectServiceTest extends KernelTestCase
         $this->templates->save(new Template($project, 'light'));
         $this->service->create($this->valid()->with(['name' => 'shop']));
 
-        $this->service->delete('blog');
+        $this->service->delete('blog', 'tester');
         $this->em->clear();
 
         self::assertNull($this->projects->findByName('blog'));
@@ -321,7 +336,7 @@ final class ProjectServiceTest extends KernelTestCase
         $this->guard->set('blog', 2);
 
         try {
-            $this->service->delete('blog');
+            $this->service->delete('blog', 'tester');
             self::fail('A project with instances was deleted.');
         } catch (Refused $e) {
             self::assertStringContainsString('2 instance(s) exist: destroy them first', $e->getMessage());
@@ -331,7 +346,7 @@ final class ProjectServiceTest extends KernelTestCase
         self::assertNotNull($this->projects->findByName('blog'));
 
         $this->guard->set('blog', 0);
-        $this->service->delete('blog');
+        $this->service->delete('blog', 'tester');
         self::assertNull($this->projects->findByName('blog'));
     }
 
@@ -342,7 +357,7 @@ final class ProjectServiceTest extends KernelTestCase
         $this->instancesOf($project, [InstanceState::Running, InstanceState::Failed]);
 
         try {
-            $service->delete('blog');
+            $service->delete('blog', 'tester');
             self::fail('A project with instances was deleted.');
         } catch (Refused $e) {
             self::assertStringContainsString('2 instance(s) exist: destroy them first', $e->getMessage());
@@ -351,7 +366,7 @@ final class ProjectServiceTest extends KernelTestCase
         self::assertNotNull($this->projects->findByName('blog'));
 
         $this->em->createQuery(\sprintf('DELETE FROM %s i', Instance::class))->execute();
-        $service->delete('blog');
+        $service->delete('blog', 'tester');
         self::assertNull($this->projects->findByName('blog'));
     }
 
@@ -362,7 +377,7 @@ final class ProjectServiceTest extends KernelTestCase
 
         $this->expectException(Refused::class);
         $this->expectExceptionMessageMatches('/^13 instance\(s\) exist: destroy them first \(blog--i1, .*blog--i10 and 3 more\)\.$/');
-        $this->service->delete('blog');
+        $this->service->delete('blog', 'tester');
     }
 
     public function testUnknownProjectIsNotFound(): void
@@ -370,7 +385,7 @@ final class ProjectServiceTest extends KernelTestCase
         foreach ([
             fn () => $this->service->get('nope'),
             fn () => $this->service->update('nope', $this->valid()->with(['name' => 'nope'])),
-            fn () => $this->service->delete('nope'),
+            fn () => $this->service->delete('nope', 'tester'),
         ] as $call) {
             try {
                 $call();

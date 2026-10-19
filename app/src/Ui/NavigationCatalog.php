@@ -32,7 +32,7 @@ final readonly class NavigationCatalog
             new NavItem('jobs', 'Jobs', 'jobs', '/admin/jobs', 'lucide:activity', self::ADMIN, 'M0.04', true),
             new NavItem('webhooks', 'Webhooks', 'webhooks', '/admin/webhooks', 'lucide:webhook', self::ADMIN, 'M0.08', false),
             new NavItem('schedules', 'Schedules', 'schedules', '/admin/schedules', 'lucide:calendar-clock', self::ADMIN, 'M0.09', false),
-            new NavItem('secrets', 'Secrets', 'secrets', '/admin/secrets', 'lucide:key-round', self::ADMIN, 'M0.05', false),
+            new NavItem('secrets', 'Secrets', 'secrets', '/admin/secrets', 'lucide:key-round', self::ADMIN, null, false),
             new NavItem('users', 'Users', 'users', '/admin/users', 'lucide:users', self::ADMIN, null, false),
             new NavItem('settings', 'Settings', 'settings', '/admin/host', 'lucide:settings', self::ADMIN, null, false),
             new NavItem('design-system', 'Design system', 'admin_design_system', '/admin/design-system', 'lucide:palette', self::ADMIN, null, false),

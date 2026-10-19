@@ -89,7 +89,7 @@ final class ProjectAccessRefreshTest extends KernelTestCase
     public function testNothingHappensBeforeSetupIsComplete(): void
     {
         $this->projects()->create(new ProjectInput(name: 'blog', git: self::GIT));
-        $this->projects()->delete('blog');
+        $this->projects()->delete('blog', 'tester');
 
         self::assertSame(0, $this->installs());
         self::assertNull($this->refresher()->takeWarning());
@@ -102,7 +102,7 @@ final class ProjectAccessRefreshTest extends KernelTestCase
         $this->projects()->create(new ProjectInput(name: 'blog', git: self::GIT));
         self::assertSame(1, $this->installs(), 'a new project needs its rule');
 
-        $this->projects()->delete('blog');
+        $this->projects()->delete('blog', 'tester');
         self::assertSame(2, $this->installs(), 'a deleted project loses its rule');
         self::assertNull($this->refresher()->takeWarning());
     }

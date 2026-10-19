@@ -45,7 +45,8 @@ app/tests/
                      InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code),
                      CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
                      option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it),
-                     AssetDocsTest (the same for docs/assets.md and `fleet asset:list|gc`, and its limits match the code)
+                     AssetDocsTest (the same for docs/assets.md and `fleet asset:list|gc`, and its limits match the code),
+                     SecretsDocsTest (the same for docs/secrets.md and the secret commands)
   Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
@@ -53,7 +54,8 @@ tests/playwright/    TypeScript @playwright/test, its own npm package
                          projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
                          setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
-                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe)
+                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe),
+                         secrets (fleet-wide and project secrets, reveal, audit log)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```

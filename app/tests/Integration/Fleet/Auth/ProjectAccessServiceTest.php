@@ -134,7 +134,7 @@ final class ProjectAccessServiceTest extends KernelTestCase
         $this->service->grant('bob', 'blog');
         $this->service->grant('alice', 'demo');
 
-        $this->projectService->delete('blog');
+        $this->projectService->delete('blog', 'tester');
 
         self::assertSame(1, $this->rowCount());
         self::assertSame(['demo'], $this->service->projectsOf('alice'));

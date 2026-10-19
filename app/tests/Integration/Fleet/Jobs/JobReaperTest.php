@@ -143,6 +143,61 @@ final class JobReaperTest extends JobTestCase
         self::assertSame([], $this->jobs->activeInstanceIds(['acme--main']));
     }
 
+    public function testAnOrphanedQueuedJobTheExecutorClaimsMeanwhileIsNotFailed(): void
+    {
+        $job = $this->queuedJob();
+        $this->clock->modify('+41 minutes');
+        $connection = $this->em->getConnection();
+
+        // The executor claims the job after the reaper listed it as stale, just before the reaper gets the lock.
+        $store = new class(new FlockStore($this->paths->locksDir()), static function () use ($connection, $job): void {
+            $connection->executeStatement('UPDATE job SET status = :status WHERE id = :id', ['status' => JobStatus::Running->value, 'id' => $job->id()]);
+        }) implements PersistingStoreInterface {
+            public function __construct(private FlockStore $inner, private \Closure $beforeSave)
+            {
+            }
+
+            public function save(Key $key): void
+            {
+                ($this->beforeSave)();
+                $this->inner->save($key);
+            }
+
+            public function delete(Key $key): void
+            {
+                $this->inner->delete($key);
+            }
+
+            public function exists(Key $key): bool
+            {
+                return $this->inner->exists($key);
+            }
+
+            public function putOffExpiration(Key $key, float $ttl): void
+            {
+                $this->inner->putOffExpiration($key, $ttl);
+            }
+        };
+        $reaper = new JobReaper($this->jobs, $this->instances, $this->service, new LockFactory($store), $this->clock);
+
+        self::assertSame(0, $reaper->reap());
+
+        self::assertSame(JobStatus::Running, $job->status());
+    }
+
+    public function testAnOrphanedQueuedJobWhoseInstanceLockIsHeldIsLeftAlone(): void
+    {
+        $job = $this->queuedJob();
+        $this->clock->modify('+41 minutes');
+        $holder = $this->locks->createLock('instance.acme--main');
+        self::assertTrue($holder->acquire());
+
+        self::assertSame(0, $this->reaper()->reap());
+
+        self::assertSame(JobStatus::Queued, $job->status());
+        $holder->release();
+    }
+
     public function testAQueuedJobStillInItsGiveUpWindowIsLeftAlone(): void
     {
         $job = $this->queuedJob();

@@ -34,6 +34,26 @@ final class UniqueJobTypesPassTest extends TestCase
         $this->expectExceptionMessage('"deploy" is registered twice');
         new UniqueJobTypesPass()->process($container);
     }
+
+    public function testANameComputedFromConstructorStateFailsTheBuild(): void
+    {
+        $container = new ContainerBuilder();
+        $container->register('a', ComputedType::class)->addTag('fleet.job_type');
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('must return a constant');
+        new UniqueJobTypesPass()->process($container);
+    }
+
+    public function testAnEmptyNameFailsTheBuild(): void
+    {
+        $container = new ContainerBuilder();
+        $container->register('a', EmptyNameType::class)->addTag('fleet.job_type');
+
+        $this->expectException(\LogicException::class);
+        $this->expectExceptionMessage('constant lower-case word');
+        new UniqueJobTypesPass()->process($container);
+    }
 }
 
 abstract class FixedType implements JobType
@@ -68,5 +88,32 @@ final class StartType extends FixedType
     public function name(): string
     {
         return 'start';
+    }
+}
+
+final class ComputedType implements JobType
+{
+    private string $name;
+
+    public function __construct(string $name)
+    {
+        $this->name = $name;
+    }
+
+    public function name(): string
+    {
+        return $this->name;
+    }
+
+    public function execute(Job $job, JobLog $log): void
+    {
+    }
+}
+
+final class EmptyNameType extends FixedType
+{
+    public function name(): string
+    {
+        return '';
     }
 }

@@ -38,16 +38,21 @@ final readonly class UserService
         $this->assertPassword($plainPassword, $username);
         $hash = self::hash($plainPassword);
 
-        $user = $this->users->findByUsername($username);
-        if (null === $user) {
-            $user = new User($username, $displayName, $email, $hash, [$this->admins->name()]);
-        } else {
-            $user->updateProfile($displayName, $email);
-            $user->changePasswordHash($hash);
-            $user->changeGroups($this->admins->addedTo($user->groups()));
-            $user->setEnabled(true);
-        }
-        $this->users->save($user);
+        // The lookup and the save are one locked change: a parallel call cannot create the user in between.
+        $user = null;
+        $this->users->write(function () use (&$user, $username, $displayName, $email, $hash): void {
+            $user = $this->users->findByUsername($username);
+            if (null === $user) {
+                $user = new User($username, $displayName, $email, $hash, [$this->admins->name()]);
+            } else {
+                $user->updateProfile($displayName, $email);
+                $user->changePasswordHash($hash);
+                $user->changeGroups($this->admins->addedTo($user->groups()));
+                $user->setEnabled(true);
+            }
+            $this->users->save($user);
+        });
+        \assert($user instanceof User);
 
         return $user;
     }
@@ -63,12 +68,19 @@ final readonly class UserService
         $this->assertUsername($username);
         $this->assertProfile($displayName, $email);
         $this->assertPassword($plainPassword, $username);
-        if (null !== $this->users->findByUsername($username)) {
-            throw new InvalidUserInput('username', 'A user with this username already exists.');
-        }
+        $hash = self::hash($plainPassword);
 
-        $user = new User($username, $displayName, $email, self::hash($plainPassword), $admin ? [$this->admins->name()] : []);
-        $this->users->save($user);
+        // The existence check and the save are one locked change: a losing parallel create gets the same
+        // InvalidUserInput as a sequential one, never a unique-constraint error.
+        $user = null;
+        $this->users->write(function () use (&$user, $username, $displayName, $email, $hash, $admin): void {
+            if (null !== $this->users->findByUsername($username)) {
+                throw new InvalidUserInput('username', 'A user with this username already exists.');
+            }
+            $user = new User($username, $displayName, $email, $hash, $admin ? [$this->admins->name()] : []);
+            $this->users->save($user);
+        });
+        \assert($user instanceof User);
 
         return $user;
     }
