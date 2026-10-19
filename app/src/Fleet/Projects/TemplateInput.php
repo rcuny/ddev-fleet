@@ -12,7 +12,7 @@ use App\Domain\Template\Template;
 final readonly class TemplateInput
 {
     /**
-     * @param list<string> $postDeploy command lines run with `ddev exec` after a deploy
+     * @param list<string> $postDeploy command lines run inside the web container with `ddev exec` after a deploy
      * @param list<string> $tty1       command lines typed into the first instance terminal
      * @param list<string> $tty2       command lines typed into the second instance terminal
      */

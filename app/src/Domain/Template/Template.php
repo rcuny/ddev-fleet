@@ -10,7 +10,7 @@ use Doctrine\DBAL\Types\Types;
 use Doctrine\ORM\Mapping as ORM;
 
 /**
- * One way to deploy a project: the Drupal environment and the command lines run after a deploy (`ddev exec`) and
+ * One way to deploy a project: the Drupal environment and the command lines run after a deploy (`ddev exec`, inside the web container) and
  * typed into the two instance terminals. Lists keep their order and duplicates. The entity only stores.
  */
 #[ORM\Entity]
