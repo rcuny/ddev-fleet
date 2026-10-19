@@ -91,7 +91,7 @@ final class FleetPathsTest extends TestCase
             $modes = [
                 'var' => 0o750, 'keys' => 0o700, 'ssh' => 0o700, 'assets' => 0o750, 'instances' => 0o750,
                 'logs' => 0o750, 'logs/jobs' => 0o750, 'logs/instances' => 0o750, 'locks' => 0o755,
-                'staging' => 0o700, 'authelia' => 0o750, 'uploads' => 0o700,
+                'staging' => 0o700, 'authelia' => 0o750, 'uploads' => 0o700, 'backups' => 0o700,
             ];
             foreach ($modes as $dir => $mode) {
                 self::assertDirectoryExists($home.'/'.$dir);
@@ -167,6 +167,7 @@ final class FleetPathsTest extends TestCase
 
         self::assertSame('/srv/fleet/staging', $paths->stagingDir());
         self::assertSame('/srv/fleet/staging/caddy/Caddyfile', $paths->stagingFile('caddy', 'Caddyfile'));
+        self::assertSame('/srv/fleet/backups', $paths->backupsDir());
         self::assertSame('/srv/fleet/uploads', $paths->uploadsDir());
         self::assertSame('/srv/fleet/uploads/0123456789abcdef0123456789abcdef', $paths->uploadDir('0123456789abcdef0123456789abcdef'));
         self::assertSame('/srv/fleet/authelia', $paths->autheliaDir());
@@ -183,10 +184,12 @@ final class FleetPathsTest extends TestCase
 
         try {
             mkdir($home.'/staging', 0o755, true);
+            mkdir($home.'/backups', 0o755, true);
             new FleetPaths($home, $home.'/caddy')->ensureLayout();
 
             clearstatcache();
             self::assertSame(0o700, fileperms($home.'/staging') & 0o777, 'repaired');
+            self::assertSame(0o700, fileperms($home.'/backups') & 0o777, 'backups repaired');
             self::assertSame(0o750, fileperms($home.'/authelia') & 0o777, 'created');
         } finally {
             umask($previous);
@@ -269,7 +272,7 @@ final class FleetPathsTest extends TestCase
 
     private static function removeLayout(string $home): void
     {
-        foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs/instances', 'logs', 'assets', 'instances', 'staging', 'authelia'] as $dir) {
+        foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs/instances', 'logs', 'assets', 'instances', 'staging', 'authelia', 'backups'] as $dir) {
             @rmdir($home.'/'.$dir);
         }
         @rmdir($home);

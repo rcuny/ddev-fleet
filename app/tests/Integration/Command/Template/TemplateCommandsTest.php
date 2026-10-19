@@ -8,6 +8,7 @@ use App\Domain\Template\Template;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
+use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\TemplateService;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RunsFleetCommands;
@@ -119,6 +120,24 @@ final class TemplateCommandsTest extends KernelTestCase
 
         $json = $this->json($this->cli('fleet:template:create', ['project' => 'blog', 'name' => 'Bad', '--json' => true]));
         self::assertSame(['<name>'], array_keys($json['fields']));
+    }
+
+    public function testTheLargestValidListIsStoredAndATextOverTheBoundIsRefused(): void
+    {
+        $lines = array_map(static fn (int $i): string => 'c'.$i.str_repeat('x', CommandLines::MAX_LINE - \strlen('c'.$i)), range(1, CommandLines::MAX_LINES));
+        $text = implode("\r\n", $lines);
+        self::assertLessThanOrEqual(CommandLines::MAX_TEXT, mb_strlen($text));
+
+        $ok = $this->cli('fleet:template:create', ['project' => 'blog', 'name' => 'big', '--post-deploy' => [$text]]);
+
+        self::assertSame(0, $ok->getStatusCode(), $ok->getErrorOutput());
+        self::assertSame($lines, $this->stored('blog', 'big')->postDeploy());
+
+        $bad = $this->cli('fleet:template:update', ['project' => 'blog', 'name' => 'big', '--tty1' => [str_repeat('a', CommandLines::MAX_TEXT + 1)]]);
+
+        self::assertSame(1, $bad->getStatusCode());
+        self::assertSame(\sprintf("--tty1: The text must be at most %d characters.\n", CommandLines::MAX_TEXT), $bad->getErrorOutput());
+        self::assertSame([], $this->stored('blog', 'big')->tty1());
     }
 
     public function testMultiLineTextIsSplitIntoLinesLikeATextarea(): void

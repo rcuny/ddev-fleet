@@ -26,10 +26,24 @@ final class CommandLinesTest extends TestCase
         self::assertSame(['a'], CommandLines::normalise("a\n"));
     }
 
+    public function testTheTextBoundHoldsTheLargestValidList(): void
+    {
+        self::assertSame(100_100, CommandLines::MAX_TEXT);
+        $largest = implode("\r\n", array_fill(0, CommandLines::MAX_LINES, str_repeat('é', CommandLines::MAX_LINE)));
+        self::assertLessThanOrEqual(CommandLines::MAX_TEXT, mb_strlen($largest));
+        self::assertNull(CommandLines::textError($largest));
+        self::assertCount(CommandLines::MAX_LINES, CommandLines::normalise($largest));
+        self::assertNull(CommandLines::error(CommandLines::normalise($largest)));
+        self::assertSame('The text must be at most 100100 characters.', CommandLines::textError(str_repeat('a', CommandLines::MAX_TEXT + 1)));
+        self::assertNotNull(CommandLines::textError(str_repeat('a', 1_000_000)));
+        self::assertNotNull(CommandLines::textError("a\0b"));
+        self::assertNotNull(CommandLines::textError(['a']));
+    }
+
     public function testValidLines(): void
     {
         self::assertNull(CommandLines::error([]));
-        self::assertNull(CommandLines::error(['ddev composer install']));
+        self::assertNull(CommandLines::error(['composer install']));
         self::assertNull(CommandLines::error(['drush cr', 'echo "é — ü"']));
         self::assertNull(CommandLines::error([str_repeat('x', 2000)]));
         self::assertNull(CommandLines::error(array_fill(0, 50, 'ls')));
@@ -54,6 +68,8 @@ final class CommandLinesTest extends TestCase
             'too many lines' => array_fill(0, 51, 'ls'),
             'empty' => [''],
             'blank' => [' '],
+            'no-break space only' => ["\u{A0}"],
+            'ideographic space only' => ["\u{3000} \u{A0}"],
             'invalid utf-8' => ["\xff"],
             'truncated utf-8' => ["a\xc3"],
             'a string' => 'string',

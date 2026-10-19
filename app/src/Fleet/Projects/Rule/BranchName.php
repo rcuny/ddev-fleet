@@ -31,6 +31,10 @@ final class BranchName
             return 'This is not a valid git branch name (no "..", "//", "/.", trailing "/" or ".", or ".lock" ending).';
         }
 
+        if ('HEAD' === $branch || str_starts_with($branch, 'refs/')) {
+            return 'This is not a branch name: it is the name git gives the current checkout, or a full reference path.';
+        }
+
         return null;
     }
 }

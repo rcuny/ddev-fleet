@@ -163,7 +163,11 @@ final class TemplatePagesTest extends AdminTestCase
         }
         self::assertSame('8', $crawler->filter('#template_postDeploy')->attr('rows'));
         self::assertStringContainsString('DRUPAL_ENV=<value>', $crawler->filter('#template_drupalEnv_help')->text());
-        self::assertStringContainsString('aborts the deploy', $crawler->filter('#template_postDeploy_help')->text());
+        self::assertStringContainsString('inside the instance\'s web container with ddev exec', $crawler->filter('#template_postDeploy_help')->text());
+        self::assertStringNotContainsString('on the host', $crawler->filter('#template_postDeploy_help')->text());
+        foreach (['postDeploy', 'tty1', 'tty2'] as $field) {
+            self::assertSame((string) CommandLines::MAX_TEXT, $crawler->filter('#template_'.$field)->attr('maxlength'), $field);
+        }
         self::assertStringContainsString('middle terminal pane', $crawler->filter('#template_tty1_help')->text());
         self::assertStringContainsString('right terminal pane', $crawler->filter('#template_tty2_help')->text());
         self::assertNotNull($crawler->filter('main form[data-testid=template-form]')->attr('novalidate'));
@@ -238,6 +242,37 @@ final class TemplatePagesTest extends AdminTestCase
         }
         // What was typed comes back for correction.
         self::assertStringContainsString('cmd51', $crawler->filter('#template_tty1')->text());
+    }
+
+    /**
+     * The largest list the CLI and the service accept (50 lines of 2000 characters) must save from the browser, which
+     * submits CRLF between lines; a text over the shared bound is refused with the CLI's message.
+     */
+    public function testTheLargestValidListSavesFromTheForm(): void
+    {
+        $lines = array_map(static fn (int $i): string => 'c'.$i.str_repeat('x', CommandLines::MAX_LINE - \strlen('c'.$i)), range(1, CommandLines::MAX_LINES));
+        $this->makeTemplate('big', new TemplateInput('big', null, $lines, $lines, $lines));
+        self::assertSame($lines, $this->stored('big')?->postDeploy());
+
+        $crawler = $this->open(self::LIST.'/big');
+        $text = implode("\r\n", $lines);
+        self::assertLessThanOrEqual(CommandLines::MAX_TEXT, mb_strlen($text));
+        $this->submit($crawler, 'Save', ['template[drupalEnv]' => 'dev', 'template[postDeploy]' => $text, 'template[tty1]' => $text, 'template[tty2]' => $text]);
+
+        self::assertResponseRedirects(self::LIST, 303);
+        $template = $this->stored('big') ?? self::fail();
+        self::assertSame('dev', $template->drupalEnv());
+        self::assertSame($lines, $template->postDeploy());
+        self::assertSame($lines, $template->tty1());
+        self::assertSame($lines, $template->tty2());
+    }
+
+    public function testATextOverTheSharedBoundIsRefusedLikeTheCli(): void
+    {
+        $crawler = $this->rawCreate(['name' => 'full', 'tty2' => str_repeat('a', CommandLines::MAX_TEXT + 1)]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(\sprintf('The text must be at most %d characters.', CommandLines::MAX_TEXT), trim($crawler->filter('#template_tty2_errors')->text()));
     }
 
     public function testALongFirstLineNamesLineOne(): void

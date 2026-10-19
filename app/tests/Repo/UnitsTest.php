@@ -128,6 +128,52 @@ final class UnitsTest extends TestCase
         }
     }
 
+    public function testBackupServiceRunsTheBackupCommandAsFleetInASandbox(): void
+    {
+        $unit = $this->unit('fleet-backup.service');
+        $service = $unit['Service'];
+
+        self::assertSame(['oneshot'], $service['Type']);
+        self::assertSame(['fleet'], $service['User']);
+        self::assertSame(['fleet'], $service['Group']);
+        self::assertSame(['/etc/ddev-fleet/fleet.env'], $service['EnvironmentFile']);
+        self::assertSame(['/opt/ddev-fleet/app'], $service['WorkingDirectory']);
+        self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:backup:create'], $service['ExecStart']);
+        self::assertSame(['0077'], $service['UMask'], 'backups are owner-only');
+        self::assertArrayNotHasKey('Install', $unit, 'only the timer is enabled');
+
+        // The command writes only the backups (FLEET_HOME), the databases' WAL files (FLEET_HOME/var) and the app's cache/logs.
+        self::assertSame(['strict'], $service['ProtectSystem']);
+        self::assertSame(['/srv/fleet /opt/ddev-fleet/app/var'], $service['ReadWritePaths']);
+        foreach (['NoNewPrivileges', 'PrivateTmp', 'PrivateDevices', 'ProtectHome', 'RestrictSUIDSGID', 'LockPersonality'] as $directive) {
+            self::assertSame(['yes'], $service[$directive], $directive);
+        }
+        self::assertSame(['AF_UNIX'], $service['RestrictAddressFamilies']);
+        self::assertSame([''], $service['CapabilityBoundingSet'], 'no capabilities');
+    }
+
+    public function testBackupTimerIsDailyRandomisedAndPersistent(): void
+    {
+        $unit = $this->unit('fleet-backup.timer');
+
+        self::assertSame(['daily'], $unit['Timer']['OnCalendar']);
+        self::assertSame(['1h'], $unit['Timer']['RandomizedDelaySec']);
+        self::assertSame(['true'], $unit['Timer']['Persistent']);
+        self::assertSame(['timers.target'], $unit['Install']['WantedBy']);
+        self::assertArrayNotHasKey('Service', $unit);
+    }
+
+    public function testBackupUnitsAreInstalledAndTheTimerEnabledByTheSteps(): void
+    {
+        $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
+        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+
+        self::assertStringContainsString('install_etc fleet-backup.service "$SYSTEMD_DIR/fleet-backup.service" 0644 root:root', $units);
+        self::assertStringContainsString('install_etc fleet-backup.timer "$SYSTEMD_DIR/fleet-backup.timer" 0644 root:root', $units);
+        self::assertStringContainsString('systemctl enable --now fleet-backup.timer', $start);
+        self::assertStringNotContainsString('systemctl enable', $units, 'units are enabled by step 98');
+    }
+
     public function testMercureUnitDirectives(): void
     {
         $unit = $this->unit('fleet-mercure.service');
@@ -277,7 +323,7 @@ final class UnitsTest extends TestCase
 
     public function testEveryUnitFileSectionIsWellFormed(): void
     {
-        foreach (['php-fpm-env.conf', 'fleet-worker@.service', 'fleet-mercure.service', 'caddy-sandbox.conf', 'caddy-env.conf', 'authelia-secrets.conf'] as $file) {
+        foreach (['php-fpm-env.conf', 'fleet-worker@.service', 'fleet-backup.service', 'fleet-mercure.service', 'caddy-sandbox.conf', 'caddy-env.conf', 'authelia-secrets.conf'] as $file) {
             $unit = $this->unit($file);
             self::assertArrayHasKey('Service', $unit, $file);
         }
@@ -285,7 +331,7 @@ final class UnitsTest extends TestCase
 
     public function testNoWorldWritablePathsAreGrantedToServices(): void
     {
-        foreach (['fleet-worker@.service', 'php-fpm-env.conf'] as $file) {
+        foreach (['fleet-worker@.service', 'fleet-backup.service', 'php-fpm-env.conf'] as $file) {
             foreach ($this->unit($file)['Service']['ReadWritePaths'] ?? [] as $value) {
                 foreach (explode(' ', $value) as $path) {
                     self::assertNotContains($path, ['/', '/etc', '/usr', '/var', '/home', '/srv', '/opt'], $file);

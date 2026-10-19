@@ -152,7 +152,7 @@ test.describe('build', () => {
     await follow(page, page.getByRole('link', { name: 'New template' }));
     await page.getByLabel('Name', { exact: true }).fill(TEMPLATE);
     await page.getByLabel('Drupal environment').fill('dev');
-    await page.getByLabel('Post-deploy commands').fill('ddev composer install\nddev drush deploy');
+    await page.getByLabel('Post-deploy commands').fill('composer install\ndrush deploy');
     await page.getByLabel('Terminal 1 commands').fill('ddev npm run watch');
     await page.getByLabel('Terminal 2 commands').fill('ddev logs -f');
     await page.getByRole('button', { name: 'Create template' }).click();
@@ -164,7 +164,7 @@ test.describe('build', () => {
     await expectNoOverflow('the template list');
 
     await follow(page, row.getByRole('link', { name: `Edit ${TEMPLATE}` }));
-    await expect(page.getByLabel('Post-deploy commands')).toHaveValue('ddev composer install\nddev drush deploy');
+    await expect(page.getByLabel('Post-deploy commands')).toHaveValue('composer install\ndrush deploy');
     await page.getByLabel('Drupal environment').fill('prod');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByTestId('flashes')).toContainText('Template saved.');
