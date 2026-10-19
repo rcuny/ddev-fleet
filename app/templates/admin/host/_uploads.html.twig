@@ -1,0 +1,16 @@
+{% set form = forms.uploads %}
+<twig:Card data-testid="host-tab-uploads">
+    <twig:Card:Header>
+        <twig:Card:Title>Asset uploads</twig:Card:Title>
+        <twig:Card:Description>The largest file the browser may upload into a project's assets. Changing it applies to the next upload.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-upload-limit-form'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.megabytes) }}
+            {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+        {{ form_end(form) }}
+
+        <p class="text-sm text-ink-muted">Now: <strong data-testid="host-upload-limit-current">{{ host.assetUploadMaxBytes|bytes }}</strong>. The same limit is checked again on the server for every upload.</p>
+    </twig:Card:Content>
+</twig:Card>
