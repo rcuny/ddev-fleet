@@ -134,7 +134,7 @@ The job page shows the log as it is written. The hub (Mercure) only says "there 
 its status and the log size, on private topics `/jobs/<job>` and `/instances`. The text itself is fetched from
 `/jobs/<job>/log?from=<byte>` in chunks of at most 64 KiB, so a page opened late, or after the job ended, shows the whole
 log. When the hub is not reachable the page says so and polls instead (the log every 2 seconds, the list every 5). A hub
-outage never fails a job. Secret values are masked in the log.
+outage never fails a job. Secret values a deploy uses are masked in the log (`[masked]`; see `docs/secrets.md`).
 
 ## Commands
 
