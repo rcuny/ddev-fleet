@@ -119,7 +119,13 @@ final readonly class UserRepository
         $this->em->flush();
     }
 
-    private function write(\Closure $change): void
+    /**
+     * Runs $change under the write lock: it joins the transaction already open, or opens one (see transactional()). Use
+     * it for a change that reads before it writes (an existence check), so no other writer slips in between.
+     *
+     * @param \Closure(): mixed $change
+     */
+    public function write(\Closure $change): void
     {
         if ($this->em->getConnection()->isTransactionActive()) {
             $change();
