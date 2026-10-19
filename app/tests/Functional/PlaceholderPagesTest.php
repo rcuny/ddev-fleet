@@ -15,7 +15,6 @@ final class PlaceholderPagesTest extends WebTestCase
      */
     public static function placeholders(): iterable
     {
-        yield 'instances' => ['/instances', 'Instances', 'M0.04', 'instances'];
         yield 'jobs' => ['/admin/jobs', 'Jobs', 'M0.04', 'jobs'];
         yield 'webhooks' => ['/admin/webhooks', 'Webhooks', 'M0.08', 'webhooks'];
         yield 'schedules' => ['/admin/schedules', 'Schedules', 'M0.09', 'schedules'];
@@ -34,12 +33,9 @@ final class PlaceholderPagesTest extends WebTestCase
         self::assertSame($routeName, self::getContainer()->get('router')->match($path)['_route']);
     }
 
-    public function testMemberSeesInstancesButNotAdminPages(): void
+    public function testMemberSeesNoAdminPages(): void
     {
         $client = self::createClient();
-
-        $client->request('GET', '/instances', server: ['HTTP_X_FLEET_STAND_IN_ROLE' => 'member']);
-        self::assertResponseStatusCodeSame(200);
 
         $catalog = self::getContainer()->get(NavigationCatalog::class);
         $adminPaths = [];

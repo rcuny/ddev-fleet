@@ -1,0 +1,24 @@
+{#- The state badge of an instance. Needs: instance, job (its newest job or null). An active job replaces the state. -#}
+{%- set active = job is not null and not job.status.isFinal ? job : null -%}
+{%- set state = instance.state.value -%}
+{%- if active -%}
+    {%- set labels = {start: 'Starting…', stop: 'Stopping…', redeploy: 'Redeploying…', deploy: 'Deploying…', destroy: 'Destroying…'} -%}
+    {%- set label = active.status.value == 'queued' ? 'Waiting for another operation' : labels[active.type]|default('Working…') -%}
+    <twig:Badge data-testid="instance-state" data-state="{{ state }}" data-active-job="{{ active.id }}" class="h-auto whitespace-normal border-transparent bg-signal-faded text-signal-darker dark:text-signal">{{ label }}</twig:Badge>
+{%- else -%}
+    {%- set labels = {running: 'Running', stopped: 'Stopped', failed: 'Failed', deploying: 'Deploying…', destroying: 'Destroying…', unknown: 'Unknown'} -%}
+    {%- if state == 'running' -%}
+        <twig:Badge data-testid="instance-state" data-state="{{ state }}" class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">{{ labels[state] }}</twig:Badge>
+    {%- elseif state == 'failed' -%}
+        <twig:Badge data-testid="instance-state" data-state="{{ state }}" variant="destructive">{{ labels[state] }}</twig:Badge>
+    {%- elseif state == 'deploying' or state == 'destroying' -%}
+        <twig:Badge data-testid="instance-state" data-state="{{ state }}" class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">{{ labels[state] }}</twig:Badge>
+    {%- elseif state == 'stopped' -%}
+        <twig:Badge data-testid="instance-state" data-state="{{ state }}" variant="secondary">{{ labels[state] }}</twig:Badge>
+    {%- else -%}
+        <twig:Badge data-testid="instance-state" data-state="{{ state }}" variant="outline">{{ labels[state] }}</twig:Badge>
+    {%- endif -%}
+{%- endif -%}
+{%- if job is not null and job.status.value in ['failed', 'interrupted'] and not active %}
+    <a href="/jobs/{{ job.id }}" data-testid="last-job-failed" class="ms-1 text-xs text-destructive underline">Last job {{ job.status.value }}</a>
+{%- endif -%}

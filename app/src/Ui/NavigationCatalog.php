@@ -27,7 +27,7 @@ final readonly class NavigationCatalog
     {
         return [
             new NavItem('home', 'Home', 'home', '/', 'lucide:house', self::USER, null, true),
-            new NavItem('instances', 'Instances', 'instances', '/instances', 'lucide:server', self::USER, 'M0.04', true),
+            new NavItem('instances', 'Instances', 'instances', '/instances', 'lucide:server', self::USER, null, true),
             new NavItem('projects', 'Projects', 'projects', '/admin/projects', 'lucide:folder', self::ADMIN, null, false),
             new NavItem('jobs', 'Jobs', 'jobs', '/admin/jobs', 'lucide:activity', self::ADMIN, 'M0.04', true),
             new NavItem('webhooks', 'Webhooks', 'webhooks', '/admin/webhooks', 'lucide:webhook', self::ADMIN, 'M0.08', false),
