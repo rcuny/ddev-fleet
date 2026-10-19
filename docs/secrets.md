@@ -80,7 +80,7 @@ says "No asset files yet". Fleet-wide secrets are never flagged: any project may
 
 ## Placeholders
 
-`App\Fleet\Secrets\TokenRenderer` renders a text for a project (the deploy uses it from M0.04):
+`App\Fleet\Secrets\TokenRenderer` renders a text for a project. It is the only deploy-time substitution:
 
 - A placeholder is `[[` followed by lowercase letters, digits and dashes, then `]]`. `[[ token ]]`, `[[TOKEN]]`
   and `[[my_token]]` are not placeholders and are left alone.
@@ -88,6 +88,17 @@ says "No asset files yet". Fleet-wide secrets are never flagged: any project may
   over any secret. Host secrets are never substituted.
 - Values are inserted **verbatim**: no quoting, no escaping. The text is scanned once, so a value that itself
   contains `[[x]]` is not expanded again.
+- Where a deploy substitutes (built-in tokens first, then the project's and fleet-wide secrets, every inserted value
+  registered with the job log masker before the first log line that could hold it):
+
+  | Site | Secrets | Unresolved token |
+  |---|---|---|
+  | Post-deploy commands (after splitting, inside each word, so a value never adds shell syntax) | resolved, in the argument list | The deploy fails in the preflight, before anything is changed; the log names the token |
+  | Asset files seeded into the checkout (text files up to 1 MiB) | resolved | Left as written; a log line names the token |
+  | `tty1` / `tty2` commands typed into the tmux window | **never**: the pane keeps what is typed in its scrollback. Only the built-in tokens are substituted | The command is skipped with a `WARNING` naming the token; the deploy goes on |
+
+  The instance configuration (`config.fleet.yaml`, the Drupal settings) has no placeholders: the Claude token is
+  written there by its own code path, also masked.
 - A placeholder that nothing resolves is **reported** (`render`) or **refused** (`renderStrict` throws
   `UnresolvedTokens` naming the placeholders, never a value); the text keeps it as written.
 

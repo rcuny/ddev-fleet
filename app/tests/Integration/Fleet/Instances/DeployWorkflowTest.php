@@ -178,6 +178,49 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertSame([], $this->runner->calls());
     }
 
+    public function testProjectSecretTokenIsInArgvAndMaskedInTheJobLog(): void
+    {
+        $this->secretStore->putManaged('acme', 'MY_SECRET', 'proj-s3cret-value', 'test');
+        $this->saveTemplate('full', ['ddev drush config:set key [[my-secret]]']);
+        $this->runner->expect(['ddev', 'drush'], new CommandResult(0, "echo proj-s3cret-value\n", ''));
+
+        $this->deploy();
+
+        $drush = $this->runner->callsMatching(['ddev', 'drush']);
+        self::assertSame(['ddev', 'drush', 'config:set', 'key', 'proj-s3cret-value'], $drush[0]->argv);
+        $job = $this->em->getRepository(\App\Domain\Job\Job::class)->findOneBy([]);
+        self::assertNotNull($job);
+        $log = $this->logText($job);
+        self::assertStringContainsString('post_deploy: ddev drush config:set key [[my-secret]]', $log);
+        self::assertStringNotContainsString('proj-s3cret-value', $log);
+        self::assertStringContainsString('[masked]', $log);
+    }
+
+    public function testProjectSecretWinsOverFleetWideAndFleetWideAloneResolves(): void
+    {
+        $this->secretStore->putManaged(null, 'SHARED', 'fleet-value-1', 'test');
+        $this->secretStore->putManaged(null, 'BOTH', 'fleet-value-2', 'test');
+        $this->secretStore->putManaged('acme', 'BOTH', 'project-value-2', 'test');
+        $this->saveTemplate('full', ['ddev drush x [[shared]] [[both]] [[project]]']);
+
+        $this->deploy();
+
+        $drush = $this->runner->callsMatching(['ddev', 'drush']);
+        self::assertSame(['ddev', 'drush', 'x', 'fleet-value-1', 'project-value-2', 'acme'], $drush[0]->argv);
+    }
+
+    public function testUnresolvedSecretTokenFailsBeforeAnythingRunsAndNamesOnlyTheToken(): void
+    {
+        $this->secretStore->putManaged('acme', 'MY_SECRET', 'proj-s3cret-value', 'test');
+        $this->saveTemplate('full', ['ddev drush x [[my-secret]] [[no-such-secret]]']);
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('line 1 cannot run: unresolved token(s): [[no-such-secret]]', $e->getMessage());
+        self::assertStringNotContainsString('proj-s3cret-value', $e->getMessage());
+        self::assertSame([], $this->runner->calls());
+    }
+
     public function testTokenValueNeverSplitsAWord(): void
     {
         $this->saveTemplate('full', ['ddev drush config:set x [[branch]]']);

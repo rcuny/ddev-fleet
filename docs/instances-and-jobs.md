@@ -80,8 +80,10 @@ Caddy site for `https://<id>.<domain>` and reloads Caddy.
 
 **Post-deploy commands run on the host, as arguments, never through a shell.** Quotes and backslashes group words; an
 unquoted `|`, `&`, `;`, `<`, `>`, `$`, `` ` ``, `(`, `)`, `{` or `}` is refused with a hint to write `ddev exec '...'`. A
-`[[token]]` is substituted after splitting, inside each word; an unresolved token fails the deploy and a secret never
-appears in an argument list.
+`[[token]]` is substituted after splitting, inside each word, from the built-in tokens and then the project's and
+fleet-wide secrets (see [`secrets.md`](secrets.md#placeholders) for every substitution site). An unresolved token fails
+the deploy before anything is changed. A secret that lands in an argument is masked in the job log. Secrets are not
+substituted in `tty1`/`tty2` commands.
 
 ## Start, stop, redeploy, destroy
 
