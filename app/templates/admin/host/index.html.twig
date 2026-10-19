@@ -1,0 +1,40 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Host settings · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Host settings" description="How this fleet host introduces itself: certificates, git identity, the Claude token, notification e-mail, the asset upload limit and database backups.">
+        <twig:block name="tabs">
+            {% if host is not null %}
+                {# md and up: the tab strip (sub navigation, see /admin/design-system). #}
+                <nav aria-label="Host settings sections" class="hidden items-center gap-6 border-b border-hairline md:flex" data-testid="host-tabs">
+                    {% for key, label in tabs %}
+                        <a href="{{ path('settings', {tab: key}) }}" data-tab="{{ key }}"{% if key == tab %} aria-current="page" class="-mb-px border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand"{% else %} class="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline"{% endif %}>{{ label }}</a>
+                    {% endfor %}
+                </nav>
+                {# Phone: a native select that names the active tab, submitted with a Go button (works without scripting). #}
+                <form method="get" action="{{ path('settings') }}" class="flex items-center gap-2 border-b border-hairline py-2 md:hidden" data-testid="host-tab-select">
+                    <label for="host-tab" class="sr-only">Section</label>
+                    <twig:NativeSelect id="host-tab" name="tab" class="min-w-0 flex-1 [&_select]:h-11">
+                        {% for key, label in tabs %}
+                            <twig:NativeSelect:Option value="{{ key }}" :selected="key == tab">{{ label }}</twig:NativeSelect:Option>
+                        {% endfor %}
+                    </twig:NativeSelect>
+                    <twig:Button type="submit" variant="outline" class="h-11 px-4">Go</twig:Button>
+                </form>
+            {% endif %}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-2xl gap-4">
+        {% if host is null %}
+            <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="host-not-initialised">
+                <twig:ux:icon name="lucide:triangle-alert" />
+                <twig:Alert:Title>This host is not initialised</twig:Alert:Title>
+                <twig:Alert:Description class="text-ink-body">The host settings do not exist yet. On the host, run <code class="break-all">sudo fleet host:init --domain=fleet.example.com</code>, then reload this page.</twig:Alert:Description>
+            </twig:Alert>
+        {% else %}
+            {% include 'admin/host/_' ~ tab ~ '.html.twig' %}
+        {% endif %}
+    </div>
+{% endblock %}

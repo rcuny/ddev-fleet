@@ -37,7 +37,7 @@ final class ProjectUpdateCommand extends Command
         return $out->run(function () use ($input, $out): void {
             $name = (string) $input->getArgument('name');
             $current = ProjectInput::fromProject($this->projects->get($name));
-            $project = $this->projects->update($name, $current->with(ProjectOptions::changes($input, true)));
+            $project = $this->projects->update($name, $current->with(ProjectOptions::changes($input, true, $current->gitBotMode)));
             $out->emit(ProjectSnapshot::fromProject($project)->toArray(), static function (JsonOutput $out) use ($project): void {
                 $out->success(\sprintf('Project "%s" updated.', $project->name()));
             });

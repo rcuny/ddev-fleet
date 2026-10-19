@@ -249,9 +249,16 @@ test.describe('projects and templates', () => {
       await expect(page.locator('a[href="/admin/projects"]')).toHaveCount(0);
     }
 
-    // The live component endpoint of the issue id tester is admin only too.
+    // The issue id tester is admin only too: the component class decides, not the route rule. A bare GET never reaches
+    // the access check (the live component route answers 404 first), so it must be exactly a denial (403 or 404, D10) and
+    // serve nothing; ComponentsAccessTest pins the 403 for a signed request.
     const live = await context.request.get('/_components/IssueIdPreview');
-    expect(live.status()).toBe(403);
+    expect([403, 404]).toContain(live.status());
+    // A denial page, never the component: no component markup, no tester field and no live-component response type.
+    const body = await live.text();
+    expect(body).not.toContain('issue-id');
+    expect(body).not.toContain('data-live-name-value');
+    expect(live.headers()['content-type'] ?? '').not.toContain('live-component');
   });
 
   test('issue id tester shows the key', async ({ page }) => {

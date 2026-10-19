@@ -55,6 +55,20 @@ final class SecretStoreTest extends KernelTestCase
         self::assertFalse($this->store->hasFleetWide('ovh_consumer_key'));
     }
 
+    public function testUpdatedAtIsReportedWithoutOpeningTheValue(): void
+    {
+        self::assertNull($this->store->fleetWideUpdatedAt('smtp_password'));
+
+        $this->store->putFleetWide('smtp_password', 'one', 'admin');
+        $this->entityManager()->clear();
+        self::assertSame('2026-10-19 10:00:00', $this->store->fleetWideUpdatedAt('smtp_password')?->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'));
+
+        $this->clock->sleep(3600);
+        $this->store->putFleetWide('smtp_password', 'two', 'admin');
+        $this->entityManager()->clear();
+        self::assertSame('2026-10-19 11:00:00', $this->store->fleetWideUpdatedAt('smtp_password')?->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s'));
+    }
+
     public function testPutManyIsOneTransactionAllOrNothing(): void
     {
         $this->store->putManyFleetWide(['ovh_endpoint' => 'ovh-eu', 'ovh_consumer_key' => 'one'], 'alice');

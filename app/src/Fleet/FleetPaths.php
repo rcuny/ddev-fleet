@@ -14,6 +14,9 @@ use App\Domain\Ssh\SshKeyRole;
 final readonly class FleetPaths
 {
     private const string ID_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/D';
+    private const string UPLOAD_ID_PATTERN = '/^[0-9a-f]{32}$/D';
+    /** An instance id is `{project}--{label}`: lowercase words joined by single dashes, at most 63 characters (a DNS label). */
+    public const string INSTANCE_ID_PATTERN = '/^(?=.{3,63}$)[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$/D';
 
     private string $home;
     private string $caddyDir;
@@ -59,6 +62,14 @@ final readonly class FleetPaths
         return $this->keysDir().'/secret.key';
     }
 
+    /**
+     * Database backups (`fleet-YYYYmmdd-HHMMSS.sqlite`, `queue-…`), written by BackupService. Owner only.
+     */
+    public function backupsDir(): string
+    {
+        return $this->home.'/backups';
+    }
+
     public function sshDir(): string
     {
         return $this->home.'/ssh';
@@ -67,6 +78,27 @@ final readonly class FleetPaths
     public function assetsDir(string $project): string
     {
         return $this->home.'/assets/'.self::id($project, 'project');
+    }
+
+    /**
+     * Where browser uploads are staged until they are assembled into `assets/<project>/`: one directory per upload
+     * under `uploads/<id>/`. Owner only.
+     */
+    public function uploadsDir(): string
+    {
+        return $this->home.'/uploads';
+    }
+
+    /**
+     * @param string $id the 32 hexadecimal characters of an upload id
+     */
+    public function uploadDir(string $id): string
+    {
+        if (1 !== preg_match(self::UPLOAD_ID_PATTERN, $id)) {
+            throw new \InvalidArgumentException('Invalid upload id.');
+        }
+
+        return $this->uploadsDir().'/'.$id;
     }
 
     public function instancesDir(): string
@@ -126,9 +158,44 @@ final readonly class FleetPaths
         return $this->autheliaDir().'/users.yml';
     }
 
+    /**
+     * The users file exactly as Fleet last wrote it (owner only). Authelia's self-service reset changes users.yml in
+     * place; comparing it with this copy is how the hash read-back finds what Authelia changed (AutheliaUsersFile).
+     */
+    public function usersRenderedFile(): string
+    {
+        return $this->varDir().'/authelia-users.rendered.yml';
+    }
+
+    /**
+     * sha256 of the Authelia configuration the app last installed (owner only), so an unchanged configuration is not
+     * installed again: installing restarts Authelia, which drops every session (AutheliaAccessSync).
+     */
+    public function autheliaConfigMarker(): string
+    {
+        return $this->varDir().'/authelia-config.sha256';
+    }
+
     public function caddySnippetDir(): string
     {
         return $this->caddyDir;
+    }
+
+    /**
+     * Where the worker writes one Caddy site snippet per instance (the main Caddyfile imports `instances/*.conf`).
+     */
+    public function caddyInstancesDir(): string
+    {
+        return $this->caddyDir.'/instances';
+    }
+
+    public function instanceSiteFile(string $id): string
+    {
+        if (1 !== preg_match(self::INSTANCE_ID_PATTERN, $id)) {
+            throw new \InvalidArgumentException(\sprintf('Invalid instance id "%s".', addcslashes($id, "\0..\37")));
+        }
+
+        return $this->caddyInstancesDir().'/'.$id.'.conf';
     }
 
     public function gateFile(): string
@@ -173,11 +240,15 @@ final readonly class FleetPaths
             $this->varDir() => [0o750, true],
             $this->keysDir() => [0o700, true],
             $this->sshDir() => [0o700, true],
+            // Owner only: copies of the database (password hashes, sealed secrets).
+            $this->backupsDir() => [0o700, true],
             $this->locksDir() => [0o755, false],
             $this->logsDir() => [0o750, true],
             $this->logsDir().'/jobs' => [0o750, true],
             $this->logsDir().'/instances' => [0o750, true],
             $this->home.'/assets' => [0o750, true],
+            // Owner only: chunks of a browser upload wait here until they are assembled (they may be database dumps).
+            $this->uploadsDir() => [0o700, true],
             $this->instancesDir() => [0o750, true],
             // Owner only: rendered config (may carry credentials) waits here for the root helper.
             $this->stagingDir() => [0o700, true],

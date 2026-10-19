@@ -12,18 +12,22 @@ final class RecordingCommandRunner implements CommandRunner
     /** @var list<RecordedCall> */
     private array $calls = [];
 
-    /** @var list<array{prefix: list<string>, result: CommandResult}> */
+    /** @var list<array{prefix: list<string>, result: CommandResult, effect: (callable(list<string>, ?string): void)|null}> */
     private array $rules = [];
 
     /**
      * Script the result for the next call whose argv starts with $argvPrefix.
      * Rules are tried in registration order and each is consumed once.
      *
-     * @param list<string> $argvPrefix
+     * $effect, when given, runs on the match with the call's argv and cwd (for example to create the files the real
+     * command would have created).
+     *
+     * @param list<string>                                 $argvPrefix
+     * @param (callable(list<string>, ?string): void)|null $effect
      */
-    public function expect(array $argvPrefix, CommandResult $result): self
+    public function expect(array $argvPrefix, CommandResult $result, ?callable $effect = null): self
     {
-        $this->rules[] = ['prefix' => $argvPrefix, 'result' => $result];
+        $this->rules[] = ['prefix' => $argvPrefix, 'result' => $result, 'effect' => $effect];
 
         return $this;
     }
@@ -43,6 +47,9 @@ final class RecordingCommandRunner implements CommandRunner
             }
             array_splice($this->rules, $i, 1);
             $result = $rule['result'];
+            if (null !== $rule['effect']) {
+                ($rule['effect'])($argv, $cwd);
+            }
             if (null !== $onOutput) {
                 self::replay($onOutput, 'stdout', $result->stdout);
                 self::replay($onOutput, 'stderr', $result->stderr);
@@ -50,6 +57,8 @@ final class RecordingCommandRunner implements CommandRunner
 
             return $result;
         }
+
+        self::pretendToClone($argv);
 
         return new CommandResult(0);
     }
@@ -79,6 +88,24 @@ final class RecordingCommandRunner implements CommandRunner
     {
         $this->calls = [];
         $this->rules = [];
+    }
+
+    /**
+     * An unscripted `git ... clone ... -- <url> <dir>` leaves a minimal checkout (`<dir>/.git/info`), so a deploy in dev
+     * and test finds the clone it asked for.
+     *
+     * @param list<string> $argv
+     */
+    private static function pretendToClone(array $argv): void
+    {
+        if ('git' !== ($argv[0] ?? null) || !\in_array('clone', $argv, true)) {
+            return;
+        }
+        $separator = array_search('--', $argv, true);
+        $dir = false === $separator ? null : ($argv[$separator + 2] ?? null);
+        if (null !== $dir && str_starts_with($dir, '/') && !is_dir($dir.'/.git/info')) {
+            @mkdir($dir.'/.git/info', 0o750, true);
+        }
     }
 
     /**

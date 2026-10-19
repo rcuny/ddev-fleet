@@ -1,0 +1,43 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-backup.service.
+# One database backup (fleet:backup:create: a consistent copy of fleet.sqlite and queue.sqlite into $FLEET_HOME/backups,
+# then pruning to the retention set on the host page). Started by fleet-backup.timer; `systemctl start fleet-backup`
+# or `fleet backup:create` run it by hand.
+[Unit]
+Description=ddev-fleet database backup
+
+[Service]
+Type=oneshot
+User=fleet
+Group=fleet
+EnvironmentFile=/etc/ddev-fleet/fleet.env
+WorkingDirectory=/opt/ddev-fleet/app
+ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:backup:create
+# Backups are owner-only files; a copy and a prune are not worth competing with the instances for the disk or the CPU.
+UMask=0077
+Nice=10
+IOSchedulingClass=idle
+# The command only reads and writes SQLite files and the app's cache and logs: no sudo, no Docker, no network, no
+# home directory. (Unlike the worker, nothing here starts a process, so the full sandbox applies.)
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+# FLEET_HOME comes from fleet.env (the EnvironmentFile above), like the worker's. systemd does not expand variables in
+# ReadWritePaths, so the installer's FLEET_HOME (/srv/fleet, install/lib/common.sh FLEET_SRV_DIR) is spelled out here;
+# UnitsTest keeps the two in step.
+ReadWritePaths=/srv/fleet /opt/ddev-fleet/app/var
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_UNIX
+LockPersonality=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service

@@ -24,10 +24,10 @@ use Symfony\UX\TwigComponent\Attribute\PreMount;
  * extract(), which runs under the backtrack limit and never throws. The samples are bounded here, before any matching,
  * and the inputs are the only writable props. Nothing the visitor typed is put into a message.
  *
- * Access has three layers, each enough on its own (checked by switching the other two off): the `^/_components`
- * rules (admins only), `#[IsGranted]` on this class (Symfony's listener reads it from the controller class the live
- * route resolves to) and the two hooks below, which also cover a mount outside a request. When M0.04 relaxes the
- * blanket rules for member-facing components, this one stays admin-only.
+ * Access has two layers, each enough on its own: `#[IsGranted]` on this class (Symfony's listener reads it from the
+ * controller class the live route resolves to; the `^/_components` rules only require a signed-in user, so every live
+ * component decides for itself, see ComponentsAccessTest) and the two hooks below, which also cover a mount outside a
+ * request. This one is admin-only.
  */
 #[AsLiveComponent]
 #[IsGranted(ProjectVoter::SETTINGS)]

@@ -12,18 +12,22 @@ Playwright in a real browser (`tests/playwright/`), and a small set of Python te
 for the CI tooling and the Ansible roles (`tests/pytest/`). The commands below are run from the
 repository root unless stated otherwise; use `php8.4` where the default `php` is older than 8.4.
 
-## Current counts (2026-10-19)
+## Counts
 
-| Suite | Where | Count |
+The numbers are not kept in this file: every feature branch edited them, so every merge conflicted.
+Print the current counts with:
+
+```bash
+ci/test-counts.sh      # PHPUnit per suite (--list-tests), Playwright (--list), pytest (--collect-only)
+```
+
+What the numbers include:
+
+| Suite | Where | Notes |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 939 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 496 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 457 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 399 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
-| Playwright | `tests/playwright/` | 102 (9 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests and `secrets.spec.ts` one, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 81 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
-| pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
-
-PHPUnit totals 2291 tests (13 skipped in a fleet instance, which lacks some of the optional tools). Update this table when the numbers change.
+| PHPUnit `Unit`, `Integration`, `Functional`, `Repo` | `app/tests/<Suite>/` | `Repo` tests skip without their tool: `FLEET_CADDY_BIN`, `FLEET_MERCURE_BIN`, or when not run as root (one test only runs as root) |
+| Playwright | `tests/playwright/` | each spec runs on the `desktop` and the `phone` project where it applies (`projects.spec.ts` has phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| pytest | `tests/pytest/` | a test skips when an optional binary is missing |
 
 ## Layout
 
@@ -40,16 +44,18 @@ app/tests/
                      helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
                      InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code),
                      CliDocsTest (docs/projects-and-templates.md documents every project, template and port command and
-                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it), SecretsDocsTest (the
-                     same for docs/secrets.md and the secret commands)
+                     option and names nothing else; CHANGELOG, indexes and CLAUDE.md point at it),
+                     AssetDocsTest (the same for docs/assets.md and `fleet asset:list|gc`, and its limits match the code),
+                     SecretsDocsTest (the same for docs/secrets.md and the secret commands)
   Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
   support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts,
                          projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
-                         setup-wizard.desktop (the setup wizard end to end), projects (project and template pages), secrets (fleet-wide
-                         and project secrets, reveal, audit log)
+                         setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
+                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe),
+                         secrets (fleet-wide and project secrets, reveal, audit log)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```
@@ -98,8 +104,14 @@ overrides the link file. Each run re-creates the setup link and clears the token
 in `finally`, so it passes repeatedly against the shared dev database of the companion and in parallel. It covers the
 list, create, edit, templates, ports and delete dialog at both widths, the member 403, the issue id tester, and (phone
 project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets and axe in both
-themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, section select, live tester) retry until
+themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
 the controller answers, because a busy host loads them after the HTML is interactive.
+`assets.spec.ts` (FLE-52, written without a browser to run it in: first run it on the pipeline) uploads files through the page
+with `setInputFiles` after lowering the chunk size to 64 KiB (the controller reads `data-asset-upload-chunk-size-value` when an
+upload starts), so a 192 KiB file travels as four requests; it compares the sha256 the server shows with the one it computed,
+downloads the file and compares it, deletes through the dialog, creates and uses a folder, aborts chunk 2 with `page.route` to
+prove that choosing the same file again sends only chunks 2 and 3, and answers the replace prompt both ways. Files copied in over
+SSH ("Rescan") need the server's disk, so that case is covered by `AssetPagesTest` only. Each test deletes the files it uploaded.
 The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
 bottom bar, and the shell specs assert that no console error or uncaught page error was seen (`support/shell.ts`).
 

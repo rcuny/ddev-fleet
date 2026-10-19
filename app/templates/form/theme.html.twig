@@ -116,15 +116,27 @@
 {%- endblock choice_widget_collapsed %}
 
 {% block choice_widget_expanded -%}
-    <div role="radiogroup" id="{{ id }}" class="grid gap-2"{% if help is not empty %} aria-describedby="{{ id }}_help"{% endif %}>
-        {%- for child in form %}
-            {#- The label's ::after covers the whole row, so the full row selects the option. -#}
-            <div class="relative flex min-h-11 items-start gap-3 rounded-lg border border-hairline p-3" data-slot="radio-row">
-                <twig:RadioGroup:Item :name="child.vars.full_name" :value="child.vars.value" id="{{ child.vars.id }}" :checked="child.vars.checked" :required="child.vars.required" class="mt-0.5" />
-                {{ form_label(child, null, {label_attr: {class: "flex-1 cursor-pointer text-sm font-normal text-ink-body after:absolute after:inset-0 after:content-['']"}}) }}
-            </div>
-        {%- endfor %}
-    </div>
+    {%- if multiple -%}
+        {#- Several choices: one checkbox row each, the label's ::after covers the whole 44 px row. -#}
+        <div id="{{ id }}" class="grid gap-2"{% if help is not empty %} aria-describedby="{{ id }}_help"{% endif %}>
+            {%- for child in form %}
+                <div class="relative flex min-h-11 items-start gap-3 rounded-lg border border-hairline p-3" data-slot="checkbox-choice">
+                    {{- form_widget(child) -}}
+                    {{- form_label(child, null, {label_attr: {class: "flex-1 cursor-pointer text-sm font-normal text-ink-body [overflow-wrap:anywhere] after:absolute after:inset-0 after:content-['']"}}) -}}
+                </div>
+            {%- endfor %}
+        </div>
+    {%- else -%}
+        <div role="radiogroup" id="{{ id }}" class="grid gap-2"{% if help is not empty %} aria-describedby="{{ id }}_help"{% endif %}>
+            {%- for child in form %}
+                {#- The label's ::after covers the whole row, so the full row selects the option. -#}
+                <div class="relative flex min-h-11 items-start gap-3 rounded-lg border border-hairline p-3" data-slot="radio-row">
+                    <twig:RadioGroup:Item :name="child.vars.full_name" :value="child.vars.value" id="{{ child.vars.id }}" :checked="child.vars.checked" :required="child.vars.required" class="mt-0.5" />
+                    {{ form_label(child, null, {label_attr: {class: "flex-1 cursor-pointer text-sm font-normal text-ink-body after:absolute after:inset-0 after:content-['']"}}) }}
+                </div>
+            {%- endfor %}
+        </div>
+    {%- endif -%}
 {%- endblock choice_widget_expanded %}
 
 {% block button_widget -%}

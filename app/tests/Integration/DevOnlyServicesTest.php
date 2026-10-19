@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration;
 
+use App\Domain\Project\ProjectMembership;
+use App\Security\StandIn\StandInProjectMembership;
 use App\Ui\ProfilerToolbarSwitch;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
@@ -18,5 +20,16 @@ final class DevOnlyServicesTest extends KernelTestCase
 
         self::assertSame('test', self::$kernel?->getEnvironment());
         self::assertFalse(self::getContainer()->has(ProfilerToolbarSwitch::class));
+    }
+
+    /**
+     * The stand-in membership exists in test (VisibleInstancesTest relies on it); ProdKernelSecurityTest pins that the
+     * compiled prod container has neither the class nor a mention of it, so production keeps the real membership.
+     */
+    public function testStandInMembershipIsWiredInTest(): void
+    {
+        self::bootKernel();
+
+        self::assertInstanceOf(StandInProjectMembership::class, self::getContainer()->get(ProjectMembership::class));
     }
 }

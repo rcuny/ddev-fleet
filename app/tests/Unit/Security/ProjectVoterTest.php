@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Security;
 
-use App\Domain\Project\NoProjectMembership;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectMembership;
 use App\Security\FleetUser;
@@ -68,7 +67,7 @@ final class ProjectVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), null, [ProjectVoter::SETTINGS]));
     }
 
-    public function testMemberOperatesOnlyOnOwnProjects(): void
+    public function testMemberOperatesOnlyProjectsTheyBelongTo(): void
     {
         $own = new Project('acme', 'git@git.example.com:acme/blog.git');
         $other = new Project('blog', 'git@git.example.com:acme/other.git');
@@ -78,9 +77,25 @@ final class ProjectVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $other, [ProjectVoter::OPERATE]));
     }
 
-    public function testDefaultMembershipMakesNobodyAMember(): void
+    public function testDeployAndDestroyAreAdminOnly(): void
     {
-        $voter = new ProjectVoter(new NoProjectMembership());
+        $own = new Project('acme', 'git@git.example.com:acme/blog.git');
+        // Even a member of the project may neither deploy nor destroy.
+        $voter = $this->voter($own);
+
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote($this->admin(), $own, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote($this->admin(), null, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_GRANTED, $voter->vote($this->admin(), $own, [ProjectVoter::DESTROY]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $own, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), null, [ProjectVoter::DEPLOY]));
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $own, [ProjectVoter::DESTROY]));
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $voter->vote($this->admin(), null, [ProjectVoter::DESTROY]), 'destroy needs a project');
+        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), $own, [ProjectVoter::DEPLOY]));
+    }
+
+    public function testNoMembershipMakesNobodyAMember(): void
+    {
+        $voter = $this->voter();
         $project = new Project('acme', 'git@git.example.com:acme/blog.git');
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $project, [ProjectVoter::OPERATE]));
@@ -107,10 +122,12 @@ final class ProjectVoterTest extends TestCase
         $voter = $this->voter();
         $project = new Project('acme', 'git@git.example.com:acme/blog.git');
 
-        foreach ([ProjectVoter::SETTINGS, ProjectVoter::OPERATE] as $attribute) {
+        foreach ([ProjectVoter::SETTINGS, ProjectVoter::OPERATE, ProjectVoter::DEPLOY, ProjectVoter::DESTROY] as $attribute) {
             self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), $project, [$attribute]));
         }
-        self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), null, [ProjectVoter::SETTINGS]));
+        foreach ([ProjectVoter::SETTINGS, ProjectVoter::DEPLOY] as $attribute) {
+            self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote(new NullToken(), null, [$attribute]));
+        }
     }
 
     public function testOtherAttributesAreAbstained(): void

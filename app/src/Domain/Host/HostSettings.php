@@ -18,6 +18,13 @@ use Doctrine\ORM\Mapping as ORM;
 class HostSettings
 {
     public const int ID = 1;
+    public const int DEFAULT_BACKUP_RETENTION_DAYS = 14;
+    public const int MAX_BACKUP_RETENTION_DAYS = 3650;
+
+    /** Browser uploads: the default cap per file, 2 GiB (design spec section 17). Bigger files go in over SSH. */
+    public const int DEFAULT_ASSET_UPLOAD_MAX_BYTES = 2_147_483_648;
+    /** The host settings page edits the cap in MiB, up to 1 TiB. */
+    public const int MAX_ASSET_UPLOAD_MEBIBYTES = 1_048_576;
 
     // SMALLINT, not INTEGER: a single-column INTEGER primary key is a rowid alias in SQLite, which DBAL
     // introspects as auto-increment and then reports as drift against this fixed (never generated) id.
@@ -42,6 +49,37 @@ class HostSettings
 
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME, nullable: true)]
     private ?\DateTimeImmutable $setupCompletedAt = null;
+
+    // INTEGER holds 64 bits in SQLite; the PHP side is an int on the 64-bit builds the app requires.
+    #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_ASSET_UPLOAD_MAX_BYTES])]
+    private int $assetUploadMaxBytes = self::DEFAULT_ASSET_UPLOAD_MAX_BYTES;
+
+    /** Days a database backup is kept (fleet:backup:create prunes older ones). */
+    #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_BACKUP_RETENTION_DAYS])]
+    private int $backupRetentionDays = self::DEFAULT_BACKUP_RETENTION_DAYS;
+
+    /** Default identity for commits the fleet makes in instances (the git bot). */
+    #[ORM\Column(type: Types::STRING, length: 100, nullable: true)]
+    private ?string $gitUserName = null;
+
+    #[ORM\Column(type: Types::STRING, length: 254, nullable: true)]
+    private ?string $gitUserEmail = null;
+
+    // Notification e-mail. Non-secret fields only: the SMTP password lives in SecretStore.
+    #[ORM\Column(type: Types::STRING, length: 253, nullable: true)]
+    private ?string $smtpHost = null;
+
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $smtpPort = null;
+
+    #[ORM\Column(type: Types::STRING, length: 254, nullable: true)]
+    private ?string $smtpUser = null;
+
+    #[ORM\Column(type: Types::STRING, length: 254, nullable: true)]
+    private ?string $mailFrom = null;
+
+    #[ORM\Column(type: Types::STRING, length: 254, nullable: true)]
+    private ?string $mailTo = null;
 
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $createdAt;
@@ -150,6 +188,98 @@ class HostSettings
         return null !== $this->setupCompletedAt;
     }
 
+    /**
+     * The largest file the browser may upload into a project's assets, in bytes.
+     */
+    public function assetUploadMaxBytes(): int
+    {
+        return $this->assetUploadMaxBytes;
+    }
+
+    public function changeAssetUploadMaxBytes(int $bytes): void
+    {
+        if ($bytes < 1) {
+            throw new \InvalidArgumentException('The upload cap must be at least one byte.');
+        }
+        $this->assetUploadMaxBytes = $bytes;
+        $this->touch();
+    }
+
+    public function backupRetentionDays(): int
+    {
+        return $this->backupRetentionDays;
+    }
+
+    public function changeBackupRetentionDays(int $days): void
+    {
+        if ($days < 1 || $days > self::MAX_BACKUP_RETENTION_DAYS) {
+            throw new \InvalidArgumentException(\sprintf('The backup retention must be between 1 and %d days.', self::MAX_BACKUP_RETENTION_DAYS));
+        }
+        $this->backupRetentionDays = $days;
+        $this->touch();
+    }
+
+    public function gitUserName(): ?string
+    {
+        return $this->gitUserName;
+    }
+
+    public function gitUserEmail(): ?string
+    {
+        return $this->gitUserEmail;
+    }
+
+    /**
+     * The validation of the values (the same rule as a project's git identity) is the caller's job; null clears one.
+     */
+    public function changeGitIdentity(?string $name, ?string $email): void
+    {
+        $this->gitUserName = self::blankToNull($name);
+        $this->gitUserEmail = self::blankToNull($email);
+        $this->touch();
+    }
+
+    public function smtpHost(): ?string
+    {
+        return $this->smtpHost;
+    }
+
+    public function smtpPort(): ?int
+    {
+        return $this->smtpPort;
+    }
+
+    public function smtpUser(): ?string
+    {
+        return $this->smtpUser;
+    }
+
+    public function mailFrom(): ?string
+    {
+        return $this->mailFrom;
+    }
+
+    public function mailTo(): ?string
+    {
+        return $this->mailTo;
+    }
+
+    /**
+     * The non-secret notification e-mail settings (the SMTP password is a SecretStore secret). Blank strings become null.
+     */
+    public function changeNotificationMail(?string $smtpHost, ?int $smtpPort, ?string $smtpUser, ?string $mailFrom, ?string $mailTo): void
+    {
+        if (null !== $smtpPort && ($smtpPort < 1 || $smtpPort > 65535)) {
+            throw new \InvalidArgumentException('The SMTP port must be between 1 and 65535.');
+        }
+        $this->smtpHost = self::blankToNull($smtpHost);
+        $this->smtpPort = $smtpPort;
+        $this->smtpUser = self::blankToNull($smtpUser);
+        $this->mailFrom = self::blankToNull($mailFrom);
+        $this->mailTo = self::blankToNull($mailTo);
+        $this->touch();
+    }
+
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
@@ -158,6 +288,13 @@ class HostSettings
     public function updatedAt(): \DateTimeImmutable
     {
         return $this->updatedAt;
+    }
+
+    private static function blankToNull(?string $value): ?string
+    {
+        $value = null === $value ? null : trim($value);
+
+        return '' === $value ? null : $value;
     }
 
     private function touch(?\DateTimeImmutable $now = null): void

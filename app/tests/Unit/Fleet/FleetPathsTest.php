@@ -91,7 +91,7 @@ final class FleetPathsTest extends TestCase
             $modes = [
                 'var' => 0o750, 'keys' => 0o700, 'ssh' => 0o700, 'assets' => 0o750, 'instances' => 0o750,
                 'logs' => 0o750, 'logs/jobs' => 0o750, 'logs/instances' => 0o750, 'locks' => 0o755,
-                'staging' => 0o700, 'authelia' => 0o750,
+                'staging' => 0o700, 'authelia' => 0o750, 'uploads' => 0o700, 'backups' => 0o700,
             ];
             foreach ($modes as $dir => $mode) {
                 self::assertDirectoryExists($home.'/'.$dir);
@@ -147,12 +147,29 @@ final class FleetPathsTest extends TestCase
         }
     }
 
+    public function testUploadDirRefusesAnythingButAnUploadId(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+
+        foreach (['', '..', '../x', '0123456789ABCDEF0123456789ABCDEF', '0123456789abcdef0123456789abcde', "0123456789abcdef0123456789abcdef\n", '0123456789abcdef/../../x00'] as $id) {
+            try {
+                $paths->uploadDir($id);
+                self::fail('Accepted upload id '.json_encode($id));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testNewPathsLiveWhereExpected(): void
     {
         $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
 
         self::assertSame('/srv/fleet/staging', $paths->stagingDir());
         self::assertSame('/srv/fleet/staging/caddy/Caddyfile', $paths->stagingFile('caddy', 'Caddyfile'));
+        self::assertSame('/srv/fleet/backups', $paths->backupsDir());
+        self::assertSame('/srv/fleet/uploads', $paths->uploadsDir());
+        self::assertSame('/srv/fleet/uploads/0123456789abcdef0123456789abcdef', $paths->uploadDir('0123456789abcdef0123456789abcdef'));
         self::assertSame('/srv/fleet/authelia', $paths->autheliaDir());
         self::assertSame('/srv/fleet/authelia/users.yml', $paths->usersFile());
         self::assertSame('/etc/caddy/fleet', $paths->caddySnippetDir());
@@ -167,10 +184,12 @@ final class FleetPathsTest extends TestCase
 
         try {
             mkdir($home.'/staging', 0o755, true);
+            mkdir($home.'/backups', 0o755, true);
             new FleetPaths($home, $home.'/caddy')->ensureLayout();
 
             clearstatcache();
             self::assertSame(0o700, fileperms($home.'/staging') & 0o777, 'repaired');
+            self::assertSame(0o700, fileperms($home.'/backups') & 0o777, 'backups repaired');
             self::assertSame(0o750, fileperms($home.'/authelia') & 0o777, 'created');
         } finally {
             umask($previous);
@@ -253,7 +272,7 @@ final class FleetPathsTest extends TestCase
 
     private static function removeLayout(string $home): void
     {
-        foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs/instances', 'logs', 'assets', 'instances', 'staging', 'authelia'] as $dir) {
+        foreach (['var', 'keys', 'ssh', 'locks', 'logs/jobs', 'logs/instances', 'logs', 'assets', 'instances', 'staging', 'authelia', 'backups'] as $dir) {
             @rmdir($home.'/'.$dir);
         }
         @rmdir($home);
@@ -267,5 +286,39 @@ final class FleetPathsTest extends TestCase
         self::assertSame('/srv/fleet/logs/instances/jobs/1.log', $paths->jobLog('1', 'jobs'));
         self::assertSame('/srv/fleet/logs/instances/instances/1.log', $paths->jobLog('1', 'instances'));
         self::assertSame('/srv/fleet/logs/jobs/1.log', $paths->jobLog('1'));
+    }
+
+    public function testInstanceSiteFileLivesUnderTheCaddyInstancesDirectory(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+
+        self::assertSame('/etc/caddy/fleet/instances', $paths->caddyInstancesDir());
+        self::assertSame('/etc/caddy/fleet/instances/blog--main.conf', $paths->instanceSiteFile('blog--main'));
+        self::assertSame('/etc/caddy/fleet/instances/my-blog--fix-1.conf', $paths->instanceSiteFile('my-blog--fix-1'));
+    }
+
+    public function testInstanceSiteFileRejectsBadIds(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+
+        foreach (['../x', 'a/b', 'A--b', 'blog', 'blog-main', '--main', 'blog--', 'a---b', "a--b\n", '', str_repeat('a', 31).'--'.str_repeat('b', 31)] as $bad) {
+            try {
+                $paths->instanceSiteFile($bad);
+                self::fail(\sprintf('"%s" should have been rejected.', addcslashes($bad, "\0..\37")));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testInstanceSiteFileAcceptsTheLongestId(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+        $id = str_repeat('a', 30).'--'.str_repeat('b', 31); // 63 characters
+
+        self::assertSame(63, \strlen($id));
+        self::assertSame('/etc/caddy/fleet/instances/'.$id.'.conf', $paths->instanceSiteFile($id));
+        $this->expectException(\InvalidArgumentException::class);
+        $paths->instanceSiteFile($id.'c'); // 64
     }
 }

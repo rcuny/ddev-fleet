@@ -1,0 +1,36 @@
+{% set form = forms.notifications %}
+{% set updated = secrets.smtp %}
+<twig:Card data-testid="host-tab-notifications">
+    <twig:Card:Header>
+        <twig:Card:Title>Notification e-mail</twig:Card:Title>
+        <twig:Card:Description>The SMTP relay the host will use to mail you. Nothing is sent from this page.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        <p data-testid="host-smtp-status" class="flex flex-wrap items-center gap-2">
+            <span class="text-sm text-ink-muted">SMTP password</span>
+            {% if updated is not null %}
+                <twig:Badge class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">Set</twig:Badge>
+                <span class="text-sm text-ink-muted">Updated {{ updated|date('Y-m-d H:i', 'UTC') }} UTC</span>
+            {% else %}
+                <twig:Badge variant="secondary">Not set</twig:Badge>
+            {% endif %}
+        </p>
+        {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-notifications-form'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.smtpHost) }}
+            {{ form_row(form.smtpPort) }}
+            {{ form_row(form.smtpUser) }}
+            {{ form_row(form.smtpPassword) }}
+            {% if updated is not null %}
+                <label for="{{ form.clearPassword.vars.id }}" class="flex min-h-11 items-center gap-3 font-normal text-ink-body">
+                    <twig:Checkbox id="{{ form.clearPassword.vars.id }}" name="{{ form.clearPassword.vars.full_name }}" value="1" />
+                    {{ form.clearPassword.vars.label }}
+                </label>
+            {% endif %}
+            {% do form.clearPassword.setRendered %}
+            {{ form_row(form.mailFrom) }}
+            {{ form_row(form.mailTo) }}
+            {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+        {{ form_end(form) }}
+    </twig:Card:Content>
+</twig:Card>

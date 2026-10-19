@@ -10,6 +10,7 @@ use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectInstanceGuard;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Projects\Rule\BranchName;
 use App\Fleet\Projects\Rule\GitIdentity;
 use App\Fleet\Projects\Rule\GitUrl;
@@ -34,7 +35,8 @@ final readonly class ProjectService
         private ProjectRepository $projects,
         private NamedPortRepository $ports,
         private ProjectInstanceGuard $instances,
-        private SecretService $secrets,
+        private ?ProjectAccessRefresher $accessRefresher = null,
+        private ?SecretService $secrets = null,
     ) {
     }
 
@@ -75,6 +77,8 @@ final readonly class ProjectService
             // Two creates raced past the existence check. The entity manager is closed now: touch nothing else.
             throw new ValidationFailed(['name' => 'A project with this name already exists.']);
         }
+        // Every project has its own Authelia access rule: a failure to install it is a warning (takeWarning()).
+        $this->accessRefresher?->refresh();
 
         return $project;
     }
@@ -115,8 +119,9 @@ final readonly class ProjectService
             throw new Refused(\sprintf('%d instance(s) exist: destroy them first (%s%s).', \count($ids), implode(', ', $listed), $more > 0 ? \sprintf(' and %d more', $more) : ''));
         }
 
-        $this->secrets->removeAllOfProject($name, $by);
+        $this->secrets?->removeAllOfProject($name, $by);
         $this->projects->remove($project);
+        $this->accessRefresher?->refresh();
     }
 
     /**

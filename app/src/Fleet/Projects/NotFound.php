@@ -5,7 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Projects;
 
 /**
- * The project, template, named port or secret asked for does not exist.
+ * The project, template, named port, instance, job or secret asked for does not exist.
  */
 final class NotFound extends \DomainException
 {
@@ -27,6 +27,16 @@ final class NotFound extends \DomainException
     public static function port(string $name): self
     {
         return new self(\sprintf('Named port "%s" does not exist.', self::shown($name)));
+    }
+
+    public static function instance(string $id): self
+    {
+        return new self(\sprintf('Instance "%s" does not exist.', self::shown($id)));
+    }
+
+    public static function job(int $id): self
+    {
+        return new self(\sprintf('Job %d does not exist.', $id));
     }
 
     /**

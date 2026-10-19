@@ -28,4 +28,11 @@ final class TextBlockTest extends TestCase
         self::assertNotNull(TextBlock::error(null));
         self::assertNotNull(TextBlock::error(['a']));
     }
+
+    public function testACallerCanGiveItsOwnBound(): void
+    {
+        self::assertNull(TextBlock::error(str_repeat('a', 50_000), 100_000));
+        self::assertSame('The text must be at most 100 characters.', TextBlock::error(str_repeat('a', 101), 100));
+        self::assertNotNull(TextBlock::error(str_repeat('a', 10_001)));
+    }
 }

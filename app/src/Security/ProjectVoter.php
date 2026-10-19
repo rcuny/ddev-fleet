@@ -21,8 +21,14 @@ final class ProjectVoter extends Voter
     /** View, edit or delete project settings, templates and ports; subject a Project, or null for list/create. Admin only. */
     public const string SETTINGS = 'PROJECT_SETTINGS';
 
-    /** Operate the instances of a project (from M0.04); subject a Project is required. Admin, or a member of it. */
+    /** Operate the instances of a project (list, open, logs, start, stop, redeploy); subject a Project is required. Admin, or a member of it. */
     public const string OPERATE = 'PROJECT_OPERATE';
+
+    /** Deploy instances of a project (or any project when the subject is null, e.g. the deploy form). Admin only. */
+    public const string DEPLOY = 'PROJECT_DEPLOY';
+
+    /** Destroy the instances of a project; subject a Project is required. Admin only. */
+    public const string DESTROY = 'PROJECT_DESTROY';
 
     public function __construct(private readonly ProjectMembership $membership)
     {
@@ -32,7 +38,8 @@ final class ProjectVoter extends Voter
     {
         return match ($attribute) {
             self::SETTINGS => null === $subject || $subject instanceof Project,
-            self::OPERATE => $subject instanceof Project,
+            self::OPERATE, self::DESTROY => $subject instanceof Project,
+            self::DEPLOY => null === $subject || $subject instanceof Project,
             default => false,
         };
     }

@@ -17,6 +17,9 @@ parameters:
     fleet.proxy_secret: '%env(FLEET_PROXY_SECRET)%'
     # The dev/test stand-in authenticator and role switch; never true in prod.
     fleet.stand_in_enabled: false
+    # Where Debian leaves the "reboot required" flag and the packages that asked for it (App\Fleet\Host\RebootSignal).
+    fleet.reboot_flag_file: '/run/reboot-required'
+    fleet.reboot_packages_file: '/run/reboot-required.pkgs'
 
 services:
     # symfony-design-system:start
@@ -49,6 +52,16 @@ services:
             $home: '%env(resolve:FLEET_HOME)%'
             $caddyDir: '%env(resolve:FLEET_CADDY_DIR)%'
 
+    # ddev reads ~/.ddev: FLEET_USER_HOME (optional) pins the fleet user's home; without it the process's HOME is used.
+    App\Fleet\Ddev\Ddev:
+        arguments:
+            $home: '%env(default::FLEET_USER_HOME)%'
+
+    App\Fleet\Host\RebootSignal:
+        arguments:
+            $flagFile: '%fleet.reboot_flag_file%'
+            $packagesFile: '%fleet.reboot_packages_file%'
+
     # Callers type-hint Applier; the one implementation runs `sudo -n apply <target>` through the CommandRunner (a
     # recording runner in dev/test, so nothing privileged runs there).
     App\Fleet\System\Applier:
@@ -58,12 +71,15 @@ services:
     App\Setup\HostResolver:
         alias: App\Setup\DnsHostResolver
 
-    # Instances arrive in M0.04 (it re-points this alias); until then no project has any, and nobody is a member of one
-    # (real memberships: M0.10).
+    # A project with instance rows cannot be deleted (the real guard; the test environment swaps in a scripted one).
     App\Domain\Project\ProjectInstanceGuard:
-        alias: App\Domain\Project\NoInstanceGuard
+        alias: App\Domain\Instance\InstanceGuard
+    # The per-project Authelia access rules come from the project_access rows (M0.10).
+    App\Fleet\System\AccessRuleSource:
+        alias: App\Fleet\Auth\ProjectAccessRules
+    # Members of a project are the rows of project_access (M0.10).
     App\Domain\Project\ProjectMembership:
-        alias: App\Domain\Project\NoProjectMembership
+        alias: App\Domain\Project\ProjectAccessMembership
 
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
@@ -85,10 +101,17 @@ services:
 when@dev:
     parameters:
         fleet.stand_in_enabled: true
+        # Not the container's or the developer's real /run files: the Playwright reboot-banner spec writes these (under
+        # its FLEET_HOME) to simulate a pending reboot, as the PHPUnit tests do in the test environment.
+        fleet.reboot_flag_file: '%env(resolve:FLEET_HOME)%/test-reboot-required'
+        fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
 when@test:
     parameters:
         fleet.stand_in_enabled: true
+        # Never the real /run files: a test writes these (under its own FLEET_HOME) to simulate a pending reboot.
+        fleet.reboot_flag_file: '%env(resolve:FLEET_HOME)%/test-reboot-required'
+        fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
     services:
         # Public so functional tests can swap in a stub.
@@ -106,7 +129,7 @@ when@test:
             alias: fleet.command_runner.recording
             public: true
 
-        # Tests script how many instances a project has (the real guard arrives with M0.04). Not under src/, so it is
+        # Tests script how many instances a project has (InstanceGuardTest covers the real one). Not under src/, so it is
         # defined here; public so a test can fetch it and call set().
         App\Tests\Support\FakeInstanceGuard:
             public: true
@@ -131,6 +154,29 @@ when@test:
             public: true
         fleet.test_alias.caddyfile_renderer:
             alias: App\Fleet\System\CaddyfileRenderer
+            public: true
+
+        # Users and access (M0.10): consumed by pages and commands of the next phase; kept reachable for the wiring tests.
+        fleet.test_alias.project_membership:
+            alias: App\Domain\Project\ProjectMembership
+            public: true
+        fleet.test_alias.access_rule_source:
+            alias: App\Fleet\System\AccessRuleSource
+            public: true
+        fleet.test_alias.identity_sync:
+            alias: App\Fleet\Auth\IdentitySync
+            public: true
+        fleet.test_alias.authelia_access_sync:
+            alias: App\Fleet\Auth\AutheliaAccessSync
+            public: true
+        fleet.test_alias.project_access_service:
+            alias: App\Fleet\Auth\ProjectAccessService
+            public: true
+        fleet.test_alias.authelia_config_renderer:
+            alias: App\Fleet\System\AutheliaConfigRenderer
+            public: true
+        fleet.test_alias.authelia_users_file:
+            alias: App\Fleet\Auth\AutheliaUsersFile
             public: true
 
         # The setup domain is only consumed by controllers (M0.02 task 8) and commands; keep it reachable for the wiring test.

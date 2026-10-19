@@ -28,7 +28,7 @@ final class TemplateOptions
     {
         $command
             ->addOption('drupal-env', null, InputOption::VALUE_REQUIRED, 'Value of DRUPAL_ENV written to the instance .env')
-            ->addOption('post-deploy', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command run with `ddev exec` after a deploy (one line; repeat for several; the given list replaces the old one)')
+            ->addOption('post-deploy', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command run inside the web container with `ddev exec` after a deploy (one line; repeat for several; the given list replaces the old one)')
             ->addOption('tty1', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the first instance terminal (repeat for several; replaces the old list)')
             ->addOption('tty2', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the second instance terminal (repeat for several; replaces the old list)')
         ;
@@ -44,11 +44,12 @@ final class TemplateOptions
      *
      * @return array<string, mixed>
      *
-     * @throws ValidationFailed for an --unset word that does not exist, or an --unset of a value that is also set
+     * @throws ValidationFailed for a command text over CommandLines::MAX_TEXT, an --unset word that does not exist, or an --unset of a value that is also set
      */
     public static function changes(InputInterface $input, bool $update): array
     {
         $changes = [];
+        $errors = [];
         if (null !== $env = $input->getOption('drupal-env')) {
             $changes['drupalEnv'] = (string) $env;
         }
@@ -59,13 +60,17 @@ final class TemplateOptions
             }
             $lines = [];
             foreach ($texts as $text) {
+                // the same size bound as the browser textarea, before the text is split
+                if (null !== $error = CommandLines::textError((string) $text)) {
+                    $errors[$property] = $error;
+                    continue 2;
+                }
                 array_push($lines, ...CommandLines::normalise((string) $text));
             }
             $changes[$property] = $lines;
         }
         if ($update) {
             $given = array_keys($changes);
-            $errors = [];
             foreach ((array) $input->getOption('unset') as $word) {
                 $target = self::UNSET[(string) $word] ?? null;
                 if (null === $target) {
@@ -76,9 +81,9 @@ final class TemplateOptions
                     $changes[$target[0]] = $target[1];
                 }
             }
-            if ([] !== $errors) {
-                throw new ValidationFailed($errors);
-            }
+        }
+        if ([] !== $errors) {
+            throw new ValidationFailed($errors);
         }
 
         return $changes;

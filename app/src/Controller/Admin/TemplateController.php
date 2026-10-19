@@ -202,9 +202,9 @@ final class TemplateController extends AbstractController
      */
     private function lists(FormInterface $form, array $data): ?array
     {
-        $postDeploy = TextLines::split($form, 'postDeploy', $data);
-        $tty1 = TextLines::split($form, 'tty1', $data);
-        $tty2 = TextLines::split($form, 'tty2', $data);
+        $postDeploy = TextLines::split($form, 'postDeploy', $data, commands: true);
+        $tty1 = TextLines::split($form, 'tty1', $data, commands: true);
+        $tty2 = TextLines::split($form, 'tty2', $data, commands: true);
         if (null === $postDeploy || null === $tty1 || null === $tty2) {
             return null;
         }

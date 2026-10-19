@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace App\Domain\Project;
 
 /**
- * Asks whether a project still has instances. Instances arrive in M0.04, which replaces the alias to
- * NoInstanceGuard; until then nothing exists that could block a deletion.
+ * Asks whether a project still has instances (App\Domain\Instance\InstanceGuard answers from the database).
  */
 interface ProjectInstanceGuard
 {
@@ -16,6 +15,4 @@ interface ProjectInstanceGuard
      * @return list<string>
      */
     public function instanceIds(Project $project): array;
-
-    public function instanceCount(Project $project): int;
 }

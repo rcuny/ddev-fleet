@@ -65,7 +65,7 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `App\Domain\Ssh` | `SshKey` (public key and fingerprint per `SshKeyRole` deploy / push; private keys live on disk, never in the database) |
 | `App\Domain\Secret` | `Secret` (sealed ciphertext, nonce, key version, scope `fleet` or `project`; the scope id is the project name) and its repository |
 | `App\Domain\Audit` | `AuditEntry` (actor, action, subject, time; never a value) and its repository |
-| `App\Domain\Project` | `Project` (name, git URL, defaults, hostnames, git identity mode `GitBotMode`, issue id pattern, submodule branch, Typesense; its ports and templates), `ProjectRepository`, `ProjectInstanceGuard` (the seam M0.04 implements: deletion is refused while `instanceIds()` is not empty; a no-op until then), `ProjectMembership` (who may operate a project; nobody is a member until M0.10) |
+| `App\Domain\Project` | `Project` (name, git URL, defaults, hostnames, git identity mode `GitBotMode`, issue id pattern, submodule branch, Typesense; its ports and templates), `ProjectRepository`, `ProjectInstanceGuard` (the seam M0.04 implements: deletion is refused while `instanceIds()` is not empty; a no-op until then), `ProjectMembership` (who may operate a project; `ProjectAccessMembership` answers from `ProjectAccess`, the user-to-project rows with a unique pair and cascading foreign keys, `ProjectAccessRepository`) |
 | `App\Domain\Template` | `Template` (belongs to a project: Drupal environment and the `postDeploy`, `tty1`, `tty2` command lists) and its repository |
 | `App\Domain\Port` | `NamedPort` (the host-wide catalogue: name, public and router port) and its repository |
 | `App\Doctrine` | Doctrine plumbing: `SqlitePragmaMiddleware` (WAL, `busy_timeout=5000`, `foreign_keys=ON` on every connection), `UtcDateTimeImmutableType` (`utc_datetime_immutable`, always UTC: use it, not the stock datetime types, under SQLite) |
@@ -73,20 +73,26 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `App\Fleet\Secrets` | `SecretKeyFile` (`keys/secret.key`, 32 bytes, never overwritten), `SecretBox` (XChaCha20-Poly1305 with the scope and name as associated data), `SecretStore` (two kinds in one table: the host's own secrets with lowercase names, written by the setup wizard, and the managed secrets with `UPPER_CASE` names, fleet-wide or per project, set by an admin), `SecretService` (the only path the pages and `fleet secret:*` use: validates, seals, audits put / delete / reveal), `SecretName` (the name rule and the kebab-case `[[token]]` of a name), `SecretValue` (text, 1 byte to 64 KiB, normalised, no wrapping quotes), `TokenRenderer` (`[[token]]` substitution for the deploy: project secret over fleet-wide, built-ins over both, verbatim, single pass, unresolved reported), `PlaceholderScanner` (which placeholders a project's asset files mention, for the "no placeholder" warning) |
 | `App\Fleet\Audit` | `AuditLog` (`record(actor, action, subject)`, `latest()`; actions `secret.put`, `secret.delete`, `secret.reveal`; the CLI actor is `cli`) |
 | `App\Fleet\Ssh` | `SshKeyService` (generate / import / regenerate the deploy and push keys), `Ed25519KeyGenerator` (OpenSSH format in PHP, no process), `KnownHostsFile` (seeded provider keys, trust only after a fingerprint confirmation), `KnownHostScanner` (`ssh-keyscan` through the runner) |
-| `App\Fleet\Auth` | `UserService`, `PasswordPolicy`, `AutheliaUsersRenderer` / `AutheliaUsersFile` (the Authelia `users.yml`, written atomically under a lock) |
-| `App\Fleet\System` | The renderers (`CaddyfileRenderer`, `CaddyEnvRenderer`, `AutheliaConfigRenderer`; templates in `templates/system/`), `ConfigValue` (validates everything that is rendered), `SystemRenderer` (staging), `GateWriter` / `GateMode` (the Caddy gate snippet), `CaddyReloader`, and the `Applier` seam with `PrivilegedApply` (see "Privileged apply") |
+| `App\Fleet\Host` | The host settings page's rules and signals: `GitIdentityRule`, `NotificationMailRule`, `HostSecrets` (secret names), `RebootSignal` / `RebootStatus` (the `/run/reboot-required` flag behind the admin banner). Forms live in `App\Form\Host`, the page in `App\Controller\Admin\HostSettingsController` |
+| `App\Fleet\Auth` | `UserService`, `PasswordPolicy`, `AutheliaUsersRenderer` / `AutheliaUsersFile` (the Authelia `users.yml`, written atomically under a lock; before every render it adopts the password hashes Authelia changed, see the file's class comment), `ProjectAccessService` (grant, revoke, set a user's projects; database only), `ProjectAccessRules` (the per-project Authelia rules from the rows), `AutheliaAccessSync` (installs the Authelia configuration through `apply authelia` only when it changed) and `IdentitySync` (**the way to change users and memberships**: `commit(fn)` runs the change and the `users.yml` render in one transaction, then `AutheliaAccessSync`; call `refreshAccess()` after a project is created or deleted; a failed install after the commit is `AccessInstallFailed`, a warning and not a rollback; `ProjectService` calls `ProjectAccessRefresher` itself), `LastAdminGuard` (refuses deleting, disabling or demoting the last enabled administrator, and the acting user themselves when a page passes one) |
+| `App\Fleet\System` | The renderers (`CaddyfileRenderer`, `CaddyEnvRenderer`, `AutheliaConfigRenderer`; templates in `templates/system/`), `AccessRule` / `AccessRuleSource` (the per-project access rules `AutheliaConfigRenderer` renders: `domain_regex` `^<project>--<label>.<domain>$`, subjects the admin group and the members), `AutheliaNotifier` (SMTP from `FLEET_AUTHELIA_SMTP_*`; the self-service reset is enabled only when it is set), `ConfigValue` (validates everything that is rendered), `SystemRenderer` (staging), `GateWriter` / `GateMode` (the Caddy gate snippet), `CaddyReloader`, and the `Applier` seam with `PrivilegedApply` (see "Privileged apply") |
 | `App\Fleet\Projects` | `ProjectService`, `TemplateService` and `NamedPortService` (the only code that creates, changes and deletes projects, templates and catalogue ports; each collects the first error of every field and throws one `ValidationFailed` carrying a `field => message` map, or `Refused` / `NotFound`), the inputs they take (`ProjectInput`, `TemplateInput`, `NamedPortInput`) and `ProjectSnapshot` (a project as plain data in the 0.x key names) |
+| `App\Fleet\Assets` | A project's assets directory (`assets/<project>/`): `AssetPath` (the text rules for a relative path or name: allow-list, no `..`, NUL, control or format characters), `AssetStore` (the only code that lists, creates folders in, deletes from, opens and publishes into that directory; walks every path with `lstat` and **never follows or writes through a symlink**), `UploadService` (chunked resumable browser uploads staged in `uploads/<id>/`, assembled atomically with a sha256, cap = `HostSettings::assetUploadMaxBytes`, abandoned after 24 h, `gc()`), `AssetEntry`, `AssetListing`, `AssetFile`, `UploadState`, `UploadResult`, `GcResult`, `ByteSize`. Errors reuse `ValidationFailed` / `Refused` (its code is the HTTP status the JSON endpoints answer) / `NotFound` |
 | `App\Fleet\Projects\Rule` | The pure validation rules, one class per concern: `ResourceName`, `GitUrl`, `BranchName`, `IssueIdPattern`, `CommandLines`, `DrupalEnv`, `GitIdentity`, `SubmodulePath`, `PortNumbers`, `TextBlock`. They return a message or null and never echo the input |
 | `App\Setup` | The setup wizard's domain: `SetupTokenService`, `SetupCookie`, `SetupState`, `SetupGate` / `SetupAccessSubscriber` (the guard), `SetupAttemptLimiter`, `SetupProgress`, `SetupFinisher`, `ScanTargetPolicy` |
 | `App\Health` | `HealthChecker` / `HealthReport` behind `GET /health`; `HostHealth` / `HostHealthReport` (memory, disk, reboot-required) for the Home card |
 | `App\Security` | `FleetUser`, `RemoteUserAuthenticator`, `TrustedProxyChecker`, `ForbiddenHandler`, `CurrentActor` (the signed-in user's name for the audit log and `updated_by`), `ProjectVoter` (`SETTINGS` is admin-only; `OPERATE`, used from M0.04, is admin or a member of the project); `App\Security\StandIn` (dev/test only) |
-| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages, among them `ProjectController`, `TemplateController`, `SecretController` and `AuditController`); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
+| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages, among them `ProjectController`, `TemplateController`, `SecretController`, `AuditController` and `UserController`: `/admin/users`, every change through `IdentitySync::commit()`, the pages also refuse acting on yourself via `LastAdminGuard`); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
 | `App\Form\Setup` | The wizard's Symfony forms |
 | `App\Form\Project` | The project and template forms (`ProjectType`, `TemplateType`; plain Symfony forms, `novalidate`, errors come from the services through `ValidationErrorMapper`) |
+| `App\Form\User` | The user forms (`UserCreateType`, `UserEditType`, `UserPasswordType`, the shared `UserProjectsField`; `novalidate`; messages come from `UserService`, whose `InvalidUserInput` names the field it refused). The form theme draws a multiple expanded choice as 44 px checkbox rows |
 | `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be in `docs/installation.md` |
 | `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliDocsTest` against `docs/projects-and-templates.md`. A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
+| `App\Command\User` | `fleet:user:list\|create\|update\|delete\|grant\|revoke` (the same exit codes and `--format=json` as the project commands; every write goes through `IdentitySync::commit()`, a failed Authelia install after the commit is exit 0 with a `warning`; a password only from a hidden prompt or `--password-stdin`, never an option). `fleet:user:reset-password` stays flat in `App\Command` |
+| `App\Command\Asset` | `fleet:asset:list <project> [path]` and `fleet:asset:gc` (exit codes and `--format=table\|json` as the commands above). Own sub-directory, group `asset` in `install/bin/fleet`; covered by `AssetDocsTest` against `docs/assets.md` |
 | `App\Command\Secret` | `fleet:secret:list\|set\|unset` (`--project=`; the value comes from a hidden prompt or standard input, never argv; actor `cli`), covered by `SecretsDocsTest` against `docs/secrets.md`; `SecretOptions` is not a command |
 | `App\Command\Support` | What those commands share: `JsonOutput` (`--format=table\|json`, `--json`, exit codes 0 done / 1 refused value / 2 not allowed now / 3 not found, the `{"error", "fields"}` document), `FieldErrors` (field name to `--option` or `<argument>`), `Shapes` (JSON for templates and ports). Not commands |
+| `App\Twig` | `ByteSizeExtension` (the `bytes` filter: `1536\|bytes` is `1.5 KiB`) |
 | `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`, and `IssueIdPreview`, the one LiveComponent: admin-only through `#[IsGranted]`) |
 | `App\Ui` | UI support classes: `NavigationCatalog`, `NavItem`, `ProfilerToolbarSwitch` |
 | `App\Message`, `App\MessageHandler` | Reserved for Messenger messages and handlers (from M0.04) |
@@ -104,7 +110,7 @@ New work follows these namespaces; add a new one only with a reason.
 - **`App\Fleet\FleetPaths` owns every filesystem path** under `FLEET_HOME` (must be absolute):
   `var/fleet.sqlite`, `var/queue.sqlite`, `keys/`, `ssh/`, `assets/<project>/`, `instances/<id>/`,
   `logs/jobs/<job>.log`, `logs/instances/<instance>/<job>.log`, `locks/`, `keys/secret.key`,
-  `ssh/{deploy,push}_ed25519[.pub]` and `ssh/known_hosts`, `staging/<target>/<file>` (rendered config waiting for the root
+  `ssh/{deploy,push}_ed25519[.pub]` and `ssh/known_hosts`, `uploads/<id>/` (browser upload chunks, 0700), `staging/<target>/<file>` (rendered config waiting for the root
   helper), `authelia/users.yml`. It also owns the Caddy snippet directory (`FLEET_CADDY_DIR`, `/etc/caddy/fleet` in
   production) and derives `gate.conf` and `/etc/caddy/Caddyfile` from it. Never hard-code a path outside it. Ids are validated (no `..`, no `/`).
   `ensureLayout()` creates the tree with exact modes (`keys/`, `ssh/`, `staging/` 0700; everything holding data or logs 0750).
@@ -149,7 +155,7 @@ New work follows these namespaces; add a new one only with a reason.
   through a shell. `docs/projects-and-templates.md` is checked by `CliDocsTest` (commands, options, exit codes): change a
   command, change the guide.
 - **Console commands**: `fleet <group>:<verb>` for groups the wrapper knows (`host`, `setup`, `user`, `project`, `template`,
-  `port`, `secret`; `fleet project list` also works). Commands that read or write the database are tested with
+  `port`, `asset`, `secret`; `fleet project list` also works). Commands that read or write the database are tested with
   `RunsFleetCommands` against a real migrated database; stderr assertions need `capture_stderr_separately`.
 - **Components beyond the managed list below.** `<twig:Textarea>` (several lines of text; the form theme renders Symfony's
   `TextareaType` with it, so never write a raw `<textarea>`), `<twig:Checkbox>`, `<twig:NativeSelect>` and `<twig:RadioGroup>` are
@@ -216,8 +222,8 @@ runner seam), `Functional/` (HTTP through `WebTestCase`, the wizard included), `
 pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its bash
 steps, the root helper, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
 `FLEET_MERCURE_BIN`, `ssh-keygen`, `shellcheck`) or run only as an unprivileged user, and skip otherwise. Each PHPUnit
-process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Counts and run guide:
-`tests/README-tests.md`.
+process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `tests/README-tests.md`. Current counts:
+`ci/test-counts.sh` (never write counts into the docs).
 
 ## Production trust and the installer
 
@@ -245,8 +251,7 @@ Facts to keep true when editing it:
 - **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
   workers when the code or env changed.
 - Not shipped yet (do not assume it exists): `fleet-scheduler`, `fleet-boot` / `fleet-tmux`, wildcard and instance Caddy
-  sites, DB-driven Authelia access rules, Authelia self-service password reset (disabled until M0.10; use
-  `fleet user:reset-password`), host hardening.
+  sites, instance sites that the Authelia access rules guard (the rules are rendered from `ProjectAccess` already; the hosts arrive with M0.04), host hardening. Authelia's self-service password reset is off until an SMTP server is configured (`docs/installation.md`; recovery: `fleet user:reset-password`).
 - Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
   install/bin/fleet` before committing a script.
 
@@ -280,13 +285,14 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 
 - `docs/README.md` — documentation index with the status of each document.
 - `docs/installation.md` — installing 1.x on a host: installer, setup wizard, recovery, security model, uninstalling.
+- `docs/assets.md` — a project's assets: the Assets tab, chunked browser upload and its cap, copying over SSH, path rules, `fleet asset:list|gc`.
 - `docs/projects-and-templates.md` — projects, templates and named ports: fields and limits, the pages, the `fleet project|template|port` commands, differences from 0.x.
 - `docs/secrets.md` — secrets: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, the `fleet secret:*` commands, the security model.
 - `docs/development.md` — setup, environment variables, stand-in, adding a component.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
 - `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.
 - `docs/v0/` — the 0.x (Python) reference, re-implemented milestone by milestone.
-- `tests/README-tests.md` — suites and how to run them.
+- `tests/README-tests.md` — suites and how to run them (counts: `ci/test-counts.sh`).
 
 If a tool wrapper condenses command output (RTK), treat the condensed output as complete; re-run
 a command as `rtk bypass <cmd>` only when its result is unusable (empty when output was clearly
