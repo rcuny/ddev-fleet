@@ -11,12 +11,15 @@ use App\Fleet\Backup\BackupKind;
 use App\Fleet\Backup\BackupNotFound;
 use App\Fleet\Backup\BackupService;
 use App\Fleet\Backup\BackupTooLarge;
+use App\Fleet\Host\ClaudeTokenRule;
 use App\Fleet\Host\GitIdentityRule;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Host\NotificationMailRule;
 use App\Fleet\Secrets\SecretConflict;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\System\ConfigValue;
+use App\Fleet\Workspace\ClaudeTokenRotation;
+use App\Fleet\Workspace\WorkspaceCheck;
 use App\Form\Host\HostBackupRetentionType;
 use App\Form\Host\HostClaudeTokenType;
 use App\Form\Host\HostGeneralType;
@@ -51,12 +54,12 @@ final class HostSettingsController extends AbstractController
         'backups' => 'Backups',
     ];
 
-    private const string TOKEN_SHAPE = '/^[\x21-\x7E]{1,512}$/D';
-
     public function __construct(
         private readonly HostSettingsRepository $settings,
         private readonly SecretStore $secrets,
         private readonly BackupService $backups,
+        private readonly ClaudeTokenRotation $rotation,
+        private readonly WorkspaceCheck $workspace,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -138,11 +141,11 @@ final class HostSettingsController extends AbstractController
             $token = trim($this->text($form, 'token') ?? '');
             if ('' === $token) {
                 $form->get('token')->addError(new FormError('Paste the token to store it.'));
-            } elseif (1 !== preg_match(self::TOKEN_SHAPE, $token)) {
-                $form->get('token')->addError(new FormError('A token has no spaces or control characters and is at most 512 characters. Copy it again from "claude setup-token".'));
+            } elseif (!ClaudeTokenRule::isValid($token)) {
+                $form->get('token')->addError(new FormError(ClaudeTokenRule::MESSAGE));
             } else {
                 try {
-                    $this->secrets->putFleetWide(HostSecrets::CLAUDE_TOKEN, $token, $this->actor());
+                    $this->rotation->rotate($token, $this->actor());
                     $this->addFlash('success', 'Claude token stored.');
 
                     return $this->back('claude');
@@ -367,8 +370,9 @@ final class HostSettingsController extends AbstractController
             'backups' => 'backups' === $tab ? $this->backupRows() : [],
             // An identity saved before the rules were tightened (FLE-59) fails its next save: say so up front.
             'gitStoredInvalid' => 'git' === $tab && null === $submitted && [] !== GitIdentityRule::violations($host->gitUserName(), $host->gitUserEmail()),
+            'workspace' => $this->workspace->run()->toArray(),
             'secrets' => [
-                'claude' => $this->secrets->fleetWideUpdatedAt(HostSecrets::CLAUDE_TOKEN),
+                'claude' => $this->rotation->lastRotated(),
                 'smtp' => $this->secrets->fleetWideUpdatedAt(HostSecrets::SMTP_PASSWORD),
             ],
         ], new Response('', $status));

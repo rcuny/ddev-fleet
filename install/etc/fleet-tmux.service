@@ -1,0 +1,31 @@
+# ddev-fleet: the agent workspace. Installed as /etc/systemd/system/fleet-tmux.service.
+# This unit OWNS the tmux server of the `fleet` session (tmux -L fleet), in its own cgroup, so that restarting php-fpm or the
+# job workers (whose cgroups are torn down on every restart) can never kill the operators' panes. After a reboot it
+# recreates the session with one window per instance (sidebar, tty1, tty2) as plain shells: tty commands are a deploy
+# action and are never typed here.
+[Unit]
+Description=ddev-fleet tmux workspace (the fleet session)
+After=network.target
+
+[Service]
+# Type=oneshot + RemainAfterExit=yes, on purpose: fleet:tmux:ensure is a short-lived client that starts the tmux server
+# (which daemonises) and exits. The server and every pane shell stay in this unit's cgroup. RemainAfterExit keeps the
+# unit active after the client exits; without it systemd would see the end of the service and kill what is left in the
+# cgroup, the tmux server we just created. Remaining processes are only killed when the unit is stopped.
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=120
+User=fleet
+Group=fleet
+EnvironmentFile=/etc/ddev-fleet/fleet.env
+Environment=HOME=/home/fleet LANG=C.UTF-8
+WorkingDirectory=/opt/ddev-fleet/app
+ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:tmux:ensure
+# End the session cleanly before systemd's cgroup kill; the leading "-" tolerates "no server".
+ExecStop=-/usr/bin/tmux -L fleet kill-session -t fleet
+TimeoutStopSec=30
+# No sandboxing: the panes are operator shells (git, ddev, docker, sudo) and would inherit NoNewPrivileges or
+# ProtectSystem. No PrivateTmp either: the tmux socket (/tmp/tmux-<uid>/fleet) is shared with the app and the operators.
+
+[Install]
+WantedBy=multi-user.target

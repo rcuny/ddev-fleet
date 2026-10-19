@@ -17,6 +17,6 @@ final readonly class RunJobHandler
 
     public function __invoke(RunJob $message): void
     {
-        $this->executor->run($message->jobId);
+        $this->executor->run($message->jobId, $message->eligibleSince);
     }
 }
