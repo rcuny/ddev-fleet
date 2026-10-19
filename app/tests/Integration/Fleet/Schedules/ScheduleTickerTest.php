@@ -176,6 +176,132 @@ final class ScheduleTickerTest extends ScheduleTestCase
         yield '61 minutes late is missed' => ['2026-10-21 04:01:00 UTC', ScheduleOutcome::Missed, 0];
     }
 
+    #[DataProvider('downtimes')]
+    public function testDowntimeFiresOnceAsACatchUpOrIsMissed(string $downFor, ScheduleOutcome $outcome, int $jobs): void
+    {
+        $this->create();
+        // The ticker ran until 02:59:30, then stopped; the 03:00 occurrence is the one in question.
+        $this->at('2026-10-21 02:59:30 UTC');
+        $this->ticker->tick();
+
+        $this->at($downFor);
+        $created = $this->ticker->tick();
+        $this->at('+30 seconds');
+        $again = $this->ticker->tick();
+
+        self::assertCount(1, $created);
+        self::assertSame([], $again);
+        self::assertSame($outcome, $created[0]->outcome());
+        self::assertSame(ScheduleTrigger::CatchUp, $created[0]->trigger());
+        self::assertCount($jobs, $this->fakeJobs());
+        self::assertCount(1, $this->history());
+    }
+
+    /**
+     * @return iterable<string, array{string, ScheduleOutcome, int}>
+     */
+    public static function downtimes(): iterable
+    {
+        yield '10 minutes down fires' => ['2026-10-21 03:10:00 UTC', ScheduleOutcome::Claimed, 1];
+        yield '59 minutes down fires' => ['2026-10-21 03:59:00 UTC', ScheduleOutcome::Claimed, 1];
+        yield '61 minutes down is missed' => ['2026-10-21 04:01:00 UTC', ScheduleOutcome::Missed, 0];
+    }
+
+    public function testALateTickWithoutDowntimeIsAScheduleRun(): void
+    {
+        $this->create();
+        // Another tick ended 30 seconds ago (it skipped this schedule), so the ticker was running: not a catch-up.
+        $this->heartbeat->beat(new \DateTimeImmutable('2026-10-21 03:01:30 UTC'));
+        $this->at('2026-10-21 03:02:00 UTC');
+
+        $created = $this->ticker->tick();
+
+        self::assertCount(1, $created);
+        self::assertSame(ScheduleTrigger::Schedule, $created[0]->trigger());
+        self::assertSame(ScheduleOutcome::Claimed, $created[0]->outcome());
+        self::assertSame(JobTrigger::Schedule, $this->fakeJobs()[0]->trigger());
+    }
+
+    public function testTheFirstTickEverCountsAsDowntime(): void
+    {
+        $this->create();
+        $this->at('2026-10-21 03:02:00 UTC');
+
+        self::assertSame(ScheduleTrigger::CatchUp, $this->ticker->tick()[0]->trigger());
+    }
+
+    public function testTheTickerBeingDownForMoreThanNinetySecondsMakesALateRunACatchUp(): void
+    {
+        $this->create();
+        $this->heartbeat->beat(new \DateTimeImmutable('2026-10-21 03:00:00 UTC'));
+        $this->at('2026-10-21 03:02:00 UTC');
+
+        self::assertSame(ScheduleTrigger::CatchUp, $this->ticker->tick()[0]->trigger());
+    }
+
+    public function testResumeAndEditNeverCatchUpAfterDowntime(): void
+    {
+        $this->create();
+        $this->scheduleService->pause('nightly', 'admin');
+        $this->at('2026-10-21 03:30:00 UTC');
+        $this->scheduleService->resume('nightly', 'admin');
+        $this->scheduleService->update('nightly', new \App\Fleet\Schedules\ScheduleInput('nightly', '0 3 * * *', 'Europe/Paris', 'fake', null), 'admin');
+        $this->at('2026-10-21 03:45:00 UTC');
+
+        self::assertSame([], $this->ticker->tick());
+        self::assertSame([], $this->fakeJobs());
+    }
+
+    public function testAClaimedRunWithoutAJobIsReapedAsFailedOnceItIsOldEnough(): void
+    {
+        $this->create();
+        $schedule = $this->scheduleService->get('nightly');
+        // The ticker died right after the claim: the cursor moved, the job was never queued.
+        $this->at('2026-10-21 03:00:05 UTC');
+        $run = $this->runs->claim($schedule, new \DateTimeImmutable('2026-10-21 03:00:00 UTC'), ScheduleTrigger::Schedule, $this->clock->now());
+        self::assertNotNull($run);
+        $schedule->advanceTo(new \DateTimeImmutable('2026-10-21 03:00:00 UTC'));
+        $this->schedules->save($schedule);
+
+        // Younger than five minutes: left alone.
+        $this->at('2026-10-21 03:04:00 UTC');
+        $this->ticker->tick();
+        self::assertSame(ScheduleOutcome::Claimed, $this->history()[0]->outcome());
+
+        $this->at('2026-10-21 03:05:30 UTC');
+        $this->ticker->tick();
+        $reaped = $this->history()[0];
+        self::assertSame(ScheduleOutcome::Failed, $reaped->outcome());
+        self::assertNull($reaped->jobId());
+        self::assertSame('The ticker stopped before the job was queued.', $reaped->detail());
+        self::assertSame('failed', $this->scheduleService->result($reaped));
+
+        // Never re-fired, and a second pass is idempotent.
+        $this->at('2026-10-21 03:06:00 UTC');
+        self::assertSame([], $this->ticker->tick());
+        self::assertSame([], $this->fakeJobs());
+        self::assertCount(1, $this->history());
+        self::assertSame('The ticker stopped before the job was queued.', $this->history()[0]->detail());
+    }
+
+    public function testTheReaperLeavesRunsWithAJobAndFinishedRunsAlone(): void
+    {
+        $this->create();
+        $this->at('2026-10-21 03:00:10 UTC');
+        $fired = $this->ticker->tick()[0];
+        $this->create('other');
+        $this->action->refuse = 'busy';
+        $this->scheduleService->runNow('other', JobTrigger::Ui, 'admin');
+
+        $this->at('2026-10-21 03:30:00 UTC');
+        $this->ticker->tick();
+
+        self::assertSame(ScheduleOutcome::Claimed, $this->history()[0]->outcome());
+        self::assertSame($fired->jobId(), $this->history()[0]->jobId());
+        self::assertSame(ScheduleOutcome::Skipped, $this->history('other')[0]->outcome());
+        self::assertSame('busy', $this->history('other')[0]->detail());
+    }
+
     public function testAMissedOccurrenceIsRecordedOnceAndNeverRetried(): void
     {
         $this->create();

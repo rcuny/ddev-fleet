@@ -37,6 +37,21 @@ final readonly class ScheduleRunRepository
         return $this->em->getRepository(ScheduleRun::class)->find((int) $this->em->getConnection()->lastInsertId());
     }
 
+    /**
+     * Runs left `claimed` with no job since before the given moment: the ticker died between the claim and the launch.
+     *
+     * @return list<ScheduleRun> oldest first
+     */
+    public function orphans(\DateTimeImmutable $before): array
+    {
+        return $this->em->getRepository(ScheduleRun::class)->createQueryBuilder('r')
+            ->where('r.outcome = :claimed')->andWhere('r.jobId IS NULL')->andWhere('r.createdAt < :before')
+            ->setParameter('claimed', ScheduleOutcome::Claimed)
+            ->setParameter('before', $before, UtcDateTimeImmutableType::NAME)
+            ->orderBy('r.id', 'ASC')
+            ->getQuery()->getResult();
+    }
+
     public function find(int $id): ?ScheduleRun
     {
         return $this->em->getRepository(ScheduleRun::class)->find($id);

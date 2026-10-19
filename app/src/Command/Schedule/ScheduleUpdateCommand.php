@@ -29,7 +29,7 @@ final class ScheduleUpdateCommand extends Command
         $this->addArgument('name', InputArgument::REQUIRED, 'Schedule name');
         $this->addOption('cron', null, InputOption::VALUE_REQUIRED, 'Five-field cron expression, for example "0 3 * * *" (required)');
         $this->addOption('timezone', null, InputOption::VALUE_REQUIRED, 'IANA timezone', 'UTC');
-        $this->addOption('action', null, InputOption::VALUE_REQUIRED, 'What to run', 'redeploy');
+        $this->addOption('action', null, InputOption::VALUE_REQUIRED, \sprintf('What to run, one of: %s', implode(', ', $this->schedules->actionNames())), 'redeploy');
         $this->addOption('instance', null, InputOption::VALUE_REQUIRED, 'Id of the instance the action applies to, for example demo--main');
         JsonOutput::addOptions($this);
     }

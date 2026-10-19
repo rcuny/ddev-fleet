@@ -40,6 +40,7 @@
                         <twig:NativeSelect:Option {{ ...{value: candidate, selected: candidate == form.action ? true : null} }}>{{ candidate }}</twig:NativeSelect:Option>
                     {% endfor %}
                 </twig:NativeSelect>
+                <p class="text-xs text-ink-muted" data-testid="schedule-actions">Available actions: {{ actions|join(', ') }}.</p>
                 {% if errors.action is defined %}<p id="schedule-action-error" class="text-sm text-destructive" data-testid="error-action">{{ errors.action }}</p>{% endif %}
             </div>
 

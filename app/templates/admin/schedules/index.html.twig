@@ -42,7 +42,7 @@
                             </p>
                             <p class="mt-1 text-xs text-ink-muted">
                                 Next run: <span data-testid="schedule-next">{% if row.next %}{{ row.next|date('Y-m-d H:i', 'UTC') }} UTC{% else %}none (paused){% endif %}</span>
-                                · Last result: <span data-testid="schedule-last">{{ row.result ?? 'never run' }}</span>
+                                · Last result: <span data-testid="schedule-last">{{ row.result ?? 'never run' }}</span>{% if row.last and row.last.jobId %} · <a href="{{ path('job_show', {id: row.last.jobId}) }}" data-testid="schedule-last-job">job #{{ row.last.jobId }}</a>{% endif %}
                             </p>
                         </div>
                         <div class="flex flex-wrap gap-2">

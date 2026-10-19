@@ -31,6 +31,16 @@ final class ScheduleCommandsTest extends KernelTestCase
         parent::tearDown();
     }
 
+    public function testCreateAndUpdateHelpListTheRegisteredActions(): void
+    {
+        foreach (['fleet:schedule:create', 'fleet:schedule:update'] as $name) {
+            self::assertNotNull(self::$kernel);
+            $definition = new \Symfony\Bundle\FrameworkBundle\Console\Application(self::$kernel)->find($name)->getDefinition();
+
+            self::assertStringContainsString('one of: redeploy', $definition->getOption('action')->getDescription());
+        }
+    }
+
     public function testCreateListPauseResumeHistoryDelete(): void
     {
         $instance = $this->seedInstance();
