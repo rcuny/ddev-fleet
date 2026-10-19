@@ -1,0 +1,27 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}New user · Users · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="New user" description="The person signs in with the username and the initial password." />
+
+    <div class="mt-6 max-w-2xl">
+        {{ form_start(form, {attr: {class: 'grid gap-6'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.username) }}
+            {{ form_row(form.displayName) }}
+            {{ form_row(form.email) }}
+            {{ form_row(form.password) }}
+
+            <twig:Separator />
+
+            {{ form_row(form.admin) }}
+            {{ include('admin/users/_projects.html.twig', {field: form.projects}) }}
+
+            <div class="flex flex-col gap-2 md:flex-row">
+                {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                <twig:Button as="a" href="{{ path('users') }}" variant="outline" class="h-11 w-full md:h-8 md:w-auto">Cancel</twig:Button>
+            </div>
+        {{ form_end(form) }}
+    </div>
+{% endblock %}

@@ -6,6 +6,7 @@ namespace App\Command\Project;
 
 use App\Command\Support\FieldErrors;
 use App\Command\Support\JsonOutput;
+use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -18,7 +19,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'fleet:project:delete', description: 'Delete a project with its templates (refused while it has instances)')]
 final class ProjectDeleteCommand extends Command
 {
-    public function __construct(private readonly ProjectService $projects)
+    public function __construct(private readonly ProjectService $projects, private readonly ProjectAccessRefresher $access)
     {
         parent::__construct();
     }
@@ -41,7 +42,7 @@ final class ProjectDeleteCommand extends Command
                 throw new Refused('Not deleted: pass --yes to confirm.');
             }
             $this->projects->delete($name);
-            $out->emit(['deleted' => $name], static function (JsonOutput $out) use ($name): void {
+            $out->emit($out->withWarning(['deleted' => $name], $this->access->takeWarning()), static function (JsonOutput $out) use ($name): void {
                 $out->success(\sprintf('Project "%s" deleted.', $name));
             });
         });

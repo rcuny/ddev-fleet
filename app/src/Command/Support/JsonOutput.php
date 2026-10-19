@@ -133,6 +133,27 @@ final class JsonOutput
     }
 
     /**
+     * A warning about a change that was made: the work is done (exit code 0) but a follow-up step failed. In JSON mode
+     * it becomes the document's `warning` key (stderr stays empty); otherwise it is one line on stderr.
+     *
+     * @param array<mixed> $payload
+     *
+     * @return array<mixed> the payload, with `warning` added in JSON mode when there is one
+     */
+    public function withWarning(array $payload, ?string $warning): array
+    {
+        if (null === $warning) {
+            return $payload;
+        }
+        if ($this->json) {
+            return $payload + ['warning' => $warning];
+        }
+        $this->stderr->writeln('Warning: '.$warning, OutputInterface::OUTPUT_RAW);
+
+        return $payload;
+    }
+
+    /**
      * @param array<mixed>         $payload
      * @param callable(self): void $human   printed instead of the document in table mode
      */

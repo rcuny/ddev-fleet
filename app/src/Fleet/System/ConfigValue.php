@@ -19,6 +19,8 @@ final class ConfigValue
     private const string EMAIL = '/^(?=.{3,254}$)[A-Za-z0-9._%+-]{1,64}@(?:[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)+[A-Za-z]{2,63}$/D';
     private const string CREDENTIAL = '/^[A-Za-z0-9._-]{8,128}$/D';
     private const string PROXY_SECRET = '/^[A-Za-z0-9._~+\/=-]{32,256}$/D';
+    private const string SMTP_ADDRESS = '/^(?:smtp|submission|submissions):\/\/(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?(?::[0-9]{1,5})?$/D';
+    private const string SMTP_USERNAME = '/^[A-Za-z0-9._@+-]{1,128}$/D';
     private const string PATH = '/^\/[A-Za-z0-9._+\/-]*$/D';
 
     private function __construct()
@@ -51,6 +53,76 @@ final class ConfigValue
         }
 
         return $email;
+    }
+
+    /**
+     * The address of Authelia's SMTP notifier: `smtp://`, `submission://` or `submissions://`, a lowercase host name
+     * and an optional port.
+     */
+    public static function smtpAddress(string $address): string
+    {
+        if (1 !== preg_match(self::SMTP_ADDRESS, $address)) {
+            throw new \InvalidArgumentException(\sprintf('"%s" is not a valid SMTP address (smtp://host, submission://host:587 or submissions://host:465).', self::printable($address)));
+        }
+
+        return $address;
+    }
+
+    /**
+     * The sender of Authelia's mail: a plain address.
+     */
+    public static function smtpSender(string $sender): string
+    {
+        if (1 !== preg_match(self::EMAIL, $sender) || false === filter_var($sender, \FILTER_VALIDATE_EMAIL)) {
+            throw new \InvalidArgumentException('The SMTP sender must be an email address.');
+        }
+
+        return $sender;
+    }
+
+    public static function smtpUsername(string $username): string
+    {
+        if (1 !== preg_match(self::SMTP_USERNAME, $username)) {
+            throw new \InvalidArgumentException('The SMTP username must be 1 to 128 characters of letters, digits and "._@+-".');
+        }
+
+        return $username;
+    }
+
+    /**
+     * A username as a rule subject (`user:<name>`): the same shape User accepts.
+     */
+    public static function username(string $username): string
+    {
+        if (1 !== preg_match('/^[a-z0-9][a-z0-9._-]{0,63}$/D', $username)) {
+            throw new \InvalidArgumentException(\sprintf('"%s" is not a valid username.', self::printable($username)));
+        }
+
+        return $username;
+    }
+
+    /**
+     * An Authelia group as a rule subject (`group:<name>`): the shape AdminGroup accepts.
+     */
+    public static function group(string $group): string
+    {
+        if (1 !== preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/D', $group)) {
+            throw new \InvalidArgumentException(\sprintf('"%s" is not a valid group name.', self::printable($group)));
+        }
+
+        return $group;
+    }
+
+    /**
+     * A project name as it appears in an instance host name (`<project>--<label>.<domain>`).
+     */
+    public static function projectName(string $name): string
+    {
+        if (1 !== preg_match('/^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/D', $name) || str_contains($name, '--')) {
+            throw new \InvalidArgumentException(\sprintf('"%s" is not a valid project name.', self::printable($name)));
+        }
+
+        return $name;
     }
 
     public static function ovhEndpoint(string $endpoint): string

@@ -158,6 +158,24 @@ final readonly class FleetPaths
         return $this->autheliaDir().'/users.yml';
     }
 
+    /**
+     * The users file exactly as Fleet last wrote it (owner only). Authelia's self-service reset changes users.yml in
+     * place; comparing it with this copy is how the hash read-back finds what Authelia changed (AutheliaUsersFile).
+     */
+    public function usersRenderedFile(): string
+    {
+        return $this->varDir().'/authelia-users.rendered.yml';
+    }
+
+    /**
+     * sha256 of the Authelia configuration the app last installed (owner only), so an unchanged configuration is not
+     * installed again: installing restarts Authelia, which drops every session (AutheliaAccessSync).
+     */
+    public function autheliaConfigMarker(): string
+    {
+        return $this->varDir().'/authelia-config.sha256';
+    }
+
     public function caddySnippetDir(): string
     {
         return $this->caddyDir;
