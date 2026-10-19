@@ -7,6 +7,7 @@
 #     and fleet-boot.service (starts the instances after a reboot);
 #   - the schedule ticker fleet-scheduler.service (enabled and started by step 98);
 #   - the daily database backup: fleet-backup.service (oneshot) and fleet-backup.timer (enabled by step 98);
+#   - the agent workspace fleet-tmux.service (enabled and started by step 98, never restarted: that would kill the panes);
 #   - the Mercure hub: pinned release, sha256-checked, plus its unit and configuration.
 # Every configuration is validated (php-fpm -t, mercure validate) before a service is asked to use it.
 
@@ -90,6 +91,10 @@ step_main() {
   install_etc fleet-backup.service "$SYSTEMD_DIR/fleet-backup.service" 0644 root:root
   [ "$FILE_CHANGED" = 0 ] || units_changed=1
   install_etc fleet-backup.timer "$SYSTEMD_DIR/fleet-backup.timer" 0644 root:root
+  [ "$FILE_CHANGED" = 0 ] || units_changed=1
+
+  # --- the agent workspace ----------------------------------------------------------------------------------------
+  install_etc fleet-tmux.service "$SYSTEMD_DIR/fleet-tmux.service" 0644 root:root
   [ "$FILE_CHANGED" = 0 ] || units_changed=1
 
   # --- the Mercure hub --------------------------------------------------------------------------------------------

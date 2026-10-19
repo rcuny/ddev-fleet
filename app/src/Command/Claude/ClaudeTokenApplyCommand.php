@@ -32,7 +32,8 @@ final class ClaudeTokenApplyCommand extends Command
     {
         $this
             ->addOption('instance', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Restart this instance (repeatable)')
-            ->addOption('all', null, InputOption::VALUE_NONE, 'Restart every running instance')
+            ->addOption('all', null, InputOption::VALUE_NONE, 'Restart every running instance (asks for confirmation)')
+            ->addOption('yes', 'y', InputOption::VALUE_NONE, 'Do not ask for confirmation (--all)')
             ->addOption('json', null, InputOption::VALUE_NONE, 'Print the queued jobs as JSON');
     }
 
@@ -46,6 +47,12 @@ final class ClaudeTokenApplyCommand extends Command
             $io->error('Choose --instance=<id> (repeatable) or --all. The restart ends what runs in the containers, so it is never implied.');
 
             return Command::INVALID;
+        }
+
+        if ($all && true !== $input->getOption('yes') && (true === $input->getOption('json') || !$input->isInteractive() || !$io->confirm('Restart EVERY running instance? This ends whatever runs in their containers.', false))) {
+            $io->error('Not restarted: pass --yes to confirm.');
+
+            return Command::FAILURE;
         }
 
         try {

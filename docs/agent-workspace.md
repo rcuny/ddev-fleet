@@ -46,9 +46,9 @@ A running instance keeps the token it started with. Handing a new one over resta
 running agent, so it is **never automatic**:
 
 ```
-fleet claude:token:apply --all                       # every running instance
+fleet claude:token:apply --all --yes                 # every running instance (without --yes it asks; non-interactive runs refuse)
 fleet claude:token:apply --instance=acme--main       # one (repeatable)
-fleet claude:token:apply --all --json                # the queued jobs as JSON
+fleet claude:token:apply --all --yes --json         # the queued jobs as JSON
 printf '%s' "$TOKEN" | fleet claude:token:set --apply  # store and apply in one go
 ```
 
@@ -59,5 +59,5 @@ running, or has a job queued or running, is refused and nothing is queued. The a
 ## Checks
 
 `fleet workspace:check` reports the push key, the git identity, the Claude token and whether the tmux server is alive
-(exit 1 when one is missing). `fleet-tmux.service` is a oneshot and cannot restart a dead server by itself; run
+(exit 1 when one is missing). `fleet-tmux.service` (installed and enabled by the installer, together with the `tmux` package; the installer never restarts it, so the panes survive a re-run) is a oneshot and cannot restart a dead server by itself; run
 `systemctl restart fleet-tmux` to recreate the session.
