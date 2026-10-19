@@ -39,6 +39,11 @@ final readonly class FieldErrors
         return new self(['name']);
     }
 
+    public static function asset(): self
+    {
+        return new self(['project', 'path']);
+    }
+
     /**
      * The command-line spelling of a field: `--default-branch`, `<name>`.
      */

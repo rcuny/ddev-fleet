@@ -49,6 +49,32 @@ final class HostSettingsRepositoryTest extends KernelTestCase
         self::assertSame('fleet.example.com', $this->repository->get()?->domain());
     }
 
+    public function testTheUploadCapDefaultsToTwoGiBAndRoundTrips(): void
+    {
+        $settings = $this->repository->getOrCreate('fleet.example.com');
+        self::assertSame(2_147_483_648, $settings->assetUploadMaxBytes());
+
+        $settings->changeAssetUploadMaxBytes(5_000_000_000);
+        $this->repository->save($settings);
+        $this->entityManager()->clear();
+
+        self::assertSame(5_000_000_000, $this->repository->get()?->assetUploadMaxBytes(), 'above 32 bits survives SQLite');
+        self::assertSame(5_000_000_000, (int) $this->entityManager()->getConnection()->fetchOne('SELECT asset_upload_max_bytes FROM host_settings'));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $settings->changeAssetUploadMaxBytes(0);
+    }
+
+    public function testTheCapColumnHasADatabaseDefaultSoExistingRowsGetOne(): void
+    {
+        $columns = $this->entityManager()->getConnection()->fetchAllAssociative('PRAGMA table_info(host_settings)');
+        $cap = array_values(array_filter($columns, static fn (array $column): bool => 'asset_upload_max_bytes' === $column['name']));
+
+        self::assertCount(1, $cap);
+        self::assertSame('1', (string) $cap[0]['notnull']);
+        self::assertSame('2147483648', (string) $cap[0]['dflt_value']);
+    }
+
     public function testTokenAndCompletionFieldsRoundTrip(): void
     {
         $settings = $this->repository->getOrCreate('fleet.example.com');
