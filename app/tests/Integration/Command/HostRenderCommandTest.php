@@ -56,7 +56,7 @@ final class HostRenderCommandTest extends KernelTestCase
         self::assertSame(0, $open->getStatusCode(), $open->getErrorOutput());
         self::assertStringContainsString('Gate: setup.', $open->getDisplay());
         self::assertStringNotContainsString('forward_auth', $this->gate());
-        self::assertSame(['authelia/configuration.yml', 'caddy/Caddyfile', 'caddy/env'], $this->fx->staged());
+        self::assertSame([], $this->fx->staged(), 'nothing is staged without --stage or --apply');
         self::assertSame(['caddy:validate', 'caddy:reload'], $this->fx->events);
 
         $host->markSetupComplete($this->fx->clock->now());
@@ -64,6 +64,42 @@ final class HostRenderCommandTest extends KernelTestCase
         $done = $this->render();
         self::assertStringContainsString('Gate: authelia.', $done->getDisplay());
         self::assertStringContainsString('forward_auth', $this->gate());
+    }
+
+    public function testStageLeavesTheRenderedFilesForTheRootHelper(): void
+    {
+        $this->fx->host();
+
+        $tester = $this->render(['--stage' => true, '--no-reload' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getErrorOutput());
+        self::assertStringContainsString('Staged: caddy, authelia.', $tester->getDisplay());
+        self::assertSame(['authelia/configuration.yml', 'caddy/Caddyfile', 'caddy/env'], $this->fx->staged());
+    }
+
+    public function testARenderWithoutApplyDiscardsWhatAnEarlierStageLeftBehind(): void
+    {
+        $this->fx->host(TlsMode::OvhDns);
+        $this->fx->addOvhSecrets();
+        $this->render(['--stage' => true, '--no-reload' => true]);
+        self::assertContains('caddy/env', $this->fx->staged(), 'the OVH credentials are staged in clear');
+
+        $tester = $this->render(['--no-reload' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getErrorOutput());
+        self::assertSame([], $this->fx->staged(), 'a render nobody applies leaves no credential on disk');
+    }
+
+    public function testAnOvhRenderWithoutApplyNeverStagesTheCredentials(): void
+    {
+        $this->fx->host(TlsMode::OvhDns);
+        $this->fx->addOvhSecrets();
+
+        $tester = $this->render();
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getErrorOutput());
+        self::assertSame([], $this->fx->staged());
+        self::assertStringContainsString('nothing staged', $tester->getDisplay());
     }
 
     public function testNoReloadOnlyWritesTheGateFile(): void

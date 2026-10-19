@@ -24,11 +24,13 @@ use Symfony\Component\Console\Style\SymfonyStyle;
     name: 'fleet:host:render',
     description: 'Render the Caddy/Authelia config for the root helper and the Caddy gate',
     help: <<<'HELP'
-        Stages the rendered config for <info>apply caddy</info> and <info>apply authelia</info> (the root helper removes what it
-        installs) and writes the Caddy gate: <info>--gate=auto</info> is the setup gate until setup is complete, then the
-        Authelia gate.
+        Writes the Caddy gate (<info>--gate=auto</info> is the setup gate until setup is complete, then the Authelia gate) and
+        checks that the Caddy and Authelia config renders. By default NOTHING is left staged: the staged Caddy environment
+        file holds the OVH credentials in clear, so it exists only for the moment before an apply.
 
-        <info>--apply</info> installs the staged files itself through the helper (sudo) and removes them afterwards.
+        <info>--apply</info> stages each target, installs it through the helper (sudo) and removes the staged files.
+        <info>--stage</info> leaves the rendered files staged for a root <info>apply caddy|authelia</info> run by the installer (the
+        helper removes what it installs; the installer removes the rest if it fails).
         <info>--gate=setup</info> after setup completed needs <info>--force</info>.
         <info>--no-reload</info> only writes the gate file; the installer needs it because Caddy is not installed yet.
         HELP,
@@ -48,7 +50,8 @@ final class HostRenderCommand extends Command
             ->addOption('gate', null, InputOption::VALUE_REQUIRED, 'auto, setup or authelia', 'auto')
             ->addOption('no-reload', null, InputOption::VALUE_NONE, 'Write the gate file but do not validate or reload Caddy')
             ->addOption('force', null, InputOption::VALUE_NONE, 'Allow --gate=setup after setup is complete (reopens the wizard\'s gate; prefer fleet:setup:reset)')
-            ->addOption('apply', null, InputOption::VALUE_NONE, 'Install the staged config through the root helper (authelia, then caddy) and remove it');
+            ->addOption('apply', null, InputOption::VALUE_NONE, 'Install the config through the root helper (authelia, then caddy) and remove what was staged')
+            ->addOption('stage', null, InputOption::VALUE_NONE, 'Leave the rendered config staged for a root `apply` (the installer only); otherwise nothing stays staged');
     }
 
     protected function execute(InputInterface $input, OutputInterface $output): int
@@ -90,9 +93,16 @@ final class HostRenderCommand extends Command
                     $this->system->stageAndApply($target, $host);
                     $io->writeln(\sprintf('Applied: %s.', $target->value));
                 }
-            } else {
+            } elseif ($input->getOption('stage')) {
                 $this->system->renderStaging($host);
                 $io->writeln('Staged: caddy, authelia.');
+            } else {
+                // A render that nobody applies must not leave the OVH credentials (or the proxy secret) on disk.
+                $this->system->assertRenderable($host);
+                foreach (ApplyTarget::cases() as $target) {
+                    $this->system->discardStaging($target);
+                }
+                $io->writeln('Rendered: caddy, authelia (nothing staged).');
             }
             $mode = $this->system->renderGate($host, $forcedGate, !$input->getOption('no-reload'));
         } catch (\InvalidArgumentException|\RuntimeException $e) {

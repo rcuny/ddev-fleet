@@ -101,7 +101,7 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/` (0750; `fleet.sqlite` and `queue.sqlite`, 0644 inside it), `locks/`, `logs/`, `assets/`, `instances/` (0750). |
 | `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
 | `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
-| `/srv/fleet/staging` | `fleet:fleet` 0700 | Rendered configuration waiting for the root helper (`caddy/`, `authelia/`); emptied after every apply. |
+| `/srv/fleet/staging` | `fleet:fleet` 0700 | Rendered configuration waiting for the root helper (`caddy/`, `authelia/`). Empty at rest: it is filled only for the moment before an `apply`, and emptied after every apply, every failed install step and every plain `fleet:host:render`, because the staged Caddy environment file holds the OVH credentials in clear text. Leave it out of backups. |
 | `/srv/fleet/authelia` | `fleet:authelia` 2750 | `users.yml` (0640, `fleet:authelia`), the sign-in portal's user file with the argon2id hashes, written by the app. |
 | `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640 `root:fleet`, see below), `mercure.env` (`root:root` 0600), `installed-revision` (0644). |
 | `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
@@ -222,7 +222,7 @@ The remaining commands exist mostly for the installer:
 | Command | Purpose |
 |---|---|
 | `fleet:host:init --domain=<fqdn> [--acme-email=] [--tls-mode=http01\|ovh_dns] [--force]` | Create the state directories, the secret key and the host settings. Idempotent. Changing the domain or the TLS mode after setup needs `--force`. |
-| `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--force]` | Render the Caddy and Authelia configuration into the staging directory and write the gate. `--apply` installs it through the root helper. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
+| `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:setup:token` | Mint a setup token and print the URL. |
 | `fleet:setup:reset [--yes]` | See above. |
 | `fleet:user:reset-password <username> [--no-apply]` | See above. |
@@ -302,7 +302,7 @@ sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes [--keep
 **Back up first.** Without `--keep-data` the uninstaller deletes `/srv/fleet` (databases, the secret key, the SSH
 keys, every instance) and `/etc/ddev-fleet` (the generated secrets), and `/etc/authelia/secrets`: none of it can
 be recreated. Copy at least `/srv/fleet` and `/etc/ddev-fleet` somewhere safe (as root, with `tar -C / -czpf
-backup.tgz srv/fleet etc/ddev-fleet etc/authelia/secrets`).
+backup.tgz --exclude=srv/fleet/staging srv/fleet etc/ddev-fleet etc/authelia/secrets`).
 
 | Flag | Effect |
 |---|---|

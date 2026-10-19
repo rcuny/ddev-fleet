@@ -174,6 +174,17 @@ fleet_app_run() {
     "$FLEET_ETC_DIR/fleet.env" "$FLEET_SRC_DIR/app" "$@"
 }
 
+# Deletes whatever is left in the app's staging directory. The staged Caddy environment file holds the OVH credentials
+# in clear text, and the root helper removes only what it installed: an install that dies between the render and the
+# `apply` calls (or an apply that fails) must not leave them in /srv/fleet, which operators back up. Called from the exit
+# trap, so it never fails and never needs the fleet user to exist.
+discard_staging() {
+  is_dry && return 0
+  [ -d "$FLEET_SRV_DIR/staging" ] || return 0
+  run_as_fleet find "$FLEET_SRV_DIR/staging" -mindepth 1 \( -type f -o -type l \) -delete >/dev/null 2>&1 || true
+  return 0
+}
+
 # `php8.4 bin/console <args>` through fleet_app_run.
 fleet_console() {
   fleet_app_run php8.4 bin/console "$@"

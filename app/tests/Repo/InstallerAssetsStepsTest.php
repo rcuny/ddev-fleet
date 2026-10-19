@@ -206,13 +206,54 @@ final class InstallerAssetsStepsTest extends TestCase
         self::assertSame("fetch\n", file_get_contents($fetches), 'downloaded once');
     }
 
+    public function testDiscardStagingRemovesWhatTheHelperDidNotInstall(): void
+    {
+        $staging = $this->scratch().'/srv/staging';
+        mkdir($staging.'/caddy', 0o700, true);
+        mkdir($staging.'/authelia', 0o700, true);
+        file_put_contents($staging.'/caddy/env', "OVH_APPLICATION_SECRET=secret\n");
+        file_put_contents($staging.'/caddy/.env.tmp.123', 'half written');
+        file_put_contents($staging.'/authelia/configuration.yml', 'x');
+        symlink('/etc/passwd', $staging.'/caddy/Caddyfile');
+        // The stub stands for `runuser -u fleet --`: it drops those words and runs the rest.
+        $stubs = $this->stubs(['runuser' => 'shift 3; exec "$@"']);
+
+        [$status, , $err] = $this->withCommon('FLEET_SRV_DIR='.escapeshellarg($this->scratch().'/srv').'; discard_staging', [], $stubs);
+
+        self::assertSame(0, $status, $err);
+        self::assertSame([], glob($staging.'/*/{,.}[!.]*', \GLOB_BRACE) ?: [], 'no staged file survives');
+        self::assertDirectoryExists($staging.'/caddy');
+        self::assertDirectoryExists($staging.'/authelia');
+        self::assertFileExists('/etc/passwd', 'a symlink is removed, never followed');
+    }
+
+    public function testDiscardStagingIsHarmlessWithoutAStagingDirectoryOrInDryRun(): void
+    {
+        [$status, , $err] = $this->withCommon('FLEET_SRV_DIR='.escapeshellarg($this->scratch().'/nowhere').'; discard_staging', [], $this->stubs(['runuser' => 'exit 1']));
+        self::assertSame(0, $status, $err);
+
+        $staging = $this->scratch().'/srv2/staging';
+        mkdir($staging, 0o700, true);
+        file_put_contents($staging.'/keep', 'x');
+        [$status, , $err] = $this->withCommon('FLEET_DRY_RUN=1; FLEET_SRV_DIR='.escapeshellarg($this->scratch().'/srv2').'; discard_staging', [], $this->stubs(['runuser' => 'exit 1']));
+        self::assertSame(0, $status, $err);
+        self::assertFileExists($staging.'/keep', 'a dry run changes nothing');
+    }
+
+    public function testTheExitTrapDiscardsTheStagingAreaAndTheRenderStepStagesExplicitly(): void
+    {
+        $run = (string) file_get_contents(self::installDir().'/run.sh');
+        self::assertMatchesRegularExpression('/on_exit\(\) \{.*discard_staging/s', $run, 'every exit of the installer cleans the staging area');
+        self::assertStringContainsString('fleet:host:render --gate=auto --no-reload --stage', (string) file_get_contents(self::installDir().'/steps/98-render-start.sh'));
+    }
+
     public function testRenderStartOrder(): void
     {
         [, $out] = $this->dryRun();
         $section = $this->section($out, '98-render-start');
 
         $order = [
-            'fleet:host:render --gate=auto --no-reload',
+            'fleet:host:render --gate=auto --no-reload --stage',
             '+ /usr/local/libexec/fleet/apply authelia',
             '+ /usr/local/libexec/fleet/apply caddy',
             '+ systemctl enable authelia php8.4-fpm fleet-mercure fleet-worker@1 caddy',

@@ -84,6 +84,7 @@ on_exit() {
   [ "$BASHPID" = "$MAIN_PID" ] || return 0
   if [ "$LOCK_HELD" = 1 ]; then
     policy_allow_start || true
+    discard_staging || true
   fi
   if [ "$code" -ne 0 ]; then
     report_failure "$code" "$DIE_WHERE"

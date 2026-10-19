@@ -81,9 +81,11 @@ step_main() {
     CODE_CHANGED=1 ENV_CHANGED=1 FPM_CHANGED=1 WORKER_UNIT_CHANGED=1 MERCURE_CHANGED=1
   fi
 
-  # Render as fleet, install as root. --no-reload: Caddy does not serve the new Caddyfile yet (the helper validates
-  # the staged copy, and Caddy is restarted below).
-  fleet_console fleet:host:render --gate=auto --no-reload
+  # Render as fleet, install as root. --stage: leave the files for the helper (a render without it stages nothing, the
+  # OVH credentials would otherwise sit in clear text in /srv/fleet); the exit trap in run.sh discards whatever the helper
+  # did not install if a step fails. --no-reload: Caddy does not serve the new Caddyfile yet (the helper validates the
+  # staged copy, and Caddy is restarted below).
+  fleet_console fleet:host:render --gate=auto --no-reload --stage
   run "$HELPER_DIR/apply" authelia
   run "$HELPER_DIR/apply" caddy
 
