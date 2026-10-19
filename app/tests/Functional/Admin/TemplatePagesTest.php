@@ -537,9 +537,9 @@ final class TemplatePagesTest extends AdminTestCase
 
         $tabs = $crawler->filter('nav[aria-label="Project sections"]');
         self::assertCount(1, $tabs);
-        self::assertSame(['General', 'Templates', 'Ports', 'Assets'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
+        self::assertSame(['General', 'Templates', 'Ports', 'Assets', 'Webhooks'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
         self::assertSame(
-            ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/ports', '/admin/projects/blog/assets'],
+            ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/ports', '/admin/projects/blog/assets', '/admin/projects/blog/webhooks'],
             $tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('href')),
         );
         self::assertSame('Templates', trim($tabs->filter('a[aria-current="page"]')->text()));

@@ -1,0 +1,51 @@
+{# The delivery log. Needs: deliveries, hideIgnored, filterUrl (the page without the filter query), showProject (bool). #}
+<section class="grid gap-4" aria-labelledby="deliveries-title" data-testid="webhook-deliveries">
+    <div class="flex flex-wrap items-center justify-between gap-2">
+        <h2 id="deliveries-title" class="text-lg">Deliveries</h2>
+        <a href="{{ hideIgnored ? filterUrl : filterUrl ~ '?hide-ignored=1' }}" class="inline-flex min-h-11 items-center text-sm" data-testid="webhook-filter">{{ hideIgnored ? 'Show ignored' : 'Hide ignored' }}</a>
+    </div>
+    {% if deliveries is empty %}
+        <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="deliveries-empty">No delivery has arrived yet.</p>
+    {% else %}
+        <twig:Table>
+            <twig:Table:Caption class="sr-only">Webhook deliveries, newest first</twig:Table:Caption>
+            <twig:Table:Header>
+                <twig:Table:Row>
+                    <twig:Table:Head>When (UTC)</twig:Table:Head>
+                    {% if showProject %}<twig:Table:Head class="hidden sm:table-cell">Project</twig:Table:Head>{% endif %}
+                    <twig:Table:Head class="hidden sm:table-cell">Source</twig:Table:Head>
+                    <twig:Table:Head>Subject</twig:Table:Head>
+                    <twig:Table:Head>Result</twig:Table:Head>
+                    <twig:Table:Head class="hidden md:table-cell">Decision</twig:Table:Head>
+                </twig:Table:Row>
+            </twig:Table:Header>
+            <twig:Table:Body>
+                {% for d in deliveries %}
+                    <twig:Table:Row data-testid="delivery-row" data-result="{{ d.result }}">
+                        <twig:Table:Cell class="whitespace-nowrap">{{ d.receivedAt|date('m-d H:i', 'UTC') }}</twig:Table:Cell>
+                        {% if showProject %}<twig:Table:Cell class="hidden sm:table-cell">{{ d.projectName }}</twig:Table:Cell>{% endif %}
+                        <twig:Table:Cell class="hidden sm:table-cell">{{ d.source.label }}</twig:Table:Cell>
+                        <twig:Table:Cell class="[overflow-wrap:anywhere]">
+                            {{ d.subject ?? d.event }}
+                            {% if showProject %}<span class="block text-xs text-ink-muted sm:hidden">{{ d.projectName }}</span>{% endif %}
+                            {% if d.change %}<span class="block text-xs text-ink-muted">{{ d.change }}</span>{% endif %}
+                        </twig:Table:Cell>
+                        <twig:Table:Cell>
+                            {% if d.result == 'accepted' %}
+                                <twig:Badge class="bg-brand-faded text-brand-darker dark:text-brand">accepted</twig:Badge>
+                            {% elseif d.result == 'failed' %}
+                                <twig:Badge variant="destructive">failed</twig:Badge>
+                            {% else %}
+                                <twig:Badge variant="outline">{{ d.result }}</twig:Badge>
+                            {% endif %}
+                        </twig:Table:Cell>
+                        <twig:Table:Cell class="hidden text-xs md:table-cell [overflow-wrap:anywhere]" data-testid="delivery-decision">
+                            {{ d.decision ?? d.reason }}
+                            {% if d.decision and d.reason %}<span class="block text-ink-muted">{{ d.reason }}</span>{% endif %}
+                        </twig:Table:Cell>
+                    </twig:Table:Row>
+                {% endfor %}
+            </twig:Table:Body>
+        </twig:Table>
+    {% endif %}
+</section>
