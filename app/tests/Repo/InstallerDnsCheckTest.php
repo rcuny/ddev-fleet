@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * The DNS pre-check compares the A and AAAA records of <domain> and auth.<domain> with this host's own addresses
- * (interface addresses, or the public address behind NAT). getent, ip and curl are stubs on PATH.
+ * (interface addresses, or the public address behind NAT). dig, ip and curl are stubs on PATH.
  */
 final class InstallerDnsCheckTest extends TestCase
 {
@@ -168,11 +168,25 @@ final class InstallerDnsCheckTest extends TestCase
         self::assertSame(0, $this->check($stubs)[0]);
     }
 
-    public function testIpv4MappedAnswersAreNotAaaaRecords(): void
+    public function testTheResolverIsQueriedNotEtcHosts(): void
     {
-        // glibc answers `getent ahostsv6` for an A-only name with ::ffff:a.b.c.d; that is not an AAAA record.
+        // getent (which reads /etc/hosts) would claim 203.0.113.7; the resolver says 192.0.2.1.
         $stubs = $this->dnsStubs(
-            [self::DOMAIN => ['4' => ['203.0.113.7'], '6' => ['::ffff:203.0.113.7']], self::AUTH => ['4' => ['203.0.113.7']]],
+            [self::DOMAIN => ['4' => ['192.0.2.1']], self::AUTH => ['4' => ['192.0.2.1']]],
+            localV4: ['203.0.113.7'],
+            publicV4: null,
+        );
+
+        [$status, , $err] = $this->check($stubs);
+
+        self::assertSame(2, $status);
+        self::assertStringContainsString('192.0.2.1', $err);
+    }
+
+    public function testCnameLinesAreIgnored(): void
+    {
+        $stubs = $this->dnsStubs(
+            [self::DOMAIN => ['4' => ['203.0.113.7']], self::AUTH => ['4' => ['203.0.113.7']]],
             localV4: ['203.0.113.7'],
             publicV4: null,
         );
@@ -224,11 +238,10 @@ final class InstallerDnsCheckTest extends TestCase
             foreach ($families as $family => $addresses) {
                 $lines = '';
                 foreach ($addresses as $address) {
-                    foreach (['STREAM', 'DGRAM', 'RAW'] as $socket) {
-                        $lines .= \sprintf("echo '%-39s %s %s'\n", $address, $socket, $name);
-                    }
+                    $lines .= \sprintf("echo '%s'\n", $address);
                 }
-                $cases .= \sprintf("ahostsv%s:%s) %s;;\n", $family, $name, $lines);
+                // dig answers a CNAME chain with the target name first; the check must ignore those lines.
+                $cases .= \sprintf("%s:%s) echo 'target.example.net.'; %s;;\n", 6 === $family ? 'AAAA' : 'A', $name, $lines);
             }
         }
         $ip = static function (array $addresses, string $family): string {
@@ -241,7 +254,10 @@ final class InstallerDnsCheckTest extends TestCase
         };
 
         return $this->stubs([
-            'getent' => "case \"\$1:\$2\" in\n".$cases."*) exit 2;;\nesac",
+            // dig +short +time=3 +tries=2 <A|AAAA> <name>
+            'dig' => "case \"\$4:\$5\" in\n".$cases."*) exit 0;;\nesac",
+            // /etc/hosts says the name is this host, whatever the resolver answers.
+            'getent' => 'echo "203.0.113.7 STREAM $2"',
             'ip' => "case \"\$2\" in\n-4) ".$ip($localV4, '4').";;\n-6) ".$ip($localV6, '6').";;\nesac",
             'curl' => "case \"\$1\" in\n-6) ".(null === $publicV6 ? 'exit 22' : "echo '{$publicV6}'").";;\n*) ".(null === $publicV4 ? 'exit 22' : "echo '{$publicV4}'").";;\nesac",
         ]);

@@ -27,8 +27,10 @@ main() {
   check_os
 
   MAIN_PID=$BASHPID
-  trap 'on_error $? $LINENO' ERR
+  trap 'on_error $? "${BASH_SOURCE[0]}" "$LINENO"' ERR
+  trap 'on_exit $?' EXIT
 
+  LOCK_HELD=0
   local tee_pid=''
   if is_dry; then
     printf 'dry-run: nothing will be changed\n'
@@ -36,6 +38,9 @@ main() {
     # One installer at a time.
     exec 9>/run/lock/ddev-fleet-install.lock
     flock -n 9 || die "$EX_TEMPFAIL" "another installer run is in progress"
+    LOCK_HELD=1
+    # A policy-rc.d left by a killed run must not outlive it.
+    policy_allow_start
     # Everything is logged (mode 0600). fd 3 stays the terminal for output that must not reach the log (term_print).
     (umask 077 && : >>"$INSTALL_LOG")
     exec 3>&1
@@ -70,15 +75,22 @@ main() {
   fi
 }
 
+# Failures: the ERR trap reports the failing command's file and line; die() and other explicit exits are caught by
+# the EXIT trap. Either way the step name and the re-run hint are printed once, by the main shell only.
 on_error() {
-  local code=$1 line=$2
-  # Subshells (command substitutions) inherit the trap; only the main shell reports.
+  # Subshells (command substitutions) inherit the ERR trap; only the main shell reports.
   [ "$BASHPID" = "$MAIN_PID" ] || return 0
-  trap - ERR
-  printf '\nERROR: step "%s" failed (exit %s, run.sh line %s).\n' "$STEP_NAME" "$code" "$line" >&2
-  printf 'Fix the cause and re-run the same command: the installer is idempotent and continues from where it stopped.\n' >&2
-  if ! is_dry; then
-    printf 'Log: %s\n' "$INSTALL_LOG" >&2
+  report_failure "$1" "${2##*/}:$3"
+}
+
+on_exit() {
+  local code=$1
+  [ "$BASHPID" = "$MAIN_PID" ] || return 0
+  if [ "$LOCK_HELD" = 1 ]; then
+    policy_allow_start || true
+  fi
+  if [ "$code" -ne 0 ]; then
+    report_failure "$code" ""
   fi
 }
 

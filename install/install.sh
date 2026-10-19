@@ -36,6 +36,9 @@ main() {
     local code=$1
     shift
     printf 'ERROR: %s\n' "$*" >&2
+    if [ "$code" = 1 ]; then
+      printf 'Fix the cause and re-run the same command: the installer is idempotent.\n' >&2
+    fi
     exit "$code"
   }
   usage() {
@@ -57,6 +60,9 @@ Options:
   --help                this text
 
 Exit codes: 0 ok, 2 DNS mismatch, 64 usage, 77 not root, 78 unsupported host.
+
+The install takes several minutes. Run it inside screen (or systemd-run): a dropped SSH session would interrupt it.
+If it is interrupted anyway, run the same command again.
 USAGE
   }
   valid_domain() {
@@ -79,6 +85,11 @@ USAGE
       return 0
     fi
     "$@" </dev/null
+  }
+  # Same apt options as lib/common.sh apt_get: non-interactive, keep existing configuration files, wait for the dpkg lock.
+  apt_step() {
+    step env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q \
+      -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 "$@"
   }
   as_fleet() {
     step runuser -u fleet -- env "HOME=$fleet_home" GIT_TERMINAL_PROMPT=0 "$@"
@@ -150,31 +161,43 @@ USAGE
 
   # --- 3. stage 1 work --------------------------------------------------------------------------------------------
   say "[stage 1] bootstrap for $domain (ref $ref)"
-  step env DEBIAN_FRONTEND=noninteractive apt-get update -q
-  step env DEBIAN_FRONTEND=noninteractive apt-get install -y -q ca-certificates curl git iproute2
+  # A run killed inside dpkg leaves it half configured; apt refuses to do anything until that is repaired.
+  if [ "$dry_run" = 1 ] || [ -n "$(dpkg --audit 2>/dev/null || true)" ] || [ -n "$(find /var/lib/dpkg/updates -maxdepth 1 -type f 2>/dev/null || true)" ]; then
+    step dpkg --configure -a
+    apt_step -f install
+  fi
+  apt_step update
+  apt_step install ca-certificates curl git iproute2 bind9-dnsutils
 
   # The checkout belongs to `fleet`; git never runs as root in it (no "dubious ownership" on a re-run).
   if [ "$dry_run" = 1 ] || ! id -u fleet >/dev/null 2>&1; then
     step useradd --system --create-home --home-dir "$fleet_home" --shell /bin/bash --user-group fleet
   fi
   step install -d -m 0755 -o fleet -g fleet "$opt_dir"
-  if [ "$dry_run" = 1 ] || [ ! -d "$opt_dir/.git" ]; then
-    if [ "$dry_run" != 1 ] && [ -n "$(ls -A "$opt_dir")" ]; then
+  local healthy=0
+  if [ "$dry_run" != 1 ] && [ -d "$opt_dir/.git" ] && runuser -u fleet -- env "HOME=$fleet_home" git -C "$opt_dir" rev-parse -q --verify HEAD >/dev/null 2>&1; then
+    healthy=1
+  fi
+  if [ "$dry_run" = 1 ] || [ "$healthy" = 0 ]; then
+    if [ "$dry_run" != 1 ] && [ -d "$opt_dir/.git" ]; then
+      # A clone that was killed half way: it holds nothing worth keeping.
+      find "$opt_dir" -mindepth 1 -delete
+    elif [ "$dry_run" != 1 ] && [ -n "$(ls -A "$opt_dir")" ]; then
       fail 1 "$opt_dir exists, is not empty and is not a git checkout; move it away and re-run"
     fi
     as_fleet git clone --quiet -- "$repo_url" "$opt_dir"
   fi
   as_fleet git -C "$opt_dir" remote set-url origin "$repo_url"
   as_fleet git -C "$opt_dir" fetch --quiet --tags --prune origin
-  # A branch follows origin (fast-forward only); a tag or commit is checked out detached.
-  if [ "$dry_run" = 1 ]; then
-    as_fleet git -C "$opt_dir" checkout --quiet "$ref"
-    as_fleet git -C "$opt_dir" merge --quiet --ff-only "origin/$ref"
-  elif runuser -u fleet -- env "HOME=$fleet_home" git -C "$opt_dir" rev-parse -q --verify "refs/remotes/origin/$ref^{commit}" >/dev/null 2>&1; then
-    as_fleet git -C "$opt_dir" checkout --quiet "$ref" 2>/dev/null || as_fleet git -C "$opt_dir" checkout --quiet -b "$ref" "origin/$ref"
-    as_fleet git -C "$opt_dir" merge --quiet --ff-only "origin/$ref"
+  # The checkout is the installer's: a branch is reset to origin (a rewritten branch converges too, local edits are
+  # discarded); a tag or commit is checked out detached.
+  if [ "$dry_run" = 1 ] || runuser -u fleet -- env "HOME=$fleet_home" git -C "$opt_dir" rev-parse -q --verify "refs/remotes/origin/$ref^{commit}" >/dev/null 2>&1; then
+    as_fleet git -C "$opt_dir" checkout --quiet --force -B "$ref" "origin/$ref"
   else
-    as_fleet git -C "$opt_dir" checkout --quiet --detach "$ref"
+    as_fleet git -C "$opt_dir" checkout --quiet --force --detach "$ref"
+  fi
+  if ! as_fleet git -C "$opt_dir" cat-file -e HEAD:install/run.sh 2>/dev/null; then
+    fail 1 "ref $ref has no install/run.sh (it predates this installer); choose a newer --ref"
   fi
 
   # Stage 2 runs from a root-owned export of the committed install/ tree, never from the fleet-writable checkout.
@@ -184,7 +207,6 @@ USAGE
     rm -rf "$stage_dir.new"
     install -d -m 0755 -o root -g root "$stage_dir.new"
     runuser -u fleet -- env "HOME=$fleet_home" git -C "$opt_dir" archive --format=tar HEAD install | tar -x --no-same-owner -C "$stage_dir.new"
-    [ -f "$stage_dir.new/install/run.sh" ] || fail 1 "ref $ref has no install/run.sh"
     rm -rf "$stage_dir"
     mv "$stage_dir.new" "$stage_dir"
   fi

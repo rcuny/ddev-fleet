@@ -293,6 +293,9 @@ final class InstallerEntryTest extends TestCase
     public function testShellcheckCleanWhenAvailable(): void
     {
         if (0 !== new Process(['shellcheck', '--version'])->run()) {
+            if (false !== getenv('BITBUCKET_BUILD_NUMBER')) {
+                self::fail('shellcheck must be installed in the Bitbucket gates image (bitbucket-pipelines.yml apt line).');
+            }
             self::markTestSkipped('shellcheck is not installed (apt-get install shellcheck).');
         }
 

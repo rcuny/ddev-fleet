@@ -73,7 +73,10 @@ step_main() {
   fi
   apt_repo authelia https://www.authelia.com/keys/authelia-security.gpg "$KEYRING_DIR/authelia-security.gpg" \
     "deb [signed-by=$KEYRING_DIR/authelia-security.gpg] https://apt.authelia.com stable main"
+  # Nothing may start Authelia before its secrets and users.yml exist (below): no service starts during the install.
+  policy_deny_start
   apt_install authelia
+  policy_allow_start
   authelia_account
 
   # 3. A first install must not leave a running Authelia behind: it has no configuration yet.

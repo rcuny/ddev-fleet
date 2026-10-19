@@ -71,6 +71,20 @@ die() {
   exit "$code"
 }
 
+REPORTED=0
+
+# Prints which step failed and what to do, once per run. $2 is "file:line" when known.
+report_failure() {
+  [ "$REPORTED" = 0 ] || return 0
+  REPORTED=1
+  local where=${2:+, at $2}
+  printf '\nERROR: step "%s" failed (exit %s%s).\n' "$STEP_NAME" "$1" "$where" >&2
+  printf 'Fix the cause and re-run the same command: the installer is idempotent and continues from where it stopped.\n' >&2
+  if ! is_dry; then
+    printf 'Log: %s\n' "$INSTALL_LOG" >&2
+  fi
+}
+
 # Writes to the terminal even while stdout is teed into the log (fd 3 is the original stdout, set up by run.sh).
 # Used for the one-time setup URL, which must never land in the install log.
 term_print() {
@@ -124,6 +138,9 @@ Options:
   --help                this text
 
 Exit codes: 0 ok, 2 DNS mismatch, 64 usage, 77 not root, 78 unsupported host.
+
+The install takes several minutes. Run it inside screen (or systemd-run): a dropped SSH session would interrupt it.
+If it is interrupted anyway, run the same command again.
 USAGE
 }
 
@@ -240,10 +257,16 @@ public_addr() {
   curl "$flag" -fsS --proto '=https' --tlsv1.2 --max-time 10 "$url" 2>/dev/null </dev/null | tr 'A-F' 'a-f' | tr -d '[:space:]' || true
 }
 
-# DNS records of family 4 or 6 for a name, one per line (IPv4-mapped IPv6 answers are not AAAA records).
+# DNS records of family 4 or 6 for a name, one per line. This asks the resolver (dig), not the name service switch:
+# `getent` would read /etc/hosts first, where Debian maps the host's own name to 127.0.1.1, and a line there could
+# also make a wrong public record look right. CNAME lines in the answer are dropped.
 dns_records() {
-  local family=$1 name=$2
-  { getent "ahostsv$family" "$name" 2>/dev/null || true; } | awk '{print $1}' | tr 'A-F' 'a-f' | { grep -v '^::ffff:' || true; } | sort -u
+  local family=$1 name=$2 type=A pattern='^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$'
+  if [ "$family" = 6 ]; then
+    type=AAAA
+    pattern='^[0-9a-fA-F:]*:[0-9a-fA-F:.]*$'
+  fi
+  { dig +short +time=3 +tries=2 "$type" "$name" 2>/dev/null || true; } | { grep -E "$pattern" || true; } | tr 'A-F' 'a-f' | sort -u
 }
 
 # True when $1 is an entry of the newline-separated list $2.
@@ -259,6 +282,7 @@ check_dns() {
     log_info "DNS check skipped (--skip-dns-check)"
     return 0
   fi
+  command -v dig >/dev/null 2>&1 || die "$EX_USAGE" "dig is needed for the DNS check (apt-get install bind9-dnsutils), or pass --skip-dns-check"
   for name in "$domain" "auth.$domain"; do
     for family in 4 6; do
       local_set=$(local_addrs "$family")
@@ -267,7 +291,7 @@ check_dns() {
       recs=$(dns_records "$family" "$name")
       if [ -z "$recs" ]; then
         if [ "$family" = 4 ]; then
-          printf 'ERROR: %s has no A record.\n' "$name" >&2
+          printf 'ERROR: %s has no A record (or the DNS lookup failed).\n' "$name" >&2
           problems=$((problems + 1))
         fi
         continue
@@ -375,16 +399,74 @@ apt_mark_dirty() {
   APT_DIRTY=1
 }
 
+# A previous run killed in the middle of dpkg (a dropped SSH session, Ctrl-C) leaves it unconfigured, and every apt
+# call then refuses until `dpkg --configure -a` has run. Checked once per run, before the first apt action.
+DPKG_UPDATES_DIR=/var/lib/dpkg/updates
+DPKG_CHECKED=0
+
+dpkg_interrupted() {
+  [ -n "$(dpkg --audit 2>/dev/null || true)" ] || [ -n "$(find "$DPKG_UPDATES_DIR" -maxdepth 1 -type f 2>/dev/null || true)" ]
+}
+
+dpkg_recover() {
+  [ "$DPKG_CHECKED" = 0 ] || return 0
+  DPKG_CHECKED=1
+  if is_dry || dpkg_interrupted; then
+    log_info "dpkg was interrupted (or may have been): repairing before any apt action"
+    run dpkg --configure -a
+    apt_get -f install
+  fi
+}
+
+# Every apt-get call of the installer goes through here: non-interactive, existing configuration files kept (a file
+# we rendered must survive a package upgrade, and a prompt on closed stdin would abort the run), and a wait for the
+# dpkg lock (a fresh image is often running unattended upgrades).
+apt_get() {
+  run env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -y -q \
+    -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 "$@"
+}
+
 apt_refresh() {
+  dpkg_recover
   if [ "$APT_DIRTY" = 1 ]; then
-    run apt-get update -q
+    apt_get update
     APT_DIRTY=0
   fi
 }
 
 apt_install() {
   apt_refresh
-  run env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get install -y -q "$@"
+  apt_get install "$@"
+}
+
+# --- no service start during a package install ------------------------------------------------------------------
+
+POLICY_RC=/usr/sbin/policy-rc.d
+POLICY_MARKER='# ddev-fleet installer: temporary, removed after the install'
+
+# invoke-rc.d and deb-systemd-invoke ask policy-rc.d before starting a service; 101 means "not allowed".
+policy_deny_start() {
+  if is_dry; then
+    printf '+ write %s 0755 root:root (exit 101: no service starts during the install)\n' "$POLICY_RC"
+    return 0
+  fi
+  if [ -e "$POLICY_RC" ] && ! grep -qxF "$POLICY_MARKER" "$POLICY_RC"; then
+    log_warn "$POLICY_RC exists and is not ours; leaving it in place"
+    return 0
+  fi
+  printf '#!/bin/sh\n%s\nexit 101\n' "$POLICY_MARKER" | write_file "$POLICY_RC" 0755 root:root
+}
+
+# Removes only our own file; safe to call at any time (also from the exit trap and after a killed run).
+policy_allow_start() {
+  if is_dry; then
+    printf '+ rm -f %s (only if the installer wrote it)\n' "$POLICY_RC"
+    return 0
+  fi
+  if [ -f "$POLICY_RC" ] && grep -qxF "$POLICY_MARKER" "$POLICY_RC"; then
+    rm -f "$POLICY_RC"
+  fi
+  return 0
 }
 
 # apt_repo <name> <key-url> <key-file> <sources line>: key and one-line source, updated only when they changed.

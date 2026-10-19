@@ -117,7 +117,7 @@ final class InstallerSafetyTest extends TestCase
         $common = (string) file_get_contents(self::installDir().'/lib/common.sh');
 
         self::assertStringContainsString('DEBIAN_FRONTEND=noninteractive', $common);
-        self::assertStringContainsString('apt-get install -y', $common);
+        self::assertStringContainsString('-o Dpkg::Options::=--force-confold', $common);
     }
 
     public function testNoDirectDownloadsOutsideTheHelper(): void

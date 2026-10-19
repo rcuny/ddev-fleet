@@ -77,6 +77,36 @@ final class InstallerPackagesTest extends TestCase
         self::assertStringNotContainsString('add-apt-repository', $all);
     }
 
+    public function testEveryAptCallKeepsConfigurationFilesAndNeverPrompts(): void
+    {
+        [, $out] = $this->dryRun();
+
+        $calls = 0;
+        foreach (explode("\n", $out) as $line) {
+            if (!str_contains($line, 'apt-get ')) {
+                continue;
+            }
+            ++$calls;
+            foreach (['DEBIAN_FRONTEND=noninteractive', ' -y ', '-o Dpkg::Options::=--force-confdef', '-o Dpkg::Options::=--force-confold', '-o DPkg::Lock::Timeout=120'] as $needle) {
+                self::assertStringContainsString($needle, $line, $line);
+            }
+        }
+        self::assertGreaterThanOrEqual(12, $calls, 'stage 1 and stage 2 both run apt');
+    }
+
+    public function testAptGetIsOnlyCalledThroughTheTwoWrappers(): void
+    {
+        foreach (self::installFiles() as $file) {
+            foreach (self::codeLines($file) as $number => $line) {
+                if (1 === preg_match('/^\s*(run|step|apt-get|env)\b.*\bapt-get\b/', $line)) {
+                    $name = basename($file);
+                    self::assertContains($name, ['common.sh', 'install.sh'], $file.':'.$number.' calls apt-get directly; use apt_get/apt_install');
+                    self::assertMatchesRegularExpression('/^\s*(run env DEBIAN_FRONTEND|step env DEBIAN_FRONTEND)/', $line, $file.':'.$number);
+                }
+            }
+        }
+    }
+
     public function testPhpIsDebiansOwnEightFour(): void
     {
         [, $out] = $this->dryRun();
@@ -84,23 +114,23 @@ final class InstallerPackagesTest extends TestCase
         self::assertDoesNotMatchRegularExpression('/php(?!8\.4)\d\.\d/', $out, 'only php8.4 packages');
     }
 
-    public function testBitbucketGatesInstallOpensshClientForTheRealKeygenTests(): void
+    public function testBitbucketGatesInstallTheToolsTheRealBinaryTestsNeed(): void
     {
         $pipeline = (string) file_get_contents(self::productRoot().'/bitbucket-pipelines.yml');
 
-        self::assertMatchesRegularExpression('/php8\.4-zip\s+composer git unzip curl ca-certificates gnupg openssh-client\b/', $pipeline);
+        self::assertMatchesRegularExpression('/php8\.4-zip\s+composer git unzip curl ca-certificates gnupg openssh-client shellcheck sudo\b/', $pipeline);
     }
 
     /**
-     * The package names of the "apt-get install" line that mentions $marker.
+     * The package names of the apt-get install line that mentions $marker.
      *
      * @return list<string>
      */
     private function packagesOf(string $plan, string $marker): array
     {
         foreach (explode("\n", $plan) as $line) {
-            if (str_contains($line, 'apt-get install -y -q') && str_contains($line, $marker)) {
-                $tail = substr($line, (int) strpos($line, 'apt-get install -y -q') + \strlen('apt-get install -y -q'));
+            if (str_contains($line, ' DPkg::Lock::Timeout=120 install ') && str_contains($line, $marker)) {
+                $tail = substr($line, (int) strpos($line, ' DPkg::Lock::Timeout=120 install ') + \strlen(' DPkg::Lock::Timeout=120 install '));
 
                 return array_values(array_filter(explode(' ', trim($tail))));
             }

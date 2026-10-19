@@ -6,6 +6,7 @@ namespace App\Tests\Repo;
 
 use App\Tests\Repo\Support\InstallerHarness;
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 /**
  * The base steps (user, DDEV, Caddy, Authelia): the order and values of the dry-run plan, and the shell functions that
@@ -69,7 +70,7 @@ final class InstallerStepsTest extends TestCase
         [, $out] = $this->dryRun();
 
         $mask = $this->position($out, '+ write /etc/tmpfiles.d/authelia.conf 0644 root:root');
-        $install = $this->position($out, 'apt-get install -y -q authelia');
+        $install = $this->position($out, ' DPkg::Lock::Timeout=120 install authelia');
         $firstSecret = $this->position($out, '+ secret /etc/authelia/secrets/session_secret');
         $users = $this->position($out, '+ write /srv/fleet/authelia/users.yml 0640 fleet:authelia');
         $assertion = $this->position($out, '+ assert no default account');
@@ -278,6 +279,129 @@ final class InstallerStepsTest extends TestCase
         self::assertMatchesRegularExpression('/custom caddy v2\.11\.9 sha256 [0-9a-f]{64}/', $out, 'the downloaded build is fingerprinted in the log');
         self::assertStringContainsString('v2.11.9', (string) shell_exec(escapeshellarg($dir.'/installed').' version'));
         self::assertFileDoesNotExist($dir.'/installed.new');
+    }
+
+    public function testDpkgIsRepairedOnlyWhenInterruptedAndOnlyOnce(): void
+    {
+        $dir = $this->scratch();
+        $updates = $dir.'/updates';
+        mkdir($updates);
+        $calls = $dir.'/calls';
+        $stubs = $this->stubs([
+            'dpkg' => 'echo "dpkg $*" >> "$CALLS"; if [ "$1" = --audit ] && [ -n "$AUDIT" ]; then echo "half-configured: foo"; fi; exit 0',
+            'apt-get' => 'echo "apt-get $*" >> "$CALLS"',
+        ]);
+        $code = 'DPKG_UPDATES_DIR="$UPDATES"; dpkg_recover; dpkg_recover; apt_install foo';
+        $run = function (array $env) use ($code, $calls, $stubs, $updates): string {
+            @unlink($calls);
+            $this->withCommon($code, $env + ['CALLS' => $calls, 'AUDIT' => '', 'UPDATES' => $updates], $stubs);
+
+            return (string) @file_get_contents($calls);
+        };
+
+        $clean = $run([]);
+        self::assertStringNotContainsString('--configure', $clean);
+        self::assertStringContainsString(' install foo', $clean);
+
+        $audited = $run(['AUDIT' => '1']);
+        self::assertSame(1, substr_count($audited, 'dpkg --configure -a'), 'repaired once, not once per call');
+        self::assertLessThan(strpos($audited, ' install foo'), strpos($audited, 'dpkg --configure -a'), 'repair comes before the install');
+        self::assertStringContainsString('-f install', $audited);
+        self::assertStringContainsString('--force-confold', $audited);
+
+        touch($updates.'/0001');
+        $pending = $run([]);
+        self::assertStringContainsString('dpkg --configure -a', $pending, 'a pending dpkg journal counts as interrupted');
+    }
+
+    public function testStartPolicyIsOursToCreateAndRemoveOnly(): void
+    {
+        $policy = $this->scratch().'/policy-rc.d';
+        $env = ['POLICY' => $policy];
+        $stubs = $this->stubs(['chown' => 'exit 0']);
+
+        $this->withCommon('POLICY_RC="$POLICY"; policy_deny_start', $env, $stubs);
+        self::assertFileExists($policy);
+        self::assertStringContainsString('exit 101', (string) file_get_contents($policy));
+        self::assertSame('755', substr(\sprintf('%o', fileperms($policy)), -3));
+
+        $this->withCommon('POLICY_RC="$POLICY"; policy_allow_start', $env, $stubs);
+        self::assertFileDoesNotExist($policy);
+
+        file_put_contents($policy, "#!/bin/sh\nexit 101\n# someone else's\n");
+        [, , $err] = $this->withCommon('POLICY_RC="$POLICY"; policy_deny_start; policy_allow_start', $env, $stubs);
+        self::assertFileExists($policy, "an administrator's own policy file is never removed");
+        self::assertStringContainsString('not ours', $err);
+    }
+
+    public function testAutheliaIsInstalledBetweenStartDenyAndAllow(): void
+    {
+        [, $out] = $this->dryRun();
+
+        $deny = $this->position($out, '+ write /usr/sbin/policy-rc.d 0755 root:root');
+        $install = $this->position($out, ' DPkg::Lock::Timeout=120 install authelia');
+        $allow = $this->position($out, '+ rm -f /usr/sbin/policy-rc.d');
+        self::assertLessThan($install, $deny);
+        self::assertLessThan($allow, $install);
+    }
+
+    public function testDryRunPlansTheDpkgRepairBeforeTheFirstAptCallOfBothStages(): void
+    {
+        [, $out] = $this->dryRun();
+
+        self::assertSame(2, substr_count($out, "+ dpkg --configure -a\n"), 'stage 1 and stage 2 each repair first');
+        self::assertLessThan(strpos($out, ' update'), strpos($out, '+ dpkg --configure -a'));
+        self::assertStringContainsString('git -C /opt/ddev-fleet checkout --quiet --force -B develop origin/develop', $out);
+        self::assertStringContainsString('git -C /opt/ddev-fleet cat-file -e HEAD:install/run.sh', $out);
+        self::assertStringNotContainsString('--ff-only', $out, 'a rewritten branch must converge, not wedge on a fast-forward');
+    }
+
+    public function testAnInstalledCustomCaddyIsKeptWhenTheBuildServiceFails(): void
+    {
+        $dir = $this->scratch();
+        $this->fakeCaddy($dir.'/default', 'v2.12.0', true);
+        $this->fakeCaddy($dir.'/ok-but-older', 'v2.11.8', true);
+        $this->fakeCaddy($dir.'/below-pin', 'v2.11.0', true);
+        $stubs = $this->stubs(['curl' => 'exit 22', 'chown' => 'exit 0']);
+        $run = fn (string $installed): array => $this->withStep(
+            '50-caddy',
+            \sprintf('CADDY_DEFAULT_BIN="$CADDY_TEST_DIR/default"; CADDY_CUSTOM_BIN="$CADDY_TEST_DIR/%s"; caddy_refresh_custom "$(caddy_wanted_version)"', $installed),
+            ['CADDY_TEST_DIR' => $dir],
+            $stubs,
+        );
+
+        [$status, , $err] = $run('ok-but-older');
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString('keeping the installed custom Caddy v2.11.8', $err);
+
+        [$status, , $err] = $run('below-pin');
+        self::assertSame(1, $status);
+        self::assertStringContainsString('no custom Caddy', $err);
+
+        [$status] = $run('missing');
+        self::assertSame(1, $status);
+    }
+
+    public function testEveryFailureNamesTheStepAndTheRerunHintOnce(): void
+    {
+        $copy = $this->scratch().'/copy';
+        mkdir($copy);
+        new Process(['cp', '-r', self::installDir(), $copy.'/install'])->mustRun();
+        $env = ['FLEET_OS_RELEASE' => $this->osRelease()];
+        $args = [$copy.'/install/run.sh', '--dry-run', '--domain=fleet.example.com', '--skip-dns-check'];
+
+        file_put_contents($copy.'/install/steps/05-boom.sh', "step_main() {\n  die 1 \"boom\"\n}\n");
+        [$status, , $err] = $this->bash($args, $env);
+        self::assertSame(1, $status);
+        self::assertStringContainsString('ERROR: boom', $err);
+        self::assertSame(1, substr_count($err, 'step "05-boom" failed (exit 1).'), $err);
+        self::assertSame(1, substr_count($err, 're-run the same command'), $err);
+
+        file_put_contents($copy.'/install/steps/05-boom.sh', "step_main() {\n  local x\n  false\n}\n");
+        [$status, , $err] = $this->bash($args, $env);
+        self::assertSame(1, $status);
+        self::assertMatchesRegularExpression('/step "05-boom" failed \(exit 1, at 05-boom\.sh:3\)\./', $err, 'the real file and line, not run.sh');
+        self::assertSame(1, substr_count($err, 're-run the same command'), $err);
     }
 
     /**
