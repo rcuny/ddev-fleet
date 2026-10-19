@@ -204,7 +204,7 @@ final class InstallDocsTest extends TestCase
      */
     public static function documentsWithRelativeLinks(): iterable
     {
-        foreach (['README.md', 'docs/installation.md', 'docs/README.md', 'docs/development.md', 'ansible/LEGACY-0x.md', 'tests/README-tests.md'] as $file) {
+        foreach (['README.md', 'docs/installation.md', 'docs/projects-and-templates.md', 'docs/README.md', 'docs/development.md', 'ansible/LEGACY-0x.md', 'tests/README-tests.md'] as $file) {
             yield $file => [$file];
         }
     }

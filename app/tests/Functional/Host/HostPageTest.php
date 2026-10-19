@@ -58,7 +58,7 @@ final class HostPageTest extends HostPageTestCase
         self::assertResponseRedirects('/admin/host?tab=general');
         self::assertSame('ops@example.com', $this->host()->acmeEmail());
         $crawler = $this->client->followRedirect();
-        self::assertStringContainsString('ACME contact saved', $crawler->filter('[data-testid=host-flash]')->text());
+        self::assertStringContainsString('ACME contact saved', $crawler->filter('[data-testid=flashes]')->text());
         self::assertSame('ops@example.com', $crawler->filter('input[name="host_general[acmeEmail]"]')->attr('value'));
 
         // Passes the browser's loose e-mail check, fails ConfigValue (a quote would reach the Caddyfile).
@@ -105,7 +105,7 @@ final class HostPageTest extends HostPageTestCase
         self::assertResponseRedirects('/admin/host?tab=claude');
         self::assertStringNotContainsString(self::TOKEN, $this->body());
         $crawler = $this->client->followRedirect();
-        self::assertStringContainsString('Claude token stored.', $crawler->filter('[data-testid=host-flash]')->text());
+        self::assertStringContainsString('Claude token stored.', $crawler->filter('[data-testid=flashes]')->text());
         self::assertStringNotContainsString(self::TOKEN, $this->body());
 
         self::assertSame(self::TOKEN, $this->secretStore()->getFleetWide('claude_oauth_token'), 'the secret the wizard uses');
@@ -263,7 +263,7 @@ final class HostPageTest extends HostPageTestCase
         $this->client->submit($form);
         self::assertResponseRedirects('/admin/host?tab=backups');
         $crawler = $this->client->followRedirect();
-        self::assertMatchesRegularExpression('/Backup written: fleet-\d{8}-\d{6}\.sqlite \(\d+ KiB\)/', $crawler->filter('[data-testid=host-flash]')->text());
+        self::assertMatchesRegularExpression('/Backup written: fleet-\d{8}-\d{6}\.sqlite \(\d+ KiB\)/', $crawler->filter('[data-testid=flashes]')->text());
 
         $rows = $crawler->filter('[data-testid=backup-row]');
         self::assertCount(1, $rows);
@@ -340,7 +340,7 @@ final class HostPageTest extends HostPageTestCase
         self::assertResponseRedirects('/admin/host?tab=backups');
         $crawler = $this->client->followRedirect();
 
-        self::assertStringContainsString('The backup failed', $crawler->filter('[data-testid=host-flash-error]')->text());
+        self::assertStringContainsString('The backup failed', $crawler->filter('[data-testid=flashes]')->text());
         self::assertStringNotContainsString($this->paths()->home(), $this->body(), 'no server path in the page');
     }
 

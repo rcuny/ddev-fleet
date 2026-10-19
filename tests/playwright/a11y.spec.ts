@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { blockingViolations } from './support/axe';
 
-const PAGES = ['/', '/admin/design-system'];
+const PAGES = ['/', '/admin/design-system', '/admin/projects', '/admin/projects/new'];
 
 for (const scheme of ['light', 'dark'] as const) {
   test.describe(`axe, ${scheme} theme`, () => {

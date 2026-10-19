@@ -99,7 +99,7 @@ test.describe('host settings', () => {
     await page.getByRole('button', { name: /Store token|Replace token/ }).click();
 
     await expect(page).toHaveURL(/\/admin\/host\?tab=claude$/);
-    await expect(page.getByTestId('host-flash')).toContainText('Claude token stored.');
+    await expect(page.getByTestId('flashes')).toContainText('Claude token stored.');
     await expect(page.getByTestId('host-claude-status')).toContainText('Set');
     await expect(page.getByTestId('host-claude-status')).toContainText(/Updated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
     expect(await page.content()).not.toContain(TOKEN);
@@ -126,7 +126,7 @@ test.describe('host settings', () => {
 
     await page.getByLabel('E-mail').fill('bot@example.com');
     await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByTestId('host-flash')).toContainText('Git identity saved.');
+    await expect(page.getByTestId('flashes')).toContainText('Git identity saved.');
     await expect(page.getByLabel('Name')).toHaveValue('Fleet Bot');
     await expect(page.getByLabel('E-mail')).toHaveValue('bot@example.com');
   });
@@ -140,7 +140,7 @@ test.describe('host settings', () => {
     await page.getByLabel('Recipient address').fill('ops@example.com');
     await page.getByRole('button', { name: 'Save' }).click();
 
-    await expect(page.getByTestId('host-flash')).toContainText('Notification e-mail settings saved.');
+    await expect(page.getByTestId('flashes')).toContainText('Notification e-mail settings saved.');
     await expect(page.getByTestId('host-smtp-status')).toContainText('Set');
     await expect(page.getByLabel('SMTP host')).toHaveValue('smtp.example.com');
     expect(await page.content()).not.toContain(SMTP_PASSWORD);
@@ -151,7 +151,7 @@ test.describe('host settings', () => {
     const before = await page.getByTestId('backup-row').count();
 
     await page.getByRole('button', { name: 'Back up now' }).click();
-    await expect(page.getByTestId('host-flash')).toContainText(/Backup written: fleet-\d{8}-\d{6}\.sqlite/);
+    await expect(page.getByTestId('flashes')).toContainText(/Backup written: fleet-\d{8}-\d{6}\.sqlite/);
     // Backups made in the same second share a name, so the list can stay the same length.
     expect(await page.getByTestId('backup-row').count()).toBeGreaterThanOrEqual(Math.max(1, before));
 
@@ -173,7 +173,7 @@ test.describe('host settings', () => {
 
     await page.getByLabel(/Keep backups for/).fill('21');
     await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByTestId('host-flash')).toContainText('Backup retention saved.');
+    await expect(page.getByTestId('flashes')).toContainText('Backup retention saved.');
     await expect(page.getByLabel(/Keep backups for/)).toHaveValue('21');
   });
 

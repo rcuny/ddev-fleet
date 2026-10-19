@@ -1,0 +1,44 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Projects" description="What Fleet can deploy: a git repository and the templates an instance starts from.">
+        <twig:block name="actions">
+            <twig:Button as="a" href="{{ path('project_new') }}" class="h-11 md:h-8">
+                <twig:ux:icon name="lucide:plus" />
+                New project
+            </twig:Button>
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6">
+        {% if projects|length == 0 %}
+            <twig:Card data-testid="projects-empty" class="max-w-xl">
+                <twig:Card:Header>
+                    <twig:Card:Title>No projects yet</twig:Card:Title>
+                    <twig:Card:Description>A project points at a git repository. Create one, then add the templates its instances start from.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content>
+                    <twig:Button as="a" href="{{ path('project_new') }}" class="h-11 md:h-8">New project</twig:Button>
+                </twig:Card:Content>
+            </twig:Card>
+        {% else %}
+            <ul class="divide-y divide-hairline overflow-hidden rounded-md border border-hairline bg-page">
+                {% for project in projects %}
+                    {% set count = templateCounts[project.name]|default(0) %}
+                    <li data-testid="project-row" class="px-4 py-2 hover:bg-surface">
+                        <a href="{{ path('project_edit', {name: project.name}) }}" class="flex min-h-11 min-w-0 items-center gap-3 hover:no-underline">
+                            <twig:ux:icon name="lucide:folder" class="size-4 shrink-0 text-ink-muted" />
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate text-sm font-medium text-ink-display">{{ project.name }}</span>
+                                <span class="block truncate text-xs text-ink-muted">{{ project.git }}{% if project.defaultBranch %} · {{ project.defaultBranch }}{% endif %}</span>
+                            </span>
+                            <twig:Badge variant="outline">{{ count }} {{ count == 1 ? 'template' : 'templates' }}</twig:Badge>
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </div>
+{% endblock %}

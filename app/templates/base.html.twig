@@ -21,6 +21,7 @@
                     {{ include('_shell/topbar.html.twig') }}
                     <main id="main" class="flex-1 px-4 pt-6 pb-[calc(var(--shell-bottom-bar)+env(safe-area-inset-bottom)+1.5rem)] md:px-8 md:pb-10">
                         <twig:RebootBanner />
+                        {{ include('_shell/flashes.html.twig') }}
                         {% block content %}{% endblock %}
                     </main>
                 </div>

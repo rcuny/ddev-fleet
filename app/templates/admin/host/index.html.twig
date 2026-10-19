@@ -27,22 +27,6 @@
     </twig:PageHeader>
 
     <div class="mt-6 grid max-w-2xl gap-4">
-        {% for type, messages in app.flashes %}
-            {% for message in messages %}
-                {% if type == 'error' %}
-                    <twig:Alert variant="destructive" data-testid="host-flash-error">
-                        <twig:ux:icon name="lucide:circle-alert" />
-                        <twig:Alert:Description class="text-destructive">{{ message }}</twig:Alert:Description>
-                    </twig:Alert>
-                {% else %}
-                    <twig:Alert class="border-transparent bg-brand-faded text-brand-darker dark:text-brand" data-testid="host-flash">
-                        <twig:ux:icon name="lucide:check" />
-                        <twig:Alert:Description class="text-ink-body">{{ message }}</twig:Alert:Description>
-                    </twig:Alert>
-                {% endif %}
-            {% endfor %}
-        {% endfor %}
-
         {% if host is null %}
             <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="host-not-initialised">
                 <twig:ux:icon name="lucide:triangle-alert" />
