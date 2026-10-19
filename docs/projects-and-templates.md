@@ -64,7 +64,7 @@ validation messages never echo what you typed (a "does not exist" message repeat
 | Field | Rule |
 |---|---|
 | Name | Same shape as a project name (`new` is allowed here), unique. |
-| Public and router port | Whole numbers from 1 to 65535. Both must be unique across the catalogue, and no public port may equal another entry's router port. The host reserves 22, 80, 443, 2019, 3000, 8765 and 9091 (public and router); 8080 and 8443 (the DDEV router) cannot be a router port. The router port must differ from the public port. |
+| Public and router port | Whole numbers from 1 to 65535. Both must be unique across the catalogue, and no public port may equal another entry's router port. The host reserves 22, 80, 443, 2019, 3000, 8765 and 9091 (public and router); 8080 and 8443 (the DDEV router) are refused as a public port and as a router port. The router port must differ from the public port. |
 
 ### Text fields
 
@@ -161,6 +161,7 @@ $ echo $?
 | `fleet port:list` | The named-port catalogue, with the projects using each port. |
 | `fleet port:create <name> --public=<port> --router=<port>` | Adds a port to the catalogue. |
 | `fleet port:delete <name> [--yes]` | Removes a port that no project uses. |
+| `fleet port:refresh [--project=<name>]` | Rewrites the Caddy sites of the instances so they carry their projects' ports. |
 
 **Project options** (`project:create` and `project:update`):
 
@@ -261,9 +262,28 @@ code `2`).
 
 The catalogue is shared by the whole host and has no web page: add entries with `fleet port:create` and list them with
 `fleet port:list`. A project's *Ports* tab shows which of them it uses; assign them with `fleet project:update
---port=<name>` (the list replaces the old one). Opening the ports in Caddy, and assigning them from the browser,
-arrive with the networking milestone (M0.07): today the catalogue and the assignments are stored and validated, nothing
-listens yet.
+--port=<name>` (the list replaces the old one). Assigning them from the browser arrives with the networking
+milestone (M0.07b).
+
+**What is exposed.** For every instance of a project that has a port, Caddy also listens on
+`<instance host>:<public port>` (the primary host and every alias). The block is the same as the instance's own site:
+the identity headers are stripped, the request goes through Authelia's `forward_auth` first, and only then is it
+proxied to `127.0.0.1:<router port>`, the port on DDEV's router. Nobody reaches a port without a session that may open
+the instance. The certificate is the one of the plain host (HTTP-01 per host, or the OVH wildcard).
+
+**Adding one.**
+
+1. `fleet port:create typesense --public=9108 --router=8108` adds it to the catalogue. Nothing listens yet.
+2. `fleet project:update <project> --port=typesense` assigns it. The Caddy sites of that project's instances are
+   rewritten and Caddy is reloaded; instances of other projects are not touched. Unassigning (a `--port` list without
+   it) takes the block away again.
+3. Instances deployed later get the blocks with their site.
+
+A site that Caddy refuses is rolled back and reported as a warning: the assignment stays saved, the other sites are
+rewritten. Fix the cause and run `fleet port:refresh [--project=<name>] [--json]`, which rewrites the sites on demand and
+prints how many (exit `2` when some failed). A public port may not be 22, 80, 443, 2019, 3000, 8080, 8443, 8765 or 9091
+(Caddy or the DDEV router already listens there). Opening the host firewall for the public port, and mirroring the port
+inside the DDEV network, are part of M0.07b.
 
 ## Upgrading
 

@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Fleet\Instances;
 
 use App\Domain\Instance\Instance;
+use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
 use App\Fleet\FleetPaths;
+use App\Fleet\Projects\Rule\PortNumbers;
 use App\Fleet\Ssh\AtomicFile;
 use App\Fleet\System\CaddyfileRenderer;
 use App\Fleet\System\CaddyReloader;
@@ -18,6 +20,9 @@ use Twig\Environment;
  * Writes the Caddy site of one instance: a snippet `instances/<id>.conf` in the fleet's Caddy directory, which the main
  * Caddyfile imports. The worker writes it as the app user and asks the running Caddy to reload through the admin API;
  * nothing here is privileged and no `apply` target is involved.
+ *
+ * The project's named ports get one more block each (`<host>:<public port>`), behind the same gate and proxied to the
+ * port on ddev's router.
  *
  * A site is never live without the gate: every request passes Authelia's forward_auth before it is proxied to ddev's
  * router. A snippet that Caddy refuses is rolled back, so one bad instance cannot take the other sites down.
@@ -52,9 +57,11 @@ final readonly class InstanceSiteWriter
         $contents = $this->twig->render('system/instance-site.twig', [
             'id' => $instance->id(),
             'hosts' => $hosts,
+            'ports' => self::portBlocks($project, $hosts),
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
             'router' => CaddyfileRenderer::DDEV_ROUTER,
+            'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
         ]);
         $this->ensureDir();
 
@@ -110,6 +117,38 @@ final readonly class InstanceSiteWriter
     public function validate(): void
     {
         $this->reloader->validate();
+    }
+
+    /**
+     * One block per named port of the project, ordered by public port: every host of the instance with the public port
+     * appended (the certificate follows the plain host).
+     *
+     * @param list<string> $hosts validated
+     *
+     * @return list<array{name: string, public: int, router: int, hosts: list<string>}>
+     *
+     * @throws \InvalidArgumentException for a port that Caddy or the DDEV router already uses
+     */
+    private static function portBlocks(Project $project, array $hosts): array
+    {
+        $ports = $project->ports();
+        usort($ports, static fn (NamedPort $a, NamedPort $b): int => $a->publicPort() <=> $b->publicPort());
+
+        $blocks = [];
+        foreach ($ports as $port) {
+            $error = PortNumbers::publicError($port->publicPort()) ?? PortNumbers::routerError($port->routerPort(), $port->publicPort());
+            if (null !== $error) {
+                throw new \InvalidArgumentException(\sprintf('Named port "%s" cannot be served: %s', $port->name(), $error));
+            }
+            $blocks[] = [
+                'name' => $port->name(),
+                'public' => $port->publicPort(),
+                'router' => $port->routerPort(),
+                'hosts' => array_map(static fn (string $host): string => $host.':'.$port->publicPort(), $hosts),
+            ];
+        }
+
+        return $blocks;
     }
 
     private function restore(string $file, ?string $previous, \Throwable $cause): void

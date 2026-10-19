@@ -88,9 +88,33 @@ final class InstanceSiteValidatesTest extends TestCase
         $snippet = SystemTemplates::twig()->render('system/instance-site.twig', [
             'id' => 'acme--main',
             'hosts' => ['acme--main.fleet.example.com', 'edge-acme--main.fleet.example.com', 'shop-acme--main.fleet.example.com'],
+            'ports' => [],
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
             'router' => CaddyfileRenderer::DDEV_ROUTER,
+            'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
+        ]);
+        file_put_contents($this->paths->instanceSiteFile('acme--main'), $snippet);
+
+        $result = $this->validate();
+
+        self::assertSame(0, $result->exitCode, $result->stderr);
+    }
+
+    public function testASnippetWithTwoNamedPortsValidates(): void
+    {
+        $hosts = ['acme--main.fleet.example.com', 'edge-acme--main.fleet.example.com'];
+        $snippet = SystemTemplates::twig()->render('system/instance-site.twig', [
+            'id' => 'acme--main',
+            'hosts' => $hosts,
+            'ports' => [
+                ['name' => 'typesense', 'public' => 9108, 'router' => 8108, 'hosts' => array_map(static fn (string $h): string => $h.':9108', $hosts)],
+                ['name' => 'mail', 'public' => 8025, 'router' => 18025, 'hosts' => array_map(static fn (string $h): string => $h.':8025', $hosts)],
+            ],
+            'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
+            'authelia' => CaddyfileRenderer::AUTHELIA,
+            'router' => CaddyfileRenderer::DDEV_ROUTER,
+            'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
         ]);
         file_put_contents($this->paths->instanceSiteFile('acme--main'), $snippet);
 
