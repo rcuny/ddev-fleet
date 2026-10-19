@@ -192,4 +192,29 @@ final class JobRepositoryTest extends KernelTestCase
         self::assertSame([$running->id()], array_map(static fn (Job $j): ?int => $j->id(), $this->jobs->running()));
         self::assertSame([], $this->jobs->pruneFinishedBefore($cut));
     }
+
+    public function testActiveInstanceIdsMatchesAcrossChunksBeyondTheBoundVariableLimit(): void
+    {
+        $ids = [];
+        for ($i = 0; $i < 1200; ++$i) {
+            $ids[] = \sprintf('blog--i%04d', $i);
+        }
+        // Busy ones in the first, a middle and the last chunk; a finished one must not count.
+        foreach ([3, 650, 1199] as $n) {
+            $this->job('deploy', $ids[$n]);
+        }
+        $this->job('deploy', $ids[10], status: JobStatus::Succeeded);
+        $this->job('start', $ids[700], status: JobStatus::Running);
+
+        self::assertSame([$ids[3], $ids[650], $ids[700], $ids[1199]], $this->jobs->activeInstanceIds($ids));
+        self::assertSame([], $this->jobs->activeInstanceIds([]));
+    }
+
+    public function testAFinishedJobCannotBeFinishedAgain(): void
+    {
+        $job = $this->job(status: JobStatus::Succeeded);
+
+        $this->expectException(\LogicException::class);
+        $job->finish(JobStatus::Interrupted, null, 'late', new \DateTimeImmutable('2026-10-01 09:00:00'));
+    }
 }

@@ -189,8 +189,14 @@ class Job
         $this->startedAt = $at;
     }
 
+    /**
+     * @throws \LogicException when the job is already finished (a late writer must not overwrite the outcome)
+     */
     public function finish(JobStatus $status, ?int $exitCode, ?string $error, \DateTimeImmutable $at): void
     {
+        if ($this->status->isFinal()) {
+            throw new \LogicException(\sprintf('Job %s is already %s.', (string) $this->id, $this->status->value));
+        }
         $this->status = $status;
         $this->exitCode = $exitCode;
         $this->error = null === $error ? null : mb_substr($error, 0, self::ERROR_MAX);

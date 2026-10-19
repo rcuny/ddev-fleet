@@ -11,4 +11,18 @@ framework:
             failed:
                 dsn: 'doctrine://queue?queue_name=failed&auto_setup=false'
 
-        routing: {}
+        routing:
+            App\Message\RunJob: jobs
+
+# In dev and test a click runs the job inside the request (with the recording command runner); prod uses the queue.
+when@dev:
+    framework:
+        messenger:
+            transports:
+                jobs: 'sync://'
+
+when@test:
+    framework:
+        messenger:
+            transports:
+                jobs: 'sync://'

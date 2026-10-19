@@ -34,6 +34,14 @@ final readonly class JobRepository
     }
 
     /**
+     * Reloads the row: another process may have changed it since it was loaded.
+     */
+    public function refresh(Job $job): void
+    {
+        $this->em->refresh($job);
+    }
+
+    /**
      * Takes a queued job: one UPDATE that only matches while the status is still `queued`, so of several workers
      * racing for the same job exactly one gets true. A managed copy of the job is refreshed on success.
      */
@@ -69,6 +77,36 @@ final readonly class JobRepository
             'SELECT COUNT(*) FROM job WHERE batch_id = :batch AND id < :id AND status IN (:queued, :running)',
             ['batch' => $batch, 'id' => $job->id(), 'queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
         ) > 0;
+    }
+
+    /**
+     * Which of the given instances have a queued or running job.
+     *
+     * @param list<string> $instanceIds
+     *
+     * @return list<string> ordered
+     */
+    public function activeInstanceIds(array $instanceIds): array
+    {
+        if ([] === $instanceIds) {
+            return [];
+        }
+
+        // Chunked: a bulk or `all` request can name more ids than SQLite takes as bound variables (999).
+        $busy = [];
+        foreach (array_chunk($instanceIds, self::CHUNK) as $chunk) {
+            /** @var list<string> $found */
+            $found = $this->em->getConnection()->fetchFirstColumn(
+                'SELECT DISTINCT instance_id FROM job WHERE instance_id IN (:ids) AND status IN (:queued, :running)',
+                ['ids' => $chunk, 'queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
+                ['ids' => ArrayParameterType::STRING],
+            );
+            array_push($busy, ...$found);
+        }
+        $busy = array_values(array_unique($busy));
+        sort($busy);
+
+        return $busy;
     }
 
     /**
