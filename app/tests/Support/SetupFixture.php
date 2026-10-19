@@ -111,7 +111,7 @@ final class SetupFixture
         $this->system = new SystemRenderer(
             new CaddyfileRenderer($twig, $paths, '/opt/ddev-fleet/app'),
             new CaddyEnvRenderer($this->store, self::PROXY_SECRET),
-            new AutheliaConfigRenderer($twig, $paths),
+            new AutheliaConfigRenderer($twig, $paths, new AdminGroup('fleet-admins')),
             new GateWriter($twig, $paths, new CaddyReloader($runner, $paths)),
             $paths,
             $applier,

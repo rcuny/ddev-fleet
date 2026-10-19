@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Fleet\System;
 
 use App\Domain\Host\HostSettings;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use App\Fleet\System\AccessRule;
 use App\Fleet\System\AccessRuleSource;
@@ -19,7 +20,7 @@ final class AutheliaConfigRendererTest extends TestCase
 {
     private static function renderer(string $home = '/srv/fleet'): AutheliaConfigRenderer
     {
-        return new AutheliaConfigRenderer(SystemTemplates::twig(), new FleetPaths($home, '/etc/caddy/fleet'));
+        return new AutheliaConfigRenderer(SystemTemplates::twig(), new FleetPaths($home, '/etc/caddy/fleet'), new AdminGroup('fleet-admins'));
     }
 
     public function testGolden(): void
@@ -54,6 +55,10 @@ final class AutheliaConfigRendererTest extends TestCase
                   policy: bypass
                 - domain: 'fleet.example.com'
                   policy: one_factor
+                - domain: '*.fleet.example.com'
+                  policy: one_factor
+                  subject:
+                    - ['group:fleet-admins']
 
             YAML;
 
@@ -75,7 +80,7 @@ final class AutheliaConfigRendererTest extends TestCase
     {
         $paths = new FleetPaths('/data/fleet-x', '/etc/caddy/fleet');
 
-        $out = new AutheliaConfigRenderer(SystemTemplates::twig(), $paths)->render(new HostSettings('fleet.example.com'));
+        $out = new AutheliaConfigRenderer(SystemTemplates::twig(), $paths, new AdminGroup('fleet-admins'))->render(new HostSettings('fleet.example.com'));
 
         self::assertStringContainsString("path: '".$paths->usersFile()."'", $out);
         self::assertStringContainsString("path: '/data/fleet-x/authelia/users.yml'", $out);
@@ -125,7 +130,7 @@ final class AutheliaConfigRendererTest extends TestCase
             }
         };
 
-        return new AutheliaConfigRenderer(SystemTemplates::twig(), new FleetPaths('/srv/fleet', '/etc/caddy/fleet'), $source, $notifier);
+        return new AutheliaConfigRenderer(SystemTemplates::twig(), new FleetPaths('/srv/fleet', '/etc/caddy/fleet'), new AdminGroup('fleet-admins'), $source, $notifier);
     }
 
     public function testRendersOneRulePerProjectAfterTheFixedRules(): void
@@ -153,13 +158,91 @@ final class AutheliaConfigRendererTest extends TestCase
                   policy: one_factor
                   subject:
                     - ['group:fleet-admins']
+                - domain: '*.fleet.example.com'
+                  policy: one_factor
+                  subject:
+                    - ['group:fleet-admins']
 
             YAML;
         self::assertStringEndsWith($expected, $out);
 
         $rules = Yaml::parse($out)['access_control']['rules'];
-        self::assertCount(4, $rules);
+        self::assertCount(5, $rules);
         self::assertSame([['group:fleet-admins'], ['user:alice'], ['user:bob']], $rules[2]['subject']);
+    }
+
+    public function testInstanceHostsRuleIsAdminGroupOnly(): void
+    {
+        $rules = Yaml::parse(self::renderer()->render(new HostSettings('fleet.example.com')))['access_control']['rules'];
+
+        self::assertSame('*.fleet.example.com', $rules[2]['domain']);
+        self::assertSame('one_factor', $rules[2]['policy']);
+        self::assertSame([['group:fleet-admins']], $rules[2]['subject']);
+    }
+
+    public function testTheAdminOnlyWildcardComesAfterEveryProjectRule(): void
+    {
+        $rules = Yaml::parse(self::withRules([
+            new AccessRule('blog', 'fleet-admins', ['alice']),
+            new AccessRule('demo', 'fleet-admins'),
+        ])->render(new HostSettings('fleet.example.com')))['access_control']['rules'];
+
+        // Authelia is first match: a wildcard before the project rules would lock members out.
+        self::assertCount(5, $rules);
+        self::assertArrayHasKey('domain_regex', $rules[2]);
+        self::assertArrayHasKey('domain_regex', $rules[3]);
+        self::assertSame('*.fleet.example.com', $rules[4]['domain']);
+    }
+
+    public function testMembersAreAllowedOnTheirProjectsHostsAndAliasesOnly(): void
+    {
+        $out = self::withRules([
+            new AccessRule('blog', 'fleet-admins', ['alice'], ['www', 'api']),
+            new AccessRule('shop', 'fleet-admins', ['bob']),
+            new AccessRule('blog-x', 'fleet-admins', ['carol'], ['www']),
+        ])->render(new HostSettings('fleet.example.com'));
+        $rules = Yaml::parse($out)['access_control']['rules'];
+
+        // First match decides, as in Authelia; the wildcard is the admin-only fallback.
+        $subjectsFor = static function (string $host) use ($rules): array {
+            foreach (\array_slice($rules, 2) as $rule) {
+                $matched = isset($rule['domain_regex'])
+                    ? 1 === preg_match('/'.str_replace('/', '\\/', $rule['domain_regex']).'/', $host)
+                    : str_ends_with($host, substr($rule['domain'], 1));
+                if ($matched) {
+                    return array_merge(...$rule['subject']);
+                }
+            }
+
+            return [];
+        };
+
+        self::assertContains('user:alice', $subjectsFor('blog--main.fleet.example.com'));
+        self::assertContains('user:alice', $subjectsFor('www-blog--main.fleet.example.com'));
+        self::assertContains('user:alice', $subjectsFor('api-blog--feature-x.fleet.example.com'));
+        self::assertContains('group:fleet-admins', $subjectsFor('www-blog--main.fleet.example.com'));
+        self::assertContains('user:bob', $subjectsFor('shop--main.fleet.example.com'));
+        self::assertNotContains('user:alice', $subjectsFor('shop--main.fleet.example.com'));
+        self::assertNotContains('user:alice', $subjectsFor('www-shop--main.fleet.example.com'));
+        self::assertNotContains('user:bob', $subjectsFor('www-blog--main.fleet.example.com'));
+        self::assertNotContains('user:alice', $subjectsFor('blog-x--main.fleet.example.com'));
+        self::assertSame(['group:fleet-admins', 'user:carol'], $subjectsFor('www-blog-x--main.fleet.example.com'));
+        self::assertSame(['group:fleet-admins'], $subjectsFor('ghost--main.fleet.example.com'), 'a project without a rule: admins only');
+    }
+
+    public function testRuleComesAfterTheAuthBypass(): void
+    {
+        $rules = Yaml::parse(self::renderer()->render(new HostSettings('fleet.example.com')))['access_control']['rules'];
+        $domains = array_column($rules, 'domain');
+
+        self::assertSame(['auth.fleet.example.com', 'fleet.example.com', '*.fleet.example.com'], $domains);
+    }
+
+    public function testTheAdminGroupFollowsTheConfiguredName(): void
+    {
+        $out = new AutheliaConfigRenderer(SystemTemplates::twig(), new FleetPaths('/srv/fleet', '/etc/caddy/fleet'), new AdminGroup('ops-team'))->render(new HostSettings('fleet.example.com'));
+
+        self::assertStringContainsString("- ['group:ops-team']", $out);
     }
 
     public function testTheRegexMatchesOnlyThatProjectsInstanceSites(): void
@@ -206,6 +289,9 @@ final class AutheliaConfigRendererTest extends TestCase
         yield 'user with a quote' => [new AccessRule('blog', 'fleet-admins', ["alice'"])];
         yield 'user with a newline' => [new AccessRule('blog', 'fleet-admins', ["alice\n    policy: bypass"])];
         yield 'user with a bracket' => [new AccessRule('blog', 'fleet-admins', ['al]ice'])];
+        yield 'hostname with a quote' => [new AccessRule('blog', 'fleet-admins', [], ["www'"])];
+        yield 'hostname with two dashes' => [new AccessRule('blog', 'fleet-admins', [], ['a--b'])];
+        yield 'hostname with a pipe' => [new AccessRule('blog', 'fleet-admins', [], ['a|b'])];
         yield 'group with a quote' => [new AccessRule('blog', "fleet'admins")];
     }
 

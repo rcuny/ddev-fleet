@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\System;
 
 use App\Domain\Host\HostSettings;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use Twig\Environment;
 
@@ -25,6 +26,7 @@ final readonly class AutheliaConfigRenderer
     public function __construct(
         private Environment $twig,
         private FleetPaths $paths,
+        private AdminGroup $admins,
         private ?AccessRuleSource $rules = null,
         private ?AutheliaNotifier $notifier = null,
     ) {
@@ -37,6 +39,8 @@ final readonly class AutheliaConfigRenderer
 
         return $this->twig->render('system/authelia-configuration.twig', [
             'domain' => $domain,
+            // Last rule: the hosts of projects without a rule of their own stay admin-only (Authelia is first match).
+            'admin_group' => ConfigValue::group($this->admins->name()),
             'rules' => $this->projectRules($domain),
             'smtp' => $smtp,
             'reset_enabled' => null !== $smtp,
@@ -60,10 +64,17 @@ final readonly class AutheliaConfigRenderer
                 $subjects[] = 'user:'.ConfigValue::username($username);
             }
 
+            // `<project>--<label>.<domain>` and the aliases `<hostname>-<project>--<label>.<domain>`, with the project's
+            // own hostnames listed (never a free prefix: "x" must not match the alias of project "blog-x"). The label
+            // is one DNS label. Names cannot contain "--" or ".", so the project part is unambiguous, and the domain is
+            // validated lowercase letters, digits, dots and dashes.
+            $prefix = '';
+            if ([] !== $rule->hostnames) {
+                $prefix = '(?:(?:'.implode('|', array_map(ConfigValue::hostnameLabel(...), $rule->hostnames)).')-)?';
+            }
+
             $rules[] = [
-                // `<project>--<label>.<domain>`: the label is one DNS label. Names cannot contain "--" or ".", so the
-                // project part is unambiguous, and the domain is validated lowercase letters, digits, dots and dashes.
-                'regex' => '^'.ConfigValue::projectName($rule->project).'--[a-z0-9-]+\\.'.$hostPattern.'$',
+                'regex' => '^'.$prefix.ConfigValue::projectName($rule->project).'--[a-z0-9-]+\\.'.$hostPattern.'$',
                 'subjects' => array_values(array_unique($subjects)),
             ];
         }

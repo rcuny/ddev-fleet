@@ -71,8 +71,8 @@ final class CaddyfileRendererTest extends TestCase
         $out = self::renderer(caddyDir: '/etc/caddy/fleet')->render(self::host());
 
         self::assertStringContainsString("        import /etc/caddy/fleet/gate.conf\n", $out);
-        self::assertSame(1, substr_count($out, 'import '));
-        self::assertStringNotContainsString('*.conf', $out, 'a glob import is a silent no-op when nothing matches');
+        self::assertSame(2, substr_count($out, 'import '), 'the gate and the instance sites');
+        self::assertSame(1, substr_count($out, '*.conf'), 'the gate is never a glob (a silent no-op when nothing matches); only the instance sites are');
     }
 
     public function testFastcgiParamCarriesTheProxySecretPlaceholder(): void
@@ -93,6 +93,14 @@ final class CaddyfileRendererTest extends TestCase
 
         self::assertStringContainsString("handle /.well-known/mercure* {\n            reverse_proxy ".CaddyfileRenderer::HUB." {\n                flush_interval -1\n            }\n        }\n", $out);
         self::assertSame('127.0.0.1:3000', CaddyfileRenderer::HUB);
+    }
+
+    public function testImportsTheInstanceSnippets(): void
+    {
+        $out = self::renderer(caddyDir: '/etc/caddy/fleet')->render(self::host());
+
+        self::assertStringContainsString("\nimport /etc/caddy/fleet/instances/*.conf\n", $out);
+        self::assertGreaterThan(strpos($out, "\nauth.fleet.example.com {"), strpos($out, 'import /etc/caddy/fleet/instances/'), 'the import is a top-level line after the fixed sites');
     }
 
     public function testAuthSiteProxiesAuthelia(): void
@@ -294,6 +302,9 @@ final class CaddyfileRendererTest extends TestCase
 
                 reverse_proxy 127.0.0.1:9091
             }
+
+            # One site per instance, written by the worker as `<id>.conf`. An empty directory is fine.
+            import /etc/caddy/fleet/instances/*.conf
 
             CADDY;
 
