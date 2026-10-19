@@ -108,8 +108,10 @@ final class ChangelogAssembleTest extends TestCase
     public function testTheRepositoryFragmentsAreWellFormed(): void
     {
         $root = \dirname(__DIR__, 3);
+        // Right after a release changelog.d/ holds only its README; the pending text is then empty and the
+        // released sections carry the entries.
         $fragments = glob($root.'/changelog.d/*.md') ?: [];
-        self::assertNotSame([], $fragments);
-        self::assertNotSame('', UnreleasedChangelog::text($root));
+        self::assertContains($root.'/changelog.d/README.md', $fragments);
+        self::assertNotSame('', trim(UnreleasedChangelog::text($root)));
     }
 }
