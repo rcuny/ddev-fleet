@@ -30,6 +30,15 @@ final class ComponentsAccessTest extends WebTestCase
     private const array LIVE_REQUEST = ['HTTP_SEC_FETCH_SITE' => 'same-origin', 'HTTP_ACCEPT' => 'application/vnd.live-component+html', 'HTTP_X_REQUESTED_WITH' => 'XMLHttpRequest'];
 
     /**
+     * The access attribute each live component must declare. A new component fails the test until it is listed here,
+     * so an admin-only component cannot be added with a weaker `ROLE_*` or `IS_AUTHENTICATED_*` by accident.
+     * `ProjectVoter::SETTINGS` is the administrator-only voter attribute.
+     */
+    private const array EXPECTED_ACCESS = [
+        'App\\Twig\\Components\\IssueIdPreview' => ProjectVoter::SETTINGS,
+    ];
+
+    /**
      * @return iterable<string, array{class-string}>
      */
     public static function liveComponents(): iterable
@@ -63,15 +72,9 @@ final class ComponentsAccessTest extends WebTestCase
         $attributes = $reflection->getAttributes(IsGranted::class);
         self::assertNotSame([], $attributes, $class.' must declare #[IsGranted] on the class');
 
-        $voterAttributes = array_values(new \ReflectionClass(ProjectVoter::class)->getConstants());
-        foreach ($attributes as $attribute) {
-            $granted = $attribute->newInstance()->attribute;
-            self::assertIsString($granted, $class.' must name a single attribute');
-            self::assertTrue(
-                \in_array($granted, $voterAttributes, true) || str_starts_with($granted, 'ROLE_') || str_starts_with($granted, 'IS_AUTHENTICATED'),
-                \sprintf('%s: "%s" is neither a ProjectVoter attribute nor a role', $class, $granted),
-            );
-        }
+        self::assertArrayHasKey($class, self::EXPECTED_ACCESS, $class.' is a new live component: add its expected access to EXPECTED_ACCESS');
+        $granted = array_map(static fn (\ReflectionAttribute $a): mixed => $a->newInstance()->attribute, $attributes);
+        self::assertSame([self::EXPECTED_ACCESS[$class]], $granted, $class.' must declare exactly the expected access attribute');
     }
 
     public function testThereIsAtLeastOneLiveComponentToCheck(): void

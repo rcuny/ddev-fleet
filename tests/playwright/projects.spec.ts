@@ -254,7 +254,11 @@ test.describe('projects and templates', () => {
     // serve nothing; ComponentsAccessTest pins the 403 for a signed request.
     const live = await context.request.get('/_components/IssueIdPreview');
     expect([403, 404]).toContain(live.status());
-    expect(await live.text()).not.toContain('issue-id');
+    // A denial page, never the component: no component markup, no tester field and no live-component response type.
+    const body = await live.text();
+    expect(body).not.toContain('issue-id');
+    expect(body).not.toContain('data-live-name-value');
+    expect(live.headers()['content-type'] ?? '').not.toContain('live-component');
   });
 
   test('issue id tester shows the key', async ({ page }) => {
