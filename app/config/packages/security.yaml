@@ -23,6 +23,9 @@ security:
     # Note: Only the *first* matching rule is applied
     access_control:
         - { path: ^/health$, roles: PUBLIC_ACCESS }
+        # Signed webhooks: Caddy exempts /hooks/* from the Authelia gate (Jira and Bitbucket cannot log in), so the
+        # app authenticates them itself, by the HMAC of the body (App\Fleet\Webhooks\WebhookReceiver).
+        - { path: ^/hooks/, roles: PUBLIC_ACCESS }
         # The dev role switch must stay reachable while the stand-in role is "none" (the route
         # does not exist in prod, where this rule is inert).
         - { path: ^/_dev/stand-in/(admin|member|none)$, roles: PUBLIC_ACCESS }
