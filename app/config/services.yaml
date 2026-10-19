@@ -87,6 +87,10 @@ services:
     App\Domain\Project\ProjectMembership:
         alias: App\Domain\Project\ProjectAccessMembership
 
+    # What a matched webhook rule does. M0.04 points this at the implementation that submits the deploy job.
+    App\Fleet\Webhooks\WebhookAction:
+        alias: App\Fleet\Webhooks\UnavailableWebhookAction
+
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
     fleet.command_runner.process:

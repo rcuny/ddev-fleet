@@ -44,7 +44,7 @@ final class AssetDocsTest extends TestCase
         }
         // The shared --format and --json options come from JsonOutput::addOptions().
         $options = ['--format', '--json'];
-        self::assertSame(['fleet:asset:gc', 'fleet:asset:list'], (static function (array $c): array {
+        self::assertSame(['fleet:asset:gc', 'fleet:asset:list', 'fleet:asset:snapshot'], (static function (array $c): array {
             sort($c);
 
             return $c;
