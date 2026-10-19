@@ -23,6 +23,8 @@ final class MigrationsTest extends KernelTestCase
 
         [$exit, $output] = $this->console('doctrine:schema:validate');
 
+        $output = (string) preg_replace('/\s+/', ' ', $output); // console output wraps at the terminal width
+
         self::assertSame(0, $exit, $output);
         self::assertStringContainsString('mapping files are correct', $output);
         self::assertStringContainsString('schema is in sync with the mapping files', $output);
@@ -38,6 +40,8 @@ final class MigrationsTest extends KernelTestCase
         $this->setUpFleetDatabase();
 
         [$exit, $output] = $this->console('doctrine:migrations:migrate', ['--no-interaction' => true]);
+
+        $output = (string) preg_replace('/\s+/', ' ', $output); // console output wraps at the terminal width
 
         self::assertSame(0, $exit);
         self::assertStringContainsString('Already at the latest version', $output);

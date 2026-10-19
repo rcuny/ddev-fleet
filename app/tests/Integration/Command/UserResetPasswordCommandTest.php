@@ -92,9 +92,9 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $parsed = Yaml::parseFile($file);
         self::assertIsArray($parsed);
         self::assertSame($this->storedHash(), $parsed['users']['alice']['password']);
-        self::assertStringNotContainsString(self::NEW, $tester->getDisplay());
+        self::assertStringNotContainsString(self::NEW, self::flat($tester->getDisplay()));
         self::assertStringNotContainsString(self::NEW, (string) file_get_contents($file));
-        self::assertStringNotContainsString('$argon2id', $tester->getDisplay());
+        self::assertStringNotContainsString('$argon2id', self::flat($tester->getDisplay()));
     }
 
     public function testSpacesAtEitherEndArePartOfThePassword(): void
@@ -110,7 +110,7 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $tester = $this->reset([self::NEW, self::NEW], 'ghost');
 
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('There is no user "ghost"', $tester->getDisplay());
+        self::assertStringContainsString('There is no user "ghost"', self::flat($tester->getDisplay()));
         self::assertSame([], $this->applier->applied);
         self::assertFileDoesNotExist($this->paths->usersFile());
     }
@@ -122,7 +122,7 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $tester = $this->reset(['short', 'short']);
 
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('at least 12', $tester->getDisplay());
+        self::assertStringContainsString('at least 12', self::flat($tester->getDisplay()));
         self::assertSame($before, $this->storedHash());
         self::assertSame([], $this->applier->applied);
         self::assertFileDoesNotExist($this->paths->usersFile());
@@ -135,7 +135,7 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $tester = $this->reset([self::NEW, self::NEW.'!']);
 
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('differ', $tester->getDisplay());
+        self::assertStringContainsString('differ', self::flat($tester->getDisplay()));
         self::assertSame($before, $this->storedHash());
         self::assertSame([], $this->applier->applied);
     }
@@ -157,8 +157,8 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $tester = $this->reset([self::NEW, self::NEW]);
 
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('apply authelia failed', $tester->getDisplay());
-        self::assertStringNotContainsString(self::NEW, $tester->getDisplay());
+        self::assertStringContainsString('apply authelia failed', self::flat($tester->getDisplay()));
+        self::assertStringNotContainsString(self::NEW, self::flat($tester->getDisplay()));
         self::assertSame([ApplyTarget::Authelia], $this->applier->applied);
     }
 
@@ -199,8 +199,8 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $tester = $this->reset([self::NEW, self::NEW]);
 
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('Nothing was changed', $tester->getDisplay());
-        self::assertStringNotContainsString('not-a-hash', $tester->getDisplay());
+        self::assertStringContainsString('Nothing was changed', self::flat($tester->getDisplay()));
+        self::assertStringNotContainsString('not-a-hash', self::flat($tester->getDisplay()));
         self::assertSame($before, $this->storedHash());
         self::assertFileDoesNotExist($this->paths->usersFile());
         self::assertSame([], $this->applier->applied);
@@ -219,7 +219,7 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $tester->execute(['username' => 'alice'], ['interactive' => false]);
 
         self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('interactively', $tester->getDisplay());
+        self::assertStringContainsString('interactively', self::flat($tester->getDisplay()));
     }
 
     public function testIsRegisteredAndAppliesThroughTheSudoHelper(): void
@@ -243,9 +243,15 @@ final class UserResetPasswordCommandTest extends KernelTestCase
         $tester->execute(['username' => 'alice'], ['interactive' => true]);
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
-        self::assertStringContainsString('Authelia was updated.', $tester->getDisplay());
+        self::assertStringContainsString('Authelia was updated.', self::flat($tester->getDisplay()));
         $sudo = $runner->callsMatching(['sudo']);
         self::assertCount(1, $sudo);
         self::assertSame(['sudo', '-n', '--', '/usr/local/libexec/fleet/apply', 'authelia'], $sudo[0]->argv);
+    }
+
+    /** Console output wraps at the terminal width (narrower in CI): compare on collapsed whitespace. */
+    private static function flat(string $display): string
+    {
+        return (string) preg_replace('/\s+/', ' ', $display);
     }
 }
