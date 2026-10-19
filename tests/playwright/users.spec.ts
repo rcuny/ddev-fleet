@@ -78,7 +78,14 @@ test.describe('users and project access', () => {
 
       // Remove the membership again from the edit page.
       await follow(page, listed.getByRole('link'));
-      await page.getByRole('checkbox', { name: project }).setChecked(false);
+      // Click the row, never the input: the label's ::after covers the whole row, so Playwright finds the label on top of
+      // the input and keeps retrying "intercepts pointer events" (the config sets no action timeout: it would wait for the
+      // whole test timeout). A click on the row reaches the label, which toggles the box natively.
+      const editRow = page.locator('[data-slot=checkbox-choice]').filter({ hasText: project });
+      await expect(editRow).toHaveCount(1);
+      await expect(page.getByRole('checkbox', { name: project })).toBeChecked();
+      await editRow.click();
+      await expect(page.getByRole('checkbox', { name: project })).not.toBeChecked();
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       await expect(page.getByTestId('flashes')).toContainText('User saved.');
       await expect(page.getByRole('checkbox', { name: project })).not.toBeChecked();
