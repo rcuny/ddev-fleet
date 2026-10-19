@@ -7,6 +7,7 @@ namespace App\Fleet\Instances;
 use App\Domain\Instance\Instance;
 use App\Domain\Project\Project;
 use App\Fleet\Host\HostSecrets;
+use App\Fleet\Jobs\SecretRegistry;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Ssh\AtomicFile;
 use Symfony\Component\Yaml\Yaml;
@@ -14,7 +15,7 @@ use Symfony\Component\Yaml\Yaml;
 /**
  * Writes `.ddev/config.fleet.yaml`, the one file fleet adds to ddev's configuration of an instance: its name, domain,
  * environment and extra host names. It never touches the project's own `config.yaml`. The file may hold the Claude
- * token, so it is not world readable, and it is dumped through the YAML component so no value can break out of it.
+ * token (registered with the job log masker), so it is not world readable, and it is dumped through the YAML component so no value can break out of it.
  */
 final readonly class InstanceConfigWriter
 {
@@ -24,6 +25,7 @@ final readonly class InstanceConfigWriter
         private InstanceHostnames $hostnames,
         private GitIdentityResolver $identities,
         private SecretStore $secrets,
+        private SecretRegistry $registry,
     ) {
     }
 
@@ -39,6 +41,7 @@ final readonly class InstanceConfigWriter
         ];
         $token = $this->secrets->getFleetWide(HostSecrets::CLAUDE_TOKEN);
         if (null !== $token && '' !== $token) {
+            $this->registry->register($token);
             $environment[] = 'CLAUDE_CODE_OAUTH_TOKEN='.$token;
         }
         $identity = $this->identities->forProject($project);

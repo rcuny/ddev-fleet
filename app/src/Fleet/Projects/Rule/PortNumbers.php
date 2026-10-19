@@ -7,7 +7,8 @@ namespace App\Fleet\Projects\Rule;
 /**
  * Public and router ports of a named port. Reserved: SSH, HTTP, HTTPS, the 0.x daemon port, and the listeners the 1.x
  * host binds itself (Caddy admin 2019, Mercure hub 3000, Authelia 9091; PortNumbersTest pins the last two against
- * CaddyfileRenderer). The router's own ports (DDEV router 8080/8443) are refused as a router port only.
+ * CaddyfileRenderer). The DDEV router's own ports (8080/8443) are refused for both: Caddy must not listen where the router does, and a
+ * router port there would loop the site back into itself.
  */
 final class PortNumbers
 {
@@ -19,7 +20,7 @@ final class PortNumbers
         if (!self::inRange($port)) {
             return 'Enter a port number between 1 and 65535.';
         }
-        if (\in_array($port, self::RESERVED, true)) {
+        if (\in_array($port, self::RESERVED, true) || \in_array($port, self::ROUTER_RESERVED, true)) {
             return 'This port is reserved for the host.';
         }
 

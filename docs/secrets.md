@@ -52,12 +52,16 @@ Everything here is administrator-only. A member of a project cannot list, set, r
 - **Secrets tab** of a project: the same for that project, plus a check that each secret is used.
 - **Audit log** (`/admin/audit`, linked from the Secrets page): the latest 200 entries, newest first, optionally
   of one action. Every put, delete and reveal of a secret is an entry with who, when, the action
-  (`secret.put`, `secret.delete`, `secret.reveal`) and the subject (`fleet/NAME` or `project:<project>/NAME`).
-  The log never contains a value.
+  (`secret.put`, `secret.delete`, `secret.reveal`, `secret.reveal-refused`) and the subject (`fleet/NAME` or
+  `project:<project>/NAME`). The log never contains a value. A field longer than its column is cut on a character
+  boundary and ends in `…`, so a cut shows.
 - **Reveal** is a POST with a CSRF token. The response shows the value once in a dialog; the response is never
   cached (`Cache-Control: no-store, private`), the reveal is recorded before the value is handed out (if the audit
   entry cannot be written, nothing is shown) and reloading the page shows nothing. A value that cannot be opened (the
-  key file was replaced, the row was tampered with) is reported and nothing is revealed.
+  key file was replaced, the row was tampered with) is reported and nothing is revealed. Each user may reveal 10
+  values per minute (sliding window, limiter `secret_reveal` in `config/packages/rate_limiter.yaml`); the 11th answers
+  429 with a `Retry-After` header and the page says to wait, nothing is opened, and the refusal is an audit entry
+  (`secret.reveal-refused`).
 - Deleting a **project** deletes its secrets too, with one audit entry per secret.
 
 All pages work at 390 px: the rows stack, the buttons are 44 px high.
@@ -137,6 +141,9 @@ Refused values are described by field (`<name>`, `<value>`) and never echoed.
   secret or another project fails to open. A fresh random nonce is drawn for every write.
 - The database holds only ciphertext, a nonce, a key version and who/when. A list reads names and stamps, never a
   value; a value is opened only to reveal it, to render a placeholder, or by the code that owns a host secret.
+- A secret a deploy uses (the Claude token in the instance configuration, any value `TokenRenderer` inserts) is
+  registered with the job log masker, which replaces it with `[masked]` in the job log, the live tail and the job's
+  error text. The registry is cleared when the job ends.
 - A value is never written to a log, an exception message, argv or the process environment: parameters that carry
   one are marked `#[\SensitiveParameter]`, and a test checks the log records of every request that touches a value.
 - Backing up the database without `keys/secret.key` loses every secret; backing up both together keeps them

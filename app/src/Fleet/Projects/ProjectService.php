@@ -11,6 +11,7 @@ use App\Domain\Project\Project;
 use App\Domain\Project\ProjectInstanceGuard;
 use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\ProjectAccessRefresher;
+use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\Projects\Rule\BranchName;
 use App\Fleet\Projects\Rule\GitIdentity;
 use App\Fleet\Projects\Rule\GitUrl;
@@ -37,6 +38,7 @@ final readonly class ProjectService
         private ProjectInstanceGuard $instances,
         private ?ProjectAccessRefresher $accessRefresher = null,
         private ?SecretService $secrets = null,
+        private ?InstanceSiteRefresher $sites = null,
     ) {
     }
 
@@ -96,8 +98,14 @@ final readonly class ProjectService
             throw new ValidationFailed($errors);
         }
 
+        $before = self::portNames($project->ports());
         $this->apply($project, $input, $ports, new \DateTimeImmutable());
         $this->projects->save($project);
+        // Each port is a site block of every instance: the sites follow an assignment (a failure is a warning,
+        // takeWarning() on the refresher). A named port that is created or deleted is assigned to no project.
+        if ($before !== self::portNames($project->ports())) {
+            $this->sites?->refresh($project);
+        }
 
         return $project;
     }
@@ -122,6 +130,19 @@ final readonly class ProjectService
         $this->secrets?->removeAllOfProject($name, $by);
         $this->projects->remove($project);
         $this->accessRefresher?->refresh();
+    }
+
+    /**
+     * @param list<NamedPort> $ports
+     *
+     * @return list<string> sorted
+     */
+    private static function portNames(array $ports): array
+    {
+        $names = array_map(static fn (NamedPort $port): string => $port->name(), $ports);
+        sort($names);
+
+        return $names;
     }
 
     /**

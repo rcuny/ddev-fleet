@@ -5,3 +5,26 @@ framework:
             policy: sliding_window
             limit: 10
             interval: '15 minutes'
+        # Reveals of a secret value (App\Fleet\Secrets\RevealThrottle), per signed-in user. A refusal is audited.
+        secret_reveal:
+            policy: sliding_window
+            limit: 10
+            interval: '1 minute'
+
+when@test:
+    services:
+        fleet.test.reveal_storage:
+            class: Symfony\Component\RateLimiter\Storage\InMemoryStorage
+    framework:
+        rate_limiter:
+            secret_reveal:
+                # In memory and without a reset between requests, so a test sees its own reveals and no other test's.
+                storage_service: fleet.test.reveal_storage
+
+when@dev:
+    framework:
+        rate_limiter:
+            secret_reveal:
+                # The Playwright suite runs in dev as one stand-in user and reveals dozens of values in a minute, across
+                # runs (the dev cache outlives them); the throttle itself is covered by the functional test.
+                limit: 1000

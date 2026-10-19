@@ -88,6 +88,65 @@ final class InstanceControllerTest extends AdminTestCase
         self::assertStringNotContainsString('acme--i1', $this->body());
     }
 
+    /**
+     * @return array<string, mixed> the claims of the Mercure cookie of the last response
+     */
+    private function mercureClaims(): array
+    {
+        $cookie = null;
+        foreach ($this->client->getResponse()->headers->getCookies() as $candidate) {
+            if (str_contains($candidate->getName(), 'mercure')) {
+                $cookie = $candidate;
+            }
+        }
+        self::assertNotNull($cookie, 'the page sets a Mercure cookie');
+        $payload = json_decode((string) base64_decode(strtr(explode('.', (string) $cookie->getValue())[1], '-_', '+/'), true), true);
+        self::assertIsArray($payload);
+
+        return $payload;
+    }
+
+    /**
+     * @param array<string, mixed> $claims
+     *
+     * @return list<string>
+     */
+    private function subscribeTopics(array $claims): array
+    {
+        $topics = [];
+        foreach ($claims['authorization_details'] as $detail) {
+            if (\in_array('subscribe', $detail['actions'], true)) {
+                foreach ($detail['topics'] as $topic) {
+                    $topics[] = $topic['match'];
+                }
+            }
+        }
+        sort($topics);
+
+        return $topics;
+    }
+
+    public function testMemberCookieAuthorisesOnlyTheirProjectsInstanceTopic(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $this->seed('demo', [InstanceState::Running]);
+        $this->as('member');
+
+        $crawler = $this->open('/instances');
+
+        $claims = $this->mercureClaims();
+        self::assertSame(['/instances/demo'], $this->subscribeTopics($claims));
+        self::assertSame('["\/instances\/demo"]', json_encode(json_decode((string) $crawler->filter('[data-controller=instance-list]')->attr('data-instance-list-topics-value'))));
+        self::assertStringNotContainsString('acme', json_encode($claims, \JSON_THROW_ON_ERROR));
+    }
+
+    public function testAdminCookieCoversEveryProjectsInstanceTopic(): void
+    {
+        $this->open('/instances');
+
+        self::assertSame(['/instances/acme', '/instances/demo'], $this->subscribeTopics($this->mercureClaims()));
+    }
+
     public function testMemberNeverSeesAForeignInstanceByUrl(): void
     {
         $this->seed('acme', [InstanceState::Running]);
