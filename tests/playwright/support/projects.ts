@@ -74,19 +74,7 @@ export async function openDialog(page: Page, trigger: Locator): Promise<Locator>
   return dialog;
 }
 
-/** Opens one of the project sections the way the viewport allows: the tab strip from md up, the "Section" select below. */
+/** Opens one of the project sections through the tab strip (the same links at every width, no script involved). */
 export async function openSection(page: Page, section: 'General' | 'Templates' | 'Ports'): Promise<void> {
-  const select = page.getByRole('combobox', { name: 'Section' });
-  if (await select.isVisible()) {
-    // The select navigates through a Stimulus controller that may not be connected yet: change it again until it did.
-    await expect(async () => {
-      const loaded = page.waitForResponse(isHtmlGet, { timeout: 4_000 });
-      loaded.catch(() => undefined);
-      await select.selectOption({ label: section });
-      await loaded;
-    }).toPass({ timeout: 60_000 });
-    await expect(page.locator('html')).not.toHaveAttribute('data-turbo-preview');
-  } else {
-    await follow(page, page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: section }));
-  }
+  await follow(page, page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: section }));
 }

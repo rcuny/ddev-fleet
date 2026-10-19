@@ -23,6 +23,19 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
 }
 
+/**
+ * Runs one part of a long walk-through as a named step and prints how long it took, so a CI timeout of the whole test
+ * shows in the log (and in the Playwright report) which part was still running.
+ */
+async function timed(name: string, body: () => Promise<void>): Promise<void> {
+  const started = Date.now();
+  try {
+    await test.step(name, body);
+  } finally {
+    console.log(`[step] ${test.info().project.name}: ${name} took ${((Date.now() - started) / 1000).toFixed(1)} s`);
+  }
+}
+
 test.describe('projects and templates', () => {
   test('admin creates, edits and deletes a project and its template', async ({ page }) => {
     // About 35 page loads; a busy shared host (the companion's php-fpm next to other workers) needs minutes, not seconds.
@@ -32,113 +45,133 @@ test.describe('projects and templates', () => {
 
     try {
       // Create: from the list through "New project".
-      await page.goto('/admin/projects');
-      await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
-      await follow(page, page.getByRole('link', { name: 'New project' }).first());
-      await expect(page.getByRole('heading', { level: 1, name: 'New project' })).toBeVisible();
-      await page.getByLabel('Name', { exact: true }).fill(name);
-      await page.getByLabel('Git URL').fill(GIT_URL);
-      await page.getByLabel('Additional hostnames').fill('www');
-      await page.getByRole('button', { name: 'Create project' }).click();
-      await expect(page.getByTestId('flashes')).toContainText('Project created.');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-      await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
-      await expect(page.getByLabel('Additional hostnames')).toHaveValue('www');
+      await timed('create from the list', async () => {
+        await page.goto('/admin/projects');
+        await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
+        await follow(page, page.getByRole('link', { name: 'New project' }).first());
+        await expect(page.getByRole('heading', { level: 1, name: 'New project' })).toBeVisible();
+        await page.getByLabel('Name', { exact: true }).fill(name);
+        await page.getByLabel('Git URL').fill(GIT_URL);
+        await page.getByLabel('Additional hostnames').fill('www');
+        await page.getByRole('button', { name: 'Create project' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Project created.');
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+        await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+        await expect(page.getByLabel('Additional hostnames')).toHaveValue('www');
+      });
 
       // Edit: the default branch.
-      await page.getByLabel('Default branch').fill('develop');
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
-      await expect(page.getByLabel('Default branch')).toHaveValue('develop');
+      await timed('edit the default branch', async () => {
+        await page.getByLabel('Default branch').fill('develop');
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+        await expect(page.getByLabel('Default branch')).toHaveValue('develop');
+      });
 
       // The edit page offers the other sections, the danger zone and the issue id tester.
-      await expect(page.getByTestId('issue-id-preview')).toBeVisible();
-      await expect(page.getByTestId('danger-zone')).toBeVisible();
+      await timed('edit page parts', async () => {
+        await expect(page.getByTestId('issue-id-preview')).toBeVisible();
+        await expect(page.getByTestId('danger-zone')).toBeVisible();
+      });
 
       // Templates: none yet, then one with two post-deploy lines, one tty1 and one tty2 line.
-      await openSection(page, 'Templates');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/templates$`));
-      await expect(page.getByTestId('templates-empty')).toBeVisible();
-      await follow(page, page.getByRole('link', { name: 'New template' }));
-      await expect(page.getByTestId('template-heading')).toHaveText('New template');
-      await page.getByLabel('Name', { exact: true }).fill('web');
-      await page.getByLabel('Drupal environment').fill('dev');
-      await page.getByLabel('Post-deploy commands').fill('composer install\ndrush deploy');
-      await page.getByLabel('Terminal 1 commands').fill('npm run watch');
-      await page.getByLabel('Terminal 2 commands').fill('tail -f var/log/dev.log');
-      await page.getByRole('button', { name: 'Create template' }).click();
-      await expect(page.getByTestId('flashes')).toContainText('Template created.');
+      await timed('create and reopen a template', async () => {
+        await openSection(page, 'Templates');
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/templates$`));
+        await expect(page.getByTestId('templates-empty')).toBeVisible();
+        await follow(page, page.getByRole('link', { name: 'New template' }));
+        await expect(page.getByTestId('template-heading')).toHaveText('New template');
+        await page.getByLabel('Name', { exact: true }).fill('web');
+        await page.getByLabel('Drupal environment').fill('dev');
+        await page.getByLabel('Post-deploy commands').fill('composer install\ndrush deploy');
+        await page.getByLabel('Terminal 1 commands').fill('npm run watch');
+        await page.getByLabel('Terminal 2 commands').fill('tail -f var/log/dev.log');
+        await page.getByRole('button', { name: 'Create template' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Template created.');
 
-      const row = page.getByTestId('template-row').filter({ hasText: 'web' });
-      await expect(row).toHaveCount(1);
-      await expect(row.getByTestId('template-env')).toHaveText('dev');
-      await expect(row.getByTestId('template-post-deploy')).toHaveText('2');
-      await expect(row.getByTestId('template-tty1')).toHaveText('1');
-      await expect(row.getByTestId('template-tty2')).toHaveText('1');
+        const row = page.getByTestId('template-row').filter({ hasText: 'web' });
+        await expect(row).toHaveCount(1);
+        await expect(row.getByTestId('template-env')).toHaveText('dev');
+        await expect(row.getByTestId('template-post-deploy')).toHaveText('2');
+        await expect(row.getByTestId('template-tty1')).toHaveText('1');
+        await expect(row.getByTestId('template-tty2')).toHaveText('1');
 
-      // Reopening shows the exact lines.
-      await follow(page, row.getByRole('link', { name: 'Edit web' }));
-      await expect(page.getByTestId('template-heading')).toContainText('web');
-      await expect(page.getByLabel('Drupal environment')).toHaveValue('dev');
-      await expect(page.getByLabel('Post-deploy commands')).toHaveValue('composer install\ndrush deploy');
-      await expect(page.getByLabel('Terminal 1 commands')).toHaveValue('npm run watch');
-      await expect(page.getByLabel('Terminal 2 commands')).toHaveValue('tail -f var/log/dev.log');
+        // Reopening shows the exact lines.
+        await follow(page, row.getByRole('link', { name: 'Edit web' }));
+        await expect(page.getByTestId('template-heading')).toContainText('web');
+        await expect(page.getByLabel('Drupal environment')).toHaveValue('dev');
+        await expect(page.getByLabel('Post-deploy commands')).toHaveValue('composer install\ndrush deploy');
+        await expect(page.getByLabel('Terminal 1 commands')).toHaveValue('npm run watch');
+        await expect(page.getByLabel('Terminal 2 commands')).toHaveValue('tail -f var/log/dev.log');
+      });
 
       // The list shows the project with its one template.
-      await page.goto('/admin/projects');
-      const projectRow = page.getByTestId('project-row').filter({ hasText: name });
-      await expect(projectRow).toContainText('1 template');
-      await expect(projectRow).toContainText(GIT_URL);
+      await timed('project list', async () => {
+        await page.goto('/admin/projects');
+        const projectRow = page.getByTestId('project-row').filter({ hasText: name });
+        await expect(projectRow).toContainText('1 template');
+        await expect(projectRow).toContainText(GIT_URL);
+      });
 
       // The ports section is read only until M0.07.
-      await follow(page, projectRow.getByRole('link'));
-      await openSection(page, 'Ports');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/ports$`));
-      await expect(page.getByTestId('ports-note')).toContainText('M0.07');
+      await timed('ports tab', async () => {
+        await follow(page, page.getByTestId('project-row').filter({ hasText: name }).getByRole('link'));
+        await openSection(page, 'Ports');
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/ports$`));
+        await expect(page.getByTestId('ports-note')).toContainText('M0.07');
+      });
 
       // Make web the default template (General tab).
-      await openSection(page, 'General');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-      await page.getByLabel('Default template').selectOption('web');
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
-      await expect(page.getByLabel('Default template')).toHaveValue('web');
+      await timed('make web the default', async () => {
+        await openSection(page, 'General');
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+        await page.getByLabel('Default template').selectOption('web');
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+        await expect(page.getByLabel('Default template')).toHaveValue('web');
+      });
 
       // Deleting the default template is refused, and the template is still there.
-      await openSection(page, 'Templates');
-      await expect(page.getByTestId('template-default')).toBeVisible();
-      await follow(page, page.getByRole('link', { name: 'Edit web' }));
-      const templateDialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
-      await templateDialog.getByRole('button', { name: 'Delete template' }).click();
-      await expect(page.getByTestId('flashes')).toContainText('The template was not deleted.');
-      await expect(page.getByTestId('flashes')).toContainText('default template');
-      await expect(page.getByTestId('template-row').filter({ hasText: 'web' })).toHaveCount(1);
+      await timed('default template delete refused', async () => {
+        await openSection(page, 'Templates');
+        await expect(page.getByTestId('template-default')).toBeVisible();
+        await follow(page, page.getByRole('link', { name: 'Edit web' }));
+        const templateDialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
+        await templateDialog.getByRole('button', { name: 'Delete template' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('The template was not deleted.');
+        await expect(page.getByTestId('flashes')).toContainText('default template');
+        await expect(page.getByTestId('template-row').filter({ hasText: 'web' })).toHaveCount(1);
+      });
 
       // Clear the default, then the template can be deleted.
-      await openSection(page, 'General');
-      await page.getByLabel('Default template').selectOption({ label: 'None' });
-      await page.getByRole('button', { name: 'Save', exact: true }).click();
-      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
-      await openSection(page, 'Templates');
-      await expect(page.getByTestId('template-default')).toHaveCount(0);
-      await follow(page, page.getByRole('link', { name: 'Edit web' }));
-      const deleteDialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
-      await deleteDialog.getByRole('button', { name: 'Delete template' }).click();
-      await expect(page.getByTestId('flashes')).toContainText('Template deleted.');
-      await expect(page.getByTestId('templates-empty')).toBeVisible();
+      await timed('clear default, delete template', async () => {
+        await openSection(page, 'General');
+        await page.getByLabel('Default template').selectOption({ label: 'None' });
+        await page.getByRole('button', { name: 'Save', exact: true }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+        await openSection(page, 'Templates');
+        await expect(page.getByTestId('template-default')).toHaveCount(0);
+        await follow(page, page.getByRole('link', { name: 'Edit web' }));
+        const deleteDialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
+        await deleteDialog.getByRole('button', { name: 'Delete template' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Template deleted.');
+        await expect(page.getByTestId('templates-empty')).toBeVisible();
+      });
 
       // Delete the project through its dialog: Cancel keeps it, the confirmation removes it.
-      await openSection(page, 'General');
-      const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
-      await expect(dialog).toContainText(`Delete ${name}?`);
-      await dialog.getByRole('button', { name: 'Cancel' }).click();
-      await expect(dialog).toBeHidden();
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-      const confirm = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
-      await confirm.getByRole('button', { name: 'Delete project' }).click();
-      await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
-      await expect(page).toHaveURL(/\/admin\/projects$/);
-      await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(0);
+      await timed('delete the project', async () => {
+        await openSection(page, 'General');
+        const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+        await expect(dialog).toContainText(`Delete ${name}?`);
+        await dialog.getByRole('button', { name: 'Cancel' }).click();
+        await expect(dialog).toBeHidden();
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+        const confirm = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+        await confirm.getByRole('button', { name: 'Delete project' }).click();
+        await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
+        await expect(page).toHaveURL(/\/admin\/projects$/);
+        await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(0);
+      });
 
       // Everything above ran without browser errors; the 404 below is logged by the browser on purpose.
       expect(errors).toEqual([]);
@@ -374,17 +407,23 @@ test.describe('phone layout of the project pages (390 px)', () => {
     expect(link.x + link.width).toBeLessThanOrEqual(page.viewportSize()!.width + 0.5);
   });
 
-  test('primary buttons are 44 px tall and the section select switches tabs', async ({ page }) => {
+  test('primary buttons are 44 px tall and the section tabs switch pages', async ({ page }) => {
     await page.goto(`/admin/projects/${NAME}`);
     await expectTall(page.getByRole('button', { name: 'Save', exact: true }));
     await expectTall(page.getByRole('button', { name: 'Delete this project' }));
-    const select = page.getByRole('combobox', { name: 'Section' });
-    await expectTall(select);
+    await expect(page.getByRole('combobox', { name: 'Section' })).toHaveCount(0);
+    const tabs = page.getByRole('navigation', { name: 'Project sections' });
+    for (const section of ['General', 'Templates', 'Ports']) {
+      await expectTall(tabs.getByRole('link', { name: section }));
+    }
+    await expectNoOverflow(page, 'the section tabs');
+    const strip = (await tabs.boundingBox())!;
+    expect(strip.x + strip.width).toBeLessThanOrEqual(page.viewportSize()!.width + 0.5);
 
     await openSection(page, 'Templates');
     await expect(page).toHaveURL(new RegExp(`/admin/projects/${NAME}/templates$`));
     await expectTall(page.getByRole('link', { name: 'New template' }));
-    await expect(page.getByRole('combobox', { name: 'Section' })).toHaveValue(new RegExp('/templates$'));
+    await expect(tabs.getByRole('link', { name: 'Templates' })).toHaveAttribute('aria-current', 'page');
 
     await openSection(page, 'Ports');
     await expect(page).toHaveURL(new RegExp(`/admin/projects/${NAME}/ports$`));

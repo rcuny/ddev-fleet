@@ -508,7 +508,7 @@ final class TemplatePagesTest extends AdminTestCase
             $tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('href')),
         );
         self::assertSame('Templates', trim($tabs->filter('a[aria-current="page"]')->text()));
-        self::assertSame(self::LIST, $crawler->filter('select[aria-label="Section"] option[selected]')->attr('value'));
+        self::assertCount(0, $crawler->filter('select[aria-label="Section"]'));
     }
 
     #[DataProvider('pages')]

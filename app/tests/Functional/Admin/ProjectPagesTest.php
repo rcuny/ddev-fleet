@@ -319,15 +319,10 @@ final class ProjectPagesTest extends AdminTestCase
             );
             self::assertSame($active, trim($tabs->filter('a[aria-current="page"]')->text()), $path);
 
-            $select = $crawler->filter('select[aria-label="Section"]');
-            self::assertCount(1, $select, $path);
-            self::assertSame('select-nav', $select->attr('data-controller'));
-            self::assertStringContainsString('select-nav#go', (string) $select->attr('data-action'));
-            self::assertSame(
-                ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/ports'],
-                $select->filter('option')->each(static fn (Crawler $o): string => (string) $o->attr('value')),
-            );
-            self::assertSame($path, $select->filter('option[selected]')->attr('value'));
+            // One tab strip at every width: no phone select that waits for a script.
+            self::assertCount(0, $crawler->filter('select[aria-label="Section"]'), $path);
+            self::assertCount(0, $crawler->filter('[data-controller~="select-nav"]'), $path);
+            self::assertStringNotContainsString('hidden', (string) $tabs->attr('class'), $path);
         }
     }
 
@@ -364,13 +359,17 @@ final class ProjectPagesTest extends AdminTestCase
         yield 'ports' => ['/admin/projects/blog/ports'];
     }
 
-    public function testThePhoneSectionSelectIsAFullTapTarget(): void
+    public function testTheSectionTabsAreFullTapTargetsAtEveryWidth(): void
     {
         $this->makeProject();
 
-        $wrapper = $this->open('/admin/projects/blog')->filter('select[aria-label="Section"]')->ancestors()->first();
-        // NativeSelect puts `class` on its wrapper, so the select is sized through it.
-        self::assertStringContainsString('[&_select]:h-11', (string) $wrapper->attr('class'));
+        $tabs = $this->open('/admin/projects/blog')->filter('nav[aria-label="Project sections"]');
+        // py-3 around a text-sm line is 44 px; the strip scrolls inside itself instead of the page.
+        self::assertStringContainsString('overflow-x-auto', (string) $tabs->attr('class'));
+        foreach ($tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('class')) as $class) {
+            self::assertStringContainsString('py-3', $class);
+            self::assertStringContainsString('whitespace-nowrap', $class);
+        }
     }
 
     public function testRowsOfChoicesAreClickableAcrossTheRow(): void

@@ -1,22 +1,15 @@
-{#- The project's sections. Needs: project, active ('general' | 'templates' | 'ports'). Tab strip from md up, a select below it. -#}
+{#- The project's sections. Needs: project, active ('general' | 'templates' | 'ports'). One tab strip at every width: no script needed, links of at least 44 px, scrolls inside its own container if it ever outgrows the screen. -#}
 {% set sections = [
     {key: 'general', label: 'General', url: path('project_edit', {name: project.name})},
     {key: 'templates', label: 'Templates', url: path('project_templates', {name: project.name})},
     {key: 'ports', label: 'Ports', url: path('project_ports', {name: project.name})},
 ] %}
-<div class="border-b border-hairline py-2 md:hidden">
-    <twig:NativeSelect aria-label="Section" class="w-full [&_select]:h-11" data-controller="select-nav" data-action="change->select-nav#go">
-        {% for section in sections %}
-            <twig:NativeSelect:Option value="{{ section.url }}" :selected="section.key == active">{{ section.label }}</twig:NativeSelect:Option>
-        {% endfor %}
-    </twig:NativeSelect>
-</div>
-<nav aria-label="Project sections" class="hidden items-center gap-6 border-b border-hairline md:flex">
+<nav aria-label="Project sections" class="flex items-center gap-6 overflow-x-auto border-b border-hairline">
     {% for section in sections %}
         {% if section.key == active %}
-            <a href="{{ section.url }}" aria-current="page" class="-mb-px border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand">{{ section.label }}</a>
+            <a href="{{ section.url }}" aria-current="page" class="-mb-px shrink-0 whitespace-nowrap border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand">{{ section.label }}</a>
         {% else %}
-            <a href="{{ section.url }}" class="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">{{ section.label }}</a>
+            <a href="{{ section.url }}" class="-mb-px shrink-0 whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">{{ section.label }}</a>
         {% endif %}
     {% endfor %}
 </nav>
