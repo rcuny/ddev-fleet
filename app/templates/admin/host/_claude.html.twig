@@ -9,7 +9,7 @@
         <p data-testid="host-claude-status" class="flex flex-wrap items-center gap-2">
             {% if updated is not null %}
                 <twig:Badge class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">Set</twig:Badge>
-                <span class="text-sm text-ink-muted">Updated {{ updated|date('Y-m-d H:i', 'UTC') }} UTC</span>
+                <span class="text-sm text-ink-muted">Last rotated {{ updated|date('Y-m-d H:i', 'UTC') }} UTC</span>
             {% else %}
                 <twig:Badge variant="secondary">Not set</twig:Badge>
             {% endif %}
@@ -19,5 +19,7 @@
             {{ form_row(form.token) }}
             {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
         {{ form_end(form) }}
+        <p class="text-sm text-ink-muted" data-testid="host-claude-command">From the host, without the browser: <code class="break-all">sudo fleet claude:token:set</code> (the token is typed hidden or piped on standard input).</p>
     </twig:Card:Content>
 </twig:Card>
+{% include 'admin/host/_workspace_checks.html.twig' %}
