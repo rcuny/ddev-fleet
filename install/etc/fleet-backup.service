@@ -1,5 +1,5 @@
 # Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-backup.service.
-# One database backup (fleet:backup:create: a consistent copy of fleet.sqlite and queue.sqlite into /srv/fleet/backups,
+# One database backup (fleet:backup:create: a consistent copy of fleet.sqlite and queue.sqlite into $FLEET_HOME/backups,
 # then pruning to the retention set on the host page). Started by fleet-backup.timer; `systemctl start fleet-backup`
 # or `fleet backup:create` run it by hand.
 [Unit]
@@ -23,6 +23,9 @@ PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=yes
+# FLEET_HOME comes from fleet.env (the EnvironmentFile above), like the worker's. systemd does not expand variables in
+# ReadWritePaths, so the installer's FLEET_HOME (/srv/fleet, install/lib/common.sh FLEET_SRV_DIR) is spelled out here;
+# UnitsTest keeps the two in step.
 ReadWritePaths=/srv/fleet /opt/ddev-fleet/app/var
 ProtectKernelTunables=yes
 ProtectKernelModules=yes
