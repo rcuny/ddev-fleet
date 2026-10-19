@@ -25,7 +25,7 @@ Type: documentation
 | [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
 | [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the `v1.*` tag guard, the systemd security check and baseline |
 | [`RELEASING.md`](RELEASING.md) | 0.x flow valid; 1.x section added | Versioning, CHANGELOG conventions, release and hotfix procedure. The section "1.x during the port" covers `v1.*` tags on `develop`; the document is rewritten at v1.0.0 (milestone M0.04) |
-| [`../tests/README-tests.md`](../tests/README-tests.md) | Current | Test suites, counts and how to run them |
+| [`../tests/README-tests.md`](../tests/README-tests.md) | Current | Test suites and how to run them (counts: `ci/test-counts.sh`) |
 | [`../CLAUDE.md`](../CLAUDE.md) | Current | Agent-facing guide: branches, namespaces, seams, commands |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Current | Contribution workflow, CI, mirror, dependency updates |
 
