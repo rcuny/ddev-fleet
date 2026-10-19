@@ -56,6 +56,7 @@ Options:
   --ref=<ref>           branch, tag or commit to install (default: develop)
   --repo-url=<url|path> git remote or bundle to install from (default: the public GitHub mirror)
   --skip-dns-check      do not compare the DNS records with this host's addresses
+  --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
   --dry-run             print the plan and change nothing (works without root)
   --help                this text
 
@@ -111,6 +112,7 @@ USAGE
       --ref=*) ref=${arg#--ref=} ;;
       --repo-url=*) repo_url=${arg#--repo-url=} ;;
       --skip-dns-check) ;;
+      --no-shell-profile) ;;
       --dry-run) dry_run=1 ;;
       *)
         usage >&2
