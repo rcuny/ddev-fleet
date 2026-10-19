@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Admin;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Projects\NamedPortInput;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\ProjectInput;
@@ -489,6 +490,23 @@ final class ProjectPagesTest extends AdminTestCase
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString('blog', $crawler->filter('[data-testid=flashes]')->text());
         self::assertStringContainsString('deleted', $crawler->filter('[data-testid=flashes]')->text());
+    }
+
+    public function testDeleteShowsTheAccessWarningLeftByTheRefresh(): void
+    {
+        $this->makeProject();
+        $refresher = $this->container()->get(ProjectAccessRefresher::class);
+        self::assertInstanceOf(ProjectAccessRefresher::class, $refresher);
+        // What a failed install leaves behind (see ProjectAccessRefresher::refresh()).
+        new \ReflectionProperty($refresher, 'warning')->setValue($refresher, 'The project was saved, but the sign-in service was not updated: boom');
+
+        $crawler = $this->open('/admin/projects/blog');
+        $this->client->submit($crawler->filter('form[action="/admin/projects/blog/delete"]')->selectButton('Delete project')->form());
+        $crawler = $this->client->followRedirect();
+
+        $flashes = $crawler->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('deleted', $flashes);
+        self::assertStringContainsString('sign-in service was not updated: boom', $flashes);
     }
 
     public function testDeleteIsRefusedWhileInstancesExist(): void
