@@ -27,13 +27,28 @@ final class CliGroupsTest extends TestCase
     private static function wrapperGroups(): array
     {
         $wrapper = (string) file_get_contents(\dirname(__DIR__, 3).'/install/bin/fleet');
-        if (!preg_match_all('/\^\(([a-z|]+)\)(?::|\$ &&)/', $wrapper, $matches)) {
-            self::fail('The group list was not found in install/bin/fleet.');
+        if (1 !== preg_match('/^FLEET_GROUPS=\(\R(.*?)^\)/ms', $wrapper, $block)) {
+            self::fail('The FLEET_GROUPS array was not found in install/bin/fleet.');
         }
-        $lists = array_unique($matches[1]);
-        self::assertCount(1, $lists, 'The wrapper names its groups in more than one way: '.implode(' / ', $lists));
+        $groups = [];
+        foreach (preg_split('/\R/', rtrim($block[1])) ?: [] as $line) {
+            self::assertMatchesRegularExpression('/^  [a-z]+$/', $line, 'FLEET_GROUPS takes one group per line, indented by two spaces.');
+            $groups[] = trim($line);
+        }
+        self::assertSame($groups, array_values(array_unique($groups)), 'FLEET_GROUPS names a group twice.');
 
-        return explode('|', (string) reset($lists));
+        return $groups;
+    }
+
+    public function testTheWrapperListsItsGroupsOnceAndSorted(): void
+    {
+        $groups = self::wrapperGroups();
+        $sorted = $groups;
+        sort($sorted, \SORT_STRING);
+        self::assertSame($sorted, $groups, 'Keep FLEET_GROUPS sorted.');
+
+        $wrapper = (string) file_get_contents(\dirname(__DIR__, 3).'/install/bin/fleet');
+        self::assertSame(0, preg_match('/\^\([a-z|]+\)/', $wrapper), 'A regex in install/bin/fleet spells the groups out again; use $groups.');
     }
 
     /**
@@ -67,7 +82,7 @@ final class CliGroupsTest extends TestCase
         }
 
         self::assertNotSame([], $groups);
-        self::assertSame([], array_values(array_diff($groups, self::wrapperGroups())), 'Add the group to the wrapper regexes in install/bin/fleet.');
+        self::assertSame([], array_values(array_diff($groups, self::wrapperGroups())), 'Add the group to FLEET_GROUPS in install/bin/fleet.');
     }
 
     public function testTheSupportDirectoryHoldsNoCommands(): void
