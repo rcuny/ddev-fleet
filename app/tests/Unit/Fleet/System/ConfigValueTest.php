@@ -131,4 +131,48 @@ final class ConfigValueTest extends TestCase
             }
         }
     }
+
+    /**
+     * Characters some parsers (YAML 1.1, JavaScript, Unicode-aware line splitters) treat as a line break, besides "\n".
+     * Every pattern here is ASCII-only with `/D` and no `/u`, so they are refused today; these cases pin that.
+     *
+     * @return iterable<string, array{string}>
+     */
+    public static function lineBreaks(): iterable
+    {
+        yield 'carriage return' => ["\r"];
+        yield 'vertical tab' => ["\v"];
+        yield 'form feed' => ["\f"];
+        yield 'next line U+0085' => ["\u{0085}"];
+        yield 'line separator U+2028' => ["\u{2028}"];
+        yield 'paragraph separator U+2029' => ["\u{2029}"];
+    }
+
+    #[DataProvider('lineBreaks')]
+    public function testNoValueAcceptsAnyKindOfLineBreak(string $break): void
+    {
+        $secret = str_repeat('a1', 16);
+        $cases = [
+            'domain, inside' => static fn () => ConfigValue::domain('fleet'.$break.'respond.example.com'),
+            'domain, trailing' => static fn () => ConfigValue::domain('fleet.example.com'.$break),
+            'email, inside' => static fn () => ConfigValue::acmeEmail('ops'.$break.'x@example.com'),
+            'email, trailing' => static fn () => ConfigValue::acmeEmail('ops@example.com'.$break),
+            'credential, inside' => static fn () => ConfigValue::ovhCredential('ovh_application_key', 'abcdefgh'.$break.'ijklmn'),
+            'credential, trailing' => static fn () => ConfigValue::ovhCredential('ovh_application_key', 'abcdefghijkl'.$break),
+            'proxy secret, inside' => static fn () => ConfigValue::proxySecret($secret.$break.$secret),
+            'proxy secret, trailing' => static fn () => ConfigValue::proxySecret($secret.$break),
+            'path, inside' => static fn () => ConfigValue::path('Dir', '/srv/fleet'.$break.'/x'),
+            'path, trailing' => static fn () => ConfigValue::path('Dir', '/srv/fleet'.$break),
+            'endpoint' => static fn () => ConfigValue::ovhEndpoint('ovh-eu'.$break),
+        ];
+
+        foreach ($cases as $label => $call) {
+            try {
+                $call();
+                self::fail($label.' accepted '.json_encode($break));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
 }
