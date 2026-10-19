@@ -154,8 +154,8 @@ New work follows these namespaces; add a new one only with a reason.
   lines and issue id patterns are hostile input: the rules are allow-lists, and a consumer must still pass them as argv, never
   through a shell. `docs/projects-and-templates.md` is checked by `CliDocsTest` (commands, options, exit codes): change a
   command, change the guide.
-- **Console commands**: `fleet <group>:<verb>` for groups the wrapper knows (`host`, `setup`, `user`, `project`, `template`,
-  `port`, `asset`, `secret`; `fleet project list` also works). Commands that read or write the database are tested with
+- **Console commands**: `fleet <group>:<verb>` for the groups in the `FLEET_GROUPS` array of `install/bin/fleet` (one group per
+  line, sorted; a new group is one new line, checked by `CliGroupsTest`; `fleet project list` also works). Commands that read or write the database are tested with
   `RunsFleetCommands` against a real migrated database; stderr assertions need `capture_stderr_separately`.
 - **Components beyond the managed list below.** `<twig:Textarea>` (several lines of text; the form theme renders Symfony's
   `TextareaType` with it, so never write a raw `<textarea>`), `<twig:Checkbox>`, `<twig:NativeSelect>` and `<twig:RadioGroup>` are
@@ -250,7 +250,7 @@ Facts to keep true when editing it:
   Only `<domain>` and `auth.<domain>` are served; instance and wildcard sites arrive in M0.04 / M0.07.
 - **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
   workers when the code or env changed.
-- Not shipped yet (do not assume it exists): `fleet-scheduler`, `fleet-boot` / `fleet-tmux`, wildcard and instance Caddy
+- Not shipped yet (do not assume it exists): `fleet-boot` / `fleet-tmux`, wildcard and instance Caddy
   sites, instance sites that the Authelia access rules guard (the rules are rendered from `ProjectAccess` already; the hosts arrive with M0.04), host hardening. Authelia's self-service password reset is off until an SMTP server is configured (`docs/installation.md`; recovery: `fleet user:reset-password`).
 - Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
   install/bin/fleet` before committing a script.
@@ -290,6 +290,7 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 - `docs/secrets.md` — secrets: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, the `fleet secret:*` commands, the security model.
 - `docs/development.md` — setup, environment variables, stand-in, adding a component.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
+- `changelog.d/` — **changelog fragments**: a change adds `changelog.d/<KEY>.md` (a `### Added|Changed|...` heading and bullets), never a line in `CHANGELOG.md`; `ci/changelog-assemble.php` builds the release section (`ChangelogAssembleTest`).
 - `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.
 - `docs/v0/` — the 0.x (Python) reference, re-implemented milestone by milestone.
 - `tests/README-tests.md` — suites and how to run them (counts: `ci/test-counts.sh`).

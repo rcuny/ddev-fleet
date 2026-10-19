@@ -34,6 +34,11 @@ final class NotFound extends \DomainException
         return new self(\sprintf('Instance "%s" does not exist.', self::shown($id)));
     }
 
+    public static function schedule(string $name): self
+    {
+        return new self(\sprintf('Schedule "%s" does not exist.', self::shown($name)));
+    }
+
     public static function job(int $id): self
     {
         return new self(\sprintf('Job %d does not exist.', $id));

@@ -1,0 +1,2 @@
+### Upgrade notes
+- **Existing hosts: re-run the installer** (`curl ... | sudo bash -s -- --domain=<fqdn>`, the same command as the first install) **to get the database backup timer.** Steps 95 (writes `fleet-backup.service` and `fleet-backup.timer`) and 98 (enables the timer) are the ones that matter; a fresh install already has them. Until then no backup is made. The migration `Version20261019100000` (host settings: backup retention, git bot identity, notification e-mail) runs on deploy, in the same installer run.

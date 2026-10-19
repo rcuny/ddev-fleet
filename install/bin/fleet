@@ -45,12 +45,32 @@ fi
 command=$1
 shift
 # Only these groups get the `fleet:` prefix (every other console command, doctrine:* for one, keeps its own name).
+# One group per line, sorted, so two branches adding a group rarely touch the same line.
 # tests/Repo/CliGroupsTest.php keeps the list in step with the commands.
+FLEET_GROUPS=(
+  asset
+  backup
+  claude
+  host
+  instance
+  job
+  port
+  project
+  schedule
+  secret
+  setup
+  template
+  tmux
+  user
+  webhook
+  workspace
+)
+groups=$(IFS='|'; printf '%s' "${FLEET_GROUPS[*]}")
 if [[ $command =~ ^fleet:[a-z][a-z0-9:-]*$ ]]; then
   :
-elif [[ $command =~ ^(host|setup|user|project|template|port|backup|asset|secret|webhook|tmux|claude|workspace|instance|job):[a-z][a-z0-9:-]*$ ]]; then
+elif [[ $command =~ ^($groups):[a-z][a-z0-9:-]*$ ]]; then
   command="fleet:$command"
-elif [[ $command =~ ^(host|setup|user|project|template|port|backup|asset|secret|webhook|tmux|claude|workspace|instance|job)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
+elif [[ $command =~ ^($groups)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
   command="fleet:$command:$1"
   shift
 fi

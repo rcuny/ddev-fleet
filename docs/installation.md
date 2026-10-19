@@ -129,6 +129,7 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
 | `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
 | `fleet-worker@1` | | One Messenger worker (`messenger:consume jobs`). More can be enabled as `fleet-worker@2` and so on. |
+| `fleet-scheduler` | | The schedule ticker (`messenger:consume scheduler_default`, one tick every 30 seconds): fires the due schedules and queues their jobs for `fleet-worker@1`. See `docs/schedules.md`. |
 | `fleet-backup.timer` | | Starts `fleet-backup.service` (a oneshot running `fleet:backup:create`) once a day, at a random time within an hour of midnight. `Persistent`: a backup missed while the host was off runs at the next boot. See "Backup and restore" in section 5. |
 | `fleet-mercure` | `127.0.0.1:3000` | A standalone Mercure hub (version 1.1.2, legacy protocol mode as `symfony/mercure-bundle` mints). Caddy proxies `/.well-known/mercure` to it. Subscribers need a JWT: an anonymous request to the hub answers 401. |
 | `docker`, DDEV | router on 8080 and 8443 (once an instance runs) | The installer configures the router ports but starts no project, so nothing listens on 8080/8443 until the first instance exists (a later milestone). It does not set `router_bind_all_interfaces`, so DDEV keeps its default (loopback only). |

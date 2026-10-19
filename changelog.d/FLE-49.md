@@ -1,0 +1,3 @@
+### Changed
+
+- **FLE-49: Caddy reads the OVH DNS-01 credentials from files, not from its environment.** The Caddyfile uses `{file./etc/caddy/ovh/<name>}` placeholders; `apply caddy` writes the four values to `/etc/caddy/ovh/` (`root:caddy` 0750, files 0640, atomic, restored on a failed reload) and keeps only `FLEET_PROXY_SECRET` in `/etc/caddy/fleet.env` (any `OVH_*` line left there is dropped, idempotently). A rotation of the credentials is a reload, not a restart; `caddy validate` runs against the staged files before anything is installed. The uninstaller removes `/etc/caddy/ovh`. The Ansible `caddy` role (v0.x) is unchanged: it serves the Python fleet on live hosts and keeps `{env.OVH_*}` in its `tls.conf` until that fleet is retired.
