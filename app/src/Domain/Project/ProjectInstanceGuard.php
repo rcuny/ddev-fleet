@@ -16,6 +16,4 @@ interface ProjectInstanceGuard
      * @return list<string>
      */
     public function instanceIds(Project $project): array;
-
-    public function instanceCount(Project $project): int;
 }

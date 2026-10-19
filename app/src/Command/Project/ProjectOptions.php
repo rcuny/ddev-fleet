@@ -68,11 +68,15 @@ final class ProjectOptions
     /**
      * The ProjectInput properties the given options change.
      *
+     * @param GitBotMode $current the project's stored git identity mode (update); the mode --git-bot-name and
+     *                            --git-bot-email are checked against when --git-bot is not given
+     *
      * @return array<string, mixed>
      *
-     * @throws ValidationFailed for a --git-bot or --unset word that does not exist, or an --unset of a value that is also set
+     * @throws ValidationFailed for a --git-bot or --unset word that does not exist, an --unset of a value that is also
+     *                          set, or a git identity name or email without the custom mode
      */
-    public static function changes(InputInterface $input, bool $update): array
+    public static function changes(InputInterface $input, bool $update, GitBotMode $current = GitBotMode::Inherit): array
     {
         $changes = [];
         foreach (self::TEXT as $option => $property) {
@@ -94,6 +98,14 @@ final class ProjectOptions
                 $errors['gitBotMode'] = 'Choose inherit, off or custom.';
             } else {
                 $changes['gitBotMode'] = $mode;
+            }
+        }
+        // the name and email are only stored for the custom mode: refuse them rather than drop them and report success
+        if ([] === $errors && GitBotMode::Override !== ($changes['gitBotMode'] ?? $current)) {
+            foreach (['gitBotName', 'gitBotEmail'] as $property) {
+                if (isset($changes[$property])) {
+                    $errors[$property] = 'Only used with --git-bot=custom.';
+                }
             }
         }
         if (true === $input->getOption('typesense')) {

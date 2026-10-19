@@ -24,7 +24,7 @@ Contents: [concepts](#concepts) · [fields and limits](#fields-and-limits) · [t
 | Thing | What it is |
 |---|---|
 | **Project** | A name, a git URL, and optional defaults: branch, template, extra hostnames, git identity, issue id pattern, a submodule to show, a Typesense search server, assigned named ports. |
-| **Template** | Belongs to one project. A name, an optional Drupal environment, and three command lists: *post-deploy* (run through `ddev exec` after a deploy), *terminal 1* and *terminal 2* (typed into the two terminal panes of the instance's window). A project has up to 50. One of them can be the project's **default template**. |
+| **Template** | Belongs to one project. A name, an optional Drupal environment, and three command lists: *post-deploy* (run inside the instance's web container with `ddev exec` after a deploy, so `composer install` or `drush deploy`, not `ddev composer install`), *terminal 1* and *terminal 2* (typed into the two terminal panes of the instance's window). A project has up to 50. One of them can be the project's **default template**. |
 | **Named port** | An entry of the host-wide catalogue: a name, a *public* port Caddy listens on and a *router* port of the DDEV router the traffic is forwarded to (for example `typesense`, 9108 to 8108). A project lists the named ports it uses. The catalogue is managed with `fleet port:*` only. |
 
 Names of projects, templates and ports are **immutable**: an instance id is `<project>--<label>`, so a rename would
@@ -34,7 +34,7 @@ orphan instances. To rename, create the new one and delete the old one.
 
 Every rule below lives in one place (`App\Fleet\Projects\Rule`) and is applied by the browser pages and the
 commands alike, so both refuse the same input with the same message. A refused value is never stored. The
-messages never echo what you typed.
+validation messages never echo what you typed (a "does not exist" message repeats the name you asked for, shortened).
 
 ### Project
 
@@ -42,7 +42,7 @@ messages never echo what you typed.
 |---|---|
 | Name | 1 to 40 characters: lowercase letters, digits and single dashes, starting and ending with a letter or digit; no `--` (the double dash separates project and instance label). `new` is reserved. Unique. Fixed after creation. |
 | Git URL | Required, at most 2048 characters, plain ASCII. Exactly three shapes: `https://host[:port]/path`, `ssh://[user@]host[:port]/path` and scp-like `[user@]host:path`. Refused: `http://`, `git://`, `file://`, `ext::` and every other scheme, local paths, credentials in the URL (use the fleet's deploy key, never a token in the URL), a leading dash, spaces and control characters, query strings and fragments, `..` segments, IPv6 literals and single-number hosts such as `2130706433`. |
-| Default branch | Optional. Letters, digits, `.`, `_`, `-` and `/`, starting with a letter or digit, at most 200 characters, and a valid git branch name (no `..`, `//`, `/.`, trailing `/` or `.`, `.lock` ending). Blank means the repository's own default. |
+| Default branch | Optional. Letters, digits, `.`, `_`, `-` and `/`, starting with a letter or digit, at most 200 characters, and a valid git branch name (no `..`, `//`, `/.`, trailing `/` or `.`, `.lock` ending; not `HEAD` and nothing starting with `refs/`). Blank means the repository's own default. |
 | Default template | Optional. The name of one of the project's own templates. It can be set only once the template exists (not when creating the project), and the default template cannot be deleted. |
 | Additional hostnames | Optional, at most 10. One label each (lowercase letters, digits, single dashes; no dots), unique within the project, and short enough that the whole host name label `<label>-<project>--<instance label>` stays within 63 characters. |
 | Ports | Optional, at most 50 names, all of them in the catalogue. |
@@ -57,7 +57,7 @@ messages never echo what you typed.
 |---|---|
 | Name | Same as a project name (1 to 40 characters, `new` reserved), unique within the project, fixed after creation. At most 50 templates per project. |
 | Drupal environment | Optional. 1 to 64 letters, digits, `.`, `_` or `-`. It is written verbatim as `DRUPAL_ENV=<value>` into the instance's `.env`, so quotes, spaces and shell characters are refused. Blank leaves the project's own value. |
-| Post-deploy, terminal 1, terminal 2 | Each a list of at most 50 command lines of at most 2000 characters. **One line per command:** every control character is refused (newline, tab, escape, NUL), as are Unicode line separators and format characters, and the text must be valid UTF-8. Blank lines are dropped and surrounding spaces trimmed. A line is never run through a host shell: post-deploy lines are run with `ddev exec`, terminal lines are typed into a terminal pane. |
+| Post-deploy, terminal 1, terminal 2 | Each a list of at most 50 command lines of at most 2000 characters. **One line per command:** every control character is refused (newline, tab, escape, NUL), as are Unicode line separators and format characters, and the text must be valid UTF-8. Blank lines are dropped and surrounding spaces trimmed. A line is never run through a host shell: **post-deploy lines run inside the instance's web container** (`ddev exec`), so write the command as you would type it in that container (`composer install`, `drush deploy`; a host-side `ddev ...` command does not exist there), and **terminal lines are typed on the host** into a terminal pane (`ddev logs -f` is fine there). Whether a failing post-deploy command stops the deploy is decided with the deploy itself (M0.04). A whole command list is also bounded as one text, to 100 100 characters (50 lines of 2000 characters with a line break between them): the browser text box and `--post-deploy`/`--tty1`/`--tty2` refuse a longer text with the same message, so every list one of them accepts the other accepts too. |
 
 ### Named port
 
@@ -68,11 +68,11 @@ messages never echo what you typed.
 
 ### Text fields
 
-Any multi-line text box accepts at most 10 000 characters of valid UTF-8 without NUL.
+Any other multi-line text box (the hostnames) accepts at most 10 000 characters of valid UTF-8 without NUL; the command lists have the bound given in the table above.
 
 ### Issue id patterns
 
-The pattern is operator input that the server runs, so it is restricted. Backreferences, recursion, callouts,
+The pattern is operator input that the server runs, so it is restricted. Backreferences, `\Q...\E` quoting, recursion, callouts,
 conditionals, comments, control verbs and extended mode are refused, and so is a repeated group whose body already
 repeats or alternates (`(a+)+`, `(a|aa)*`). A pattern that is merely expensive on long input is refused after a trial
 run. These checks are filters, not proofs: the real protection is that every match runs under a small backtrack limit on
@@ -171,7 +171,7 @@ $ echo $?
 | `--hostname=<label>` | An additional hostname label. Repeat for several; the list you give **replaces** the old one. |
 | `--port=<name>` | A named port to assign (see `fleet port:list`). Repeat for several; the list **replaces** the old one. |
 | `--git-bot=inherit\|off\|custom` | The git identity: the host default, none (`disabled` in JSON), or a custom one (`override` in JSON). |
-| `--git-bot-name=<text>`, `--git-bot-email=<address>` | The custom identity, with `--git-bot=custom`. |
+| `--git-bot-name=<text>`, `--git-bot-email=<address>` | The custom identity. Only with `--git-bot=custom` (on update: or when the project already uses it); otherwise they are refused with exit code `1`, not silently dropped. |
 | `--issue-id-regexp=<pattern>` | The issue id pattern. |
 | `--display-submodule-branch=<path>` | The submodule whose branch is shown. |
 | `--typesense` | Give the project a Typesense search server. On update `--no-typesense` removes it. |
@@ -195,7 +195,7 @@ question. Without a terminal, and in JSON mode, they never prompt: without `--ye
 $ fleet project list
 $ fleet project create blog --git=git@git.example.com:acme/blog.git --hostname=www
 Project "blog" created.
-$ fleet template create blog web --post-deploy='ddev composer install' --tty1='ddev logs -f'
+$ fleet template create blog web --post-deploy='composer install' --tty1='ddev logs -f'
 Template "web" created in project "blog".
 $ fleet project update blog --default-template=web --issue-id-regexp='(?:ABC|XYZ)-\d{1,6}'
 Project "blog" updated.
@@ -204,7 +204,7 @@ Named port "typesense" created (public 9108, router 8108).
 $ fleet project update blog --port=typesense
 ```
 
-A script reads a project with `--json`. Keys are the 0.x names; times are UTC; an unset value is `null`:
+A script reads a project with `--json`. Keys are the 0.x names; times are UTC; an unset value is `null`; the sample is shown compact, the command prints it indented:
 
 ```json
 {
@@ -222,7 +222,7 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
         {
             "name": "web",
             "drupal_env": null,
-            "post_deploy": {"exec": ["ddev composer install"], "tty1": ["ddev logs -f"], "tty2": []}
+            "post_deploy": {"exec": ["composer install"], "tty1": ["ddev logs -f"], "tty2": []}
         }
     ],
     "created_at": "2026-10-19T07:16:05Z",

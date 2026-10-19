@@ -289,6 +289,37 @@ final class ProjectCommandsTest extends KernelTestCase
         self::assertSame($before, $this->snapshot('blog'));
     }
 
+    public function testGitBotNameAndEmailNeedTheCustomMode(): void
+    {
+        $bad = $this->create('blog', ['--git-bot-name' => 'Bob']);
+        self::assertSame(1, $bad->getStatusCode());
+        self::assertSame("--git-bot-name: Only used with --git-bot=custom.\n", $bad->getErrorOutput());
+        self::assertSame([], self::getContainer()->get(ProjectRepository::class)->all());
+
+        $bad = $this->create('blog', ['--git-bot' => 'off', '--git-bot-email' => 'bot@example.com']);
+        self::assertSame(1, $bad->getStatusCode());
+        self::assertSame("--git-bot-email: Only used with --git-bot=custom.\n", $bad->getErrorOutput());
+
+        $this->create();
+        $before = $this->snapshot('blog');
+        $bad = $this->cli('fleet:project:update', ['name' => 'blog', '--git-bot-name' => 'Bob']);
+        self::assertSame(1, $bad->getStatusCode());
+        self::assertStringContainsString('--git-bot-name: Only used with --git-bot=custom.', $bad->getErrorOutput());
+        $json = $this->json($this->cli('fleet:project:update', ['name' => 'blog', '--git-bot' => 'inherit', '--git-bot-name' => 'Bob', '--json' => true]));
+        self::assertSame(['--git-bot-name'], array_keys($json['fields']));
+        self::assertSame($before, $this->snapshot('blog'));
+    }
+
+    public function testGitBotNameAndEmailAreAcceptedWhenTheStoredModeIsCustom(): void
+    {
+        $this->create('blog', ['--git-bot' => 'custom', '--git-bot-name' => 'Bot', '--git-bot-email' => 'bot@example.com']);
+
+        $ok = $this->cli('fleet:project:update', ['name' => 'blog', '--git-bot-name' => 'Other Bot']);
+
+        self::assertSame(0, $ok->getStatusCode(), $ok->getErrorOutput());
+        self::assertSame('Other Bot', $this->snapshot('blog')['git_bot']['name']);
+    }
+
     public function testUpdateUnknownProjectExits3(): void
     {
         $update = $this->cli('fleet:project:update', ['name' => 'nope', '--default-branch' => 'main']);

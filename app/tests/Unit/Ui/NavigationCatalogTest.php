@@ -89,7 +89,7 @@ final class NavigationCatalogTest extends TestCase
             'schedules' => 'M0.09',
             'secrets' => 'M0.05',
             'users' => null,
-            'settings' => 'M0.12',
+            'settings' => null,
             'design-system' => null,
         ], $milestones);
     }

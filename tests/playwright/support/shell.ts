@@ -10,7 +10,7 @@ export const ADMIN_NAV = [
   { label: 'Schedules', path: '/admin/schedules' },
   { label: 'Secrets', path: '/admin/secrets' },
   { label: 'Users', path: '/admin/users' },
-  { label: 'Settings', path: '/admin/settings' },
+  { label: 'Settings', path: '/admin/host' },
   { label: 'Design system', path: '/admin/design-system' },
 ] as const;
 

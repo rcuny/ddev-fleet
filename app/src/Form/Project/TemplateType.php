@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace App\Form\Project;
 
+use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\Rule\ResourceName;
-use App\Fleet\Projects\Rule\TextBlock;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
@@ -30,7 +30,7 @@ final class TemplateType extends AbstractType
     {
         $create = self::CREATE === $options['mode'];
         $text = ['autocomplete' => 'off', 'autocapitalize' => 'none', 'spellcheck' => 'false'];
-        $commands = $text + ['wrap' => 'off', 'class' => 'font-mono', 'maxlength' => TextBlock::MAX];
+        $commands = $text + ['wrap' => 'off', 'class' => 'font-mono', 'maxlength' => CommandLines::MAX_TEXT];
 
         if ($create) {
             $builder->add('name', TextType::class, [
@@ -50,7 +50,7 @@ final class TemplateType extends AbstractType
             ->add('postDeploy', TextareaType::class, [
                 'label' => 'Post-deploy commands',
                 'required' => false,
-                'help' => 'One command per line, run on the host after deploy through ddev exec; a failing command aborts the deploy.',
+                'help' => "One command per line, run inside the instance's web container with ddev exec after a deploy (for example composer install or drush deploy).",
                 'attr' => $commands + ['rows' => 8],
             ])
             ->add('tty1', TextareaType::class, [

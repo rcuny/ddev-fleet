@@ -59,6 +59,14 @@ final readonly class FleetPaths
         return $this->keysDir().'/secret.key';
     }
 
+    /**
+     * Database backups (`fleet-YYYYmmdd-HHMMSS.sqlite`, `queue-…`), written by BackupService. Owner only.
+     */
+    public function backupsDir(): string
+    {
+        return $this->home.'/backups';
+    }
+
     public function sshDir(): string
     {
         return $this->home.'/ssh';
@@ -191,6 +199,8 @@ final readonly class FleetPaths
             $this->varDir() => [0o750, true],
             $this->keysDir() => [0o700, true],
             $this->sshDir() => [0o700, true],
+            // Owner only: copies of the database (password hashes, sealed secrets).
+            $this->backupsDir() => [0o700, true],
             $this->locksDir() => [0o755, false],
             $this->logsDir() => [0o750, true],
             $this->logsDir().'/jobs' => [0o750, true],

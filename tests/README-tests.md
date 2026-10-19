@@ -16,14 +16,14 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 
 | Suite | Where | Count |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 882 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 398 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 405 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 391 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
-| Playwright | `tests/playwright/` | 98 (9 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop; `users.spec.ts` has 4 tests on both projects). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 77 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| PHPUnit `Unit` | `app/tests/Unit/` | 945 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 412 tests |
+| PHPUnit `Functional` | `app/tests/Functional/` | 448 tests |
+| PHPUnit `Repo` | `app/tests/Repo/` | 394 tests (13 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
+| Playwright | `tests/playwright/` | 153 (9 spec files, including `host-settings.spec.ts`; 125 run and 28 skip on a default run; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 69 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 2076 tests (12 skipped). Update this table when the numbers change.
+PHPUnit totals 2199 tests (13 skipped). Update this table when the numbers change.
 
 ## Layout
 
@@ -97,7 +97,7 @@ overrides the link file. Each run re-creates the setup link and clears the token
 in `finally`, so it passes repeatedly against the shared dev database of the companion and in parallel. It covers the
 list, create, edit, templates, ports and delete dialog at both widths, the member 403, the issue id tester, and (phone
 project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets and axe in both
-themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, section select, live tester) retry until
+themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
 the controller answers, because a busy host loads them after the HTML is interactive.
 The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
 bottom bar, and the shell specs assert that no console error or uncaught page error was seen (`support/shell.ts`).
