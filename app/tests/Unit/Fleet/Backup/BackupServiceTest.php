@@ -7,6 +7,7 @@ namespace App\Tests\Unit\Fleet\Backup;
 use App\Fleet\Backup\BackupKind;
 use App\Fleet\Backup\BackupNotFound;
 use App\Fleet\Backup\BackupService;
+use App\Fleet\Backup\BackupTooLarge;
 use App\Fleet\FleetPaths;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
@@ -52,6 +53,24 @@ final class BackupServiceTest extends TestCase
         self::assertSame($backup->size, filesize($path));
         self::assertSame('fleet.example.com', $this->value($path, 'host'));
         self::assertSame(['fleet-20261019-083015.sqlite'], $this->names(), 'no temp file is left behind, no queue db yet');
+    }
+
+    public function testCreateWithinRequestLimitRefusesLargeDatabasesAndWritesNothing(): void
+    {
+        $size = (int) filesize($this->paths->fleetDb());
+
+        try {
+            $this->service->createWithinRequestLimit($size - 1);
+            self::fail('A database above the limit must be refused.');
+        } catch (BackupTooLarge $e) {
+            self::assertSame($size, $e->size);
+            self::assertSame($size - 1, $e->limit);
+        }
+        self::assertSame([], $this->names());
+
+        $backup = $this->service->createWithinRequestLimit($size);
+        self::assertSame(['fleet-20261019-083015.sqlite'], $this->names());
+        self::assertSame('fleet-20261019-083015.sqlite', $backup->name);
     }
 
     public function testCopyIsASnapshotOfCommittedDataEvenInWalMode(): void

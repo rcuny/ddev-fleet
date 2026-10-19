@@ -10,6 +10,7 @@ use App\Fleet\Backup\BackupInfo;
 use App\Fleet\Backup\BackupKind;
 use App\Fleet\Backup\BackupNotFound;
 use App\Fleet\Backup\BackupService;
+use App\Fleet\Backup\BackupTooLarge;
 use App\Fleet\Host\GitIdentityRule;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Host\NotificationMailRule;
@@ -225,8 +226,13 @@ final class HostSettingsController extends AbstractController
         }
 
         try {
-            $info = $this->backups->create();
+            $info = $this->backups->createWithinRequestLimit();
             $this->addFlash('success', \sprintf('Backup written: %s (%s).', $info->name, HostHealthReport::bytes($info->size)));
+        } catch (BackupTooLarge $e) {
+            $this->addFlash('error', \sprintf(
+                'The databases (%s) are too large to back up from this page. Run "fleet fleet:backup:create" on the host or wait for the daily backup.',
+                HostHealthReport::bytes($e->size),
+            ));
         } catch (\RuntimeException $e) {
             $this->logger->error('A database backup requested from the host page failed.', ['exception' => $e::class, 'message' => $e->getMessage()]);
             $this->addFlash('error', 'The backup failed. Check the free disk space and the application log.');
