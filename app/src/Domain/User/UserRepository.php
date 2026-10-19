@@ -91,10 +91,14 @@ final readonly class UserRepository
         ));
     }
 
+    /**
+     * Stores the user under the write lock (see transactional()); inside a transaction already open it only flushes.
+     */
     public function save(User $user): void
     {
-        $this->em->persist($user);
-        $this->em->flush();
+        $this->write(function () use ($user): void {
+            $this->em->persist($user);
+        });
     }
 
     /**
@@ -102,8 +106,9 @@ final readonly class UserRepository
      */
     public function remove(User $user): void
     {
-        $this->em->remove($user);
-        $this->em->flush();
+        $this->write(function () use ($user): void {
+            $this->em->remove($user);
+        });
     }
 
     /**
@@ -112,5 +117,17 @@ final readonly class UserRepository
     public function flush(): void
     {
         $this->em->flush();
+    }
+
+    private function write(\Closure $change): void
+    {
+        if ($this->em->getConnection()->isTransactionActive()) {
+            $change();
+            $this->em->flush();
+
+            return;
+        }
+
+        $this->transactional($change);
     }
 }
