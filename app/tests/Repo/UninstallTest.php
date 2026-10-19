@@ -225,6 +225,11 @@ final class UninstallTest extends TestCase
         // so the refusal is the location check, not the missing-root check.
         $copy = $this->scratch().'/uninstall-copy.sh';
         copy(self::installDir().'/uninstall.sh', $copy);
+        chmod($copy, 0o755); // not group/other-writable whatever the umask, so only the owner check can refuse
+        if (0 === posix_geteuid()) {
+            // CI runs the suite as root: hand the copy to another user so it is "not owned by root" there too.
+            chown($copy, 65534);
+        }
         $stubs = $this->stubs(['id' => 'echo 0']);
 
         [$status, $out, $err] = $this->bash([$copy, '--yes'], [], null, $stubs);
