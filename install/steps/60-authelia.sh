@@ -84,7 +84,8 @@ step_main() {
     if is_dry || systemctl is-active --quiet authelia.service; then
       run systemctl stop authelia.service
     fi
-    run systemctl reset-failed authelia.service
+    # Exits 1 ("Unit authelia.service not loaded") when the unit never ran, which is the normal case here.
+    run systemctl reset-failed authelia.service || true
   fi
 
   # 4. Secrets, one guard per file.

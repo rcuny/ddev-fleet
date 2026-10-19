@@ -100,6 +100,15 @@ final class InstallerStepsTest extends TestCase
         self::assertStringNotContainsString('groupadd', $step);
     }
 
+    public function testResetFailedOfAnUnloadedAutheliaUnitDoesNotAbortAFreshInstall(): void
+    {
+        // `systemctl reset-failed` exits 1 for a unit that never ran ("Unit authelia.service not loaded"): found on the
+        // first real install, where it killed step 60 under set -e.
+        $step = (string) file_get_contents(self::installDir().'/steps/60-authelia.sh');
+
+        self::assertMatchesRegularExpression('/systemctl reset-failed authelia\.service \|\| true/', $step);
+    }
+
     public function testTmpfilesMaskKeepsOnlyTheDirectoryLine(): void
     {
         $lines = array_values(array_filter(
