@@ -66,6 +66,20 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         self::assertSame(InstanceState::Running, $this->instances->find('acme--main')?->state());
     }
 
+    public function testSecretTokensInAssetsAreSubstitutedAndMasked(): void
+    {
+        $this->secretStore->putManaged('acme', 'DB_PASS', 'asset-s3cret-value', 'test');
+        file_put_contents($this->assets.'/.env', "PASS=[[db-pass]]\nOTHER=[[unknown-secret]]\n");
+
+        $job = $this->deploy();
+
+        self::assertSame("PASS=asset-s3cret-value\nOTHER=[[unknown-secret]]\n", file_get_contents($this->dir().'/.env'));
+        $log = $this->logText($job);
+        self::assertStringContainsString('unresolved token(s) left as written: [[unknown-secret]]', $log);
+        self::assertStringNotContainsString('asset-s3cret-value', $log);
+        self::assertSame('[masked]', $this->masker->mask('asset-s3cret-value'));
+    }
+
     public function testDumpsAreHardLinkedUntouchedAndExcluded(): void
     {
         file_put_contents($this->assets.'/dumps/db.sql.gz', 'dump [[project]]');
@@ -91,7 +105,7 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         $job = $this->job('redeploy', $instance);
 
         // the same step run on an existing tree, as an idempotent second pass would
-        $context = new DeployContext($instance, $this->project, $dir, ['project' => 'acme'], $this->logFor($job));
+        $context = new DeployContext($instance, $this->project, $dir, ['project' => 'acme'], $this->logFor($job), $this->secretRenderer);
         new AssetsSeedStep($this->paths)->run($context);
         new AssetsSeedStep($this->paths)->run($context);
 
@@ -141,7 +155,7 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         $job = $this->job('deploy', $instance);
 
         try {
-            new AssetsSeedStep($this->paths)->run(new DeployContext($instance, $this->project, $dir, [], $this->logFor($job)));
+            new AssetsSeedStep($this->paths)->run(new DeployContext($instance, $this->project, $dir, [], $this->logFor($job), $this->secretRenderer));
             self::fail('expected a failure');
         } catch (JobFailed $e) {
             self::assertStringContainsString('assets: "web" is a symbolic link in the checkout', $e->getMessage());

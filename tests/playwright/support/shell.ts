@@ -28,7 +28,12 @@ export function collectBrowserErrors(page: Page): string[] {
   return errors;
 }
 
-/** True when the document is wider than the viewport (horizontal scroll). */
+/**
+ * True when the document is wider than the viewport (horizontal scroll). Measured against the configured width, not
+ * `window.innerWidth`: a mobile browser zooms out to fit overflowing content, so `innerWidth` grows with it and hides
+ * the overflow (FLE-78: a 64-character name in a flash widened the phone layout viewport to 724 px).
+ */
 export function hasHorizontalOverflow(page: Page): Promise<boolean> {
-  return page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
+  const width = page.viewportSize()?.width;
+  return page.evaluate((expected) => document.documentElement.scrollWidth > (expected ?? window.innerWidth), width);
 }

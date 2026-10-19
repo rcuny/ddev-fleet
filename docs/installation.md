@@ -61,6 +61,7 @@ plan and changes nothing.
 | `--ref=<ref>` | Branch, tag or commit to install. Default `develop`, the unreleased 1.x line; pin a `v1.*` tag once one exists. |
 | `--repo-url=<url\|path>` | Git remote (or a bundle or path readable by the `fleet` user) to install from. Default: the public GitHub mirror. |
 | `--skip-dns-check` | Do not compare the DNS records with this host's addresses (for example behind NAT or a CDN). |
+| `--no-shell-profile` | Do not install the shell profile (step 35). Default: installed. |
 | `--dry-run` | Print the plan, change nothing. Works without root. |
 | `--help` | Print the usage text. |
 
@@ -79,6 +80,7 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | 10 packages | PHP 8.4 from Debian (php-fpm, cli and extensions, no third-party PHP repository), Composer, `openssh-client`, `acl`, `sudo` and a few tools. |
 | 20 docker | Docker CE from Docker's repository; the daemon is enabled and started. |
 | 30 fleet user | The `fleet` system user (member of `docker`), `/srv/fleet`, `/etc/ddev-fleet`, `/opt/ddev-fleet`. |
+| 35 shell | The interactive shell profile `/etc/profile.d/10-fleet-shell.sh` (coloured prompt that names the host, `ls` colours, `l` alias, `EDITOR=nano`; interactive shells only) and one guarded hook block at the end of `/etc/bash.bashrc` and of the `~/.bashrc` of root, `fleet` and the user that ran `sudo` (added once, only to files that exist). Skipped with `--no-shell-profile`. |
 | 40 ddev | DDEV from its repository, configured for `fleet` (router on ports 8080 and 8443), mkcert's CA for the NSS store only. |
 | 50 caddy | Caddy from its repository plus a **custom build with the OVH DNS module**; the package binary is diverted so `apt` never replaces the custom one. A re-run refreshes the custom build when it is older than the packaged Caddy. The sandbox drop-in is installed. |
 | 60 authelia | Authelia from its repository, its three secrets (generated once), the tmpfiles mask (see Troubleshooting), and a `users.yml` with one disabled placeholder user (Authelia 4.39 refuses an empty user list; the placeholder can never sign in and disappears when the first real user exists). |
@@ -90,6 +92,8 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | 98 render and start | Renders the Caddy and Authelia configuration, installs it through the helper, starts everything, waits until `https://<domain>/health` and the hub answer, and prints the setup URL. |
 
 The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
+
+The uninstaller removes the profile file and exactly the hook block step 35 added (a block you edited stays).
 
 ## 3. What is installed where
 
@@ -133,6 +137,7 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `fleet-scheduler` | | The schedule ticker (`messenger:consume scheduler_default`, one tick every 30 seconds): fires the due schedules and queues their jobs for `fleet-worker@1`. See `docs/schedules.md`. |
 | `fleet-status` | | The status watcher (`fleet:instance:watch --interval=10`): keeps instance states and memory true to `ddev list` and `docker stats`, reaps dead jobs and prunes old ones. Restarted by an upgrade. |
 | `fleet-boot` | | A oneshot, enabled but never started by the installer: after a reboot it runs `fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict`, which starts every instance, stopped ones too (as 0.x did). |
+| `fleet-tmux.service` | | Owns the `fleet` tmux session (the agent workspace, see `agent-workspace.md`) in its own cgroup, so restarting php-fpm or the workers never kills the panes. A oneshot with `RemainAfterExit`; installed, enabled and started by the installer, never restarted by a re-run. Needs the `tmux` package, which the installer installs. The uninstaller removes the unit, not the package. |
 | `fleet-backup.timer` | | Starts `fleet-backup.service` (a oneshot running `fleet:backup:create`) once a day, at a random time within an hour of midnight. `Persistent`: a backup missed while the host was off runs at the next boot. See "Backup and restore" in section 5. |
 | `fleet-mercure` | `127.0.0.1:3000` | A standalone Mercure hub (version 1.1.2, legacy protocol mode as `symfony/mercure-bundle` mints). Caddy proxies `/.well-known/mercure` to it. Subscribers need a JWT: an anonymous request to the hub answers 401. |
 | `docker`, DDEV | router on 8080 and 8443 (once an instance runs) | The installer configures the router ports but starts no project, so nothing listens on 8080/8443 until the first instance exists (a later milestone). It does not set `router_bind_all_interfaces`, so DDEV keeps its default (loopback only). |

@@ -132,11 +132,11 @@ definitions:
           - export DEBIAN_FRONTEND=noninteractive COMPOSER_ALLOW_SUPERUSER=1 COMPOSER_NO_INTERACTION=1
           # PHP 8.4 and Composer come from Debian 13. git: Composer source fallbacks and the tag-guard tests
           # build real repositories. unzip: Composer. gnupg: NodeSource's key. openssh-client: ssh-keygen, which the
-          # SSH key tests run for real. shellcheck: the installer scripts. sudo: visudo for the sudoers test.
+          # SSH key tests run for real. shellcheck: the installer scripts. sudo: visudo for the sudoers test. tmux: TmuxRealTest.
           - >-
             apt-get update -qq && apt-get install -y -qq --no-install-recommends
             php8.4-cli php8.4-sqlite3 php8.4-intl php8.4-mbstring php8.4-xml php8.4-curl php8.4-zip
-            composer git unzip curl ca-certificates gnupg openssh-client shellcheck sudo > /dev/null
+            composer git unzip curl ca-certificates gnupg openssh-client shellcheck sudo tmux > /dev/null
           # Node 22 for Playwright and @axe-core/playwright (>= 22.12); Debian 13's Node is 20.
           # pipefail: a failed download must stop the step, not feed an empty script to bash.
           - set -o pipefail

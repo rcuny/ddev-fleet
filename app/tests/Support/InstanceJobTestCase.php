@@ -34,6 +34,7 @@ use App\Fleet\Jobs\RegisteredSecretsMasker;
 use App\Fleet\Secrets\SecretBox;
 use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Secrets\SecretStore;
+use App\Fleet\Secrets\TokenRenderer;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Fleet\System\CaddyReloader;
 use App\Fleet\Workspace\Tmux;
@@ -68,6 +69,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
     protected JobFeed $feed;
     protected RegisteredSecretsMasker $masker;
     protected SecretStore $secretStore;
+    protected TokenRenderer $secretRenderer;
     protected DeployWorkflow $workflow;
 
     /** @var \ArrayObject<int, DeployStep> */
@@ -109,6 +111,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $secrets, $this->masker),
             new DrupalSettingsWriter(),
             new ContextTokens($hostnames),
+            $this->secretRenderer = new TokenRenderer($secrets, $this->masker),
             $hostnames,
             $this->sites,
             $this->teardown,

@@ -89,13 +89,27 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         self::assertSame(InstanceState::Running, $this->instances->find('acme--main')?->state(), 'a skipped command never fails the deploy');
     }
 
+    public function testASecretTokenIsNeverTypedNorOpened(): void
+    {
+        $this->secretStore->putManaged('acme', 'MY_SECRET', 'tty-s3cret-value', 'test');
+        $this->template([], ['echo [[my-secret]]', 'echo [[branch]]']);
+
+        $job = $this->deploy('main');
+
+        self::assertSame(['echo develop'], $this->tmuxRunner->typedIn('tty2'));
+        $log = $this->logText($job);
+        self::assertStringContainsString('WARNING: skipped a tty2 command: unresolved token(s): [[my-secret]]', $log);
+        self::assertStringContainsString('a secret is never typed', $log);
+        self::assertSame('tty-s3cret-value', $this->masker->mask('tty-s3cret-value'), 'the secret was never opened, so never registered');
+    }
+
     public function testATokenValueThatIsNotSafeForAShellIsNotTyped(): void
     {
         $this->template(['echo [[branch]]', 'echo [[project]]'], []);
         $instance = $this->instance('main', 'develop');
         $job = $this->job('deploy', $instance);
 
-        $this->step->run(new DeployContext($instance, $this->project, $this->paths->instanceDir($instance->id()), ['branch' => 'x;touch /tmp/pwned', 'project' => 'acme'], $this->logFor($job)));
+        $this->step->run(new DeployContext($instance, $this->project, $this->paths->instanceDir($instance->id()), ['branch' => 'x;touch /tmp/pwned', 'project' => 'acme'], $this->logFor($job), $this->secretRenderer));
 
         self::assertSame(['echo acme'], $this->tmuxRunner->typedIn('tty1'));
         self::assertStringContainsString('the value of [[branch]] is not safe to type into a shell', $this->logText($job));

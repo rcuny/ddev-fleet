@@ -8,12 +8,12 @@
                     {% if type == 'warning' or type == 'danger' or type == 'error' %}
                         <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">
                             <twig:ux:icon name="lucide:triangle-alert" />
-                            <twig:Alert:Description class="text-ink-body">{{ message }}</twig:Alert:Description>
+                            <twig:Alert:Description class="text-ink-body [overflow-wrap:anywhere]">{{ message }}</twig:Alert:Description>
                         </twig:Alert>
                     {% else %}
                         <twig:Alert class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">
                             <twig:ux:icon name="lucide:check" />
-                            <twig:Alert:Description class="text-ink-body">{{ message }}</twig:Alert:Description>
+                            <twig:Alert:Description class="text-ink-body [overflow-wrap:anywhere]">{{ message }}</twig:Alert:Description>
                         </twig:Alert>
                     {% endif %}
                 {% endfor %}

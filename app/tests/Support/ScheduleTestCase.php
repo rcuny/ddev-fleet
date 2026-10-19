@@ -7,6 +7,7 @@ namespace App\Tests\Support;
 use App\Domain\Audit\AuditEntryRepository;
 use App\Domain\Job\Job;
 use App\Domain\Schedule\ScheduleRepository;
+use App\Domain\Schedule\SchedulerHeartbeatRepository;
 use App\Domain\Schedule\ScheduleRun;
 use App\Domain\Schedule\ScheduleRunRepository;
 use App\Fleet\Audit\AuditLog;
@@ -27,6 +28,7 @@ abstract class ScheduleTestCase extends JobTestCase
     protected ScheduleRepository $schedules;
     protected ScheduleRunRepository $runs;
     protected FakeScheduleAction $action;
+    protected SchedulerHeartbeatRepository $heartbeat;
     protected ScheduleTicker $ticker;
     protected ScheduleService $scheduleService;
 
@@ -40,7 +42,8 @@ abstract class ScheduleTestCase extends JobTestCase
         $this->action = new FakeScheduleAction($this->service);
         $actions = new ScheduleActions([$this->action]);
         $launcher = new ScheduleLauncher($actions, $this->runs, $registry, $this->em, new NullLogger());
-        $this->ticker = new ScheduleTicker($this->schedules, $this->runs, $launcher, $registry, $this->em, $this->clock, new NullLogger());
+        $this->heartbeat = new SchedulerHeartbeatRepository($this->em);
+        $this->ticker = new ScheduleTicker($this->schedules, $this->runs, $this->heartbeat, $launcher, $registry, $this->em, $this->clock, new NullLogger());
         $this->scheduleService = new ScheduleService(
             $this->schedules,
             $this->runs,

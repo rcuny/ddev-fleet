@@ -9,8 +9,9 @@ use App\Domain\Project\Project;
 use App\Fleet\Projects\Rule\IssueIdPattern;
 
 /**
- * The `[[token]]` values of an instance (the v0 context) and the FLEET_* environment derived from them. Only these
- * context tokens exist: a secret never becomes a token, so it cannot reach a command line.
+ * The `[[token]]` values of an instance (the v0 context) and the FLEET_* environment derived from them. These are the
+ * built-in tokens: a secret never becomes one, so it never reaches the FLEET_* environment. Managed secrets are resolved
+ * on top of them at the substitution sites by Secrets\TokenRenderer (DeployContext::render(), the post-deploy argv).
  */
 final readonly class ContextTokens
 {

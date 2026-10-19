@@ -66,17 +66,12 @@ final class InstallerPackagesTest extends TestCase
         self::assertStringNotContainsString('apt-key', $out);
     }
 
-    public function testNoTmuxOrSuryRepo(): void
+    public function testTmuxIsInstalledAndNoSuryRepo(): void
     {
         [, $out] = $this->dryRun();
         $all = $out.implode("\n", array_map(static fn (string $f): string => (string) file_get_contents($f), self::installFiles()));
-        // The unit file of the tmux workspace and the `tmux` group of the fleet wrapper (M0.11a) ship in install/, but no installer step installs the tmux package or the unit yet.
-        $withoutUnit = $out.implode("\n", array_map(
-            static fn (string $f): string => (string) file_get_contents($f),
-            array_filter(self::installFiles(), static fn (string $f): bool => !\in_array(basename($f), ['fleet-tmux.service', 'fleet'], true)),
-        ));
 
-        self::assertDoesNotMatchRegularExpression('/\btmux\b/i', $withoutUnit, 'tmux belongs to M0.11/12, not the installer steps');
+        self::assertContains('tmux', $this->packagesOf($out, 'php8.4-fpm'), 'the agent workspace needs the tmux package');
         self::assertStringNotContainsStringIgnoringCase('sury', $all, 'PHP comes from Debian 13, not the sury repository');
         self::assertStringNotContainsString('packages.sury.org', $all);
         self::assertStringNotContainsString('add-apt-repository', $all);
@@ -163,7 +158,7 @@ final class InstallerPackagesTest extends TestCase
     {
         $pipeline = (string) file_get_contents(self::productRoot().'/bitbucket-pipelines.yml');
 
-        self::assertMatchesRegularExpression('/php8\.4-zip\s+composer git unzip curl ca-certificates gnupg openssh-client shellcheck sudo\b/', $pipeline);
+        self::assertMatchesRegularExpression('/php8\.4-zip\s+composer git unzip curl ca-certificates gnupg openssh-client shellcheck sudo tmux\b/', $pipeline);
     }
 
     /**
