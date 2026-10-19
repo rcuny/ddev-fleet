@@ -1,0 +1,31 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-worker@.service.
+# One Messenger worker per instance number (fleet-worker@1 is enabled by the installer).
+[Unit]
+Description=ddev-fleet job worker %i
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+User=fleet
+Group=fleet
+EnvironmentFile=/etc/ddev-fleet/fleet.env
+Environment=HOME=/home/fleet
+WorkingDirectory=/opt/ddev-fleet/app
+ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console messenger:consume jobs --time-limit=3600 --memory-limit=256M -vv
+Restart=always
+RestartSec=5
+# A restart on upgrade lets the running message finish (a `ddev start` can take minutes) before systemd kills it.
+TimeoutStopSec=600
+# /etc, /usr and /boot read-only except what the worker writes. Deliberately NOT set: NoNewPrivileges (sudo),
+# PrivateTmp (the sockets under /tmp are shared), ProtectHome (DDEV lives in /home/fleet), ProcSubset=pid, PrivateUsers
+# (unmaps the docker group), UMask=0027 (Caddy must read what the worker writes). A path outside this list fails with
+# EROFS, not EACCES.
+# NOTE for the first job that runs `sudo apply caddy|authelia` (M0.04 moving Finish-like work into a job, M0.10 per-instance
+# Authelia rules): the helper inherits this unit's mount namespace, so /etc/caddy (Caddyfile, fleet.env) and /etc/authelia are
+# read-only to it and the install fails with EROFS. Add `-/etc/caddy -/etc/authelia` to ReadWritePaths then (php-fpm's drop-in
+# already lists them), or route the apply through the helper from a unit without ProtectSystem.
+ProtectSystem=full
+ReadWritePaths=/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var
+
+[Install]
+WantedBy=multi-user.target

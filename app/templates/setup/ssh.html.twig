@@ -1,0 +1,131 @@
+{% extends 'setup/base.html.twig' %}
+
+{% block setup_content %}
+    {% if errors %}
+        <twig:Alert variant="destructive" data-testid="setup-ssh-errors">
+            <twig:ux:icon name="lucide:circle-alert" />
+            <twig:Alert:Description class="text-destructive">
+                {% for message in errors %}<p>{{ message }}</p>{% endfor %}
+            </twig:Alert:Description>
+        </twig:Alert>
+    {% endif %}
+    {% for problem in problems %}
+        <twig:Alert variant="destructive">
+            <twig:ux:icon name="lucide:circle-alert" />
+            <twig:Alert:Description class="text-destructive">{{ problem }}</twig:Alert:Description>
+        </twig:Alert>
+    {% endfor %}
+
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>SSH keys</h1>
+            <p>Fleet clones and pushes with these two keys. Add each public key to the Git server as a deploy key (the push key with write access) before you finish.</p>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-6">
+            {% for key in keys %}
+                <div class="grid gap-2" data-controller="clipboard" data-testid="setup-key-{{ key.role }}">
+                    <twig:Label for="key-{{ key.role }}">{{ key.label }}</twig:Label>
+                    <div class="flex gap-2">
+                        <twig:Input id="key-{{ key.role }}" readonly value="{{ key.public_key }}" data-clipboard-target="source" class="h-11 min-w-0 flex-1 font-mono text-xs md:h-8" />
+                        <twig:Button variant="outline" data-action="clipboard#copy" class="h-11 md:h-8" data-testid="copy-{{ key.role }}">Copy</twig:Button>
+                    </div>
+                    <p class="text-xs text-ink-muted">Fingerprint <code class="break-all">{{ key.fingerprint }}</code> <span data-clipboard-target="status" aria-live="polite" class="text-brand-darker dark:text-brand"></span></p>
+                </div>
+            {% else %}
+                <p>No keys yet.</p>
+            {% endfor %}
+
+            <details class="grid gap-6" data-testid="setup-ssh-replace">
+                <summary class="min-h-11 cursor-pointer py-2">Replace a key</summary>
+                <form method="post" action="{{ path('setup_ssh') }}" class="grid gap-4">
+                    {{ include('setup/_csrf.html.twig') }}
+                    <input type="hidden" name="action" value="regenerate">
+                    <p class="text-xs text-ink-muted">Generates a fresh key. The old one stops working wherever it is registered.</p>
+                    {{ include('setup/_role_select.html.twig', {id: 'regenerate-role'}) }}
+                    <div class="flex items-center gap-3">
+                        <twig:Checkbox id="regenerate-confirm" name="confirm" value="1" />
+                        <twig:Label for="regenerate-confirm" class="min-h-11 font-normal text-ink-body md:min-h-0">I understand the old key stops working</twig:Label>
+                    </div>
+                    <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto">Generate a new key</twig:Button>
+                </form>
+                <form method="post" action="{{ path('setup_ssh') }}" enctype="multipart/form-data" class="grid gap-4">
+                    {{ include('setup/_csrf.html.twig') }}
+                    <input type="hidden" name="action" value="import">
+                    <p class="text-xs text-ink-muted">Use an existing key instead. Upload the unencrypted private key file (no passphrase).</p>
+                    {{ include('setup/_role_select.html.twig', {id: 'import-role'}) }}
+                    <div class="grid gap-2">
+                        <twig:Label for="import-file">Private key file</twig:Label>
+                        <twig:Input id="import-file" type="file" name="private_key" class="h-11 md:h-8" />
+                    </div>
+                    <div class="flex items-center gap-3">
+                        <twig:Checkbox id="import-confirm" name="confirm" value="1" />
+                        <twig:Label for="import-confirm" class="min-h-11 font-normal text-ink-body md:min-h-0">I understand the old key stops working</twig:Label>
+                    </div>
+                    <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto">Import this key</twig:Button>
+                </form>
+            </details>
+        </twig:Card:Content>
+    </twig:Card>
+
+    <twig:Card>
+        <twig:Card:Header>
+            <h2>Trusted Git servers</h2>
+            <p>Fleet only connects to servers listed here. GitHub, GitLab and Bitbucket are included; add your own below.</p>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-6">
+            {% if scan %}
+                <div class="grid gap-3 rounded-lg border border-hairline p-3" data-testid="setup-ssh-scan">
+                    <h3>Keys offered by {{ scan_host }}</h3>
+                    <p class="text-xs text-ink-muted">Compare these fingerprints with the ones your server's administrator published, then trust them. Nothing is added until you do.</p>
+                    <ul class="grid gap-2">
+                        {% for found in scan %}
+                            <li><strong>{{ found.type }}</strong><br><code class="break-all text-xs">{{ found.fingerprint }}</code></li>
+                        {% endfor %}
+                    </ul>
+                    <form method="post" action="{{ path('setup_ssh') }}" class="grid gap-3">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <input type="hidden" name="action" value="trust">
+                        <input type="hidden" name="host" value="{{ scan_host }}">
+                        {% for found in scan %}<input type="hidden" name="fingerprints[]" value="{{ found.fingerprint }}">{% endfor %}
+                        <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="setup-ssh-trust">I checked: trust these keys</twig:Button>
+                    </form>
+                </div>
+            {% endif %}
+
+            <form method="post" action="{{ path('setup_ssh') }}" class="grid gap-3" data-testid="setup-ssh-scan-form">
+                {{ include('setup/_csrf.html.twig') }}
+                <input type="hidden" name="action" value="scan">
+                <div class="grid gap-2">
+                    <twig:Label for="scan-host">Add a server</twig:Label>
+                    <twig:Input id="scan-host" name="host" placeholder="git.example.com" autocomplete="off" autocapitalize="none" spellcheck="false" class="h-11 md:h-8" aria-describedby="scan-host-help" />
+                    <p id="scan-host-help" class="text-xs text-ink-muted">A host name, or [host]:port for another port. Fleet reads its keys; you confirm them.</p>
+                </div>
+                <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto">Read host keys</twig:Button>
+            </form>
+
+            <twig:Table data-testid="setup-known-hosts">
+                <twig:Table:Header>
+                    <twig:Table:Row>
+                        <twig:Table:Head>Host</twig:Table:Head>
+                        <twig:Table:Head>Keys</twig:Table:Head>
+                    </twig:Table:Row>
+                </twig:Table:Header>
+                <twig:Table:Body>
+                    {% for host, found in hosts %}
+                        <twig:Table:Row>
+                            <twig:Table:Cell>{{ host }}</twig:Table:Cell>
+                            <twig:Table:Cell>{{ found|map(f => f.type|replace({'ssh-': '', 'ecdsa-sha2-nistp': 'ecdsa-'}))|join(', ') }}</twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% else %}
+                        <twig:Table:Row>
+                            <twig:Table:Cell colspan="2">No trusted servers yet.</twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% endfor %}
+                </twig:Table:Body>
+            </twig:Table>
+        </twig:Card:Content>
+        <twig:Card:Footer class="justify-end">
+            <twig:Button as="a" href="{{ path('setup_claude') }}" class="h-11 w-full md:h-8 md:w-auto" data-testid="setup-next">Continue</twig:Button>
+        </twig:Card:Footer>
+    </twig:Card>
+{% endblock %}

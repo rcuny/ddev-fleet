@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 Type: documentation
 ---
 
@@ -18,7 +18,7 @@ use `fleet.example.com`, `demo` and `blog`.
 | Branch | Line | Contents |
 |---|---|---|
 | `main` | **0.x** (Python) | Releases `v0.*` only: FastAPI daemon, `fleet` CLI, `fleet.yml`, `bootstrap.sh`. Live servers follow it. Not touched by the port. |
-| `develop` | **1.x** (Symfony 8) | The rewrite in `app/`. No Python app, no `fleet.yml`, no `bootstrap.sh`. Not deployable yet. |
+| `develop` | **1.x** (Symfony 8) | The rewrite in `app/` and its installer in `install/`. No Python app, no `fleet.yml`, no `bootstrap.sh`. Installable on a test host (`install/install.sh`, `docs/installation.md`), not released or production-ready yet. |
 
 Gitflow on `develop`: features are `feature/<KEY>-<slug>` cut off `develop` and merged
 back with `git merge --no-ff`; 1.x releases are `v1.*` annotated tags cut from
@@ -35,7 +35,10 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
   configuration to this repository assuming the product runs in a container.
 - **`ddev`, `git` and `docker` never run inside an HTTP request.** They run only in
   Messenger workers and console commands, always through the `CommandRunner` seam.
-- **The 1.x app must not face the Internet yet** (see "Known limitation: trusted proxy").
+- **Only Caddy faces the Internet.** The installed host serves the app through Caddy and a unix-socket php-fpm
+  pool; identity headers are trusted only from a request carrying the proxy secret (see "Production trust and the
+  installer"). Never expose `app/public` any other way (`php -S`, a DDEV project): outside the installed host there
+  is no proxy, and `dev` has the stand-in login.
 - The Python code and docs of the 0.x line are gone from `develop`; their
   documentation is kept under `docs/v0/` as history.
 
@@ -48,7 +51,8 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `tests/README-tests.md`) |
 | `ci/` | Tag guard (`tag-guard.sh`), the systemd security scorer and its baseline, requirements files for the Python CI steps |
 | `bitbucket-pipelines.yml`, `renovate-config.json` | CI and dependency updates |
-| `ansible/` | Provisioning for the 0.x host layout; reshaped for 1.x in milestone M0.02 |
+| `install/` | The 1.x installer (pure bash): `install.sh` (bootstrap), `run.sh`, `lib/common.sh`, `steps/NN-*.sh`, `etc/` (unit files, pool, sudoers line, env drop-ins), `libexec/apply` (the root helper), `bin/fleet` (the CLI wrapper), `uninstall.sh`. Tested by `app/tests/Repo/Installer*Test` and friends |
+| `ansible/` | Provisioning for the 0.x host layout, kept as reference and not used by the installer (`ansible/LEGACY-0x.md`) |
 | `docs/` | Documentation index in `docs/README.md`; `docs/v0/` holds the 0.x reference |
 | `demo/`, `scripts/` | A minimal DDEV project the 0.x installer seeds as `demo`; the Renovate merge helper |
 
@@ -56,15 +60,25 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 
 | Namespace | Holds |
 |---|---|
-| `App\Domain\<Area>\` | Doctrine entities and repositories (attribute mapping; empty until M0.02) |
-| `App\Doctrine` | Doctrine plumbing: `SqlitePragmaMiddleware` (WAL, `busy_timeout=5000`, `foreign_keys=ON` on every connection) |
+| `App\Domain\Host` | `HostSettings` (single row: domain, ACME email, `TlsMode` http01 / ovh_dns, setup token hash and expiry, completion time) and its repository |
+| `App\Domain\User` | `User` (argon2id hash, groups; `fleet-admins` is the admin group), `PasswordHash` (strict argon2id check), `UserRepository` |
+| `App\Domain\Ssh` | `SshKey` (public key and fingerprint per `SshKeyRole` deploy / push; private keys live on disk, never in the database) |
+| `App\Domain\Secret` | `Secret` (sealed ciphertext, nonce, key version, scope) and its repository |
+| `App\Doctrine` | Doctrine plumbing: `SqlitePragmaMiddleware` (WAL, `busy_timeout=5000`, `foreign_keys=ON` on every connection), `UtcDateTimeImmutableType` (`utc_datetime_immutable`, always UTC: use it, not the stock datetime types, under SQLite) |
 | `App\Fleet` | `FleetPaths` and host-driving services; `App\Fleet\Shell` is the `CommandRunner` seam |
-| `App\Health` | `HealthChecker` / `HealthReport` behind `GET /health` |
+| `App\Fleet\Secrets` | `SecretKeyFile` (`keys/secret.key`, 32 bytes, never overwritten), `SecretBox` (XChaCha20-Poly1305 with the scope and name as associated data), `SecretStore` (fleet-wide secrets: OVH credentials, Claude token) |
+| `App\Fleet\Ssh` | `SshKeyService` (generate / import / regenerate the deploy and push keys), `Ed25519KeyGenerator` (OpenSSH format in PHP, no process), `KnownHostsFile` (seeded provider keys, trust only after a fingerprint confirmation), `KnownHostScanner` (`ssh-keyscan` through the runner) |
+| `App\Fleet\Auth` | `UserService`, `PasswordPolicy`, `AutheliaUsersRenderer` / `AutheliaUsersFile` (the Authelia `users.yml`, written atomically under a lock) |
+| `App\Fleet\System` | The renderers (`CaddyfileRenderer`, `CaddyEnvRenderer`, `AutheliaConfigRenderer`; templates in `templates/system/`), `ConfigValue` (validates everything that is rendered), `SystemRenderer` (staging), `GateWriter` / `GateMode` (the Caddy gate snippet), `CaddyReloader`, and the `Applier` seam with `PrivilegedApply` (see "Privileged apply") |
+| `App\Setup` | The setup wizard's domain: `SetupTokenService`, `SetupCookie`, `SetupState`, `SetupGate` / `SetupAccessSubscriber` (the guard), `SetupAttemptLimiter`, `SetupProgress`, `SetupFinisher`, `ScanTargetPolicy` |
+| `App\Health` | `HealthChecker` / `HealthReport` behind `GET /health`; `HostHealth` / `HostHealthReport` (memory, disk, reboot-required) for the Home card |
 | `App\Security` | `FleetUser`, `RemoteUserAuthenticator`, `TrustedProxyChecker`, `ForbiddenHandler`; `App\Security\StandIn` (dev/test only) |
-| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages) |
-| `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`) |
+| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
+| `App\Form\Setup` | The wizard's Symfony forms |
+| `App\Command` | The `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`) |
+| `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`) |
 | `App\Ui` | UI support classes: `NavigationCatalog`, `NavItem`, `ProfilerToolbarSwitch` |
-| `App\Message`, `App\MessageHandler`, `App\Command` | Reserved for Messenger messages, handlers and `fleet:*` console commands (from M0.04) |
+| `App\Message`, `App\MessageHandler` | Reserved for Messenger messages and handlers (from M0.04) |
 
 New work follows these namespaces; add a new one only with a reason.
 
@@ -78,17 +92,38 @@ New work follows these namespaces; add a new one only with a reason.
   environment, not the app's secrets. Nothing else may start a process (`tests/Repo/HostCommandSeamTest`).
 - **`App\Fleet\FleetPaths` owns every filesystem path** under `FLEET_HOME` (must be absolute):
   `var/fleet.sqlite`, `var/queue.sqlite`, `keys/`, `ssh/`, `assets/<project>/`, `instances/<id>/`,
-  `logs/jobs/<job>.log`, `logs/instances/<instance>/<job>.log`, `locks/`. Never hard-code a path outside it. Ids are validated (no `..`, no `/`).
-  `ensureLayout()` creates the tree with exact modes (`keys/`, `ssh/` 0700; everything holding data or logs 0750).
+  `logs/jobs/<job>.log`, `logs/instances/<instance>/<job>.log`, `locks/`, `keys/secret.key`,
+  `ssh/{deploy,push}_ed25519[.pub]` and `ssh/known_hosts`, `staging/<target>/<file>` (rendered config waiting for the root
+  helper), `authelia/users.yml`. It also owns the Caddy snippet directory (`FLEET_CADDY_DIR`, `/etc/caddy/fleet` in
+  production) and derives `gate.conf` and `/etc/caddy/Caddyfile` from it. Never hard-code a path outside it. Ids are validated (no `..`, no `/`).
+  `ensureLayout()` creates the tree with exact modes (`keys/`, `ssh/`, `staging/` 0700; everything holding data or logs 0750).
 - **Two SQLite files**: `fleet.sqlite` (Doctrine `default`, domain data) and `queue.sqlite` (Doctrine
   `queue`, Messenger transports `jobs` and `failed` only). Entities live under `App\Domain\<Area>\`.
 - **Locks** use Symfony Lock with a flock store in `FLEET_HOME/locks` (`LOCK_DSN`).
-- **Mercure** is wired (bundle config, `MERCURE_*` variables) but no hub is started by the dev commands and nothing publishes yet.
-- **Authentication** is by header, never by password. In `prod` the app trusts `Remote-User`,
-  `Remote-Groups`, `Remote-Email` and `Remote-Name` **only** when `REMOTE_ADDR` is in
-  `FLEET_TRUSTED_PROXIES` (default `127.0.0.1,::1`). Group `FLEET_ADMIN_GROUP` (default
-  `fleet-admins`) gives `ROLE_ADMIN`; every other authenticated user is `ROLE_MEMBER`.
-  `/health` is public; `/admin/*` needs `ROLE_ADMIN`; the rest needs a login.
+- **Mercure** is wired (bundle config, `MERCURE_*` variables). The installer runs a standalone hub (`fleet-mercure`, `127.0.0.1:3000`, legacy protocol mode) behind Caddy; the dev commands start none and nothing publishes yet.
+- **Authentication** is by header, never by password in the app. In `prod` the app trusts `Remote-User`,
+  `Remote-Groups`, `Remote-Email` and `Remote-Name` only from a request that carries the proxy secret: Caddy sets the
+  FastCGI parameter `FLEET_PROXY_AUTH` (`TrustedProxyChecker::PROXY_PARAM`) to `FLEET_PROXY_SECRET`, compared with
+  `hash_equals`; a secret shorter than 32 characters is ignored. `FLEET_TRUSTED_PROXIES` (default `127.0.0.1,::1`) is the
+  dev/test peer list; the installer sets it empty. Group `FLEET_ADMIN_GROUP` (default `fleet-admins`) gives `ROLE_ADMIN`;
+  every other authenticated user is `ROLE_MEMBER`. `/health` is public; `/setup*` is public but guarded by
+  `App\Setup\SetupGate` (token wizard, see below); `/admin/*` needs `ROLE_ADMIN`; the rest needs a login.
+- **Setup wizard.** `fleet:host:init` (installer) creates the host row, `fleet:setup:token` prints
+  `https://<domain>/setup?token=...` (sha256 stored, valid 24 hours or until Finish). The exchange sets the signed
+  `__Host-fleet_setup` cookie; every other `/setup` route needs it (`SetupState::permits`), and after completion all
+  of them answer 404. The guard decides on the decoded path **and** the matched route and each controller guards itself:
+  never decide on `getPathInfo()` alone. Finish does every side effect in a fixed order and marks completion last
+  (`SetupFinisher`; php-fpm's `request_terminate_timeout` must stay >= `SetupFinisher::REQUIRED_REQUEST_TIMEOUT`, 240 s).
+  Wizard forms carry the stateless CSRF token on top of the Strict cookie.
+- **Secrets** go through `SecretStore` (sealed with `SecretBox`, key in `keys/secret.key`, ciphertext bound to scope and
+  name), never into `.env`, logs, argv or the database in clear. The runner strips the app's secrets from child
+  environments. Private SSH keys are files (0600), the database holds only public keys and fingerprints.
+- **Privileged apply.** The app never runs as root. A change to `/etc/caddy` or `/etc/authelia` is rendered by
+  `SystemRenderer` into `staging/<target>/` and installed by `PrivilegedApply` (`sudo -n /usr/local/libexec/fleet/apply
+  caddy|authelia`; `ApplyTarget` is the only argument). The helper (`install/libexec/apply`) validates with the real
+  binary, installs atomically and rolls back; it is not a security boundary (the `fleet` user is in `docker`). Four
+  places must agree and a repo test pins them: `ApplyTarget`, the sudoers line (`install/etc/sudoers-fleet-apply`), the helper's
+  allowed targets and `PrivilegedApply::HELPER`. Add a target only by changing all four.
 - **Dev/test stand-in** (does not exist in `prod`): identities from `FLEET_STAND_IN_*`; the role
   comes from the `X-Fleet-Stand-In-Role` header, else the `fleet_stand_in_role` cookie set by
   `GET /_dev/stand-in/{admin|member|none}?next=/path`, else `FLEET_STAND_IN_ROLE`.
@@ -141,36 +176,60 @@ php vendor/bin/phpunit --testsuite Repo   # one suite: Unit | Integration | Func
 
 `npm run test:smoke` runs only `@smoke` specs. Other knobs: `FLEET_E2E_PORT` (default 8000),
 `FLEET_PHP` (PHP binary for the launcher). Projects: `desktop` (1280 px) and `phone` (390 px).
+`start-app.mjs` also initialises the host (`fleet:host:init`) and writes a fresh setup link to
+`tests/playwright/.run/setup-url.txt`; `setup-wizard.desktop.spec.ts` walks the wizard once and so runs only in the
+first mode (it skips itself against an external server, whose `FLEET_HOME` is not fresh).
 
 ### Test layout
 
 `app/tests/`: `Unit/` (plain objects), `Integration/` (kernel and container wiring, SQLite, the
-runner seam), `Functional/` (HTTP through `WebTestCase`), `Repo/` (repository rules: hygiene,
-pipeline configuration, tag guard, design-system agent block, Python app gone). Each PHPUnit
+runner seam), `Functional/` (HTTP through `WebTestCase`, the wizard included), `Repo/` (repository rules: hygiene,
+pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its bash
+steps, the root helper, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
+`FLEET_MERCURE_BIN`, `ssh-keygen`, `shellcheck`) or run only as an unprivileged user, and skip otherwise. Each PHPUnit
 process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Counts and run guide:
 `tests/README-tests.md`.
 
-## Known limitation: trusted proxy (until M0.02)
+## Production trust and the installer
 
-Header authentication trusts the TCP peer address only. With Caddy and PHP-FPM on the same host
-every request arrives from loopback, so any local process, or anything that can reach the app
-without passing through the authenticating proxy, can assert an identity. Nothing runs behind
-Caddy yet, so this is accepted for M0.01; the installer milestone (M0.02) adds a shared-secret
-header (or loopback TCP) between Caddy and the app and sets the production environment. Related
-requirements for M0.02: Caddy must strip both `Remote-User` and `Remote_User` from client
-requests (FastCGI maps both to `HTTP_REMOTE_USER`); `::ffff:127.0.0.1` does not match
-`127.0.0.1` (it fails closed); a production deployment must set `APP_ENV=prod`, an absolute
-`FLEET_HOME`, `APP_SECRET` and `MERCURE_JWT_SECRET` in the real environment (the committed `.env`
-defaults are for development and are project-relative).
+`install/install.sh --domain=<fqdn>` turns a Debian 13 host into a fleet (`docs/installation.md` is the user guide;
+keep it and `README.md` in step with the code, `InstallDocsTest` checks flags, commands and `fleet.env` keys).
+Facts to keep true when editing it:
 
-## The 0.x host layout (Ansible, until the installer milestone)
+- **Two stages.** `install.sh` (self-contained, wrapped in `main`) clones the ref into `/opt/ddev-fleet` as `fleet`
+  (git never runs as root there), exports a root-owned copy of `install/` and execs its `run.sh`; privileged files
+  (`apply`, sudoers, wrapper) are always installed from that copy, never from the fleet-writable checkout. Steps are
+  `install/steps/NN-*.sh`, each defines `step_main`, each is idempotent; `run.sh` prints `==> <step>` lines only for
+  steps. `--dry-run` prints the whole plan and changes nothing.
+- **Never touched:** `sshd`, ufw / iptables / nftables, fail2ban, unattended-upgrades (a lockout risk; hardening is the
+  operator's). `/opt/ddev-fleet` stays `fleet:fleet`. Authelia's `/etc/tmpfiles.d/authelia.conf` mask is installed
+  before the package. Caddy snippet directories are `fleet:caddy` 2750 (setgid).
+- **Env files:** `/etc/ddev-fleet/fleet.env` (`root:fleet` 0640; app, workers, CLI, php-fpm via a unit drop-in),
+  `mercure.env` (0600), `/etc/caddy/fleet.env` (written by `apply caddy`). Only missing keys are added and secrets are
+  generated once. The pool pins `APP_ENV=prod`; `ProductionGuard` refuses an unsafe production environment (empty
+  `APP_SECRET`, `FLEET_RUNNER=recording`, `FLEET_HOME` inside the project, trusted proxies together with a proxy
+  secret).
+- **Caddy** gets its config from the app: the main `Caddyfile` through `apply caddy`, the sign-in gate (`gate.conf`, mode
+  `setup` or `authelia`) written by `GateWriter` and loaded with `caddy reload`. It strips every `Remote-*` / `Remote_*`
+  request header on all routes before the gate. Setup mode lets through only `/setup`, `/assets/*` and `/health`.
+  Only `<domain>` and `auth.<domain>` are served; instance and wildcard sites arrive in M0.04 / M0.07.
+- **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
+  workers when the code or env changed.
+- Not shipped yet (do not assume it exists): `fleet-scheduler`, `fleet-boot` / `fleet-tmux`, wildcard and instance Caddy
+  sites, DB-driven Authelia access rules, Authelia self-service password reset (disabled until M0.10; use
+  `fleet user:reset-password`), host hardening.
+- Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
+  install/bin/fleet` before committing a script.
+
+## The 0.x host layout (Ansible, legacy)
 
 `ansible/` still describes the 0.x host: it installs the Python package and units, which no longer
-exist on `develop`. Do not run it against a live host from `develop`, and never run the full
+exist on `develop`, and the 1.x installer does not use it (`ansible/LEGACY-0x.md`). Do not run it against a live
+host from `develop`, and never run the full
 `site.yml` against a live host at all (the `fleet_service` role rewrites the checkout's git
 remote). Apply individual roles through the scoped playbooks beside it (`caddy-only.yml`,
 `hardening.yml`, `fleet-units.yml`, `security-probe.yml`, `authelia.yml`, `claude-onboarding.yml`),
-`--check --diff` first. Milestone M0.02 reshapes the roles for 1.x. Roles, in `site.yml` order:
+`--check --diff` first. The roles are not reshaped for 1.x. Roles, in `site.yml` order:
 
 | Role | Responsibility |
 |---|---|
@@ -191,6 +250,7 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 ## Cross-references
 
 - `docs/README.md` — documentation index with the status of each document.
+- `docs/installation.md` — installing 1.x on a host: installer, setup wizard, recovery, security model, uninstalling.
 - `docs/development.md` — setup, environment variables, stand-in, adding a component.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
 - `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.

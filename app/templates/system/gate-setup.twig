@@ -1,0 +1,6 @@
+{% autoescape false %}
+# Fleet gate, setup mode. Written by the app (GateWriter); imported from the main Caddyfile inside the identity route.
+# Only the setup wizard, its assets and /health are reachable until setup is complete.
+@fleet_closed not path /setup /setup/* /assets/* /health
+redir @fleet_closed /setup 302
+{% endautoescape %}

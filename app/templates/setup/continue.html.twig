@@ -1,0 +1,17 @@
+{% extends 'setup/base.html.twig' %}
+
+{% block setup_content %}
+    {# The link carried the token: swap the address bar to the clean entry URL (the session cookie is already set). #}
+    <div data-controller="clean-url" data-clean-url-url-value="{{ path('setup_enter') }}" hidden></div>
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>Setup session started</h1>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            <p>The setup link was accepted. Continue to the next step.</p>
+        </twig:Card:Content>
+        <twig:Card:Footer>
+            <twig:Button as="a" href="{{ path(target.route) }}" class="h-11 w-full md:h-8 md:w-auto" data-testid="setup-continue">Continue</twig:Button>
+        </twig:Card:Footer>
+    </twig:Card>
+{% endblock %}

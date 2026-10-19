@@ -1,5 +1,6 @@
 twig:
     file_name_pattern: '*.twig'
+    form_themes: ['form/theme.html.twig']
     globals:
         # The dev role switch renders only where the stand-in authenticator exists.
         fleet_stand_in_enabled: '%fleet.stand_in_enabled%'

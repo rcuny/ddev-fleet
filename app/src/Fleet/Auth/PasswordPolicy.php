@@ -1,0 +1,43 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fleet\Auth;
+
+/**
+ * What a fleet password must satisfy. Length is counted in characters (a passphrase in any script counts fairly);
+ * the upper bound only exists so a hostile request cannot make argon2id hash megabytes.
+ */
+final readonly class PasswordPolicy
+{
+    public const int MIN_LENGTH = 12;
+    public const int MAX_LENGTH = 128;
+
+    /**
+     * @return list<string> human readable reasons the password is refused; empty when it is acceptable. The
+     *                      messages never contain the password.
+     */
+    public function violations(#[\SensitiveParameter] string $password, string $username): array
+    {
+        if (!mb_check_encoding($password, 'UTF-8')) {
+            return ['The password must be valid UTF-8.'];
+        }
+
+        $violations = [];
+        $length = mb_strlen($password, 'UTF-8');
+        if ($length < self::MIN_LENGTH) {
+            $violations[] = \sprintf('The password must be at least %d characters long.', self::MIN_LENGTH);
+        }
+        if ($length > self::MAX_LENGTH) {
+            $violations[] = \sprintf('The password must be at most %d characters long.', self::MAX_LENGTH);
+        }
+        if (str_contains($password, "\0")) {
+            $violations[] = 'The password must not contain NUL characters.';
+        }
+        if ('' !== $username && 0 === strcasecmp($password, $username)) {
+            $violations[] = 'The password must not be the username.';
+        }
+
+        return $violations;
+    }
+}

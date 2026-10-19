@@ -13,4 +13,7 @@
             <twig:UserMenu variant="block" data-testid="role-summary" />
         </twig:Card:Content>
     </twig:Card>
+    {% if is_granted('ROLE_ADMIN') %}
+        <twig:HostHealthCard class="mt-6 max-w-xl" />
+    {% endif %}
 {% endblock %}

@@ -53,7 +53,9 @@ for dev_only in symfony/web-profiler-bundle symfony/ux-toolkit symfony/debug-bun
 done
 
 step "composer dump-env prod (what a deployment compiles; the server must not depend on inheriting the environment)"
-printf 'APP_SECRET=%s\nMERCURE_JWT_SECRET=%s\n' "$APP_SECRET" "$MERCURE_JWT_SECRET" >.env.local   # the copy's, not app/'s
+# FLEET_HOME is compiled in too: php -S under variables_order=GPCS does not see the exported one, and the boot guard
+# refuses the dotenv default (inside the application directory).
+printf 'APP_SECRET=%s\nMERCURE_JWT_SECRET=%s\nFLEET_HOME=%s\n' "$APP_SECRET" "$MERCURE_JWT_SECRET" "$FLEET_HOME" >.env.local   # the copy's, not app/'s
 "$php" "$composer" dump-env prod --no-interaction
 grep -q "'APP_ENV' => 'prod'" .env.local.php || fail ".env.local.php does not select prod"
 

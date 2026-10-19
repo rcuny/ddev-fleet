@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 Type: documentation
 ---
 
@@ -19,6 +19,7 @@ Type: documentation
 
 | Document | Status | Covers |
 |---|---|---|
+| [`installation.md`](installation.md) | Current | Installing 1.x on a Debian 13 host: prerequisites, `install.sh` and its flags, the setup wizard, what is installed where, recovery (`fleet setup:reset`, `fleet user:reset-password`), upgrades, the security model, uninstalling, troubleshooting |
 | [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
 | [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the `v1.*` tag guard, the systemd security check and baseline |
 | [`RELEASING.md`](RELEASING.md) | 0.x flow valid; 1.x section added | Versioning, CHANGELOG conventions, release and hotfix procedure. The section "1.x during the port" covers `v1.*` tags on `develop`; the document is rewritten at v1.0.0 (milestone M0.04) |
@@ -40,8 +41,8 @@ configuration they describe (`src/fleet/`, the `fleet` CLI, `fleet.yml`, `bootst
 
 | Document | Covers | Rewritten in |
 |---|---|---|
-| [`v0/installation.md`](v0/installation.md) | First-run checklist: DNS, installer, deploy key, `fleet init`, first deploy | M0.02 |
-| [`v0/README-authelia.md`](v0/README-authelia.md) | Authelia auth mode: login portal, users, rollout | M0.02, M0.10 |
+| [`v0/installation.md`](v0/installation.md) | First-run checklist: DNS, installer, deploy key, `fleet init`, first deploy | M0.02 (done: [`installation.md`](installation.md); the first deploy returns in M0.04) |
+| [`v0/README-authelia.md`](v0/README-authelia.md) | Authelia auth mode: login portal, users, rollout | M0.10 (the portal itself is installed by M0.02, see [`installation.md`](installation.md)) |
 | [`v0/configuration.md`](v0/configuration.md) | The `fleet.yml` registry schema | M0.03 |
 | [`v0/cli.md`](v0/cli.md) | The `fleet` command reference | M0.04 |
 | [`v0/networking.md`](v0/networking.md) | Topology, every port, exposing a new one | M0.07 |

@@ -18,7 +18,8 @@ use Symfony\Component\Security\Http\EntryPoint\AuthenticationEntryPointInterface
 
 /**
  * Trusts the identity headers set by the authenticating reverse proxy (Remote-User, Remote-Groups,
- * Remote-Email, Remote-Name), but only when the TCP peer is a trusted proxy. It is also the firewall's
+ * Remote-Email, Remote-Name), but only when the request provably comes
+ * from the proxy (TrustedProxyChecker). It is also the firewall's
  * entry point: an unauthenticated request gets a plain-text 401.
  */
 final class RemoteUserAuthenticator extends AbstractAuthenticator implements AuthenticationEntryPointInterface
@@ -42,14 +43,13 @@ final class RemoteUserAuthenticator extends AbstractAuthenticator implements Aut
 
     public function authenticate(Request $request): Passport
     {
-        // The raw peer address, never getClientIp(): X-Forwarded-For is attacker-controlled.
-        // Known limitation (K26): behind Caddy's php_fastcgi, REMOTE_ADDR is the real client address, so with
-        // the default FLEET_TRUSTED_PROXIES prod answers 401 to everyone (fails closed) until M0.02 adds a
-        // shared-secret header or loopback TCP. Never widen FLEET_TRUSTED_PROXIES to "fix" that: any
-        // broader range lets anyone spoof the identity headers.
-        $peer = $request->server->get('REMOTE_ADDR');
-        if (!\is_string($peer) || !$this->proxies->isTrusted($peer)) {
-            throw new CustomUserMessageAuthenticationException('Identity headers are not accepted from this peer.');
+        // Trust comes from TrustedProxyChecker::isTrustedRequest(): the peer is a listed proxy, or the request carries
+        // the FastCGI parameter FLEET_PROXY_AUTH that Caddy sets from the shared secret (K26, fixed in M0.02: behind
+        // Caddy's php_fastcgi REMOTE_ADDR is the real client, so the peer alone can never identify the proxy there).
+        // A client cannot forge the parameter, and never widen FLEET_TRUSTED_PROXIES to "fix" a 401: any broader
+        // range lets anyone spoof the identity headers.
+        if (!$this->proxies->isTrustedRequest($request)) {
+            throw new CustomUserMessageAuthenticationException('Identity headers are not accepted from this request.');
         }
 
         $username = trim((string) $request->headers->get('Remote-User'));

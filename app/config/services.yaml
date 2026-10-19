@@ -13,6 +13,8 @@ parameters:
     fleet.admin_group: '%env(FLEET_ADMIN_GROUP)%'
     # Peers (IPs/CIDRs) allowed to assert identity headers.
     fleet.trusted_proxies: '%env(FLEET_TRUSTED_PROXIES)%'
+    # Shared secret Caddy passes as the FastCGI parameter FLEET_PROXY_AUTH (K26). Under 32 characters = disabled.
+    fleet.proxy_secret: '%env(FLEET_PROXY_SECRET)%'
     # The dev/test stand-in authenticator and role switch; never true in prod.
     fleet.stand_in_enabled: false
 
@@ -45,6 +47,16 @@ services:
         public: true
         arguments:
             $home: '%env(resolve:FLEET_HOME)%'
+            $caddyDir: '%env(resolve:FLEET_CADDY_DIR)%'
+
+    # Callers type-hint Applier; the one implementation runs `sudo -n apply <target>` through the CommandRunner (a
+    # recording runner in dev/test, so nothing privileged runs there).
+    App\Fleet\System\Applier:
+        alias: App\Fleet\System\PrivilegedApply
+
+    # What a host name resolves to (the wizard's scan target check); the test environment swaps in a resolver without DNS.
+    App\Setup\HostResolver:
+        alias: App\Setup\DnsHostResolver
 
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
@@ -85,4 +97,40 @@ when@test:
             public: true
         fleet.test_alias.recording_command_runner:
             alias: fleet.command_runner.recording
+            public: true
+
+        # The suite never touches DNS; a test that needs a resolution sets its own HostResolver.
+        App\Setup\HostResolver:
+            alias: App\Setup\NoHostResolver
+            public: true
+
+        # Reachable for the env -> container wiring tests (nothing consumes these services at run time yet).
+        fleet.test_alias.applier:
+            alias: App\Fleet\System\Applier
+            public: true
+        fleet.test_alias.trusted_proxy_checker:
+            alias: App\Security\TrustedProxyChecker
+            public: true
+        fleet.test_alias.caddy_env_renderer:
+            alias: App\Fleet\System\CaddyEnvRenderer
+            public: true
+        fleet.test_alias.caddyfile_renderer:
+            alias: App\Fleet\System\CaddyfileRenderer
+            public: true
+
+        # The setup domain is only consumed by controllers (M0.02 task 8) and commands; keep it reachable for the wiring test.
+        fleet.test_alias.setup_finisher:
+            alias: App\Setup\SetupFinisher
+            public: true
+        fleet.test_alias.setup_state:
+            alias: App\Setup\SetupState
+            public: true
+        fleet.test_alias.setup_cookie:
+            alias: App\Setup\SetupCookie
+            public: true
+        fleet.test_alias.setup_token_service:
+            alias: App\Setup\SetupTokenService
+            public: true
+        fleet.test_alias.setup_attempt_limiter:
+            alias: App\Setup\SetupAttemptLimiter
             public: true

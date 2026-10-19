@@ -1,0 +1,2 @@
+{#- The stateless CSRF token for a plain form (Symfony forms add theirs): see config/packages/csrf.yaml. -#}
+<input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">

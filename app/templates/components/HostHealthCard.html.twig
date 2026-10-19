@@ -1,0 +1,46 @@
+{# Memory, disk and reboot state of the host (App\Health\HostHealth). #}
+{% set report = this.report %}
+{% set memory_used = report.memoryUsedPercent %}
+{% set disk_used = report.diskUsedPercent %}
+<twig:Card {{ ...attributes.defaults({'data-testid': 'host-health'}) }}>
+    <twig:Card:Header>
+        <twig:Card:Title>This machine</twig:Card:Title>
+        <twig:Card:Description>Memory, disk space and pending restarts.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content>
+        <dl class="grid gap-4 sm:grid-cols-3">
+            <div data-testid="host-memory">
+                <dt class="text-sm text-ink-muted">Memory</dt>
+                <dd>
+                    {% if memory_used is not null %}
+                        <strong>{{ memory_used }}% used</strong>
+                        <span class="block text-sm text-ink-muted">{{ report.bytes(report.memoryAvailableBytes) }} free of {{ report.bytes(report.memoryTotalBytes) }}</span>
+                    {% else %}
+                        <span class="text-ink-muted">Not reported</span>
+                    {% endif %}
+                </dd>
+            </div>
+            <div data-testid="host-disk">
+                <dt class="text-sm text-ink-muted">Disk</dt>
+                <dd>
+                    {% if disk_used is not null %}
+                        <strong>{{ disk_used }}% used</strong>
+                        <span class="block text-sm text-ink-muted">{{ report.bytes(report.diskFreeBytes) }} free of {{ report.bytes(report.diskTotalBytes) }}</span>
+                    {% else %}
+                        <span class="text-ink-muted">Not reported</span>
+                    {% endif %}
+                </dd>
+            </div>
+            <div data-testid="host-reboot">
+                <dt class="text-sm text-ink-muted">Restart</dt>
+                <dd>
+                    {% if report.rebootRequired %}
+                        <twig:Badge class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">Reboot required</twig:Badge>
+                    {% else %}
+                        <twig:Badge variant="secondary">None pending</twig:Badge>
+                    {% endif %}
+                </dd>
+            </div>
+        </dl>
+    </twig:Card:Content>
+</twig:Card>

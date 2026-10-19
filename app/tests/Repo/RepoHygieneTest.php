@@ -92,7 +92,7 @@ final class RepoHygieneTest extends TestCase
         // [Unreleased] section is scanned by testChangelogUnreleasedSectionIsClean), LICENSE (the copyright holder)
         // and SYSTEMD-SECURITY-REPORT.md (generated from the maintainer's live hosts). docs/v0 is scanned too.
         $roots = [
-            'app', 'ci', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright', 'tests/pytest',
+            'app', 'ci', 'install', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright', 'tests/pytest',
             'tests/README-tests.md', 'CLAUDE.md', 'README.md', 'CONTRIBUTING.md', 'docs',
             '.github', '.gitignore', 'demo', 'scripts',
         ];

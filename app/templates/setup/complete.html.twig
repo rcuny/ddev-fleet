@@ -1,0 +1,16 @@
+{% extends 'setup/base.html.twig' %}
+
+{#- Shown (with status 404) for every wizard URL once setup is finished: nothing here depends on the request. -#}
+{% block setup_content %}
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>Setup is complete</h1>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            <p data-testid="setup-complete">The setup wizard is closed. Continue to sign in{% if domain %} at <strong>auth.{{ domain }}</strong>{% endif %} with the administrator you created: Authelia now guards the site.</p>
+        </twig:Card:Content>
+        <twig:Card:Footer>
+            <twig:Button as="a" href="{{ path('home') }}" class="h-11 w-full md:h-8 md:w-auto" data-testid="setup-complete-sign-in">Continue to sign in</twig:Button>
+        </twig:Card:Footer>
+    </twig:Card>
+{% endblock %}

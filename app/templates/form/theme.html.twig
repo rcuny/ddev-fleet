@@ -1,0 +1,113 @@
+{# Symfony form widgets drawn with the design system's components, so server-side errors reuse the same markup. #}
+{% extends 'form_div_layout.html.twig' %}
+
+{% block form_row -%}
+    {%- if compound and expanded|default(false) -%}
+        <fieldset class="grid gap-2" data-slot="form-row">
+            {{- form_label(form) -}}
+            {{- form_widget(form) -}}
+            {{- form_help(form) -}}
+            {{- form_errors(form) -}}
+        </fieldset>
+    {%- else -%}
+        <div class="grid gap-2" data-slot="form-row">
+            {{- form_label(form) -}}
+            {{- form_widget(form) -}}
+            {{- form_help(form) -}}
+            {{- form_errors(form) -}}
+        </div>
+    {%- endif -%}
+{%- endblock form_row %}
+
+{% block form_widget_simple -%}
+    {%- set type = type|default('text') -%}
+    {%- set described = [] -%}
+    {%- if help is not empty %}{% set described = described|merge([id ~ '_help']) %}{% endif -%}
+    {%- if errors|length > 0 %}{% set described = described|merge([id ~ '_errors']) %}{% endif -%}
+    {%- set merged = attr|merge({
+        type: type,
+        id: id,
+        name: full_name,
+        required: required,
+        disabled: disabled,
+        'aria-invalid': errors|length > 0 ? 'true' : null,
+        'aria-describedby': described is not empty ? described|join(' ') : null,
+        class: ('h-11 md:h-8 ' ~ attr.class|default(''))|trim,
+    }) -%}
+    {%- if 'password' != type and value is not null and '' != value %}{% set merged = merged|merge({value: value}) %}{% endif -%}
+    <twig:Input {{ ...merged }} />
+{%- endblock form_widget_simple %}
+
+{# Hidden fields (the CSRF token) stay plain: no control styling. #}
+{% block hidden_widget -%}
+    <input type="hidden" {{ block('widget_attributes') }}{% if value is not empty %} value="{{ value }}"{% endif %}>
+{%- endblock hidden_widget %}
+
+{% block choice_widget_collapsed -%}
+    {%- set described = [] -%}
+    {%- if help is not empty %}{% set described = described|merge([id ~ '_help']) %}{% endif -%}
+    {%- if errors|length > 0 %}{% set described = described|merge([id ~ '_errors']) %}{% endif -%}
+    {%- set merged = attr|merge({
+        id: id,
+        name: full_name,
+        required: required,
+        disabled: disabled,
+        'aria-invalid': errors|length > 0 ? 'true' : null,
+        'aria-describedby': described is not empty ? described|join(' ') : null,
+        class: ('w-full h-11 md:h-8 ' ~ attr.class|default(''))|trim,
+    }) -%}
+    {%- set options_html -%}
+        {%- if placeholder is not none -%}
+            <option value=""{% if placeholder_in_choices is same as(false) and value is same as('') %} selected="selected"{% endif %}>{{ placeholder }}</option>
+        {%- endif -%}
+        {%- set options = choices -%}
+        {%- set render_preferred_choices = false -%}
+        {{- block('choice_widget_options') -}}
+    {%- endset -%}
+    <twig:NativeSelect {{ ...merged }}>{{ options_html }}</twig:NativeSelect>
+{%- endblock choice_widget_collapsed %}
+
+{% block choice_widget_expanded -%}
+    <div role="radiogroup" id="{{ id }}" class="grid gap-2"{% if help is not empty %} aria-describedby="{{ id }}_help"{% endif %}>
+        {%- for child in form %}
+            <div class="flex min-h-11 items-start gap-3 rounded-lg border border-hairline p-3">
+                <twig:RadioGroup:Item :name="child.vars.full_name" :value="child.vars.value" id="{{ child.vars.id }}" :checked="child.vars.checked" :required="child.vars.required" class="mt-0.5" />
+                {{ form_label(child, null, {label_attr: {class: 'flex-1 text-sm font-normal text-ink-body'}}) }}
+            </div>
+        {%- endfor %}
+    </div>
+{%- endblock choice_widget_expanded %}
+
+{% block button_widget -%}
+    {%- set merged = attr|merge({
+        type: type|default('button'),
+        id: id,
+        name: full_name,
+        variant: attr['data-variant']|default('default'),
+        class: ('h-11 md:h-8 ' ~ attr.class|default(''))|trim,
+    }) -%}
+    <twig:Button {{ ...merged }}>{{ label is not empty ? label : (name|humanize) }}</twig:Button>
+{%- endblock button_widget %}
+
+{% block form_help -%}
+    {%- if help is not empty -%}
+        <p id="{{ id }}_help" class="text-xs text-ink-muted">{{ help }}</p>
+    {%- endif -%}
+{%- endblock form_help %}
+
+{% block form_errors -%}
+    {%- if errors|length > 0 -%}
+        {%- if form.parent is null -%}
+            <twig:Alert variant="destructive" data-slot="form-errors">
+                <twig:ux:icon name="lucide:circle-alert" />
+                <twig:Alert:Description class="text-destructive">
+                    {%- for error in errors %}<p>{{ error.message }}</p>{% endfor -%}
+                </twig:Alert:Description>
+            </twig:Alert>
+        {%- else -%}
+            <ul id="{{ id }}_errors" class="grid gap-1 text-xs text-danger-darker dark:text-danger">
+                {%- for error in errors %}<li>{{ error.message }}</li>{% endfor -%}
+            </ul>
+        {%- endif -%}
+    {%- endif -%}
+{%- endblock form_errors %}

@@ -1,0 +1,7 @@
+framework:
+    rate_limiter:
+        # Guesses at the one-time setup token (App\Setup\SetupAttemptLimiter), per client address.
+        setup_token:
+            policy: sliding_window
+            limit: 10
+            interval: '15 minutes'

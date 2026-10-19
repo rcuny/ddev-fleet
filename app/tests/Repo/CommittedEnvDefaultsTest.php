@@ -37,6 +37,13 @@ final class CommittedEnvDefaultsTest extends TestCase
         self::assertSame('none', $this->env['FLEET_STAND_IN_ROLE'] ?? null);
     }
 
+    public function testTheProxySecretIsEmptyAndCaddyDirLivesUnderFleetHome(): void
+    {
+        self::assertArrayHasKey('FLEET_PROXY_SECRET', $this->env);
+        self::assertSame('', $this->env['FLEET_PROXY_SECRET']);
+        self::assertSame('%env(resolve:FLEET_HOME)%/caddy', $this->env['FLEET_CADDY_DIR'] ?? null);
+    }
+
     public function testOnlyTheDevAndTestFilesOptIntoAdmin(): void
     {
         $dev = new Dotenv()->parse((string) file_get_contents(\dirname(__DIR__, 2).'/.env.dev'));

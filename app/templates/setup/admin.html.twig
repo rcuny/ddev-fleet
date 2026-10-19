@@ -1,0 +1,21 @@
+{% extends 'setup/base.html.twig' %}
+
+{% block setup_content %}
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>Create the administrator</h1>
+            <p>This account signs in to Fleet once setup is finished.{% if admin %} It already exists: saving again updates it.{% endif %}</p>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'setup-admin-form'}}) }}
+                {{ form_errors(form) }}
+                {{ form_row(form.username) }}
+                {{ form_row(form.displayName) }}
+                {{ form_row(form.email) }}
+                {{ form_row(form.password.first) }}
+                {{ form_row(form.password.second) }}
+                {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+            {{ form_end(form) }}
+        </twig:Card:Content>
+    </twig:Card>
+{% endblock %}

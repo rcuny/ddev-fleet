@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-18
+Last updated: 2026-10-19
 Type: documentation
 ---
 
@@ -20,9 +20,9 @@ in one place, and puts every instance under one wildcard domain with TLS and a l
 | Line | Branch | State |
 |---|---|---|
 | **0.x** (Python: FastAPI daemon, `fleet` CLI, `fleet.yml`) | `main` (tags `v0.*`) | Production line. Install and operate it from `main`; its documentation is kept in [`docs/v0/`](docs/v0/). |
-| **1.x** (Symfony 8, PHP 8.4, SQLite) | `develop` (tags `v1.*` from v1.0.0) | A rewrite in progress, developed milestone by milestone. This branch currently ships the foundation: app skeleton, command seam, authentication by proxy header, the design system and app shell, and the test and CI setup. It cannot manage instances yet and is **not ready to deploy**. |
+| **1.x** (Symfony 8, PHP 8.4, SQLite) | `develop` (tags `v1.*` from v1.0.0) | A rewrite in progress, developed milestone by milestone. This branch ships the foundation (app skeleton, command seam, the design system and app shell, tests and CI) and the **installer and setup wizard**: one command turns a fresh Debian 13 host into a fleet with HTTPS, a sign-in portal and a setup wizard. It cannot manage instances yet and is **not ready for production use**; install it on a test host. |
 
-What each milestone brings back from 0.x (installer and setup wizard, projects, instances and
+What each milestone brings back from 0.x (projects, instances and
 jobs, secrets, assets, networking, webhooks, schedules, users and access) is listed in the
 [documentation index](docs/README.md).
 
@@ -49,7 +49,24 @@ Bare-metal / VPS host
 The web request never runs `ddev`, `git` or `docker`: it stores a job, a worker picks it up
 through the `CommandRunner` seam and the browser follows the log live (Mercure). Of this
 picture, the app, the seams, header authentication, the SQLite wiring and the shell exist
-today; Caddy, Authelia, the Mercure hub, the workers and the jobs arrive in M0.02 to M0.04.
+today, and so do Caddy, Authelia, the Mercure hub and the worker unit (installed by `install/`); the jobs that
+use them arrive in M0.04.
+
+## Install on a server (1.x)
+
+On a fresh **Debian 13** host, as root, with DNS records for the domain and for `auth.<domain>` already
+pointing at it and ports 80 and 443 open:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/develop/install/install.sh \
+  | sudo bash -s -- --domain=fleet.example.com --acme-email=you@example.com
+```
+
+It installs PHP 8.4, Docker, DDEV, Caddy, Authelia and a Mercure hub, creates the `fleet` user and `/srv/fleet`,
+starts the services and prints a setup URL (a credential for 24 hours) for the browser wizard (administrator, certificates, SSH
+keys, optional Claude token). Re-running the same command upgrades. Flags (`--ref`, `--repo-url`,
+`--skip-dns-check`, `--dry-run`), recovery (`fleet setup:reset`, `fleet user:reset-password`), the security
+model and uninstalling: [`docs/installation.md`](docs/installation.md).
 
 ## Quickstart for contributors
 
@@ -79,7 +96,9 @@ executed. The merge gate is `composer run gates` in `app/`, plus the Playwright 
   `tests/pytest/` — Python tests for the CI tooling and the Ansible roles; see
   [`tests/README-tests.md`](tests/README-tests.md)
 - `ci/`, `bitbucket-pipelines.yml`, `renovate-config.json` — CI, the release-tag guard, dependency updates
-- `ansible/` — provisioning for the 0.x host layout, reshaped for 1.x in M0.02
+- `install/` — the 1.x installer (`install.sh`, `run.sh`, `steps/`, the root helper `libexec/apply`, `uninstall.sh`)
+- `ansible/` — provisioning for the 0.x host layout, kept as reference and not used by the 1.x installer
+  ([`ansible/LEGACY-0x.md`](ansible/LEGACY-0x.md))
 - `docs/` — documentation, indexed in [`docs/README.md`](docs/README.md); `docs/v0/` is the 0.x reference
 - `demo/` — a minimal DDEV project the 0.x installer seeds as the `demo` project
 
@@ -88,6 +107,7 @@ executed. The merge gate is `composer run gates` in `app/`, plus the Playwright 
 | Doc | Covers |
 |---|---|
 | [`docs/README.md`](docs/README.md) | Index of every document with its status |
+| [`docs/installation.md`](docs/installation.md) | Installing 1.x: prerequisites, the installer and its flags, the setup wizard, what is installed where, recovery, upgrades, security model, uninstalling |
 | [`docs/development.md`](docs/development.md) | Prerequisites, first run, environment variables, recording runner, stand-in, gates, adding a component |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Workflow, code style, pull requests, CI and mirror |
 | [`docs/RELEASING.md`](docs/RELEASING.md) | Versioning, CHANGELOG conventions, release and hotfix procedure (0.x flow and 1.x during the port) |

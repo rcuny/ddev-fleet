@@ -1,0 +1,21 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/fleet-mercure/Caddyfile. The hub runs as a dynamic user,
+# which cannot read /etc/ddev-fleet (root:fleet 0750), so its configuration lives in its own directory.
+# Keys come from the environment (mercure.env); the hub listens on loopback only and Caddy proxies to it.
+{
+	admin off
+	auto_https off
+	http_port 3000
+}
+
+http://127.0.0.1:3000 {
+	bind 127.0.0.1
+	route {
+		respond /healthz "ok" 200
+		mercure {
+			protocol_version_compatibility 8
+			publisher_jwt {env.MERCURE_PUBLISHER_JWT_KEY} HS256
+			subscriber_jwt {env.MERCURE_SUBSCRIBER_JWT_KEY} HS256
+		}
+		respond 404
+	}
+}
