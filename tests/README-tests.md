@@ -12,18 +12,18 @@ Playwright in a real browser (`tests/playwright/`), and a small set of Python te
 for the CI tooling and the Ansible roles (`tests/pytest/`). The commands below are run from the
 repository root unless stated otherwise; use `php8.4` where the default `php` is older than 8.4.
 
-## Current counts (2026-10-18)
+## Current counts (2026-10-19)
 
 | Suite | Where | Count |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 114 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 25 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 70 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 63 tests |
+| PHPUnit `Unit` | `app/tests/Unit/` | 443 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 233 tests |
+| PHPUnit `Functional` | `app/tests/Functional/` | 175 tests |
+| PHPUnit `Repo` | `app/tests/Repo/` | 349 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
 | Playwright | `tests/playwright/` | 46 (7 spec files; each spec runs on the `desktop` and the `phone` project where it applies). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 38 run, 8 skipped |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 272 tests. Update this table when the numbers change.
+PHPUnit totals 1200 tests. Update this table when the numbers change.
 
 ## Layout
 
@@ -34,7 +34,10 @@ app/tests/
   Integration/       kernel and container wiring: Doctrine/SQLite, Messenger, Lock, Mercure, prod security
   Functional/        HTTP through WebTestCase: access control, app shell, design-system page, health, stand-in
   Repo/              repository rules: hygiene (no owner or workspace references), pipeline configuration,
-                     tag guard, the design-system block in CLAUDE.md, the Python app being gone
+                     tag guard, the design-system block in CLAUDE.md, the Python app being gone, and the
+                     installer: Installer*Test (flags, dry-run plan, DNS check, idempotency, safety), the root
+                     helper (ApplyHelperTest), units, sudoers, env file, fleet wrapper, uninstall, and
+                     InstallDocsTest (docs/installation.md, README.md, CLAUDE.md and the CHANGELOG agree with the code)
   Support/           shared helpers (a temporary FLEET_HOME)
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
@@ -87,6 +90,25 @@ self-started app provides, so it skips itself against an external server (the co
 overrides the link file. Each run re-creates the setup link and clears the token-attempt throttle (`cache.rate_limiter`).
 The specs send `X-Fleet-Profiler-Toolbar: 0` so the Symfony toolbar cannot cover the phone
 bottom bar, and the shell specs assert that no console error or uncaught page error was seen (`support/shell.ts`).
+
+### Installer and real-binary tests
+
+The installer is bash and is never run for real in the gates (no root, no server). `app/tests/Repo/Installer*Test`,
+`ApplyHelperTest`, `UnitsTest`, `EnvFileTest`, `FleetWrapperTest` and `UninstallTest` run its scripts with `--dry-run`,
+against scratch directories and with stubbed commands, and assert on the plan, the file modes and the unit files.
+Some checks need a tool and skip without it:
+
+```bash
+shellcheck -x install/*.sh install/lib/*.sh install/steps/*.sh install/libexec/apply install/bin/fleet   # also a test
+# the rendered Caddyfile against the real Caddy (a build with the OVH DNS module, see RenderedCaddyfileValidatesTest)
+FLEET_CADDY_BIN=$PWD/app/var/tools/caddy php8.4 app/vendor/bin/phpunit app/tests/Repo/RenderedCaddyfileValidatesTest.php
+# the Mercure hub configuration against the pinned hub (v1.1.2, install/steps/95-units.sh)
+FLEET_MERCURE_BIN=/path/to/mercure php8.4 app/vendor/bin/phpunit app/tests/Repo/UnitsTest.php
+```
+
+A few tests assert the behaviour of a non-root run and skip when the suite runs as root (and one runs only as root).
+CI installs `openssh-client`, `shellcheck` and `sudo` so the `ssh-keygen` and shell checks are not skipped. The first
+real install on a host is a manual verification, not part of the gates.
 
 ### pytest (CI tooling and Ansible roles)
 

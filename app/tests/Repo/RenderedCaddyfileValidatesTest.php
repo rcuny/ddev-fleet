@@ -20,7 +20,7 @@ use PHPUnit\Framework\TestCase;
 
 /**
  * Runs the real Caddy over the rendered files. Set FLEET_CADDY_BIN to a Caddy built with the OVH DNS module
- * (see docs/installation.md); without it the test is skipped, like the other real-binary checks.
+ * (see tests/README-tests.md); without it the test is skipped, like the other real-binary checks.
  *
  *   mkdir -p var/tools && curl -fsSL "https://caddyserver.com/api/download?os=linux&arch=<arch>&p=github.com%2Fcaddy-dns%2Fovh" \
  *       -o var/tools/caddy && chmod +x var/tools/caddy && FLEET_CADDY_BIN=$PWD/var/tools/caddy vendor/bin/phpunit tests/Repo/RenderedCaddyfileValidatesTest.php
