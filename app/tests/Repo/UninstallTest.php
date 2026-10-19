@@ -67,6 +67,7 @@ final class UninstallTest extends TestCase
             '+ rm -rf --one-file-system -- /etc/ddev-fleet',
             '+ rm -rf --one-file-system -- /etc/caddy/fleet',
             '+ rm -f -- /etc/caddy/fleet.env',
+            '+ rm -rf --one-file-system -- /etc/caddy/ovh',
             '+ update-alternatives --remove caddy /usr/bin/caddy.custom',
             '+ dpkg-divert --rename --remove /usr/bin/caddy',
             '+ rm -f -- /etc/caddy/Caddyfile',
