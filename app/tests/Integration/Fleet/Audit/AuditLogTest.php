@@ -78,4 +78,25 @@ final class AuditLogTest extends KernelTestCase
         self::assertSame(AuditEntry::ACTION_MAX, \strlen($entry->action()));
         self::assertSame(AuditEntry::SUBJECT_MAX, \strlen($entry->subject()));
     }
+
+    public function testATruncationEndsInAnEllipsisOnACharacterBoundary(): void
+    {
+        // 3-byte characters never divide 252 evenly with a 255 limit unless the cut backs up to a boundary.
+        $this->log->record('alice', 'secret.reveal', str_repeat('日', 100).'tail');
+
+        $subject = $this->log->latest()[0]->subject();
+        self::assertStringEndsWith('…', $subject);
+        self::assertLessThanOrEqual(AuditEntry::SUBJECT_MAX, \strlen($subject));
+        self::assertTrue(mb_check_encoding($subject, 'UTF-8'));
+        self::assertSame(str_repeat('日', 84).'…', $subject);
+        self::assertStringNotContainsString('tail', $subject);
+    }
+
+    public function testATextThatFitsIsStoredUntouched(): void
+    {
+        $exact = str_repeat('s', AuditEntry::SUBJECT_MAX);
+        $this->log->record('alice', 'secret.reveal', $exact);
+
+        self::assertSame($exact, $this->log->latest()[0]->subject());
+    }
 }

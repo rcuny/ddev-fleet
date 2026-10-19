@@ -22,6 +22,7 @@ final readonly class SecretService
         private ProjectRepository $projects,
         private AuditLog $audit,
         private PlaceholderScanner $scanner,
+        private RevealThrottle $throttle,
     ) {
     }
 
@@ -93,10 +94,16 @@ final readonly class SecretService
      *
      * @throws NotFound         when the project or the secret does not exist
      * @throws SecretOpenFailed when the stored value cannot be authenticated
+     * @throws RevealThrottled  when $by revealed too much lately; the refusal is audited and nothing is opened
      */
     public function reveal(?string $project, string $name, string $by): string
     {
         $this->assertProject($project);
+        if (null !== $retryAfter = $this->throttle->attempt($by)) {
+            $this->audit->record($by, AuditLog::SECRET_REVEAL_REFUSED, self::subject($project, $name));
+
+            throw new RevealThrottled($retryAfter);
+        }
         $value = null === SecretName::error($name) ? $this->store->getManaged($project, $name) : null;
         if (null === $value) {
             throw NotFound::secret($name);

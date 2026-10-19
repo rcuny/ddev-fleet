@@ -8,6 +8,7 @@ use App\Domain\Project\Project;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\ValidationFailed;
+use App\Fleet\Secrets\RevealThrottled;
 use App\Fleet\Secrets\SecretConflict;
 use App\Fleet\Secrets\SecretName;
 use App\Fleet\Secrets\SecretOpenFailed;
@@ -150,6 +151,11 @@ final class SecretController extends AbstractController
             $value = $this->secrets->reveal($project?->name(), $secret, $this->actor->name());
         } catch (NotFound) {
             throw new NotFoundHttpException();
+        } catch (RevealThrottled $e) {
+            $response = $this->page($project, null, status: Response::HTTP_TOO_MANY_REQUESTS, retryAfter: $e->retryAfter);
+            $response->headers->set('Retry-After', (string) $e->retryAfter);
+
+            return $response;
         } catch (SecretOpenFailed) {
             $this->addFlash('warning', \sprintf('The secret "%s" could not be opened. Set it again.', $secret));
 
@@ -164,7 +170,7 @@ final class SecretController extends AbstractController
      * @param array{name: string}                     $form
      * @param array<string, string>                   $errors
      */
-    private function page(?Project $project, ?array $revealed, array $form = ['name' => ''], array $errors = [], int $status = Response::HTTP_OK): Response
+    private function page(?Project $project, ?array $revealed, array $form = ['name' => ''], array $errors = [], int $status = Response::HTTP_OK, ?int $retryAfter = null): Response
     {
         try {
             $overview = $this->secrets->overview($project?->name());
@@ -179,6 +185,7 @@ final class SecretController extends AbstractController
             'revealed' => $revealed,
             'form' => $form,
             'errors' => $errors,
+            'retryAfter' => $retryAfter,
         ], new Response(status: $status));
         if (null !== $revealed) {
             // The one response that carries a value: no browser or proxy may keep it.
