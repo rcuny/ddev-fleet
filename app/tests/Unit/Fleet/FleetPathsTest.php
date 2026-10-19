@@ -91,7 +91,7 @@ final class FleetPathsTest extends TestCase
             $modes = [
                 'var' => 0o750, 'keys' => 0o700, 'ssh' => 0o700, 'assets' => 0o750, 'instances' => 0o750,
                 'logs' => 0o750, 'logs/jobs' => 0o750, 'logs/instances' => 0o750, 'locks' => 0o755,
-                'staging' => 0o700, 'authelia' => 0o750,
+                'staging' => 0o700, 'authelia' => 0o750, 'uploads' => 0o700,
             ];
             foreach ($modes as $dir => $mode) {
                 self::assertDirectoryExists($home.'/'.$dir);
@@ -147,12 +147,28 @@ final class FleetPathsTest extends TestCase
         }
     }
 
+    public function testUploadDirRefusesAnythingButAnUploadId(): void
+    {
+        $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
+
+        foreach (['', '..', '../x', '0123456789ABCDEF0123456789ABCDEF', '0123456789abcdef0123456789abcde', "0123456789abcdef0123456789abcdef\n", '0123456789abcdef/../../x00'] as $id) {
+            try {
+                $paths->uploadDir($id);
+                self::fail('Accepted upload id '.json_encode($id));
+            } catch (\InvalidArgumentException) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testNewPathsLiveWhereExpected(): void
     {
         $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
 
         self::assertSame('/srv/fleet/staging', $paths->stagingDir());
         self::assertSame('/srv/fleet/staging/caddy/Caddyfile', $paths->stagingFile('caddy', 'Caddyfile'));
+        self::assertSame('/srv/fleet/uploads', $paths->uploadsDir());
+        self::assertSame('/srv/fleet/uploads/0123456789abcdef0123456789abcdef', $paths->uploadDir('0123456789abcdef0123456789abcdef'));
         self::assertSame('/srv/fleet/authelia', $paths->autheliaDir());
         self::assertSame('/srv/fleet/authelia/users.yml', $paths->usersFile());
         self::assertSame('/etc/caddy/fleet', $paths->caddySnippetDir());
