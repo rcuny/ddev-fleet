@@ -2,7 +2,7 @@
 {% if app.request and app.request.hasPreviousSession %}
     {% set flashes = app.flashes %}
     {% if flashes|length > 0 %}
-        <div class="mb-6 grid gap-2" data-testid="flashes">
+        <div class="mb-6 grid gap-2" data-testid="flashes" data-turbo-temporary>
             {% for type, messages in flashes %}
                 {% for message in messages %}
                     {% if type == 'warning' or type == 'danger' or type == 'error' %}
