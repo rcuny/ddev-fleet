@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Host;
 
+use App\Domain\Host\HostSettings;
 use App\Domain\Host\HostSettingsRepository;
 use App\Fleet\Backup\BackupKind;
 use App\Fleet\Backup\BackupService;
@@ -25,14 +26,14 @@ final class HostPageTest extends HostPageTestCase
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-general]'));
 
         $tabs = $crawler->filter('[data-testid=host-tabs] a');
-        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
+        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Uploads', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
         self::assertSame('page', $crawler->filter('[data-testid=host-tabs] a[aria-current]')->attr('aria-current'));
         // The phone version of the tabs: a native select with a Go button, no script needed.
-        self::assertCount(5, $crawler->filter('[data-testid=host-tab-select] option'));
+        self::assertCount(6, $crawler->filter('[data-testid=host-tab-select] option'));
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-select] button[type=submit]'));
         self::assertCount(0, $crawler->filter('main script'));
 
-        foreach (['git', 'claude', 'notifications', 'backups'] as $tab) {
+        foreach (['git', 'claude', 'notifications', 'uploads', 'backups'] as $tab) {
             $crawler = $this->open('/admin/host?tab='.$tab);
             self::assertResponseStatusCodeSame(200, $tab);
             self::assertCount(1, $crawler->filter('[data-testid=host-tab-'.$tab.']'), $tab);
@@ -167,6 +168,8 @@ final class HostPageTest extends HostPageTestCase
         self::assertResponseStatusCodeSame(422);
         $this->client->request('POST', '/admin/host/backups/retention', ['host_backup_retention' => ['days' => '3', 'save' => '', '_token' => 'csrf-token']]);
         self::assertResponseStatusCodeSame(422);
+        $this->client->request('POST', '/admin/host/uploads', ['host_upload_limit' => ['megabytes' => '1', 'save' => '', '_token' => 'csrf-token']]);
+        self::assertResponseStatusCodeSame(422);
         $this->client->request('POST', '/admin/host/backups', ['_token' => 'csrf-token']);
         self::assertResponseStatusCodeSame(422);
         // A missing or wrong token fails the same way, even same-origin.
@@ -181,6 +184,7 @@ final class HostPageTest extends HostPageTestCase
         self::assertNull($host->gitUserName());
         self::assertNull($host->smtpHost());
         self::assertSame(14, $host->backupRetentionDays());
+        self::assertSame(HostSettings::DEFAULT_ASSET_UPLOAD_MAX_BYTES, $host->assetUploadMaxBytes());
         self::assertSame([], self::getContainer()->get(BackupService::class)->list());
     }
 
@@ -327,6 +331,26 @@ final class HostPageTest extends HostPageTestCase
         $this->submit('backups', 'Save', ['host_backup_retention[days]' => '3650']);
         self::assertResponseRedirects();
         self::assertSame(3650, $this->host()->backupRetentionDays());
+    }
+
+    public function testTheUploadCapIsEditedInMebibytesAndBounded(): void
+    {
+        $crawler = $this->open('/admin/host?tab=uploads');
+        self::assertSame('2048', $crawler->filter('input[name="host_upload_limit[megabytes]"]')->attr('value'));
+        self::assertSame('2.0 GiB', trim($crawler->filter('[data-testid=host-upload-limit-current]')->text()));
+
+        $this->submit('uploads', 'Save', ['host_upload_limit[megabytes]' => '512']);
+        self::assertResponseRedirects('/admin/host?tab=uploads');
+        self::assertSame(512 * 1_048_576, $this->host()->assetUploadMaxBytes());
+
+        foreach (['0', '-1', '1048577', 'abc', ''] as $bad) {
+            $this->submit('uploads', 'Save', ['host_upload_limit[megabytes]' => $bad]);
+            self::assertResponseStatusCodeSame(422, $bad);
+            self::assertSame(512 * 1_048_576, $this->host()->assetUploadMaxBytes());
+        }
+        $this->submit('uploads', 'Save', ['host_upload_limit[megabytes]' => '1048576']);
+        self::assertResponseRedirects();
+        self::assertSame(1_048_576 * 1_048_576, $this->host()->assetUploadMaxBytes());
     }
 
     public function testAFailedBackupShowsAGenericMessageAndLogsTheReason(): void

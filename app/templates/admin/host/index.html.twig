@@ -3,7 +3,7 @@
 {% block title %}Host settings · {{ parent() }}{% endblock %}
 
 {% block content %}
-    <twig:PageHeader title="Host settings" description="How this fleet host introduces itself: certificates, git identity, the Claude token, notification e-mail and database backups.">
+    <twig:PageHeader title="Host settings" description="How this fleet host introduces itself: certificates, git identity, the Claude token, notification e-mail, the asset upload limit and database backups.">
         <twig:block name="tabs">
             {% if host is not null %}
                 {# md and up: the tab strip (sub navigation, see /admin/design-system). #}

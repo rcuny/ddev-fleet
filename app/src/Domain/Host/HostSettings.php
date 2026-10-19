@@ -23,6 +23,8 @@ class HostSettings
 
     /** Browser uploads: the default cap per file, 2 GiB (design spec section 17). Bigger files go in over SSH. */
     public const int DEFAULT_ASSET_UPLOAD_MAX_BYTES = 2_147_483_648;
+    /** The host settings page edits the cap in MiB, up to 1 TiB. */
+    public const int MAX_ASSET_UPLOAD_MEBIBYTES = 1_048_576;
 
     // SMALLINT, not INTEGER: a single-column INTEGER primary key is a rowid alias in SQLite, which DBAL
     // introspects as auto-increment and then reports as drift against this fixed (never generated) id.

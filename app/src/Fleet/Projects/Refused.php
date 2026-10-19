@@ -10,4 +10,12 @@ namespace App\Fleet\Projects;
  */
 final class Refused extends \DomainException
 {
+    /**
+     * @param string|null $reason a machine-readable kind for callers that must tell refusals apart (the JSON endpoints
+     *                            send it as `reason`); null for the common case
+     */
+    public function __construct(string $message = '', int $code = 0, public readonly ?string $reason = null)
+    {
+        parent::__construct($message, $code);
+    }
 }

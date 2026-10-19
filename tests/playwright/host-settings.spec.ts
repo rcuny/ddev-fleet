@@ -8,6 +8,7 @@ const TABS = [
   { key: 'git', label: 'Git identity' },
   { key: 'claude', label: 'Claude token' },
   { key: 'notifications', label: 'Notifications' },
+  { key: 'uploads', label: 'Uploads' },
   { key: 'backups', label: 'Backups' },
 ] as const;
 
