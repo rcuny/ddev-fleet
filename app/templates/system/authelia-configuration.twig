@@ -18,6 +18,10 @@ session:
 storage:
   local:
     path: '{{ state_dir }}/db.sqlite3'
+regulation:
+  max_retries: {{ max_retries }}
+  find_time: '{{ find_time }}'
+  ban_time: '{{ ban_time }}'
 notifier:
 {% if smtp is not null %}
   smtp:

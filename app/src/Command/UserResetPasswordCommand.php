@@ -11,6 +11,7 @@ use App\Fleet\Auth\UnknownUser;
 use App\Fleet\Auth\UserService;
 use App\Fleet\System\Applier;
 use App\Fleet\System\ApplyTarget;
+use App\Fleet\System\AutheliaConfigRenderer;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Exception\RuntimeException;
@@ -111,6 +112,7 @@ final class UserResetPasswordCommand extends Command
 
         if ($input->getOption('no-apply')) {
             $io->note('Skipped: installing the users file and restarting Authelia (--no-apply). The new password only works after that.');
+            $io->note(AutheliaConfigRenderer::banNotice($username));
 
             return Command::SUCCESS;
         }
@@ -122,6 +124,7 @@ final class UserResetPasswordCommand extends Command
             return Command::FAILURE;
         }
         $io->writeln('Authelia was updated.');
+        $io->note(AutheliaConfigRenderer::banNotice($username));
 
         return Command::SUCCESS;
     }

@@ -17,6 +17,7 @@ use App\Fleet\Auth\ProjectAccessService;
 use App\Fleet\Auth\UnknownUser;
 use App\Fleet\Auth\UserChangeRefused;
 use App\Fleet\Auth\UserService;
+use App\Fleet\System\AutheliaConfigRenderer;
 use App\Form\User\UserCreateType;
 use App\Form\User\UserEditType;
 use App\Form\User\UserPasswordType;
@@ -166,7 +167,7 @@ final class UserController extends AbstractController
             $outcome = $this->commit(
                 $form,
                 fn () => $this->service->setPassword($username, self::text($data['password'] ?? null)),
-                \sprintf('The password of "%s" was changed.', $username),
+                \sprintf('The password of "%s" was changed. %s', $username, AutheliaConfigRenderer::banNotice($username)),
             );
             if (true === $outcome) {
                 return $this->redirectToRoute('user_edit', ['username' => $username], Response::HTTP_SEE_OTHER);

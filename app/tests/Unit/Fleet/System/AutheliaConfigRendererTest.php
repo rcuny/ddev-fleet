@@ -23,6 +23,25 @@ final class AutheliaConfigRendererTest extends TestCase
         return new AutheliaConfigRenderer(SystemTemplates::twig(), new FleetPaths($home, '/etc/caddy/fleet'), new AdminGroup('fleet-admins'));
     }
 
+    public function testRegulationIsRenderedExplicitly(): void
+    {
+        $config = Yaml::parse(self::renderer()->render(new HostSettings('fleet.example.com')));
+
+        self::assertSame(
+            ['max_retries' => AutheliaConfigRenderer::MAX_RETRIES, 'find_time' => '2m', 'ban_time' => '5m'],
+            $config['regulation'],
+        );
+        self::assertSame(5, AutheliaConfigRenderer::BAN_MINUTES);
+    }
+
+    public function testBanNoticeNamesTheUserAndTheRenderedBanTime(): void
+    {
+        $notice = AutheliaConfigRenderer::banNotice('alice');
+
+        self::assertStringContainsString('"alice"', $notice);
+        self::assertStringContainsString('up to 5 minutes', $notice);
+    }
+
     public function testGolden(): void
     {
         $expected = <<<'YAML'
@@ -45,6 +64,10 @@ final class AutheliaConfigRendererTest extends TestCase
             storage:
               local:
                 path: '/var/lib/authelia/db.sqlite3'
+            regulation:
+              max_retries: 3
+              find_time: '2m'
+              ban_time: '5m'
             notifier:
               filesystem:
                 filename: '/var/lib/authelia/notification.txt'
