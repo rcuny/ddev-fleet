@@ -131,6 +131,18 @@ final class JobRepositoryTest extends KernelTestCase
         self::assertSame([], $this->jobs->latestPerInstance([]));
     }
 
+    public function testLatestPerInstanceHandlesMoreIdsThanSqliteBindsAtOnce(): void
+    {
+        $job = $this->job(instance: 'blog--main');
+        $ids = array_map(static fn (int $i): string => 'none--'.$i, range(1, 1500));
+        $ids[] = 'blog--main';
+
+        $latest = $this->jobs->latestPerInstance($ids);
+
+        self::assertSame(['blog--main'], array_keys($latest));
+        self::assertSame($job->id(), $latest['blog--main']->id());
+    }
+
     public function testSearchFiltersAndPages(): void
     {
         $this->job(instance: 'blog--main', status: JobStatus::Succeeded);
