@@ -4,7 +4,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expectNoBlockingViolations } from './support/axe';
 import { externalBaseURL } from './support/env';
-import { createProjectViaUi, deleteProjectViaUi, openDialog, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // Schedules in a real browser, at 1280 px (desktop project) and 390 px (phone project): create, validation errors,
@@ -85,16 +85,16 @@ test.describe('schedules', () => {
       await expectNoBlockingViolations(page);
 
       // Pause, resume.
-      await row.getByTestId('schedule-pause').click();
+      await submitAndWait(page, row.getByTestId('schedule-pause'));
       await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" paused.`);
       await expect(row.getByTestId('schedule-state')).toHaveText('Paused');
       await expect(row.getByTestId('schedule-next')).toContainText('none');
-      await row.getByTestId('schedule-resume').click();
+      await submitAndWait(page, row.getByTestId('schedule-resume'));
       await expect(page.getByTestId('flashes')).toContainText('resumed');
       await expect(row.getByTestId('schedule-state')).toHaveText('Active');
 
       // Run now, then the history shows the manual run with its job.
-      await row.getByTestId('schedule-run').click();
+      await submitAndWait(page, row.getByTestId('schedule-run'));
       await expect(page.getByTestId('flashes')).toContainText(/started job #\d+/);
       await row.getByTestId('schedule-history').click();
       await expect(page.getByRole('heading', { level: 1, name: `History of ${name}` })).toBeVisible();
@@ -109,7 +109,7 @@ test.describe('schedules', () => {
       await page.goto('/admin/schedules');
       await page.getByTestId('schedule-row').filter({ hasText: name }).getByTestId('schedule-edit').click();
       await page.getByLabel('Cron expression').fill('30 4 * * *');
-      await page.getByTestId('schedule-save').click();
+      await submitAndWait(page, page.getByTestId('schedule-save'));
       await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" saved.`);
       await expect(page.getByTestId('schedule-row').filter({ hasText: name }).getByTestId('schedule-cron')).toHaveText('30 4 * * *');
 

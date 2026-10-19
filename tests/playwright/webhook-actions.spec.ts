@@ -3,7 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
 import { blockingViolations } from './support/axe';
-import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // M0.08b: the Bitbucket pipeline token form and the delivery outcome on both Webhooks pages. A `run-pipeline` rule is the
@@ -40,7 +40,7 @@ function console_(args: string[]): void {
 
 async function createBitbucketSecret(page: Page, project: string): Promise<string> {
   await page.goto(`/admin/projects/${project}/webhooks`);
-  await page.locator('[data-testid=webhook-endpoint][data-source=bitbucket]').getByTestId('webhook-create').click();
+  await submitAndWait(page, page.locator('[data-testid=webhook-endpoint][data-source=bitbucket]').getByTestId('webhook-create'));
   await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
   const secret = await page.getByTestId('webhook-secret-value').inputValue();
   await page.getByTestId('webhook-secret-done').click();
@@ -76,7 +76,7 @@ test.describe('webhook actions', () => {
       }
 
       await input.fill('ATCTT-playwright-token-1');
-      await card.getByTestId('webhook-token-save').click();
+      await submitAndWait(page, card.getByTestId('webhook-token-save'));
       await expect(page.getByTestId('flashes')).toContainText('The pipeline token is saved');
       await expect(card.getByTestId('webhook-token-state')).toContainText('Pipeline token set');
       expect(await page.content()).not.toContain('ATCTT-playwright-token-1');
@@ -84,11 +84,11 @@ test.describe('webhook actions', () => {
 
       await card.getByText('Replace the pipeline token').click();
       await card.getByTestId('webhook-token-input').fill('ATCTT-playwright-token-2');
-      await card.getByTestId('webhook-token-save').click();
+      await submitAndWait(page, card.getByTestId('webhook-token-save'));
       await expect(page.getByTestId('flashes')).toContainText('The pipeline token is saved');
       expect(await page.content()).not.toContain('ATCTT-playwright-token');
 
-      await card.getByTestId('webhook-token-clear').click();
+      await submitAndWait(page, card.getByTestId('webhook-token-clear'));
       await expect(page.getByTestId('flashes')).toContainText('The pipeline token was removed');
       await expect(card.getByTestId('webhook-token-state')).toContainText('No pipeline token');
       await expect(card.getByTestId('webhook-token-clear')).toHaveCount(0);

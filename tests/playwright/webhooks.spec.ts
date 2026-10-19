@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
 import { blockingViolations } from './support/axe';
-import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 const isPhone = (testInfo: { project: { name: string } }) => testInfo.project.name === 'phone';
@@ -10,7 +10,7 @@ const sign = (body: string, secret: string): string => `sha256=${createHmac('sha
 
 async function createSecret(page: Page, project: string): Promise<string> {
   await page.goto(`/admin/projects/${project}/webhooks`);
-  await page.locator('[data-testid=webhook-endpoint][data-source=jira]').getByTestId('webhook-create').click();
+  await submitAndWait(page, page.locator('[data-testid=webhook-endpoint][data-source=jira]').getByTestId('webhook-create'));
   await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
   const secret = await page.getByTestId('webhook-secret-value').inputValue();
   expect(secret).toMatch(/^[0-9a-f]{64}$/);
@@ -88,7 +88,7 @@ test.describe('webhooks', () => {
       // Rotation: confirm inside the details, then the old secret stops working.
       const jira = page.locator('[data-testid=webhook-endpoint][data-source=jira]');
       await jira.getByText('Rotate secret').click();
-      await jira.getByTestId('webhook-rotate').click();
+      await submitAndWait(page, jira.getByTestId('webhook-rotate'));
       await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
       const second = await page.getByTestId('webhook-secret-value').inputValue();
       expect(second).not.toBe(first);
