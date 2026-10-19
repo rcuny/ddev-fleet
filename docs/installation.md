@@ -304,7 +304,8 @@ hardening guide for 1.x is planned with the host operations milestone. The Ansib
 
 Nothing in the installer calls the uninstaller. Run it deliberately, **from the root-owned copy** the installer
 keeps (the checkout in `/opt/ddev-fleet` belongs to the `fleet` user and is removed by the uninstaller itself; do
-not run root code from a directory another account can write):
+not run root code from a directory another account can write; the uninstaller refuses to start as root from a file or
+directory that is not owned by root or is writable by anyone else):
 
 ```bash
 sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes --dry-run     # review the plan first
