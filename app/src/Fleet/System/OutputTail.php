@@ -14,6 +14,13 @@ final class OutputTail
 {
     private const int MAX_BYTES = 800;
 
+    /**
+     * A credential-looking name (any case, so `ovh_application_secret` and `Token` count too) followed by `=` or `:`
+     * and its value, bare or quoted: `NAME=value`, `name: value`, `"name": "value"`, `name='a b'`. The name and the
+     * separator stay, so the output still says which value was hidden.
+     */
+    private const string CREDENTIAL_ASSIGNMENT = '/\b((?:ovh_[a-z0-9_]+|fleet_proxy_secret|[a-z0-9_.-]*(?:secret|token|password|passwd|key)))(["\']?[ \t]*[=:][ \t]*)("[^"\r\n]*"|\'[^\'\r\n]*\'|[^\s,;]*)/i';
+
     private function __construct()
     {
     }
@@ -28,7 +35,7 @@ final class OutputTail
      */
     public static function text(string $text): string
     {
-        $text = (string) preg_replace('/\b(OVH_[A-Z_]+|FLEET_PROXY_SECRET|[A-Z_]*(?:SECRET|TOKEN|PASSWORD|KEY))=\S*/', '$1=[redacted]', $text);
+        $text = (string) preg_replace(self::CREDENTIAL_ASSIGNMENT, '$1$2[redacted]', $text);
         $text = trim($text);
         $text = (string) preg_replace('/[^\x20-\x7E\n\t]/', '?', $text);
         if (\strlen($text) > self::MAX_BYTES) {
