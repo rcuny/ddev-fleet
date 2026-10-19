@@ -43,6 +43,7 @@ let page: Page;
 let errors: string[];
 const keys: RecordedKey[] = [];
 let finished = false;
+let finishPressedAt = 0;
 let signedIn = false;
 
 async function shot(target: Page, name: string): Promise<void> {
@@ -51,8 +52,9 @@ async function shot(target: Page, name: string): Promise<void> {
 }
 
 async function signIn(target: Page): Promise<void> {
-  await target.getByLabel('Username', { exact: true }).fill(ADMIN.username);
-  await target.getByLabel('Password', { exact: true }).fill(ADMIN.password);
+  // Authelia marks the required fields with an asterisk in their accessible names ("Username *").
+  await target.getByRole('textbox', { name: /^Username\b/ }).fill(ADMIN.username);
+  await target.getByRole('textbox', { name: /^Password\b/ }).fill(ADMIN.password);
   await target.getByRole('button', { name: 'Sign in' }).click();
 }
 
@@ -102,11 +104,15 @@ test('wizard completes over valid HTTPS', async () => {
         }
       }
       if ('finish' === step) {
+        finishPressedAt = Date.now();
         const summary = await current.getByTestId('setup-summary').innerText();
         expect(summary).not.toContain(ADMIN.password);
         await expect(current.getByTestId('summary-claude')).toHaveText('Not set (optional)');
       }
       if ('done' === step) {
+        // Seconds from pressing Finish to the completion page: every side effect (users file, Authelia restart, gate flip, Caddy apply).
+        mkdirSync(OUT, { recursive: true });
+        writeFileSync(join(OUT, 'finish-seconds.txt'), `${((Date.now() - finishPressedAt) / 1000).toFixed(1)}\n`);
         expect(await current.locator('body').innerText()).not.toContain(ADMIN.password);
       }
     },
@@ -135,8 +141,8 @@ test('reloading shows the Authelia login', async () => {
   await session.clearCookies();
   await page.goto('/');
   await expect(page).toHaveURL(new RegExp(`^https://${AUTH_HOST.replace(/\./g, '\\.')}/`));
-  await expect(page.getByLabel('Username', { exact: true })).toBeVisible();
-  await expect(page.getByLabel('Password', { exact: true })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /^Username\b/ })).toBeVisible();
+  await expect(page.getByRole('textbox', { name: /^Password\b/ })).toBeVisible();
   await shot(page, 'authelia-login');
 });
 
@@ -159,10 +165,20 @@ test('signing in as the new admin lands on the dashboard', async () => {
 });
 
 test('the old setup URL no longer works', async ({ browser }) => {
+  expect(signedIn, 'signed in first').toBe(true);
+  // Signed in, the app itself answers: the link is dead and sets no wizard cookie.
+  const response = await page.goto(setupUrl);
+  expect(response?.status()).toBe(404);
+  await expect(page.getByRole('heading', { level: 1, name: 'Setup is complete' })).toBeVisible();
+  expect((await session.cookies()).some((cookie) => cookie.name === '__Host-fleet_setup')).toBe(false);
+
+  // A stranger never gets that far: the Authelia gate is in front of /setup too.
   const late = await browser.newContext({ baseURL, viewport: VIEWPORT, ignoreHTTPSErrors: false });
   try {
-    const response = await (await late.newPage()).goto(setupUrl);
-    expect(response?.status()).toBe(404);
+    const latePage = await late.newPage();
+    await latePage.goto(setupUrl);
+    await expect(latePage).toHaveURL(new RegExp(`^https://${AUTH_HOST.replace(/\./g, '\\.')}/`));
+    expect(await latePage.content()).not.toContain('Create the administrator');
     expect((await late.cookies()).some((cookie) => cookie.name === '__Host-fleet_setup')).toBe(false);
   } finally {
     await late.close();
@@ -173,9 +189,9 @@ test('a second token-less visit to /setup is refused after sign-out', async () =
   expect(signedIn, 'signed in first').toBe(true);
   await page.goto(`https://${AUTH_HOST}/logout`);
   await page.waitForLoadState('networkidle');
-  const response = await session.request.get('/setup', { maxRedirects: 0 });
-  expect(response.status(), '/setup while signed out').toBe(404);
-  expect(await response.text()).not.toContain('Create the administrator');
-  const home = await session.request.get('/', { maxRedirects: 0 });
-  expect([302, 303, 401], 'signed out, / does not serve the app').toContain(home.status());
+  for (const path of ['/setup', '/setup/admin', '/']) {
+    const response = await session.request.get(path, { maxRedirects: 0 });
+    expect(response.status(), `${path} while signed out`).toBe(302);
+    expect(response.headers().location ?? '', `${path} goes to the Authelia login`).toContain(`https://${AUTH_HOST}/`);
+  }
 });

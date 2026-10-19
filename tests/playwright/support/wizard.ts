@@ -52,6 +52,10 @@ export async function completeWizard(page: Page, options: WizardOptions): Promis
   };
 
   await page.goto(options.setupUrl ?? '/setup');
+  // A wizard that was reopened (fleet setup:reset) keeps its earlier answers and resumes at Finish: go back to the start.
+  if (!page.url().endsWith('/setup/admin')) {
+    await page.goto('/setup/admin');
+  }
 
   // 1 Administrator
   await expect(page).toHaveTitle('Setup · Administrator · Fleet');
@@ -59,7 +63,13 @@ export async function completeWizard(page: Page, options: WizardOptions): Promis
   await expect(page.getByTestId('setup-stepper').locator('li')).toHaveCount(5);
   await expect(page.getByTestId('setup-stepper').locator('[aria-current="step"]')).toHaveCount(1);
   await seen('admin');
-  await page.getByLabel('Username', { exact: true }).fill(options.admin.username);
+  // The username is locked once the administrator exists (a reopened wizard updates the same user).
+  const username = page.getByLabel('Username', { exact: true });
+  if (await username.isEnabled()) {
+    await username.fill(options.admin.username);
+  } else {
+    await expect(username).toHaveValue(options.admin.username);
+  }
   await page.getByLabel('Display name', { exact: true }).fill(options.admin.displayName);
   await page.getByLabel('Email', { exact: true }).fill(options.admin.email);
   await page.getByLabel('Password', { exact: true }).fill(options.admin.password);
