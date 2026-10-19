@@ -89,7 +89,7 @@ step_main() {
   run "$HELPER_DIR/apply" authelia
   run "$HELPER_DIR/apply" caddy
 
-  run systemctl enable authelia php8.4-fpm fleet-mercure fleet-worker@1 caddy
+  run systemctl enable authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-scheduler caddy
 
   if [ "$FPM_CHANGED" = 1 ] || [ "$ENV_CHANGED" = 1 ]; then
     run systemctl restart php8.4-fpm
@@ -108,6 +108,12 @@ step_main() {
     restart_workers
   else
     run systemctl start fleet-worker@1
+  fi
+  # The schedule ticker restarts with the workers' triggers: it runs the same code and environment.
+  if [ "$CODE_CHANGED" = 1 ] || [ "$ENV_CHANGED" = 1 ] || [ "${SCHEDULER_UNIT_CHANGED:-0}" = 1 ]; then
+    run systemctl restart fleet-scheduler
+  else
+    run systemctl start fleet-scheduler
   fi
   run systemctl restart caddy
   # The daily backup timer (the units are written by step 95). enable --now is a no-op when it already runs.

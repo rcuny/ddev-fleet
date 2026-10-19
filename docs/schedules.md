@@ -44,11 +44,11 @@ All accept `--json`. Exit codes: `0` done, `1` a value was refused (`--cron`, `-
 ## Running the ticker
 
 The ticker is the Messenger consumer of the scheduler transport. The unit file is `install/etc/fleet-scheduler.service`
-(the installer does not place it yet). On a host, as root:
+; the installer places it, enables it and starts it
+(restarted with the workers on a code or environment change, removed by the uninstaller). To look at it on a host:
 
 ```bash
-install -m 0644 /opt/ddev-fleet/install/etc/fleet-scheduler.service /etc/systemd/system/fleet-scheduler.service
-systemctl daemon-reload && systemctl enable --now fleet-scheduler
+systemctl status fleet-scheduler
 journalctl -u fleet-scheduler -n 50 --no-pager
 ```
 

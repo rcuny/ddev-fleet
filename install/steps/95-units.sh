@@ -4,6 +4,7 @@
 #   - php-fpm: the `fleet` pool on /run/php/fleet.sock (the stock www pool is disabled), the 90-fleet.ini settings and
 #     the unit drop-in that loads fleet.env and lets the pool write /etc/caddy and /etc/authelia;
 #   - the job worker template unit fleet-worker@.service;
+#   - the schedule ticker fleet-scheduler.service (enabled and started by step 98);
 #   - the daily database backup: fleet-backup.service (oneshot) and fleet-backup.timer (enabled by step 98);
 #   - the Mercure hub: pinned release, sha256-checked, plus its unit and configuration.
 # Every configuration is validated (php-fpm -t, mercure validate) before a service is asked to use it.
@@ -74,6 +75,10 @@ step_main() {
   # --- the job worker ---------------------------------------------------------------------------------------------
   install_etc 'fleet-worker@.service' "$SYSTEMD_DIR/fleet-worker@.service" 0644 root:root
   [ "$FILE_CHANGED" = 0 ] || { WORKER_UNIT_CHANGED=1; units_changed=1; }
+
+  # --- the schedule ticker ----------------------------------------------------------------------------------------
+  install_etc fleet-scheduler.service "$SYSTEMD_DIR/fleet-scheduler.service" 0644 root:root
+  [ "$FILE_CHANGED" = 0 ] || { SCHEDULER_UNIT_CHANGED=1; units_changed=1; }
 
   # --- the daily database backup ----------------------------------------------------------------------------------
   install_etc fleet-backup.service "$SYSTEMD_DIR/fleet-backup.service" 0644 root:root

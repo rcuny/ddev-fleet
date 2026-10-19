@@ -1,8 +1,7 @@
 # The schedule ticker (FLE-72): consumes the scheduler transport `scheduler_default`, which sends one TickSchedules message
 # every 30 seconds; the handler fires the schedules that are due and queues their jobs on the `jobs` transport for
 # fleet-worker@. It never runs ddev, git or docker itself, so it needs neither the docker group nor sudo.
-# NOT installed by install/steps/95-units.sh yet: enable it by hand until the installer step follows, see
-# docs/schedules.md ("Running the ticker").
+# Installed by install/steps/95-units.sh, enabled and started by step 98 (docs/schedules.md, "Running the ticker").
 [Unit]
 Description=ddev-fleet schedule ticker
 After=network.target
