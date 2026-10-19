@@ -245,6 +245,7 @@ final class UserResetPasswordCommandTest extends KernelTestCase
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
         self::assertStringContainsString('Authelia was updated.', self::flat($tester->getDisplay()));
+        self::assertStringContainsString('may still block "alice" for up to 5 minutes', self::flat($tester->getDisplay()));
         $sudo = $runner->callsMatching(['sudo']);
         self::assertCount(1, $sudo);
         self::assertSame(['sudo', '-n', '--', '/usr/local/libexec/fleet/apply', 'authelia'], $sudo[0]->argv);
