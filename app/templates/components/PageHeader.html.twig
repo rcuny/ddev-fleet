@@ -8,9 +8,9 @@
 <header {{ attributes.defaults({'data-slot': 'page-header'}) }}>
     <div class="flex flex-col gap-4 border-b border-hairline pb-6 sm:flex-row sm:items-start sm:justify-between">
         <div class="min-w-0 flex-1">
-            <h1>{{ title }}</h1>
+            <h1 class="[overflow-wrap:anywhere]">{{ title }}</h1>
             {%- if description %}
-                <p class="mt-1">{{ description }}</p>
+                <p class="mt-1 [overflow-wrap:anywhere]">{{ description }}</p>
             {%- endif %}
         </div>
         {## Right-hand slot: buttons, icon buttons, search, links. Primary action last. -#}

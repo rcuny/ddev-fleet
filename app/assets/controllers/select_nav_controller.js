@@ -6,8 +6,8 @@ import { Controller } from '@hotwired/stimulus';
 export default class extends Controller {
     go(event) {
         const target = event.target.value;
-        // Only a path on this site: "/x", never "//host" or a scheme.
-        if (typeof target !== 'string' || !target.startsWith('/') || target.startsWith('//')) {
+        // Only a path on this site: "/x", never "//host", "/\host" (browsers read it as "//host") or a scheme.
+        if (typeof target !== 'string' || !target.startsWith('/') || target.startsWith('//') || target.startsWith('/\\')) {
             return;
         }
         if (window.Turbo && typeof window.Turbo.visit === 'function') {

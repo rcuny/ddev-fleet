@@ -5,7 +5,7 @@
     {key: 'ports', label: 'Ports', url: path('project_ports', {name: project.name})},
 ] %}
 <div class="border-b border-hairline py-2 md:hidden">
-    <twig:NativeSelect aria-label="Section" class="w-full" data-controller="select-nav" data-action="change->select-nav#go">
+    <twig:NativeSelect aria-label="Section" class="w-full [&_select]:h-11" data-controller="select-nav" data-action="change->select-nav#go">
         {% for section in sections %}
             <twig:NativeSelect:Option value="{{ section.url }}" :selected="section.key == active">{{ section.label }}</twig:NativeSelect:Option>
         {% endfor %}

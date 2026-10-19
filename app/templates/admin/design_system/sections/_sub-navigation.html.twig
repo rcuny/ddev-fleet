@@ -3,7 +3,7 @@
 <div class="space-y-8">
     {# Phone (below md): a full-width native select that names the active tab. #}
     <div class="max-w-sm border-b border-hairline py-2 md:hidden">
-        <twig:NativeSelect aria-label="Section" class="w-full">
+        <twig:NativeSelect aria-label="Section" class="w-full [&_select]:h-11">
             <twig:NativeSelect:Option value="overview" selected>Overview</twig:NativeSelect:Option>
             <twig:NativeSelect:Option value="activity">Activity</twig:NativeSelect:Option>
             <twig:NativeSelect:Option value="members">Members</twig:NativeSelect:Option>
@@ -46,7 +46,7 @@
         <ul>
             <li><strong>Active tab</strong>: <code>border-brand text-brand-darker dark:text-brand font-medium</code> plus <code>aria-current="page"</code>; <code>-mb-px</code> overlaps the parent hairline.</li>
             <li><strong>Right-hand slot</strong>: links, filters, small actions; <code>pb-2</code> centres them against the tab text.</li>
-            <li><strong>Phone</strong>: the select navigates on change (a small Stimulus or Turbo handler), or submit it with a Go button when scripting is unwanted.</li>
+            <li><strong>Phone</strong>: the select is 44 px high (<code>[&amp;_select]:h-11</code> on the wrapper, as the select itself takes no class) and navigates on change (a small Stimulus or Turbo handler), or submit it with a Go button when scripting is unwanted.</li>
         </ul>
     </twig:block>
 </twig:Ds:Section>

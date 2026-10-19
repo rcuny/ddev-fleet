@@ -18,8 +18,15 @@
 
     <div class="space-y-2">
         <twig:Label for="ds-form-notes">Notes</twig:Label>
-        <twig:Textarea id="ds-form-notes" name="notes" rows="3" aria-describedby="ds-form-notes-help">Anything else we should know.</twig:Textarea>
+        <twig:Textarea id="ds-form-notes" name="notes" rows="3" placeholder="Anything else we should know." aria-describedby="ds-form-notes-help" />
         <p id="ds-form-notes-help" class="text-xs text-ink-muted">One entry per line.</p>
+    </div>
+
+    <div class="space-y-2">
+        <twig:Label for="ds-form-hosts">Hostnames</twig:Label>
+        <twig:Textarea id="ds-form-hosts" name="hosts" rows="2" aria-invalid="true" aria-describedby="ds-form-hosts-error">www
+Www</twig:Textarea>
+        <p id="ds-form-hosts-error" class="text-xs text-danger-darker dark:text-danger">Use lowercase letters only.</p>
     </div>
 
     <fieldset class="space-y-2">
@@ -63,7 +70,7 @@
     </twig:block>
     <twig:block name="when_to_use">
         <ul>
-            <li>All data entry.</li>
+            <li>All data entry; <code>Textarea</code> for several lines of text (one entry per line).</li>
             <li>A <code>Label</code> (or <code>&lt;label for&gt;</code>) bound to every control by <code>id</code>.</li>
             <li><code>fieldset</code> + <code>legend</code> around radio groups.</li>
         </ul>

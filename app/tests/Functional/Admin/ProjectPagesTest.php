@@ -342,13 +342,95 @@ final class ProjectPagesTest extends AdminTestCase
         }
     }
 
-    public function testAPlainGetStartsNoSession(): void
+    #[DataProvider('getPages')]
+    public function testAPlainGetStartsNoSession(string $path): void
     {
+        $this->makeProject();
         $this->client->getCookieJar()->clear();
-        $this->open('/admin/projects');
+        $this->open($path);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(0, $this->client->getResponse()->headers->getCookies(), 'a shell page does not start a session');
+        self::assertCount(0, $this->client->getResponse()->headers->getCookies(), $path.' does not start a session');
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function getPages(): iterable
+    {
+        yield 'list' => ['/admin/projects'];
+        yield 'new' => ['/admin/projects/new'];
+        yield 'edit' => ['/admin/projects/blog'];
+        yield 'ports' => ['/admin/projects/blog/ports'];
+    }
+
+    public function testThePhoneSectionSelectIsAFullTapTarget(): void
+    {
+        $this->makeProject();
+
+        $wrapper = $this->open('/admin/projects/blog')->filter('select[aria-label="Section"]')->ancestors()->first();
+        // NativeSelect puts `class` on its wrapper, so the select is sized through it.
+        self::assertStringContainsString('[&_select]:h-11', (string) $wrapper->attr('class'));
+    }
+
+    public function testRowsOfChoicesAreClickableAcrossTheRow(): void
+    {
+        $this->makeProject();
+
+        $crawler = $this->open('/admin/projects/blog');
+        foreach (['radio-row', 'checkbox-row'] as $slot) {
+            $rows = $crawler->filter('[data-slot='.$slot.']');
+            self::assertGreaterThan(0, $rows->count(), $slot);
+            foreach ($rows as $row) {
+                $row = new Crawler($row);
+                self::assertStringContainsString('relative', (string) $row->attr('class'));
+                self::assertStringContainsString('min-h-11', (string) $row->attr('class'));
+                // The label stretches over the row.
+                self::assertStringContainsString('after:absolute after:inset-0', (string) $row->filter('label[for]')->last()->attr('class'));
+            }
+        }
+    }
+
+    public function testALongGitUrlWrapsInsteadOfWideningThePage(): void
+    {
+        $url = 'https://git.example.com/'.str_repeat('a', 180).'/blog.git';
+        $this->makeProject('blog', new ProjectInput('blog', $url));
+
+        foreach (['/admin/projects/blog', '/admin/projects/blog/ports'] as $path) {
+            $header = $this->open($path)->filter('main header');
+            self::assertStringContainsString($url, $header->text(), $path);
+            self::assertStringContainsString('[overflow-wrap:anywhere]', (string) $header->filter('h1')->attr('class'), $path);
+            self::assertStringContainsString('[overflow-wrap:anywhere]', (string) $header->filter('p')->first()->attr('class'), $path);
+        }
+        // The list row truncates it.
+        self::assertStringContainsString('truncate', (string) $this->open('/admin/projects')->filter('[data-testid=project-row] span.truncate')->first()->attr('class'));
+    }
+
+    public function testHostileValuesAreEscapedOnTheErrorPage(): void
+    {
+        $crawler = $this->open('/admin/projects/new');
+        $values = [
+            'project[name]' => '<script>alert(1)</script>',
+            'project[git]' => '"><img src=x onerror=alert(2)>',
+            'project[defaultBranch]' => '</textarea><svg onload=alert(3)>',
+            'project[additionalHostnames]' => "</textarea><script>alert(4)</script>\n\"onfocus=\"alert(5)",
+            'project[issueIdRegexp]' => '(?<x><b>)',
+            'project[gitBotName]' => '<i>bot</i>',
+            'project[displaySubmoduleBranch]' => '<u>path</u>',
+        ];
+        $this->submit($crawler, 'Create project', $values);
+
+        self::assertResponseStatusCodeSame(422);
+        $body = $this->body();
+        foreach (['<script>alert', '<img src=x', '<svg onload', '<i>bot', '<u>path', '<b>'] as $raw) {
+            self::assertStringNotContainsString($raw, $body, $raw.' must be escaped');
+        }
+        self::assertStringNotContainsString('" onfocus', $body);
+        // The values come back as text, not markup.
+        self::assertSame('<script>alert(1)</script>', $this->client->getCrawler()->filter('#project_name')->attr('value'));
+        self::assertStringContainsString('&lt;script&gt;alert(4)', $body);
+        self::assertSame(0, $this->projectCount());
+        self::assertCount(0, $this->client->getCrawler()->filter('main script, main img, main [onerror], main [onload], main [onfocus]'));
     }
 
     // --- ports tab

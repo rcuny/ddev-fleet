@@ -73,11 +73,12 @@
 {%- endblock checkbox_widget %}
 
 {% block checkbox_row -%}
+    {#- The label's ::after covers the whole row, so the full 44 px row toggles the box. -#}
     <div class="grid gap-2" data-slot="form-row">
-        <div class="flex min-h-11 items-start gap-3 md:min-h-0">
+        <div class="relative flex min-h-11 items-start gap-3 md:min-h-0" data-slot="checkbox-row">
             {{- form_widget(form) -}}
             <div class="grid gap-1">
-                {{- form_label(form, null, {label_attr: {class: 'font-normal text-ink-body'}}) -}}
+                {{- form_label(form, null, {label_attr: {class: "cursor-pointer font-normal text-ink-body after:absolute after:inset-0 after:content-['']"}}) -}}
                 {{- form_help(form) -}}
             </div>
         </div>
@@ -117,9 +118,10 @@
 {% block choice_widget_expanded -%}
     <div role="radiogroup" id="{{ id }}" class="grid gap-2"{% if help is not empty %} aria-describedby="{{ id }}_help"{% endif %}>
         {%- for child in form %}
-            <div class="flex min-h-11 items-start gap-3 rounded-lg border border-hairline p-3">
+            {#- The label's ::after covers the whole row, so the full row selects the option. -#}
+            <div class="relative flex min-h-11 items-start gap-3 rounded-lg border border-hairline p-3" data-slot="radio-row">
                 <twig:RadioGroup:Item :name="child.vars.full_name" :value="child.vars.value" id="{{ child.vars.id }}" :checked="child.vars.checked" :required="child.vars.required" class="mt-0.5" />
-                {{ form_label(child, null, {label_attr: {class: 'flex-1 text-sm font-normal text-ink-body'}}) }}
+                {{ form_label(child, null, {label_attr: {class: "flex-1 cursor-pointer text-sm font-normal text-ink-body after:absolute after:inset-0 after:content-['']"}}) }}
             </div>
         {%- endfor %}
     </div>
