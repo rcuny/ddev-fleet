@@ -113,10 +113,11 @@ final class AutheliaConfigRendererTest extends TestCase
 
     /**
      * @param list<AccessRule> $rules
+     * @param list<string>     $extraProjects projects without members (ProjectAccessRules lists them too)
      */
-    private static function withRules(array $rules, ?AutheliaNotifier $notifier = null): AutheliaConfigRenderer
+    private static function withRules(array $rules, ?AutheliaNotifier $notifier = null, array $extraProjects = []): AutheliaConfigRenderer
     {
-        $source = new class($rules) implements AccessRuleSource {
+        $source = new class([...$rules, ...array_map(static fn (string $project): AccessRule => new AccessRule($project, 'fleet-admins'), $extraProjects)]) implements AccessRuleSource {
             /**
              * @param list<AccessRule> $rules
              */
@@ -228,6 +229,52 @@ final class AutheliaConfigRendererTest extends TestCase
         self::assertNotContains('user:alice', $subjectsFor('blog-x--main.fleet.example.com'));
         self::assertSame(['group:fleet-admins', 'user:carol'], $subjectsFor('www-blog-x--main.fleet.example.com'));
         self::assertSame(['group:fleet-admins'], $subjectsFor('ghost--main.fleet.example.com'), 'a project without a rule: admins only');
+    }
+
+    /**
+     * @param list<AccessRule> $rules
+     * @param list<string>     $extraProjects
+     *
+     * @return list<string>
+     */
+    private static function subjectsOf(array $rules, array $extraProjects, string $host): array
+    {
+        $out = self::withRules($rules, null, $extraProjects)->render(new HostSettings('fleet.example.com'));
+        foreach (\array_slice(Yaml::parse($out)['access_control']['rules'], 2) as $rule) {
+            $matched = isset($rule['domain_regex'])
+                ? 1 === preg_match('/'.str_replace('/', '\\/', $rule['domain_regex']).'/', $host)
+                : str_ends_with($host, substr($rule['domain'], 1));
+            if ($matched) {
+                return array_values(array_merge(...$rule['subject']));
+            }
+        }
+
+        return [];
+    }
+
+    public function testAnAliasThatSpellsAnotherProjectsNameNeverMatchesIt(): void
+    {
+        // blog has the hostname "x"; x-blog is its own project (here without members, and with members).
+        $blog = new AccessRule('blog', 'fleet-admins', ['alice'], ['x', 'www']);
+
+        self::assertNotContains('user:alice', self::subjectsOf([$blog], ['x-blog'], 'x-blog--main.fleet.example.com'));
+        self::assertNotContains('user:alice', self::subjectsOf([$blog, new AccessRule('x-blog', 'fleet-admins', ['carol'])], [], 'x-blog--main.fleet.example.com'));
+        self::assertSame(['group:fleet-admins', 'user:carol'], self::subjectsOf([$blog, new AccessRule('x-blog', 'fleet-admins', ['carol'])], [], 'x-blog--main.fleet.example.com'));
+        // The other hostnames and the project's own hosts keep working.
+        self::assertContains('user:alice', self::subjectsOf([$blog], ['x-blog'], 'www-blog--main.fleet.example.com'));
+        self::assertContains('user:alice', self::subjectsOf([$blog], ['x-blog'], 'blog--main.fleet.example.com'));
+        // Without a project named x-blog the alias still works.
+        self::assertContains('user:alice', self::subjectsOf([$blog], [], 'x-blog--main.fleet.example.com'));
+    }
+
+    public function testAProjectDoesNotMatchAProjectWhoseNameItIsAPrefixOf(): void
+    {
+        $foo = new AccessRule('foo', 'fleet-admins', ['alice'], ['www']);
+
+        self::assertContains('user:alice', self::subjectsOf([$foo], ['foobar'], 'foo--main.fleet.example.com'));
+        self::assertNotContains('user:alice', self::subjectsOf([$foo], ['foobar'], 'foobar--main.fleet.example.com'));
+        self::assertNotContains('user:alice', self::subjectsOf([$foo], ['foobar'], 'www-foobar--main.fleet.example.com'));
+        self::assertNotContains('user:alice', self::subjectsOf([$foo], ['foobar'], 'foo-bar--main.fleet.example.com'));
     }
 
     public function testRuleComesAfterTheAuthBypass(): void
