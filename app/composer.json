@@ -48,6 +48,7 @@
             "symfony/runtime": true
         },
         "bump-after-update": true,
+        "process-timeout": 900,
         "sort-packages": true
     },
     "autoload": {
