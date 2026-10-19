@@ -40,9 +40,9 @@
                 <twig:Table:Body>
                     {% for entry in entries %}
                         <twig:Table:Row data-testid="audit-row">
-                            <twig:Table:Cell class="whitespace-nowrap">{{ entry.createdAt|date('Y-m-d H:i:s', 'UTC') }}</twig:Table:Cell>
-                            <twig:Table:Cell>{{ entry.actor }}</twig:Table:Cell>
-                            <twig:Table:Cell>{{ entry.action }}</twig:Table:Cell>
+                            <twig:Table:Cell>{{ entry.createdAt|date('Y-m-d H:i:s', 'UTC') }}</twig:Table:Cell>
+                            <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ entry.actor }}</twig:Table:Cell>
+                            <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ entry.action }}</twig:Table:Cell>
                             <twig:Table:Cell class="font-mono [overflow-wrap:anywhere]">{{ entry.subject }}</twig:Table:Cell>
                         </twig:Table:Row>
                     {% endfor %}

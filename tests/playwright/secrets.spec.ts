@@ -38,7 +38,12 @@ async function saveSecret(page: Page, name: string, value: string): Promise<void
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
   await form.getByLabel('Value').fill(value);
-  await form.getByTestId('secret-save').click();
+  // Wait for the POST itself so a failed submit reports its status instead of a missing flash.
+  const [response] = await Promise.all([
+    page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
+    form.getByTestId('secret-save').click(),
+  ]);
+  expect(response.status(), `save of ${name} answered ${response.status()}`).toBeLessThan(400);
   await expect(page.getByTestId('flashes')).toContainText(`Secret "${name}" saved.`);
 }
 
@@ -144,7 +149,8 @@ test.describe('secrets', () => {
     await expect(form.getByLabel('Name')).toHaveValue('lower_case');
     await expect(form.getByLabel('Value')).toHaveValue('');
     expect(await page.content()).not.toContain(value);
-    await expect(page.getByTestId('secret-row')).toHaveCount(0);
+    // Other tests save secrets in parallel on the shared database: only this name must be absent.
+    await expect(rowOf(page, 'lower_case')).toHaveCount(0);
   });
 
   test('project: the Secrets tab keeps its own secrets and reveals them', async ({ page }) => {
