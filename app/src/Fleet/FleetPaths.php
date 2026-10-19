@@ -15,6 +15,8 @@ final readonly class FleetPaths
 {
     private const string ID_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/D';
     private const string UPLOAD_ID_PATTERN = '/^[0-9a-f]{32}$/D';
+    /** An instance id is `{project}--{label}`: lowercase words joined by single dashes, at most 63 characters (a DNS label). */
+    public const string INSTANCE_ID_PATTERN = '/^(?=.{3,63}$)[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$/D';
 
     private string $home;
     private string $caddyDir;
@@ -159,6 +161,23 @@ final readonly class FleetPaths
     public function caddySnippetDir(): string
     {
         return $this->caddyDir;
+    }
+
+    /**
+     * Where the worker writes one Caddy site snippet per instance (the main Caddyfile imports `instances/*.conf`).
+     */
+    public function caddyInstancesDir(): string
+    {
+        return $this->caddyDir.'/instances';
+    }
+
+    public function instanceSiteFile(string $id): string
+    {
+        if (1 !== preg_match(self::INSTANCE_ID_PATTERN, $id)) {
+            throw new \InvalidArgumentException(\sprintf('Invalid instance id "%s".', addcslashes($id, "\0..\37")));
+        }
+
+        return $this->caddyInstancesDir().'/'.$id.'.conf';
     }
 
     public function gateFile(): string

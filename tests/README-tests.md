@@ -16,14 +16,14 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 
 | Suite | Where | Count |
 |---|---|---|
-| PHPUnit `Unit` | `app/tests/Unit/` | 1035 tests |
-| PHPUnit `Integration` | `app/tests/Integration/` | 461 tests |
-| PHPUnit `Functional` | `app/tests/Functional/` | 508 tests |
-| PHPUnit `Repo` | `app/tests/Repo/` | 401 tests (13 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
+| PHPUnit `Unit` | `app/tests/Unit/` | 1039 tests |
+| PHPUnit `Integration` | `app/tests/Integration/` | 481 tests |
+| PHPUnit `Functional` | `app/tests/Functional/` | 514 tests |
+| PHPUnit `Repo` | `app/tests/Repo/` | 394 tests (13 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
 | Playwright | `tests/playwright/` | 165 (10 spec files, including `host-settings.spec.ts` and `assets.spec.ts`; 137 run and 28 skip on a default run; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 81 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
-PHPUnit totals 2405 tests (13 skipped). Update this table when the numbers change.
+PHPUnit totals 2435 tests (13 skipped). Update this table when the numbers change.
 
 ## Layout
 

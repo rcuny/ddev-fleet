@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Fleet\Projects;
 
+use App\Domain\Instance\Instance;
+use App\Domain\Instance\InstanceGuard;
+use App\Domain\Instance\InstanceRepository;
+use App\Domain\Instance\InstanceState;
 use App\Domain\Port\NamedPort;
 use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\GitBotMode;
@@ -18,6 +22,7 @@ use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
 use App\Tests\Support\FakeInstanceGuard;
 use App\Tests\Support\FleetDatabase;
+use App\Tests\Support\InstanceFixtures;
 use App\Tests\Support\SecondWriter;
 use Doctrine\ORM\EntityManagerInterface;
 use PHPUnit\Framework\Attributes\DataProvider;
@@ -26,6 +31,7 @@ use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 final class ProjectServiceTest extends KernelTestCase
 {
     use FleetDatabase;
+    use InstanceFixtures;
     use SecondWriter;
 
     private const string GIT = 'https://git.example.com/acme/blog.git';
@@ -326,6 +332,26 @@ final class ProjectServiceTest extends KernelTestCase
 
         $this->guard->set('blog', 0);
         $this->service->delete('blog');
+        self::assertNull($this->projects->findByName('blog'));
+    }
+
+    public function testDeleteIsRefusedWhileRealInstancesExist(): void
+    {
+        $service = new ProjectService($this->projects, $this->ports, new InstanceGuard(new InstanceRepository($this->em)));
+        $project = $service->create($this->valid());
+        $this->instancesOf($project, [InstanceState::Running, InstanceState::Failed]);
+
+        try {
+            $service->delete('blog');
+            self::fail('A project with instances was deleted.');
+        } catch (Refused $e) {
+            self::assertStringContainsString('2 instance(s) exist: destroy them first', $e->getMessage());
+            self::assertStringContainsString('blog--i1', $e->getMessage());
+        }
+        self::assertNotNull($this->projects->findByName('blog'));
+
+        $this->em->createQuery(\sprintf('DELETE FROM %s i', Instance::class))->execute();
+        $service->delete('blog');
         self::assertNull($this->projects->findByName('blog'));
     }
 

@@ -23,8 +23,9 @@ final class AccessControlTest extends WebTestCase
         yield 'admin admin' => ['admin', '/admin/x', 404];
         yield 'anonymous health' => ['none', '/health', 200];
         yield 'anonymous components' => ['none', '/_components/anything', 401];
-        yield 'member components' => ['member', '/_components/anything', 403];
-        // Authorised, but there is no such component.
+        // Signed in is enough for the endpoint; each component decides for itself (ComponentsAccessTest), and there is
+        // no such component.
+        yield 'member components' => ['member', '/_components/anything', 404];
         yield 'admin components' => ['admin', '/_components/anything', 404];
     }
 
@@ -55,10 +56,10 @@ final class AccessControlTest extends WebTestCase
     }
 
     /**
-     * The live component endpoint serves any registered component by name, so it is admin-only as a whole
-     * (member-facing components arrive with their own checks in M0.04). Every spelling the router resolves to
-     * the endpoint must be refused to members and anonymous users; a spelling it does not resolve is a 404 for
-     * everybody, which exposes nothing.
+     * The live component endpoint serves any registered component by name and only requires a signed-in user; the
+     * component class decides the rest (ComponentsAccessTest). Every spelling the router resolves to the endpoint
+     * must be refused to anonymous users, and a member gets the "no such component" 404 for a name that does not
+     * exist; a spelling it does not resolve is a 404 for everybody, which exposes nothing.
      *
      * @return iterable<string, array{string, string, string, int}>
      */
@@ -74,7 +75,7 @@ final class AccessControlTest extends WebTestCase
                 'encoded letter' => '/_%63omponents/anything',
                 'encoded slash after prefix' => '/_components%2Fanything',
             ] as $label => $path) {
-                yield "$method $label member" => ['member', $method, $path, 403];
+                yield "$method $label member" => ['member', $method, $path, 404];
                 yield "$method $label anonymous" => ['none', $method, $path, 401];
             }
 
