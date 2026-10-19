@@ -100,6 +100,23 @@ final class InstallerShellProfileTest extends TestCase
         self::assertSame("# stock\nalias x=y\n".self::BEGIN."\nif [ -f /etc/profile.d/10-fleet-shell.sh ]; then\n  . /etc/profile.d/10-fleet-shell.sh\nfi\n".self::END."\n", $text);
     }
 
+    public function testAnExistingHookInAnyFormIsNotDuplicated(): void
+    {
+        $forms = [
+            'ansible' => "# BEGIN ANSIBLE MANAGED BLOCK - fleet shell profile\nif [ -f /etc/profile.d/10-fleet-shell.sh ]; then\n    . /etc/profile.d/10-fleet-shell.sh\nfi\n# END ANSIBLE MANAGED BLOCK - fleet shell profile\n",
+            'by hand' => "# fleet shell profile (prompt, aliases)\n[ -f /etc/profile.d/10-fleet-shell.sh ] && . /etc/profile.d/10-fleet-shell.sh\n",
+        ];
+        foreach ($forms as $name => $block) {
+            $rc = $this->scratch().'/bashrc-'.md5($name);
+            file_put_contents($rc, "# stock\n".$block);
+
+            [$status, , $err] = $this->step('hook_file '.escapeshellarg($rc));
+
+            self::assertSame(0, $status, $err);
+            self::assertSame("# stock\n".$block, file_get_contents($rc), $name);
+        }
+    }
+
     public function testAMissingBashrcIsNotCreated(): void
     {
         $rc = $this->scratch().'/absent-bashrc';

@@ -36,7 +36,8 @@ shell_hook_targets() {
   done
 }
 
-# hook_file <file>: appends the block unless the file already has its first line. A missing file is left alone
+# hook_file <file>: appends the block unless the file already sources the profile in any form (this block, the 0.x
+# Ansible block, a hand-added one: a second block would source it twice). A missing file is left alone
 # (the account has no bash profile to hook; creating one would also need the right owner).
 hook_file() {
   local file=$1
@@ -45,7 +46,7 @@ hook_file() {
     return 0
   fi
   [ -f "$file" ] || return 0
-  if grep -qxF -- "$SHELL_HOOK_BEGIN" "$file"; then
+  if grep -qF -- "$(basename "$SHELL_PROFILE_FILE")" "$file"; then
     return 0
   fi
   # Append in place (keeps the owner and mode); start on a fresh line.
