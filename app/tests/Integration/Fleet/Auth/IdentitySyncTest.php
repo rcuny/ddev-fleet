@@ -239,6 +239,23 @@ final class IdentitySyncTest extends KernelTestCase
         self::assertSame(['blog'], $this->access->projectsOf('bob'), 'the membership change was rolled back with the render');
     }
 
+    public function testUsersYmlIsNotWrittenWhenTheChangeIsRolledBack(): void
+    {
+        $this->sync->commit(fn () => $this->access->grant('bob', 'blog'));
+        $before = (string) file_get_contents($this->paths->usersFile());
+
+        try {
+            $this->sync->commit(function (): void {
+                $this->accounts->setPassword('bob', 'a different passphrase');
+
+                throw new \RuntimeException('refused');
+            });
+        } catch (\RuntimeException) {
+        }
+
+        self::assertSame($before, (string) file_get_contents($this->paths->usersFile()), 'the file never holds a rolled-back change');
+    }
+
     public function testNothingIsInstalledWhenTheChangeFails(): void
     {
         $this->completeSetup();

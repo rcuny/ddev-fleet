@@ -56,6 +56,18 @@ final readonly class AutheliaUsersFile
         return $this->syncWithReport($users)->changed;
     }
 
+    /**
+     * Renders the users as stored now without writing anything: throws what sync() would throw for a row that cannot be
+     * rendered. Lets a caller refuse a change before it commits and write the file after (see IdentitySync::commit()).
+     * Pending changes must be flushed first.
+     *
+     * @throws \InvalidArgumentException a user that cannot be rendered
+     */
+    public function check(UserRepository $users): void
+    {
+        $this->renderer->render($users->allFresh());
+    }
+
     public function syncWithReport(UserRepository $users): UsersSyncResult
     {
         return $this->locked(function () use ($users): UsersSyncResult {
