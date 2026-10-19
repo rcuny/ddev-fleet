@@ -213,6 +213,31 @@ hash that Authelia changed (the user's self-service reset), unless an administra
 in the meantime (Fleet then wins), so the next user change does not undo a reset. `users.yml` is then group-writable
 (0660) so Authelia can write it.
 
+### Users and project access
+
+Open **Users** (`https://<domain>/admin/users`, administrators only; it works on a phone). Fleet owns the people who may
+sign in, so there is no other place to add them:
+
+- **New user:** username (lowercase letters, digits, dot, underscore or dash; fixed afterwards), display name, email and
+  an initial password (the same rules as everywhere: 12 to 128 characters), whether the person is an administrator, and
+  the projects they work on (one tap-sized checkbox per project).
+- **Edit** (tap a user in the list): display name, email, the administrator role and the project checkboxes. A member can
+  operate the instances of the projects they are in (instances arrive in a later milestone), and cannot create or delete projects, change
+  settings or open another project's instance sites. An administrator needs no memberships: every project is theirs.
+- **Set a new password** for the user (the person can also reset it from the sign-in page once outgoing mail is
+  configured, see above), **Disable** or **Enable** the account (a disabled user cannot sign in; nothing is deleted)
+  and **Delete** it (with its project access).
+
+Every change is written to the Authelia users file before it is saved, and the per-project access rules are installed
+into Authelia when they changed (that restarts Authelia, so signed-in users sign in again; it happens only when the
+rules differ). If installing the rules fails the page says so: the change is saved and the next user or project change
+tries again.
+
+Safeguards: nobody can delete, disable or demote **themselves**, and the **last enabled administrator** can never be
+deleted, disabled or demoted (create or enable another one first), so the fleet cannot lock itself out. Everything on
+these pages is checked on the server and protected against cross-site requests; passwords are stored as argon2id
+hashes and are never shown or logged.
+
 Next, describe what the fleet can deploy: add your first project and its templates in the browser or on the host, see
 [`projects-and-templates.md`](projects-and-templates.md). (Instances arrive in a later milestone.)
 

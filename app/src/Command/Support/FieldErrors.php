@@ -39,6 +39,11 @@ final readonly class FieldErrors
         return new self(['name']);
     }
 
+    public static function user(): self
+    {
+        return new self(['username']);
+    }
+
     /**
      * The command-line spelling of a field: `--default-branch`, `<name>`.
      */

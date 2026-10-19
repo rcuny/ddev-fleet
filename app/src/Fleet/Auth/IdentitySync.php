@@ -30,9 +30,11 @@ final readonly class IdentitySync
      *
      * @return T whatever $change returned
      *
-     * @throws \RuntimeException|\InvalidArgumentException from $change or the render: nothing was committed. Also from
-     *                                                     the access install after the commit: the change IS saved
-     *                                                     and the call may be repeated (refreshAccess()).
+     * @throws \RuntimeException|\InvalidArgumentException from $change or the render: nothing was committed
+     * @throws UserChangeRefused                           a LastAdminGuard refusal thrown by $change: nothing was committed
+     * @throws AccessInstallFailed                         the access install after the commit failed: the change IS
+     *                                                     saved (the exception carries $change's result) and
+     *                                                     refreshAccess() retries the install
      */
     public function commit(callable $change): mixed
     {
@@ -44,7 +46,11 @@ final readonly class IdentitySync
 
             return $result;
         });
-        $this->access->sync();
+        try {
+            $this->access->sync();
+        } catch (\RuntimeException|\InvalidArgumentException $e) {
+            throw new AccessInstallFailed($result, $e);
+        }
 
         return $result;
     }

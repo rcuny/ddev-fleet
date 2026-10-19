@@ -11,6 +11,7 @@ use App\Domain\Project\ProjectAccessRepository;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Secret\SecretRepository;
 use App\Domain\User\UserRepository;
+use App\Fleet\Auth\AccessInstallFailed;
 use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\AutheliaAccessSync;
 use App\Fleet\Auth\AutheliaUsersFile;
@@ -254,6 +255,26 @@ final class IdentitySyncTest extends KernelTestCase
         }
 
         self::assertSame([], $this->applier->applied);
+    }
+
+    public function testAFailedInstallAfterTheCommitCarriesTheResultAndKeepsTheChange(): void
+    {
+        $this->completeSetup();
+        $this->applier->fails = new \RuntimeException('apply authelia failed (exit 1)');
+
+        try {
+            $this->sync->commit(fn (): bool => $this->access->grant('bob', 'blog'));
+            self::fail('Expected the install failure.');
+        } catch (AccessInstallFailed $e) {
+            self::assertTrue($e->result, 'what the change returned');
+            self::assertStringContainsString('the change was saved', strtolower($e->getMessage()));
+            self::assertStringContainsString('apply authelia failed', $e->getMessage());
+        }
+
+        $this->entityManager()->clear();
+        self::assertSame(['blog'], $this->access->projectsOf('bob'), 'a failed install is not a rollback');
+        $this->applier->fails = null;
+        self::assertTrue($this->sync->refreshAccess(), 'the install is retried');
     }
 
     public function testRefreshAccessIsTheCallForProjectChanges(): void

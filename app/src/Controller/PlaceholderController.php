@@ -25,7 +25,6 @@ final class PlaceholderController extends AbstractController
     #[Route('/admin/webhooks', name: 'webhooks', defaults: ['key' => 'webhooks'], methods: ['GET'])]
     #[Route('/admin/schedules', name: 'schedules', defaults: ['key' => 'schedules'], methods: ['GET'])]
     #[Route('/admin/secrets', name: 'secrets', defaults: ['key' => 'secrets'], methods: ['GET'])]
-    #[Route('/admin/users', name: 'users', defaults: ['key' => 'users'], methods: ['GET'])]
     #[Route('/admin/settings', name: 'settings', defaults: ['key' => 'settings'], methods: ['GET'])]
     public function __invoke(string $key): Response
     {

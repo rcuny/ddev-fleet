@@ -20,7 +20,7 @@ repository root unless stated otherwise; use `php8.4` where the default `php` is
 | PHPUnit `Integration` | `app/tests/Integration/` | 398 tests |
 | PHPUnit `Functional` | `app/tests/Functional/` | 405 tests |
 | PHPUnit `Repo` | `app/tests/Repo/` | 391 tests (12 skip without their tool: 10 need `FLEET_CADDY_BIN`, 1 needs `FLEET_MERCURE_BIN`, 1 only runs as root) |
-| Playwright | `tests/playwright/` | 90 (8 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 69 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| Playwright | `tests/playwright/` | 98 (9 spec files; each spec runs on the `desktop` and the `phone` project where it applies; `projects.spec.ts` has 13 phone-only tests, skipped on desktop; `users.spec.ts` has 4 tests on both projects). Against an external server (`FLEET_E2E_BASE_URL` set) the 8 wizard tests skip: 77 run, 21 skipped. Not counted: `live-install.desktop.spec.ts` (6 tests, only with `FLEET_LIVE_SETUP_URL`, skipped otherwise) and `live-projects.desktop.spec.ts` (9 tests against an installed host, only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | 255 passed, 2 skipped (a missing optional binary) |
 
 PHPUnit totals 2076 tests (12 skipped). Update this table when the numbers change.
@@ -45,9 +45,10 @@ app/tests/
 tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
   support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts,
-                         projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
+                         projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation), users.ts (delete a user through the UI)
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
-                         setup-wizard.desktop (the setup wizard end to end), projects (project and template pages)
+                         setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
+                         users (an administrator adds a user to a project at 390 px, password, disable, delete, axe)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
 ```

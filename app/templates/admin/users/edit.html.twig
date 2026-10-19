@@ -1,0 +1,98 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ user.displayName }} · Users · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="user.displayName" :description="user.username ~ ' · ' ~ user.email" />
+
+    <div class="mt-6 grid max-w-2xl gap-8">
+        <twig:Card data-testid="user-status">
+            <twig:Card:Header>
+                <twig:Card:Title>
+                    {{ user.enabled ? 'Active' : 'Disabled' }}
+                    {% if admin %}<twig:Badge class="ms-2 align-middle">Admin</twig:Badge>{% endif %}
+                </twig:Card:Title>
+                <twig:Card:Description>
+                    {% if self %}
+                        You are signed in as this user. You cannot disable, demote or delete your own account.
+                    {% elseif user.enabled %}
+                        A disabled user cannot sign in and loses access to every project. Nothing else is deleted.
+                    {% else %}
+                        This user cannot sign in. Enable the account to give the access back.
+                    {% endif %}
+                </twig:Card:Description>
+            </twig:Card:Header>
+            {% if not self %}
+                <twig:Card:Content>
+                    <form method="post" action="{{ path(user.enabled ? 'user_disable' : 'user_enable', {username: user.username}) }}">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto">{{ user.enabled ? 'Disable user' : 'Enable user' }}</twig:Button>
+                    </form>
+                </twig:Card:Content>
+            {% endif %}
+        </twig:Card>
+
+        {{ form_start(form, {action: path('user_edit', {username: user.username}), attr: {class: 'grid gap-6'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.displayName) }}
+            {{ form_row(form.email) }}
+
+            <twig:Separator />
+
+            {{ form_row(form.admin) }}
+            {{ include('admin/users/_projects.html.twig', {field: form.projects}) }}
+
+            <div class="flex flex-col gap-2 md:flex-row">
+                {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                <twig:Button as="a" href="{{ path('users') }}" variant="outline" class="h-11 w-full md:h-8 md:w-auto">Back to users</twig:Button>
+            </div>
+        {{ form_end(form) }}
+
+        <twig:Card data-testid="password-card">
+            <twig:Card:Header>
+                <twig:Card:Title>Set a new password</twig:Card:Title>
+                <twig:Card:Description>Replaces the current password. The person can also reset it from the sign-in page when the host has outgoing mail configured.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                {{ form_start(passwordForm, {action: path('user_password', {username: user.username}), attr: {class: 'grid gap-6'}}) }}
+                    {{ form_errors(passwordForm) }}
+                    {{ form_row(passwordForm.password) }}
+                    <div>
+                        {{ form_widget(passwordForm.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                    </div>
+                {{ form_end(passwordForm) }}
+            </twig:Card:Content>
+        </twig:Card>
+
+        {% if not self %}
+            <twig:Card data-testid="danger-zone">
+                <twig:Card:Header>
+                    <twig:Card:Title>Danger zone</twig:Card:Title>
+                    <twig:Card:Description>Deleting a user removes the account and its project access. The last enabled administrator cannot be deleted.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content>
+                    <twig:Dialog id="delete-user">
+                        <twig:Dialog:Trigger>
+                            <twig:Button variant="destructive" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_trigger_attrs }}>Delete this user</twig:Button>
+                        </twig:Dialog:Trigger>
+                        <twig:Dialog:Content>
+                            <twig:Dialog:Header>
+                                <twig:Dialog:Title>Delete {{ user.username }}?</twig:Dialog:Title>
+                                <twig:Dialog:Description>This removes the account and its access to every project. It cannot be undone.</twig:Dialog:Description>
+                            </twig:Dialog:Header>
+                            <twig:Dialog:Footer>
+                                <twig:Dialog:Close>
+                                    <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                </twig:Dialog:Close>
+                                <form method="post" action="{{ path('user_delete', {username: user.username}) }}" class="contents">
+                                    {{ include('setup/_csrf.html.twig') }}
+                                    <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto">Delete user</twig:Button>
+                                </form>
+                            </twig:Dialog:Footer>
+                        </twig:Dialog:Content>
+                    </twig:Dialog>
+                </twig:Card:Content>
+            </twig:Card>
+        {% endif %}
+    </div>
+{% endblock %}
