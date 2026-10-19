@@ -1,0 +1,76 @@
+{#- One instance: a table row from md, a card below. Needs: instance, job, url, canDestroy. -#}
+{%- set busy = job is not null and not job.status.isFinal -%}
+{%- set running = instance.state.value == 'running' -%}
+{%- set id = instance.id -%}
+<twig:Table:Row data-testid="instance-row" data-instance="{{ id }}" class="flex flex-col gap-2 p-3 md:table-row md:p-0">
+    <twig:Table:Cell class="block p-0 md:table-cell md:p-2">
+        <label class="flex size-11 items-center justify-center md:size-8">
+            <twig:Checkbox name="ids[]" value="{{ id }}" aria-label="Select {{ id }}" data-instance-list-target="row" data-action="change->instance-list#toggle" />
+        </label>
+    </twig:Table:Cell>
+    <twig:Table:Cell class="block min-w-0 p-0 whitespace-normal md:table-cell md:p-2">
+        <a href="{{ path('instance_show', {id: id}) }}" class="block font-medium [overflow-wrap:anywhere] text-ink-display">{{ id }}</a>
+        <span class="block text-xs text-ink-muted [overflow-wrap:anywhere]">{{ instance.project.name }} · {{ instance.branch }}{% if instance.headSha %} · {{ instance.headSha|slice(0, 7) }}{% endif %}</span>
+    </twig:Table:Cell>
+    <twig:Table:Cell class="block p-0 whitespace-normal md:table-cell md:p-2">
+        {{ include('instances/_state.html.twig', {instance: instance, job: job}) }}
+    </twig:Table:Cell>
+    <twig:Table:Cell class="block p-0 text-ink-muted md:table-cell md:p-2">
+        {{ instance.ramMib is not null ? instance.ramMib ~ ' MiB' : '' }}
+    </twig:Table:Cell>
+    <twig:Table:Cell class="block p-0 md:table-cell md:p-2 md:text-end">
+        <div class="flex flex-wrap items-center gap-2 md:justify-end">
+            {% if url and running %}
+                <twig:Button as="a" href="{{ url }}" target="_blank" rel="noopener noreferrer" variant="outline" class="h-11 md:h-8" data-testid="open-site">
+                    <twig:ux:icon name="lucide:external-link" />
+                    Open site
+                </twig:Button>
+            {% endif %}
+            {% if running %}
+                <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: id, action: 'stop'}) }}" formmethod="post" data-turbo-frame="_top">Stop</twig:Button>
+            {% else %}
+                <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: id, action: 'start'}) }}" formmethod="post" data-turbo-frame="_top">Start</twig:Button>
+            {% endif %}
+            {% if canDestroy %}
+                <twig:Dialog id="destroy-{{ id }}" class="inline-block">
+                    <twig:DropdownMenu id="row-{{ id }}" align="end">
+                        <twig:DropdownMenu:Trigger>
+                            <twig:Button variant="ghost" size="icon" class="size-11 md:size-8" aria-label="More actions for {{ id }}" {{ ...dropdown_menu_trigger_attrs }}>
+                                <twig:ux:icon name="lucide:ellipsis" />
+                            </twig:Button>
+                        </twig:DropdownMenu:Trigger>
+                        <twig:DropdownMenu:Content>
+                            <twig:DropdownMenu:Item class="min-h-11 md:min-h-0" disabled="{{ busy ? 'true' : 'false' }}" formaction="{{ path('instance_action', {id: id, action: 'redeploy'}) }}" formmethod="post" data-turbo-frame="_top"><twig:ux:icon name="lucide:refresh-cw" />Redeploy</twig:DropdownMenu:Item>
+                            <twig:Dialog:Trigger>
+                                <twig:DropdownMenu:Item variant="destructive" class="min-h-11 md:min-h-0" data-action="click->dialog#open click->dropdown-menu#closeFromItem" data-dialog-target="trigger" aria-haspopup="dialog"><twig:ux:icon name="lucide:trash-2" />Destroy…</twig:DropdownMenu:Item>
+                            </twig:Dialog:Trigger>
+                        </twig:DropdownMenu:Content>
+                    </twig:DropdownMenu>
+                    <twig:Dialog:Content>
+                        <twig:Dialog:Header>
+                            <twig:Dialog:Title>Destroy {{ id }}?</twig:Dialog:Title>
+                            <twig:Dialog:Description>This deletes the instance, its database and its files. It cannot be undone.</twig:Dialog:Description>
+                        </twig:Dialog:Header>
+                        <twig:Dialog:Footer>
+                            <twig:Dialog:Close>
+                                <twig:Button type="button" variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                            </twig:Dialog:Close>
+                            <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" formaction="{{ path('instance_action', {id: id, action: 'destroy'}) }}" formmethod="post" data-turbo-frame="_top">Destroy instance</twig:Button>
+                        </twig:Dialog:Footer>
+                    </twig:Dialog:Content>
+                </twig:Dialog>
+            {% else %}
+                <twig:DropdownMenu id="row-{{ id }}" align="end">
+                    <twig:DropdownMenu:Trigger>
+                        <twig:Button variant="ghost" size="icon" class="size-11 md:size-8" aria-label="More actions for {{ id }}" {{ ...dropdown_menu_trigger_attrs }}>
+                            <twig:ux:icon name="lucide:ellipsis" />
+                        </twig:Button>
+                    </twig:DropdownMenu:Trigger>
+                    <twig:DropdownMenu:Content>
+                        <twig:DropdownMenu:Item class="min-h-11 md:min-h-0" disabled="{{ busy ? 'true' : 'false' }}" formaction="{{ path('instance_action', {id: id, action: 'redeploy'}) }}" formmethod="post" data-turbo-frame="_top"><twig:ux:icon name="lucide:refresh-cw" />Redeploy</twig:DropdownMenu:Item>
+                    </twig:DropdownMenu:Content>
+                </twig:DropdownMenu>
+            {% endif %}
+        </div>
+    </twig:Table:Cell>
+</twig:Table:Row>

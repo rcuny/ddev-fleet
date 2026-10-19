@@ -140,6 +140,8 @@ main() {
   for unit in $workers; do
     do_cmd systemctl disable --now "$unit"
   done
+  do_cmd systemctl disable --now fleet-status.service
+  do_cmd systemctl disable fleet-boot.service
   do_cmd systemctl disable --now fleet-scheduler.service
   do_cmd systemctl disable --now fleet-backup.timer
   do_cmd systemctl disable --now fleet-mercure.service
@@ -149,6 +151,8 @@ main() {
   # --- 2. units, drop-ins, configuration -----------------------------------------------------------------------------
   say "==> removing units and configuration"
   remove_file "${systemd_dir:?}/fleet-worker@.service"
+  remove_file "${systemd_dir:?}/fleet-status.service"
+  remove_file "${systemd_dir:?}/fleet-boot.service"
   remove_file "${systemd_dir:?}/fleet-scheduler.service"
   remove_file "${systemd_dir:?}/fleet-backup.service"
   remove_file "${systemd_dir:?}/fleet-backup.timer"

@@ -20,8 +20,6 @@ final class PlaceholderController extends AbstractController
     {
     }
 
-    #[Route('/instances', name: 'instances', defaults: ['key' => 'instances'], methods: ['GET'])]
-    #[Route('/admin/jobs', name: 'jobs', defaults: ['key' => 'jobs'], methods: ['GET'])]
     public function __invoke(string $key): Response
     {
         $item = $this->catalog->find($key) ?? throw new NotFoundHttpException();

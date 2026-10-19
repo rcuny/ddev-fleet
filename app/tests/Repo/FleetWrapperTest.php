@@ -80,6 +80,26 @@ final class FleetWrapperTest extends TestCase
         self::assertSame('php8.4 /app/'.$expected, explode('|', $out)[0], $out);
     }
 
+    public function testInstanceAndJobGroups(): void
+    {
+        $expected = [
+            [['instance:deploy', 'acme'], 'bin/console fleet:instance:deploy acme'],
+            [['instance', 'list', '--json'], 'bin/console fleet:instance:list --json'],
+            [['instance', 'destroy', 'acme--main', '--yes'], 'bin/console fleet:instance:destroy acme--main --yes'],
+            [['job:retry', '7'], 'bin/console fleet:job:retry 7'],
+            [['job', 'show', '7'], 'bin/console fleet:job:show 7'],
+            // The older groups are still on the list.
+            [['tmux', 'list'], 'bin/console fleet:tmux:list'],
+            [['secret', 'list', 'acme'], 'bin/console fleet:secret:list acme'],
+        ];
+        foreach ($expected as [$args, $command]) {
+            [$status, $out, $err] = $this->asFleet($args);
+
+            self::assertSame(0, $status, $err);
+            self::assertSame('php8.4 /app/'.$command, explode('|', $out)[0], implode(' ', $args));
+        }
+    }
+
     public function testLoadsTheApplicationEnvironmentAndHome(): void
     {
         [$status, $out, $err] = $this->asFleet(['setup:token']);

@@ -1,0 +1,114 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}{{ instance.id }} · Instances · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="instance.id" :description="instance.project.name ~ ' · ' ~ instance.branch">
+        <twig:block name="actions">
+            {% if url and instance.state.value == 'running' %}
+                <twig:Button as="a" href="{{ url }}" target="_blank" rel="noopener noreferrer" class="h-11 md:h-8" data-testid="open-site">
+                    <twig:ux:icon name="lucide:external-link" />
+                    Open site
+                </twig:Button>
+            {% endif %}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-3xl gap-6">
+        <twig:Card data-testid="instance-detail">
+            <twig:Card:Header>
+                <twig:Card:Title>Details</twig:Card:Title>
+                <twig:Card:Description>{{ include('instances/_state.html.twig', {instance: instance, job: latest}) }}</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <dl class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <dt class="text-sm text-ink-muted">Addresses</dt>
+                        <dd class="[overflow-wrap:anywhere]">
+                            {% if url %}
+                                <a href="{{ url }}" target="_blank" rel="noopener noreferrer">{{ url|replace({'https://': ''}) }}</a>
+                                {% for alias in aliases %}<span class="block text-sm text-ink-muted" data-testid="instance-alias">{{ alias }}</span>{% endfor %}
+                            {% else %}
+                                <span class="text-ink-muted">The host has no domain yet.</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+                    <div><dt class="text-sm text-ink-muted">Template</dt><dd>{{ instance.templateName }}</dd></div>
+                    <div><dt class="text-sm text-ink-muted">Branch</dt><dd class="[overflow-wrap:anywhere]">{{ instance.branch }}</dd></div>
+                    <div><dt class="text-sm text-ink-muted">Head</dt><dd>{{ instance.headSha ? instance.headSha|slice(0, 7) : 'Not recorded' }}</dd></div>
+                    <div><dt class="text-sm text-ink-muted">Memory</dt><dd>{{ instance.ramMib is not null ? instance.ramMib ~ ' MiB' : 'Not recorded' }}</dd></div>
+                    <div><dt class="text-sm text-ink-muted">Requested by</dt><dd>{{ instance.requestedBy }}</dd></div>
+                </dl>
+            </twig:Card:Content>
+        </twig:Card>
+
+        <twig:Card data-testid="instance-actions">
+            <twig:Card:Header>
+                <twig:Card:Title>Actions</twig:Card:Title>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <form method="post" class="flex flex-wrap gap-2" data-turbo="false">
+                    {{ include('setup/_csrf.html.twig') }}
+                    {% set busy = active is not null %}
+                    {% if instance.state.value == 'running' %}
+                        <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: instance.id, action: 'stop'}) }}">Stop</twig:Button>
+                    {% else %}
+                        <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: instance.id, action: 'start'}) }}">Start</twig:Button>
+                    {% endif %}
+                    <twig:Button type="submit" variant="outline" class="h-11 md:h-8" disabled="{{ busy ? 'disabled' : null }}" formaction="{{ path('instance_action', {id: instance.id, action: 'redeploy'}) }}">Redeploy</twig:Button>
+                    {% if canDestroy %}
+                        <twig:Dialog id="destroy-instance" class="inline-block">
+                            <twig:Dialog:Trigger>
+                                <twig:Button type="button" variant="destructive" class="h-11 md:h-8" {{ ...dialog_trigger_attrs }}>Destroy…</twig:Button>
+                            </twig:Dialog:Trigger>
+                            <twig:Dialog:Content>
+                                <twig:Dialog:Header>
+                                    <twig:Dialog:Title>Destroy {{ instance.id }}?</twig:Dialog:Title>
+                                    <twig:Dialog:Description>This deletes the instance, its database and its files. It cannot be undone.</twig:Dialog:Description>
+                                </twig:Dialog:Header>
+                                <twig:Dialog:Footer>
+                                    <twig:Dialog:Close>
+                                        <twig:Button type="button" variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                    </twig:Dialog:Close>
+                                    <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" formaction="{{ path('instance_action', {id: instance.id, action: 'destroy'}) }}">Destroy instance</twig:Button>
+                                </twig:Dialog:Footer>
+                            </twig:Dialog:Content>
+                        </twig:Dialog>
+                    {% endif %}
+                </form>
+            </twig:Card:Content>
+        </twig:Card>
+
+        {% if active %}
+            <twig:Card data-testid="active-job">
+                <twig:Card:Header>
+                    <twig:Card:Title>Running now</twig:Card:Title>
+                    <twig:Card:Description><a href="{{ path('job_show', {id: active.id}) }}">Job #{{ active.id }}</a> is {{ active.status.value }}.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content>
+                    {{ include('jobs/_log.html.twig', {job: active}) }}
+                </twig:Card:Content>
+            </twig:Card>
+        {% endif %}
+
+        <twig:Card data-testid="instance-timeline">
+            <twig:Card:Header>
+                <twig:Card:Title>Timeline</twig:Card:Title>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                {% if jobs|length == 0 %}
+                    <p class="text-sm text-ink-muted">No jobs yet.</p>
+                {% else %}
+                    <ul class="divide-y divide-hairline">
+                        {% for job in jobs %}
+                            <li class="flex min-h-11 flex-wrap items-center gap-x-3 gap-y-1 py-2 text-sm" data-testid="timeline-job">
+                                <a href="{{ path('job_show', {id: job.id}) }}" class="font-medium">#{{ job.id }} {{ job.type }}</a>
+                                <span class="text-ink-muted">{{ job.status.value }} · {{ job.trigger.value }} · {{ job.createdAt|date('Y-m-d H:i') }} UTC</span>
+                            </li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

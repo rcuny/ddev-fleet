@@ -1,0 +1,20 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-boot.service.
+# After a reboot, starts every instance (stopped ones too, as v0 did), one at a time. Enabled by the installer, never
+# started by it.
+[Unit]
+Description=ddev-fleet start the instances at boot
+After=docker.service network-online.target fleet-worker@1.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=fleet
+Group=fleet
+EnvironmentFile=/etc/ddev-fleet/fleet.env
+Environment=HOME=/home/fleet
+WorkingDirectory=/opt/ddev-fleet/app
+TimeoutStartSec=0
+ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict
+
+[Install]
+WantedBy=multi-user.target
