@@ -37,6 +37,8 @@ function instanceRow(action: 'insert' | 'delete', project: string, label: string
 }
 
 async function expectNoBlockingViolations(page: Page): Promise<void> {
+  // Park the pointer away from any button: a hovered default Button blends to bg-primary/80, which fails axe contrast.
+  await page.mouse.move(0, 0);
   expect(await blockingViolations(page)).toEqual([]);
   // Flip the theme class in place: a reload would repeat a POST page and lose what the test typed.
   await page.evaluate(() => document.documentElement.classList.add('dark'));

@@ -55,13 +55,23 @@ final readonly class JobReaper
             if ($now->getTimestamp() - $this->jobs->eligibleSince($job)->getTimestamp() < $limit) {
                 continue;
             }
-            // The executor may have claimed or failed it meanwhile: judge the row as it is now.
-            $this->jobs->refresh($job);
-            if (JobStatus::Queued !== $job->status()) {
+            // The executor locks the instance before it claims a job: holding the lock here means it cannot claim this
+            // one between the check and the finish. A busy lock means an executor is on it, so leave it alone.
+            $lock = $this->locks->createLock('instance.'.($job->instanceId() ?? 'fleet'));
+            if (!$lock->acquire(false)) {
                 continue;
             }
-            $this->service->finish($job, JobStatus::Failed, null, 'The job was never started: its queue message was lost.');
-            $this->settleInstance($job, started: false);
+            try {
+                // The executor may have claimed or failed it before the lock: judge the row as it is now.
+                $this->jobs->refresh($job);
+                if (JobStatus::Queued !== $job->status()) {
+                    continue;
+                }
+                $this->service->finish($job, JobStatus::Failed, null, 'The job was never started: its queue message was lost.');
+                $this->settleInstance($job, started: false);
+            } finally {
+                $lock->release();
+            }
             ++$failed;
         }
 

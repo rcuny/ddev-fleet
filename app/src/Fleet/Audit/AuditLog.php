@@ -16,6 +16,7 @@ final readonly class AuditLog
     public const string SECRET_PUT = 'secret.put';
     public const string SECRET_DELETE = 'secret.delete';
     public const string SECRET_REVEAL = 'secret.reveal';
+    public const string CLAUDE_TOKEN_ROTATE = 'claude.token.rotate';
 
     public const string SCHEDULE_CREATE = 'schedule.create';
     public const string SCHEDULE_UPDATE = 'schedule.update';

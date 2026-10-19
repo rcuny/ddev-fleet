@@ -51,9 +51,9 @@ final class JobExecutor
     }
 
     /**
-     * The worker entry point (one RunJob message).
+     * The worker entry point (one RunJob message). $eligibleSince is the give-up clock a previous delivery computed.
      */
-    public function run(int $jobId): void
+    public function run(int $jobId, ?int $eligibleSince = null): void
     {
         $job = $this->jobs->find($jobId);
         if (null === $job || JobStatus::Queued !== $job->status()) {
@@ -69,7 +69,7 @@ final class JobExecutor
 
         $lock = $this->lockFor($job);
         if (!$lock->acquire(false)) {
-            $this->requeueOrGiveUp($job, self::BUSY_DELAY_MS);
+            $this->requeueOrGiveUp($job, self::BUSY_DELAY_MS, $eligibleSince);
 
             return;
         }
@@ -148,19 +148,20 @@ final class JobExecutor
         }
     }
 
-    private function requeueOrGiveUp(Job $job, int $delayMs): void
+    private function requeueOrGiveUp(Job $job, int $delayMs, ?int $eligibleSince): void
     {
-        $waited = $this->clock->now()->getTimestamp() - $this->jobs->eligibleSince($job)->getTimestamp();
-        if ($waited >= self::GIVE_UP_SECONDS) {
+        // Past the batch gate the clock no longer moves, so it is read once and then travels with the message.
+        $eligibleSince ??= $this->jobs->eligibleSince($job)->getTimestamp();
+        if ($this->clock->now()->getTimestamp() - $eligibleSince >= self::GIVE_UP_SECONDS) {
             $this->service->finish($job, JobStatus::Failed, null, 'Gave up waiting for the instance to be free.');
 
             return;
         }
 
-        $this->requeue($job, $delayMs);
+        $this->requeue($job, $delayMs, $eligibleSince);
     }
 
-    private function requeue(Job $job, int $delayMs): void
+    private function requeue(Job $job, int $delayMs, ?int $eligibleSince = null): void
     {
         if ($this->requeueDepth >= self::MAX_REQUEUE_DEPTH) {
             // Only a transport that ignores the delay (sync://, dev and test) nests this deep: waiting would recurse.
@@ -171,7 +172,7 @@ final class JobExecutor
 
         ++$this->requeueDepth;
         try {
-            $this->bus->dispatch(new RunJob((int) $job->id()), [new DelayStamp($delayMs)]);
+            $this->bus->dispatch(new RunJob((int) $job->id(), $eligibleSince), [new DelayStamp($delayMs)]);
         } finally {
             --$this->requeueDepth;
         }

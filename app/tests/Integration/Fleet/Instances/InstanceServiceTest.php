@@ -269,6 +269,41 @@ final class InstanceServiceTest extends JobTestCase
         self::assertCount(1, $this->bus->sent, 'the lost attempt dispatched nothing');
     }
 
+    public function testARequestThatKeepsLosingTheRaceForItsLabelIsRefused(): void
+    {
+        $second = $this->secondEntityManager($this->em);
+        $taken = 0;
+        $labels = ['develop', 'develop-1', 'develop-2'];
+        // Every attempt finds its label taken by another request between the existence check and the flush.
+        $this->em->getEventManager()->addEventListener(\Doctrine\ORM\Events::prePersist, new class(function () use ($second, &$taken, $labels): void {
+            $project = $second->find(Project::class, $this->project->id());
+            self::assertNotNull($project);
+            $second->persist(new Instance($project, $labels[$taken++], 'full', 'develop', 'other'));
+            $second->flush();
+        }) {
+            public function __construct(private readonly \Closure $write)
+            {
+            }
+
+            public function prePersist(\Doctrine\ORM\Event\PrePersistEventArgs $args): void
+            {
+                if ($args->getObject() instanceof Instance) {
+                    ($this->write)();
+                }
+            }
+        });
+
+        try {
+            $this->deploy(new DeployInput('acme'));
+            self::fail('expected Refused');
+        } catch (Refused $e) {
+            self::assertStringContainsString('same label', $e->getMessage());
+        }
+
+        self::assertSame(3, $taken);
+        self::assertSame([], $this->bus->sent, 'nothing was dispatched');
+    }
+
     public function testStopStartAndDestroyOfOneInstance(): void
     {
         $this->deploy(new DeployInput('acme'));
@@ -423,5 +458,54 @@ final class InstanceServiceTest extends JobTestCase
 
         self::assertSame('start', $retry->type());
         self::assertSame(InstanceState::Stopped, $this->instances->find('acme--develop')?->state());
+    }
+
+    public function testARequestThatLosesTheRaceForTheInstanceIsRefusedAndWritesNothing(): void
+    {
+        $this->deploy(new DeployInput('acme'));
+        $this->markFinished('acme--develop');
+        $second = $this->secondEntityManager($this->em);
+        $this->beforeNextPersist($this->em, function () use ($second): void {
+            // Another request queued a job for the same instance after the busy check.
+            $second->persist(new Job('stop', 'acme--develop', 'acme', JobTrigger::Ui, 'other', [], null, false, null, $this->clock->now()));
+            $second->flush();
+        });
+
+        try {
+            $this->service()->request('stop', new Selector(['acme--develop']), new OperationOptions(), JobTrigger::Ui, 'admin');
+            self::fail('expected Refused');
+        } catch (Refused $e) {
+            self::assertStringContainsString('Busy', $e->getMessage());
+        }
+
+        self::assertCount(1, array_filter($this->jobs->search([], 1, 200)['rows'], static fn (Job $j): bool => 'stop' === $j->type()));
+    }
+
+    /**
+     * @return iterable<string, array{string, InstanceState, InstanceState}> the failed job's type, the instance state
+     *                                                                       before the retry, the state after it
+     */
+    public static function retryStates(): iterable
+    {
+        yield 'stop leaves the state alone' => ['stop', InstanceState::Running, InstanceState::Running];
+        yield 'destroy goes back to destroying' => ['destroy', InstanceState::Failed, InstanceState::Destroying];
+        yield 'redeploy goes back to deploying' => ['redeploy', InstanceState::Failed, InstanceState::Deploying];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('retryStates')]
+    public function testRetryOfAFailedJobSetsTheInstanceState(string $type, InstanceState $before, InstanceState $after): void
+    {
+        $this->deploy(new DeployInput('acme'));
+        $this->markFinished('acme--develop');
+        $this->instances->find('acme--develop')?->changeState(InstanceState::Stopped);
+        $failed = $this->service()->request($type, new Selector(['acme--develop']), new OperationOptions(), JobTrigger::Ui, 'admin')[0];
+        $this->service->finish($failed, JobStatus::Failed, 1, 'boom');
+        $this->instances->find('acme--develop')?->changeState($before);
+
+        $retry = $this->service()->retry((int) $failed->id(), JobTrigger::Ui, 'admin');
+
+        self::assertSame($type, $retry->type());
+        self::assertSame($failed->id(), $retry->retryOf());
+        self::assertSame($after, $this->instances->find('acme--develop')?->state());
     }
 }
