@@ -133,14 +133,25 @@ final class JobRepositoryTest extends KernelTestCase
 
     public function testLatestPerInstanceHandlesMoreIdsThanSqliteBindsAtOnce(): void
     {
-        $job = $this->job(instance: 'blog--main');
+        // One real instance in each of the first, middle and last chunks (the repository chunks by 500, and the
+        // fillers never match), so this fails when a chunk is skipped or overwritten, whatever the build's limit.
         $ids = array_map(static fn (int $i): string => 'none--'.$i, range(1, 1500));
-        $ids[] = 'blog--main';
+        $ids[10] = 'blog--main';
+        $ids[700] = 'shop--main';
+        $ids[1400] = 'docs--main';
+        $expected = [];
+        foreach (['blog--main', 'shop--main', 'docs--main'] as $instance) {
+            $this->job(instance: $instance);
+            $expected[$instance] = $this->job(instance: $instance)->id();
+        }
+        $this->em->clear();
 
-        $latest = $this->jobs->latestPerInstance($ids);
+        $latest = $this->jobs->latestPerInstance(array_values($ids));
 
-        self::assertSame(['blog--main'], array_keys($latest));
-        self::assertSame($job->id(), $latest['blog--main']->id());
+        self::assertEqualsCanonicalizing(array_keys($expected), array_keys($latest));
+        foreach ($expected as $instance => $id) {
+            self::assertSame($id, $latest[$instance]->id(), $instance);
+        }
     }
 
     public function testSearchFiltersAndPages(): void

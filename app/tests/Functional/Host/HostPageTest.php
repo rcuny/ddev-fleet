@@ -286,6 +286,42 @@ final class HostPageTest extends HostPageTestCase
         self::assertStringStartsWith('SQLite format 3', (string) file_get_contents($response->getFile()->getPathname()));
     }
 
+    public function testBackupNowOverTheLimitFlashesTheTooLargeMessage(): void
+    {
+        // A sparse file: it reports 257 MiB (over INTERACTIVE_MAX_BYTES) without using the disk.
+        $this->paths()->ensureLayout();
+        $handle = fopen($this->paths()->queueDb(), 'w');
+        self::assertIsResource($handle);
+        ftruncate($handle, BackupService::INTERACTIVE_MAX_BYTES + 1024 * 1024);
+        fclose($handle);
+
+        $crawler = $this->open('/admin/host?tab=backups');
+        $this->client->submit($crawler->filter('[data-testid=backup-now-form]')->form());
+        self::assertResponseRedirects('/admin/host?tab=backups');
+        $crawler = $this->client->followRedirect();
+
+        $flashes = $crawler->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('too large to back up from this page', $flashes);
+        self::assertStringContainsString('fleet fleet:backup:create', $flashes);
+        self::assertSame([], self::getContainer()->get(BackupService::class)->list(), 'nothing is written');
+    }
+
+    public function testGitTabWarnsAboutAStoredIdentityThatNoLongerPasses(): void
+    {
+        $repository = new HostSettingsRepository($this->em());
+        $host = $repository->get() ?? self::fail('No host row.');
+        $host->changeGitIdentity('Fleet Bot', 'bot@localhost');
+        $repository->save($host);
+
+        $crawler = $this->open('/admin/host?tab=git');
+        self::assertCount(1, $crawler->filter('[data-testid=host-git-stored-invalid]'));
+
+        $host->changeGitIdentity('Fleet Bot', 'bot@example.com');
+        $repository->save($host);
+        $crawler = $this->open('/admin/host?tab=git');
+        self::assertCount(0, $crawler->filter('[data-testid=host-git-stored-invalid]'));
+    }
+
     public function testDownloadRefusesEverythingButAFleetBackup(): void
     {
         $service = self::getContainer()->get(BackupService::class);

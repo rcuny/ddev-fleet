@@ -5,6 +5,9 @@
         <twig:Card:Description>The default author of the commits the fleet makes in instances (the git bot).</twig:Card:Description>
     </twig:Card:Header>
     <twig:Card:Content>
+        {% if gitStoredInvalid|default(false) %}
+            <p class="mb-4 text-sm text-destructive" role="alert" data-testid="host-git-stored-invalid">The saved identity no longer passes the current rules (for example <code>bot@localhost</code> or a name with invisible formatting characters). Correct it and save again.</p>
+        {% endif %}
         {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-git-form'}}) }}
             {{ form_errors(form) }}
             {{ form_row(form.name) }}

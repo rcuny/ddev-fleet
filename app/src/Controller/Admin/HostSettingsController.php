@@ -365,6 +365,8 @@ final class HostSettingsController extends AbstractController
             'tab' => $tab,
             'forms' => $forms,
             'backups' => 'backups' === $tab ? $this->backupRows() : [],
+            // An identity saved before the rules were tightened (FLE-59) fails its next save: say so up front.
+            'gitStoredInvalid' => 'git' === $tab && null === $submitted && [] !== GitIdentityRule::violations($host->gitUserName(), $host->gitUserEmail()),
             'secrets' => [
                 'claude' => $this->secrets->fleetWideUpdatedAt(HostSecrets::CLAUDE_TOKEN),
                 'smtp' => $this->secrets->fleetWideUpdatedAt(HostSecrets::SMTP_PASSWORD),
