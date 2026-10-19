@@ -87,6 +87,7 @@ final class JobControllerTest extends AdminTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('h1'));
         self::assertCount(1, $crawler->filter('[data-testid=job-log]'));
+        self::assertCount(1, $crawler->filter('pre[data-testid=job-log][role=log][aria-live=off][aria-label]'));
         self::assertStringContainsString('acme--i1', $this->body());
     }
 
