@@ -135,7 +135,7 @@ curl examples above use. How the installer sets this up: [`installation.md`](ins
 ## Directory modes under `FLEET_HOME`
 
 `FleetPaths::ensureLayout()` creates the tree with exact modes (applied with `chmod`, so the
-umask does not matter): `keys/` and `ssh/` are `0700`; `home`, `var/`, `assets/`, `instances/` and
+umask does not matter): `keys/`, `ssh/` and `uploads/` (browser upload chunks) are `0700`; `home`, `var/`, `assets/`, `instances/` and
 `logs/` (with `logs/jobs/` and `logs/instances/`) are `0750`, because they hold database files,
 injected `.env` files and job logs that echo secrets; `locks/` is `0755`. Job logs are
 `logs/jobs/<job>.log` for fleet-level jobs and `logs/instances/<instance>/<job>.log` for jobs of

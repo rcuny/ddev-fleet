@@ -74,6 +74,7 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `App\Fleet\Auth` | `UserService`, `PasswordPolicy`, `AutheliaUsersRenderer` / `AutheliaUsersFile` (the Authelia `users.yml`, written atomically under a lock) |
 | `App\Fleet\System` | The renderers (`CaddyfileRenderer`, `CaddyEnvRenderer`, `AutheliaConfigRenderer`; templates in `templates/system/`), `ConfigValue` (validates everything that is rendered), `SystemRenderer` (staging), `GateWriter` / `GateMode` (the Caddy gate snippet), `CaddyReloader`, and the `Applier` seam with `PrivilegedApply` (see "Privileged apply") |
 | `App\Fleet\Projects` | `ProjectService`, `TemplateService` and `NamedPortService` (the only code that creates, changes and deletes projects, templates and catalogue ports; each collects the first error of every field and throws one `ValidationFailed` carrying a `field => message` map, or `Refused` / `NotFound`), the inputs they take (`ProjectInput`, `TemplateInput`, `NamedPortInput`) and `ProjectSnapshot` (a project as plain data in the 0.x key names) |
+| `App\Fleet\Assets` | A project's assets directory (`assets/<project>/`): `AssetPath` (the text rules for a relative path or name: allow-list, no `..`, NUL, control or format characters), `AssetStore` (the only code that lists, creates folders in, deletes from, opens and publishes into that directory; walks every path with `lstat` and **never follows or writes through a symlink**), `UploadService` (chunked resumable browser uploads staged in `uploads/<id>/`, assembled atomically with a sha256, cap = `HostSettings::assetUploadMaxBytes`, abandoned after 24 h, `gc()`), `AssetEntry`, `AssetListing`, `AssetFile`, `UploadState`, `UploadResult`, `GcResult`, `ByteSize`. Errors reuse `ValidationFailed` / `Refused` (its code is the HTTP status the JSON endpoints answer) / `NotFound` |
 | `App\Fleet\Projects\Rule` | The pure validation rules, one class per concern: `ResourceName`, `GitUrl`, `BranchName`, `IssueIdPattern`, `CommandLines`, `DrupalEnv`, `GitIdentity`, `SubmodulePath`, `PortNumbers`, `TextBlock`. They return a message or null and never echo the input |
 | `App\Setup` | The setup wizard's domain: `SetupTokenService`, `SetupCookie`, `SetupState`, `SetupGate` / `SetupAccessSubscriber` (the guard), `SetupAttemptLimiter`, `SetupProgress`, `SetupFinisher`, `ScanTargetPolicy` |
 | `App\Health` | `HealthChecker` / `HealthReport` behind `GET /health`; `HostHealth` / `HostHealthReport` (memory, disk, reboot-required) for the Home card |
@@ -83,7 +84,9 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
 | `App\Form\Project` | The project and template forms (`ProjectType`, `TemplateType`; plain Symfony forms, `novalidate`, errors come from the services through `ValidationErrorMapper`) |
 | `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be in `docs/installation.md` |
 | `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliDocsTest` against `docs/projects-and-templates.md`. A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
+| `App\Command\Asset` | `fleet:asset:list <project> [path]` and `fleet:asset:gc` (exit codes and `--format=table\|json` as the commands above). Own sub-directory, group `asset` in `install/bin/fleet`; covered by `AssetDocsTest` against `docs/assets.md` |
 | `App\Command\Support` | What those commands share: `JsonOutput` (`--format=table\|json`, `--json`, exit codes 0 done / 1 refused value / 2 not allowed now / 3 not found, the `{"error", "fields"}` document), `FieldErrors` (field name to `--option` or `<argument>`), `Shapes` (JSON for templates and ports). Not commands |
+| `App\Twig` | `ByteSizeExtension` (the `bytes` filter: `1536\|bytes` is `1.5 KiB`) |
 | `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`, and `IssueIdPreview`, the one LiveComponent: admin-only through `#[IsGranted]`) |
 | `App\Ui` | UI support classes: `NavigationCatalog`, `NavItem`, `ProfilerToolbarSwitch` |
 | `App\Message`, `App\MessageHandler` | Reserved for Messenger messages and handlers (from M0.04) |
@@ -101,7 +104,7 @@ New work follows these namespaces; add a new one only with a reason.
 - **`App\Fleet\FleetPaths` owns every filesystem path** under `FLEET_HOME` (must be absolute):
   `var/fleet.sqlite`, `var/queue.sqlite`, `keys/`, `ssh/`, `assets/<project>/`, `instances/<id>/`,
   `logs/jobs/<job>.log`, `logs/instances/<instance>/<job>.log`, `locks/`, `keys/secret.key`,
-  `ssh/{deploy,push}_ed25519[.pub]` and `ssh/known_hosts`, `staging/<target>/<file>` (rendered config waiting for the root
+  `ssh/{deploy,push}_ed25519[.pub]` and `ssh/known_hosts`, `uploads/<id>/` (browser upload chunks, 0700), `staging/<target>/<file>` (rendered config waiting for the root
   helper), `authelia/users.yml`. It also owns the Caddy snippet directory (`FLEET_CADDY_DIR`, `/etc/caddy/fleet` in
   production) and derives `gate.conf` and `/etc/caddy/Caddyfile` from it. Never hard-code a path outside it. Ids are validated (no `..`, no `/`).
   `ensureLayout()` creates the tree with exact modes (`keys/`, `ssh/`, `staging/` 0700; everything holding data or logs 0750).
@@ -143,7 +146,7 @@ New work follows these namespaces; add a new one only with a reason.
   through a shell. `docs/projects-and-templates.md` is checked by `CliDocsTest` (commands, options, exit codes): change a
   command, change the guide.
 - **Console commands**: `fleet <group>:<verb>` for groups the wrapper knows (`host`, `setup`, `user`, `project`, `template`,
-  `port`; `fleet project list` also works). Commands that read or write the database are tested with
+  `port`, `asset`; `fleet project list` also works). Commands that read or write the database are tested with
   `RunsFleetCommands` against a real migrated database; stderr assertions need `capture_stderr_separately`.
 - **Components beyond the managed list below.** `<twig:Textarea>` (several lines of text; the form theme renders Symfony's
   `TextareaType` with it, so never write a raw `<textarea>`), `<twig:Checkbox>`, `<twig:NativeSelect>` and `<twig:RadioGroup>` are
@@ -274,6 +277,7 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 
 - `docs/README.md` — documentation index with the status of each document.
 - `docs/installation.md` — installing 1.x on a host: installer, setup wizard, recovery, security model, uninstalling.
+- `docs/assets.md` — a project's assets: the Assets tab, chunked browser upload and its cap, copying over SSH, path rules, `fleet asset:list|gc`.
 - `docs/projects-and-templates.md` — projects, templates and named ports: fields and limits, the pages, the `fleet project|template|port` commands, differences from 0.x.
 - `docs/development.md` — setup, environment variables, stand-in, adding a component.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
