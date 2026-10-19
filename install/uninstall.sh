@@ -119,7 +119,15 @@ main() {
     # Containers of the fleet's instances: stopped (their files go with /srv/fleet, or stay with --keep-data).
     do_cmd runuser -u "${fleet_user:?}" -- env HOME=/home/fleet DDEV_NONINTERACTIVE=true ddev poweroff
   fi
-  do_cmd systemctl disable --now 'fleet-worker@*.service'
+  # enable/disable take unit file names and stop matches loaded units, so each instance is named in full: the
+  # enabled fleet-worker@1 always, plus every instance systemd knows (running, failed or inactive-but-loaded).
+  local workers unit
+  workers=$(systemctl list-units --all --plain --no-legend 'fleet-worker@*' 2>/dev/null |
+    awk '{for (i = 1; i <= NF; i++) if ($i ~ /^fleet-worker@[A-Za-z0-9_.:-]+\.service$/) print $i}' || true)
+  workers=$(printf '%s\n' fleet-worker@1.service "$workers" | sort -u)
+  for unit in $workers; do
+    do_cmd systemctl disable --now "$unit"
+  done
   do_cmd systemctl disable --now fleet-mercure.service
   do_cmd systemctl disable --now caddy.service
   do_cmd systemctl disable --now authelia.service
@@ -134,7 +142,6 @@ main() {
   remove_file "${systemd_dir:?}/authelia.service.d/secrets.conf"
   # The drop-in directories go when they are empty (rmdir never removes anything else).
   do_cmd rmdir --ignore-fail-on-non-empty "${systemd_dir:?}/php8.4-fpm.service.d" "${systemd_dir:?}/caddy.service.d" "${systemd_dir:?}/authelia.service.d"
-  remove_file "${tmpfiles_mask:?}"
   remove_path "${etc_dir:?}"
   remove_path "${mercure_etc:?}"
   remove_path "${var_lib:?}/fleet-mercure"
@@ -182,9 +189,13 @@ main() {
     say "kept: ${srv_dir:?}, Authelia's secrets and database, and the ${fleet_user:?} user that owns them (--keep-data)"
   else
     remove_path "${srv_dir:?}"
+    # The tmpfiles mask goes with the secrets it protects; with --keep-data both stay.
+    remove_file "${tmpfiles_mask:?}"
     remove_path "${authelia_etc:?}/secrets"
     remove_path "${var_lib:?}/authelia"
     if [ "$dry" = 1 ] || id -u "${fleet_user:?}" >/dev/null 2>&1; then
+      # Nothing of the fleet user may still run (a worker, DDEV, a shell), or userdel refuses.
+      do_cmd pkill -KILL -u "${fleet_user:?}"
       do_cmd userdel --remove "${fleet_user:?}"
     fi
   fi

@@ -292,6 +292,37 @@ final class InstallerAssetsStepsTest extends TestCase
         self::assertLessThan(strpos($calls, 'systemctl restart caddy'), strpos($calls, 'apply caddy'), 'the helper installs before Caddy restarts');
     }
 
+    public function testAnUpgradeThatAddsAnEnvironmentKeyRestartsInsteadOfReloading(): void
+    {
+        $etc = $this->scratch().'/etc';
+        $step70 = '. "$INSTALL_DIR/steps/70-env.sh"; step_main; . "$INSTALL_DIR/steps/98-render-start.sh"; ';
+        // The first install writes fleet.env and starts everything.
+        [$status, , $err] = $this->runRenderStart(['CODE_CHANGED' => 1], extra: $step70, etc: $etc);
+        self::assertSame(0, $status, $err);
+
+        // The upgrade ships new code and a new key. Nothing sets ENV_CHANGED by hand: step 70 must.
+        file_put_contents($etc.'/fleet.env', (string) preg_replace('/^FLEET_ADMIN_GROUP=.*\n/m', '', (string) file_get_contents($etc.'/fleet.env')));
+        [$status, $calls, $err] = $this->runRenderStart(['CODE_CHANGED' => 1], extra: $step70, etc: $etc);
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString("systemctl restart php8.4-fpm\n", $calls, 'EnvironmentFile is read at start: a reload would keep the old environment');
+        self::assertStringNotContainsString('reload-or-restart', $calls);
+        self::assertStringContainsString("systemctl restart fleet-worker@1.service\n", $calls);
+        self::assertStringContainsString("systemctl restart caddy\n", $calls);
+        self::assertStringNotContainsString('systemctl restart fleet-mercure', $calls, 'the hub key did not change');
+
+        // Same code, nothing new in the files: only a reload for new code, no restart of fpm.
+        [$status, $calls] = $this->runRenderStart(['CODE_CHANGED' => 1], extra: $step70, etc: $etc);
+        self::assertSame(0, $status);
+        self::assertStringContainsString("systemctl reload-or-restart php8.4-fpm\n", $calls);
+        self::assertStringNotContainsString("systemctl restart php8.4-fpm\n", $calls);
+
+        // A new hub secret restarts the hub.
+        file_put_contents($etc.'/fleet.env', (string) preg_replace('/^MERCURE_JWT_SECRET=.*$/m', 'MERCURE_JWT_SECRET='.str_repeat('f', 64), (string) file_get_contents($etc.'/fleet.env')));
+        [, $calls] = $this->runRenderStart([], extra: $step70, etc: $etc);
+        self::assertStringContainsString("systemctl restart fleet-mercure\n", $calls);
+    }
+
     public function testRenderStartRecordsTheInstalledRevisionOnlyWhenHealthy(): void
     {
         $etc = $this->scratch().'/etc';
@@ -365,7 +396,7 @@ final class InstallerAssetsStepsTest extends TestCase
         foreach ($flags as $name => $value) {
             $assign .= $name.'='.$value.'; ';
         }
-        $code = '. "$INSTALL_DIR/steps/98-render-start.sh"; FLEET_DRY_RUN=0; DOMAIN=fleet.example.com; SETUP_COMPLETE=1; '.
+        $code = '. "$INSTALL_DIR/steps/98-render-start.sh"; FLEET_DRY_RUN=0; DOMAIN=fleet.example.com; SETUP_COMPLETE=1; CODE_REVISION=; '.
             'HELPER_DIR='.escapeshellarg($helperDir).'; FLEET_ETC_DIR='.escapeshellarg($etc).'; '.$assign.$extra.' step_main';
 
         [$status, , $err] = $this->withCommon($code, ['FLEET_INSTALL_HEALTH_TIMEOUT' => $timeout], $stubs);

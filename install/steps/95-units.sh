@@ -49,7 +49,7 @@ install_mercure() {
   install -m 0755 -o root -g root "$tmp/mercure" "$MERCURE_BIN.new"
   mv -f "$MERCURE_BIN.new" "$MERCURE_BIN"
   ensure_dir "$MERCURE_MARKER_DIR" 0755 root:root
-  printf '%s %s\n' "$MERCURE_VERSION" "$sha" | write_file "$MERCURE_MARKER" 0644 root:root
+  write_file "$MERCURE_MARKER" 0644 root:root <<<"$MERCURE_VERSION $sha"
   rm -rf "$tmp"
 }
 

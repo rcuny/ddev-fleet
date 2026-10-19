@@ -91,7 +91,7 @@ final class UnitsTest extends TestCase
 
         self::assertSame(['/etc/ddev-fleet/fleet.env'], $unit['Service']['EnvironmentFile']);
         // Debian's unit has ProtectSystem=full: /etc is read-only for the pool and the sudo child unless listed here.
-        self::assertSame(['/etc/caddy /etc/authelia'], $unit['Service']['ReadWritePaths']);
+        self::assertSame(['-/etc/caddy -/etc/authelia'], $unit['Service']['ReadWritePaths'], '"-": the unit still starts if a package was removed by hand');
         self::assertSame(['no'], $unit['Service']['NoNewPrivileges'], 'the pool calls sudo');
     }
 
@@ -106,6 +106,7 @@ final class UnitsTest extends TestCase
         self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console messenger:consume jobs --time-limit=3600 --memory-limit=256M -vv'], $service['ExecStart']);
         self::assertSame(['always'], $service['Restart']);
         self::assertSame(['5'], $service['RestartSec']);
+        self::assertGreaterThanOrEqual(600, (int) $service['TimeoutStopSec'][0], 'a restart on upgrade lets the running job finish');
         self::assertSame(['full'], $service['ProtectSystem']);
         self::assertSame(['/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var'], $service['ReadWritePaths']);
         self::assertSame(['/opt/ddev-fleet/app'], $service['WorkingDirectory']);

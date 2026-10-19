@@ -51,7 +51,7 @@ final class UninstallTest extends TestCase
         self::assertSame(0, $status, $err);
         self::assertStringContainsString('dry-run: nothing is changed', $out);
         foreach ([
-            '+ systemctl disable --now fleet-worker@\*.service',
+            '+ systemctl disable --now fleet-worker@1.service',
             '+ systemctl disable --now fleet-mercure.service',
             '+ systemctl disable --now caddy.service',
             '+ systemctl disable --now authelia.service',
@@ -82,6 +82,35 @@ final class UninstallTest extends TestCase
             self::assertStringContainsString($line, $out);
         }
         self::assertStringNotContainsString('apt-get -y -q purge', $out, 'packages stay without --purge-packages');
+    }
+
+    public function testEveryWorkerInstanceIsStoppedAndDisabledByFullNameBeforeAnythingIsRemoved(): void
+    {
+        // systemctl lists loaded instances (one failed, one only loaded); the enabled fleet-worker@1 is always included.
+        $stubs = $this->stubs(['systemctl' => 'if [ "$1" = list-units ]; then echo "fleet-worker@2.service loaded active running w"; echo "● fleet-worker@7.service loaded failed failed w"; echo "caddy.service loaded active running c"; fi']);
+
+        [$status, $out, $err] = $this->bash([self::installDir().'/uninstall.sh', '--yes', '--dry-run'], [], null, $stubs);
+
+        self::assertSame(0, $status, $err);
+        foreach (['1', '2', '7'] as $n) {
+            self::assertSame(1, substr_count($out, '+ systemctl disable --now fleet-worker@'.$n.".service\n"), 'instance '.$n);
+        }
+        self::assertStringNotContainsString('fleet-worker@\\*', $out, 'no glob: disable takes unit file names');
+        self::assertStringNotContainsString('--now caddy.service\n+ systemctl disable --now fleet-worker', $out);
+        $workers = (int) strrpos($out, 'fleet-worker@7.service');
+        self::assertLessThan((int) strpos($out, '+ rm -f -- /etc/systemd/system/fleet-worker@.service'), $workers, 'stopped before the unit file goes');
+        self::assertLessThan((int) strpos($out, '+ userdel --remove fleet'), (int) strpos($out, '+ pkill -KILL -u fleet'), 'nothing of the user runs when userdel is called');
+        self::assertLessThan((int) strpos($out, '+ userdel --remove fleet'), $workers);
+    }
+
+    public function testTheAutheliaTmpfilesMaskStaysWithKeepData(): void
+    {
+        [, $out] = $this->uninstall(['--yes', '--dry-run', '--keep-data']);
+        self::assertStringNotContainsString('/etc/tmpfiles.d/authelia.conf', $out, 'the package and its secrets stay, so does the mask that protects them');
+        self::assertStringNotContainsString('pkill', $out);
+
+        [, $out] = $this->uninstall(['--yes', '--dry-run']);
+        self::assertStringContainsString('+ rm -f -- /etc/tmpfiles.d/authelia.conf', $out);
     }
 
     public function testKeepDataKeepsTheStateAndItsOwner(): void

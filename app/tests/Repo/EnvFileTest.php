@@ -154,6 +154,27 @@ final class EnvFileTest extends TestCase
         self::assertSame('prod|/srv/fleet|64', $out);
     }
 
+    public function testChangeFlagsFollowWhatTheStepActuallyChanged(): void
+    {
+        $dir = $this->scratch().'/etc-ddev-fleet';
+        $flags = static fn (string $out): string => trim(substr($out, (int) strrpos($out, 'flags:')));
+
+        [, $out] = $this->runStepRaw(after: 'echo "flags: env=$ENV_CHANGED mercure=$MERCURE_CHANGED"');
+        self::assertSame('flags: env=1 mercure=1', $flags($out), 'a fresh install');
+
+        [, $out] = $this->runStepRaw(after: 'echo "flags: env=$ENV_CHANGED mercure=$MERCURE_CHANGED"');
+        self::assertSame('flags: env=0 mercure=0', $flags($out), 'a re-run that changes nothing must restart nothing');
+
+        file_put_contents($dir.'/fleet.env', (string) preg_replace('/^FLEET_ADMIN_GROUP=.*\n/m', '', (string) file_get_contents($dir.'/fleet.env')));
+        [, $out] = $this->runStepRaw(after: 'echo "flags: env=$ENV_CHANGED mercure=$MERCURE_CHANGED"');
+        self::assertSame('flags: env=1 mercure=0', $flags($out), 'a key added by the upgrade: php-fpm and the workers must re-read their environment');
+        self::assertArrayHasKey('FLEET_ADMIN_GROUP', $this->parse($dir.'/fleet.env'));
+
+        file_put_contents($dir.'/fleet.env', (string) preg_replace('/^MERCURE_JWT_SECRET=.*$/m', 'MERCURE_JWT_SECRET='.str_repeat('e', 64), (string) file_get_contents($dir.'/fleet.env')));
+        [, $out] = $this->runStepRaw(after: 'echo "flags: env=$ENV_CHANGED mercure=$MERCURE_CHANGED"');
+        self::assertSame('flags: env=0 mercure=1', $flags($out), 'a new hub key restarts the hub');
+    }
+
     public function testSecretsNeverReachTheOutput(): void
     {
         $dir = $this->scratch().'/etc-ddev-fleet';
@@ -199,14 +220,15 @@ final class EnvFileTest extends TestCase
     }
 
     /** @return array{int, string, string} */
-    private function runStepRaw(?string $stubs = null, string $domain = 'fleet.example.com'): array
+    private function runStepRaw(?string $stubs = null, string $domain = 'fleet.example.com', string $after = ''): array
     {
         $dir = $this->scratch().'/etc-ddev-fleet';
         $stubs ??= $this->stubs(['chown' => 'exit 0']);
         $code = \sprintf(
-            '. "$INSTALL_DIR/steps/70-env.sh"; FLEET_ETC_DIR=%s; DOMAIN=%s; FLEET_DRY_RUN=0; step_main',
+            '. "$INSTALL_DIR/steps/70-env.sh"; FLEET_ETC_DIR=%s; DOMAIN=%s; FLEET_DRY_RUN=0; step_main; %s',
             escapeshellarg($dir),
             escapeshellarg($domain),
+            '' === $after ? 'true' : $after,
         );
 
         return $this->withCommon($code, [], $stubs);

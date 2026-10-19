@@ -112,7 +112,7 @@ step_main() {
   wait_until_healthy
 
   if ! is_dry && [ -n "$CODE_REVISION" ]; then
-    printf '%s\n' "$CODE_REVISION" | write_file "$FLEET_ETC_DIR/installed-revision" 0644 root:root
+    write_file "$FLEET_ETC_DIR/installed-revision" 0644 root:root <<<"$CODE_REVISION"
   fi
   announce_setup
 }

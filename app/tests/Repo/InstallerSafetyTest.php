@@ -63,6 +63,15 @@ final class InstallerSafetyTest extends TestCase
         self::assertSame([], $hits, "plain http urls:\n".implode("\n", $hits));
     }
 
+    public function testNothingPipesIntoWriteFile(): void
+    {
+        // write_file reports a change through the FILE_CHANGED global; a pipeline stage is a subshell, so the caller
+        // would never see it and the restarts of step 98 would silently be skipped.
+        $hits = $this->grepCode('/\|\s*write_file(_once)?\b/');
+
+        self::assertSame([], $hits, "a pipe into write_file:\n".implode("\n", $hits));
+    }
+
     public function testNoShellTrace(): void
     {
         // A trace prints every command, secrets included, into the install log.

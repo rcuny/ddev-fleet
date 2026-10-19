@@ -419,7 +419,8 @@ ensure_dir() {
 }
 
 # write_file <path> <mode> <owner:group>  (content on stdin). Atomic (temp file in the same directory, then rename).
-# Sets FILE_CHANGED=1 when the content differs from what was there.
+# Sets FILE_CHANGED=1 when the content differs from what was there. Never feed it through a pipe: a pipeline stage
+# runs in a subshell and the flag would be lost (use a here-string or a redirect).
 write_file() {
   local path=$1 mode=$2 owner=$3 tmp
   FILE_CHANGED=0
@@ -533,7 +534,9 @@ policy_deny_start() {
     log_warn "$POLICY_RC exists and is not ours; leaving it in place"
     return 0
   fi
-  printf '#!/bin/sh\n%s\nexit 101\n' "$POLICY_MARKER" | write_file "$POLICY_RC" 0755 root:root
+  write_file "$POLICY_RC" 0755 root:root <<<"#!/bin/sh
+$POLICY_MARKER
+exit 101"
 }
 
 # Removes only our own file; safe to call at any time (also from the exit trap and after a killed run).
