@@ -21,23 +21,21 @@ final class MessengerWiringTest extends KernelTestCase
         $this->restoreFleetHome();
     }
 
-    public function testJobsTransportRoundTripsOnTheQueueDatabaseOnly(): void
+    public function testQueueTransportsRoundTripOnTheQueueDatabaseOnly(): void
     {
         $this->useFreshFleetHome();
         self::bootKernel();
         $container = self::getContainer();
 
-        foreach (['jobs', 'failed'] as $name) {
-            $transport = $container->get('messenger.transport.'.$name);
-            self::assertInstanceOf(SetupableTransportInterface::class, $transport);
-            $transport->setup();
-        }
+        // `jobs` runs as sync:// in the test environment (MessengerRoutingTest pins prod to Doctrine), so the
+        // round trip uses `failed`, which is Doctrine everywhere.
+        $failed = $container->get('messenger.transport.failed');
+        self::assertInstanceOf(SetupableTransportInterface::class, $failed);
+        $failed->setup();
+        self::assertInstanceOf(TransportInterface::class, $failed);
 
-        $jobs = $container->get('messenger.transport.jobs');
-        self::assertInstanceOf(TransportInterface::class, $jobs);
-
-        $jobs->send(new Envelope(new \stdClass()));
-        $received = iterator_to_array($jobs->get());
+        $failed->send(new Envelope(new \stdClass()));
+        $received = iterator_to_array($failed->get());
         self::assertCount(1, $received);
         self::assertInstanceOf(\stdClass::class, $received[0]->getMessage());
 
