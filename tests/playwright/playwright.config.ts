@@ -16,6 +16,8 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'retain-on-failure',
+    // A click that can never land (an overlay over the target) must fail naming the intercepting element, not hang to the test timeout.
+    actionTimeout: 30_000,
     ignoreHTTPSErrors,
     // Hides the Symfony profiler toolbar per request: it would cover the phone bottom bar, and an external
     // server (the companion's php-fpm) has an environment this suite does not control.

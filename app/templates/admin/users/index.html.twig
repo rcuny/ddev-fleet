@@ -1,0 +1,57 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Users · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Users" description="Who can sign in to Fleet, and which projects they can operate.">
+        <twig:block name="actions">
+            <twig:Button as="a" href="{{ path('user_new') }}" class="h-11 md:h-8">
+                <twig:ux:icon name="lucide:user-plus" />
+                New user
+            </twig:Button>
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6">
+        {% if rows|length == 0 %}
+            <twig:Card data-testid="users-empty" class="max-w-xl">
+                <twig:Card:Header>
+                    <twig:Card:Title>No users yet</twig:Card:Title>
+                    <twig:Card:Description>Create the people who sign in, then add them to the projects they work on.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content>
+                    <twig:Button as="a" href="{{ path('user_new') }}" class="h-11 md:h-8">New user</twig:Button>
+                </twig:Card:Content>
+            </twig:Card>
+        {% else %}
+            <ul class="divide-y divide-hairline overflow-hidden rounded-md border border-hairline bg-page">
+                {% for row in rows %}
+                    {% set user = row.user %}
+                    <li data-testid="user-row" data-username="{{ user.username }}" class="px-4 py-2 hover:bg-surface">
+                        <a href="{{ path('user_edit', {username: user.username}) }}" class="flex min-h-11 min-w-0 items-center gap-3 hover:no-underline">
+                            <twig:ux:icon name="lucide:user" class="size-4 shrink-0 text-ink-muted" />
+                            <span class="min-w-0 flex-1">
+                                <span class="block truncate text-sm font-medium text-ink-display">{{ user.displayName }}</span>
+                                <span class="block truncate text-xs text-ink-muted">{{ user.username }} · {{ user.email }}</span>
+                                <span class="mt-1 flex flex-wrap gap-1">
+                                    {% if row.admin %}
+                                        <twig:Badge data-testid="user-admin">Admin</twig:Badge>
+                                    {% endif %}
+                                    {% if not user.enabled %}
+                                        <twig:Badge variant="secondary" data-testid="user-disabled">Disabled</twig:Badge>
+                                    {% endif %}
+                                    {% if row.admin %}
+                                        <twig:Badge variant="outline" data-testid="user-projects">All projects</twig:Badge>
+                                    {% else %}
+                                        <twig:Badge variant="outline" data-testid="user-projects">{{ row.projects }} {{ row.projects == 1 ? 'project' : 'projects' }}</twig:Badge>
+                                    {% endif %}
+                                </span>
+                            </span>
+                            <twig:ux:icon name="lucide:chevron-right" class="size-4 shrink-0 text-ink-muted" />
+                        </a>
+                    </li>
+                {% endfor %}
+            </ul>
+        {% endif %}
+    </div>
+{% endblock %}

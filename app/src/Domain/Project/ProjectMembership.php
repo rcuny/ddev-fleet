@@ -7,7 +7,7 @@ namespace App\Domain\Project;
 use App\Security\FleetUser;
 
 /**
- * Whether a non-admin user may operate a project. Real memberships arrive with M0.10; until then nobody is a member.
+ * Whether a non-admin user may operate a project. The implementation is ProjectAccessMembership (project_access rows).
  */
 interface ProjectMembership
 {

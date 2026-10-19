@@ -67,11 +67,14 @@ services:
         alias: App\Setup\DnsHostResolver
 
     # A project with instance rows cannot be deleted (the real guard; the test environment swaps in a scripted one).
-    # Nobody is a member of a project until M0.10 brings real memberships.
     App\Domain\Project\ProjectInstanceGuard:
         alias: App\Domain\Instance\InstanceGuard
+    # The per-project Authelia access rules come from the project_access rows (M0.10).
+    App\Fleet\System\AccessRuleSource:
+        alias: App\Fleet\Auth\ProjectAccessRules
+    # Members of a project are the rows of project_access (M0.10).
     App\Domain\Project\ProjectMembership:
-        alias: App\Domain\Project\NoProjectMembership
+        alias: App\Domain\Project\ProjectAccessMembership
 
     # Command seam: both runners are shared services under non-class ids (so no class can autowire them);
     # only the factory receives them, and FLEET_RUNNER picks the CommandRunner.
@@ -146,6 +149,29 @@ when@test:
             public: true
         fleet.test_alias.caddyfile_renderer:
             alias: App\Fleet\System\CaddyfileRenderer
+            public: true
+
+        # Users and access (M0.10): consumed by pages and commands of the next phase; kept reachable for the wiring tests.
+        fleet.test_alias.project_membership:
+            alias: App\Domain\Project\ProjectMembership
+            public: true
+        fleet.test_alias.access_rule_source:
+            alias: App\Fleet\System\AccessRuleSource
+            public: true
+        fleet.test_alias.identity_sync:
+            alias: App\Fleet\Auth\IdentitySync
+            public: true
+        fleet.test_alias.authelia_access_sync:
+            alias: App\Fleet\Auth\AutheliaAccessSync
+            public: true
+        fleet.test_alias.project_access_service:
+            alias: App\Fleet\Auth\ProjectAccessService
+            public: true
+        fleet.test_alias.authelia_config_renderer:
+            alias: App\Fleet\System\AutheliaConfigRenderer
+            public: true
+        fleet.test_alias.authelia_users_file:
+            alias: App\Fleet\Auth\AutheliaUsersFile
             public: true
 
         # The setup domain is only consumed by controllers (M0.02 task 8) and commands; keep it reachable for the wiring test.
