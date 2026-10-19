@@ -109,7 +109,8 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640 `root:fleet`, see below), `mercure.env` (`root:root` 0600), `installed-revision` (0644). |
 | `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
 | `/etc/caddy/fleet/` | `fleet:caddy` 2750 | `gate.conf` (0640), the sign-in gate, written by the app; `instances/` and `ports/` for later milestones. |
-| `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret and, in DNS mode, the **OVH credentials in clear text** (Caddy reads them from its environment, so they cannot stay encrypted here). Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Caddy reads the file only at start, so a change of credentials restarts Caddy. |
+| `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret (Caddy reads it from its environment, so it only takes effect at the next start). It holds no OVH credential: an `OVH_*` line left by an older apply is dropped at the next `apply caddy`. |
+| `/etc/caddy/ovh/` | `root:caddy` 0750 | DNS mode only: four files (`endpoint`, `application_key`, `application_secret`, `consumer_key`), `root:caddy` 0640, one **clear-text** value each, which the Caddyfile reads through `{file./etc/caddy/ovh/…}` placeholders each time Caddy loads its configuration. Nothing sits in Caddy's process environment. Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Removed when the host leaves DNS mode. |
 | `/etc/authelia/` | `authelia:authelia` | `configuration.yml` (0640, written by the helper); `secrets/` (`root:authelia` 0750, three secret files 0640, generated once). |
 | `/etc/fleet-mercure/Caddyfile` | `root:root` 0644 | The Mercure hub configuration (it lives apart from `/etc/ddev-fleet` because the hub runs as a dynamic user). |
 | `/run/php/fleet.sock` | `fleet:caddy` 0660 | The only way into the app. |
@@ -178,11 +179,11 @@ step is saved as you go, and the wizard works at phone width.
 
      **Implemented, not yet verified live.** Only `http01` has run end to end on a real host; the DNS-01 path is
      covered by unit and helper tests with stand-ins, never against the OVH API. Finish installs the new Caddyfile
-     and `/etc/caddy/fleet.env` and then **restarts** Caddy a few seconds later (a reload would give the new
-     `{env.OVH_*}` placeholders to a Caddy that still has the old environment). What to check after choosing it:
+     and the four credential files in `/etc/caddy/ovh/` and **reloads** Caddy (the files are read at every load, so a
+     rotation of the credentials needs a reload only, never a restart). What to check after choosing it:
      `systemctl is-active caddy` a minute after Finish, `journalctl -u caddy -n 100 --no-pager` free of `ovh` or
      `dns` errors, and `sudo -u caddy env -i bash -c 'set -a; . /etc/caddy/fleet.env; caddy validate --config
-     /etc/caddy/Caddyfile --adapter caddyfile'` succeeding. Caddy keeps the certificates it already has, so the first
+     /etc/caddy/Caddyfile --adapter caddyfile'` succeeding (it reads `/etc/caddy/ovh/*` as `caddy`). Caddy keeps the certificates it already has, so the first
      DNS-01 issuance happens at the next renewal (about 30 days before expiry): to prove the credentials earlier,
      move the certificate storage aside and restart Caddy while watching the journal. If Caddy does not come back
      (the web UI is behind it, so the wizard cannot help), go back to HTTP-01 from the shell:
@@ -384,8 +385,8 @@ finish again.
   (a setuid `sudo` needs it), and the Finish request runs the helper from php-fpm for now.
 - **Secrets.** Generated once, kept in files with narrow modes (see section 3); the OVH credentials and the Claude
   token are stored encrypted in the database with a key that is only readable by `fleet` (the OVH credentials
-  also sit in clear text in `/etc/caddy/fleet.env`, `root:caddy` 0640, because Caddy needs them in its
-  environment); the setup URL is not in the install log, and Caddy's
+  also sit in clear text in `/etc/caddy/ovh/`, one file per value, `root:caddy` 0640 in a 0750 directory, because Caddy
+  needs them; they are not in Caddy's environment); the setup URL is not in the install log, and Caddy's
   log filter removes the `token` query parameter from every log line (there is no access log);
   secrets do not appear in command-line arguments.
 - **The Mercure hub** listens on loopback only and is reachable only through Caddy.

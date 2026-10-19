@@ -10,9 +10,10 @@ use App\Fleet\Secrets\SecretStore;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
- * Renders Caddy's environment file (`/etc/caddy/fleet.env`, installed through `apply caddy`): the proxy secret the
- * Caddyfile passes to the app, and in DNS mode the OVH credentials read from the secret store. Plain KEY=VALUE lines,
- * unquoted: every value is validated against a charset that is safe for systemd's EnvironmentFile and for the root
+ * Renders the staged `env` file of `apply caddy`: the proxy secret the Caddyfile passes to the app, and in DNS mode the
+ * OVH credentials read from the secret store. The helper splits it: `/etc/caddy/fleet.env` (Caddy's environment) keeps
+ * the proxy secret only, each OVH value goes to its own file under `/etc/caddy/ovh/` that the Caddyfile reads through
+ * `{file.*}` placeholders. Plain KEY=VALUE lines, unquoted: every value is validated against a charset that is safe for systemd's EnvironmentFile and for the root
  * helper's allowlist parser.
  */
 final readonly class CaddyEnvRenderer

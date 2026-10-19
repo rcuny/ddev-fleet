@@ -165,6 +165,7 @@ main() {
   remove_path "${var_lib:?}/private/fleet-mercure"
   remove_path "${caddy_etc:?}/fleet"
   remove_file "${caddy_etc:?}/fleet.env"
+  remove_path "${caddy_etc:?}/ovh"
   remove_file "${authelia_etc:?}/configuration.yml"
   do_cmd systemctl daemon-reload
 
