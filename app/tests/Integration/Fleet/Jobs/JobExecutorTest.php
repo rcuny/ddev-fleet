@@ -180,4 +180,78 @@ final class JobExecutorTest extends JobTestCase
         self::assertSame(JobStatus::Failed, $result->status());
         $holder->release();
     }
+
+    public function testAGatedJobDoesNotGiveUpWhileItWaitsForItsPredecessor(): void
+    {
+        $this->queuedJob('deploy', 'acme--a', 'b1', true);
+        $second = $this->queuedJob('deploy', 'acme--b', 'b1', true);
+        $this->clock->modify('+2 hours');
+
+        $this->executor([$this->jobType('deploy', static fn () => null)])->run((int) $second->id());
+
+        self::assertSame(JobStatus::Queued, $second->status());
+        self::assertSame([5000], $this->bus->delays());
+    }
+
+    public function testTheGiveUpClockOfABatchMemberStartsWhenItsPredecessorFinished(): void
+    {
+        $first = $this->queuedJob('deploy', 'acme--a', 'b1', true);
+        $second = $this->queuedJob('deploy', 'acme--b', 'b1', true);
+        $holder = $this->locks->createLock('instance.acme--b');
+        self::assertTrue($holder->acquire());
+
+        $this->clock->modify('+40 minutes');
+        $this->service->finish($first, JobStatus::Succeeded, 0, null);
+
+        $this->clock->modify('+10 minutes');
+        $this->executor([$this->jobType('deploy', static fn () => null)])->run((int) $second->id());
+        self::assertSame(JobStatus::Queued, $second->status(), '10 minutes after its turn it still waits');
+
+        $this->clock->modify('+25 minutes');
+        $this->executor([$this->jobType('deploy', static fn () => null)])->run((int) $second->id());
+        self::assertSame(JobStatus::Failed, $second->status());
+        $holder->release();
+    }
+
+    public function testASynchronousQueueFailsFastInsteadOfRecursing(): void
+    {
+        $job = $this->queuedJob();
+        $holder = $this->locks->createLock('instance.acme--main');
+        self::assertTrue($holder->acquire());
+        $executor = null;
+        $bus = new class implements \Symfony\Component\Messenger\MessageBusInterface {
+            public ?JobExecutor $executor = null;
+            public int $calls = 0;
+
+            public function dispatch(object $message, array $stamps = []): \Symfony\Component\Messenger\Envelope
+            {
+                ++$this->calls;
+                \assert($message instanceof \App\Message\RunJob && null !== $this->executor);
+                $this->executor->run($message->jobId); // what sync:// does: ignore the delay, handle at once
+
+                return \Symfony\Component\Messenger\Envelope::wrap($message, $stamps);
+            }
+        };
+        $executor = new JobExecutor(
+            $this->jobs,
+            new \App\Fleet\Jobs\JobTypeRegistry([]),
+            $this->service,
+            $this->locks,
+            $bus,
+            $this->paths,
+            new \App\Fleet\Jobs\NoLogMasker(),
+            $this->feed,
+            $this->clock,
+            new \Psr\Log\NullLogger(),
+            0,
+        );
+        $bus->executor = $executor;
+
+        $executor->run((int) $job->id());
+
+        self::assertSame(JobStatus::Failed, $job->status());
+        self::assertStringContainsString('cannot wait', (string) $job->error());
+        self::assertLessThanOrEqual(5, $bus->calls);
+        $holder->release();
+    }
 }

@@ -410,4 +410,18 @@ final class InstanceServiceTest extends JobTestCase
             }
         }
     }
+
+    public function testRetryOfAStartLeavesTheStateAlone(): void
+    {
+        $this->deploy(new DeployInput('acme'));
+        $this->markFinished('acme--develop');
+        $this->instances->find('acme--develop')?->changeState(InstanceState::Stopped);
+        $start = $this->service()->request('start', new Selector(['acme--develop']), new OperationOptions(), JobTrigger::Ui, 'admin')[0];
+        $this->service->finish($start, JobStatus::Failed, 1, 'port conflict');
+
+        $retry = $this->service()->retry((int) $start->id(), JobTrigger::Ui, 'admin');
+
+        self::assertSame('start', $retry->type());
+        self::assertSame(InstanceState::Stopped, $this->instances->find('acme--develop')?->state());
+    }
 }

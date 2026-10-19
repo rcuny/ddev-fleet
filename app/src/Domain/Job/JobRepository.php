@@ -6,6 +6,7 @@ namespace App\Domain\Job;
 
 use App\Doctrine\UtcDateTimeImmutableType;
 use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\Types\Type;
 use Doctrine\ORM\EntityManagerInterface;
 
 final readonly class JobRepository
@@ -77,6 +78,45 @@ final readonly class JobRepository
             'SELECT COUNT(*) FROM job WHERE batch_id = :batch AND id < :id AND status IN (:queued, :running)',
             ['batch' => $batch, 'id' => $job->id(), 'queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
         ) > 0;
+    }
+
+    /**
+     * When a queued job became eligible to run: its creation, or for a member of a sequential batch the moment the
+     * latest earlier member finished (whichever is later). The give-up clock counts from here.
+     */
+    public function eligibleSince(Job $job): \DateTimeImmutable
+    {
+        $batch = $job->batchId();
+        if (!$job->isSequential() || null === $batch || null === $job->id()) {
+            return $job->createdAt();
+        }
+
+        $latest = $this->em->getConnection()->fetchOne(
+            'SELECT MAX(finished_at) FROM job WHERE batch_id = :batch AND id < :id AND finished_at IS NOT NULL',
+            ['batch' => $batch, 'id' => $job->id()],
+        );
+        if (!\is_string($latest)) {
+            return $job->createdAt();
+        }
+        $finished = Type::getType(UtcDateTimeImmutableType::NAME)->convertToPHPValue($latest, $this->em->getConnection()->getDatabasePlatform());
+
+        return $finished instanceof \DateTimeImmutable && $finished > $job->createdAt() ? $finished : $job->createdAt();
+    }
+
+    /**
+     * Queued jobs created before $before, oldest first. The caller decides which of them are really stale.
+     *
+     * @return list<Job>
+     */
+    public function queuedCreatedBefore(\DateTimeImmutable $before): array
+    {
+        /** @var list<Job> $jobs */
+        $jobs = $this->em->createQuery(\sprintf('SELECT j FROM %s j WHERE j.status = :queued AND j.createdAt < :before ORDER BY j.id ASC', Job::class))
+            ->setParameter('queued', JobStatus::Queued)
+            ->setParameter('before', $before, UtcDateTimeImmutableType::NAME)
+            ->getResult();
+
+        return $jobs;
     }
 
     /**

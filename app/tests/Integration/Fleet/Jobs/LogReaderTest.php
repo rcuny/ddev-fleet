@@ -128,4 +128,17 @@ final class LogReaderTest extends JobTestCase
         }
         self::assertSame(str_repeat('é', 100_000), $all);
     }
+
+    public function testAHugeLineIsNotCutInsideAnEscapeSequence(): void
+    {
+        $content = str_repeat('a', LogReader::CHUNK - 2)."\e[31mred\e[0m".str_repeat('b', 10);
+        $job = $this->jobWithLog($content, true);
+
+        $first = $this->reader->read($job, 0);
+        self::assertSame(LogReader::CHUNK - 2, $first['next'], 'the piece stops before the escape that straddles the cut');
+        $second = $this->reader->read($job, $first['next']);
+
+        self::assertSame(str_repeat('a', LogReader::CHUNK - 2).'redbbbbbbbbbb', $first['text'].$second['text']);
+        self::assertStringNotContainsString("\e", $first['text'].$second['text']);
+    }
 }
