@@ -82,8 +82,35 @@ main() {
   local apt_keyrings=/etc/apt/keyrings
   local caddy_default_bin=/usr/bin/caddy.default
   local caddy_custom_bin=/usr/bin/caddy.custom
+  local shell_profile=/etc/profile.d/10-fleet-shell.sh
+  local hook_begin='# BEGIN ddev-fleet shell profile'
+  local hook_end='# END ddev-fleet shell profile'
 
   say() { printf '%s\n' "$*"; }
+  # strip_hook <file> <begin> <end> <profile>: deletes the block step 35 appended, only when its four lines match
+  # exactly (a block someone edited stays). A missing file is fine.
+  strip_hook() {
+    local file=$1 begin=$2 end=$3 profile=$4 tmp
+    [ -f "$file" ] || return 0
+    tmp=$(mktemp)
+    awk -v b="$begin" -v e="$end" -v p="$profile" '
+      function flush(   i) { for (i = 1; i <= n; i++) print buf[i]; n = 0 }
+      $0 == b && !held { held = 1; n = 1; buf[1] = $0; next }
+      held {
+        buf[++n] = $0
+        if (n == 5) {
+          if (buf[2] == "if [ -f " p " ]; then" && buf[3] == "  . " p && buf[4] == "fi" && buf[5] == e) { n = 0 } else { flush() }
+          held = 0
+        }
+        next
+      }
+      { print }
+      END { if (held) flush() }
+    ' "$file" >"$tmp"
+    # Write through the original file so its owner and mode stay.
+    cat "$tmp" >"$file"
+    do_cmd rm -f -- "$tmp"
+  }
   # do_cmd <command...>: runs it, or prints it in dry-run. A failure of a cleanup command is reported, not fatal:
   # a half-installed host must still be cleaned as far as possible.
   do_cmd() {
@@ -199,6 +226,16 @@ main() {
 
   # --- 5. the root helper, sudoers, command, Mercure ----------------------------------------------------------------
   say "==> removing the helper, the sudoers line and the commands"
+  # The shell profile (step 35): the file, and the hook block it added to each bashrc (exact block match only).
+  remove_file "${shell_profile:?}"
+  local rc sudo_home=''
+  if [ -n "${SUDO_USER:-}" ]; then
+    sudo_home=$(getent passwd "$SUDO_USER" | cut -d: -f6 || true)
+  fi
+  for rc in /etc/bash.bashrc /root/.bashrc "/home/${fleet_user:?}/.bashrc" "${sudo_home%/}/.bashrc"; do
+    [ "$rc" = /.bashrc ] && continue
+    do_cmd strip_hook "$rc" "$hook_begin" "$hook_end" "$shell_profile"
+  done
   remove_file "${sudoers_file:?}"
   remove_path "${helper_dir:?}"
   remove_file "${wrapper:?}"

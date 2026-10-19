@@ -45,6 +45,7 @@ ACME_EMAIL=
 REF=develop
 REPO_URL=https://github.com/rcuny/ddev-fleet.git
 SKIP_DNS_CHECK=0
+SHELL_PROFILE=1
 
 # Name of the step being run, for the error trap.
 STEP_NAME=startup
@@ -212,6 +213,7 @@ Options:
   --ref=<ref>           branch, tag or commit to install (default: develop)
   --repo-url=<url|path> git remote or bundle to install from (default: the public GitHub mirror)
   --skip-dns-check      do not compare the DNS records with this host's addresses
+  --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
   --dry-run             print the plan and change nothing (works without root)
   --help                this text
 
@@ -264,6 +266,7 @@ parse_args() {
       --ref=*) REF=${arg#--ref=} ;;
       --repo-url=*) REPO_URL=${arg#--repo-url=} ;;
       --skip-dns-check) SKIP_DNS_CHECK=1 ;;
+      --no-shell-profile) SHELL_PROFILE=0 ;;
       --dry-run) FLEET_DRY_RUN=1 ;;
       *)
         usage >&2
