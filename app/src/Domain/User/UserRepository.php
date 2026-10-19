@@ -88,4 +88,21 @@ final readonly class UserRepository
         $this->em->persist($user);
         $this->em->flush();
     }
+
+    /**
+     * Deletes the user; its project_access rows go with it (foreign key cascade).
+     */
+    public function remove(User $user): void
+    {
+        $this->em->remove($user);
+        $this->em->flush();
+    }
+
+    /**
+     * Writes every pending change of the entity manager (needed before a read that refreshes entities, see allFresh()).
+     */
+    public function flush(): void
+    {
+        $this->em->flush();
+    }
 }

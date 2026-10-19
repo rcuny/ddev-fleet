@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Security;
 
-use App\Domain\Project\NoProjectMembership;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectMembership;
 use App\Security\FleetUser;
@@ -78,9 +77,9 @@ final class ProjectVoterTest extends TestCase
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $other, [ProjectVoter::OPERATE]));
     }
 
-    public function testDefaultMembershipMakesNobodyAMember(): void
+    public function testNoMembershipMakesNobodyAMember(): void
     {
-        $voter = new ProjectVoter(new NoProjectMembership());
+        $voter = $this->voter();
         $project = new Project('acme', 'git@git.example.com:acme/blog.git');
 
         self::assertSame(VoterInterface::ACCESS_DENIED, $voter->vote($this->member(), $project, [ProjectVoter::OPERATE]));

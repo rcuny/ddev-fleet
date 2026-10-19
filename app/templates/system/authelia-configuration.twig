@@ -7,7 +7,7 @@ log:
   level: info
 authentication_backend:
   password_reset:
-    disable: true
+    disable: {{ reset_enabled ? 'false' : 'true' }}
   file:
     path: '{{ users_file }}'
     watch: true
@@ -19,8 +19,17 @@ storage:
   local:
     path: '{{ state_dir }}/db.sqlite3'
 notifier:
+{% if smtp is not null %}
+  smtp:
+    address: '{{ smtp.address }}'
+    sender: '{{ smtp.sender }}'
+{% if smtp.username is not null %}
+    username: '{{ smtp.username }}'
+{% endif %}
+{% else %}
   filesystem:
     filename: '{{ state_dir }}/notification.txt'
+{% endif %}
 access_control:
   default_policy: deny
   rules:
@@ -28,4 +37,12 @@ access_control:
       policy: bypass
     - domain: '{{ domain }}'
       policy: one_factor
+{% for rule in rules %}
+    - domain_regex: '{{ rule.regex }}'
+      policy: one_factor
+      subject:
+{% for subject in rule.subjects %}
+        - ['{{ subject }}']
+{% endfor %}
+{% endfor %}
 {% endautoescape %}
