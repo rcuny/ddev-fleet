@@ -3,7 +3,7 @@
 // Used only when FLEET_E2E_BASE_URL is unset. Stops the server and removes .run/ on SIGTERM/SIGINT.
 import { spawn, spawnSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -78,8 +78,45 @@ writeFileSync(join(runDir, 'setup-url.txt'), `${setupUrl.href}\n`, { mode: 0o600
 const server = spawn(php, ['-S', `127.0.0.1:${port}`, '-t', 'public'], {
   cwd: appDir,
   env: { ...env, PHP_CLI_SERVER_WORKERS: '4' },
-  // php -S logs every request to stderr; application errors are in app/var/log/dev.log.
-  stdio: 'ignore',
+  // php -S logs every request and every PHP error to stderr. Keep it: a 5xx must be diagnosable from the CI log.
+  stdio: ['ignore', 'ignore', 'pipe'],
+});
+
+// On a 5xx the recent server output and the application's own error lines are printed (CI shows only this process'
+// output, and a failed request otherwise leaves nothing to read). Capped, so a storm of errors stays readable.
+const recent = [];
+let dumps = 0;
+let partial = '';
+// Only what this run wrote: the log outlives the run.
+const appLog = join(appDir, 'var/log/dev.log');
+const appLogStart = existsSync(appLog) ? statSync(appLog).size : 0;
+function appErrors() {
+  if (!existsSync(appLog)) return [];
+  return readFileSync(appLog)
+    .subarray(appLogStart)
+    .toString('utf8')
+    .split('\n')
+    .filter((line) => /\.(CRITICAL|ERROR|EMERGENCY|ALERT):/.test(line))
+    .slice(-3)
+    .map((line) => line.replace(/(token=)[^\s&"]+/g, '$1[redacted]').slice(0, 2500));
+}
+function dumpServerFailure() {
+  if (dumps++ >= 5) return;
+  console.error('start-app: the PHP server answered with a 5xx. Last server output:');
+  console.error(recent.join('\n'));
+  const errors = appErrors();
+  console.error(errors.length ? `start-app: last application errors (var/log/dev.log):\n${errors.join('\n')}` : 'start-app: no application error in var/log/dev.log');
+}
+server.stderr.on('data', (chunk) => {
+  const lines = (partial + chunk.toString()).split('\n');
+  partial = lines.pop() ?? '';
+  for (const line of lines) {
+    // The setup link is a query string; never let it into the CI log.
+    const clean = line.replace(/(token=)[^\s&]+/g, '$1[redacted]');
+    recent.push(clean);
+    if (recent.length > 40) recent.shift();
+    if (/\[5\d\d\]:/.test(clean)) dumpServerFailure();
+  }
 });
 
 let stopping = false;

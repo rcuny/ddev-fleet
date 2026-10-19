@@ -72,7 +72,7 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | 30 fleet user | The `fleet` system user (member of `docker`), `/srv/fleet`, `/etc/ddev-fleet`, `/opt/ddev-fleet`. |
 | 40 ddev | DDEV from its repository, configured for `fleet` (router on ports 8080 and 8443), mkcert's CA for the NSS store only. |
 | 50 caddy | Caddy from its repository plus a **custom build with the OVH DNS module**; the package binary is diverted so `apt` never replaces the custom one. A re-run refreshes the custom build when it is older than the packaged Caddy. The sandbox drop-in is installed. |
-| 60 authelia | Authelia from its repository, its three secrets (generated once), the tmpfiles mask (see Troubleshooting), an empty valid `users.yml`. |
+| 60 authelia | Authelia from its repository, its three secrets (generated once), the tmpfiles mask (see Troubleshooting), and a `users.yml` with one disabled placeholder user (Authelia 4.39 refuses an empty user list; the placeholder can never sign in and disappears when the first real user exists). |
 | 70 env | `/etc/ddev-fleet/fleet.env` and `mercure.env`: only missing keys are added, secrets are generated once. |
 | 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. |
 | 85 app init | Migrations, the queue transport, `fleet:host:init` (domain, ACME email). |
@@ -112,8 +112,8 @@ The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
 | `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
 | `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
 | `fleet-worker@1` | | One Messenger worker (`messenger:consume jobs`). More can be enabled as `fleet-worker@2` and so on. |
-| `fleet-mercure` | `127.0.0.1:3000` | A standalone Mercure hub (version 1.1.2, legacy protocol mode as `symfony/mercure-bundle` mints). Caddy proxies `/.well-known/mercure` to it. |
-| `docker`, DDEV | router on 8080 and 8443 | The installer does not set `router_bind_all_interfaces`, so DDEV keeps its default (loopback only). |
+| `fleet-mercure` | `127.0.0.1:3000` | A standalone Mercure hub (version 1.1.2, legacy protocol mode as `symfony/mercure-bundle` mints). Caddy proxies `/.well-known/mercure` to it. Subscribers need a JWT: an anonymous request to the hub answers 401. |
+| `docker`, DDEV | router on 8080 and 8443 (once an instance runs) | The installer configures the router ports but starts no project, so nothing listens on 8080/8443 until the first instance exists (a later milestone). It does not set `router_bind_all_interfaces`, so DDEV keeps its default (loopback only). |
 
 ### `/etc/ddev-fleet/fleet.env`
 
@@ -248,7 +248,8 @@ finish again.
   a compromised `fleet` account or a compromised app. This is why php-fpm's unit sets `NoNewPrivileges=no`
   (a setuid `sudo` needs it), and the Finish request runs the helper from php-fpm for now.
 - **Secrets.** Generated once, kept in files with narrow modes (see section 3); the OVH credentials and the Claude
-  token are stored encrypted with a key that is only readable by `fleet`; the setup URL is not in the install log;
+  token are stored encrypted with a key that is only readable by `fleet`; the setup URL is not in the install log, and Caddy's
+  log filter removes the `token` query parameter from every log line (there is no access log);
   secrets do not appear in command-line arguments.
 - **The Mercure hub** listens on loopback only and is reachable only through Caddy.
 
@@ -285,7 +286,7 @@ and the packaged Caddy, removes the helper, the sudoers line, the `fleet` comman
 
 | Symptom | Cause and fix |
 |---|---|
-| The installer stops with `... has the A record ..., which is not an address of this host` (exit 2) | An A record for `<domain>` or `auth.<domain>` points elsewhere, or an AAAA record is not this host's (Let's Encrypt prefers IPv6; fix it or remove the AAAA record). Fix DNS, or `--skip-dns-check` if you know better. "DNS check inconclusive" means the lookup itself failed (timeout, SERVFAIL). |
+| The installer stops with `... has the A record ..., which is not an address of this host` (exit 2) | An A record for `<domain>` or `auth.<domain>` points elsewhere, or an AAAA record is not this host's (Let's Encrypt prefers IPv6; fix it or remove the AAAA record). Fix DNS, or `--skip-dns-check` if you know better. "DNS check inconclusive" means the lookup itself failed (timeout, SERVFAIL). The check asks the system resolver first; when that answers a loopback address (Debian's `/etc/hosts` line for the host name, served by systemd-resolved) it asks 1.1.1.1 and 9.9.9.9 instead (`FLEET_DNS_FALLBACK_RESOLVERS` changes the list). |
 | A step failed | The message names the step, the script line and the log. Fix the cause and run the same command again. |
 | No certificate, the browser warns | Port 80 or 443 is closed, or DNS is wrong. `journalctl -u caddy -n 100 --no-pager`. In `ovh_dns` mode check the OVH credentials' rights and, if you restricted them to an IP address, that it is this host's. |
 | After a reboot the sign-in portal answers 502 and nobody can sign in | Authelia could not read its secrets. The Authelia package ships a tmpfiles rule that strips the execute bit of `/etc/authelia/secrets` at every boot; the installer masks it with `/etc/tmpfiles.d/authelia.conf`. Check that file exists and `stat -c %a /etc/authelia/secrets` prints `750`; re-run the installer to repair it. |
