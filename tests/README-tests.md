@@ -12,6 +12,10 @@ Playwright in a real browser (`tests/playwright/`), and a small set of Python te
 for the CI tooling and the Ansible roles (`tests/pytest/`). The commands below are run from the
 repository root unless stated otherwise; use `php8.4` where the default `php` is older than 8.4.
 
+## Running every gate
+
+`ci/run-gates.sh [--quick|--full]` runs all the gates below in one go and writes a summary (see `docs/README-ci.md`, "One gates script").
+
 ## Counts
 
 The numbers are not kept in this file: every feature branch edited them, so every merge conflicted.

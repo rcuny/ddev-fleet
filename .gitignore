@@ -7,3 +7,5 @@ __pycache__/
 
 # CI report artifacts (ci/systemd_security.py, bitbucket-pipelines.yml)
 /reports/
+/var/ci-report/
+/.venv-lint/

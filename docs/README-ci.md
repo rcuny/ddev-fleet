@@ -318,6 +318,31 @@ Other servers: add the key and run the playbook there too, then add
 `name=fleet-probe@host` to the variable. For a server other people use, get their
 explicit OK before touching it.
 
+## One gates script (`ci/run-gates.sh`, FLE-120)
+
+Every caller runs the same script, so the gate list cannot drift: dispatched agents, the orchestrator
+(merge gate) and Fleet CI. The source of truth for the list is the Gates, Infra tests and Ansible lint
+steps of `bitbucket-pipelines.yml`; change both together.
+
+```bash
+ci/run-gates.sh [--quick|--full] [--report-dir DIR]     # from anywhere; --full is the default
+FLEET_CI_WORKERS=2 ci/run-gates.sh --full               # Playwright --workers (default: Playwright's own)
+```
+
+| Mode | Gates (log name) |
+|---|---|
+| `--quick` | `composer-install`, `composer-gates` (`composer run gates`: assets, cs, stan, lint, phpunit), `prod-check` (only if `app/composer.json` has the script) |
+| `--full` | quick, plus `playwright-install` (`npm ci`, Chromium), `playwright-typecheck`, `playwright` (whole suite with `FLEET_E2E_BASE_URL` unset), `infra-install` (`.venv`), `pytest` (`tests/pytest`), `systemd-security` (offline score; skipped without `systemd-analyze`), `ansible-lint` (non-blocking, skipped below Python 3.12) |
+
+It clears `app/var/cache/dev` and `app/var/cache/test` first (a stale cache after a branch switch gives false
+Playwright reds). A failing gate does not stop the others; the exit status is 0 only if every **blocking** gate
+passed (a skipped gate counts as passed, its reason is in the summary).
+
+The report directory (default `var/ci-report/`, git-ignored) holds `<gate>.log` per gate, `gates.tsv`,
+`summary.txt` (printed at the end), `summary.json` (`{"ok", "gates": [{gate, status, duration_s, blocking, log,
+counts?, note?}]}`, counts parsed from PHPUnit, Playwright and pytest output by `ci/gates_summary.py`) and the
+Playwright HTML report in `playwright-report/`. Tests: `tests/pytest/repo/test_gates_summary.py`.
+
 ## Local runs
 
 ```bash
