@@ -63,7 +63,7 @@ final readonly class ProjectService
     /**
      * @throws ValidationFailed
      */
-    public function create(ProjectInput $input): Project
+    public function create(ProjectInput $input, bool $refresh = true): Project
     {
         $input = $input->normalised();
         [$input, $typesenseError] = $this->syncTypesense($input, null);
@@ -84,7 +84,9 @@ final readonly class ProjectService
             throw new ValidationFailed(['name' => 'A project with this name already exists.']);
         }
         // Every project has its own Authelia access rule: a failure to install it is a warning (takeWarning()).
-        $this->accessRefresher?->refresh();
+        if ($refresh) {
+            $this->accessRefresher?->refresh();
+        }
 
         return $project;
     }
@@ -93,7 +95,7 @@ final readonly class ProjectService
      * @throws NotFound
      * @throws ValidationFailed
      */
-    public function update(string $name, ProjectInput $input): Project
+    public function update(string $name, ProjectInput $input, bool $refresh = true): Project
     {
         $project = $this->get($name);
         $input = $input->normalised();
@@ -109,7 +111,7 @@ final readonly class ProjectService
         $this->projects->save($project);
         // Each port is a site block of every instance: the sites follow an assignment (a failure is a warning,
         // takeWarning() on the refresher). A named port that is created or deleted is assigned to no project.
-        if ($before !== self::portNames($project->ports())) {
+        if ($refresh && $before !== self::portNames($project->ports())) {
             $this->sites?->refresh($project);
         }
 
@@ -185,6 +187,17 @@ final readonly class ProjectService
         sort($names);
 
         return $names;
+    }
+
+    /**
+     * The field => message map create() (no $existing) or update() would refuse the input with, without touching the
+     * database. A project import checks a whole file with it before it writes anything.
+     *
+     * @return array<string, string>
+     */
+    public function validate(ProjectInput $input, ?Project $existing): array
+    {
+        return $this->check($input->normalised(), $existing)[0];
     }
 
     /**

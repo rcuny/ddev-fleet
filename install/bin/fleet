@@ -51,7 +51,9 @@ FLEET_GROUPS=(
   asset
   backup
   claude
+  export
   host
+  import
   instance
   job
   port

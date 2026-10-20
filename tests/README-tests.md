@@ -35,7 +35,7 @@ What the numbers include:
 app/tests/
   bootstrap.php      forces APP_ENV=test, gives each PHPUnit process its own FLEET_HOME and migrates its database once
                      (any test may read the domain tables; isolated tests use FleetDatabase, which migrates a fresh home)
-  Unit/              plain objects: FleetPaths, the command runners, health, security, navigation, tokens
+  Unit/              plain objects: FleetPaths, the command runners, health, security, navigation, tokens, the export file format and its passphrase sealing
   Integration/       kernel and container wiring: Doctrine/SQLite, Messenger (the `jobs` transport is `sync://` in dev and
                      test, so a click runs its job in the request with the recording runner; prod is Doctrine, pinned by a test), Lock, Mercure, prod security
   Functional/        HTTP through WebTestCase: access control, app shell, design-system page, health, stand-in
@@ -48,6 +48,7 @@ app/tests/
                      instance and job command and option and name nothing else; CHANGELOG, indexes and CLAUDE.md point at them),
                      AssetDocsTest (the same for docs/assets.md and `fleet asset:list|gc`, and its limits match the code),
                      SecretsDocsTest (the same for docs/secrets.md and the secret commands),
+                     ExportDocsTest (the same for docs/moving-projects.md and `fleet export:project`, `fleet import:preview|apply`),
                      ChangelogAssembleTest (ci/changelog-assemble.php merges changelog.d/ fragments and cuts a release),
                      CliGroupsTest (the FLEET_GROUPS list of the wrapper matches the command groups)
   Support/           shared helpers (a temporary FLEET_HOME, FleetDatabase, WizardTestCase, AdminTestCase for admin pages)
@@ -58,6 +59,7 @@ tests/playwright/    TypeScript @playwright/test, its own npm package
   *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
                          setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
                          assets (the Assets tab: chunked upload, resume, download, delete, folders, axe),
+                         import-export (a project's Export download, then Projects → Import: upload, preview table, confirm, axe),
                          secrets (fleet-wide and project secrets, reveal, audit log)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)

@@ -1,0 +1,124 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Import a project · Projects · {{ parent() }}{% endblock %}
+
+{#- The Import page. Needs: plan (ImportPlan|null: set after an upload), document (the file text to confirm, null when the plan has errors), sealed (the file holds sealed secrets), error (string|null: the upload was refused), failures (problems of an apply refused after the preview), maxMiB, minPassphrase. -#}
+{% block content %}
+    <twig:PageHeader title="Import a project" description="Load a project export file from another host. You see what would change before anything is written.">
+        <twig:block name="actions">
+            <twig:Button as="a" variant="outline" href="{{ path('projects') }}" class="h-11 md:h-8">Back to projects</twig:Button>
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-3xl gap-8">
+        {% if error %}
+            <twig:Alert variant="destructive" data-testid="import-error" role="alert">
+                <twig:ux:icon name="lucide:circle-alert" />
+                <twig:Alert:Description>{{ error }}</twig:Alert:Description>
+            </twig:Alert>
+        {% endif %}
+
+        {% if failures %}
+            <twig:Alert variant="destructive" data-testid="import-failed" role="alert">
+                <twig:ux:icon name="lucide:circle-alert" />
+                <twig:Alert:Description>The import was refused and nothing was written: {{ failures|join(' ') }}</twig:Alert:Description>
+            </twig:Alert>
+        {% endif %}
+
+        {% if plan is null or plan.errors %}
+            <twig:Card data-testid="import-upload">
+                <twig:Card:Header>
+                    <twig:Card:Title>{{ plan ? 'Upload another file' : '1. Upload the file' }}</twig:Card:Title>
+                    <twig:Card:Description>A <code>*.fleet-project.json</code> file made by "Export" on a project page or by <code>fleet export:project</code>. At most {{ maxMiB }} MiB. Assets are not part of it: copy them with rsync.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content>
+                    <form method="post" action="{{ path('import_preview') }}" enctype="multipart/form-data" data-turbo="false" novalidate autocomplete="off" class="grid gap-6">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <div class="grid gap-2" data-slot="form-row">
+                            <twig:Label for="import-file">Export file</twig:Label>
+                            <twig:Input id="import-file" type="file" name="file" accept="application/json,.json" class="h-11 md:h-8" data-testid="import-file" />
+                        </div>
+                        <div class="grid gap-2" data-slot="form-row">
+                            <twig:Label for="import-passphrase">Passphrase (only if the file holds sealed secrets)</twig:Label>
+                            <twig:Input id="import-passphrase" type="password" name="passphrase" class="h-11 md:h-8" autocomplete="off" data-lpignore="true" data-testid="import-passphrase" />
+                        </div>
+                        <div class="flex flex-col gap-2 md:flex-row">
+                            <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="import-preview">Preview the import</twig:Button>
+                        </div>
+                    </form>
+                </twig:Card:Content>
+            </twig:Card>
+        {% endif %}
+
+        {% if plan %}
+            <section aria-labelledby="preview-heading" class="grid gap-4" data-testid="import-preview-section">
+                <h2 id="preview-heading">{{ plan.project ? 'Preview: ' ~ plan.project : 'Preview' }}</h2>
+
+                {% if plan.errors %}
+                    <twig:Alert variant="destructive" data-testid="import-errors" role="alert">
+                        <twig:ux:icon name="lucide:circle-alert" />
+                        <twig:Alert:Title>The file cannot be imported</twig:Alert:Title>
+                        <twig:Alert:Description>
+                            <ul class="mt-1 list-disc pl-5">
+                                {% for problem in plan.errors %}<li data-testid="import-error-item">{{ problem }}</li>{% endfor %}
+                            </ul>
+                            <span class="mt-2 block">Nothing was written.</span>
+                        </twig:Alert:Description>
+                    </twig:Alert>
+                {% endif %}
+
+                {% for warning in plan.warnings %}
+                    <p class="text-sm text-ink-body" data-testid="import-warning">{{ warning }}</p>
+                {% endfor %}
+
+                {% if plan.items %}
+                    <twig:Table data-testid="import-table">
+                        <twig:Table:Header>
+                            <twig:Table:Row>
+                                <twig:Table:Head>Kind</twig:Table:Head>
+                                <twig:Table:Head>Name</twig:Table:Head>
+                                <twig:Table:Head>Action</twig:Table:Head>
+                                <twig:Table:Head>Note</twig:Table:Head>
+                            </twig:Table:Row>
+                        </twig:Table:Header>
+                        <twig:Table:Body>
+                            {% for item in plan.items %}
+                                <twig:Table:Row data-testid="import-row" data-action="{{ item.action }}">
+                                    <twig:Table:Cell>{{ item.kind }}</twig:Table:Cell>
+                                    <twig:Table:Cell class="font-mono [overflow-wrap:anywhere]">{{ item.name }}</twig:Table:Cell>
+                                    <twig:Table:Cell>
+                                        <twig:Badge variant="{{ item.action == 'create' ? 'default' : 'outline' }}">{{ item.action }}</twig:Badge>
+                                    </twig:Table:Cell>
+                                    <twig:Table:Cell class="text-ink-muted [overflow-wrap:anywhere]">{{ item.note }}</twig:Table:Cell>
+                                </twig:Table:Row>
+                            {% endfor %}
+                        </twig:Table:Body>
+                    </twig:Table>
+                    {% set counts = plan.counts %}
+                    <p class="text-sm text-ink-muted" data-testid="import-counts">{{ counts.create }} create, {{ counts.update }} update, {{ counts.unchanged }} unchanged, {{ counts.skipped }} skipped.</p>
+                {% endif %}
+
+                {% if document is not null %}
+                    {% if plan.changes %}
+                        <form method="post" action="{{ path('import_apply') }}" novalidate autocomplete="off" class="grid gap-6" data-testid="import-confirm-form">
+                            {{ include('setup/_csrf.html.twig') }}
+                            <input type="hidden" name="document" value="{{ document }}">
+                            {% if sealed %}
+                                <div class="grid gap-2" data-slot="form-row">
+                                    <twig:Label for="confirm-passphrase">Passphrase of the sealed secrets (empty: leave the secrets out)</twig:Label>
+                                    <twig:Input id="confirm-passphrase" type="password" name="passphrase" class="h-11 md:h-8" autocomplete="off" data-lpignore="true" data-testid="confirm-passphrase" />
+                                </div>
+                            {% endif %}
+                            <div class="flex flex-col gap-2 md:flex-row">
+                                <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="import-confirm">Import this project</twig:Button>
+                                <twig:Button as="a" variant="outline" href="{{ path('import') }}" class="h-11 w-full md:h-8 md:w-auto">Cancel</twig:Button>
+                            </div>
+                        </form>
+                    {% else %}
+                        <p class="text-sm text-ink-body" data-testid="import-nothing">Everything in the file is already on this host: there is nothing to import.</p>
+                    {% endif %}
+                {% endif %}
+            </section>
+        {% endif %}
+    </div>
+{% endblock %}

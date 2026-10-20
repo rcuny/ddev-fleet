@@ -14,6 +14,28 @@
 
         <twig:IssueIdPreview :pattern="project.issueIdRegexp ?? ''" />
 
+        <twig:Card data-testid="export-project">
+            <twig:Card:Header>
+                <twig:Card:Title>Export</twig:Card:Title>
+                <twig:Card:Description>Download this project as one file to import it on another host: settings, templates, ports, webhook rules and schedules. Secrets are left out unless you give a passphrase to seal them. Assets are not included: copy them with rsync.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <form method="post" action="{{ path('project_export', {name: project.name}) }}" data-turbo="false" novalidate autocomplete="off" class="grid gap-4">
+                    {{ include('setup/_csrf.html.twig') }}
+                    <div class="grid gap-2" data-slot="form-row">
+                        <twig:Label for="export-passphrase">Passphrase for the secrets (optional)</twig:Label>
+                        <twig:Input id="export-passphrase" type="password" name="passphrase" class="h-11 md:h-8" autocomplete="new-password" data-lpignore="true" minlength="8" data-testid="export-passphrase" />
+                    </div>
+                    <div class="flex flex-col gap-2 md:flex-row">
+                        <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="export-download">
+                            <twig:ux:icon name="lucide:download" />
+                            Export
+                        </twig:Button>
+                    </div>
+                </form>
+            </twig:Card:Content>
+        </twig:Card>
+
         <twig:Card data-testid="danger-zone">
             <twig:Card:Header>
                 <twig:Card:Title>Danger zone</twig:Card:Title>

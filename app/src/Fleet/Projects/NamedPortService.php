@@ -52,12 +52,19 @@ final readonly class NamedPortService
     /**
      * @throws ValidationFailed
      */
-    public function create(NamedPortInput $input): NamedPort
+    /**
+     * The field => message map create() would refuse the input with, without touching the database. $pending are ports
+     * not stored yet that the new one must not collide with (a project import checks a whole file with it).
+     *
+     * @param list<NamedPortInput> $pending normalised inputs
+     *
+     * @return array<string, string>
+     */
+    public function validate(NamedPortInput $input, array $pending = []): array
     {
         $input = $input->normalised();
         $errors = [];
 
-        // Port names are not reserved (unlike project and template names): "new" is not a URL here.
         if (null !== $error = ResourceName::error($input->name, false)) {
             $errors['name'] = $error;
         }
@@ -67,7 +74,14 @@ final readonly class NamedPortService
         if (null !== $error = PortNumbers::routerError($input->router, $input->public)) {
             $errors['router'] = $error;
         }
-        $errors += $this->collisions($input, $errors);
+
+        return $errors + $this->collisions($input, $errors, $pending);
+    }
+
+    public function create(NamedPortInput $input): NamedPort
+    {
+        $input = $input->normalised();
+        $errors = $this->validate($input);
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -113,17 +127,22 @@ final readonly class NamedPortService
      * listening ports of the host).
      *
      * @param array<string, string> $errors
+     * @param list<NamedPortInput>  $pending ports of a file not stored yet, that count as taken
      *
      * @return array<string, string> errors for the fields not in $errors yet
      */
-    private function collisions(NamedPortInput $input, array $errors): array
+    private function collisions(NamedPortInput $input, array $errors, array $pending): array
     {
         $found = [];
         $catalogue = $this->ports->all();
         $publics = array_map(static fn (NamedPort $port): int => $port->publicPort(), $catalogue);
         $routers = array_map(static fn (NamedPort $port): int => $port->routerPort(), $catalogue);
+        foreach ($pending as $other) {
+            $publics[] = $other->public;
+            $routers[] = $other->router;
+        }
 
-        if (!isset($errors['name']) && null !== $this->ports->findByName($input->name)) {
+        if (!isset($errors['name']) && (null !== $this->ports->findByName($input->name) || \in_array($input->name, array_map(static fn (NamedPortInput $other): string => $other->name, $pending), true))) {
             $found['name'] = 'A port with this name already exists.';
         }
         if (!isset($errors['public']) && (\in_array($input->public, $publics, true) || \in_array($input->public, $routers, true))) {
