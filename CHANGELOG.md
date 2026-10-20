@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.4] - 2026-10-20
+
+### Added
+- **FLE-98: Typesense keys and environment for instances.** An instance of a project with the Typesense flag gets what
+  0.x gave it: a generated admin key and search-only key (sealed project secrets, created once, never rotated),
+  `TYPESENSE_API_KEY` in `.ddev/.env`, the `FLEET_TYPESENSE_*` variables in `web_environment`, and the search-only key
+  registered in the instance's Typesense after `ddev start` (a failure is a warning in the job log). See
+  `docs/networking.md`.
+
+### Changed
+- **FLE-99: the Typesense search key waits for a cold container.** After `ddev start` the deploy retries registering
+  the search-only key with a growing delay for up to 60 seconds instead of 3 x 3 seconds. Giving up is still only a
+  warning in the job log. `docs/projects-and-templates.md` now lists the Typesense variables an instance gets, where
+  each lands and the operator steps.
+
 ## [1.0.3] - 2026-10-20
 
 ### Added
@@ -647,7 +662,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.3...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.4...HEAD
+[1.0.4]: https://github.com/rcuny/ddev-fleet/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/rcuny/ddev-fleet/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/rcuny/ddev-fleet/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/rcuny/ddev-fleet/compare/v1.0.0...v1.0.1
