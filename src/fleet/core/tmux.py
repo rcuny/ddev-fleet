@@ -12,6 +12,7 @@ import sys
 from pathlib import Path
 
 from fleet.core.errors import FleetError
+from fleet.core.locks import is_instance_locked
 from fleet.core.runner import RunResult, run_streamed
 
 SESSION = "fleet"
@@ -236,10 +237,20 @@ def reconcile(paths, instance_ids, *, runner=run_streamed) -> None:
     Windows created here are ALWAYS plain shells (sidebar + 2 bash panes).
     tty commands are a deploy action (FLE-6) and are never typed from
     reconcile — otherwise a reboot (or a closed-and-recreated window) would
-    re-launch every templated instance's commands."""
+    re-launch every templated instance's commands.
+
+    An instance whose per-instance lock is held (a deploy/redeploy/destroy in
+    progress) gets NO window here: a plain-shell window created mid-deploy
+    would make the deploy's own `ensure_instance_window(..., tty=...)` return
+    False at the end, so the template's tty1/tty2 commands would never be
+    typed. Such ids stay in `instance_ids`, so the prune step never kills a
+    window the operation creates meanwhile; the next reconcile adds the
+    window if the operation did not."""
     ensure_session(paths.home, runner=runner)
     ensure_general_layout(paths.home, runner=runner)  # heal an already-running session
     for instance_id in sorted(instance_ids):
+        if is_instance_locked(paths.locks, instance_id):
+            continue  # operation in progress; it owns window creation (tty typing)
         ensure_instance_window(instance_id, paths.instances / instance_id, runner=runner)
     for window in list_window_names(runner=runner):
         ensure_sidebar(window, runner=runner)  # self-heal

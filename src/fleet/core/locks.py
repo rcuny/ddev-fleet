@@ -52,6 +52,32 @@ def instance_lock(locks_dir: Path, instance_id: str) -> Iterator[None]:
         fh.close()
 
 
+def is_instance_locked(locks_dir: Path, instance_id: str) -> bool:
+    """True when another open file description currently holds the
+    `instance_lock` for `instance_id` (a deploy, redeploy, destroy, ...).
+
+    Non-blocking probe: tries the same non-blocking exclusive flock as
+    `instance_lock` and drops it again at once (closing the fd), so nothing
+    stays held. It never creates the lock file or the directory: a missing
+    lock file means nobody has ever locked the instance, so it is not locked.
+    The probe holds the lock for microseconds; an operation starting in that
+    instant would see LockHeldError, which callers already handle."""
+    lock_path = locks_dir / f"{instance_id}.lock"
+    try:
+        fh = open(lock_path, "r+")
+    except FileNotFoundError:
+        return False
+    with fh:
+        try:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except OSError as exc:
+            if exc.errno in (errno.EAGAIN, errno.EWOULDBLOCK):
+                return True
+            raise
+        fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+        return False
+
+
 def retry_while_locked(
     fn: Callable[[], _T],
     *,

@@ -186,6 +186,7 @@ def test_reconcile_adds_sorted_and_prunes_stale():
     class P:  # minimal FleetPaths stand-in
         home = Path("/srv/fleet")
         instances = paths_instances
+        locks = Path("/nonexistent/locks")
 
     fake = FakeRunner(
         default=RunResult(0, []),
@@ -217,6 +218,7 @@ def test_reconcile_does_not_kill_unmanaged_window_with_dashes():
     class P:  # minimal FleetPaths stand-in
         home = Path("/srv/fleet")
         instances = paths_instances
+        locks = Path("/nonexistent/locks")
 
     fake = FakeRunner(
         default=RunResult(0, []),
@@ -747,6 +749,7 @@ def test_ensure_instance_window_tty_none_sends_nothing():
 class _P:  # minimal FleetPaths stand-in
     home = Path("/srv/fleet")
     instances = Path("/srv/fleet/instances")
+    locks = Path("/nonexistent/locks")
 
 
 def _new_window_fake(win: str, *, session: bool = True, bash_panes: bool = True) -> FakeRunner:
