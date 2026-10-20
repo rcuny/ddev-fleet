@@ -177,17 +177,14 @@ step is saved as you go, and the wizard works at phone width.
 2. **Domain and certificates.** The domain was set by the installer. Choose how certificates are obtained:
    - `http01` (default): Let's Encrypt HTTP-01 on port 80, for `<domain>` and `auth.<domain>`.
    - `ovh_dns`: DNS-01 through the OVH API. Enter the API endpoint (`ovh-eu`, `ovh-ca` or `ovh-us`), the
-     application key, the application secret and the consumer key. The credentials need these rights (the list the DNS
-     library behind Caddy's OVH module, [libdns/ovh](https://github.com/libdns/ovh#authenticating), documents;
-     `<zone>` is your DNS zone, or `*` for several): `GET` and `POST` on `/domain/zone/<zone>/record`, `GET`, `PUT` and
-     `DELETE` on `/domain/zone/<zone>/record/*`, `GET` on `/domain/zone/<zone>/soa`, and `POST` on
-     `/domain/zone/<zone>/refresh`. They are stored encrypted (libsodium, key in
+     application key, the application secret and the consumer key. **Create them exactly as described in
+     [Creating the OVH API token](#creating-the-ovh-api-token) below.** They are stored encrypted (libsodium, key in
      `/srv/fleet/keys/secret.key`) and never shown again. The endpoints of OVH's budget brands are not
      supported: create the credentials at one of the three endpoints above. Today this mode only changes how
      the certificates are obtained (the two host names and one per instance, see "Instances on the host" in section 6).
 
-     **Implemented, not yet verified live.** Only `http01` has run end to end on a real host; the DNS-01 path is
-     covered by unit and helper tests with stand-ins, never against the OVH API. Finish installs the new Caddyfile
+     **Checked on a real host:** Caddy reads the four credential files and authenticates against the OVH API; a token
+     created with the wrong rights fails with `This call has not been granted` (see the token section). Finish installs the new Caddyfile
      and the four credential files in `/etc/caddy/ovh/` and **reloads** Caddy (the files are read at every load, so a
      rotation of the credentials needs a reload only, never a restart). What to check after choosing it:
      `systemctl is-active caddy` a minute after Finish, `journalctl -u caddy -n 100 --no-pager` free of `ovh` or
@@ -227,6 +224,53 @@ With a server configured, Fleet keeps what Authelia changes: before every rewrit
 hash that Authelia changed (the user's self-service reset), unless an administrator set that user's password in Fleet
 in the meantime (Fleet then wins), so the next user change does not undo a reset. `users.yml` is then group-writable
 (0660) so Authelia can write it.
+
+### Creating the OVH API token
+
+Only for the `ovh_dns` certificate mode. Caddy uses the token to add and remove a temporary TXT record
+(`_acme-challenge…`) in your DNS zone each time it obtains a certificate. The example uses the zone `example.com`
+and the host address `203.0.113.10`: use your own zone (the domain you manage at OVH, not the fleet's host name)
+and your server's public IPv4 address.
+
+1. Open the token page of your OVH endpoint and sign in:
+   - `ovh-eu`: <https://eu.api.ovh.com/createToken/>
+   - `ovh-ca`: <https://ca.api.ovh.com/createToken/>
+   - `ovh-us`: <https://api.us.ovhcloud.com/createToken/>
+2. Fill in the form:
+
+   | Field | Value |
+   |---|---|
+   | Application name | anything, e.g. `fleet-caddy-<host>` |
+   | Application description | anything, e.g. `Caddy DNS-01 certificates for <domain>` |
+   | Validity | `Unlimited` |
+   | Rights | **four lines**, one per method, all with the same path ending in `/*`: |
+   | | `GET` `/domain/zone/example.com/*` |
+   | | `POST` `/domain/zone/example.com/*` |
+   | | `PUT` `/domain/zone/example.com/*` |
+   | | `DELETE` `/domain/zone/example.com/*` |
+   | Restricted IPs | your server's address, e.g. `203.0.113.10/32` (recommended) |
+
+   Two mistakes make every certificate fail with `This call has not been granted` (HTTP 403) in the Caddy journal:
+   - **the method**: the form starts each new line on `GET`; change the second, third and fourth lines to `POST`,
+     `PUT` and `DELETE`;
+   - **the path**: it must end in `/*`. A path like `/domain/zone/example.com/record` grants that exact path only, while
+     Caddy also calls `/domain/zone/example.com/record/<id>` and `/domain/zone/example.com/refresh`.
+
+   These four lines cover every call of the DNS library behind Caddy's OVH module,
+   [libdns/ovh](https://github.com/libdns/ovh#authenticating) (records, record ids, the zone's SOA and the refresh).
+3. Click **Create keys**. OVH shows the **Application Key**, the **Application Secret** and the **Consumer Key**
+   once: copy them into the wizard's certificate step (with the matching endpoint) before you leave the page.
+4. To replace the token later, create a new one the same way and run `sudo fleet setup:reset`, then enter the new
+   values in the certificate step; your users, projects and instances are kept. Delete the old token in your OVH account.
+
+Check the result once Caddy has had a minute to try:
+
+```bash
+sudo journalctl -u caddy -n 200 --no-pager | grep -E 'certificate obtained|not been granted'
+```
+
+`certificate obtained successfully` for the instance host names means it works; `not been granted` means a right is
+missing (see the two mistakes above).
 
 ### Users and project access
 
