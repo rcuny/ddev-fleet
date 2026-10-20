@@ -149,6 +149,17 @@ Assets tab and in `fleet asset:list`: a target outside the project's assets (`..
 to a folder or a special file, a loop or a chain over the cap, a link behind a folder that is a link, and a target with
 a name that is never seeded (`.git`, unsupported characters).
 
+A target that climbs out of the project's directory and back in (`../<project>/dumps/x.sql`) is refused as well: the
+check is on the path as written, and a `..` above the assets directory is outside it, even when it lands in the same
+project again. Use a path below the link's own folder (`../dumps/x.sql` from `web/`).
+
+**The remaining limit:** the checks run while the deploy walks the tree, and the file is then opened and verified (the
+opened file must be the regular file that was checked, by device and inode, before and after the open; a link or another
+file swapped in between fails the deploy with "changed while it was being seeded" and nothing is copied from it).
+Whoever can write to `assets/<project>/` while a deploy runs can still make a deploy fail or choose which file in the
+assets is seeded; they cannot make it read outside. Keep write access to the assets to the people who manage the
+project (the Assets tab and `scp` as the fleet user are the intended ways in).
+
 ## Snapshot a running instance
 
 The **Snapshot a running instance** card on the Assets tab lists the project's running instances. **Take snapshot** queues
