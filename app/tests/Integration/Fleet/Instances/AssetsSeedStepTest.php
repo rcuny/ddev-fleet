@@ -340,7 +340,7 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         $this->workflow->run($instance, $this->project, false, $this->logFor($this->job('deploy', $instance)), false);
     }
 
-    public function testAFolderLinkSwappedInAfterTheLeafWasOpenedIsRefusedByTheDescriptorPath(): void
+    public function testAFolderSwappedForALinkAfterTheWalkCheckedTheLeafIsRefusedByTheDescriptorPath(): void
     {
         $outside = sys_get_temp_dir().'/seed-outside-'.bin2hex(random_bytes(3));
         mkdir($outside);
@@ -348,21 +348,23 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         file_put_contents($this->assets.'/web/sites/default/settings.local.php', 'inside');
         $folder = $this->assets.'/web/sites/default';
 
-        // Swap the folder after the open: the leaf path now resolves outside, so only the descriptor tells the truth.
+        // Swapped in the afterCheck seam (before the first lstat): the leaf then resolves outside, is a regular file and
+        // keeps one inode through the open, so only the real path of the descriptor can refuse it. (A swap after the open
+        // would not do: the descriptor's /proc path follows a renamed folder and the inode recheck fails instead.)
         $swap = static function (string $src) use ($outside, $folder): void {
             if (str_ends_with($src, '/settings.local.php') && !is_link($folder)) {
                 rename($folder, $folder.'.old');
                 symlink($outside, $folder);
             }
         };
-        $this->steps->exchangeArray([new AssetsSeedStep($this->paths, null, $swap)]);
+        $this->steps->exchangeArray([new AssetsSeedStep($this->paths, $swap)]);
         $instance = $this->instance();
 
         try {
             $this->workflow->run($instance, $this->project, false, $this->logFor($this->job('deploy', $instance)), false);
             self::fail('expected a failure');
         } catch (JobFailed $e) {
-            self::assertStringContainsString('settings.local.php', $e->getMessage());
+            self::assertStringContainsString('is not inside the project\'s assets', $e->getMessage());
         } finally {
             @unlink($outside.'/settings.local.php');
             @rmdir($outside);
