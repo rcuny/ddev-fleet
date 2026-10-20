@@ -332,8 +332,11 @@ test.describe('assets coverage: symbolic links', () => {
       await rescan(page);
 
       // The three links are rows with a badge and no Delete/Download; the real folder is a normal row.
-      const links = page.getByTestId('asset-row').filter({ hasText: 'symbolic link, ignored' });
+      const links = page.getByTestId('asset-row').filter({ has: page.getByTestId('asset-link-state') });
       await expect(links).toHaveCount(3);
+      // Each link says where it points and whether a deploy honours it.
+      await expect(links.getByTestId('asset-link-state')).toHaveText([/^symbolic link, (seeded on deploy|not seeded: .+)$/, /^symbolic link, (seeded on deploy|not seeded: .+)$/, /^symbolic link, (seeded on deploy|not seeded: .+)$/]);
+      await expect(links.filter({ hasText: 'outside' }).getByTestId('asset-link-target')).toHaveText('→ /etc');
       await expect(links.getByTestId('asset-delete')).toHaveCount(0);
       await expect(links.getByTestId('asset-download')).toHaveCount(0);
       await expect(links.locator('a')).toHaveCount(0);
