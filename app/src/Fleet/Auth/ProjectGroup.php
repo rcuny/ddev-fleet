@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Fleet\Auth;
 
+use App\Domain\User\User;
 use App\Fleet\System\ConfigValue;
 
 /**
@@ -13,7 +14,7 @@ use App\Fleet\System\ConfigValue;
  */
 final class ProjectGroup
 {
-    public const string PREFIX = 'fleet-project-';
+    public const string PREFIX = User::RESERVED_GROUP_PREFIX;
 
     public static function name(string $project): string
     {

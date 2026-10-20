@@ -475,10 +475,14 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   `Remote-Groups` header that Authelia returns and answers **403** unless it holds the administrators' group
   (`FLEET_ADMIN_GROUP`) or the instance's project group `fleet-project-<project>`. Administrators open every site,
   members only their projects' sites, and no project name matches another (the group is compared as a whole list entry).
-  Access therefore changes through `users.yml` and a graceful Caddy reload, never through a restart. **After upgrading from
-  an earlier 1.0.x** install the new Authelia configuration (re-run the installer, or `sudo fleet host:render --apply`;
-  that restart signs everyone out once) and rewrite the sites of the running instances with `fleet port:refresh`.
-  Until then those sites keep the old rule (administrators only).
+  Access therefore changes through `users.yml` and a graceful Caddy reload, never through a restart. **Upgrading from
+  an earlier 1.0.x** is safe in one step: re-run the installer (or `sudo fleet host:render --apply`). Before it installs the
+  new Authelia configuration (one restart, everyone signs in once) it writes the project groups into `users.yml` and
+  rewrites every existing instance site with the group check, in that order. If a site cannot be rewritten the command
+  stops with the reason and leaves Authelia as it is, so the old per-project rules keep protecting the sites; fix the
+  cause and run it again. Never install the new Authelia configuration by other means before the sites are rewritten:
+  `fleet port:refresh` rewrites the sites on demand. A user group starting with `fleet-project-` is reserved for this and
+  refused.
 - **Upgrading while a job runs.** Re-running the installer restarts the workers when the code changed. A job running at that
   moment is marked `interrupted` (its worker is gone) and can be retried; wait for running deploys before upgrading when you can.
 - **Root-owned leftovers.** A container can leave files owned by root in an instance checkout. Destroy then fails with the

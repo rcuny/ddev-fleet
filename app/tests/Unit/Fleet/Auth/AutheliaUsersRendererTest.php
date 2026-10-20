@@ -37,7 +37,7 @@ final class AutheliaUsersRendererTest extends TestCase
     public function testProjectMembershipsBecomeProjectGroupsOnce(): void
     {
         $parsed = self::parse(new AutheliaUsersRenderer()->render(
-            [self::user('alice', groups: ['dev', 'fleet-project-blog']), self::user('bob', groups: []), self::user('carol')],
+            [self::user('alice', groups: ['dev']), self::user('bob', groups: []), self::user('carol')],
             ['alice' => ['blog', 'demo'], 'bob' => ['demo'], 'ghost' => ['demo']],
         ));
 
@@ -45,6 +45,18 @@ final class AutheliaUsersRendererTest extends TestCase
         self::assertSame(['fleet-project-demo'], $parsed['users']['bob']['groups']);
         self::assertSame(['fleet-admins'], $parsed['users']['carol']['groups'], 'no membership, no project group');
         self::assertArrayNotHasKey('ghost', $parsed['users'], 'a membership of an unknown user renders nothing');
+    }
+
+    public function testAStoredUserGroupWithTheReservedPrefixIsRefused(): void
+    {
+        $user = self::user('alice');
+        // A row edited by hand: the entity refuses the group, a hydrated one does not go through the constructor.
+        new \ReflectionProperty($user, 'groups')->setValue($user, ['fleet-project-blog']);
+
+        $this->expectException(\InvalidArgumentException::class);
+        $this->expectExceptionMessage('reserved');
+
+        new AutheliaUsersRenderer()->render([$user]);
     }
 
     public function testAProjectNameThatIsNotAValidNameIsRefused(): void

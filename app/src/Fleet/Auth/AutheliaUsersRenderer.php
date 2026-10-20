@@ -78,6 +78,12 @@ final class AutheliaUsersRenderer
     private static function groupsOf(User $user, array $projects): array
     {
         $groups = $user->groups();
+        foreach ($groups as $group) {
+            // A row edited by hand: the entity refuses these, a loaded row does not go through it.
+            if (str_starts_with($group, User::RESERVED_GROUP_PREFIX)) {
+                throw new \InvalidArgumentException(\sprintf('User "%s" has the reserved group "%s".', $user->username(), $group));
+            }
+        }
         foreach ($projects as $project) {
             $group = ProjectGroup::name($project);
             if (!\in_array($group, $groups, true)) {
