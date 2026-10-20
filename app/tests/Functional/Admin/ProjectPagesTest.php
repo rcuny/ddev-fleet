@@ -328,10 +328,10 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject();
 
         $crawler = $this->open('/admin/projects/blog');
-        $crawler = $this->submit($crawler, 'Save', ['project[additionalHostnames]' => implode("\n", array_map(static fn (int $i): string => 'h'.$i, range(1, 11)))]);
+        $crawler = $this->submit($crawler, 'Save', ['project[additionalHostnames]' => implode("\n", array_map(static fn (int $i): string => 'h'.$i, range(1, 51)))]);
 
         self::assertResponseStatusCodeSame(422);
-        self::assertStringContainsString('At most 10', $crawler->filter('#project_additionalHostnames_errors')->text());
+        self::assertStringContainsString('At most 50', $crawler->filter('#project_additionalHostnames_errors')->text());
     }
 
     // --- layout

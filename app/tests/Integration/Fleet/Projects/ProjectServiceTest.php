@@ -214,7 +214,7 @@ final class ProjectServiceTest extends KernelTestCase
         yield 'reserved name' => [['name' => 'new'], 'name'];
         yield 'branch starting with a dash' => [['defaultBranch' => '-x'], 'defaultBranch'];
         yield 'hostname with a dot' => [['additionalHostnames' => ['a.b']], 'additionalHostnames'];
-        yield 'eleven hostnames' => [['additionalHostnames' => ['h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'h7', 'h8', 'h9', 'h10', 'h11']], 'additionalHostnames'];
+        yield 'fifty-one hostnames' => [['additionalHostnames' => array_map(static fn (int $i): string => 'h'.$i, range(1, 51))], 'additionalHostnames'];
         yield 'duplicate hostnames' => [['additionalHostnames' => ['www', 'www']], 'additionalHostnames'];
         yield 'unknown port' => [['ports' => ['nope']], 'ports'];
         yield 'too many ports' => [['ports' => array_map(static fn (int $i): string => 'port'.$i, range(1, 51))], 'ports'];
@@ -386,6 +386,25 @@ final class ProjectServiceTest extends KernelTestCase
         self::assertSame(['mail'], array_map(static fn (NamedPort $p): string => $p->name(), $found->ports()));
         self::assertFalse($found->typesense());
         self::assertGreaterThanOrEqual($found->createdAt(), $found->updatedAt());
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function acceptedHostnameCounts(): iterable
+    {
+        yield 'a real-world list' => [23];
+        yield 'the limit' => [50];
+    }
+
+    #[DataProvider('acceptedHostnameCounts')]
+    public function testManyHostnamesAreStoredInOrder(int $count): void
+    {
+        $hostnames = array_map(static fn (int $i): string => 'h'.$i, range(1, $count));
+        $this->service->create($this->valid()->with(['additionalHostnames' => $hostnames]));
+        $this->em->clear();
+
+        self::assertSame($hostnames, ($this->projects->findByName('blog') ?? self::fail())->additionalHostnames());
     }
 
     public function testSavingGeneralKeepsPortAssignments(): void
