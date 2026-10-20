@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.6] - 2026-10-20
+
+### Added
+- **FLE-101: site-only users.** A user kind "Site access only" (checkbox on the Users create and edit forms,
+  `--site-only` / `--no-site-only` on `fleet user:create|update`) for people who should only open the instance sites of
+  chosen projects, such as a client behind a shared `shield` / `shield` login that keeps crawlers out. No email is needed,
+  a password of 4 characters or more is accepted (regular users keep the 12-character rule), and the account is never
+  an administrator. Fleet itself answers 403 "This account only opens project sites" for them; the users list shows a
+  badge. `users.yml` marks them with the reserved group `fleet-site-only` and a placeholder `@site-only.invalid` email.
+
+- **FLE-103: Playwright coverage for projects, templates and project ports.** New specs for every project and template field, each validation message, edit, delete and cancel paths, the Ports tab and the `fleet:port:*` commands, on desktop and phone with axe in both themes.
+
+
+- Playwright coverage of the users and access area (`users-coverage.spec.ts`): every validation message, the list badges, memberships, the site-only kind, password rules, disable/enable/delete, the last-administrator and own-account protections, a member's refusals, long values at 390 px and axe in both themes.
+- **FLE-107: Playwright coverage for assets, instances and jobs, project export/import and the setup wizard**, on desktop and phone, with axe in both themes.
+
+### Changed
+- **FLE-114: a project can have up to 50 additional hostnames (was 10).** A real project needs 23. The form, the
+  `fleet project:*` commands and project import all use the same limit; hostname validation is unchanged. Every
+  hostname is written to the instance's DDEV `additional_fqdns` and to its single Caddy site block. In `http01` mode
+  each name gets its own Let's Encrypt certificate, so a project with many hostnames deployed many times can hit the
+  rate limits; `ovh_dns` mode uses one wildcard certificate.
+
+- **FLE-115: one rule for a schedule whose target instance does not exist yet.** The CLI and the pages now accept it,
+  as project import already did, with a warning ("Instance X does not exist yet; runs are skipped until it does"; the
+  `warning` key with `--json`) and a **Target missing** badge in the schedule list. A run against a missing instance
+  (timed or **Run now**) is recorded as `skipped` with that reason and queues no job, instead of `failed`. An empty
+  instance id is still refused. `docs/schedules.md` describes the rule.
+
+### Fixed
+- **FLE-103: the New project form preselects the "inherit" git identity mode**, instead of showing no choice selected.
+
+- **FLE-104: New user form: ticking Administrator and then Site access only no longer submits a hidden administrator tick.** The refusal ("A site-only user cannot be an administrator.") used to appear under a row that was hidden, so the form came back with an error nobody could see. Hiding the row now unticks it.
+
+- Instance list: the row menu used the wrong instance id (row Redeploy and Destroy returned 404), the row Redeploy item was always disabled and never submitted, the bulk Redeploy and Destroy dialogs listed no instances, and two links loaded into the Turbo frame ("Content missing").
+- Assets, Import and the setup wizard SSH step no longer overflow horizontally at 390 px with long names or symlink badges.
+
+- **FLE-116: deploy asset seeding verifies the opened file's real path.** The seed step now reads the path of the open
+  descriptor (`/proc/self/fd`) and refuses a file that is not inside the project's assets, which closes the case of a
+  folder swapped for a link to an outside folder while a deploy runs. The file is opened without blocking, so a
+  named pipe swapped in no longer hangs the deploy. `docs/assets.md` states that a deploy cannot be made to read outside
+  the assets again, and documents hard links (copied like any regular file). New tests cover the inode swap after the
+  open, the folder swap, the fifo and the hard link.
+
 ## [1.0.5] - 2026-10-20
 
 ### Added
@@ -720,7 +764,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/rcuny/ddev-fleet/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/rcuny/ddev-fleet/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/rcuny/ddev-fleet/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/rcuny/ddev-fleet/compare/v1.0.2...v1.0.3
