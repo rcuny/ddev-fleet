@@ -224,16 +224,16 @@ test.describe('additional hostnames', () => {
     await expectRefused(page, { hostnames: 'www\nshop\nwww' }, ['Each hostname can be listed once.']);
   });
 
-  test('more than ten labels are refused, ten are accepted', async ({ page }) => {
-    const eleven = Array.from({ length: 11 }, (_, i) => `h${i}`).join('\n');
-    await expectRefused(page, { hostnames: eleven }, ['At most 10 additional hostnames are allowed.']);
+  test('more than fifty labels are refused, fifty are accepted', async ({ page }) => {
+    const tooMany = Array.from({ length: 51 }, (_, i) => `h${i}`).join('\n');
+    await expectRefused(page, { hostnames: tooMany }, ['At most 50 additional hostnames are allowed.']);
     const name = uniqueName();
     created = name;
     await openNewProject(page);
-    await fillProject(page, { name, git: GIT_URL, hostnames: eleven.split('\n').slice(0, 10).join('\n') });
+    await fillProject(page, { name, git: GIT_URL, hostnames: tooMany.split('\n').slice(0, 50).join('\n') });
     await submitCreate(page);
     await expect(page.getByTestId('flashes')).toContainText('Project created.');
-    await expect(page.getByLabel('Additional hostnames')).toHaveValue(eleven.split('\n').slice(0, 10).join('\n'));
+    await expect(page.getByLabel('Additional hostnames')).toHaveValue(tooMany.split('\n').slice(0, 50).join('\n'));
   });
 
   test('a text longer than 10000 characters is refused', async ({ page }) => {
