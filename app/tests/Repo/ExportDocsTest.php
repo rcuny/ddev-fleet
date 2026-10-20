@@ -139,6 +139,7 @@ final class ExportDocsTest extends TestCase
         $claude = self::read('CLAUDE.md');
         self::assertStringContainsString('App\Fleet\Export', $claude);
         self::assertStringContainsString('ExportDocsTest', $claude);
-        self::assertStringContainsString('FLE-94', self::read('changelog.d/FLE-94.md'));
+        // The entry is a changelog.d fragment until a release assembles it into a version section.
+        self::assertStringContainsString('FLE-94', UnreleasedChangelog::text(self::root()));
     }
 }
