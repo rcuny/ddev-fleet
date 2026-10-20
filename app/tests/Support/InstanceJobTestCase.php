@@ -10,6 +10,7 @@ use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Job\Job;
 use App\Domain\Job\JobTrigger;
+use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Secret\SecretRepository;
@@ -37,6 +38,8 @@ use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Secrets\TokenRenderer;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Fleet\System\CaddyReloader;
+use App\Fleet\Typesense\TypesenseEnvironment;
+use App\Fleet\Typesense\TypesenseKeys;
 use App\Fleet\Workspace\Tmux;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\NullLogger;
@@ -108,7 +111,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->templates,
             new GitClient($this->runner, $this->paths),
             $this->ddev,
-            new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $secrets, $this->masker),
+            new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $secrets, $this->masker, new TypesenseEnvironment(new TypesenseKeys($secrets), new NamedPortRepository($this->em), $hostnames, $this->masker)),
             new DrupalSettingsWriter(),
             new ContextTokens($hostnames),
             $this->secretRenderer = new TokenRenderer($secrets, $this->masker),

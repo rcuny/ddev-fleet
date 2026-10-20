@@ -12,7 +12,9 @@ use App\Fleet\Jobs\JobFailed;
  * `#[AutoconfigureTag('fleet.deploy_step', ['priority' => 100])]`. The tag is not on this interface on purpose: an
  * interface tag has no priority and would register a prioritised step twice. DeployStepRegistrationTest fails for a
  * step that is not tagged. Order: AssetsSeedStep (BeforeStart, 100), PortMirrorSyncStep (BeforeStart, 50),
- * PortMirrorConvergeStep (AfterStart, 200, so the router is settled before the tmux window's commands run).
+ * TypesenseEnvFileStep (BeforeStart, 40, after the assets so it edits their `.ddev/.env`), PortMirrorConvergeStep
+ * (AfterStart, 200, so the router is settled before the tmux window's commands run), TypesenseSearchKeyStep
+ * (AfterStart, 150, needs the settled router), TmuxWindowStep (AfterStart, 100).
  */
 interface DeployStep
 {

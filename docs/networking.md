@@ -30,8 +30,32 @@ yourself (and in your provider's firewall, if it has one); `fleet port:firewall`
 
 A migration seeds one entry, `typesense` (public `9108`, router `8108`), unless the host already has a port with that
 name or those numbers. It is the entry of the Typesense search server: assigning the catalogue entry `typesense` to a project is the same as switching on the
-project's Typesense flag (the two stay in step). Injecting the Typesense key and environment into the instance is not
-ported yet (0.x: [`v0/README-typesense.md`](v0/README-typesense.md)).
+project's Typesense flag (the two stay in step). How the instance gets its keys is described in [Typesense keys and environment](#typesense-keys-and-environment).
+
+## Typesense keys and environment
+
+The fleet installs and manages no Typesense server. Each instance of a project with the Typesense flag runs its own
+container from the project's committed `.ddev/docker-compose.typesense.yaml`; the fleet supplies the keys, as 0.x did
+([`v0/README-typesense.md`](v0/README-typesense.md)).
+
+**Keys.** Per project, on its first deploy, the fleet generates two keys of 48 hex characters and stores them sealed as
+project secrets (see [secrets](secrets.md)): `TYPESENSE_API_KEY` (admin) and `FLEET_TYPESENSE_SEARCH_KEY` (search only).
+They are never rotated, and a value an administrator set by hand under those names is kept. Every instance of the
+project shares them. A project without the flag gets nothing.
+
+**What a deploy injects:**
+
+| Where | What |
+|---|---|
+| `.ddev/.env` (mode 0640, kept out of the project's git status) | `TYPESENSE_API_KEY=<admin key>`. The project's compose file must read it as `${TYPESENSE_API_KEY}` to boot Typesense. Other lines of the file stay as they are. |
+| `.ddev/config.fleet.yaml`, `web_environment` | `FLEET_TYPESENSE_HOST=<instance host>`, `FLEET_TYPESENSE_PORT` (the public port of the catalogue entry `typesense`, 9108), `TYPESENSE_API_KEY` (admin, for indexing) and `FLEET_TYPESENSE_SEARCH_KEY`. The protocol is https. |
+| The instance's Typesense, after `ddev start` | The search-only key, created through the admin API (`POST /keys`, action `documents:search`, all collections, description `fleet-search-only`) by a request to the router on `127.0.0.1:<router port>` with the instance host in the `Host` header. A key with that description is left alone, so a redeploy adds nothing. |
+
+If the registration fails (Typesense not up yet), the job log gets a `WARNING: typesense: ...` line and the deploy
+goes on; a redeploy tries again. Neither key is ever written to a log (the job log masks both) or put on a command line.
+
+**Checks on the host:** `ss -tlnp | grep 8108` (the router listens on the router port), `curl https://<instance host>:9108/health`
+(through Caddy) and `fleet port:firewall` for the public ports to open.
 
 Only Caddy listens on the Internet. Everything else is on loopback or inside the Docker network.
 
