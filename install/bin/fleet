@@ -6,6 +6,7 @@
 #   fleet project list --json      ->  ... fleet:project:list --json   (a "<group> <verb>" pair works as "<group>:<verb>")
 #   fleet fleet:host:render        ->  an already prefixed name is accepted as it is
 #   fleet doctrine:migrations:status -> ... doctrine:migrations:status, with the application environment loaded
+#   fleet tmux [<instance-id>]     ->  attaches this terminal to the agent workspace (also: fleet tmux:attach, fleet tmux attach)
 #   fleet                          ->  lists the fleet:* commands
 #   fleet list | help <cmd> | ...  ->  anything that does not start with one of our groups goes to the console unchanged
 #
@@ -25,6 +26,20 @@ if [ "$(id -un)" != "$FLEET_USER" ]; then
   exec sudo -u "$FLEET_USER" -- /usr/local/bin/fleet "$@"
 fi
 
+# `fleet tmux` and `fleet tmux attach|:attach`, with an optional instance id: attach to the agent workspace. It needs a
+# terminal on both ends; without one (ssh host fleet tmux) tmux would only fail with a cryptic message. FLEET_WRAPPER_TTY=1
+# skips the check for the unit tests (read after the switch to `fleet`, like the other FLEET_WRAPPER_* variables).
+attach=0
+if [ "${1:-}" = tmux ] && { [ "$#" -eq 1 ] || [ "$2" = attach ] || [[ ${2:-} =~ ^[a-z0-9-]+--[a-z0-9-]+$ ]]; }; then
+  attach=1; window=${2:-}; [ "$window" = attach ] && window=${3:-}
+elif [ "${1:-}" = tmux:attach ]; then
+  attach=1; window=${2:-}
+fi
+if [ "$attach" -eq 1 ] && [ "${FLEET_WRAPPER_TTY:-}" != 1 ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
+  printf 'fleet: tmux needs a terminal: use ssh -t\n' >&2
+  exit 2
+fi
+
 if [ ! -r "$ENV_FILE" ]; then
   printf 'fleet: cannot read %s (is ddev-fleet installed on this host?)\n' "$ENV_FILE" >&2
   exit 1
@@ -37,6 +52,20 @@ set -a
 # shellcheck source=/dev/null
 . "$ENV_FILE"
 set +a
+
+if [ "$attach" -eq 1 ]; then
+  # Make sure the session exists (quiet), then select the instance's window and attach. The id is matched by the pattern
+  # above and passed as one argv word, never through a shell.
+  "$PHP" "$CONSOLE" fleet:tmux:ensure -q
+  if [ -n "$window" ]; then
+    if [[ ! $window =~ ^[a-z0-9]+(-[a-z0-9]+)*--[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+      printf 'fleet: %s is not an instance id\n' "$window" >&2
+      exit 2
+    fi
+    tmux -L fleet select-window -t "=fleet:=$window" || { printf 'fleet: instance %s has no window\n' "$window" >&2; exit 1; }
+  fi
+  exec tmux -L fleet attach -t =fleet
+fi
 
 if [ "$#" -eq 0 ]; then
   exec "$PHP" "$CONSOLE" list fleet

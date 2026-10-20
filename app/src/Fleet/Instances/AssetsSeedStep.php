@@ -41,11 +41,14 @@ final class AssetsSeedStep implements DeployStep
     private const int MAX_TEXT_BYTES = 1_048_576;
     private const string DUMPS = 'dumps';
 
-    /** The assets directory being seeded (set by run()). */
-    private string $root = '';
-
-    public function __construct(private readonly FleetPaths $paths)
-    {
+    /**
+     * @param (\Closure(string): void)|null $afterCheck test seam: called with a source path once the walk has checked it
+     *                                                  and right before it is opened (production leaves it null)
+     */
+    public function __construct(
+        private readonly FleetPaths $paths,
+        private readonly ?\Closure $afterCheck = null,
+    ) {
     }
 
     public function phase(): StepPhase
@@ -67,9 +70,8 @@ final class AssetsSeedStep implements DeployStep
         }
 
         $counts = ['copied' => 0, 'substituted' => 0, 'linked' => 0, 'skipped' => 0];
-        $this->root = $source;
         try {
-            $this->copyTree($source, $context->dir, '', $context, $counts);
+            $this->copyTree($source, $source, $context->dir, '', $context, $counts);
         } catch (\RuntimeException $e) {
             throw new JobFailed('assets: '.$e->getMessage());
         }
@@ -85,7 +87,7 @@ final class AssetsSeedStep implements DeployStep
     /**
      * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
      */
-    private function copyTree(string $from, string $to, string $relative, DeployContext $context, array &$counts): void
+    private function copyTree(string $root, string $from, string $to, string $relative, DeployContext $context, array &$counts): void
     {
         $names = @scandir($from);
         if (false === $names) {
@@ -117,10 +119,10 @@ final class AssetsSeedStep implements DeployStep
             }
             $type = $info['mode'] & 0o170000;
             if (0o120000 === $type) {
-                $this->copyLink($path, $dst, $inDumps, $context, $counts);
+                $this->copyLink($root, $path, $dst, $inDumps, $context, $counts);
             } elseif (0o040000 === $type) {
                 $this->ensureDirectory($dst, $path);
-                $this->copyTree($src, $dst, $path, $context, $counts);
+                $this->copyTree($root, $src, $dst, $path, $context, $counts);
                 if ('' === $relative && self::DUMPS === $name) {
                     $context->exclude('/'.self::DUMPS.'/');
                 }
@@ -139,9 +141,9 @@ final class AssetsSeedStep implements DeployStep
     /**
      * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
      */
-    private function copyLink(string $path, string $dst, bool $inDumps, DeployContext $context, array &$counts): void
+    private function copyLink(string $root, string $path, string $dst, bool $inDumps, DeployContext $context, array &$counts): void
     {
-        $link = AssetLinkResolver::resolve($this->root, $path);
+        $link = AssetLinkResolver::resolve($root, $path);
         if (null === $link->target) {
             $context->log->line(\sprintf('assets: skipped "%s" (symbolic link to "%s": %s)', $this->printable($path), $link->raw, $link->refusal));
             ++$counts['skipped'];
@@ -150,7 +152,7 @@ final class AssetsSeedStep implements DeployStep
         }
 
         if ($inDumps && self::DUMPS === explode('/', $link->target)[0]) {
-            $this->linkOrCopy($this->root.'/'.$link->target, $dst, $path, $counts);
+            $this->linkOrCopy($root.'/'.$link->target, $dst, $path, $counts);
 
             return;
         }
@@ -195,26 +197,31 @@ final class AssetsSeedStep implements DeployStep
             return;
         }
 
-        $size = (int) @filesize($src);
-        $content = $size <= self::MAX_TEXT_BYTES ? @file_get_contents($src) : false;
-        if ($size <= self::MAX_TEXT_BYTES && false === $content) {
-            throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
-        }
-        if (\is_string($content) && !str_contains($content, "\0") && mb_check_encoding($content, 'UTF-8')) {
-            $rendering = $context->render($content);
-            $rendered = $rendering->text;
-            $missing = $rendering->unresolved;
-            if ([] !== $missing) {
-                $context->log->line(\sprintf('assets: "%s" has unresolved token(s) left as written: %s', $this->printable($path), implode(', ', array_map(static fn (string $n): string => '[['.$n.']]', $missing))));
+        [$handle, $opened] = $this->openChecked($src, $path);
+        try {
+            $size = $opened['size'];
+            $content = $size <= self::MAX_TEXT_BYTES ? stream_get_contents($handle, self::MAX_TEXT_BYTES + 1) : false;
+            if ($size <= self::MAX_TEXT_BYTES && (false === $content || \strlen($content) > self::MAX_TEXT_BYTES)) {
+                throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
             }
-            $this->replace($dst, $path, $mode, static fn (string $tmp): bool => false !== @file_put_contents($tmp, $rendered));
-            ++$counts['substituted'];
+            if (\is_string($content) && !str_contains($content, "\0") && mb_check_encoding($content, 'UTF-8')) {
+                $rendering = $context->render($content);
+                $rendered = $rendering->text;
+                $missing = $rendering->unresolved;
+                if ([] !== $missing) {
+                    $context->log->line(\sprintf('assets: "%s" has unresolved token(s) left as written: %s', $this->printable($path), implode(', ', array_map(static fn (string $n): string => '[['.$n.']]', $missing))));
+                }
+                $this->replace($dst, $path, $mode, static fn (string $tmp): bool => false !== @file_put_contents($tmp, $rendered));
+                ++$counts['substituted'];
 
-            return;
+                return;
+            }
+
+            $this->replace($dst, $path, $mode, static fn (string $tmp): bool => self::copyFrom($handle, $tmp));
+            ++$counts['copied'];
+        } finally {
+            fclose($handle);
         }
-
-        $this->replace($dst, $path, $mode, static fn (string $tmp): bool => @copy($src, $tmp));
-        ++$counts['copied'];
     }
 
     /**
@@ -222,20 +229,100 @@ final class AssetsSeedStep implements DeployStep
      */
     private function linkOrCopy(string $src, string $dst, string $path, array &$counts): void
     {
-        $a = @lstat($src);
-        $b = @lstat($dst);
-        $same = false !== $a && false !== $b && 0o100000 === ($b['mode'] & 0o170000) && $a['ino'] === $b['ino'] && $a['dev'] === $b['dev'];
-        if (!$same) {
-            if (is_link($dst) || file_exists($dst)) {
-                if (!@unlink($dst)) {
-                    throw new \RuntimeException(\sprintf('cannot replace "%s"', $this->printable($path)));
+        [$handle, $opened] = $this->openChecked($src, $path);
+        try {
+            $b = @lstat($dst);
+            $same = false !== $b && self::isFile($b) && self::sameInode($opened, $b);
+            if (!$same) {
+                if (is_link($dst) || file_exists($dst)) {
+                    if (!@unlink($dst)) {
+                        throw new \RuntimeException(\sprintf('cannot replace "%s"', $this->printable($path)));
+                    }
+                }
+                // link(2) does not follow a link at the source, so check what was linked is the file that was opened.
+                $linked = @link($src, $dst);
+                $made = $linked ? @lstat($dst) : false;
+                if ($linked && (false === $made || !self::isFile($made) || !self::sameInode($opened, $made))) {
+                    @unlink($dst);
+                    $linked = false;
+                }
+                if (!$linked) {
+                    $this->replace($dst, $path, null, static fn (string $tmp): bool => self::copyFrom($handle, $tmp));
                 }
             }
-            if (!@link($src, $dst)) {
-                $this->replace($dst, $path, null, static fn (string $tmp): bool => @copy($src, $tmp));
-            }
+            ++$counts['linked'];
+        } finally {
+            fclose($handle);
         }
-        ++$counts['linked'];
+    }
+
+    /**
+     * Opens a source the walk has checked, and proves the descriptor is the regular file that was checked: the path is
+     * lstat'ed before and after the open and compared (inode and device) with fstat of the descriptor, so a link, or
+     * another file, swapped in between makes the seed fail instead of copying from outside the assets.
+     *
+     * @return array{resource, array<int|string, int>}
+     */
+    private function openChecked(string $src, string $path): array
+    {
+        if (null !== $this->afterCheck) {
+            ($this->afterCheck)($src);
+        }
+        $changed = fn (): \RuntimeException => new \RuntimeException(\sprintf('"%s" changed while it was being seeded', $this->printable($path)));
+        $before = @lstat($src);
+        if (false === $before || !self::isFile($before)) {
+            throw $changed();
+        }
+        $handle = @fopen($src, 'r');
+        if (false === $handle) {
+            throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
+        }
+        $opened = fstat($handle);
+        $after = @lstat($src);
+        if (false === $opened) {
+            fclose($handle);
+
+            throw $changed();
+        }
+        if (!self::isFile($opened) || !self::isFile($after) || !self::sameInode($before, $opened) || !self::sameInode($before, $after)) {
+            fclose($handle);
+
+            throw $changed();
+        }
+
+        return [$handle, $opened];
+    }
+
+    /**
+     * @param resource $handle
+     */
+    private static function copyFrom($handle, string $tmp): bool
+    {
+        $out = @fopen($tmp, 'w');
+        if (false === $out) {
+            return false;
+        }
+        rewind($handle);
+        $ok = false !== stream_copy_to_stream($handle, $out);
+
+        return fclose($out) && $ok;
+    }
+
+    /**
+     * @param array<int|string, int>|false $stat
+     */
+    private static function isFile(array|false $stat): bool
+    {
+        return false !== $stat && 0o100000 === ($stat['mode'] & 0o170000);
+    }
+
+    /**
+     * @param array<int|string, int>|false $a
+     * @param array<int|string, int>|false $b
+     */
+    private static function sameInode(array|false $a, array|false $b): bool
+    {
+        return false !== $a && false !== $b && $a['ino'] === $b['ino'] && $a['dev'] === $b['dev'];
     }
 
     /**

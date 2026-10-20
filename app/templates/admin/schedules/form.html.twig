@@ -4,7 +4,7 @@
 {% block title %}{{ title }} · Schedules · {{ parent() }}{% endblock %}
 
 {% block content %}
-    <twig:PageHeader :title="title" description="Cron fields: minute hour day-of-month month day-of-week, or an alias such as @daily. The timezone decides what the hours mean." />
+    <twig:PageHeader :title="title" description="Cron fields: minute hour day-of-month month day-of-week (aliases such as @daily are not accepted). The timezone decides what the hours mean." />
 
     <div class="mt-6 max-w-2xl">
         <form method="post" action="{{ editing ? path('schedule_edit', {name: editing}) : path('schedule_new') }}" novalidate autocomplete="off" class="grid gap-6" data-testid="schedule-form">
@@ -35,7 +35,7 @@
 
             <div class="grid gap-2" data-slot="form-row">
                 <twig:Label for="schedule-action">Action</twig:Label>
-                <twig:NativeSelect id="schedule-action" name="action" class="h-11 md:h-8">
+                <twig:NativeSelect id="schedule-action" name="action" class="[&_select]:h-11 md:[&_select]:h-8">
                     {% for candidate in actions %}
                         <twig:NativeSelect:Option {{ ...{value: candidate, selected: candidate == form.action ? true : null} }}>{{ candidate }}</twig:NativeSelect:Option>
                     {% endfor %}
