@@ -139,7 +139,8 @@
                                         {% else %}
                                             <span class="font-medium [overflow-wrap:anywhere]" data-testid="asset-name">{{ entry.name }}</span>
                                             {% if entry.kind == 'link' %}
-                                                <twig:Badge variant="outline" class="ms-2">symbolic link, ignored</twig:Badge>
+                                                <span class="block text-xs text-ink-muted [overflow-wrap:anywhere]" data-testid="asset-link-target">&rarr; {{ entry.linkTarget }}</span>
+                                                <twig:Badge variant="outline" class="ms-2" data-testid="asset-link-state">{{ entry.linkSeeded ? 'symbolic link, seeded on deploy' : 'symbolic link, not seeded: ' ~ entry.linkNote }}</twig:Badge>
                                             {% elseif not entry.usable %}
                                                 <twig:Badge variant="outline" class="ms-2">name not supported here</twig:Badge>
                                             {% endif %}

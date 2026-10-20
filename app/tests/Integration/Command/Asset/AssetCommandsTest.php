@@ -143,7 +143,7 @@ final class AssetCommandsTest extends KernelTestCase
 
         $out = $this->squash($this->cli('fleet:asset:list', ['project' => 'blog'])->getDisplay());
 
-        self::assertStringContainsString('link link (symbolic link, ignored) -', $out);
+        self::assertStringContainsString("link link -> /etc/hostname (symbolic link, not seeded: points outside the project's assets) -", $out);
         self::assertStringContainsString('odd:name (not addressable)', $out);
     }
 

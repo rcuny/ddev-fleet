@@ -92,6 +92,7 @@ final readonly class AssetStore
                 continue;
             }
             $usable = AssetPath::isUsableName($name) && AssetEntry::LINK !== $kind && \count($segments) < AssetPath::MAX_DEPTH;
+            $link = AssetEntry::LINK === $kind ? $this->describeLink($project, $segments, $name) : null;
             $entries[] = new AssetEntry(
                 self::printable($name),
                 $usable ? AssetPath::join([...$segments, $name]) : '',
@@ -99,11 +100,34 @@ final readonly class AssetStore
                 AssetEntry::FILE === $kind ? $stat['size'] : null,
                 $stat['mtime'],
                 $usable,
+                $link->raw ?? '',
+                $link?->isAllowed() ?? false,
+                $link->refusal ?? '',
             );
         }
         usort($entries, static fn (AssetEntry $a, AssetEntry $b): int => [!$a->isDirectory(), strtolower($a->name), $a->name] <=> [!$b->isDirectory(), strtolower($b->name), $b->name]);
 
         return new AssetListing($segments, $entries, $truncated);
+    }
+
+    /**
+     * What deploy seeding makes of a link (a name or folder it never seeds is refused by the resolver's walk).
+     *
+     * @param list<string> $segments the folder holding the link
+     */
+    private function describeLink(string $project, array $segments, string $name): AssetLink
+    {
+        $root = $this->paths->assetsDir($project);
+        if (is_link($root) || !is_dir($root) || !AssetPath::isUsableName($name)) {
+            return AssetLink::refused('not seeded', '');
+        }
+        foreach ($segments as $segment) {
+            if (!AssetPath::isUsableName($segment)) {
+                return AssetLink::refused('in a folder that is never seeded', '');
+            }
+        }
+
+        return AssetLinkResolver::resolve($root, implode('/', [...$segments, $name]));
     }
 
     /**

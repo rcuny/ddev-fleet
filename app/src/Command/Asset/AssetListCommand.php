@@ -56,7 +56,7 @@ final class AssetListCommand extends Command
                         array_map(static fn (AssetEntry $entry): array => [
                             $entry->kind,
                             $entry->name.match (true) {
-                                AssetEntry::LINK === $entry->kind => ' (symbolic link, ignored)',
+                                AssetEntry::LINK === $entry->kind => \sprintf(' -> %s (%s)', $entry->linkTarget, $entry->linkSeeded ? 'symbolic link, seeded' : 'symbolic link, not seeded: '.$entry->linkNote),
                                 !$entry->usable => ' (not addressable)',
                                 default => '',
                             },

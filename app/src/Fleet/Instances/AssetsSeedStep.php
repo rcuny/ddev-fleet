@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Fleet\Instances;
 
+use App\Fleet\Assets\AssetLinkResolver;
 use App\Fleet\Assets\AssetPath;
 use App\Fleet\FleetPaths;
 use App\Fleet\Jobs\JobFailed;
@@ -19,8 +20,12 @@ use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
  *   Anything else is copied untouched.
  * - `dumps/` is never substituted: its files are hard-linked (a copy when the link is refused, for example across
  *   filesystems), and a stale file at the destination is replaced.
- * - A symbolic link or special file in the assets is skipped and logged, a name the browser could not address is
- *   skipped, nothing is written into `.git`, and a destination directory that is a symbolic link fails the deploy.
+ * - A symbolic link is honoured when AssetLinkResolver finds a regular file for it inside the same project's assets.
+ *   In `dumps/`, a link to another file in `dumps/` becomes a hard link to the same inode (the dump is not copied
+ *   twice, and `dumps/default.sql` is a plain file for `ddev import-db`); elsewhere it becomes a relative symbolic link
+ *   to the seeded target, so the instance mirrors the assets. A refused link (outside the assets, dangling, to a
+ *   folder, a loop) is skipped and logged with the reason. A special file is skipped and logged, a name the browser
+ *   could not address is skipped, nothing is written into `.git`, and a destination directory that is a symbolic link fails the deploy.
  * - What was copied is reported through DeployContext::exclude(), so the project's `git status` stays clean.
  */
 #[AutoconfigureTag('fleet.deploy_step', ['priority' => self::PRIORITY])]
@@ -35,6 +40,9 @@ final class AssetsSeedStep implements DeployStep
 
     private const int MAX_TEXT_BYTES = 1_048_576;
     private const string DUMPS = 'dumps';
+
+    /** The assets directory being seeded (set by run()). */
+    private string $root = '';
 
     public function __construct(private readonly FleetPaths $paths)
     {
@@ -59,6 +67,7 @@ final class AssetsSeedStep implements DeployStep
         }
 
         $counts = ['copied' => 0, 'substituted' => 0, 'linked' => 0, 'skipped' => 0];
+        $this->root = $source;
         try {
             $this->copyTree($source, $context->dir, '', $context, $counts);
         } catch (\RuntimeException $e) {
@@ -108,8 +117,7 @@ final class AssetsSeedStep implements DeployStep
             }
             $type = $info['mode'] & 0o170000;
             if (0o120000 === $type) {
-                $context->log->line(\sprintf('assets: skipped "%s" (symbolic link)', $this->printable($path)));
-                ++$counts['skipped'];
+                $this->copyLink($path, $dst, $inDumps, $context, $counts);
             } elseif (0o040000 === $type) {
                 $this->ensureDirectory($dst, $path);
                 $this->copyTree($src, $dst, $path, $context, $counts);
@@ -125,6 +133,41 @@ final class AssetsSeedStep implements DeployStep
                 $context->log->line(\sprintf('assets: skipped "%s" (not a regular file)', $this->printable($path)));
                 ++$counts['skipped'];
             }
+        }
+    }
+
+    /**
+     * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
+     */
+    private function copyLink(string $path, string $dst, bool $inDumps, DeployContext $context, array &$counts): void
+    {
+        $link = AssetLinkResolver::resolve($this->root, $path);
+        if (null === $link->target) {
+            $context->log->line(\sprintf('assets: skipped "%s" (symbolic link to "%s": %s)', $this->printable($path), $link->raw, $link->refusal));
+            ++$counts['skipped'];
+
+            return;
+        }
+
+        if ($inDumps && self::DUMPS === explode('/', $link->target)[0]) {
+            $this->linkOrCopy($this->root.'/'.$link->target, $dst, $path, $counts);
+
+            return;
+        }
+
+        // Relative to the folder of the link, so the instance stays movable: `a/b/link` -> `../c/target`.
+        $from = explode('/', $path);
+        array_pop($from);
+        $to = explode('/', $link->target);
+        while ([] !== $from && \count($to) > 1 && $from[0] === $to[0]) {
+            array_shift($from);
+            array_shift($to);
+        }
+        $relative = str_repeat('../', \count($from)).implode('/', $to);
+        $this->replace($dst, $path, null, static fn (string $tmp): bool => @symlink($relative, $tmp));
+        ++$counts['linked'];
+        if (!$inDumps) {
+            $context->exclude('/'.self::escape($path));
         }
     }
 
