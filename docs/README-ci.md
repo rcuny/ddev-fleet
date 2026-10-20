@@ -334,6 +334,12 @@ FLEET_CI_WORKERS=2 ci/run-gates.sh --full               # Playwright --workers (
 | `--quick` | `composer-install`, `composer-gates` (`composer run gates`: assets, cs, stan, lint, phpunit), `prod-check` (only if `app/composer.json` has the script) |
 | `--full` | quick, plus `playwright-install` (`npm ci`, Chromium), `playwright-typecheck`, `playwright` (whole suite with `FLEET_E2E_BASE_URL` unset), `infra-install` (`.venv`), `pytest` (`tests/pytest`), `systemd-security` (offline score; skipped without `systemd-analyze`), `ansible-lint` (non-blocking, skipped below Python 3.12) |
 
+Every gate runs with a throw-away `FLEET_HOME` (`mktemp -d`, removed on exit) and without `APP_ENV`: the companion
+container exports `FLEET_HOME=/tmp/sqlite/fleet-home` (the served dev app's database, which the tests wipe) and
+`APP_ENV=dev`. Composer is called as found on PATH; `FLEET_PHP` runs it through that PHP binary instead. Unlike the
+pipeline, the browser install is `npx playwright install --only-shell chromium` **without** `--with-deps` (the script
+does not need root); on a bare host install the system libraries once with `--with-deps` as root.
+
 It clears `app/var/cache/dev` and `app/var/cache/test` first (a stale cache after a branch switch gives false
 Playwright reds). A failing gate does not stop the others; the exit status is 0 only if every **blocking** gate
 passed (a skipped gate counts as passed, its reason is in the summary).

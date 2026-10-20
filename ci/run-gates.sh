@@ -9,7 +9,8 @@
 #   --full    quick + Playwright (npm ci, browser install, typecheck, the whole suite) + infra tests (pytest,
 #             systemd security score) + ansible-lint (non-blocking)      [default]
 #
-# Environment: FLEET_CI_WORKERS (Playwright --workers, default unset), FLEET_PHP (PHP binary, default php8.4/php).
+# Environment: FLEET_CI_WORKERS (Playwright --workers, default unset), FLEET_PHP (run composer through this PHP binary,
+# default: composer as found on PATH). Every gate runs with a throw-away FLEET_HOME and without APP_ENV.
 # The report directory (default var/ci-report/, git-ignored) gets <gate>.log per gate, gates.tsv, summary.json,
 # summary.txt and, in full mode, playwright-report/. Exit 0 only if every blocking gate passed.
 # Run from anywhere; needs network (Composer, npm, pip). Works in the companion container and in a DDEV web container.
@@ -45,9 +46,23 @@ rm -rf "$report_dir/playwright-report"
 rm -f "$report_dir"/*.log "$report_dir/gates.tsv" "$report_dir/summary.json" "$report_dir/summary.txt"
 : > "$report_dir/gates.tsv"
 
-php="${FLEET_PHP:-$(command -v php8.4 || command -v php)}"
-composer="$(command -v composer)"
+# Throw-away state for every gate. The container exports FLEET_HOME=/tmp/sqlite/fleet-home (the served dev app's
+# database, which the tests wipe) and APP_ENV=dev; neither may reach the gates. PHPUnit forces APP_ENV=test itself,
+# the other gates use the app's own default from .env. Playwright additionally makes its own FLEET_HOME.
+gates_home="$(mktemp -d)"
+trap 'rm -rf "$gates_home"' EXIT
+export FLEET_HOME="$gates_home"
+unset APP_ENV
 export COMPOSER_NO_INTERACTION=1
+
+# Composer: the executable on PATH (a phar or a wrapper), run through FLEET_PHP only when that is set.
+# A missing tool is a failed gate in the summary, not a crash before it.
+composer=()
+if [ -n "${FLEET_PHP:-}" ]; then
+    composer=("$FLEET_PHP" "$(command -v composer || true)")
+elif command -v composer > /dev/null 2>&1; then
+    composer=(composer)
+fi
 
 # run_gate NAME BLOCKING(1|0) CMD...   runs CMD with its output in <report>/NAME.log, records the result.
 # Returns the status of CMD, but never aborts the script: every independent gate still runs.
@@ -74,11 +89,16 @@ app() { (cd "$root/app" && "$@"); }
 # Stale Symfony caches give false Playwright and PHPUnit reds after a branch switch.
 rm -rf "$root/app/var/cache/dev" "$root/app/var/cache/test"
 
-if run_gate composer-install 1 app "$php" "$composer" install --no-interaction --prefer-dist; then
-    run_gate composer-gates 1 app "$php" "$composer" run gates || true
-    scripts="$(app "$php" "$composer" run-script --list 2>/dev/null || true)"
+if [ "${#composer[@]}" -eq 0 ] || [ -z "${composer[${#composer[@]}-1]}" ]; then
+    printf '==> composer-install\n    composer not found on PATH\n'
+    printf 'composer-install\tfailed\t0\t1\tcomposer not found on PATH\n' >> "$report_dir/gates.tsv"
+    skip_gate composer-gates 1 "composer not found"
+    skip_gate prod-check 1 "composer not found"
+elif run_gate composer-install 1 app "${composer[@]}" install --no-interaction --prefer-dist; then
+    run_gate composer-gates 1 app "${composer[@]}" run gates || true
+    scripts="$(app "${composer[@]}" run-script --list 2>/dev/null || true)"
     if grep -q '^ *prod-check\b' <<< "$scripts"; then
-        run_gate prod-check 1 app "$php" "$composer" run prod-check || true
+        run_gate prod-check 1 app "${composer[@]}" run prod-check || true
     else
         skip_gate prod-check 1 "no prod-check script in app/composer.json"
     fi
