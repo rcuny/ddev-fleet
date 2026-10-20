@@ -139,9 +139,9 @@
                                         {% else %}
                                             <span class="font-medium [overflow-wrap:anywhere]" data-testid="asset-name">{{ entry.name }}</span>
                                             {% if entry.kind == 'link' %}
-                                                <twig:Badge variant="outline" class="ms-2">symbolic link, ignored</twig:Badge>
+                                                <twig:Badge variant="outline" class="ms-2 h-auto whitespace-normal">symbolic link, ignored</twig:Badge>
                                             {% elseif not entry.usable %}
-                                                <twig:Badge variant="outline" class="ms-2">name not supported here</twig:Badge>
+                                                <twig:Badge variant="outline" class="ms-2 h-auto whitespace-normal">name not supported here</twig:Badge>
                                             {% endif %}
                                         {% endif %}
                                         <span class="block text-xs text-ink-muted sm:hidden">
