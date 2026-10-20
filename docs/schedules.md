@@ -24,7 +24,7 @@ administrators only) or with `fleet schedule:*` (`php bin/console fleet:schedule
 | `fleet:schedule:delete <name> --yes` | Delete the schedule and its history. |
 
 All accept `--json`. Exit codes: `0` done, `1` a value was refused (`--cron`, `--timezone`, `--instance` named on stderr),
-`2` not allowed now (no `--yes`; `run` when the instance is busy or gone), `3` not found.
+`2` not allowed now (no `--yes`; `run` when the instance is busy or does not exist), `3` not found.
 
 ## Rules
 
@@ -43,8 +43,13 @@ All accept `--json`. Exit codes: `0` done, `1` a value was refused (`--cron`, `-
   stopped before the job was queued." It is never fired again (the claim consumed the occurrence), and a second tick
   leaves it alone.
 - Each occurrence is claimed once (a unique key on schedule and occurrence), so two ticks racing fire one job.
-- Results, in the 0.x words: `claimed` (job queued), `started`, `succeeded`, `failed`, `skipped` (the instance was busy)
-  and `missed`.
+- Results, in the 0.x words: `claimed` (job queued), `started`, `succeeded`, `failed`, `skipped` (the instance was busy, or does not exist) and `missed`.
+- **An instance that does not exist yet is accepted** by the CLI, the pages and project import alike, so a schedule can
+  be set up before its instance is deployed (or after a host restore). The create and update commands print a warning
+  ("Instance X does not exist yet; runs are skipped until it does", the `warning` key with `--json`), the pages flash it,
+  and the schedule list shows a **Target missing** badge. Until the instance exists every run, timed or **Run now**,
+  is recorded as `skipped` with that reason and no job is queued; it is not retried. Once the instance exists the next
+  occurrence runs normally. An empty instance id is still refused.
 - The only action is `redeploy` (the schedule's instance). The form and `fleet:schedule:create --help` list the
   registered actions. Actions are a small registry
   (`App\Fleet\Schedules\ScheduleAction`, tag `fleet.schedule_action`); each builds its job through the generic job API.
@@ -61,7 +66,7 @@ fleet schedule:history nightly-demo # one row per night, with the job and how it
 
 At 03:00 the ticker queues a `redeploy` job for the instance (trigger `schedule`, requested by `schedule:nightly-demo`)
 and the history row follows that job: `claimed` while queued, `started`, then `succeeded` or `failed`. If the instance
-has a queued or running job the run is `skipped` (with the reason); if the instance was destroyed it is `failed`. The
+has a queued or running job the run is `skipped` (with the reason); if the instance does not exist (never deployed, or destroyed) it is `skipped` with that reason. The
 history links each run to its job page. On the page, **Run now** does the same by hand and the schedule row links the
 last job.
 

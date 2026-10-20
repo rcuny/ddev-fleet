@@ -23,6 +23,10 @@ use Symfony\Component\Console\Output\OutputInterface;
         Creates a user, optionally an administrator (<info>--admin</info>) and optionally a member of projects
         (<info>--project</info>, repeatable), then rewrites the Authelia users file and has Authelia pick it up.
 
+        A <info>--site-only</info> user only opens the instance sites of its projects (to keep crawlers and strangers
+        out of a shared site): no Fleet access, no email needed, a password of at least 4 characters, never an
+        administrator.
+
         The password is asked on the terminal, twice and without echo. In a script give it as the first line of standard
         input with <info>--password-stdin</info>: <info>printf '%s\n' "$PASSWORD" | fleet user:create alice --email=alice@example.com --password-stdin</info>.
         It is never an argument or an option.
@@ -46,6 +50,7 @@ final class UserCreateCommand extends AbstractUserCommand
             ->addOption('display-name', null, InputOption::VALUE_REQUIRED, 'Display name (default: the username)')
             ->addOption('email', null, InputOption::VALUE_REQUIRED, 'Email address')
             ->addOption('admin', null, InputOption::VALUE_NONE, 'Make the user an administrator')
+            ->addOption('site-only', null, InputOption::VALUE_NONE, 'A site-only user: opens the instance sites of its projects, nothing else (no email needed, short password allowed)')
             ->addOption('project', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'A project the user is a member of (repeatable)');
         PasswordInput::addOption($this);
         JsonOutput::addOptions($this);
@@ -58,7 +63,11 @@ final class UserCreateCommand extends AbstractUserCommand
         return self::guarded($out, function () use ($input, $output, $out): void {
             $username = (string) $input->getArgument('username');
             $email = $input->getOption('email');
-            if (!\is_string($email) || '' === $email) {
+            $siteOnly = true === $input->getOption('site-only');
+            if (!\is_string($email)) {
+                $email = '';
+            }
+            if ('' === $email && !$siteOnly) {
                 throw new InvalidUserInput('email', 'An email address is required.');
             }
             $displayName = $input->getOption('display-name');
@@ -68,8 +77,8 @@ final class UserCreateCommand extends AbstractUserCommand
             $password = PasswordInput::read($input, $output);
 
             // One transaction: an unknown project name undoes the user as well.
-            [$user, $warning] = self::commit($this->sync, function () use ($username, $displayName, $email, $password, $admin, $projects) {
-                $user = $this->users->create($username, $displayName, $email, $password, $admin);
+            [$user, $warning] = self::commit($this->sync, function () use ($username, $displayName, $email, $password, $admin, $siteOnly, $projects) {
+                $user = $this->users->create($username, $displayName, $email, $password, $admin, $siteOnly);
                 if ([] !== $projects) {
                     $this->access->setProjects($username, $projects);
                 }

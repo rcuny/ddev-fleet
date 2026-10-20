@@ -15,6 +15,7 @@ final readonly class UserService
 {
     private const int DISPLAY_NAME_MAX = 255;
     private const int EMAIL_MAX = 254;
+    private const string SITE_ONLY_ADMIN = 'A site-only user cannot be an administrator.';
 
     public function __construct(
         private UserRepository $users,
@@ -61,25 +62,29 @@ final readonly class UserService
 
     /**
      * Creates a user (an administrator when $admin; the admin group is the only group a user can be put in here).
+     * A site-only user (FLE-101) needs no email, may have a short password and is never an administrator.
      *
      * @throws \InvalidArgumentException when the username is taken or the username, display name, email or password is
      *                                   not acceptable; nothing is stored then
      */
-    public function create(string $username, string $displayName, string $email, #[\SensitiveParameter] string $plainPassword, bool $admin = false): User
+    public function create(string $username, string $displayName, string $email, #[\SensitiveParameter] string $plainPassword, bool $admin = false, bool $siteOnly = false): User
     {
+        if ($siteOnly && $admin) {
+            throw new InvalidUserInput('admin', self::SITE_ONLY_ADMIN);
+        }
         $this->assertUsername($username);
-        $this->assertProfile($displayName, $email);
-        $this->assertPassword($plainPassword, $username);
+        $this->assertProfile($displayName, $email, $siteOnly);
+        $this->assertPassword($plainPassword, $username, $siteOnly);
         $hash = self::hash($plainPassword);
 
         // The existence check and the save are one locked change: a losing parallel create gets the same
         // InvalidUserInput as a sequential one, never a unique-constraint error.
         $user = null;
-        $this->users->write(function () use (&$user, $username, $displayName, $email, $hash, $admin): void {
+        $this->users->write(function () use (&$user, $username, $displayName, $email, $hash, $admin, $siteOnly): void {
             if (null !== $this->users->findByUsername($username)) {
                 throw new InvalidUserInput('username', 'A user with this username already exists.');
             }
-            $user = new User($username, $displayName, $email, $hash, $admin ? [$this->admins->name()] : []);
+            $user = new User($username, $displayName, $siteOnly ? '' : $email, $hash, $admin ? [$this->admins->name()] : [], siteOnly: $siteOnly);
             $this->users->save($user);
         });
         if (!$user instanceof User) {
@@ -100,9 +105,9 @@ final readonly class UserService
         $user = $this->users->findByUsername($username) ?? throw UnknownUser::named($username);
         $displayName ??= $user->displayName();
         $email ??= $user->email();
-        $this->assertProfile($displayName, $email);
+        $this->assertProfile($displayName, $email, $user->isSiteOnly());
 
-        $user->updateProfile($displayName, $email);
+        $user->updateProfile($displayName, $user->isSiteOnly() ? '' : $email);
         $this->users->save($user);
 
         return $user;
@@ -132,9 +137,32 @@ final readonly class UserService
     public function setAdmin(string $username, bool $admin): User
     {
         $user = $this->users->findByUsername($username) ?? throw UnknownUser::named($username);
+        if ($admin && $user->isSiteOnly()) {
+            throw new InvalidUserInput('admin', self::SITE_ONLY_ADMIN);
+        }
         $user->changeGroups($admin
             ? $this->admins->addedTo($user->groups())
             : array_values(array_filter($user->groups(), fn (string $group): bool => $group !== $this->admins->name())));
+        $this->users->save($user);
+
+        return $user;
+    }
+
+    /**
+     * Makes the user site-only or a regular user again. A site-only user cannot be an administrator. Going back to a
+     * regular user keeps the stored password (it may be shorter than the regular policy allows: set a new one) and
+     * needs an email, which the next updateProfile() call checks.
+     *
+     * @throws UnknownUser
+     * @throws InvalidUserInput when an administrator would become site-only
+     */
+    public function setSiteOnly(string $username, bool $siteOnly): User
+    {
+        $user = $this->users->findByUsername($username) ?? throw UnknownUser::named($username);
+        if ($siteOnly && $this->admins->includes($user)) {
+            throw new InvalidUserInput('siteOnly', self::SITE_ONLY_ADMIN);
+        }
+        $user->changeSiteOnly($siteOnly);
         $this->users->save($user);
 
         return $user;
@@ -157,7 +185,7 @@ final readonly class UserService
     public function setPassword(string $username, #[\SensitiveParameter] string $plain): User
     {
         $user = $this->users->findByUsername($username) ?? throw UnknownUser::named($username);
-        $this->assertPassword($plain, $username);
+        $this->assertPassword($plain, $username, $user->isSiteOnly());
 
         $user->changePasswordHash(self::hash($plain));
         $this->users->save($user);
@@ -172,20 +200,23 @@ final readonly class UserService
         }
     }
 
-    private function assertProfile(string $displayName, string $email): void
+    private function assertProfile(string $displayName, string $email, bool $siteOnly = false): void
     {
         if ('' === trim($displayName) || mb_strlen($displayName, 'UTF-8') > self::DISPLAY_NAME_MAX
             || !mb_check_encoding($displayName, 'UTF-8') || 1 === preg_match('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/u', $displayName)) {
             throw new InvalidUserInput('displayName', 'The display name must be 1-255 characters without control characters.');
+        }
+        if ($siteOnly) {
+            return;
         }
         if (\strlen($email) > self::EMAIL_MAX || 1 === preg_match('/\s/', $email) || false === filter_var($email, \FILTER_VALIDATE_EMAIL)) {
             throw new InvalidUserInput('email', 'The email address is not valid.');
         }
     }
 
-    private function assertPassword(#[\SensitiveParameter] string $plain, string $username): void
+    private function assertPassword(#[\SensitiveParameter] string $plain, string $username, bool $siteOnly = false): void
     {
-        $violations = $this->policy->violations($plain, $username);
+        $violations = $this->policy->violations($plain, $username, $siteOnly);
         if ([] !== $violations) {
             throw new InvalidUserInput('password', implode(' ', $violations));
         }

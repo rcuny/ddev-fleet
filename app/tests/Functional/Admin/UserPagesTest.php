@@ -211,6 +211,86 @@ final class UserPagesTest extends AdminTestCase
         self::assertSame('Alice Example', $crawler->filter('#user_edit_displayName')->attr('value'));
     }
 
+    public function testCreateASiteOnlyUserWithoutEmailAndWithAShortPassword(): void
+    {
+        $this->makeProject('blog');
+
+        $crawler = $this->open('/admin/users/new');
+        self::assertCount(1, $crawler->filter('input[type=checkbox][name="user_create[siteOnly]"]'));
+        self::assertCount(1, $crawler->filter('[data-testid=site-only-warning][hidden]'));
+
+        $this->send($crawler, 'Create user', 'user_create', ['username' => 'shield', 'displayName' => 'Client shield', 'email' => '', 'password' => 'shield', 'siteOnly' => '1', 'admin' => null, 'projects' => ['blog']]);
+
+        self::assertResponseRedirects('/admin/users/shield/edit', 303);
+        $user = $this->user('shield');
+        self::assertTrue($user->isSiteOnly());
+        self::assertSame('', $user->email());
+        self::assertSame(['blog'], $this->projectsOf('shield'));
+        $entry = $this->usersFile()['shield'];
+        self::assertSame(['fleet-site-only', 'fleet-project-blog'], $entry['groups']);
+        self::assertTrue(password_verify('shield', $entry['password']));
+
+        $list = $this->open('/admin/users');
+        self::assertCount(1, $list->filter('[data-username=shield] [data-testid=user-site-only]'));
+    }
+
+    public function testASiteOnlyUserCannotBeAnAdministratorAndKeepsTheMinimumLength(): void
+    {
+        $crawler = $this->open('/admin/users/new');
+        $this->send($crawler, 'Create user', 'user_create', ['username' => 'shield', 'displayName' => 'Shield', 'email' => '', 'password' => 'abc', 'siteOnly' => '1', 'admin' => '1', 'projects' => null]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertNull($this->stored('shield'));
+
+        $crawler = $this->open('/admin/users/new');
+        $page = $this->send($crawler, 'Create user', 'user_create', ['username' => 'shield', 'displayName' => 'Shield', 'email' => '', 'password' => 'abc', 'siteOnly' => '1', 'admin' => null, 'projects' => null]);
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('at least 4 characters', $page->text());
+    }
+
+    public function testARegularUserStillNeedsAnEmailAndTheLongPassword(): void
+    {
+        $crawler = $this->open('/admin/users/new');
+        $page = $this->send($crawler, 'Create user', 'user_create', ['username' => 'bob', 'displayName' => 'Bob', 'email' => '', 'password' => 'short', 'siteOnly' => null, 'admin' => null, 'projects' => null]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('email address is not valid', $page->text());
+        self::assertNull($this->stored('bob'));
+    }
+
+    public function testEditSwitchesTheKindOfAnAccount(): void
+    {
+        $this->makeUser('bob');
+
+        $crawler = $this->open('/admin/users/bob/edit');
+        $this->send($crawler, 'Save', 'user_edit', ['siteOnly' => '1', 'email' => '', 'admin' => null, 'projects' => null]);
+        self::assertResponseRedirects('/admin/users/bob/edit', 303);
+        self::assertTrue($this->user('bob')->isSiteOnly());
+        self::assertSame('', $this->user('bob')->email());
+
+        $crawler = $this->open('/admin/users/bob/edit');
+        self::assertCount(1, $crawler->filter('[data-testid=user-site-only]'));
+        $this->send($crawler, 'Save', 'user_edit', ['siteOnly' => null, 'email' => '', 'admin' => null, 'projects' => null]);
+        self::assertResponseStatusCodeSame(422);
+        self::assertTrue($this->user('bob')->isSiteOnly(), 'back to regular needs an email, nothing changed');
+
+        $crawler = $this->open('/admin/users/bob/edit');
+        $this->send($crawler, 'Save', 'user_edit', ['siteOnly' => null, 'email' => 'bob@example.com', 'admin' => null, 'projects' => null]);
+        self::assertResponseRedirects('/admin/users/bob/edit', 303);
+        self::assertFalse($this->user('bob')->isSiteOnly());
+    }
+
+    public function testAnAdministratorCannotBeMadeSiteOnly(): void
+    {
+        $this->makeUser('carol', admin: true);
+
+        $crawler = $this->open('/admin/users/carol/edit');
+        $this->send($crawler, 'Save', 'user_edit', ['siteOnly' => '1', 'admin' => '1', 'projects' => null]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertFalse($this->user('carol')->isSiteOnly());
+    }
+
     public function testCreateAnAdministrator(): void
     {
         $crawler = $this->open('/admin/users/new');

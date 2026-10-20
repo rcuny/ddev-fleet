@@ -31,6 +31,20 @@ final class PasswordPolicyTest extends TestCase
         self::assertSame(['The password must not be the username.'], $this->policy->violations('Administrator-01', 'administrator-01'), 'case does not make it a different password');
     }
 
+    public function testSiteOnlyAllowsAShortPasswordEvenTheUsername(): void
+    {
+        self::assertSame([], $this->policy->violations('shield', 'shield', true));
+        self::assertSame([], $this->policy->violations('abcd', 'alice', true));
+        self::assertSame(['The password must be at least 4 characters long.'], $this->policy->violations('abc', 'alice', true));
+        self::assertNotSame([], $this->policy->violations('abcd', 'alice'), 'regular users keep the 12-character rule');
+    }
+
+    public function testSiteOnlyStillRefusesNulAndTooLong(): void
+    {
+        self::assertNotSame([], $this->policy->violations("ab\0cd", 'alice', true));
+        self::assertNotSame([], $this->policy->violations(str_repeat('a', PasswordPolicy::MAX_LENGTH + 1), 'alice', true));
+    }
+
     public function testAcceptsPassphrase(): void
     {
         self::assertSame([], $this->policy->violations('correct horse battery staple', 'alice'));

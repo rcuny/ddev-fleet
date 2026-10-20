@@ -78,12 +78,26 @@ final class ScheduleCommandsTest extends KernelTestCase
 
         self::assertSame(1, $bad->getStatusCode());
         $lines = array_map(static fn (string $line): string => explode(':', $line)[0], array_filter(explode("\n", $bad->getErrorOutput())));
-        self::assertSame(['--cron', '--timezone', '--instance'], $lines);
+        self::assertSame(['--cron', '--timezone'], $lines);
 
         $json = $this->cli('fleet:schedule:create', ['name' => 'nightly', '--cron' => 'x', '--json' => true]);
         self::assertSame(1, $json->getStatusCode());
         self::assertSame('Invalid values.', $this->json($json)['error']);
         self::assertSame([], self::getContainer()->get(ScheduleRepository::class)->all());
+    }
+
+    public function testAnInstanceThatDoesNotExistYetIsAcceptedWithAWarning(): void
+    {
+        $created = $this->cli('fleet:schedule:create', ['name' => 'nightly', '--cron' => '0 3 * * *', '--instance' => 'later--main', '--json' => true]);
+
+        self::assertSame(0, $created->getStatusCode());
+        $shape = $this->json($created);
+        self::assertSame('later--main', $shape['instance']);
+        self::assertStringContainsString('later--main does not exist yet; runs are skipped until it does', $shape['warning']);
+
+        $plain = $this->cli('fleet:schedule:update', ['name' => 'nightly', '--cron' => '0 4 * * *', '--instance' => 'later--main']);
+        self::assertSame(0, $plain->getStatusCode());
+        self::assertStringContainsString('does not exist yet', $plain->getErrorOutput());
     }
 
     public function testDeleteWithoutYesIsRefused(): void

@@ -26,7 +26,6 @@ const MSG = {
   cronBad: 'Not a valid cron expression: use five fields (minute hour day-of-month month day-of-week), for example "0 3 * * *".',
   zone: 'Enter an IANA timezone such as "Europe/Brussels" or "UTC".',
   instanceEmpty: 'Enter the id of the instance to redeploy.',
-  instanceMissing: 'This instance does not exist.',
 } as const;
 
 interface Fixture {
@@ -185,12 +184,10 @@ test.describe('schedules, full coverage', () => {
         await expect(page.getByTestId('error-cron')).toHaveCount(0);
       }
 
-      // Instance rules: empty, unknown, an instance of nobody.
+      // Instance rules: an empty id is refused. An id that does not exist yet is not (see the missing-target test).
       for (const [instance, message] of [
         ['', MSG.instanceEmpty],
         ['   ', MSG.instanceEmpty],
-        [`${fx.project}--nope`, MSG.instanceMissing],
-        ['nope', MSG.instanceMissing],
       ] as const) {
         await fillForm(page, { name: 'instance-check', cron: '0 3 * * *', timezone: 'UTC', instance });
         await submitAndWait(page, page.getByTestId('schedule-save'));
@@ -223,6 +220,39 @@ test.describe('schedules, full coverage', () => {
       await expect(row(page, name).getByTestId('schedule-cron')).toHaveText('0 3 * * *');
       // The 422 answers of the refusals are the only expected console errors.
       expect(errors.filter((e) => !e.includes('status of 422'))).toEqual([]);
+    } finally {
+      await cleanup(page, fx);
+    }
+  });
+
+  test('a target instance that does not exist yet is accepted with a warning, badged, and its run is skipped until it exists', async ({ page }) => {
+    test.setTimeout(180_000);
+    const fx = await fixture(page);
+    const name = uniqueName('later');
+    const target = `${fx.project}--other`;
+    try {
+      await page.goto('/admin/schedules');
+      await follow(page, page.getByTestId('schedule-new'));
+      fx.names.push(name);
+      await fillForm(page, { name, cron: '0 3 * * *', timezone: 'UTC', instance: target });
+      await submitAndWait(page, page.getByTestId('schedule-save'));
+      await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" created.`);
+      await expect(page.getByTestId('flashes')).toContainText(`Instance ${target} does not exist yet; runs are skipped until it does.`);
+      await expect(row(page, name).getByTestId('schedule-target-missing')).toHaveText('Target missing');
+      await expectClean(page, 'the list with a target missing badge');
+
+      // Run now is skipped with a reason, and the history keeps it.
+      await submitAndWait(page, row(page, name).getByTestId('schedule-run'));
+      await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" did not run: Instance ${target} does not exist yet`);
+      await expect(row(page, name).getByTestId('schedule-last')).toHaveText('skipped');
+      await expect(row(page, name).getByTestId('schedule-last-job')).toHaveCount(0);
+
+      // Once the instance exists the badge goes and the run starts a job.
+      instanceRow('insert', fx.project, 'other');
+      await page.goto('/admin/schedules');
+      await expect(row(page, name).getByTestId('schedule-target-missing')).toHaveCount(0);
+      await submitAndWait(page, row(page, name).getByTestId('schedule-run'));
+      await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" started job #`);
     } finally {
       await cleanup(page, fx);
     }
@@ -313,9 +343,7 @@ test.describe('schedules, full coverage', () => {
       await expect(page.getByTestId('error-name')).toHaveCount(0);
       await expect(page.getByLabel('Cron expression')).toHaveValue('nope');
       await expectClean(page, 'the edit form with errors');
-      await fillForm(page, { cron: '0 3 * * *', timezone: 'UTC', instance: `${fx.project}--gone` });
-      await submitAndWait(page, page.getByTestId('schedule-save'));
-      await expect(page.getByTestId('error-instance')).toHaveText(MSG.instanceMissing);
+      await fillForm(page, { cron: '0 3 * * *', timezone: 'UTC' });
 
       // Cancel: back to the list, nothing changed.
       await follow(page, page.getByRole('link', { name: 'Cancel' }));
@@ -429,10 +457,10 @@ test.describe('schedules, full coverage', () => {
       await submitAndWait(page, row(page, orphan).getByTestId('schedule-run'));
       await expect(page.getByTestId('flashes')).toContainText(new RegExp(`Schedule "${orphan}" did not run: .+`));
       await expect(row(page, orphan).getByTestId('schedule-last-job')).toHaveCount(0);
-      await expect(row(page, orphan).getByTestId('schedule-last')).toHaveText(/^(failed|skipped)$/);
+      await expect(row(page, orphan).getByTestId('schedule-last')).toHaveText('skipped');
       await follow(page, row(page, orphan).getByTestId('schedule-history'));
       await expect(page.getByTestId('schedule-run-row')).toHaveCount(1);
-      await expect(page.getByTestId('run-result')).toHaveText(/^(failed|skipped)$/);
+      await expect(page.getByTestId('run-result')).toHaveText('skipped');
       await expect(page.getByTestId('run-job')).toHaveText('-');
       await expect(page.getByTestId('run-job-link')).toHaveCount(0);
       await expect(page.getByTestId('schedule-run-row').locator('td').last()).not.toBeEmpty();
@@ -587,9 +615,9 @@ test.describe('schedules, full coverage', () => {
       await expectClean(page, 'the edit form with long values');
 
       // A refusal with the long values typed back, and the delete dialog titled with the long name.
-      await fillForm(page, { instance: `${longInstance}-nope` });
+      await fillForm(page, { instance: '' });
       await submitAndWait(page, page.getByTestId('schedule-save'));
-      await expect(page.getByTestId('error-instance')).toHaveText(MSG.instanceMissing);
+      await expect(page.getByTestId('error-instance')).toHaveText(MSG.instanceEmpty);
       await expectClean(page, 'the edit form with a long refused value');
       await page.goto('/admin/schedules');
       const dialog = await openDialog(page, row(page, longName).getByTestId('schedule-delete'));

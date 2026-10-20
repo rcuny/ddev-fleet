@@ -64,10 +64,10 @@ final readonly class ScheduleService
     /**
      * @throws ValidationFailed
      */
-    public function create(ScheduleInput $input, string $by, bool $requireTarget = true): Schedule
+    public function create(ScheduleInput $input, string $by): Schedule
     {
         $input = $input->normalised();
-        $errors = $this->errors($input, true, $requireTarget);
+        $errors = $this->errors($input, true);
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -93,12 +93,12 @@ final readonly class ScheduleService
      * @throws NotFound
      * @throws ValidationFailed
      */
-    public function update(string $name, ScheduleInput $input, string $by, bool $requireTarget = true): Schedule
+    public function update(string $name, ScheduleInput $input, string $by): Schedule
     {
         $schedule = $this->get($name);
         $input = new ScheduleInput($schedule->name(), $input->cron, $input->timezone, $input->action, $input->instance);
         $input = $input->normalised();
-        $errors = $this->errors($input, false, $requireTarget);
+        $errors = $this->errors($input, false);
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -225,19 +225,19 @@ final readonly class ScheduleService
 
     /**
      * The field => message map create() would refuse the input with, without touching the database. A project import
-     * checks a file with it before it writes anything; $checkTarget false accepts an instance that does not exist yet.
+     * checks a file with it before it writes anything. An instance that does not exist yet is not an error, see targetWarning().
      *
      * @return array<string, string>
      */
-    public function validate(ScheduleInput $input, bool $checkName = true, bool $checkTarget = true): array
+    public function validate(ScheduleInput $input, bool $checkName = true): array
     {
-        return $this->errors($input->normalised(), $checkName, $checkTarget);
+        return $this->errors($input->normalised(), $checkName);
     }
 
     /**
      * @return array<string, string> field => message
      */
-    private function errors(ScheduleInput $input, bool $checkName, bool $checkTarget): array
+    private function errors(ScheduleInput $input, bool $checkName): array
     {
         $errors = [];
         if ($checkName) {
@@ -252,11 +252,29 @@ final readonly class ScheduleService
         $action = $this->actions->get($input->action);
         if (null === $action) {
             $errors['action'] = \sprintf('Choose one of: %s.', implode(', ', $this->actions->names()));
-        } elseif ($checkTarget && null !== $error = $action->targetError($input->instance)) {
+        } elseif (null !== $error = $action->targetError($input->instance)) {
             $errors['instance'] = $error;
         }
 
         return $errors;
+    }
+
+    /**
+     * Whether the schedule's target does not exist (yet): its runs are skipped until it does.
+     */
+    public function targetMissing(Schedule $schedule): bool
+    {
+        return $this->actions->get($schedule->action())?->targetMissing($schedule->instanceId()) ?? false;
+    }
+
+    /**
+     * The warning to show after a schedule was saved with a target that does not exist yet, or null.
+     */
+    public function targetWarning(Schedule $schedule): ?string
+    {
+        return $this->targetMissing($schedule)
+            ? \sprintf('Instance %s does not exist yet; runs are skipped until it does.', $schedule->instanceId())
+            : null;
     }
 
     private function skipTo(Schedule $schedule, \DateTimeImmutable $now): void

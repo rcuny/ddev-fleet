@@ -93,6 +93,19 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertCount(1, $this->runner->callsMatching(['caddy', 'reload']));
     }
 
+    public function testTwentyThreeAliasesShareOneBlock(): void
+    {
+        $labels = array_map(static fn (int $i): string => 'h'.$i, range(1, 23));
+        $project = $this->project(...$labels);
+        $this->writer->write($this->instance($project), $project);
+        $site = $this->site();
+
+        self::assertSame(1, preg_match_all('/^\S.* \{$/m', $site), 'one site block');
+        foreach ($labels as $label) {
+            self::assertStringContainsString($label.'-acme--main.fleet.example.com', $site);
+        }
+    }
+
     /**
      * @param list<NamedPort> $ports
      */

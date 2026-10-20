@@ -33,6 +33,15 @@ final class FleetUserTest extends TestCase
         self::assertSame($roles, new FleetUser('alice', 'Alice', null, $groups, 'fleet-admins')->getRoles());
     }
 
+    public function testASiteOnlyUserHasNeitherMemberNorAdminRole(): void
+    {
+        $user = new FleetUser('shield', 'shield', null, ['fleet-site-only', 'fleet-project-blog', 'fleet-admins'], 'fleet-admins');
+
+        self::assertTrue($user->isSiteOnly());
+        self::assertSame(['ROLE_USER', 'ROLE_SITE_ONLY'], $user->getRoles(), 'not even with the admin group');
+        self::assertFalse(new FleetUser('a', 'a', null, ['demo'], 'fleet-admins')->isSiteOnly());
+    }
+
     public function testAccessors(): void
     {
         $user = new FleetUser('alice', 'Alice A.', 'alice@fleet.example.com', ['demo'], 'fleet-admins');

@@ -43,8 +43,8 @@ final class UserListCommand extends AbstractUserCommand
                 array_map(static fn (array $row): array => [
                     $row['username'],
                     $row['display_name'],
-                    $row['email'],
-                    $row['admin'] ? 'admin' : 'member',
+                    '' === $row['email'] ? '-' : $row['email'],
+                    $row['admin'] ? 'admin' : ($row['site_only'] ? 'site-only' : 'member'),
                     $row['enabled'] ? 'enabled' : 'disabled',
                     $row['admin'] ? 'all' : ([] === $row['projects'] ? '-' : implode(', ', $row['projects'])),
                 ], $rows),

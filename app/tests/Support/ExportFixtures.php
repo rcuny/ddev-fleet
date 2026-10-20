@@ -69,8 +69,8 @@ trait ExportFixtures
 
         $schedules = $this->service(ScheduleService::class);
         \assert($schedules instanceof ScheduleService);
-        $schedules->create(new ScheduleInput('blog-nightly', '0 3 * * *', 'Europe/Paris', 'redeploy', 'blog--main'), 'admin', false);
-        $schedules->create(new ScheduleInput('blog-weekly', '0 4 * * 1', 'UTC', 'redeploy', 'blog--stage'), 'admin', false);
+        $schedules->create(new ScheduleInput('blog-nightly', '0 3 * * *', 'Europe/Paris', 'redeploy', 'blog--main'), 'admin');
+        $schedules->create(new ScheduleInput('blog-weekly', '0 4 * * 1', 'UTC', 'redeploy', 'blog--stage'), 'admin');
         $schedules->pause('blog-weekly', 'admin');
 
         $secrets = $this->service(SecretService::class);

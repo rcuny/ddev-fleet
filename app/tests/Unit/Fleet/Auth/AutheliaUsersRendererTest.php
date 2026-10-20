@@ -47,6 +47,16 @@ final class AutheliaUsersRendererTest extends TestCase
         self::assertArrayNotHasKey('ghost', $parsed['users'], 'a membership of an unknown user renders nothing');
     }
 
+    public function testASiteOnlyUserGetsTheMarkerGroupAndAPlaceholderEmail(): void
+    {
+        $siteOnly = new User('shield', 'shield', '', self::HASH_A, [], siteOnly: true);
+
+        $parsed = self::parse(new AutheliaUsersRenderer()->render([$siteOnly], ['shield' => ['blog']]));
+
+        self::assertSame(['fleet-site-only', 'fleet-project-blog'], $parsed['users']['shield']['groups']);
+        self::assertSame('shield@site-only.invalid', $parsed['users']['shield']['email']);
+    }
+
     public function testAStoredUserGroupWithTheReservedPrefixIsRefused(): void
     {
         $user = self::user('alice');
