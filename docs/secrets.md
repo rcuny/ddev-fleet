@@ -53,7 +53,8 @@ Everything here is administrator-only. A member of a project cannot list, set, r
 - **Audit log** (`/admin/audit`, linked from the Secrets page): the latest 200 entries, newest first, optionally
   of one action. Every put, delete and reveal of a secret is an entry with who, when, the action
   (`secret.put`, `secret.delete`, `secret.reveal`, `secret.reveal-refused`) and the subject (`fleet/NAME` or
-  `project:<project>/NAME`). The log never contains a value. A field longer than its column is cut on a character
+  `project:<project>/NAME`). Storing or removing the notification SMTP password on the host settings page is recorded the same way (subject
+  `fleet/smtp_password`), and so is a Claude token rotation (`claude.token.rotate`). The log never contains a value. A field longer than its column is cut on a character
   boundary and ends in `…`, so a cut shows.
 - **Reveal** is a POST with a CSRF token. The response shows the value once in a dialog; the response is never
   cached (`Cache-Control: no-store, private`), the reveal is recorded before the value is handed out (if the audit

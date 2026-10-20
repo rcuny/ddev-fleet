@@ -110,6 +110,9 @@ in `prod`. The role is resolved from, in order:
    `/_dev/stand-in/none` (optional `?next=/path`, same-site paths only); the app shell has the same switch;
 3. `FLEET_STAND_IN_ROLE`.
 
+The `fleet_stand_in_user` cookie renames the signed-in stand-in user (`[a-z][a-z0-9-]{2,31}`, any other value is ignored), so a
+browser test has a user of its own: the reveal throttle and the audit log's actor column are per user.
+
 `none` means unauthenticated (a login is required). A request that carries `Remote-User` is never
 treated as a stand-in. To exercise the real header authenticator from your machine, send the headers
 yourself; the peer is loopback, which is trusted by default:

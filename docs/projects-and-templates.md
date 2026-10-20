@@ -250,7 +250,7 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
 Everything on this page is **administrator-only**: the pages need `ROLE_ADMIN` (the group `FLEET_ADMIN_GROUP`, see
 [`installation.md`](installation.md)), the issue id tester's endpoint is admin-only too, and every state change is a
 POST with a CSRF token. A member gets 403, a signed-out visitor is sent to sign in. The commands are for whoever can
-use `sudo fleet` on the host. Operating the instances of a project (start, stop, redeploy, logs) is open to the project's members; deploying and destroying are administrators only, and changing a project's settings never can be given away.
+use `sudo fleet` on the host. Operating the instances of a project (start, stop, redeploy, logs) is open to the project's members; deploying and destroying are administrators only, and changing a project's settings never can be given away. A member opens the sites of their projects only: the project's instance sites answer 403 to everyone else except administrators (the access is the group `fleet-project-<name>` in the Authelia users file, see `docs/installation.md`).
 
 ## Deleting
 
@@ -286,6 +286,14 @@ rewritten. Fix the cause and run `fleet port:refresh [--project=<name>] [--json]
 prints how many (exit `2` when some failed). A public port may not be 22, 80, 443, 2019, 3000, 8080, 8443, 8765 or 9091
 (Caddy or the DDEV router already listens there). `fleet port:firewall` lists the public ports to open in the host firewall; the installer does not open them. More in
 [`networking.md`](networking.md).
+
+### Named-port variables (`FLEET_PORT_<NAME>`)
+
+Every instance gets one variable per named port its project uses, in `web_environment` (`.ddev/config.fleet.yaml`), as
+in 0.x: `FLEET_PORT_<NAME>=<public port>`, with the name upper-cased and `-` turned into `_`. So `playwright` gives
+`FLEET_PORT_PLAYWRIGHT=9325` and `ts-dashboard` gives `FLEET_PORT_TS_DASHBOARD=9111`. A project without ports gets none.
+The values reach the instance on the next deploy or restart of the instance, not by a port change alone. Catalogue
+examples (not seeded): [`networking.md`](networking.md#example-catalogue-entries).
 
 ### Typesense instances
 

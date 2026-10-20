@@ -115,7 +115,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
 | `/etc/caddy/fleet/` | `fleet:caddy` 2750 | `gate.conf` (0640), the sign-in gate, written by the app; `instances/` and `ports/` for later milestones. |
 | `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret (Caddy reads it from its environment, so it only takes effect at the next start). It holds no OVH credential: an `OVH_*` line left by an older apply is dropped at the next `apply caddy`. |
-| `/etc/caddy/ovh/` | `root:caddy` 0750 | DNS mode only: four files (`endpoint`, `application_key`, `application_secret`, `consumer_key`), `root:caddy` 0640, one **clear-text** value each, which the Caddyfile reads through `{file./etc/caddy/ovh/…}` placeholders each time Caddy loads its configuration. Nothing sits in Caddy's process environment. Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Removed when the host leaves DNS mode. |
+| `/etc/caddy/ovh/` | `root:caddy` 0750 | DNS mode only: three files (`application_key`, `application_secret`, `consumer_key`), `root:caddy` 0640, one **clear-text** value each (the endpoint is no secret: it is written into the Caddyfile; an `endpoint` file of an older apply is removed), which the Caddyfile reads through `{file./etc/caddy/ovh/…}` placeholders each time Caddy loads its configuration. Nothing sits in Caddy's process environment. Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Removed when the host leaves DNS mode. |
 | `/etc/authelia/` | `authelia:authelia` | `configuration.yml` (0640, written by the helper); `secrets/` (`root:authelia` 0750, three secret files 0640, generated once). |
 | `/etc/fleet-mercure/Caddyfile` | `root:root` 0644 | The Mercure hub configuration (it lives apart from `/etc/ddev-fleet` because the hub runs as a dynamic user). |
 | `/run/php/fleet.sock` | `fleet:caddy` 0660 | The only way into the app. |
@@ -177,24 +177,32 @@ step is saved as you go, and the wizard works at phone width.
 2. **Domain and certificates.** The domain was set by the installer. Choose how certificates are obtained:
    - `http01` (default): Let's Encrypt HTTP-01 on port 80, for `<domain>` and `auth.<domain>`.
    - `ovh_dns`: DNS-01 through the OVH API. Enter the API endpoint (`ovh-eu`, `ovh-ca` or `ovh-us`), the
-     application key, the application secret and the consumer key. The credentials need these rights (the list the DNS
-     library behind Caddy's OVH module, [libdns/ovh](https://github.com/libdns/ovh#authenticating), documents;
-     `<zone>` is your DNS zone, or `*` for several): `GET` and `POST` on `/domain/zone/<zone>/record`, `GET`, `PUT` and
-     `DELETE` on `/domain/zone/<zone>/record/*`, `GET` on `/domain/zone/<zone>/soa`, and `POST` on
-     `/domain/zone/<zone>/refresh`. They are stored encrypted (libsodium, key in
+     application key, the application secret and the consumer key. **Create them exactly as described in
+     [Creating the OVH API token](#creating-the-ovh-api-token) below.** They are stored encrypted (libsodium, key in
      `/srv/fleet/keys/secret.key`) and never shown again. The endpoints of OVH's budget brands are not
      supported: create the credentials at one of the three endpoints above. Today this mode only changes how
      the certificates are obtained (the two host names and one per instance, see "Instances on the host" in section 6).
 
-     **Implemented, not yet verified live.** Only `http01` has run end to end on a real host; the DNS-01 path is
-     covered by unit and helper tests with stand-ins, never against the OVH API. Finish installs the new Caddyfile
-     and the four credential files in `/etc/caddy/ovh/` and **reloads** Caddy (the files are read at every load, so a
+     **Checked on a real host:** Caddy reads the credential files and authenticates against the OVH API; a token
+     created with the wrong rights fails with `This call has not been granted` (see the token section). Finish installs the new Caddyfile
+     (the endpoint is written into it; it is a public API name, not a secret) and the three credential files in
+     `/etc/caddy/ovh/` and **reloads** Caddy (the files are read at every load, so a
      rotation of the credentials needs a reload only, never a restart). What to check after choosing it:
      `systemctl is-active caddy` a minute after Finish, `journalctl -u caddy -n 100 --no-pager` free of `ovh` or
      `dns` errors, and `sudo -u caddy env -i bash -c 'set -a; . /etc/caddy/fleet.env; caddy validate --config
      /etc/caddy/Caddyfile --adapter caddyfile'` succeeding (it reads `/etc/caddy/ovh/*` as `caddy`). Caddy keeps the certificates it already has, so the first
      DNS-01 issuance happens at the next renewal (about 30 days before expiry): to prove the credentials earlier,
-     move the certificate storage aside and restart Caddy while watching the journal. If Caddy does not come back
+     move the certificate storage aside and restart Caddy while watching the journal.
+
+     **Rotating the credentials later** (a leaked or expired consumer key, a new token): no `fleet setup:reset`. Run
+     `sudo fleet host:ovh-credentials` (hidden prompts for the application key, the secret and the consumer key; add
+     `--endpoint=ovh-ca` to change the endpoint too; or pipe the three values, one per line, on standard input). It
+     stores them and installs the Caddyfile and the credential files through the root helper, and Caddy **reloads**.
+     A `403 This call has not been granted` in the Caddy journal means the token lacks one of the rights in the token section (or is
+     restricted to another IP address: if you limited the credentials to an address, it must be this host's), not that
+     the files are missing. Create the consumer key with exactly those rights, then rotate.
+
+     If Caddy does not come back
      (the web UI is behind it, so the wizard cannot help), go back to HTTP-01 from the shell:
      `sudo fleet host:init --tls-mode=http01 --force && sudo fleet host:render --apply && sudo systemctl restart caddy`.
 3. **SSH keys.** Fleet clones and pushes with two ed25519 keys, **deploy** (read) and **push** (write). Copy each
@@ -228,6 +236,55 @@ hash that Authelia changed (the user's self-service reset), unless an administra
 in the meantime (Fleet then wins), so the next user change does not undo a reset. `users.yml` is then group-writable
 (0660) so Authelia can write it.
 
+### Creating the OVH API token
+
+Only for the `ovh_dns` certificate mode. Caddy uses the token to add and remove a temporary TXT record
+(`_acme-challenge…`) in your DNS zone each time it obtains a certificate. The example uses the zone `example.com`
+and the host address `203.0.113.10`: use your own zone (the domain you manage at OVH, not the fleet's host name)
+and your server's public IPv4 address.
+
+1. Open the token page of your OVH endpoint and sign in:
+   - `ovh-eu`: <https://eu.api.ovh.com/createToken/>
+   - `ovh-ca`: <https://ca.api.ovh.com/createToken/>
+   - `ovh-us`: <https://api.us.ovhcloud.com/createToken/>
+2. Fill in the form:
+
+   | Field | Value |
+   |---|---|
+   | Application name | anything, e.g. `fleet-caddy-<host>` |
+   | Application description | anything, e.g. `Caddy DNS-01 certificates for <domain>` |
+   | Validity | `Unlimited` |
+   | Rights | **four lines**, one per method, all with the same path ending in `/*`: |
+   | | `GET` `/domain/zone/example.com/*` |
+   | | `POST` `/domain/zone/example.com/*` |
+   | | `PUT` `/domain/zone/example.com/*` |
+   | | `DELETE` `/domain/zone/example.com/*` |
+   | Restricted IPs | your server's address, e.g. `203.0.113.10/32` (recommended) |
+
+   Two mistakes make every certificate fail with `This call has not been granted` (HTTP 403) in the Caddy journal:
+   - **the method**: the form starts each new line on `GET`; change the second, third and fourth lines to `POST`,
+     `PUT` and `DELETE`;
+   - **the path**: it must end in `/*`. A path like `/domain/zone/example.com/record` grants that exact path only, while
+     Caddy also calls `/domain/zone/example.com/record/<id>` and `/domain/zone/example.com/refresh`.
+
+   These four lines cover every call of the DNS library behind Caddy's OVH module,
+   [libdns/ovh](https://github.com/libdns/ovh#authenticating) (records, record ids, the zone's SOA and the refresh).
+3. Click **Create keys**. OVH shows the **Application Key**, the **Application Secret** and the **Consumer Key**
+   once: copy them into the wizard's certificate step (with the matching endpoint) before you leave the page.
+4. To replace the token later (rotation, expiry, a leaked key), create a new one the same way and run
+   `sudo fleet host:ovh-credentials`: it prompts (hidden) for the three new values, rewrites `/etc/caddy/ovh/` and
+   reloads Caddy. No `setup:reset`, and your users, projects and instances are untouched. Delete the old token in your
+   OVH account afterwards.
+
+Check the result once Caddy has had a minute to try:
+
+```bash
+sudo journalctl -u caddy -n 200 --no-pager | grep -E 'certificate obtained|not been granted'
+```
+
+`certificate obtained successfully` for the instance host names means it works; `not been granted` means a right is
+missing (see the two mistakes above).
+
 ### Users and project access
 
 Open **Users** (`https://<domain>/admin/users`, administrators only; it works on a phone). Fleet owns the people who may
@@ -243,10 +300,11 @@ sign in, so there is no other place to add them:
   configured, see above), **Disable** or **Enable** the account (a disabled user cannot sign in; nothing is deleted)
   and **Delete** it (with its project access).
 
-Every change is written to the Authelia users file before it is saved, and the per-project access rules are installed
-into Authelia when they changed (that restarts Authelia, so signed-in users sign in again; it happens only when the
-rules differ). If installing the rules fails the page says so: the change is saved and the next user or project change
-tries again.
+Every change is checked against the Authelia users file before it is saved and written to it right after. Project
+access is part of that file: a member carries the group `fleet-project-<project>`. Authelia reloads the file by
+itself, so creating a user or a project, changing a membership or deleting either **never restarts Authelia and nobody is
+signed out**; the change applies at once (Authelia re-reads the user's groups on every request). If writing the file
+fails the page says so: the change is saved and the next user or project change tries again.
 
 Safeguards: nobody can delete, disable or demote **themselves**, and the **last enabled administrator** can never be
 deleted, disabled or demoted (create or enable another one first), so the fleet cannot lock itself out. Everything on
@@ -266,6 +324,7 @@ All commands run on the host. `fleet` is the wrapper the installer puts in `/usr
 | Lost the setup URL (setup not complete) | `sudo fleet setup:token` prints a new setup URL; the old one stops working. It refuses once setup is complete. |
 | Nobody can sign in, or a password is forgotten | `ssh -t admin@fleet.example.com sudo fleet user:reset-password alice` |
 | Start the wizard over (change certificates, replace the administrator, ...) | `sudo fleet setup:reset` |
+| Get into the agent workspace (the `fleet` tmux session) | `ssh -t admin@fleet.example.com sudo fleet tmux`, or `sudo fleet tmux <instance-id>` for one instance's window. Needs a terminal: without `ssh -t` it exits with status 2. See [`agent-workspace.md`](agent-workspace.md). |
 
 **`fleet:user:reset-password <username>`** asks for the new password twice **without echo** and stores its
 argon2id hash, rewrites the Authelia users file and restarts Authelia. It needs a real terminal: over SSH use
@@ -287,6 +346,7 @@ The remaining commands exist mostly for the installer:
 | Command | Purpose |
 |---|---|
 | `fleet:host:init --domain=<fqdn> [--acme-email=] [--tls-mode=http01\|ovh_dns] [--force]` | Create the state directories, the secret key and the host settings. Idempotent. Changing the domain or the TLS mode after setup needs `--force`. |
+| `fleet:host:ovh-credentials [--endpoint=ovh-eu\|ovh-ca\|ovh-us]` | DNS mode only: replace the OVH application key, secret and consumer key (hidden prompts, or three lines on standard input), then install them through the root helper and reload Caddy. Nothing is stored unless all three are valid. |
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
 | `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity, schema version and whether it was sealed by this host's secret key, read-only (see below). |
@@ -425,9 +485,19 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   Encrypt limits how many certificates one registered domain may obtain per week, so deploying dozens of new instances in
   a week can hit the limit: the site then stays without a certificate until the limit passes. Reusing a label (redeploy)
   reuses the certificate.
-- **Who can open a site.** The installer's Authelia rule for `*.<domain>` admits **administrators only**. Project members
-  can operate their instances in the app but cannot open the sites until per-project access rules are rendered
-  (users and access, milestone M0.10).
+- **Who can open a site.** Authelia has one rule for `*.<domain>`: any signed-in user. The per-project check is made by
+  the Caddy site of each instance (`instances/<id>.conf`, aliases and named-port blocks included): it reads the
+  `Remote-Groups` header that Authelia returns and answers **403** unless it holds the administrators' group
+  (`FLEET_ADMIN_GROUP`) or the instance's project group `fleet-project-<project>`. Administrators open every site,
+  members only their projects' sites, and no project name matches another (the group is compared as a whole list entry).
+  Access therefore changes through `users.yml` and a graceful Caddy reload, never through a restart. **Upgrading from
+  an earlier 1.0.x** is safe in one step: re-run the installer (or `sudo fleet host:render --apply`). Before it installs the
+  new Authelia configuration (one restart, everyone signs in once) it writes the project groups into `users.yml` and
+  rewrites every existing instance site with the group check, in that order. If a site cannot be rewritten the command
+  stops with the reason and leaves Authelia as it is, so the old per-project rules keep protecting the sites; fix the
+  cause and run it again. Never install the new Authelia configuration by other means before the sites are rewritten:
+  `fleet port:refresh` rewrites the sites on demand. A user group starting with `fleet-project-` is reserved for this and
+  refused.
 - **Upgrading while a job runs.** Re-running the installer restarts the workers when the code changed. A job running at that
   moment is marked `interrupted` (its worker is gone) and can be retried; wait for running deploys before upgrading when you can.
 - **Root-owned leftovers.** A container can leave files owned by root in an instance checkout. Destroy then fails with the
@@ -448,8 +518,10 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   Symfony's routing is case-sensitive, and the identity headers are stripped on these paths too, so nothing there
   can act as a signed-in user. Everything else, `/setup` included, needs an Authelia session.
 - **Authelia** uses the `one_factor` policy (password only) for `<domain>`, bypasses its own portal and denies every
-  other host by default. Nothing under `*.<domain>` is served yet; instances and their per-project access arrive in later
-  milestones.
+  other host by default. It has one static rule for `*.<domain>` (any signed-in user); who may open which project is
+  decided by the instance's Caddy site from the user's `fleet-project-<name>` groups (see "Who can open a site"). The
+  configuration changes only with host-level settings (domain, outgoing mail); installing it restarts Authelia and
+  signs everyone out, so such a change is announced as that.
 - **The root helper.** The app never runs as root. To install a rendered Caddy or Authelia configuration it writes
   the files into `/srv/fleet/staging/<target>/` and runs `sudo -n /usr/local/libexec/fleet/apply <target>`. The
   sudoers file contains exactly one line, allowing `apply caddy` and `apply authelia` for `fleet`, with the

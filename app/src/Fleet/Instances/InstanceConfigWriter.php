@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Instances;
 
 use App\Domain\Instance\Instance;
+use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Jobs\SecretRegistry;
@@ -15,7 +16,7 @@ use Symfony\Component\Yaml\Yaml;
 
 /**
  * Writes `.ddev/config.fleet.yaml`, the one file fleet adds to ddev's configuration of an instance: its name, domain,
- * environment (the Typesense host, port and keys of a Typesense project) and extra host names. It never touches the project's own `config.yaml`. The file may hold the Claude
+ * environment (the Typesense host, port and keys of a Typesense project, and `FLEET_PORT_<NAME>` for each named port) and extra host names. It never touches the project's own `config.yaml`. The file may hold the Claude
  * token and the Typesense keys (registered with the job log masker), so it is not world readable, and it is dumped through the YAML component so no value can break out of it.
  */
 final readonly class InstanceConfigWriter
@@ -47,6 +48,7 @@ final readonly class InstanceConfigWriter
             $environment[] = 'CLAUDE_CODE_OAUTH_TOKEN='.$token;
         }
         array_push($environment, ...$this->typesense->variables($instance, $project));
+        array_push($environment, ...self::portVariables($project));
         $identity = $this->identities->forProject($project);
         if (null !== $identity) {
             $environment[] = 'GIT_AUTHOR_NAME='.$identity['name'];
@@ -73,5 +75,22 @@ final readonly class InstanceConfigWriter
         AtomicFile::write($dir.'/'.self::RELATIVE_PATH, Yaml::dump($config, 4, 2), 0o640);
 
         return self::RELATIVE_PATH;
+    }
+
+    /**
+     * `FLEET_PORT_<NAME>=<public port>` for every named port the project uses, as in 0.x (`playwright` gives
+     * `FLEET_PORT_PLAYWRIGHT`, `ts-dashboard` gives `FLEET_PORT_TS_DASHBOARD`), ordered by public port.
+     *
+     * @return list<string>
+     */
+    private static function portVariables(Project $project): array
+    {
+        $ports = $project->ports();
+        usort($ports, static fn (NamedPort $a, NamedPort $b): int => $a->publicPort() <=> $b->publicPort());
+
+        return array_map(
+            static fn (NamedPort $port): string => 'FLEET_PORT_'.strtoupper(str_replace('-', '_', $port->name())).'='.$port->publicPort(),
+            $ports,
+        );
     }
 }

@@ -8,20 +8,25 @@ use App\Domain\Host\HostSettings;
 use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\Auth\IdentitySync;
 use App\Fleet\Auth\ProjectAccessRefresher;
+use App\Fleet\Auth\ProjectAccessService;
+use App\Fleet\Auth\UserService;
+use App\Fleet\FleetPaths;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
-use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Fleet\System\PrivilegedApply;
 use App\Tests\Support\FakeInstanceGuard;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RunsFleetCommands;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Yaml\Yaml;
 
 /**
- * A project created or deleted (through ProjectService, so by the pages and the commands alike) re-renders the Authelia
- * access rules and installs them when they changed. A failing install is a warning: the project change stands.
+ * A project created or deleted (through ProjectService, so by the pages and the commands alike) rewrites users.yml (its
+ * group goes) and never installs Authelia's configuration, which would restart Authelia and sign everyone out. A
+ * failing write is a warning: the project change stands.
  */
 final class ProjectAccessRefreshTest extends KernelTestCase
 {
@@ -95,16 +100,38 @@ final class ProjectAccessRefreshTest extends KernelTestCase
         self::assertNull($this->refresher()->takeWarning());
     }
 
-    public function testCreateAndDeleteInstallTheRules(): void
+    public function testCreateAndDeleteNeverRestartAuthelia(): void
     {
         $this->completeSetup();
 
         $this->projects()->create(new ProjectInput(name: 'blog', git: self::GIT));
-        self::assertSame(1, $this->installs(), 'a new project needs its rule');
+        $this->projects()->delete('blog', 'tester');
+
+        self::assertSame(0, $this->installs(), 'project access is a users.yml group: `apply authelia` would sign everyone out');
+        self::assertNull($this->refresher()->takeWarning());
+    }
+
+    public function testDeletingAProjectRemovesItsGroupFromTheUsersFile(): void
+    {
+        $this->completeSetup();
+        $users = self::getContainer()->get(UserService::class);
+        self::assertInstanceOf(UserService::class, $users);
+        $users->upsertAdmin('bob', 'Bob', 'bob@example.com', 'correct horse battery staple');
+        $this->projects()->create(new ProjectInput(name: 'blog', git: self::GIT));
+        $access = self::getContainer()->get(ProjectAccessService::class);
+        self::assertInstanceOf(ProjectAccessService::class, $access);
+        $access->grant('bob', 'blog');
+        $identity = self::getContainer()->get(IdentitySync::class);
+        self::assertInstanceOf(IdentitySync::class, $identity);
+        $identity->refreshAccess();
+        $paths = self::getContainer()->get(FleetPaths::class);
+        self::assertInstanceOf(FleetPaths::class, $paths);
+        self::assertContains('fleet-project-blog', Yaml::parseFile($paths->usersFile())['users']['bob']['groups']);
 
         $this->projects()->delete('blog', 'tester');
-        self::assertSame(2, $this->installs(), 'a deleted project loses its rule');
-        self::assertNull($this->refresher()->takeWarning());
+
+        self::assertNotContains('fleet-project-blog', Yaml::parseFile($paths->usersFile())['users']['bob']['groups']);
+        self::assertSame(0, $this->installs());
     }
 
     public function testAnUpdateDoesNotRestartAuthelia(): void
@@ -114,51 +141,57 @@ final class ProjectAccessRefreshTest extends KernelTestCase
 
         $this->projects()->update('blog', new ProjectInput(name: 'blog', git: 'https://git.example.com/acme/blog2.git'));
 
-        self::assertSame(1, $this->installs());
+        self::assertSame(0, $this->installs());
     }
 
-    public function testAFailedInstallIsAWarningAndTheProjectStands(): void
+    private function breakUsersFile(): string
+    {
+        $paths = self::getContainer()->get(FleetPaths::class);
+        self::assertInstanceOf(FleetPaths::class, $paths);
+        // A directory where users.yml should be: the atomic rename cannot replace it.
+        if (is_file($paths->usersFile())) {
+            unlink($paths->usersFile());
+        }
+        mkdir($paths->usersFile(), 0o750, true);
+
+        return $paths->usersFile();
+    }
+
+    public function testAFailedUsersFileWriteIsAWarningAndTheProjectStands(): void
     {
         $this->completeSetup();
-        $this->runner()->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
+        $this->projects()->create(new ProjectInput(name: 'blog', git: self::GIT));
+        $file = $this->breakUsersFile();
 
-        $project = $this->projects()->create(new ProjectInput(name: 'blog', git: self::GIT));
+        $this->projects()->delete('blog', 'tester');
 
-        self::assertSame('blog', $project->name());
-        self::assertTrue($this->exists('blog'));
+        self::assertFalse($this->exists('blog'));
         $warning = $this->refresher()->takeWarning();
         self::assertNotNull($warning);
         self::assertStringContainsString('The project was saved, but the sign-in service was not updated', $warning);
         self::assertNull($this->refresher()->takeWarning(), 'a warning is taken once');
-
-        // The failed install was not remembered: the next project change retries it.
-        $this->projects()->create(new ProjectInput(name: 'shop', git: 'https://git.example.com/acme/shop.git'));
-        self::assertSame(2, $this->installs());
-        self::assertNull($this->refresher()->takeWarning());
+        rmdir($file);
     }
 
     public function testProjectCommandsShowTheWarning(): void
     {
         $this->completeSetup();
-        $this->runner()->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
+        $file = $this->breakUsersFile();
 
         $created = $this->cli('fleet:project:create', ['name' => 'blog', '--git' => self::GIT, '--json' => true]);
-
         self::assertSame(0, $created->getStatusCode(), $created->getDisplay());
-        self::assertSame('', $created->getErrorOutput());
-        self::assertStringContainsString('the sign-in service was not updated', $this->json($created)['warning']);
         self::assertTrue($this->exists('blog'));
 
-        $this->runner()->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
         $deleted = $this->cli('fleet:project:delete', ['name' => 'blog', '--yes' => true]);
 
         self::assertSame(0, $deleted->getStatusCode());
         self::assertStringContainsString('Project "blog" deleted.', $deleted->getDisplay());
         self::assertStringContainsString('Warning: The project was saved', $deleted->getErrorOutput());
         self::assertFalse($this->exists('blog'));
+        rmdir($file);
     }
 
-    public function testProjectCommandsStayQuietWhenTheInstallWorks(): void
+    public function testProjectCommandsStayQuietWhenTheWriteWorks(): void
     {
         $this->completeSetup();
 
@@ -166,7 +199,7 @@ final class ProjectAccessRefreshTest extends KernelTestCase
 
         self::assertSame(0, $created->getStatusCode());
         self::assertArrayNotHasKey('warning', $this->json($created));
-        self::assertSame(1, $this->installs());
+        self::assertSame(0, $this->installs());
     }
 
     public function testTheServiceStillWorksWithoutARefresher(): void

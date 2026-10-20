@@ -8,6 +8,7 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Instance\Instance;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceHostnames;
 use App\Fleet\Instances\InstanceSiteWriter;
@@ -24,6 +25,9 @@ use Symfony\Component\Lock\Store\FlockStore;
 final class InstanceSiteWriterTest extends KernelTestCase
 {
     use FleetDatabase;
+
+    /** The Remote-Groups pattern of the project `acme` with the admin group `fleet-admins`. */
+    private const string GROUPS = '(?:^|,)(?:fleet\\-admins|fleet\\-project\\-acme)(?:,|$)';
 
     private FleetPaths $paths;
     private RecordingCommandRunner $runner;
@@ -44,6 +48,7 @@ final class InstanceSiteWriterTest extends KernelTestCase
             new CaddyReloader($this->runner, $this->paths),
             new InstanceHostnames($host),
             new LockFactory(new FlockStore($this->paths->locksDir())),
+            new AdminGroup('fleet-admins'),
         );
     }
 
@@ -112,8 +117,8 @@ final class InstanceSiteWriterTest extends KernelTestCase
                     -Server
                 }
 
-                # The identity headers never come from the client, and nothing is copied back from Authelia: the app behind the
-                # instance does not read them. Only the session decides who may open the site.
+                # The identity headers never come from the client. Only Remote-Groups is copied back from Authelia, to check the
+                # project group below, and it is removed again: the app behind the instance does not read identity headers.
                 route {
                     request_header -Remote-User
                     request_header -Remote_User
@@ -126,7 +131,13 @@ final class InstanceSiteWriterTest extends KernelTestCase
 
                     forward_auth 127.0.0.1:9091 {
                         uri /api/authz/forward-auth
+                        copy_headers Remote-Groups
                     }
+
+                    # Per-project access: the groups come from Authelia (the client's own header was stripped above).
+                    @forbidden not header_regexp Remote-Groups `(?:^|,)(?:fleet\-admins|fleet\-project\-acme)(?:,|$)`
+                    respond @forbidden "Forbidden" 403
+                    request_header -Remote-Groups
 
                     reverse_proxy 127.0.0.1:8080
                 }
@@ -160,6 +171,17 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertSame(2, preg_match_all('/^\S.* \{$/m', $site), 'the plain site plus one port block');
     }
 
+    public function testThePlaywrightReportPortIsServedOnItsOwnPublicPortAndProxiedToTheAddonRouterPort(): void
+    {
+        $project = $this->portedProject([new NamedPort('playwright', 9325, 8323)]);
+        $this->writer->write($this->instance($project), $project);
+        $site = $this->site();
+
+        self::assertStringContainsString("\nacme--main.fleet.example.com:9325 {\n", $site);
+        self::assertStringContainsString('reverse_proxy 127.0.0.1:8323', $site);
+        self::assertStringContainsString('forward_auth', substr($site, (int) strpos($site, ':9325 {')));
+    }
+
     public function testTwoPortsWithAnAliasAreOrderedAndEveryBlockIsGatedAndStripped(): void
     {
         $project = $this->portedProject([new NamedPort('mail', 9200, 18025), new NamedPort('typesense', 9108, 8108)], 'edge');
@@ -179,7 +201,12 @@ final class InstanceSiteWriterTest extends KernelTestCase
             foreach (CaddyfileRenderer::strippedHeaders() as $header) {
                 self::assertStringContainsString('request_header -'.$header."\n", $block);
             }
-            self::assertStringNotContainsString('copy_headers', $block);
+            self::assertSame(1, substr_count($block, 'copy_headers Remote-Groups'), 'only the groups are read back from Authelia');
+            self::assertSame(1, substr_count($block, 'copy_headers'));
+            self::assertStringContainsString('@forbidden not header_regexp Remote-Groups `'.self::GROUPS.'`', $block);
+            self::assertStringContainsString('respond @forbidden "Forbidden" 403', $block);
+            self::assertLessThan(strpos($block, 'respond @forbidden'), strpos($block, 'forward_auth'), 'the group check follows the gate');
+            self::assertLessThan(strpos($block, 'reverse_proxy'), strpos($block, 'respond @forbidden'), 'and comes before the proxy');
         }
     }
 
@@ -198,13 +225,40 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertSame([], $this->runner->calls());
     }
 
-    public function testNoCopyHeadersAndAllRemoteHeadersStripped(): void
+    public function testTheSiteAdmitsTheAdminGroupAndThisProjectsGroupOnly(): void
     {
         $project = $this->project();
         $this->writer->write($this->instance($project), $project);
         $site = $this->site();
 
-        self::assertStringNotContainsString('copy_headers', $site);
+        self::assertStringContainsString('@forbidden not header_regexp Remote-Groups `(?:^|,)(?:fleet\-admins|fleet\-project\-acme)(?:,|$)`', $site);
+        self::assertStringContainsString("request_header -Remote-Groups\n", $site);
+        self::assertStringNotContainsString('fleet-project-other', $site);
+    }
+
+    public function testTheGroupPatternIsAnchoredToWholeListEntries(): void
+    {
+        $project = $this->project();
+        $this->writer->write($this->instance($project), $project);
+        $pattern = '/'.str_replace('/', '\\/', self::GROUPS).'/';
+        self::assertStringContainsString('`'.self::GROUPS.'`', $this->site());
+
+        foreach (['fleet-project-acme', 'a,fleet-project-acme', 'fleet-project-acme,b', 'fleet-admins', 'x,fleet-admins,y'] as $allowed) {
+            self::assertSame(1, preg_match($pattern, $allowed), $allowed);
+        }
+        foreach (['', 'fleet-project-acme-x', 'x-fleet-project-acme', 'fleet-project-acm', 'fleet-project-other', 'fleet-admins2', 'myfleet-admins'] as $denied) {
+            self::assertSame(0, preg_match($pattern, $denied), $denied);
+        }
+    }
+
+    public function testOnlyTheGroupsAreReadBackAndAllRemoteHeadersStripped(): void
+    {
+        $project = $this->project();
+        $this->writer->write($this->instance($project), $project);
+        $site = $this->site();
+
+        self::assertSame(1, substr_count($site, 'copy_headers Remote-Groups'));
+        self::assertSame(1, substr_count($site, 'copy_headers'));
         foreach (CaddyfileRenderer::strippedHeaders() as $header) {
             self::assertStringContainsString('request_header -'.$header."\n", $site);
         }

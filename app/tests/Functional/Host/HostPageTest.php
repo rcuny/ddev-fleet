@@ -280,6 +280,14 @@ final class HostPageTest extends HostPageTestCase
         $crawler = $this->open('/admin/host?tab=notifications');
         self::assertStringContainsString('Not set', $crawler->filter('[data-testid=host-smtp-status]')->text());
         self::assertCount(0, $crawler->filter('input[type=checkbox]'));
+
+        // The password changes are in the audit log (a put on the first save, none on the blank one, a delete), never a value.
+        $rows = $this->em()->getConnection()->fetchAllAssociative('SELECT action, subject FROM audit_entry ORDER BY id');
+        self::assertSame([
+            ['action' => 'secret.put', 'subject' => 'fleet/smtp_password'],
+            ['action' => 'secret.delete', 'subject' => 'fleet/smtp_password'],
+        ], $rows);
+        self::assertStringNotContainsString(self::SMTP_PASSWORD, json_encode($rows, \JSON_THROW_ON_ERROR));
     }
 
     public function testInvalidNotificationValuesChangeNothing(): void

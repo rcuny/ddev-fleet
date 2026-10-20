@@ -31,11 +31,13 @@ final class AutheliaUsersRenderer
         | Yaml::DUMP_EMPTY_ARRAY_AS_SEQUENCE | Yaml::DUMP_OBJECT_AS_MAP;
 
     /**
-     * @param list<User> $users
+     * @param list<User>                  $users
+     * @param array<string, list<string>> $projectsByUser username => names of the projects the user is a member of;
+     *                                                    each becomes the project group (ProjectGroup) of that user
      *
      * @throws \InvalidArgumentException on a duplicate username or a hash that is not argon2id
      */
-    public function render(array $users): string
+    public function render(array $users, array $projectsByUser = []): string
     {
         $entries = [];
         foreach ($users as $user) {
@@ -51,7 +53,7 @@ final class AutheliaUsersRenderer
                 'displayname' => $user->displayName(),
                 'password' => $user->passwordHash(),
                 'email' => $user->email(),
-                'groups' => $user->groups(),
+                'groups' => self::groupsOf($user, $projectsByUser[$username] ?? []),
             ];
         }
         if ([] === $entries) {
@@ -66,5 +68,29 @@ final class AutheliaUsersRenderer
         ksort($entries, \SORT_STRING);
 
         return Yaml::dump(['users' => $entries], 4, 2, self::FLAGS);
+    }
+
+    /**
+     * @param list<string> $projects
+     *
+     * @return list<string> the user's own groups, then the project groups, once each
+     */
+    private static function groupsOf(User $user, array $projects): array
+    {
+        $groups = $user->groups();
+        foreach ($groups as $group) {
+            // A row edited by hand: the entity refuses these, a loaded row does not go through it.
+            if (str_starts_with($group, User::RESERVED_GROUP_PREFIX)) {
+                throw new \InvalidArgumentException(\sprintf('User "%s" has the reserved group "%s".', $user->username(), $group));
+            }
+        }
+        foreach ($projects as $project) {
+            $group = ProjectGroup::name($project);
+            if (!\in_array($group, $groups, true)) {
+                $groups[] = $group;
+            }
+        }
+
+        return $groups;
     }
 }

@@ -318,7 +318,7 @@ final class UserPagesTest extends AdminTestCase
         self::assertSame(['shop'], $this->projectsOf('alice'));
         $entry = $this->usersFile()['alice'];
         self::assertSame('Alice Liddell', $entry['displayname']);
-        self::assertSame(['fleet-admins'], $entry['groups']);
+        self::assertSame(['fleet-admins', 'fleet-project-shop'], $entry['groups'], 'the membership is a project group in users.yml');
 
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString('User saved.', $crawler->filter('[data-testid=flashes]')->text());

@@ -11,6 +11,7 @@ use App\Domain\Webhook\WebhookRepository;
 use App\Domain\Webhook\WebhookSource;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectService;
+use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Webhooks\WebhookService;
 use App\Fleet\Webhooks\WebhookUrls;
@@ -124,6 +125,11 @@ final class WebhookController extends AbstractController
             $secret = $this->service->issueSecret($name, $kind, '1' === $request->request->get('rotate'));
         } catch (NotFound) {
             throw new NotFoundHttpException();
+        } catch (Refused $refused) {
+            // A second tab that still offered "Create secret": say so and keep the secret the first tab made.
+            $this->addFlash('warning', $refused->getMessage());
+
+            return $this->redirectToRoute('project_webhooks', ['name' => $name]);
         }
 
         $response = $this->render('admin/webhooks/secret.html.twig', [

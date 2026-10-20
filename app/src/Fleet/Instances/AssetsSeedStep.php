@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Fleet\Instances;
 
+use App\Fleet\Assets\AssetLinkResolver;
 use App\Fleet\Assets\AssetPath;
 use App\Fleet\FleetPaths;
 use App\Fleet\Jobs\JobFailed;
@@ -19,8 +20,12 @@ use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
  *   Anything else is copied untouched.
  * - `dumps/` is never substituted: its files are hard-linked (a copy when the link is refused, for example across
  *   filesystems), and a stale file at the destination is replaced.
- * - A symbolic link or special file in the assets is skipped and logged, a name the browser could not address is
- *   skipped, nothing is written into `.git`, and a destination directory that is a symbolic link fails the deploy.
+ * - A symbolic link is honoured when AssetLinkResolver finds a regular file for it inside the same project's assets.
+ *   In `dumps/`, a link to another file in `dumps/` becomes a hard link to the same inode (the dump is not copied
+ *   twice, and `dumps/default.sql` is a plain file for `ddev import-db`); elsewhere it becomes a relative symbolic link
+ *   to the seeded target, so the instance mirrors the assets. A refused link (outside the assets, dangling, to a
+ *   folder, a loop) is skipped and logged with the reason. A special file is skipped and logged, a name the browser
+ *   could not address is skipped, nothing is written into `.git`, and a destination directory that is a symbolic link fails the deploy.
  * - What was copied is reported through DeployContext::exclude(), so the project's `git status` stays clean.
  */
 #[AutoconfigureTag('fleet.deploy_step', ['priority' => self::PRIORITY])]
@@ -36,8 +41,17 @@ final class AssetsSeedStep implements DeployStep
     private const int MAX_TEXT_BYTES = 1_048_576;
     private const string DUMPS = 'dumps';
 
-    public function __construct(private readonly FleetPaths $paths)
-    {
+    /**
+     * @param (\Closure(string): void)|null $afterCheck test seam: called with a source path once the walk has checked it
+     *                                                  and right before it is opened (production leaves it null)
+     * @param (\Closure(string): void)|null $afterOpen  test seam: called with a source path right after it was opened
+     *                                                  and before the descriptor is verified (production leaves it null)
+     */
+    public function __construct(
+        private readonly FleetPaths $paths,
+        private readonly ?\Closure $afterCheck = null,
+        private readonly ?\Closure $afterOpen = null,
+    ) {
     }
 
     public function phase(): StepPhase
@@ -60,7 +74,7 @@ final class AssetsSeedStep implements DeployStep
 
         $counts = ['copied' => 0, 'substituted' => 0, 'linked' => 0, 'skipped' => 0];
         try {
-            $this->copyTree($source, $context->dir, '', $context, $counts);
+            $this->copyTree($source, $source, $context->dir, '', $context, $counts);
         } catch (\RuntimeException $e) {
             throw new JobFailed('assets: '.$e->getMessage());
         }
@@ -76,7 +90,7 @@ final class AssetsSeedStep implements DeployStep
     /**
      * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
      */
-    private function copyTree(string $from, string $to, string $relative, DeployContext $context, array &$counts): void
+    private function copyTree(string $root, string $from, string $to, string $relative, DeployContext $context, array &$counts): void
     {
         $names = @scandir($from);
         if (false === $names) {
@@ -108,16 +122,15 @@ final class AssetsSeedStep implements DeployStep
             }
             $type = $info['mode'] & 0o170000;
             if (0o120000 === $type) {
-                $context->log->line(\sprintf('assets: skipped "%s" (symbolic link)', $this->printable($path)));
-                ++$counts['skipped'];
+                $this->copyLink($root, $path, $dst, $inDumps, $context, $counts);
             } elseif (0o040000 === $type) {
                 $this->ensureDirectory($dst, $path);
-                $this->copyTree($src, $dst, $path, $context, $counts);
+                $this->copyTree($root, $src, $dst, $path, $context, $counts);
                 if ('' === $relative && self::DUMPS === $name) {
                     $context->exclude('/'.self::DUMPS.'/');
                 }
             } elseif (0o100000 === $type) {
-                $this->copyFile($src, $dst, $path, $info['mode'] & 0o755, $inDumps, $context, $counts);
+                $this->copyFile($root, $src, $dst, $path, $info['mode'] & 0o755, $inDumps, $context, $counts);
                 if (!$inDumps) {
                     $context->exclude('/'.self::escape($path));
                 }
@@ -125,6 +138,41 @@ final class AssetsSeedStep implements DeployStep
                 $context->log->line(\sprintf('assets: skipped "%s" (not a regular file)', $this->printable($path)));
                 ++$counts['skipped'];
             }
+        }
+    }
+
+    /**
+     * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
+     */
+    private function copyLink(string $root, string $path, string $dst, bool $inDumps, DeployContext $context, array &$counts): void
+    {
+        $link = AssetLinkResolver::resolve($root, $path);
+        if (null === $link->target) {
+            $context->log->line(\sprintf('assets: skipped "%s" (symbolic link to "%s": %s)', $this->printable($path), $link->raw, $link->refusal));
+            ++$counts['skipped'];
+
+            return;
+        }
+
+        if ($inDumps && self::DUMPS === explode('/', $link->target)[0]) {
+            $this->linkOrCopy($root, $root.'/'.$link->target, $dst, $path, $counts);
+
+            return;
+        }
+
+        // Relative to the folder of the link, so the instance stays movable: `a/b/link` -> `../c/target`.
+        $from = explode('/', $path);
+        array_pop($from);
+        $to = explode('/', $link->target);
+        while ([] !== $from && \count($to) > 1 && $from[0] === $to[0]) {
+            array_shift($from);
+            array_shift($to);
+        }
+        $relative = str_repeat('../', \count($from)).implode('/', $to);
+        $this->replace($dst, $path, null, static fn (string $tmp): bool => @symlink($relative, $tmp));
+        ++$counts['linked'];
+        if (!$inDumps) {
+            $context->exclude('/'.self::escape($path));
         }
     }
 
@@ -144,55 +192,184 @@ final class AssetsSeedStep implements DeployStep
     /**
      * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
      */
-    private function copyFile(string $src, string $dst, string $path, int $mode, bool $dump, DeployContext $context, array &$counts): void
+    private function copyFile(string $root, string $src, string $dst, string $path, int $mode, bool $dump, DeployContext $context, array &$counts): void
     {
         if ($dump) {
-            $this->linkOrCopy($src, $dst, $path, $counts);
+            $this->linkOrCopy($root, $src, $dst, $path, $counts);
 
             return;
         }
 
-        $size = (int) @filesize($src);
-        $content = $size <= self::MAX_TEXT_BYTES ? @file_get_contents($src) : false;
-        if ($size <= self::MAX_TEXT_BYTES && false === $content) {
-            throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
-        }
-        if (\is_string($content) && !str_contains($content, "\0") && mb_check_encoding($content, 'UTF-8')) {
-            $rendering = $context->render($content);
-            $rendered = $rendering->text;
-            $missing = $rendering->unresolved;
-            if ([] !== $missing) {
-                $context->log->line(\sprintf('assets: "%s" has unresolved token(s) left as written: %s', $this->printable($path), implode(', ', array_map(static fn (string $n): string => '[['.$n.']]', $missing))));
+        [$handle, $opened] = $this->openChecked($root, $src, $path);
+        try {
+            $size = $opened['size'];
+            $content = $size <= self::MAX_TEXT_BYTES ? stream_get_contents($handle, self::MAX_TEXT_BYTES + 1) : false;
+            if ($size <= self::MAX_TEXT_BYTES && (false === $content || \strlen($content) > self::MAX_TEXT_BYTES)) {
+                throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
             }
-            $this->replace($dst, $path, $mode, static fn (string $tmp): bool => false !== @file_put_contents($tmp, $rendered));
-            ++$counts['substituted'];
+            if (\is_string($content) && !str_contains($content, "\0") && mb_check_encoding($content, 'UTF-8')) {
+                $rendering = $context->render($content);
+                $rendered = $rendering->text;
+                $missing = $rendering->unresolved;
+                if ([] !== $missing) {
+                    $context->log->line(\sprintf('assets: "%s" has unresolved token(s) left as written: %s', $this->printable($path), implode(', ', array_map(static fn (string $n): string => '[['.$n.']]', $missing))));
+                }
+                $this->replace($dst, $path, $mode, static fn (string $tmp): bool => false !== @file_put_contents($tmp, $rendered));
+                ++$counts['substituted'];
 
-            return;
+                return;
+            }
+
+            $this->replace($dst, $path, $mode, static fn (string $tmp): bool => self::copyFrom($handle, $tmp));
+            ++$counts['copied'];
+        } finally {
+            fclose($handle);
         }
-
-        $this->replace($dst, $path, $mode, static fn (string $tmp): bool => @copy($src, $tmp));
-        ++$counts['copied'];
     }
 
     /**
      * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
      */
-    private function linkOrCopy(string $src, string $dst, string $path, array &$counts): void
+    private function linkOrCopy(string $root, string $src, string $dst, string $path, array &$counts): void
     {
-        $a = @lstat($src);
-        $b = @lstat($dst);
-        $same = false !== $a && false !== $b && 0o100000 === ($b['mode'] & 0o170000) && $a['ino'] === $b['ino'] && $a['dev'] === $b['dev'];
-        if (!$same) {
-            if (is_link($dst) || file_exists($dst)) {
-                if (!@unlink($dst)) {
-                    throw new \RuntimeException(\sprintf('cannot replace "%s"', $this->printable($path)));
+        [$handle, $opened] = $this->openChecked($root, $src, $path);
+        try {
+            $b = @lstat($dst);
+            $same = false !== $b && self::isFile($b) && self::sameInode($opened, $b);
+            if (!$same) {
+                if (is_link($dst) || file_exists($dst)) {
+                    if (!@unlink($dst)) {
+                        throw new \RuntimeException(\sprintf('cannot replace "%s"', $this->printable($path)));
+                    }
+                }
+                // link(2) does not follow a link at the source, so check what was linked is the file that was opened.
+                $linked = @link($src, $dst);
+                $made = $linked ? @lstat($dst) : false;
+                if ($linked && (false === $made || !self::isFile($made) || !self::sameInode($opened, $made))) {
+                    @unlink($dst);
+                    $linked = false;
+                }
+                if (!$linked) {
+                    $this->replace($dst, $path, null, static fn (string $tmp): bool => self::copyFrom($handle, $tmp));
                 }
             }
-            if (!@link($src, $dst)) {
-                $this->replace($dst, $path, null, static fn (string $tmp): bool => @copy($src, $tmp));
-            }
+            ++$counts['linked'];
+        } finally {
+            fclose($handle);
         }
-        ++$counts['linked'];
+    }
+
+    /**
+     * Opens a source the walk has checked, and proves the descriptor is the regular file that was checked: the path is
+     * lstat'ed before and after the open and compared (inode and device) with fstat of the descriptor, so a link, or
+     * another file, swapped in between makes the seed fail instead of copying from outside the assets. The open is
+     * non-blocking (`n`), so a fifo swapped in after the lstat is refused by the fstat instead of hanging the deploy, and
+     * the real path of the descriptor (`/proc/self/fd`, Linux only) must be inside the assets directory, which covers a
+     * parent folder swapped for a link to somewhere else, a case the inode of the leaf cannot show.
+     *
+     * @return array{resource, array<int|string, int>}
+     */
+    private function openChecked(string $root, string $src, string $path): array
+    {
+        if (null !== $this->afterCheck) {
+            ($this->afterCheck)($src);
+        }
+        $changed = fn (): \RuntimeException => new \RuntimeException(\sprintf('"%s" changed while it was being seeded', $this->printable($path)));
+        $before = @lstat($src);
+        if (false === $before || !self::isFile($before)) {
+            throw $changed();
+        }
+        $handle = @fopen($src, 'rn');
+        if (false === $handle) {
+            throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
+        }
+        if (null !== $this->afterOpen) {
+            ($this->afterOpen)($src);
+        }
+        $opened = fstat($handle);
+        $after = @lstat($src);
+        if (false === $opened) {
+            fclose($handle);
+
+            throw $changed();
+        }
+        if (!self::isFile($opened) || !self::isFile($after) || !self::sameInode($before, $opened) || !self::sameInode($before, $after)) {
+            fclose($handle);
+
+            throw $changed();
+        }
+        if (!self::descriptorInside($root, $opened)) {
+            fclose($handle);
+
+            throw new \RuntimeException(\sprintf('"%s" is not inside the project\'s assets (a folder on its way was replaced); nothing was copied', $this->printable($path)));
+        }
+
+        return [$handle, $opened];
+    }
+
+    /**
+     * PHP does not expose the descriptor number, so the open descriptors of this process that point at the opened
+     * inode are found in `/proc/self/fd`; at least one must exist, and every one must resolve below the real assets
+     * directory.
+     *
+     * @param array<int|string, int> $opened
+     */
+    private static function descriptorInside(string $root, array $opened): bool
+    {
+        $base = realpath($root);
+        $fds = @scandir('/proc/self/fd');
+        if (false === $base || false === $fds) {
+            return false;
+        }
+        $found = false;
+        foreach ($fds as $fd) {
+            if ('.' === $fd || '..' === $fd) {
+                continue;
+            }
+            $stat = @stat('/proc/self/fd/'.$fd);
+            if (!self::sameInode($opened, $stat)) {
+                continue;
+            }
+            $real = @readlink('/proc/self/fd/'.$fd);
+            if (false === $real || !str_starts_with($real, $base.'/')) {
+                return false;
+            }
+            $found = true;
+        }
+
+        return $found;
+    }
+
+    /**
+     * @param resource $handle
+     */
+    private static function copyFrom($handle, string $tmp): bool
+    {
+        $out = @fopen($tmp, 'w');
+        if (false === $out) {
+            return false;
+        }
+        rewind($handle);
+        $ok = false !== stream_copy_to_stream($handle, $out);
+
+        return fclose($out) && $ok;
+    }
+
+    /**
+     * @param array<int|string, int>|false $stat
+     */
+    private static function isFile(array|false $stat): bool
+    {
+        return false !== $stat && 0o100000 === ($stat['mode'] & 0o170000);
+    }
+
+    /**
+     * @param array<int|string, int>|false $a
+     * @param array<int|string, int>|false $b
+     */
+    private static function sameInode(array|false $a, array|false $b): bool
+    {
+        return false !== $a && false !== $b && $a['ino'] === $b['ino'] && $a['dev'] === $b['dev'];
     }
 
     /**

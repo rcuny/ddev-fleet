@@ -34,8 +34,8 @@ Open **Projects**, pick a project, then the **Assets** tab (`/admin/projects/<pr
 | **Download** | Sends the file as an attachment. Folders cannot be downloaded. |
 | **Delete** | Asks for confirmation in a dialog, then removes the file. A folder is deleted only when it is empty; hidden leftovers of an upload assembly that was killed (older than an hour) do not count and go with it. |
 
-Entries the screen cannot handle are listed but have no buttons: a **symbolic link** is shown as "symbolic link,
-ignored" and never followed, and a file copied in with a name outside the allowed characters is shown as "name not
+Entries the screen cannot handle are listed but have no buttons: a **symbolic link** is shown with its target and
+whether a deploy seeds it (see [symbolic links](#names-paths-and-symbolic-links)); the screen never follows it, and a file copied in with a name outside the allowed characters is shown as "name not
 supported here" (rename it on the host). A folder with more than 2000 items shows the first 2000.
 
 ## Deploying from the assets
@@ -50,7 +50,8 @@ log shows `assets: seeded N file(s) ...`.
 | Text files | A regular file of at most 1 MiB that has no NUL byte and is valid UTF-8 has its `[[token]]` placeholders substituted (the context tokens of [secrets](secrets.md)). An unresolved placeholder stays as written and is logged by name, never by value. |
 | Other files | A larger file, a binary file or a file that is not UTF-8 is copied byte for byte. |
 | `dumps/` | Never substituted. Each file is **hard-linked** into the checkout (a copy when the link is refused, for example across filesystems), so a big dump costs no disk. A stale file at the destination is replaced, and a second pass changes nothing. |
-| Skipped | Symbolic links and special files (logged), names the browser could not address, upload temporaries and anything named `.git`. Nothing is ever written into the checkout's `.git`. |
+| Symbolic links | Honoured when they end at a regular file inside the same project's assets, see [symbolic links](#names-paths-and-symbolic-links). Others are skipped and logged with the reason. |
+| Skipped | Special files (logged), names the browser could not address, upload temporaries and anything named `.git`. Nothing is ever written into the checkout's `.git`. |
 | Git status | Everything copied is added to `.git/info/exclude` (`dumps/` as a whole), so the project's `git status` stays clean. |
 | Failure | An unreadable file, or a checkout folder that is a symbolic link where the assets have a folder, fails the deploy: the instance is `failed` and the log says which path. A project without an assets directory is a no-op with one log line. |
 
@@ -129,7 +130,44 @@ The same rules apply to names on disk that you copied in: a name outside the set
 **Symbolic links are never followed.** The project's directory itself may not be a link (mount what you need instead);
 a link anywhere on the way to a folder or file makes the request fail with "A symbolic link is in the way"; nothing is
 ever written through one. A link inside the directory is listed, can be deleted (the link, not what it points at) and is
-otherwise ignored.
+otherwise ignored by the screen.
+
+**Deploy seeding honours links that stay inside the project's assets** (typically `dumps/default.sql` pointing at
+`dump-prod-2026-10-15.sql`, so the project's `ddev init` finds its seed DB). The link is resolved without being
+followed: each hop is read with `readlink`, resolved against the link's folder, and must stay below `assets/<project>/`
+(an absolute target is accepted only when it is below it too); the folders on the way must be real folders; at most 4
+hops. The result must be a regular file with a name that is seeded. What the instance gets:
+
+- a link in `dumps/` to another file in `dumps/`: a **hard link** to the same inode as the target (a copy when the
+  filesystem refuses), so `dumps/default.sql` is a plain file, nothing is stored twice and `ddev import-db` needs no
+  link support;
+- any other link: a **relative symbolic link** with the same name to the seeded target (the checkout mirrors the
+  assets, and `git status` stays clean as for the other seeded files).
+
+Skipped, with the reason in the deploy log (`assets: skipped "dumps/x.sql" (symbolic link to "...": <reason>)`) and on the
+Assets tab and in `fleet asset:list`: a target outside the project's assets (`../..`, absolute), a dangling link, a link
+to a folder or a special file, a loop or a chain over the cap, a link behind a folder that is a link, and a target with
+a name that is never seeded (`.git`, unsupported characters).
+
+A target that climbs out of the project's directory and back in (`../<project>/dumps/x.sql`) is refused as well: the
+check is on the path as written, and a `..` above the assets directory is outside it, even when it lands in the same
+project again. Use a path below the link's own folder (`../dumps/x.sql` from `web/`).
+
+**Verified when it is opened.** The checks run while the deploy walks the tree, and the file is then opened and
+verified: the opened file must be the regular file that was checked (by device and inode, before and after the open),
+and the real path of the open descriptor (`/proc/self/fd`, so Linux only) must be inside the project's assets
+directory. A link or another file swapped in between, or a folder on the way replaced by a link to somewhere else,
+fails the deploy ("changed while it was being seeded", or "is not inside the project's assets") and nothing is copied
+from it, so a deploy **cannot be made to read outside** the project's assets. The file is opened without blocking, so a
+named pipe or another special file swapped in does not hang the deploy: it is refused the same way.
+
+**Hard links.** A hard link is the same inode under another name, so it is a regular file like any other and is
+copied. A hard link inside `assets/<project>/` to a file outside it is possible only for someone who can already write
+in the assets and read the target, so it grants nothing new; a test pins this behaviour.
+
+**The remaining limit:** whoever can write to `assets/<project>/` while a deploy runs can still make a deploy fail or
+choose which file in the assets is seeded. Keep write access to the assets to the people who manage the project (the
+Assets tab and `scp` as the fleet user are the intended ways in).
 
 ## Snapshot a running instance
 

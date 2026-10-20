@@ -13,7 +13,7 @@
         <form method="get" action="{{ path('audit') }}" class="flex flex-col gap-2 md:max-w-md md:flex-row md:items-end" data-testid="audit-filter">
             <div class="grid flex-1 gap-2">
                 <twig:Label for="audit-action">Action</twig:Label>
-                <twig:NativeSelect id="audit-action" name="action" class="h-11 md:h-8">
+                <twig:NativeSelect id="audit-action" name="action" class="[&_select]:h-11 md:[&_select]:h-8">
                     <twig:NativeSelect:Option value="">All actions</twig:NativeSelect:Option>
                     {% for candidate in actions %}
                         <twig:NativeSelect:Option {{ ...{value: candidate, selected: candidate == action ? true : null} }}>{{ candidate }}</twig:NativeSelect:Option>
@@ -41,9 +41,9 @@
                     {% for entry in entries %}
                         <twig:Table:Row data-testid="audit-row">
                             <twig:Table:Cell>{{ entry.createdAt|date('Y-m-d H:i:s', 'UTC') }}</twig:Table:Cell>
-                            <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ entry.actor }}</twig:Table:Cell>
-                            <twig:Table:Cell class="[overflow-wrap:anywhere]">{{ entry.action }}</twig:Table:Cell>
-                            <twig:Table:Cell class="font-mono [overflow-wrap:anywhere]">{{ entry.subject }}</twig:Table:Cell>
+                            <twig:Table:Cell class="whitespace-normal [overflow-wrap:anywhere]">{{ entry.actor }}</twig:Table:Cell>
+                            <twig:Table:Cell class="whitespace-normal [overflow-wrap:anywhere]">{{ entry.action }}</twig:Table:Cell>
+                            <twig:Table:Cell class="whitespace-normal font-mono [overflow-wrap:anywhere]">{{ entry.subject }}</twig:Table:Cell>
                         </twig:Table:Row>
                     {% endfor %}
                 </twig:Table:Body>

@@ -17,6 +17,9 @@ final readonly class StandInSettings
 {
     public const string COOKIE = 'fleet_stand_in_role';
     public const string HEADER = 'X-Fleet-Stand-In-Role';
+    /** Renames the signed-in stand-in user, so a test owns an identity of its own (the reveal throttle and the audit log are per user). */
+    public const string USER_COOKIE = 'fleet_stand_in_user';
+    private const string USER_PATTERN = '/^[a-z][a-z0-9-]{2,31}$/D';
     public const string ADMIN = 'admin';
     public const string MEMBER = 'member';
     public const string NONE = 'none';
@@ -65,11 +68,16 @@ final readonly class StandInSettings
         return self::known($header) ?? self::known($cookie) ?? $this->defaultRole;
     }
 
-    public function userFor(string $role): ?FleetUser
+    /**
+     * @param string|null $rename a name from the user cookie; used only when it is a plain lowercase name, else ignored
+     */
+    public function userFor(string $role, ?string $rename = null): ?FleetUser
     {
+        $rename = null !== $rename && 1 === preg_match(self::USER_PATTERN, $rename) ? $rename : null;
+
         return match ($role) {
-            self::ADMIN => $this->build($this->adminUser, 'Dev Admin', $this->adminGroups),
-            self::MEMBER => $this->build($this->memberUser, 'Dev Member', $this->memberGroups),
+            self::ADMIN => $this->build($rename ?? $this->adminUser, 'Dev Admin', $this->adminGroups),
+            self::MEMBER => $this->build($rename ?? $this->memberUser, 'Dev Member', $this->memberGroups),
             default => null,
         };
     }

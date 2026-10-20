@@ -99,6 +99,43 @@ test.describe('users and project access', () => {
     }
   });
 
+  test('creating a project and a user shows the result at once and keeps the admin signed in', async ({ page }) => {
+    // FLE-100: both used to restart Authelia (everyone signed out, the save looked like it did nothing). The stand-in
+    // stands in for the session: it must still be there, and each page shows what was just created.
+    test.setTimeout(240_000);
+    const project = uniqueName('prj');
+    const username = uniqueName('usr');
+
+    try {
+      await createProjectViaUi(page, project);
+      await expect(page.getByTestId('flashes')).toContainText('Project created.');
+      await expect(page.getByRole('heading', { level: 1 })).toContainText(project);
+
+      await page.goto('/admin/users/new');
+      await page.getByLabel('Username').fill(username);
+      await page.getByLabel('Display name').fill('Spec Person');
+      await page.getByLabel('Email').fill(`${username}@example.com`);
+      await page.getByLabel('Initial password').fill(PASSWORD);
+      const row = page.locator('[data-slot=checkbox-choice]').filter({ hasText: project });
+      const box = (await row.boundingBox())!;
+      await row.click({ position: { x: box.width - 3, y: box.height - 3 } });
+      await expect(page.getByRole('checkbox', { name: project })).toBeChecked();
+      await page.getByRole('button', { name: 'Create user' }).click();
+      await expect(page.getByTestId('flashes')).toContainText(`User "${username}" created.`);
+      await expect(page.getByRole('checkbox', { name: project })).toBeChecked();
+
+      // Still signed in: an admin page opens without a sign-in redirect, and it lists the new user and project.
+      const response = await page.goto('/admin/users');
+      expect(response?.status()).toBe(200);
+      await expect(page.getByTestId('user-row').filter({ hasText: username })).toHaveCount(1);
+      await page.goto('/admin/projects');
+      await expect(page.getByText(project).first()).toBeVisible();
+    } finally {
+      await deleteUserViaUi(page, username);
+      await deleteProjectViaUi(page, project);
+    }
+  });
+
   test('admin sets a password, disables and deletes a user', async ({ page }) => {
     test.setTimeout(240_000);
     const errors = collectBrowserErrors(page);

@@ -138,7 +138,8 @@ final class InstallDocsTest extends TestCase
             'user:reset-password',
             'ovh-eu', 'ovh-ca', 'ovh-us',                   // the OVH endpoint allow-list
             'libdns/ovh',                                   // where the OVH rights list comes from
-            '/domain/zone/<zone>/refresh',                       // ... and the list itself
+            '`DELETE` `/domain/zone/example.com/*`',         // ... and the rights, one line per method
+            'This call has not been granted',               // the 403 a wrong token produces
             'auth.fleet.example.com',                       // HTTP-01 needs a record for the login host too
             'every signed-in session',                      // an Authelia restart drops every session
             'is a credential for 24 hours',                 // the setup URL is not "one-time"

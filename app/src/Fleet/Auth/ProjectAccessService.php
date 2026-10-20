@@ -13,9 +13,9 @@ use App\Fleet\Projects\NotFound;
 
 /**
  * Who is a member of which project: the only code that creates and removes project_access rows. It touches the
- * database only; the Authelia access rules follow the rows, so after a change call IdentitySync::commit() (which
- * wraps the change and re-renders) or AutheliaAccessSync::sync(). Administrators need no row: the voter and the
- * rendered rules give them every project.
+ * database only; the users.yml project groups follow the rows, so after a change call IdentitySync::commit() (which
+ * wraps the change and rewrites the file). Administrators need no row: the voter and the
+ * Caddy sites (admin group) give them every project.
  *
  * Every method flushes once at its end, so a call is atomic on its own and also composes inside a transaction.
  */

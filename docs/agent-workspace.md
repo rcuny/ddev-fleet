@@ -1,7 +1,10 @@
 # The agent workspace
 
 Every deployed instance has a window in the persistent `fleet` tmux session, so a person (or an agent) can watch and
-drive it from one terminal: `tmux -L fleet attach -t fleet`. A window has three panes: the sidebar on the left, `tty1`
+drive it from one terminal: `sudo fleet tmux` (attaches to the session, creating it first if it is missing;
+`sudo fleet tmux <instance-id>` opens that instance's window; also `fleet tmux:attach`). The command needs a terminal:
+over ssh use `ssh -t host sudo fleet tmux`, without `-t` it stops with "needs a terminal: use ssh -t" (exit 2). The raw form is
+`sudo -u fleet tmux -L fleet attach -t fleet`. A window has three panes: the sidebar on the left, `tty1`
 above `tty2` on the right, all in the instance's checkout.
 
 ## What is typed, by whom, when

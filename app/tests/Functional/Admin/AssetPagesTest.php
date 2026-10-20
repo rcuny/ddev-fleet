@@ -166,7 +166,22 @@ final class AssetPagesTest extends AdminTestCase
         self::assertStringNotContainsString('<script>alert(1)', $html);
         // The first name is refused by the rules, so it is listed but cannot be addressed.
         self::assertStringContainsString('name not supported here', $html);
-        self::assertStringContainsString('symbolic link, ignored', $html);
+        self::assertStringContainsString('symbolic link, not seeded: points outside', $html);
+    }
+
+    public function testALinkInsideTheAssetsIsMarkedAsSeededOnDeploy(): void
+    {
+        $this->makeProject();
+        $this->put('dumps/dump-prod.sql', 'x');
+        symlink('dump-prod.sql', $this->dir('dumps/default.sql'));
+
+        $crawler = $this->open('/admin/projects/blog/assets?path=dumps');
+
+        self::assertResponseStatusCodeSame(200);
+        $states = $crawler->filter('[data-testid=asset-link-state]');
+        self::assertCount(1, $states);
+        self::assertSame('symbolic link, seeded on deploy', trim($states->text()));
+        self::assertStringNotContainsString('not seeded', $this->body());
     }
 
     public function testMissingFolderAndTraversalPathsAre404(): void

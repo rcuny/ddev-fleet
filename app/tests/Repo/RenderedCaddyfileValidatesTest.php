@@ -14,6 +14,7 @@ use App\Fleet\System\CaddyfileRenderer;
 use App\Fleet\System\CaddyReloader;
 use App\Fleet\System\GateMode;
 use App\Fleet\System\GateWriter;
+use App\Tests\Support\FixedOvhEndpoint;
 use App\Tests\Support\SystemTemplates;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -79,7 +80,7 @@ final class RenderedCaddyfileValidatesTest extends TestCase
         $host->changeAcmeEmail($email);
         $twig = SystemTemplates::twig();
 
-        file_put_contents($this->paths->caddyMainFile(), new CaddyfileRenderer($twig, $this->paths, $this->tree.'/project')->render($host));
+        file_put_contents($this->paths->caddyMainFile(), new CaddyfileRenderer($twig, $this->paths, new FixedOvhEndpoint(), $this->tree.'/project')->render($host));
         $writer = new GateWriter($twig, $this->paths, new CaddyReloader(new RecordingCommandRunner(), $this->paths));
         file_put_contents($this->paths->gateFile(), $writer->render($gate));
     }
