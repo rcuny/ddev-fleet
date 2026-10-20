@@ -62,7 +62,7 @@ test.describe('schedules', () => {
       await page.getByLabel('Name', { exact: true }).fill(name);
       await page.getByLabel('Cron expression').fill('not a cron');
       await page.getByLabel('Timezone').fill('Mars/Base');
-      await page.getByLabel('Instance').fill(`${project}--nope`);
+      await page.getByLabel('Instance').fill('');
       await page.getByTestId('schedule-save').click();
       await expect(page.getByTestId('error-cron')).toBeVisible();
       await expect(page.getByTestId('error-timezone')).toBeVisible();

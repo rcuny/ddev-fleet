@@ -409,7 +409,7 @@ final class ProjectTransferTest extends KernelTestCase
         $this->switchToEmptyHost();
         $schedules = $this->service(ScheduleService::class);
         \assert($schedules instanceof ScheduleService);
-        $schedules->create(new ScheduleInput('blog-nightly', '0 1 * * *', 'UTC', 'redeploy', 'shop--main'), 'admin', false);
+        $schedules->create(new ScheduleInput('blog-nightly', '0 1 * * *', 'UTC', 'redeploy', 'shop--main'), 'admin');
 
         $preview = $this->importer()->preview($text);
         self::assertStringContainsString('schedules[0].name', implode(' | ', $preview->errors));

@@ -32,7 +32,12 @@ final class FakeScheduleAction implements ScheduleAction
 
     public function targetError(?string $instanceId): ?string
     {
-        return 'gone' === $instanceId ? 'This instance does not exist.' : null;
+        return null;
+    }
+
+    public function targetMissing(?string $instanceId): bool
+    {
+        return 'gone' === $instanceId;
     }
 
     public function start(Schedule $schedule, JobTrigger $trigger, string $requestedBy): ?int

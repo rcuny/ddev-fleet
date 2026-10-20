@@ -37,14 +37,16 @@ final class ScheduleServiceTest extends ScheduleTestCase
         self::assertSame([], $this->scheduleService->list());
     }
 
-    public function testTheActionValidatesItsTarget(): void
+    public function testATargetThatDoesNotExistYetIsAcceptedWithAWarning(): void
     {
-        try {
-            $this->scheduleService->create(new ScheduleInput('nightly', '0 3 * * *', 'UTC', 'fake', 'gone'), 'admin');
-            self::fail('expected ValidationFailed');
-        } catch (ValidationFailed $e) {
-            self::assertSame(['instance'], array_keys($e->errors));
-        }
+        $schedule = $this->scheduleService->create(new ScheduleInput('nightly', '0 3 * * *', 'UTC', 'fake', 'gone'), 'admin');
+
+        self::assertTrue($this->scheduleService->targetMissing($schedule));
+        self::assertSame('Instance gone does not exist yet; runs are skipped until it does.', $this->scheduleService->targetWarning($schedule));
+
+        $present = $this->scheduleService->create(new ScheduleInput('other', '0 3 * * *', 'UTC', 'fake', 'here'), 'admin');
+        self::assertFalse($this->scheduleService->targetMissing($present));
+        self::assertNull($this->scheduleService->targetWarning($present));
     }
 
     public function testNamesAreUnique(): void
@@ -124,7 +126,8 @@ final class ScheduleServiceTest extends ScheduleTestCase
         $redeploy = $actions->get('redeploy');
         self::assertInstanceOf(RedeployAction::class, $redeploy);
         self::assertSame('Enter the id of the instance to redeploy.', $redeploy->targetError(null));
-        self::assertSame('This instance does not exist.', $redeploy->targetError('nope--main'));
+        self::assertNull($redeploy->targetError('nope--main'));
+        self::assertTrue($redeploy->targetMissing('nope--main'));
     }
 
     /**

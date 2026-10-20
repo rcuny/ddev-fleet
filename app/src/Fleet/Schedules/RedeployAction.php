@@ -34,7 +34,12 @@ final readonly class RedeployAction implements ScheduleAction
             return 'Enter the id of the instance to redeploy.';
         }
 
-        return null === $this->repository->find($instanceId) ? 'This instance does not exist.' : null;
+        return null;
+    }
+
+    public function targetMissing(?string $instanceId): bool
+    {
+        return null === $instanceId || '' === $instanceId || null === $this->repository->find($instanceId);
     }
 
     public function start(Schedule $schedule, JobTrigger $trigger, string $requestedBy): ?int

@@ -45,6 +45,7 @@ final class ScheduleController extends AbstractController
                 'next' => $this->schedules->nextFire($schedule),
                 'last' => $last,
                 'result' => null === $last ? null : $this->schedules->result($last),
+                'targetMissing' => $this->schedules->targetMissing($schedule),
             ];
         }
 
@@ -66,6 +67,7 @@ final class ScheduleController extends AbstractController
                 return $this->formPage(null, $form, $failed->errors, Response::HTTP_UNPROCESSABLE_ENTITY);
             }
             $this->addFlash('success', \sprintf('Schedule "%s" created.', $schedule->name()));
+            $this->warnIfTargetMissing($schedule);
 
             return $this->back();
         }
@@ -91,13 +93,14 @@ final class ScheduleController extends AbstractController
             $form = $this->readForm($request);
             $form['name'] = $schedule->name();
             try {
-                $this->schedules->update($name, $this->input($form), $this->actor->name());
+                $schedule = $this->schedules->update($name, $this->input($form), $this->actor->name());
             } catch (ValidationFailed $failed) {
                 return $this->formPage($schedule->name(), $form, $failed->errors, Response::HTTP_UNPROCESSABLE_ENTITY);
             } catch (NotFound) {
                 throw new NotFoundHttpException();
             }
             $this->addFlash('success', \sprintf('Schedule "%s" saved.', $name));
+            $this->warnIfTargetMissing($schedule);
 
             return $this->back();
         }
@@ -223,6 +226,13 @@ final class ScheduleController extends AbstractController
     private function input(array $form): ScheduleInput
     {
         return new ScheduleInput($form['name'], $form['cron'], $form['timezone'], $form['action'], $form['instance']);
+    }
+
+    private function warnIfTargetMissing(\App\Domain\Schedule\Schedule $schedule): void
+    {
+        if (null !== $warning = $this->schedules->targetWarning($schedule)) {
+            $this->addFlash('warning', $warning);
+        }
     }
 
     private function guardPost(Request $request): void
