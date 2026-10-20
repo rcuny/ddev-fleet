@@ -142,7 +142,8 @@ final class ComponentsAccessTest extends WebTestCase
                 continue;
             }
             ++$found;
-            self::assertSame('IS_AUTHENTICATED_FULLY', $rule['roles'] ?? null, 'a component rule must not be an admin blanket');
+            // ROLE_MEMBER, not ROLE_ADMIN: any Fleet user, but not a site-only account (FLE-101).
+            self::assertSame('ROLE_MEMBER', $rule['roles'] ?? null, 'a component rule must not be an admin blanket');
         }
         self::assertSame(2, $found, 'the route rule and the path rule');
     }

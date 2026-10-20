@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Form\User;
 
+use App\Fleet\Auth\PasswordPolicy;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\EmailType;
@@ -26,6 +27,12 @@ final class UserEditType extends AbstractType
             ->add('displayName', TextType::class, [
                 'label' => 'Display name',
                 'attr' => ['autocomplete' => 'off', 'maxlength' => 255],
+            ])
+            ->add('siteOnly', CheckboxType::class, [
+                'label' => 'Site access only',
+                'required' => false,
+                'help' => 'Only opens the instance sites of the projects below, for people you share a site with: no Fleet access, no email. The password can be as short as '.PasswordPolicy::SITE_ONLY_MIN_LENGTH.' characters.',
+                'attr' => ['data-site-only-target' => 'box', 'data-action' => 'site-only#toggle'],
             ])
             ->add('email', EmailType::class, [
                 'label' => 'Email',
@@ -51,7 +58,7 @@ final class UserEditType extends AbstractType
             'data_class' => null,
             'projects' => [],
             'self' => false,
-            'attr' => ['novalidate' => 'novalidate', 'data-testid' => 'user-form'],
+            'attr' => ['novalidate' => 'novalidate', 'data-testid' => 'user-form', 'data-controller' => 'site-only'],
         ]);
         $resolver->setAllowedTypes('projects', 'array');
         $resolver->setAllowedTypes('self', 'bool');

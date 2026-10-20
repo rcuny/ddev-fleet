@@ -69,7 +69,8 @@ final class UserResetPasswordCommand extends Command
 
             return Command::FAILURE;
         }
-        if (null === $this->users->findByUsername($username)) {
+        $account = $this->users->findByUsername($username);
+        if (null === $account) {
             $io->error(UnknownUser::named($username)->getMessage());
 
             return Command::FAILURE;
@@ -77,7 +78,7 @@ final class UserResetPasswordCommand extends Command
 
         try {
             $password = $this->askHidden($io, 'New password');
-            $violations = $this->policy->violations($password, $username);
+            $violations = $this->policy->violations($password, $username, $account->isSiteOnly());
             if ([] !== $violations) {
                 $io->error($violations);
 

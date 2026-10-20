@@ -52,7 +52,7 @@ final class AutheliaUsersRenderer
                 'disabled' => !$user->isEnabled(),
                 'displayname' => $user->displayName(),
                 'password' => $user->passwordHash(),
-                'email' => $user->email(),
+                'email' => '' === $user->email() ? self::siteOnlyEmail($username) : $user->email(),
                 'groups' => self::groupsOf($user, $projectsByUser[$username] ?? []),
             ];
         }
@@ -71,6 +71,15 @@ final class AutheliaUsersRenderer
     }
 
     /**
+     * A site-only user has no email. Authelia's file backend is fed one anyway (it is not verified that 4.39 accepts
+     * an entry without), a syntactically valid address on the reserved `.invalid` TLD that can never be delivered to.
+     */
+    private static function siteOnlyEmail(string $username): string
+    {
+        return $username.'@site-only.invalid';
+    }
+
+    /**
      * @param list<string> $projects
      *
      * @return list<string> the user's own groups, then the project groups, once each
@@ -78,6 +87,10 @@ final class AutheliaUsersRenderer
     private static function groupsOf(User $user, array $projects): array
     {
         $groups = $user->groups();
+        if ($user->isSiteOnly()) {
+            // The marker the Fleet app refuses; never together with the admin group, whatever a hand-edited row says.
+            $groups = [User::SITE_ONLY_GROUP, ...array_values(array_filter($groups, static fn (string $group): bool => User::SITE_ONLY_GROUP !== $group))];
+        }
         foreach ($groups as $group) {
             // A row edited by hand: the entity refuses these, a loaded row does not go through it.
             if (str_starts_with($group, User::RESERVED_GROUP_PREFIX)) {

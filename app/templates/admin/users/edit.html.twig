@@ -3,7 +3,7 @@
 {% block title %}{{ user.displayName }} · Users · {{ parent() }}{% endblock %}
 
 {% block content %}
-    <twig:PageHeader :title="user.displayName" :description="user.username ~ ' · ' ~ user.email" />
+    <twig:PageHeader :title="user.displayName" :description="user.siteOnly ? user.username ~ ' · site access only' : user.username ~ ' · ' ~ user.email" />
 
     <div class="mt-6 grid max-w-2xl gap-8">
         <twig:Card data-testid="user-status">
@@ -11,6 +11,7 @@
                 <twig:Card:Title>
                     {{ user.enabled ? 'Active' : 'Disabled' }}
                     {% if admin %}<twig:Badge class="ms-2 align-middle">Admin</twig:Badge>{% endif %}
+                    {% if user.siteOnly %}<twig:Badge variant="secondary" class="ms-2 align-middle" data-testid="user-site-only">Site access only</twig:Badge>{% endif %}
                 </twig:Card:Title>
                 <twig:Card:Description>
                     {% if self %}
@@ -35,11 +36,13 @@
         {{ form_start(form, {action: path('user_edit', {username: user.username}), attr: {class: 'grid gap-6'}}) }}
             {{ form_errors(form) }}
             {{ form_row(form.displayName) }}
-            {{ form_row(form.email) }}
+            {{ form_row(form.siteOnly) }}
+            <div data-site-only-target="email">{{ form_row(form.email) }}</div>
+            {{ include('admin/users/_site_only_warning.html.twig') }}
 
             <twig:Separator />
 
-            {{ form_row(form.admin) }}
+            <div data-site-only-target="admin">{{ form_row(form.admin) }}</div>
             {{ include('admin/users/_projects.html.twig', {field: form.projects}) }}
 
             <div class="flex flex-col gap-2 md:flex-row">
@@ -51,7 +54,13 @@
         <twig:Card data-testid="password-card">
             <twig:Card:Header>
                 <twig:Card:Title>Set a new password</twig:Card:Title>
-                <twig:Card:Description>Replaces the current password. The person can also reset it from the sign-in page when the host has outgoing mail configured.</twig:Card:Description>
+                <twig:Card:Description>
+                    {% if user.siteOnly %}
+                        Replaces the current password (at least {{ constant('App\\Fleet\\Auth\\PasswordPolicy::SITE_ONLY_MIN_LENGTH') }} characters). There is no email, so the person cannot reset it themselves.
+                    {% else %}
+                        Replaces the current password. The person can also reset it from the sign-in page when the host has outgoing mail configured.
+                    {% endif %}
+                </twig:Card:Description>
             </twig:Card:Header>
             <twig:Card:Content>
                 {{ form_start(passwordForm, {action: path('user_password', {username: user.username}), attr: {class: 'grid gap-6'}}) }}

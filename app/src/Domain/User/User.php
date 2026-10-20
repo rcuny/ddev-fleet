@@ -43,6 +43,10 @@ class User
     #[ORM\Column(type: Types::BOOLEAN)]
     private bool $enabled = true;
 
+    /** A site-only account opens the instance sites of its projects and nothing else: no Fleet UI, no email, never an administrator. */
+    #[ORM\Column(name: 'site_only', type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $siteOnly = false;
+
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $createdAt;
 
@@ -60,6 +64,7 @@ class User
         string $passwordHash,
         array $groups = [],
         ?\DateTimeImmutable $now = null,
+        bool $siteOnly = false,
     ) {
         if (1 !== preg_match(self::USERNAME_PATTERN, $username)) {
             throw new \InvalidArgumentException(\sprintf('Invalid username "%s".', $username));
@@ -70,6 +75,7 @@ class User
         $this->email = $email;
         $this->passwordHash = $passwordHash;
         $this->groups = self::normaliseGroups($groups);
+        $this->siteOnly = $siteOnly;
         $this->createdAt = $this->updatedAt = $now ?? new \DateTimeImmutable();
     }
 
@@ -120,6 +126,17 @@ class User
         return $this->enabled;
     }
 
+    public function isSiteOnly(): bool
+    {
+        return $this->siteOnly;
+    }
+
+    public function changeSiteOnly(bool $siteOnly): void
+    {
+        $this->siteOnly = $siteOnly;
+        $this->touch();
+    }
+
     public function updateProfile(string $displayName, string $email): void
     {
         $this->displayName = $displayName;
@@ -159,6 +176,9 @@ class User
         return $this->updatedAt;
     }
 
+    /** The group users.yml gives every site-only user; the Fleet app refuses anyone who carries it. Written by Fleet only. */
+    public const string SITE_ONLY_GROUP = 'fleet-site-only';
+
     /** Groups with this prefix stand for project membership and are written by Fleet only (ProjectGroup). */
     public const string RESERVED_GROUP_PREFIX = 'fleet-project-';
 
@@ -176,6 +196,9 @@ class User
             }
             if (str_starts_with($group, self::RESERVED_GROUP_PREFIX)) {
                 throw new \InvalidArgumentException(\sprintf('Groups starting with "%s" are reserved for project access.', self::RESERVED_GROUP_PREFIX));
+            }
+            if (self::SITE_ONLY_GROUP === $group) {
+                throw new \InvalidArgumentException(\sprintf('The group "%s" is reserved for site-only users.', $group));
             }
             $clean[$group] = $group;
         }

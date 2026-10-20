@@ -296,6 +296,15 @@ sign in, so there is no other place to add them:
 - **Edit** (tap a user in the list): display name, email, the administrator role and the project checkboxes. A member can
   operate the instances of the projects they are in (start, stop, redeploy, read logs; deploy and destroy stay with administrators), and cannot create or delete projects, change
   settings or open another project's instance sites. An administrator needs no memberships: every project is theirs.
+- **Site access only:** a checkbox on the create and edit forms (`--site-only` on `fleet user:create` and
+  `fleet user:update`, which also takes the negated form to undo it). A site-only user only opens the instance sites of the projects they
+  are in, for example to share a staging site with a client while keeping crawlers and strangers out (the 0.x
+  `users: [{name: shield, password: shield}]` setting). They need no email, may have a trivially short password (4
+  characters or more, and it may equal the username; the form warns that it only protects instance sites), and are never
+  administrators. They have **no access to Fleet itself**: every Fleet page, API and live component answers 403
+  "This account only opens project sites", and the list marks them with a badge. They have no email, so the sign-in page's
+  password reset cannot reach them; an administrator sets a new password. Switching a user back to a regular one needs
+  an email and keeps the stored password, so set a new one.
 - **Set a new password** for the user (the person can also reset it from the sign-in page once outgoing mail is
   configured, see above), **Disable** or **Enable** the account (a disabled user cannot sign in; nothing is deleted)
   and **Delete** it (with its project access).
