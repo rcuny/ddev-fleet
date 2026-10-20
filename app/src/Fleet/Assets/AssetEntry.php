@@ -16,10 +16,13 @@ final readonly class AssetEntry
     public const string LINK = 'link';
 
     /**
-     * @param string   $path     relative to the project's assets directory; empty when not usable
-     * @param string   $kind     one of the constants above
-     * @param int|null $size     bytes of a file; null for a folder or a link
-     * @param int      $modified Unix time
+     * @param string   $path       relative to the project's assets directory; empty when not usable
+     * @param string   $kind       one of the constants above
+     * @param int|null $size       bytes of a file; null for a folder or a link
+     * @param int      $modified   Unix time
+     * @param string   $linkTarget a link's target as written (printable); empty for anything else
+     * @param bool     $linkSeeded whether deploy seeding honours the link (see AssetLinkResolver)
+     * @param string   $linkNote   the reason a link is not seeded; empty otherwise
      */
     public function __construct(
         public string $name,
@@ -28,6 +31,9 @@ final readonly class AssetEntry
         public ?int $size,
         public int $modified,
         public bool $usable,
+        public string $linkTarget = '',
+        public bool $linkSeeded = false,
+        public string $linkNote = '',
     ) {
     }
 
@@ -42,10 +48,12 @@ final readonly class AssetEntry
     }
 
     /**
-     * @return array{name: string, path: string, type: string, size: int|null, modified: string, usable: bool}
+     * @return array{name: string, path: string, type: string, size: int|null, modified: string, usable: bool, link_target?: string, seeded?: bool, note?: string}
      */
     public function toArray(): array
     {
+        $link = self::LINK === $this->kind ? ['link_target' => $this->linkTarget, 'seeded' => $this->linkSeeded, 'note' => $this->linkNote] : [];
+
         return [
             'name' => $this->name,
             'path' => $this->path,
@@ -53,6 +61,6 @@ final readonly class AssetEntry
             'size' => $this->size,
             'modified' => new \DateTimeImmutable('@'.$this->modified)->format('Y-m-d\TH:i:s\Z'),
             'usable' => $this->usable,
-        ];
+        ] + $link;
     }
 }
