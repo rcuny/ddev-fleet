@@ -100,6 +100,100 @@ final class FleetWrapperTest extends TestCase
         }
     }
 
+    /**
+     * @return iterable<string, array{list<string>, string}>
+     */
+    public static function attachCommands(): iterable
+    {
+        yield 'no verb' => [['tmux'], "tmux -L fleet attach -t =fleet\n"];
+        yield 'tmux:attach' => [['tmux:attach'], "tmux -L fleet attach -t =fleet\n"];
+        yield 'tmux attach' => [['tmux', 'attach'], "tmux -L fleet attach -t =fleet\n"];
+        yield 'an instance window' => [['tmux', 'acme--main'], "tmux -L fleet select-window -t =fleet:=acme--main\ntmux -L fleet attach -t =fleet\n"];
+        yield 'an instance window via tmux:attach' => [['tmux:attach', 'acme--fle-9'], "tmux -L fleet select-window -t =fleet:=acme--fle-9\ntmux -L fleet attach -t =fleet\n"];
+    }
+
+    /**
+     * @param list<string> $args
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('attachCommands')]
+    public function testTmuxAttachesToTheFleetSession(array $args, string $expectedTmuxCalls): void
+    {
+        $log = $this->scratch().'/calls.log';
+        [$status, , $err] = $this->attach($args, $log, tty: true);
+
+        self::assertSame(0, $status, $err);
+        $calls = (string) file_get_contents($log);
+        // The session is ensured, quietly, before tmux is run.
+        self::assertStringStartsWith("php8.4 /app/bin/console fleet:tmux:ensure -q\n", $calls);
+        self::assertSame($expectedTmuxCalls, substr($calls, \strlen("php8.4 /app/bin/console fleet:tmux:ensure -q\n")));
+    }
+
+    public function testTmuxVerbsAreNotAttach(): void
+    {
+        [$status, $out] = $this->asFleet(['tmux', 'list']);
+
+        self::assertSame(0, $status);
+        self::assertSame('php8.4 /app/bin/console fleet:tmux:list', explode('|', $out)[0]);
+    }
+
+    public function testTmuxWithoutATerminalIsRefused(): void
+    {
+        foreach ([['tmux'], ['tmux:attach'], ['tmux', 'acme--main']] as $args) {
+            $log = $this->scratch().'/calls.log';
+            [$status, , $err] = $this->attach($args, $log, tty: false);
+
+            self::assertSame(2, $status, implode(' ', $args));
+            self::assertStringContainsString('needs a terminal: use ssh -t', $err);
+            self::assertFileDoesNotExist($log, 'nothing runs without a terminal');
+        }
+    }
+
+    public function testTmuxRefusesAnUnknownWindow(): void
+    {
+        $log = $this->scratch().'/calls.log';
+        [$status, , $err] = $this->attach(['tmux', 'acme--main'], $log, tty: true, selectBody: 'exit 1');
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString('instance acme--main has no window', $err);
+        self::assertStringNotContainsString('attach', (string) file_get_contents($log));
+    }
+
+    public function testTmuxDoesNotTreatOtherWordsAsAWindow(): void
+    {
+        // Not an instance id: goes to the console as it is, and tmux never runs.
+        $log = $this->scratch().'/calls.log';
+        [$status, $out] = $this->attach(['tmux', 'x; touch /tmp/pwned'], $log, tty: true);
+
+        self::assertSame(0, $status);
+        self::assertStringContainsString('bin/console tmux x; touch /tmp/pwned', $out);
+        self::assertFileDoesNotExist($log);
+    }
+
+    /**
+     * Runs the wrapper as the fleet user with stub php8.4 and tmux that log their calls to $log.
+     *
+     * @param list<string> $args
+     *
+     * @return array{int, string, string}
+     */
+    private function attach(array $args, string $log, bool $tty, string $selectBody = ''): array
+    {
+        $envFile = $this->scratch().'/fleet.env';
+        file_put_contents($envFile, "APP_ENV=prod\n");
+        $logArg = escapeshellarg($log);
+        $stubs = $this->stubs([
+            'id' => 'echo fleet',
+            'sudo' => 'echo "sudo must not run for the fleet user" >&2; exit 9',
+            'php8.4' => 'case "$1 $2" in "/app/bin/console fleet:tmux:ensure") echo "php8.4 $*" >> '.$logArg.';; *) echo "php8.4 $*";; esac',
+            'tmux' => 'echo "tmux $*" >> '.$logArg.'; '.('' !== $selectBody ? 'if [ "$3" = select-window ]; then '.$selectBody.'; fi' : ':'),
+        ]);
+
+        return $this->wrapper($args, $stubs, [
+            'FLEET_WRAPPER_ENV_FILE' => $envFile,
+            'FLEET_WRAPPER_CONSOLE' => '/app/bin/console',
+        ] + ($tty ? ['FLEET_WRAPPER_TTY' => '1'] : []));
+    }
+
     public function testLoadsTheApplicationEnvironmentAndHome(): void
     {
         [$status, $out, $err] = $this->asFleet(['setup:token']);
