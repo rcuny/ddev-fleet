@@ -202,7 +202,7 @@ test.describe('export form', () => {
 
   test('with a passphrase the secrets are sealed: neither the value nor the passphrase is in the file', async ({ page }) => {
     test.setTimeout(120_000);
-    const name = uniqueName('pws');
+    const name = uniqueName('pwsec');
     const secret = `PW_SEALED_${randomBytes(3).toString('hex').toUpperCase()}`;
     const value = `pw-value-${randomBytes(8).toString('hex')}`;
     try {
