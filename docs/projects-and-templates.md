@@ -287,6 +287,28 @@ prints how many (exit `2` when some failed). A public port may not be 22, 80, 44
 (Caddy or the DDEV router already listens there). `fleet port:firewall` lists the public ports to open in the host firewall; the installer does not open them. More in
 [`networking.md`](networking.md).
 
+### Typesense instances
+
+An instance of a project with the Typesense flag gets these variables, and a search-only key registered in its
+Typesense:
+
+| Variable | Value | Where it lands |
+|---|---|---|
+| `FLEET_TYPESENSE_HOST` | The instance's primary host name. | `web_environment` (`.ddev/config.fleet.yaml`) |
+| `FLEET_TYPESENSE_PORT` | The public port of the `typesense` named port (9108 if the entry was removed). | `web_environment` |
+| `TYPESENSE_API_KEY` | The admin key, for backend indexing. | `web_environment` and `.ddev/.env` (git-excluded, mode 0640) |
+| `FLEET_TYPESENSE_SEARCH_KEY` | The search-only key, safe for the front end. | `web_environment` |
+
+Both keys are generated once per project, stored as sealed project secrets and never rotated. A value an operator set
+beforehand as the project secret `TYPESENSE_API_KEY` is kept. The job log masks them.
+
+Operator steps: switch the Typesense flag on for the project, create and assign the `typesense` named port (see
+"Adding one" above) and open its public port in the host firewall (`fleet port:firewall`), then deploy. After
+`ddev start` the deploy registers the search-only key in the instance's Typesense through the DDEV router. A cold
+container can take a while to answer, so a failed attempt is retried with a growing delay for up to 60 seconds. If
+Typesense never answers, the job log gets a `WARNING: typesense: ...` line and the deploy still succeeds; a redeploy
+tries again.
+
 ## Upgrading
 
 The tables are created by a database migration. Re-running the installer (the upgrade, see
