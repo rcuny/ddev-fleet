@@ -5,7 +5,7 @@
         <twig:Alert variant="destructive" data-testid="setup-ssh-errors">
             <twig:ux:icon name="lucide:circle-alert" />
             <twig:Alert:Description class="text-destructive">
-                {% for message in errors %}<p>{{ message }}</p>{% endfor %}
+                {% for message in errors %}<p class="wrap-anywhere">{{ message }}</p>{% endfor %}
             </twig:Alert:Description>
         </twig:Alert>
     {% endif %}
@@ -75,7 +75,7 @@
         <twig:Card:Content class="grid gap-6">
             {% if scan %}
                 <div class="grid gap-3 rounded-lg border border-hairline p-3" data-testid="setup-ssh-scan">
-                    <h3>Keys offered by {{ scan_host }}</h3>
+                    <h3 class="wrap-anywhere">Keys offered by {{ scan_host }}</h3>
                     <p class="text-xs text-ink-muted">Compare these fingerprints with the ones your server's administrator published, then trust them. Nothing is added until you do.</p>
                     <ul class="grid gap-2">
                         {% for found in scan %}
