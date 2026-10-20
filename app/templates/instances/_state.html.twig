@@ -20,5 +20,5 @@
     {%- endif -%}
 {%- endif -%}
 {%- if job is not null and job.status.value in ['failed', 'interrupted'] and not active %}
-    <a href="{{ path('job_show', {id: job.id}) }}" data-testid="last-job-failed" class="ms-1 text-xs text-destructive underline">Last job {{ job.status.value }}</a>
+    <a href="{{ path('job_show', {id: job.id}) }}" data-turbo-frame="_top" data-testid="last-job-failed" class="ms-1 text-xs text-destructive underline">Last job {{ job.status.value }}</a>
 {%- endif -%}

@@ -1,9 +1,10 @@
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type APIResponse, type Locator, type Page } from '@playwright/test';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalBaseURL } from './env';
+import { navigate } from './projects';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const appDir = resolve(here, '../../../app');
@@ -35,12 +36,14 @@ export interface FakeJobOptions {
   delay?: number;
   width?: number;
   fail?: boolean;
+  /** Aborting kills the command: the job then stays `running`, which is how a spec holds an instance busy. */
+  signal?: AbortSignal;
 }
 
 /** Runs one console command against the app's database; resolves when it exited 0. */
-function runConsole(args: string[]): Promise<void> {
+export function runConsole(args: string[], signal?: AbortSignal): Promise<void> {
   return new Promise((done, fail) => {
-    const child = spawn(process.env.FLEET_PHP || 'php8.4', ['bin/console', ...args, '--no-interaction', '-q'], { cwd: appDir, env: consoleEnv(), stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(process.env.FLEET_PHP || 'php8.4', ['bin/console', ...args, '--no-interaction', '-q'], { cwd: appDir, env: consoleEnv(), signal, stdio: ['ignore', 'ignore', 'pipe'] });
     let stderr = '';
     child.stderr.on('data', (chunk) => (stderr += chunk.toString()));
     child.on('error', fail);
@@ -55,7 +58,7 @@ export function runFakeJob(instanceId: string, options: FakeJobOptions = {}): Pr
   if (options.delay !== undefined) args.push(`--delay=${options.delay}`);
   if (options.width !== undefined) args.push(`--width=${options.width}`);
   if (options.fail) args.push('--fail');
-  return runConsole(args);
+  return runConsole(args, options.signal);
 }
 
 /** A project with a default template, made through the CLI (the deploy form needs one). */
@@ -94,4 +97,31 @@ export async function deployOne(page: Page, project: string = ADMIN_PROJECT, lab
 
 export function rowOf(page: Page, id: string): Locator {
   return page.locator(`[data-testid="instance-row"][data-instance="${id}"]`);
+}
+
+/**
+ * Clicks a submit button after `tamper` changed it or its form (a hidden field added, a value or a formaction changed,
+ * the token removed), the way a hand-edited page would; returns the status of the POST (a redirect is 303). The
+ * request is the browser's own, so the CSRF token is the real one.
+ */
+export async function submitTampered(page: Page, button: Locator, tamper: (button: HTMLButtonElement, arg: string) => void, arg = ''): Promise<number> {
+  await button.evaluate(tamper as (element: HTMLElement | SVGElement, arg: string) => void, arg);
+  const response = page.waitForResponse((r) => r.request().method() === 'POST');
+  await navigate(page, () => button.click());
+  return (await response).status();
+}
+
+/**
+ * Posts a form without a browser's help, for the answers that do not depend on a valid CSRF token (a route that is
+ * not there, a missing or wrong token, a wrong method); a request that must pass the token goes through
+ * {@link submitTampered}. A field may repeat, which the `form:` option does not allow; a redirect is not followed.
+ */
+export function postForm(page: Page, url: string, fields: Record<string, string | string[]> = {}): Promise<APIResponse> {
+  const body = new URLSearchParams();
+  for (const [name, value] of Object.entries(fields)) {
+    for (const one of Array.isArray(value) ? value : [value]) {
+      body.append(name, one);
+    }
+  }
+  return page.request.post(url, { data: body.toString(), headers: { 'content-type': 'application/x-www-form-urlencoded', origin: new URL(page.url()).origin }, maxRedirects: 0 });
 }
