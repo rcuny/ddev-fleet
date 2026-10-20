@@ -31,9 +31,9 @@
     data-close-on-select="{{ closeOnSelect ? 'true' : 'false' }}"
     data-disabled="{{ disabled ? 'true' : 'false' }}"
     aria-disabled="{{ disabled ? 'true' : 'false' }}"
-    {% if as == 'button' %}type="button"{% endif %}
+    {% if as == 'button' %}type="{{ attributes.all['type']|default('button') }}"{% endif %}
     {%- if as == 'button' and disabled %} disabled{% endif %}
-    {{ attributes.defaults({
+    {{ (as == 'button' ? attributes.without('type') : attributes).defaults({
         class: style.apply({variant: variant, inset: inset ? 'true' : 'false'})|tailwind_classes,
         'data-action': 'click->dropdown-menu#closeFromItem',
     }) }}

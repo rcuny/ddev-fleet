@@ -140,9 +140,9 @@
                                             <span class="font-medium [overflow-wrap:anywhere]" data-testid="asset-name">{{ entry.name }}</span>
                                             {% if entry.kind == 'link' %}
                                                 <span class="block text-xs text-ink-muted [overflow-wrap:anywhere]" data-testid="asset-link-target">&rarr; {{ entry.linkTarget }}</span>
-                                                <twig:Badge variant="outline" class="ms-2" data-testid="asset-link-state">{{ entry.linkSeeded ? 'symbolic link, seeded on deploy' : 'symbolic link, not seeded: ' ~ entry.linkNote }}</twig:Badge>
+                                                <twig:Badge variant="outline" class="ms-2 h-auto whitespace-normal" data-testid="asset-link-state">{{ entry.linkSeeded ? 'symbolic link, seeded on deploy' : 'symbolic link, not seeded: ' ~ entry.linkNote }}</twig:Badge>
                                             {% elseif not entry.usable %}
-                                                <twig:Badge variant="outline" class="ms-2">name not supported here</twig:Badge>
+                                                <twig:Badge variant="outline" class="ms-2 h-auto whitespace-normal">name not supported here</twig:Badge>
                                             {% endif %}
                                         {% endif %}
                                         <span class="block text-xs text-ink-muted sm:hidden">

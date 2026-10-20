@@ -25,7 +25,7 @@
         <twig:Button type="submit" variant="outline" class="h-11 md:h-8" name="action" value="stop" formaction="{{ path('instance_bulk') }}" formmethod="post" data-turbo-frame="_top">Stop</twig:Button>
         <twig:Dialog id="bulk-redeploy" class="inline-block">
             <twig:Dialog:Trigger>
-                <twig:Button type="button" variant="outline" class="h-11 md:h-8" data-action="click->dialog#open click->instance-list#fillConfirm" {{ ...dialog_trigger_attrs }}>Redeploy…</twig:Button>
+                <twig:Button type="button" variant="outline" class="h-11 md:h-8" {{ ...dialog_trigger_attrs|merge({'data-action': 'click->dialog#open click->instance-list#fillConfirm'}) }}>Redeploy…</twig:Button>
             </twig:Dialog:Trigger>
             <twig:Dialog:Content>
                 <twig:Dialog:Header>
@@ -44,7 +44,7 @@
         {% if canDestroy %}
             <twig:Dialog id="bulk-destroy" class="inline-block">
                 <twig:Dialog:Trigger>
-                    <twig:Button type="button" variant="destructive" class="h-11 md:h-8" data-action="click->dialog#open click->instance-list#fillConfirm" {{ ...dialog_trigger_attrs }}>Destroy…</twig:Button>
+                    <twig:Button type="button" variant="destructive" class="h-11 md:h-8" {{ ...dialog_trigger_attrs|merge({'data-action': 'click->dialog#open click->instance-list#fillConfirm'}) }}>Destroy…</twig:Button>
                 </twig:Dialog:Trigger>
                 <twig:Dialog:Content>
                     <twig:Dialog:Header>
