@@ -10,12 +10,13 @@ use App\Fleet\Host\HostSecrets;
 use App\Fleet\Jobs\SecretRegistry;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Ssh\AtomicFile;
+use App\Fleet\Typesense\TypesenseEnvironment;
 use Symfony\Component\Yaml\Yaml;
 
 /**
  * Writes `.ddev/config.fleet.yaml`, the one file fleet adds to ddev's configuration of an instance: its name, domain,
- * environment and extra host names. It never touches the project's own `config.yaml`. The file may hold the Claude
- * token (registered with the job log masker), so it is not world readable, and it is dumped through the YAML component so no value can break out of it.
+ * environment (the Typesense host, port and keys of a Typesense project) and extra host names. It never touches the project's own `config.yaml`. The file may hold the Claude
+ * token and the Typesense keys (registered with the job log masker), so it is not world readable, and it is dumped through the YAML component so no value can break out of it.
  */
 final readonly class InstanceConfigWriter
 {
@@ -26,6 +27,7 @@ final readonly class InstanceConfigWriter
         private GitIdentityResolver $identities,
         private SecretStore $secrets,
         private SecretRegistry $registry,
+        private TypesenseEnvironment $typesense,
     ) {
     }
 
@@ -44,6 +46,7 @@ final readonly class InstanceConfigWriter
             $this->registry->register($token);
             $environment[] = 'CLAUDE_CODE_OAUTH_TOKEN='.$token;
         }
+        array_push($environment, ...$this->typesense->variables($instance, $project));
         $identity = $this->identities->forProject($project);
         if (null !== $identity) {
             $environment[] = 'GIT_AUTHOR_NAME='.$identity['name'];

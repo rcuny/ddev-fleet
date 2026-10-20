@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Fleet\Instances;
 
 use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Instance\Instance;
+use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Secret\SecretRepository;
@@ -19,6 +20,8 @@ use App\Fleet\Jobs\RegisteredSecretsMasker;
 use App\Fleet\Secrets\SecretBox;
 use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Secrets\SecretStore;
+use App\Fleet\Typesense\TypesenseEnvironment;
+use App\Fleet\Typesense\TypesenseKeys;
 use App\Tests\Support\FleetDatabase;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -44,7 +47,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
             new SecretBox(new SecretKeyFile(self::getContainer()->get(FleetPaths::class))),
             new MockClock('2026-10-19 10:00:00 UTC'),
         );
-        $this->writer = new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $this->secrets, $this->registry = new RegisteredSecretsMasker());
+        $this->writer = new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $this->secrets, $this->registry = new RegisteredSecretsMasker(), new TypesenseEnvironment(new TypesenseKeys($this->secrets), new NamedPortRepository($em), $hostnames, $this->registry));
         $this->dir = $this->tempHome.'/checkout';
         mkdir($this->dir, 0o750, true);
     }
