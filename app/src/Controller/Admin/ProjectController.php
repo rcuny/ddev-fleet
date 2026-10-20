@@ -69,7 +69,8 @@ final class ProjectController extends AbstractController
     {
         $this->denyAccessUnlessGranted(ProjectVoter::SETTINGS);
 
-        $form = $this->createForm(ProjectType::class, null, ['mode' => ProjectType::CREATE]);
+        // The host default is preselected: a new project with no radio chosen showed an identity choice nobody had made.
+        $form = $this->createForm(ProjectType::class, ['gitBotMode' => GitBotMode::Inherit], ['mode' => ProjectType::CREATE]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
