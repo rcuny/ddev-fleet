@@ -12,15 +12,14 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
 /**
  * Renders the staged `env` file of `apply caddy`: the proxy secret the Caddyfile passes to the app, and in DNS mode the
  * OVH credentials read from the secret store. The helper splits it: `/etc/caddy/fleet.env` (Caddy's environment) keeps
- * the proxy secret only, each OVH value goes to its own file under `/etc/caddy/ovh/` that the Caddyfile reads through
+ * the proxy secret only, each OVH credential goes to its own file under `/etc/caddy/ovh/` that the Caddyfile reads through
  * `{file.*}` placeholders. Plain KEY=VALUE lines, unquoted: every value is validated against a charset that is safe for systemd's EnvironmentFile and for the root
  * helper's allowlist parser.
  */
 final readonly class CaddyEnvRenderer
 {
-    /** Secret store names of the OVH settings, in the order they are written. */
+    /** Secret store names of the OVH credentials, in the order they are written. The endpoint is no secret: the Caddyfile carries it. */
     private const array OVH = [
-        'OVH_ENDPOINT' => 'ovh_endpoint',
         'OVH_APPLICATION_KEY' => 'ovh_application_key',
         'OVH_APPLICATION_SECRET' => 'ovh_application_secret',
         'OVH_CONSUMER_KEY' => 'ovh_consumer_key',
@@ -46,9 +45,9 @@ final readonly class CaddyEnvRenderer
             foreach (self::OVH as $variable => $name) {
                 $value = $this->secrets->getFleetWide($name);
                 if (null === $value) {
-                    throw new \RuntimeException(\sprintf('The secret "%s" is not set; DNS mode needs all four OVH values.', $name));
+                    throw new \RuntimeException(\sprintf('The secret "%s" is not set; DNS mode needs all three OVH credentials.', $name));
                 }
-                $lines[] = $variable.'='.('ovh_endpoint' === $name ? ConfigValue::ovhEndpoint($value) : ConfigValue::ovhCredential($name, $value));
+                $lines[] = $variable.'='.ConfigValue::ovhCredential($name, $value);
             }
         }
 

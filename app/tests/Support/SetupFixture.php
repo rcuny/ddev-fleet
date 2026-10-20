@@ -30,6 +30,7 @@ use App\Fleet\System\CaddyEnvRenderer;
 use App\Fleet\System\CaddyfileRenderer;
 use App\Fleet\System\CaddyReloader;
 use App\Fleet\System\GateWriter;
+use App\Fleet\System\StoredOvhEndpoint;
 use App\Fleet\System\SystemRenderer;
 use App\Setup\SetupFinisher;
 use App\Setup\SetupTokenService;
@@ -109,7 +110,7 @@ final class SetupFixture
 
         $twig = SystemTemplates::twig();
         $this->system = new SystemRenderer(
-            new CaddyfileRenderer($twig, $paths, '/opt/ddev-fleet/app'),
+            new CaddyfileRenderer($twig, $paths, new StoredOvhEndpoint($this->store), '/opt/ddev-fleet/app'),
             new CaddyEnvRenderer($this->store, self::PROXY_SECRET),
             new AutheliaConfigRenderer($twig, $paths, new AdminGroup('fleet-admins')),
             new GateWriter($twig, $paths, new CaddyReloader($runner, $paths)),

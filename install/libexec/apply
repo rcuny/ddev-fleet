@@ -22,7 +22,7 @@
 #     environment only at start);
 #   - splits the staged environment file: the OVH credentials never go into Caddy's environment, they are written one
 #     value per file to /etc/caddy/ovh/ (root:caddy 0750, files root:caddy 0640), which the Caddyfile reads through
-#     {file.*} placeholders, so a rotation needs only a reload. /etc/caddy/fleet.env keeps the proxy secret alone, and
+#     {file.*} placeholders, so a rotation needs only a reload. The endpoint is no secret and sits in the Caddyfile. /etc/caddy/fleet.env keeps the proxy secret alone, and
 #     any OVH_* line an older apply left there is dropped;
 #   - deletes the staged files on every exit path (the staged environment file holds the OVH credentials).
 # `apply authelia` with no staged configuration only restarts Authelia (the password-reset path).
@@ -38,9 +38,11 @@ set -euo pipefail
 ALLOWED_TARGETS='caddy authelia'
 readonly ALLOWED_TARGETS
 readonly MAX_BYTES=262144
-readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_ENDPOINT OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
+readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
 # Staged OVH key => file name under /etc/caddy/ovh/. The Caddyfile template names the same files (CaddyfileRenderer::OVH_DIR).
-readonly OVH_FILES='OVH_ENDPOINT:endpoint OVH_APPLICATION_KEY:application_key OVH_APPLICATION_SECRET:application_secret OVH_CONSUMER_KEY:consumer_key'
+# The endpoint is not a secret: it is written into the Caddyfile (FLE-109). OVH_LEGACY_FILES are removed if an older apply left them.
+readonly OVH_LEGACY_FILES='endpoint'
+readonly OVH_FILES='OVH_APPLICATION_KEY:application_key OVH_APPLICATION_SECRET:application_secret OVH_CONSUMER_KEY:consumer_key'
 # Secret files of the Authelia unit drop-in (install/etc/authelia-secrets.conf); `authelia config validate` needs them.
 readonly AUTHELIA_SECRET_FILES='AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/etc/authelia/secrets/reset_password_jwt_secret'
 # Budget: the app gives one apply 60 s. validate 15 + reload 15 + rollback reload 15 (authelia: 15 + 20 + 20).
@@ -224,22 +226,16 @@ parse_caddy_env() {
   if [ "${#secret}" -lt 32 ]; then
     fail 'FLEET_PROXY_SECRET is missing or shorter than 32 characters' 65
   fi
-  for k in OVH_ENDPOINT OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY; do
+  for k in OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY; do
     [ -z "${seen[$k]:-}" ] || have_ovh=$((have_ovh + 1))
   done
-  if [ "$have_ovh" -ne 0 ] && [ "$have_ovh" -ne 4 ]; then
-    fail 'the OVH values must be all present or all absent' 65
-  fi
-  if [ "$have_ovh" -eq 4 ]; then
-    case ${seen[OVH_ENDPOINT]} in
-      ovh-eu | ovh-ca | ovh-us) ;;
-      *) fail 'OVH_ENDPOINT must be ovh-eu, ovh-ca or ovh-us' 65 ;;
-    esac
+  if [ "$have_ovh" -ne 0 ] && [ "$have_ovh" -ne 3 ]; then
+    fail 'the OVH credentials must be all present (application key, secret, consumer key) or all absent' 65
   fi
   # Caddy's environment gets the proxy secret only; each OVH value goes to its own file (no key, no newline games).
   printf 'FLEET_PROXY_SECRET=%s\n' "$secret" >"$file.canon"
   mkdir -p "$file.ovh"
-  if [ "$have_ovh" -eq 4 ]; then
+  if [ "$have_ovh" -eq 3 ]; then
     local pair
     for pair in $OVH_FILES; do
       printf '%s\n' "${seen[${pair%%:*}]}" >"$file.ovh/${pair#*:}"
@@ -314,6 +310,9 @@ ovh_names() {
   for pair in $OVH_FILES; do
     printf '%s\n' "${pair#*:}"
   done
+  for pair in $OVH_LEGACY_FILES; do
+    printf '%s\n' "$pair"
+  done
 }
 
 # install_ovh <staged dir>: creates /etc/caddy/ovh (root:caddy 0750) and installs the files in it, or removes them all
@@ -331,8 +330,15 @@ install_ovh() {
   if [ "$AS_ROOT" -eq 1 ]; then
     chown root:caddy "$CADDY_OVH_DIR" || return 1
   fi
-  for name in $(ovh_names); do
+  local pair
+  for pair in $OVH_FILES; do
+    name=${pair#*:}
     put_file "$dir/$name" "$CADDY_OVH_DIR/$name" 0640 root caddy || return 1
+    # An apply that reports success has written every credential file: check, never assume.
+    [ -s "$CADDY_OVH_DIR/$name" ] || return 1
+  done
+  for name in $OVH_LEGACY_FILES; do
+    rm -f -- "$CADDY_OVH_DIR/$name"
   done
 }
 

@@ -34,6 +34,7 @@ use App\Fleet\System\CaddyEnvRenderer;
 use App\Fleet\System\CaddyfileRenderer;
 use App\Fleet\System\CaddyReloader;
 use App\Fleet\System\GateWriter;
+use App\Fleet\System\StoredOvhEndpoint;
 use App\Fleet\System\SystemRenderer;
 use App\Tests\Support\FakeInstanceGuard;
 use App\Tests\Support\FleetDatabase;
@@ -84,7 +85,7 @@ final class IdentitySyncTest extends KernelTestCase
         $runner = new RecordingCommandRunner();
         $store = new SecretStore(new SecretRepository($em), new SecretBox(new SecretKeyFile($paths)), new MockClock('2026-10-19 10:00:00 UTC'));
         $system = new SystemRenderer(
-            new CaddyfileRenderer($twig, $paths, '/opt/ddev-fleet/app'),
+            new CaddyfileRenderer($twig, $paths, new StoredOvhEndpoint($store), '/opt/ddev-fleet/app'),
             new CaddyEnvRenderer($store, 'proxy-secret-0123456789abcdef-0123456789'),
             $config,
             new GateWriter($twig, $paths, new CaddyReloader($runner, $paths)),
