@@ -51,6 +51,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the assets again, and documents hard links (copied like any regular file). New tests cover the inode swap after the
   open, the folder swap, the fifo and the hard link.
 
+- **FLE-125: stable Playwright phone runs under load.** A Turbo prefetch (a hover or a touch on a link) no longer
+  consumes the flash message the redirect after a save is about to show, and a request that Turbo cancels (the instance
+  list refreshing itself, a navigation) no longer ends as an unhandled "The user aborted a request." page error. The
+  instance list does not start a refresh while the previous one is still loading.
+
 ## [1.0.5] - 2026-10-20
 
 ### Added
