@@ -171,6 +171,17 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertSame(2, preg_match_all('/^\S.* \{$/m', $site), 'the plain site plus one port block');
     }
 
+    public function testThePlaywrightReportPortIsServedOnItsOwnPublicPortAndProxiedToTheAddonRouterPort(): void
+    {
+        $project = $this->portedProject([new NamedPort('playwright', 9325, 8323)]);
+        $this->writer->write($this->instance($project), $project);
+        $site = $this->site();
+
+        self::assertStringContainsString("\nacme--main.fleet.example.com:9325 {\n", $site);
+        self::assertStringContainsString('reverse_proxy 127.0.0.1:8323', $site);
+        self::assertStringContainsString('forward_auth', substr($site, (int) strpos($site, ':9325 {')));
+    }
+
     public function testTwoPortsWithAnAliasAreOrderedAndEveryBlockIsGatedAndStripped(): void
     {
         $project = $this->portedProject([new NamedPort('mail', 9200, 18025), new NamedPort('typesense', 9108, 8108)], 'edge');

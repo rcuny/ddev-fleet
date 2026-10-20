@@ -287,6 +287,14 @@ prints how many (exit `2` when some failed). A public port may not be 22, 80, 44
 (Caddy or the DDEV router already listens there). `fleet port:firewall` lists the public ports to open in the host firewall; the installer does not open them. More in
 [`networking.md`](networking.md).
 
+### Named-port variables (`FLEET_PORT_<NAME>`)
+
+Every instance gets one variable per named port its project uses, in `web_environment` (`.ddev/config.fleet.yaml`), as
+in 0.x: `FLEET_PORT_<NAME>=<public port>`, with the name upper-cased and `-` turned into `_`. So `playwright` gives
+`FLEET_PORT_PLAYWRIGHT=9325` and `ts-dashboard` gives `FLEET_PORT_TS_DASHBOARD=9111`. A project without ports gets none.
+The values reach the instance on the next deploy or restart of the instance, not by a port change alone. Catalogue
+examples (not seeded): [`networking.md`](networking.md#example-catalogue-entries).
+
 ### Typesense instances
 
 An instance of a project with the Typesense flag gets these variables, and a search-only key registered in its

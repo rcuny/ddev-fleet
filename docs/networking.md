@@ -32,6 +32,28 @@ A migration seeds one entry, `typesense` (public `9108`, router `8108`), unless 
 name or those numbers. It is the entry of the Typesense search server: assigning the catalogue entry `typesense` to a project is the same as switching on the
 project's Typesense flag (the two stay in step). How the instance gets its keys is described in [Typesense keys and environment](#typesense-keys-and-environment).
 
+## Example catalogue entries
+
+Only `typesense` is seeded. These two come from the 0.x registry; add them with `fleet port:create` when a project needs them:
+
+| Name | Public | Router | What |
+|---|---|---|---|
+| `playwright` | `9325` | `8323` | The Playwright report of the DDEV add-on (`pw-report`). |
+| `ts-dashboard` | `9111` | `8110` | A Typesense dashboard. |
+
+```bash
+fleet port:create playwright --public=9325 --router=8323
+fleet project:update <project> --port=playwright
+```
+
+**Why `9325` and not the add-on's `9324`.** The add-on's own `https_port` is `9324`, and the instance's DDEV router already
+binds `127.0.0.1:9324` for it, so Caddy cannot listen there. The public port is therefore a distinct one. `8323` is the add-on's
+`http_port`: Caddy terminates TLS and proxies to the router's HTTP entrypoint. Each instance gets
+`FLEET_PORT_PLAYWRIGHT=9325` in its `web_environment` (see
+[`FLEET_PORT_<NAME>`](projects-and-templates.md#named-port-variables-fleet_port_name)), which `pw-report` prints. The report is
+then at `https://<instance host>:9325`, behind the Authelia gate, and `fleet port:firewall` lists `9325` for the
+projects that use it.
+
 ## Typesense keys and environment
 
 The fleet installs and manages no Typesense server. Each instance of a project with the Typesense flag runs its own
