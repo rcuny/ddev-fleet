@@ -27,7 +27,7 @@ use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
  */
 final readonly class ProjectService
 {
-    public const int MAX_HOSTNAMES = 10;
+    public const int MAX_HOSTNAMES = 50;
     public const int MAX_PORTS = 50;
     /** The catalogue port that `Project.typesense` stands for. */
     public const string TYPESENSE_PORT = 'typesense';

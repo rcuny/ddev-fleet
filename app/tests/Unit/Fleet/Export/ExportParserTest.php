@@ -114,6 +114,18 @@ final class ExportParserTest extends TestCase
         self::assertSame(['(key): unknown key.'], $this->problems($document));
     }
 
+    public function testUpToFiftyAdditionalHostnamesAreAccepted(): void
+    {
+        $document = self::document();
+        $document['project']['additional_hostnames'] = array_map(static fn (int $i): string => 'h'.$i, range(1, 23));
+
+        self::assertSame($document['project']['additional_hostnames'], new ExportParser()->parse(ExportFormat::encode($document))['project']['additional_hostnames']);
+
+        $document['project']['additional_hostnames'] = array_map(static fn (int $i): string => 'h'.$i, range(1, 51));
+
+        self::assertNotSame([], $this->problems($document));
+    }
+
     public function testAProjectPortMustBeDescribedAndNamesMustBeUnique(): void
     {
         $document = self::document();
