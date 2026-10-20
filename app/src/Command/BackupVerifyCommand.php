@@ -52,6 +52,8 @@ final class BackupVerifyCommand extends Command
                 'ok' => $result->ok(),
                 'integrity' => $result->integrityOk ? 'ok' : 'failed',
                 'schema' => $result->schema,
+                'key_fingerprint' => $result->keyFingerprint,
+                'key' => $result->keyStatus,
                 'pending_migrations' => \count($result->pending),
                 'problems' => $result->problems,
             ], \JSON_THROW_ON_ERROR | \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
@@ -69,6 +71,12 @@ final class BackupVerifyCommand extends Command
         }
         $output->writeln('integrity: ok', OutputInterface::OUTPUT_RAW);
         $output->writeln('schema: '.($result->schema ?? 'not applicable'), OutputInterface::OUTPUT_RAW);
+        if (null !== $result->keyStatus) {
+            $output->writeln('secret key: '.$result->keyStatus.(null === $result->keyFingerprint ? '' : ' (fingerprint '.$result->keyFingerprint.')'), OutputInterface::OUTPUT_RAW);
+            if ('mismatch' === $result->keyStatus) {
+                $io->getErrorStyle()->warning('Sealed by another secret key than this host\'s: a restore needs --accept-key-mismatch, and every secret must be set again.');
+            }
+        }
         if ([] !== $result->pending) {
             $output->writeln(\sprintf('After a restore run "fleet doctrine:migrations:migrate -n": %d migration(s) are newer than this file.', \count($result->pending)), OutputInterface::OUTPUT_RAW);
         }

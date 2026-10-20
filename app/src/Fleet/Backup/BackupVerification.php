@@ -10,9 +10,10 @@ namespace App\Fleet\Backup;
 final readonly class BackupVerification
 {
     /**
-     * @param string|null  $schema   current / behind / newer, null when the file has no schema to compare (a queue backup)
-     * @param list<string> $pending  migrations this release ships and the file has not run
+     * @param string|null  $schema    current / behind / newer, null when the file has no schema to compare (a queue backup)
+     * @param list<string> $pending   migrations this release ships and the file has not run
      * @param list<string> $problems
+     * @param string|null  $keyStatus match / mismatch (the backup was sealed by another secret key than this host's) / not recorded, null for a queue backup or an unreadable file
      */
     public function __construct(
         public string $path,
@@ -20,6 +21,8 @@ final readonly class BackupVerification
         public ?string $schema,
         public array $pending,
         public array $problems,
+        public ?string $keyFingerprint = null,
+        public ?string $keyStatus = null,
     ) {
     }
 

@@ -7,15 +7,20 @@ namespace App\Tests\Integration\Command;
 use App\Domain\Job\Job;
 use App\Domain\Job\JobRepository;
 use App\Domain\Job\JobTrigger;
+use App\Fleet\Backup\BackupMeta;
 use App\Fleet\Backup\BackupRestorer;
 use App\Fleet\Backup\BackupService;
+use App\Fleet\Backup\BackupVerifier;
 use App\Fleet\Backup\RestoreFailed;
 use App\Fleet\FleetPaths;
+use App\Fleet\Secrets\SecretKeyFile;
+use App\Fleet\Secrets\SecretKeyFingerprint;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RunsFleetCommands;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
+use Symfony\Component\Clock\MockClock;
 
 /**
  * Always on a throwaway FLEET_HOME (FleetDatabase), never the shared dev database.
@@ -98,6 +103,202 @@ final class BackupRestoreCommandTest extends KernelTestCase
     private function liveSnapshot(): string
     {
         return (string) hash_file('sha256', $this->paths->fleetDb());
+    }
+
+    private function fingerprint(): ?string
+    {
+        return new SecretKeyFingerprint(new SecretKeyFile($this->paths))->current();
+    }
+
+    /**
+     * Gives the host a secret key, then swaps it for another one (what a rebuilt host without its old key looks like).
+     */
+    private function replaceKey(): void
+    {
+        $path = $this->paths->secretKey();
+        unlink($path);
+        file_put_contents($path, random_bytes(SecretKeyFile::KEY_BYTES));
+        chmod($path, 0o600);
+    }
+
+    private function recordedFingerprint(string $database): ?string
+    {
+        $pdo = new \PDO('sqlite:'.$database, null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+        $recorded = BackupMeta::readKeyFingerprint($pdo);
+        unset($pdo);
+
+        return $recorded;
+    }
+
+    public function testABackupRecordsTheKeyFingerprintAndARestoreWithTheSameKeyHasNoWarning(): void
+    {
+        new SecretKeyFile($this->paths)->ensure();
+        $file = $this->backup();
+        self::assertNotNull($this->fingerprint());
+        self::assertSame($this->fingerprint(), $this->recordedFingerprint($file));
+        self::assertSame(32, \strlen((string) $this->recordedFingerprint($file)));
+        self::assertStringNotContainsString(bin2hex((string) file_get_contents($this->paths->secretKey())), bin2hex((string) file_get_contents($file)), 'the key itself is never in a backup');
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true, '--json' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay().$tester->getErrorOutput());
+        $result = $this->json($tester);
+        self::assertSame('match', $result['key']);
+        self::assertSame([], $result['warnings']);
+    }
+
+    public function testItRefusesABackupSealedByAnotherKeyAndTouchesNothing(): void
+    {
+        new SecretKeyFile($this->paths)->ensure();
+        $file = $this->backup();
+        $this->replaceKey();
+        $before = $this->liveSnapshot();
+        $listing = $this->backupDirListing();
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true, '--json' => true]);
+
+        self::assertSame(1, $tester->getStatusCode());
+        $result = $this->json($tester);
+        self::assertFalse($result['restored']);
+        self::assertStringContainsString('another secret key', $result['problems'][0]);
+        self::assertStringContainsString('--accept-key-mismatch', $result['problems'][0]);
+        self::assertSame($before, $this->liveSnapshot());
+        self::assertSame($listing, $this->backupDirListing());
+    }
+
+    public function testAcceptKeyMismatchRestoresWithAWarningAndTheKeptDatabaseCarriesTheCurrentKey(): void
+    {
+        new SecretKeyFile($this->paths)->ensure();
+        $file = $this->backup();
+        $this->replaceKey();
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true, '--accept-key-mismatch' => true, '--json' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay().$tester->getErrorOutput());
+        $result = $this->json($tester);
+        self::assertSame('mismatch', $result['key']);
+        self::assertCount(1, $result['warnings']);
+        self::assertStringContainsString('must be set again', $result['warnings'][0]);
+        self::assertSame($this->fingerprint(), $this->recordedFingerprint($result['previous']['fleet']), 'the kept database was sealed by the key the host had');
+        self::assertNotSame($this->fingerprint(), $this->recordedFingerprint($file), 'the backup itself is unchanged');
+    }
+
+    public function testAMismatchIsPrintedAsAWarningWhenAcceptedWithoutJson(): void
+    {
+        new SecretKeyFile($this->paths)->ensure();
+        $file = $this->backup();
+        $this->replaceKey();
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true, '--accept-key-mismatch' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getErrorOutput());
+        self::assertStringContainsString('must be set again', $this->squash($tester->getErrorOutput()));
+    }
+
+    public function testABackupWithoutAFingerprintIsRestoredWithAWarning(): void
+    {
+        new SecretKeyFile($this->paths)->ensure();
+        $file = $this->backup();
+        $pdo = new \PDO('sqlite:'.$file);
+        $pdo->exec('DROP TABLE fleet_backup_meta');
+        unset($pdo);
+        $this->replaceKey();
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true, '--json' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay().$tester->getErrorOutput());
+        $result = $this->json($tester);
+        self::assertSame('not recorded', $result['key']);
+        self::assertStringContainsString('records no secret key fingerprint', $result['warnings'][0]);
+    }
+
+    public function testBackupVerifyShowsTheKeyStatus(): void
+    {
+        new SecretKeyFile($this->paths)->ensure();
+        $file = $this->backup();
+        $verifier = self::getContainer()->get(BackupVerifier::class);
+        self::assertInstanceOf(BackupVerifier::class, $verifier);
+
+        $same = $verifier->verify($file);
+        self::assertSame('match', $same->keyStatus);
+        self::assertSame($this->fingerprint(), $same->keyFingerprint);
+        $this->replaceKey();
+        self::assertSame('mismatch', $verifier->verify($file)->keyStatus);
+    }
+
+    public function testItRefusesWhilePhpFpmOrTheStatusWatcherIsActiveAndNamesThemInTheStopLine(): void
+    {
+        $file = $this->backup();
+        $this->runner->expect(['systemctl', 'list-units'], new CommandResult(0, "php8.4-fpm.service loaded active running The PHP 8.4 FastCGI Process Manager\nfleet-status.service loaded active running Fleet status watcher\nssh.service loaded active running OpenBSD Secure Shell server\n"));
+        $before = $this->liveSnapshot();
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true]);
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('Still running: fleet-status.service, php8.4-fpm.service.', $tester->getErrorOutput());
+        self::assertStringContainsString('sudo systemctl stop fleet-scheduler fleet-worker@1 fleet-status php8.4-fpm', $tester->getErrorOutput());
+        self::assertSame($before, $this->liveSnapshot());
+        $call = $this->runner->callsMatching(['systemctl'])[0];
+        self::assertContains('php*-fpm.service', $call->argv, 'asked read-only about php-fpm');
+        self::assertContains('fleet-status.service', $call->argv);
+        self::assertSame('list-units', $call->argv[1], 'read-only: list-units, never stop');
+    }
+
+    public function testTheStartLineListsTheSameUnitsAsTheStopLine(): void
+    {
+        $file = $this->backup();
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getErrorOutput());
+        self::assertStringContainsString('sudo systemctl start fleet-worker@1 fleet-scheduler fleet-status php8.4-fpm', $tester->getErrorOutput());
+    }
+
+    public function testALeftoverWalAndShmAreNotReplayedOntoTheRestoredDatabase(): void
+    {
+        $this->addPort('alpha', 9001);
+        $file = $this->backup();
+        // A live database in WAL mode whose last writes are still in the -wal file (no checkpoint, connection open).
+        $writer = new \PDO('sqlite:'.$this->paths->fleetDb(), null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+        $writer->exec('PRAGMA journal_mode = WAL');
+        $writer->exec('PRAGMA wal_autocheckpoint = 0');
+        $writer->exec("INSERT INTO named_port (name, public_port, router_port, created_at) VALUES ('beta', 9002, 19002, '2026-10-20 09:00:00')");
+        self::assertFileExists($this->paths->fleetDb().'-wal');
+        self::assertGreaterThan(0, (int) filesize($this->paths->fleetDb().'-wal'));
+
+        $tester = $this->cli('fleet:backup:restore', ['file' => $file, '--yes' => true, '--json' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay().$tester->getErrorOutput());
+        self::assertFileDoesNotExist($this->paths->fleetDb().'-wal');
+        self::assertFileDoesNotExist($this->paths->fleetDb().'-shm');
+        $result = $this->json($tester);
+        self::assertSame(['alpha'], $this->ports(), 'the restored database has the backup rows, not the WAL ones');
+        self::assertSame(['alpha', 'beta'], $this->ports($result['previous']['fleet']), 'the WAL rows are in the kept database');
+        unset($writer);
+    }
+
+    public function testItRefusesWhenRunByAnotherUserThanTheOwnerOfFleetHome(): void
+    {
+        $file = $this->backup();
+        $restorer = new BackupRestorer(
+            $this->paths,
+            self::getContainer()->get(BackupVerifier::class),
+            self::getContainer()->get(JobRepository::class),
+            $this->runner,
+            new MockClock('2026-10-20 10:00:00 UTC'),
+            new SecretKeyFingerprint(new SecretKeyFile($this->paths)),
+            posix_geteuid() + 1,
+        );
+
+        $plan = $restorer->preflight($file);
+
+        self::assertFalse($plan->ok());
+        self::assertCount(1, $plan->refusals);
+        self::assertStringContainsString('Run the restore as', $plan->refusals[0]);
+        self::assertStringContainsString($this->paths->home(), $plan->refusals[0]);
+        $this->expectException(\LogicException::class);
+        $restorer->restore($plan, static function (): void {
+        });
     }
 
     public function testRoundTripBringsTheOldDataBackKeepsThePreviousDatabaseAndMigrates(): void

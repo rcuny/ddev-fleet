@@ -20,8 +20,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 
 /**
  * Restores a backup into the live databases: verified first, swapped atomically, the previous database kept as
- * `<name>.sqlite.pre-restore-<stamp>`, then migrated and validated (a failure puts the previous one back). The workers
- * and the scheduler must be stopped by the operator first; this command only checks they are. Exit 0 restored, 1
+ * `<name>.sqlite.pre-restore-<stamp>`, then migrated and validated (a failure puts the previous one back). The workers,
+ * the scheduler, the status watcher and php-fpm must be stopped by the operator first; this command only checks they
+ * are, and that the backup was sealed by this host's secret key (or `--accept-key-mismatch`). Exit 0 restored, 1
  * refused or failed, 2 not a usable request (missing or wrong file, no --yes without a terminal).
  */
 #[AsCommand(
@@ -30,8 +31,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class BackupRestoreCommand extends Command
 {
-    private const string STOP = 'sudo systemctl stop fleet-scheduler fleet-worker@1';
-    private const string START = 'sudo systemctl start fleet-worker@1 fleet-scheduler';
+    /** Everything that writes the databases (BackupRestorer::UNIT_NAME); START lists the same units. */
+    private const string STOP = 'sudo systemctl stop fleet-scheduler fleet-worker@1 fleet-status php8.4-fpm';
+    private const string START = 'sudo systemctl start fleet-worker@1 fleet-scheduler fleet-status php8.4-fpm';
 
     public function __construct(
         private readonly BackupRestorer $restorer,
@@ -44,6 +46,7 @@ final class BackupRestoreCommand extends Command
     {
         $this->addArgument('file', InputArgument::REQUIRED, 'The fleet backup, for example /srv/fleet/backups/fleet-20261019-083015.sqlite (its queue-<same stamp>.sqlite is restored too when present)');
         $this->addOption('yes', 'y', InputOption::VALUE_NONE, 'Do not ask for confirmation (required without a terminal)');
+        $this->addOption('accept-key-mismatch', null, InputOption::VALUE_NONE, 'Restore a backup sealed by another secret key; every secret in it must then be set again');
         $this->addOption('json', null, InputOption::VALUE_NONE, 'Print the result as JSON');
     }
 
@@ -54,7 +57,7 @@ final class BackupRestoreCommand extends Command
         $json = true === $input->getOption('json');
 
         try {
-            $plan = $this->restorer->preflight((string) $input->getArgument('file'));
+            $plan = $this->restorer->preflight((string) $input->getArgument('file'), true === $input->getOption('accept-key-mismatch'));
         } catch (\InvalidArgumentException $e) {
             return $this->fail($output, $errors, $json, 2, $e->getMessage(), []);
         }
@@ -65,6 +68,11 @@ final class BackupRestoreCommand extends Command
             }
 
             return $this->fail($output, $errors, $json, 1, 'The restore was refused; nothing was changed.', $plan->refusals);
+        }
+        if (!$json) {
+            foreach ($plan->warnings as $warning) {
+                $errors->warning($warning);
+            }
         }
         if (true !== $input->getOption('yes')) {
             if (!$input->isInteractive()) {
@@ -90,6 +98,8 @@ final class BackupRestoreCommand extends Command
                 'previous' => ['fleet' => $result->previousFleet, 'queue' => $result->previousQueue],
                 'migrations_run' => \count($plan->verification->pending),
                 'schema' => 'valid',
+                'key' => $plan->verification->keyStatus,
+                'warnings' => $plan->warnings,
             ], \JSON_THROW_ON_ERROR | \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES), OutputInterface::OUTPUT_RAW);
 
             return Command::SUCCESS;
