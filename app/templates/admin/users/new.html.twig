@@ -10,12 +10,14 @@
             {{ form_errors(form) }}
             {{ form_row(form.username) }}
             {{ form_row(form.displayName) }}
-            {{ form_row(form.email) }}
+            {{ form_row(form.siteOnly) }}
+            <div data-site-only-target="email">{{ form_row(form.email) }}</div>
             {{ form_row(form.password) }}
+            {{ include('admin/users/_site_only_warning.html.twig') }}
 
             <twig:Separator />
 
-            {{ form_row(form.admin) }}
+            <div data-site-only-target="admin">{{ form_row(form.admin) }}</div>
             {{ include('admin/users/_projects.html.twig', {field: form.projects}) }}
 
             <div class="flex flex-col gap-2 md:flex-row">

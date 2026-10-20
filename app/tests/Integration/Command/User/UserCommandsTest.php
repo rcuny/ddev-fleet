@@ -129,6 +129,84 @@ final class UserCommandsTest extends KernelTestCase
         return $parsed['users'];
     }
 
+    public function testCreateASiteOnlyUserNeedsNoEmailAndAcceptsAShortPassword(): void
+    {
+        $created = $this->cli('fleet:user:create', ['username' => 'shield', '--site-only' => true, '--project' => ['blog'], '--password-stdin' => true, '--json' => true], ['shield']);
+
+        self::assertSame(0, $created->getStatusCode(), $created->getDisplay());
+        $document = $this->json($created);
+        self::assertTrue($document['site_only']);
+        self::assertFalse($document['admin']);
+        self::assertSame('', $document['email']);
+        self::assertSame(['blog'], $document['projects']);
+        $entry = $this->usersFile()['shield'];
+        self::assertSame(['fleet-site-only', 'fleet-project-blog'], $entry['groups']);
+        self::assertSame('shield@site-only.invalid', $entry['email']);
+        self::assertTrue(password_verify('shield', $entry['password']));
+    }
+
+    public function testCreateASiteOnlyUserKeepsTheMinimumLengthAndRefusesAdmin(): void
+    {
+        $short = $this->cli('fleet:user:create', ['username' => 'shield', '--site-only' => true, '--password-stdin' => true, '--json' => true], ['abc']);
+        self::assertSame(1, $short->getStatusCode());
+        self::assertStringContainsString('at least 4', $this->errorText($short));
+        self::assertNull($this->stored('shield'));
+
+        $admin = $this->cli('fleet:user:create', ['username' => 'shield', '--site-only' => true, '--admin' => true, '--password-stdin' => true, '--json' => true], ['shield']);
+        self::assertSame(1, $admin->getStatusCode());
+        self::assertStringContainsString('site-only user cannot be an administrator', $this->errorText($admin));
+        self::assertNull($this->stored('shield'));
+    }
+
+    public function testARegularUserStillNeedsAnEmailAndTheLongPassword(): void
+    {
+        $noEmail = $this->cli('fleet:user:create', ['username' => 'bob', '--password-stdin' => true, '--json' => true], [self::PASSWORD]);
+        self::assertSame(1, $noEmail->getStatusCode());
+        self::assertStringContainsString('email', $this->errorText($noEmail));
+
+        $short = $this->cli('fleet:user:create', ['username' => 'bob', '--email' => 'bob@example.com', '--password-stdin' => true, '--json' => true], ['shield']);
+        self::assertSame(1, $short->getStatusCode());
+        self::assertStringContainsString('at least 12', $this->errorText($short));
+    }
+
+    public function testUpdateTogglesSiteOnly(): void
+    {
+        self::assertSame(0, $this->create('bob')->getStatusCode());
+
+        $on = $this->cli('fleet:user:update', ['username' => 'bob', '--site-only' => true, '--json' => true]);
+        self::assertSame(0, $on->getStatusCode(), $on->getDisplay());
+        self::assertTrue($this->json($on)['site_only']);
+        self::assertSame('', $this->stored('bob')?->email());
+        self::assertContains('fleet-site-only', $this->usersFile()['bob']['groups']);
+
+        $off = $this->cli('fleet:user:update', ['username' => 'bob', '--no-site-only' => true, '--json' => true]);
+        self::assertSame(1, $off->getStatusCode(), 'a regular user needs an email');
+        self::assertTrue($this->stored('bob')?->isSiteOnly(), 'nothing changed');
+
+        $off = $this->cli('fleet:user:update', ['username' => 'bob', '--no-site-only' => true, '--email' => 'bob@example.com', '--json' => true]);
+        self::assertSame(0, $off->getStatusCode(), $off->getDisplay());
+        self::assertFalse($this->stored('bob')?->isSiteOnly());
+        self::assertNotContains('fleet-site-only', $this->usersFile()['bob']['groups']);
+    }
+
+    public function testAnAdministratorCannotBecomeSiteOnly(): void
+    {
+        $update = $this->cli('fleet:user:update', ['username' => 'alice', '--site-only' => true, '--json' => true]);
+
+        self::assertSame(1, $update->getStatusCode());
+        self::assertFalse($this->stored('alice')?->isSiteOnly());
+    }
+
+    public function testListMarksSiteOnlyUsers(): void
+    {
+        $this->cli('fleet:user:create', ['username' => 'shield', '--site-only' => true, '--password-stdin' => true, '--json' => true], ['shield']);
+
+        $list = $this->cli('fleet:user:list', []);
+
+        self::assertSame(0, $list->getStatusCode());
+        self::assertMatchesRegularExpression('/shield\s+shield\s+-\s+site-only/', $list->getDisplay());
+    }
+
     public function testNoCommandTakesAPasswordAsAnArgumentOrOption(): void
     {
         self::assertNotNull(self::$kernel);
@@ -150,7 +228,7 @@ final class UserCommandsTest extends KernelTestCase
         self::assertSame(0, $created->getStatusCode(), $created->getDisplay());
         self::assertSame('', $created->getErrorOutput());
         self::assertSame(
-            ['username' => 'bob', 'display_name' => 'Bob B.', 'email' => 'bob@example.com', 'admin' => false, 'enabled' => true, 'projects' => []],
+            ['username' => 'bob', 'display_name' => 'Bob B.', 'email' => 'bob@example.com', 'admin' => false, 'site_only' => false, 'enabled' => true, 'projects' => []],
             $this->json($created),
         );
         $user = $this->stored('bob');

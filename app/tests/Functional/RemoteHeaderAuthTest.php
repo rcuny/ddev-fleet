@@ -38,6 +38,26 @@ final class RemoteHeaderAuthTest extends WebTestCase
         self::assertResponseStatusCodeSame(200);
     }
 
+    public function testASiteOnlyUserGets403EverywhereInTheApp(): void
+    {
+        $client = self::createClient();
+        $server = [
+            'REMOTE_ADDR' => '127.0.0.1',
+            'HTTP_REMOTE_USER' => 'shield',
+            // Even a hand-edited group list with the admin group cannot lift the marker.
+            'HTTP_REMOTE_GROUPS' => 'fleet-site-only,fleet-project-blog,fleet-admins',
+        ];
+
+        foreach (['/', '/admin/users', '/admin/x', '/instances', '/_components/anything'] as $path) {
+            $crawler = $client->request('GET', $path, server: $server);
+            self::assertResponseStatusCodeSame(403, $path);
+            self::assertStringContainsString('only opens project sites', $crawler->filter('main')->text(), $path);
+        }
+
+        $client->request('GET', '/health', server: $server);
+        self::assertResponseStatusCodeSame(200);
+    }
+
     public function testTheHeadersBeatTheStandIn(): void
     {
         $client = self::createClient();

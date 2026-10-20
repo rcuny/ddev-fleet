@@ -37,6 +37,12 @@ final class UserCreateType extends AbstractType
                 'label' => 'Display name',
                 'attr' => ['autocomplete' => 'off', 'maxlength' => 255],
             ])
+            ->add('siteOnly', CheckboxType::class, [
+                'label' => 'Site access only',
+                'required' => false,
+                'help' => 'Only opens the instance sites of the projects below, for people you share a site with: no Fleet access, no email. The password can be as short as '.PasswordPolicy::SITE_ONLY_MIN_LENGTH.' characters.',
+                'attr' => ['data-site-only-target' => 'box', 'data-action' => 'site-only#toggle'],
+            ])
             ->add('email', EmailType::class, [
                 'label' => 'Email',
                 'attr' => $text + ['inputmode' => 'email', 'maxlength' => 254],
@@ -62,7 +68,7 @@ final class UserCreateType extends AbstractType
         $resolver->setDefaults([
             'data_class' => null,
             'projects' => [],
-            'attr' => ['novalidate' => 'novalidate', 'data-testid' => 'user-form'],
+            'attr' => ['novalidate' => 'novalidate', 'data-testid' => 'user-form', 'data-controller' => 'site-only'],
         ]);
         $resolver->setAllowedTypes('projects', 'array');
     }

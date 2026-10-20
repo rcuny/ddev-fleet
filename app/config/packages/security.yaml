@@ -37,9 +37,11 @@ security:
         # without one), so a member-facing component never inherits an admin blanket and an admin one is not open.
         # Two rules, one decision: the route name survives any spelling of the path, the path also covers a
         # route that is renamed or re-mounted under the same prefix.
-        - { route: ux_live_component, roles: IS_AUTHENTICATED_FULLY }
-        - { path: ^/_components, roles: IS_AUTHENTICATED_FULLY }
-        - { path: ^/, roles: IS_AUTHENTICATED_FULLY }
+        # ROLE_MEMBER, not IS_AUTHENTICATED_FULLY: a site-only account (FLE-101; ROLE_USER and ROLE_SITE_ONLY, see
+        # FleetUser::getRoles) only opens the instance sites and gets the 403 page everywhere in the app.
+        - { route: ux_live_component, roles: ROLE_MEMBER }
+        - { path: ^/_components, roles: ROLE_MEMBER }
+        - { path: ^/, roles: ROLE_MEMBER }
 
 when@prod:
     security:

@@ -256,4 +256,65 @@ test.describe('users and project access', () => {
       await deleteProjectViaUi(page, project);
     }
   });
+  test('a site-only user needs no email, may have a short password and is marked in the list', async ({ page }) => {
+    test.setTimeout(240_000);
+    const errors = collectBrowserErrors(page);
+    const project = uniqueName('prj');
+    const username = uniqueName('shd');
+
+    try {
+      await createProjectViaUi(page, project);
+      await page.goto('/admin/users/new');
+      await expect(page.getByRole('heading', { level: 1, name: 'New user' })).toBeVisible();
+
+      // Regular user: email and administrator rows are there, the weak-password warning is not.
+      // Click the label, never the input (see the project row below: the label's ::after covers the row).
+      const siteOnly = page.getByRole('checkbox', { name: 'Site access only' });
+      const siteOnlyLabel = page.locator('label[for=user_create_siteOnly]');
+      await expect(siteOnly).not.toBeChecked();
+      await expect(page.getByLabel('Email')).toBeVisible();
+      await expect(page.getByRole('checkbox', { name: 'Administrator' })).toBeVisible();
+      await expect(page.getByTestId('site-only-warning')).toBeHidden();
+
+      // Checking the box drops the email and administrator rows and shows the warning.
+      await siteOnlyLabel.click();
+      await expect(siteOnly).toBeChecked();
+      await expect(page.getByLabel('Email')).toBeHidden();
+      await expect(page.getByRole('checkbox', { name: 'Administrator' })).toBeHidden();
+      await expect(page.getByTestId('site-only-warning')).toBeVisible();
+      if (isPhone()) {
+        await expectNoOverflow(page, 'the new user form, site access only');
+      }
+      expect(await blockingViolations(page), 'axe, new site-only user form').toEqual([]);
+
+      // Unchecking brings them back.
+      await siteOnlyLabel.click();
+      await expect(siteOnly).not.toBeChecked();
+      await expect(page.getByLabel('Email')).toBeVisible();
+      await expect(page.getByTestId('site-only-warning')).toBeHidden();
+      await siteOnlyLabel.click();
+      await expect(siteOnly).toBeChecked();
+
+      await page.getByLabel('Username').fill(username);
+      await page.getByLabel('Display name').fill('Client shield');
+      await page.getByLabel('Initial password').fill('abcd');
+      const row = page.locator('[data-slot=checkbox-choice]').filter({ hasText: project });
+      const box = (await row.boundingBox())!;
+      await row.click({ position: { x: box.width - 3, y: box.height - 3 } });
+      await page.getByRole('button', { name: 'Create user' }).click();
+      await expect(page.getByTestId('flashes')).toContainText(`User "${username}" created.`);
+      await expect(page.getByRole('checkbox', { name: 'Site access only' })).toBeChecked();
+      await expect(page.getByTestId('user-site-only')).toBeVisible();
+
+      await page.goto('/admin/users');
+      const listed = page.getByTestId('user-row').filter({ hasText: username });
+      await expect(listed.getByTestId('user-site-only')).toHaveText('Site access only');
+      await expect(listed.getByTestId('user-projects')).toHaveText('1 project');
+
+      expect(errors).toEqual([]);
+    } finally {
+      await deleteUserViaUi(page, username);
+      await deleteProjectViaUi(page, project);
+    }
+  });
 });

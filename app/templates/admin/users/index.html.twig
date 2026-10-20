@@ -32,10 +32,13 @@
                             <twig:ux:icon name="lucide:user" class="size-4 shrink-0 text-ink-muted" />
                             <span class="min-w-0 flex-1">
                                 <span class="block truncate text-sm font-medium text-ink-display">{{ user.displayName }}</span>
-                                <span class="block truncate text-xs text-ink-muted">{{ user.username }} · {{ user.email }}</span>
+                                <span class="block truncate text-xs text-ink-muted">{{ user.username }}{% if user.email != '' %} · {{ user.email }}{% endif %}</span>
                                 <span class="mt-1 flex flex-wrap gap-1">
                                     {% if row.admin %}
                                         <twig:Badge data-testid="user-admin">Admin</twig:Badge>
+                                    {% endif %}
+                                    {% if user.siteOnly %}
+                                        <twig:Badge variant="secondary" data-testid="user-site-only">Site access only</twig:Badge>
                                     {% endif %}
                                     {% if not user.enabled %}
                                         <twig:Badge variant="secondary" data-testid="user-disabled">Disabled</twig:Badge>

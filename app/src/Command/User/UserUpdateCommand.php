@@ -27,6 +27,10 @@ use Symfony\Component\Console\Output\OutputInterface;
         project membership is changed with <info>fleet user:grant</info> and <info>fleet user:revoke</info>, a password
         with <info>fleet user:reset-password</info>.
 
+        <info>--site-only</info> makes the user a site-only user (opens the instance sites of its projects, nothing else;
+        an administrator cannot be one), <info>--no-site-only</info> a regular user again (an email is needed, and
+        the stored password is kept: set a new one with <info>fleet user:reset-password</info>).
+
         The last enabled administrator cannot be disabled or demoted (exit code 2).
         HELP,
 )]
@@ -51,7 +55,8 @@ final class UserUpdateCommand extends AbstractUserCommand
             ->addOption('email', null, InputOption::VALUE_REQUIRED, 'New email address')
             ->addOption('enable', null, InputOption::VALUE_NONE, 'Enable the user (the user can sign in)')
             ->addOption('disable', null, InputOption::VALUE_NONE, 'Disable the user (the user cannot sign in; nothing is deleted)')
-            ->addOption('admin', null, InputOption::VALUE_NEGATABLE, 'Make the user an administrator (--no-admin: a member)');
+            ->addOption('admin', null, InputOption::VALUE_NEGATABLE, 'Make the user an administrator (--no-admin: a member)')
+            ->addOption('site-only', null, InputOption::VALUE_NEGATABLE, 'Make the user a site-only user (--no-site-only: a regular user)');
         JsonOutput::addOptions($this);
     }
 
@@ -66,11 +71,12 @@ final class UserUpdateCommand extends AbstractUserCommand
             $enable = true === $input->getOption('enable');
             $disable = true === $input->getOption('disable');
             $admin = $input->getOption('admin');
+            $siteOnly = $input->getOption('site-only');
             if ($enable && $disable) {
                 throw new \InvalidArgumentException('--enable and --disable cannot be used together.');
             }
-            if (null === $displayName && null === $email && !$enable && !$disable && null === $admin) {
-                throw new \InvalidArgumentException('Nothing to change: give --display-name, --email, --enable, --disable or --admin / --no-admin.');
+            if (null === $displayName && null === $email && !$enable && !$disable && null === $admin && null === $siteOnly) {
+                throw new \InvalidArgumentException('Nothing to change: give --display-name, --email, --enable, --disable or --admin / --no-admin or --site-only / --no-site-only.');
             }
             $displayName = \is_string($displayName) ? $displayName : null;
             $email = \is_string($email) ? $email : null;
@@ -78,7 +84,7 @@ final class UserUpdateCommand extends AbstractUserCommand
                 throw UnknownUser::named($username);
             }
 
-            [$user, $warning] = self::commit($this->sync, function () use ($username, $displayName, $email, $enable, $disable, $admin): User {
+            [$user, $warning] = self::commit($this->sync, function () use ($username, $displayName, $email, $enable, $disable, $admin, $siteOnly): User {
                 $user = $this->repository->findByUsername($username) ?? throw UnknownUser::named($username);
                 // The guard runs before each change, so the second one sees the first.
                 if ($disable) {
@@ -87,7 +93,10 @@ final class UserUpdateCommand extends AbstractUserCommand
                 if (false === $admin) {
                     $this->guard->assertMayDemote($user);
                 }
-                if (null !== $displayName || null !== $email) {
+                if (\is_bool($siteOnly)) {
+                    $this->users->setSiteOnly($username, $siteOnly);
+                }
+                if (null !== $displayName || null !== $email || \is_bool($siteOnly)) {
                     $this->users->updateProfile($username, $displayName, $email);
                 }
                 if ($enable || $disable) {

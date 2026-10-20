@@ -87,15 +87,17 @@ final class UserController extends AbstractController
             $data = $this->formData($form);
             $username = self::text($data['username'] ?? null);
             $projects = self::names($data['projects'] ?? null);
+            $siteOnly = true === ($data['siteOnly'] ?? false);
             $outcome = $this->commit(
                 $form,
-                function () use ($data, $username, $projects): void {
+                function () use ($data, $username, $projects, $siteOnly): void {
                     $this->service->create(
                         $username,
                         self::text($data['displayName'] ?? null),
                         self::text($data['email'] ?? null),
                         self::text($data['password'] ?? null),
                         true === ($data['admin'] ?? false),
+                        $siteOnly,
                     );
                     if ([] !== $projects) {
                         $this->access->setProjects($username, $projects);
@@ -121,6 +123,7 @@ final class UserController extends AbstractController
         $form = $this->createForm(UserEditType::class, [
             'displayName' => $user->displayName(),
             'email' => $user->email(),
+            'siteOnly' => $user->isSiteOnly(),
             'admin' => $this->admins->includes($user),
             'projects' => $this->access->projectsOf($username),
         ], ['projects' => $this->projectNames(), 'self' => $self]);
@@ -129,10 +132,15 @@ final class UserController extends AbstractController
         if ($form->isSubmitted() && $form->isValid()) {
             $data = $this->formData($form);
             $wantAdmin = true === ($data['admin'] ?? false);
+            $wantSiteOnly = true === ($data['siteOnly'] ?? false);
             $outcome = $this->commit(
                 $form,
-                function () use ($data, $user, $username, $wantAdmin): void {
-                    // The profile first: it validates everything before the role or the memberships are touched.
+                function () use ($data, $user, $username, $wantAdmin, $wantSiteOnly): void {
+                    // The kind first (the email rule depends on it), then the profile: it validates everything before the
+                    // role or the memberships are touched.
+                    if ($user->isSiteOnly() !== $wantSiteOnly) {
+                        $this->service->setSiteOnly($username, $wantSiteOnly);
+                    }
                     $this->service->updateProfile($username, self::text($data['displayName'] ?? null), self::text($data['email'] ?? null));
                     $isAdmin = $this->admins->includes($user);
                     if ($isAdmin && !$wantAdmin) {
@@ -177,6 +185,7 @@ final class UserController extends AbstractController
         $edit = $this->createForm(UserEditType::class, [
             'displayName' => $user->displayName(),
             'email' => $user->email(),
+            'siteOnly' => $user->isSiteOnly(),
             'admin' => $this->admins->includes($user),
             'projects' => $this->access->projectsOf($username),
         ], ['projects' => $this->projectNames(), 'self' => $this->actor() === $username]);
@@ -316,6 +325,7 @@ final class UserController extends AbstractController
         return $this->render('admin/users/edit.html.twig', [
             'user' => $user,
             'admin' => $this->admins->includes($user),
+            'siteOnly' => $user->isSiteOnly(),
             'self' => $this->actor() === $user->username(),
             'form' => $edit->createView(),
             'passwordForm' => $password->createView(),
