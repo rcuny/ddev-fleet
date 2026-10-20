@@ -187,6 +187,20 @@ final class BackupServiceTest extends TestCase
         self::assertCount(1, $this->service->list());
     }
 
+    public function testPruneNeverTouchesTheDatabasesARestoreKept(): void
+    {
+        $old = $this->clock->now()->getTimestamp() - 400 * 86400;
+        foreach (['fleet.sqlite.pre-restore-20250101-000000', 'queue.sqlite.pre-restore-20250101-000000', 'fleet-20250101-000000.sqlite'] as $name) {
+            touch($this->paths->backupsDir().'/'.$name, $old);
+        }
+        touch($this->paths->backupsDir().'/fleet-20261018-000000.sqlite', $this->clock->now()->getTimestamp() - 86400);
+
+        self::assertSame(['fleet-20250101-000000.sqlite'], $this->service->prune(14));
+        self::assertSame([], $this->service->list(BackupKind::Queue), 'a kept database is not listed as a backup');
+        self::assertFileExists($this->paths->backupsDir().'/fleet.sqlite.pre-restore-20250101-000000');
+        self::assertFileExists($this->paths->backupsDir().'/queue.sqlite.pre-restore-20250101-000000');
+    }
+
     public function testPruneRejectsARetentionBelowOneDay(): void
     {
         $this->expectException(\InvalidArgumentException::class);

@@ -1,0 +1,3 @@
+### Added
+
+- **FLE-96: `fleet backup:restore <file> [--yes] [--json]` restores a database backup into the live databases.** It verifies the backup first (integrity, not from a newer release), refuses while a job is queued or running or a `fleet-worker@*` or `fleet-scheduler` unit is active, swaps the file in atomically, keeps the previous database as `fleet.sqlite.pre-restore-<stamp>` (never pruned), then migrates and validates the schema; a failure puts the previous database back. The queue backup with the same stamp is restored with it. The restore section of `docs/installation.md` is rewritten around it, including how to undo a restore.

@@ -290,6 +290,7 @@ The remaining commands exist mostly for the installer:
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
 | `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity and schema version, read-only (see below). |
+| `fleet:backup:restore <file> [--yes] [--json]` | Restore a backup into the live databases: verified first, swapped atomically, the previous database kept as `*.pre-restore-*`, then migrated; refuses while jobs run or the worker and scheduler units are active (see below). |
 | `fleet:setup:token` | Mint a setup token and print the URL. |
 | `fleet:setup:reset [--yes]` | See above. |
 | `fleet:user:reset-password <username> [--no-apply]` | See above. |
@@ -334,22 +335,51 @@ downloads one (an attachment, never cached) and has a "Back up now" button. On t
 `fleet fleet:backup:create`); a failure exits non-zero. `systemctl list-timers fleet-backup.timer` shows the next
 run and `journalctl -u fleet-backup.service` the last ones.
 
-**Check before you restore.** `sudo fleet backup:verify /srv/fleet/backups/fleet-20261019-083015.sqlite` opens the file read-only and runs SQLite's integrity check and a schema comparison. It exits 0 when the file is sound (`schema: behind` says how many migrations to run after the restore), 1 when it is not, and it refuses the live database. See [`moving-projects.md`](moving-projects.md) for moving a single project between hosts.
+**Check before you restore.** `sudo fleet backup:verify /srv/fleet/backups/fleet-20261019-083015.sqlite` opens the file read-only and runs SQLite's integrity check and a schema comparison. It exits 0 when the file is sound (`schema: behind` says how many migrations the restore will run), 1 when it is not, and it refuses the live database. See [`moving-projects.md`](moving-projects.md) for moving a single project between hosts.
 
-**Restore.** Stop everything that writes to the database, put the file back and start again. Replace
+**Restore.** `fleet backup:restore <file>` puts a backup back as the live database, and keeps what it replaced. Replace
 `fleet-20261019-083015.sqlite` with the backup you chose:
 
 ```bash
-sudo systemctl stop php8.4-fpm 'fleet-worker@*' fleet-status
-sudo rm -f /srv/fleet/var/fleet.sqlite-wal /srv/fleet/var/fleet.sqlite-shm      # leftovers of the old database
-sudo install -m 0600 -o fleet -g fleet /srv/fleet/backups/fleet-20261019-083015.sqlite /srv/fleet/var/fleet.sqlite
-sudo systemctl start php8.4-fpm fleet-worker@1 fleet-status
-sudo fleet doctrine:migrations:migrate -n                                       # only if the backup is from an older version
+sudo systemctl stop fleet-scheduler fleet-worker@1
+sudo fleet backup:restore /srv/fleet/backups/fleet-20261019-083015.sqlite
+sudo systemctl start fleet-worker@1 fleet-scheduler
 ```
 
-Check `https://<domain>/health`. If `keys/secret.key` was lost, the restored secrets cannot be decrypted: set the
-OVH credentials and the Claude token again. To restore the queue as well, copy `queue-<same stamp>.sqlite` to
-`/srv/fleet/var/queue.sqlite` the same way (and remove its `-wal` and `-shm` files); otherwise leave the current one.
+The command stops nothing itself (it has no root rights); it checks that the units are stopped and prints the exact
+`systemctl` lines when they are not. Before it touches anything it refuses, with exit 1 and a reason, when:
+
+- the file fails `fleet backup:verify` (integrity) or comes from a newer release than this one;
+- a job is queued or running (`fleet job:list`; let it finish first);
+- a `fleet-worker@*` or `fleet-scheduler` unit is active;
+- the live database cannot be read (a damaged file: move it aside with `mv`, then restore into the empty place).
+
+Then it asks for confirmation (`--yes` skips the question and is required without a terminal; `--json` prints the
+result as JSON). The file is a fleet backup (`fleet-<stamp>.sqlite`); the queue backup with the same stamp is restored
+with it when it exists, otherwise the current queue stays. The steps:
+
+1. The backup is copied next to the live file (same filesystem), compared and flushed to disk.
+2. The current database is kept as `/srv/fleet/backups/fleet.sqlite.pre-restore-<UTC stamp>` (and `queue.sqlite.pre-restore-<stamp>`).
+   These files are never deleted by the retention and are not listed on the Backups tab.
+3. The copy is renamed over the live file (atomic; the old `-wal` and `-shm` files go first).
+4. `doctrine:migrations:migrate` upgrades a backup from an older release, then the schema is validated.
+
+Until the rename the live database is untouched. If the rename, the migration or the schema check fails, the previous
+databases are put back and the command says so (exit 1); if even that fails it prints the files to copy back by hand.
+On success it prints `previous kept: <path>`.
+
+**Undo a restore.** The kept file is a normal backup: stop the units and run the same command on it,
+
+```bash
+sudo systemctl stop fleet-scheduler fleet-worker@1
+sudo fleet backup:restore /srv/fleet/backups/fleet.sqlite.pre-restore-20261020-101500
+sudo systemctl start fleet-worker@1 fleet-scheduler
+```
+
+which in turn keeps the database you are leaving. Delete the `*.pre-restore-*` files by hand once you no longer need them.
+
+Check `https://<domain>/health` afterwards. If `keys/secret.key` was lost, the restored secrets cannot be decrypted: set the
+OVH credentials and the Claude token again. Instances, assets and SSH keys are not part of a backup and are not touched.
 
 ## 6. Upgrading and re-running
 
