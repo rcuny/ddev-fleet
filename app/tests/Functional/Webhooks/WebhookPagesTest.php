@@ -93,6 +93,18 @@ final class WebhookPagesTest extends AdminTestCase
         $this->service()->issueSecret('blog', WebhookSource::Jira, false);
     }
 
+    public function testASecondCreatePostIsAWarningOnTheTabAndKeepsTheSecret(): void
+    {
+        $this->service()->issueSecret('blog', WebhookSource::Jira, false);
+
+        $this->post('/admin/projects/blog/webhooks/jira/secret', []);
+
+        self::assertResponseRedirects(self::BASE.'/admin/projects/blog/webhooks');
+        $crawler = $this->client->followRedirect();
+        self::assertStringContainsString('already has a webhook secret for Jira', $crawler->filter('[data-testid=flashes]')->text());
+        self::assertCount(0, $crawler->filter('[data-testid=webhook-secret-once]'));
+    }
+
     public function testThePostNeedsTheCsrfToken(): void
     {
         $this->client->request('POST', self::BASE.'/admin/projects/blog/webhooks/jira/secret', server: $this->browserServer());
