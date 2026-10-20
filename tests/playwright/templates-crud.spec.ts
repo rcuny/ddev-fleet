@@ -37,10 +37,10 @@ test.describe('templates', () => {
       await expect(page.getByRole('button', { name: 'Create template' })).toBeVisible();
       await expectNoOverflow(page, 'new template form');
       await expectNoBlockingViolations(page, 'new template form');
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
     }
-    expect(errors).toEqual([]);
   });
 
   test('a template with every field is created, listed and re-read in its edit form', async ({ page }) => {
@@ -84,10 +84,10 @@ test.describe('templates', () => {
       await expect(page.getByTestId('danger-zone')).toBeVisible();
       await expectNoOverflow(page, 'edit template form');
       await expectNoBlockingViolations(page, 'edit template form');
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
     }
-    expect(errors).toEqual([]);
   });
 
   test('optional fields may stay empty and the list shows a dash for the Drupal environment', async ({ page }) => {
@@ -136,10 +136,10 @@ test.describe('templates', () => {
       await expect(page.getByLabel('Terminal 1 commands')).toHaveValue('x\ny');
       await expect(page.getByLabel('Terminal 2 commands')).toHaveValue('z');
 
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
     }
-    expect(errors).toEqual([]);
   });
 
   test('clearing every optional field empties them', async ({ page }) => {
@@ -157,10 +157,10 @@ test.describe('templates', () => {
       await expect(row.getByTestId('template-post-deploy')).toHaveText('0');
       await expect(row.getByTestId('template-tty1')).toHaveText('0');
       await expect(row.getByTestId('template-tty2')).toHaveText('0');
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
     }
-    expect(errors).toEqual([]);
   });
 
   test('Cancel on the new and the edit form leaves without saving', async ({ page }) => {

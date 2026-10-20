@@ -87,10 +87,10 @@ test.describe('template validation, create form', () => {
       await submitAndWait(page, page.getByRole('button', { name: 'Create template' }));
       await expect(page.getByTestId('flashes')).toContainText('Template created.');
       await expect(templateRow(page, 'fixed')).toHaveCount(1);
+      expect(unexpected(errors)).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
     }
-    expect(unexpected(errors)).toEqual([]);
   });
 
   test('the inputs carry the length limits the rules enforce', async ({ page }) => {
@@ -127,11 +127,11 @@ test.describe('template validation, create form', () => {
 
       await createTemplateViaUi(page, second, { name: 'web' });
       await expect(templateRow(page, 'web')).toHaveCount(1);
+      expect(unexpected(errors)).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, first);
       await deleteProjectViaUi(page, second);
     }
-    expect(unexpected(errors)).toEqual([]);
   });
 
   test('boundary values are accepted: 40 character name, 64 character env, 50 lines, 2000 character line, inner spaces', async ({ page }) => {

@@ -71,11 +71,11 @@ test.describe('named-port catalogue', () => {
       await submitAndWait(page, page.getByRole('button', { name: 'Save ports' }));
       await expect(page.getByTestId('flashes')).toContainText('Ports saved.');
       await expect(page.getByTestId('port-row').filter({ has: page.getByText(name, { exact: true }) }).getByRole('checkbox')).not.toBeChecked();
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
       remove(name);
     }
-    expect(errors).toEqual([]);
   });
 
   test('the list command shows the entry and the catalogue is ordered by name on the Ports tab', async ({ page }) => {

@@ -29,11 +29,11 @@ test.describe('project ports tab, in full', () => {
       await expect(page.getByTestId('ports-errors')).toHaveCount(0);
       await expect(page.getByRole('table', { name: 'Named ports' })).toBeVisible();
       await expectNoBlockingViolations(page, 'Ports tab');
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
       deletePort(port.name);
     }
-    expect(errors).toEqual([]);
   });
 
   test('several ports are assigned, one is unassigned, and the state survives a reload', async ({ page }) => {
@@ -71,13 +71,13 @@ test.describe('project ports tab, in full', () => {
       for (const port of [a, b, c]) {
         await expect(box(page, port.name)).not.toBeChecked();
       }
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
       for (const port of [a, b, c]) {
         deletePort(port.name);
       }
     }
-    expect(errors).toEqual([]);
   });
 
   test('the assignment is per project: a second project does not see the first one\'s ports', async ({ page }) => {
@@ -341,11 +341,11 @@ test.describe('project ports tab, in full', () => {
       const width = page.viewportSize()!.width;
       expect(saveBox!.x).toBeGreaterThanOrEqual(0);
       expect(saveBox!.x + saveBox!.width).toBeLessThanOrEqual(width + 0.5);
+      expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
       deletePort(port.name);
     }
-    expect(errors).toEqual([]);
   });
 
   test('the checkbox and the button are touch-sized on the phone', async ({ page }, testInfo) => {
