@@ -99,6 +99,21 @@ final class SchedulePagesTest extends AdminTestCase
         self::assertCount(1, $page->filter('[data-testid=schedule-target-missing]'));
     }
 
+    public function testATurboPrefetchDoesNotConsumeTheFlash(): void
+    {
+        $this->seed();
+        $this->post('/admin/schedules/nightly/pause', []);
+        self::assertResponseRedirects('/admin/schedules');
+
+        // A hover or a touch on a link prefetches its page before the redirect is followed.
+        $prefetch = $this->client->request('GET', self::BASE.'/admin/schedules', server: $this->browserServer() + ['HTTP_X_SEC_PURPOSE' => 'prefetch']);
+        self::assertResponseIsSuccessful();
+        self::assertCount(0, $prefetch->filter('[data-testid=flashes]'));
+
+        $crawler = $this->open('/admin/schedules');
+        self::assertStringContainsString('Schedule "nightly" paused.', $crawler->filter('[data-testid=flashes]')->text());
+    }
+
     public function testPauseResumeAndRunNow(): void
     {
         $this->seed();
