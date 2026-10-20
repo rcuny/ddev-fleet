@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.3] - 2026-10-20
+
+### Added
+- **FLE-96: `fleet backup:restore <file> [--yes] [--json]` restores a database backup into the live databases.** It verifies the backup first (integrity, not from a newer release), refuses while a job is queued or running or a `fleet-worker@*` or `fleet-scheduler` unit is active, swaps the file in atomically, keeps the previous database as `fleet.sqlite.pre-restore-<stamp>` (never pruned), then migrates and validates the schema; a failure puts the previous database back. The queue backup with the same stamp is restored with it. The restore section of `docs/installation.md` is rewritten around it, including how to undo a restore.
+
+### Changed
+- **FLE-97: `fleet backup:restore` is safer.** A fleet backup now records a fingerprint of the secret key that sealed it (never the key), `fleet backup:verify` shows it (`secret key: match`, `mismatch` or `not recorded`), and the restore refuses a backup sealed by another key unless you pass `--accept-key-mismatch` (every secret must then be set again); a backup without a fingerprint is restored with a warning. The restore also refuses while `fleet-status` or php-fpm is active (besides the worker and the scheduler; the printed stop and start lines list all four), and when it runs as another user than the owner of `FLEET_HOME`. A leftover `-wal` or `-shm` next to the live database is covered by a test. `docs/installation.md` describes all of it.
+
 ## [1.0.2] - 2026-10-20
 
 ### Added
@@ -639,7 +647,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/rcuny/ddev-fleet/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/rcuny/ddev-fleet/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/rcuny/ddev-fleet/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...v1.0.0
