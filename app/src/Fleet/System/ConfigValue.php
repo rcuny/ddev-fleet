@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Fleet\System;
 
+use App\Fleet\Projects\Rule\ResourceName;
+
 /**
  * Validation of every value that is rendered into a root-installed config (Caddyfile, Authelia configuration, Caddy
  * environment file). The system templates run with autoescape off, so this is the only defence against a newline,
@@ -38,6 +40,31 @@ final class ConfigValue
         }
 
         return $domain;
+    }
+
+    /**
+     * A TCP port number (1 to 65535), for a port rendered into a root-installed or Caddy config.
+     */
+    public static function port(int $port): int
+    {
+        if ($port < 1 || $port > 65535) {
+            throw new \InvalidArgumentException(\sprintf('"%d" is not a valid port number.', $port));
+        }
+
+        return $port;
+    }
+
+    /**
+     * The name of a catalogue port as it may appear in a rendered config (a comment line): the ResourceName shape,
+     * lowercase letters, digits and single dashes, at most ResourceName::MAX characters.
+     */
+    public static function portName(string $name): string
+    {
+        if (null !== ResourceName::error($name, false)) {
+            throw new \InvalidArgumentException(\sprintf('"%s" is not a valid port name.', self::printable($name)));
+        }
+
+        return $name;
     }
 
     /**

@@ -8,6 +8,7 @@ const TABS = [
   { key: 'git', label: 'Git identity' },
   { key: 'claude', label: 'Claude token' },
   { key: 'notifications', label: 'Notifications' },
+  { key: 'network', label: 'Networking' },
   { key: 'uploads', label: 'Uploads' },
   { key: 'backups', label: 'Backups' },
 ] as const;
@@ -93,6 +94,36 @@ test.describe('host settings', () => {
       }
     });
   }
+
+  test('the Networking tab switches the port mirror off and on', async ({ page }, testInfo) => {
+    // The setting is one row shared by both projects, which run in parallel: toggling it twice at once is a race.
+    test.skip(isPhone(testInfo), 'desktop only: the switch is shared host state');
+    const errors = collectBrowserErrors(page);
+    await openTab(page, 'network');
+    const box = page.getByLabel('Mirror the named ports inside the Docker network');
+    const save = page.getByTestId('host-network-form').getByRole('button', { name: 'Save' });
+    const ports = page.getByTestId('host-mirror-ports');
+    // Turbo swaps the page after each redirect: wait for what only the new page shows before the next click, or the
+    // click lands on the old page and the swap undoes it.
+    await box.check({ force: true });
+    await save.click();
+    await expect(page.getByText('Port mirror setting saved.')).toBeVisible();
+    await expect(box).toBeChecked();
+
+    await page.getByText('Mirror the named ports inside the Docker network').click();
+    await expect(box).not.toBeChecked();
+    await save.click();
+    await expect(ports).toContainText('The mirror is off');
+    await expect(box).not.toBeChecked();
+
+    await box.check({ force: true });
+    await expect(box).toBeChecked();
+    await save.click();
+    await expect(ports).not.toContainText('The mirror is off');
+    await expect(box).toBeChecked();
+    expect(await hasHorizontalOverflow(page)).toBe(false);
+    expect(errors).toEqual([]);
+  });
 
   test('a Claude token is stored write-only: the page never shows it back', async ({ page }) => {
     await openTab(page, 'claude');

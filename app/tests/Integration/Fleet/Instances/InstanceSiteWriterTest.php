@@ -115,12 +115,38 @@ final class InstanceSiteWriterTest extends KernelTestCase
                 # The identity headers never come from the client, and nothing is copied back from Authelia: the app behind the
                 # instance does not read them. Only the session decides who may open the site.
                 route {
+                    request_header -Remote-User
+                    request_header -Remote_User
+                    request_header -Remote-Groups
+                    request_header -Remote_Groups
+                    request_header -Remote-Name
+                    request_header -Remote_Name
+                    request_header -Remote-Email
+                    request_header -Remote_Email
+
+                    forward_auth 127.0.0.1:9091 {
+                        uri /api/authz/forward-auth
+                    }
+
+                    reverse_proxy 127.0.0.1:8080
+                }
+            }
 
             CADDY;
-        $site = $this->site();
-        self::assertStringStartsWith($expected, $site);
-        self::assertStringEndsWith("        reverse_proxy 127.0.0.1:8080\n    }\n}\n", $site);
-        self::assertSame(1, preg_match_all('/^\S.* \{$/m', $site));
+        self::assertSame($expected, $this->site(), 'byte-identical, whole file');
+    }
+
+    public function testAHostileNameOrPortNeverReachesTheTemplate(): void
+    {
+        $project = $this->portedProject([new NamedPort("x\nreverse_proxy evil", 9108, 8108)]);
+
+        try {
+            $this->writer->write($this->instance($project), $project);
+            self::fail('expected the name to be refused');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('not a valid port name', $e->getMessage());
+        }
+        self::assertSame([], glob($this->paths->caddyInstancesDir().'/*') ?: []);
     }
 
     public function testOnePortAddsAGatedBlockToTheRouter(): void

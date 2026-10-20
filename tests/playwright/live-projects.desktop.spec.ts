@@ -16,7 +16,7 @@ import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 //
 // FLEET_LIVE_PHASE splits the walk-through around host-side checks done over SSH (default: every phase in order):
 //   build   sign in, field errors, create + edit the project, create + edit the template, issue id tester
-//   ports   (FLEET_LIVE_PORT names a catalogue port the host operator assigned) the read-only Ports tab marks it
+//   ports   (FLEET_LIVE_PORT names a catalogue port the host operator assigned) the Ports tab ticks it
 //   clean   delete the template and the project through the browser, leaving no test data behind
 // The tests share one browser context and run in order.
 const password = process.env.FLEET_LIVE_ADMIN_PASSWORD ?? '';
@@ -188,14 +188,13 @@ test.describe('build', () => {
 test.describe('ports', () => {
   test.skip(!runs('ports') || '' === PORT, 'phase, or FLEET_LIVE_PORT not set');
 
-  test('the Ports tab marks the assigned port, read only', async () => {
+  test('the Ports tab ticks the assigned port', async () => {
     await page.goto(`/admin/projects/${PROJECT}`);
     await openSection(page, 'Ports');
     await expect(page.getByTestId('ports-note')).toBeVisible();
     const row = page.getByTestId('port-row').filter({ hasText: PORT });
     await expect(row).toHaveCount(1);
-    await expect(row.getByTestId('port-assigned')).toBeVisible();
-    await expect(page.locator('main input[type=checkbox]')).toHaveCount(0);
+    await expect(row.getByRole('checkbox')).toBeChecked();
     await shot('10-ports');
     await expectNoOverflow('the Ports tab');
   });

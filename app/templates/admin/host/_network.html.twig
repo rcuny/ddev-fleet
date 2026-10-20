@@ -1,0 +1,36 @@
+{% set form = forms.network %}
+<twig:Card data-testid="host-tab-network">
+    <twig:Card:Header>
+        <twig:Card:Title>Networking</twig:Card:Title>
+        <twig:Card:Description>Named ports exist on the host's Caddy only. The mirror makes the DDEV router answer on the same ports inside the Docker network, so a browser running in an instance can open the same URLs.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-network-form'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.enabled) }}
+            {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+        {{ form_end(form) }}
+
+        {% if mirror is not null %}
+            <p class="text-sm text-ink-muted" data-testid="host-mirror-ports">
+                {% if host.portMirror %}
+                    {% if mirror.ports is empty %}
+                        No port is mirrored now.
+                    {% else %}
+                        Mirrored public ports: <strong>{{ mirror.ports|join(', ') }}</strong>.
+                    {% endif %}
+                {% else %}
+                    The mirror is off.
+                {% endif %}
+            </p>
+            {% if mirror.skipped is not empty %}
+                <ul class="grid gap-1 text-sm text-ink-muted" data-testid="host-mirror-skipped">
+                    {% for reason in mirror.skipped %}
+                        <li>{{ reason }}</li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        {% endif %}
+        <p class="text-sm text-ink-muted">The files are rewritten whenever the ports change. <code>fleet port:refresh</code> rewrites them on demand and retries a mirror that failed.</p>
+    </twig:Card:Content>
+</twig:Card>

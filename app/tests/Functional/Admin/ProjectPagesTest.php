@@ -200,6 +200,7 @@ final class ProjectPagesTest extends AdminTestCase
 
     public function testEditSavesEveryField(): void
     {
+        $this->makePort('typesense', 9108, 8108);
         $this->makeProject();
         $this->makeTemplate('blog', 'full');
         $this->makeTemplate('blog', 'light');
@@ -235,6 +236,7 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertSame('(?:ABC|XYZ)-\d{1,6}', $project->issueIdRegexp());
         self::assertSame('web/modules/custom/blog', $project->displaySubmoduleBranch());
         self::assertTrue($project->typesense());
+        self::assertSame(['typesense'], $this->assignedPorts());
 
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString('Project saved.', $crawler->filter('[data-testid=flashes]')->text());
@@ -469,7 +471,18 @@ final class ProjectPagesTest extends AdminTestCase
 
     // --- ports tab
 
-    public function testPortsTabIsReadOnly(): void
+    /**
+     * @return list<string>
+     */
+    private function assignedPorts(string $project = 'blog'): array
+    {
+        $names = array_map(static fn ($p): string => $p->name(), ($this->stored($project) ?? self::fail())->ports());
+        sort($names);
+
+        return $names;
+    }
+
+    public function testPortsTabShowsOneCheckboxPerCataloguePort(): void
     {
         $this->makePort('typesense', 9108, 8108);
         $this->makePort('mail', 8025, 18025);
@@ -479,16 +492,125 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertResponseStatusCodeSame(200);
 
         $main = $crawler->filter('main');
-        self::assertCount(0, $main->filter('form, input, textarea'));
-        self::assertCount(0, $main->filter('button[type=submit]'));
+        self::assertCount(1, $main->filter('form[data-testid=ports-form][method=post]'));
         $rows = $main->filter('[data-testid=port-row]');
         self::assertCount(2, $rows);
         self::assertStringContainsString('mail', $rows->eq(0)->text());
-        self::assertStringContainsString('9108', $rows->eq(1)->text());
+        self::assertStringContainsString('8025', $rows->eq(0)->text());
+        self::assertStringContainsString('18025', $rows->eq(0)->text());
         self::assertStringContainsString('typesense', $rows->eq(1)->text());
-        self::assertCount(1, $main->filter('[data-testid=port-assigned]'));
-        self::assertStringContainsString('Assigned', $rows->eq(1)->filter('[data-testid=port-assigned]')->text());
-        self::assertStringContainsString('M0.07', $main->filter('[data-testid=ports-note]')->text());
+        self::assertStringContainsString('9108', $rows->eq(1)->text());
+        self::assertSame(['mail', 'typesense'], $main->filter('input[type=checkbox][name="ports[]"]')->each(static fn (Crawler $c): string => (string) $c->attr('value')));
+        self::assertNull($rows->eq(0)->filter('input[type=checkbox]')->attr('checked'));
+        self::assertNotNull($rows->eq(1)->filter('input[type=checkbox]')->attr('checked'));
+        self::assertCount(1, $main->filter('input[name=_token]'));
+        self::assertStringNotContainsString('M0.07', $main->text());
+    }
+
+    public function testPortsTabAssignsAndUnassigns(): void
+    {
+        $this->makePort('typesense', 9108, 8108);
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+
+        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
+        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        self::assertSame(['mail'], $this->assignedPorts());
+        self::assertStringContainsString('Ports saved', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+
+        $this->post('/admin/projects/blog/ports', ['ports' => ['mail', 'typesense']]);
+        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        self::assertSame(['mail', 'typesense'], $this->assignedPorts());
+        self::assertTrue(($this->stored('blog') ?? self::fail())->typesense(), 'assigning the port sets the flag');
+
+        $this->post('/admin/projects/blog/ports', []);
+        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        self::assertSame([], $this->assignedPorts());
+        self::assertFalse(($this->stored('blog') ?? self::fail())->typesense(), 'unassigning the port clears the flag');
+    }
+
+    public function testPortsTabSaveWithoutAChangeSaysSo(): void
+    {
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+
+        $this->post('/admin/projects/blog/ports', []);
+
+        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        self::assertStringContainsString('No change', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+    }
+
+    public function testPortsTabRejectsAnUnknownPortWith422(): void
+    {
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+
+        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['mail', 'ghost']]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('Unknown port(s): ghost', $crawler->filter('[data-testid=ports-errors]')->text());
+        self::assertSame([], $this->assignedPorts(), 'nothing is saved');
+        self::assertNotNull($crawler->filter('input[value=mail]')->attr('checked'), 'the submitted selection is shown again');
+    }
+
+    public function testPortsTabSurfacesTheTypesenseFlagError(): void
+    {
+        // Assigning the "typesense" port needs the catalogue entry; the service rejects the unknown name.
+        $this->makeProject();
+
+        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['typesense']]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertCount(1, $crawler->filter('[data-testid=ports-errors]'));
+        self::assertSame([], $this->assignedPorts());
+    }
+
+    public function testPortsTabCrossSitePostChangesNothing(): void
+    {
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+
+        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']], fetchSite: 'cross-site');
+        self::assertResponseStatusCodeSame(403);
+
+        $this->client->request('POST', self::BASE.'/admin/projects/blog/ports', ['ports' => ['mail']], [], $this->browserServer());
+        self::assertResponseStatusCodeSame(403, 'no token');
+        self::assertSame([], $this->assignedPorts());
+    }
+
+    public function testPortsTabPostByAMemberOrAnonymousIsRefused(): void
+    {
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+
+        $this->as('member');
+        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
+        self::assertResponseStatusCodeSame(403);
+
+        $this->as('none');
+        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
+        self::assertResponseStatusCodeSame(401);
+
+        self::assertSame([], $this->assignedPorts());
+    }
+
+    public function testPortsTabPostToAnUnknownProjectIs404(): void
+    {
+        $this->post('/admin/projects/nope/ports', []);
+
+        self::assertResponseStatusCodeSame(404);
+    }
+
+    public function testGeneralTypesenseFlagNeedsTheCataloguePort(): void
+    {
+        $this->makeProject();
+
+        $crawler = $this->open('/admin/projects/blog');
+        $this->submit($crawler, 'Save', ['project[typesense]' => true]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertCount(1, $this->client->getCrawler()->filter('#project_typesense_errors'));
+        self::assertFalse(($this->stored('blog') ?? self::fail())->typesense());
     }
 
     public function testPortsTabWithAnEmptyCatalogue(): void
@@ -658,6 +780,7 @@ final class ProjectPagesTest extends AdminTestCase
         yield 'edit' => ['GET', '/admin/projects/blog'];
         yield 'save' => ['POST', '/admin/projects/blog'];
         yield 'ports' => ['GET', '/admin/projects/blog/ports'];
+        yield 'ports save' => ['POST', '/admin/projects/blog/ports'];
         yield 'delete' => ['POST', '/admin/projects/blog/delete'];
     }
 

@@ -29,6 +29,8 @@ final readonly class ProjectService
 {
     public const int MAX_HOSTNAMES = 10;
     public const int MAX_PORTS = 50;
+    /** The catalogue port that `Project.typesense` stands for. */
+    public const string TYPESENSE_PORT = 'typesense';
     /** Instance ids named in a refusal message. */
     private const int LISTED_INSTANCES = 10;
 
@@ -64,7 +66,9 @@ final readonly class ProjectService
     public function create(ProjectInput $input): Project
     {
         $input = $input->normalised();
+        [$input, $typesenseError] = $this->syncTypesense($input, null);
         [$errors, $ports] = $this->check($input, null);
+        $errors += null === $typesenseError ? [] : ['typesense' => $typesenseError];
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -93,7 +97,9 @@ final readonly class ProjectService
     {
         $project = $this->get($name);
         $input = $input->normalised();
+        [$input, $typesenseError] = $this->syncTypesense($input, $project);
         [$errors, $ports] = $this->check($input, $project);
+        $errors += null === $typesenseError ? [] : ['typesense' => $typesenseError];
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -130,6 +136,42 @@ final readonly class ProjectService
         $this->secrets?->removeAllOfProject($name, $by);
         $this->projects->remove($project);
         $this->accessRefresher?->refresh();
+    }
+
+    /**
+     * Keeps the `typesense` flag and the `typesense` port assignment one fact. The side that differs from what is
+     * stored wins (the flag when both moved); when neither moved, a flag without its port is healed by assigning the
+     * port when the catalogue has it, and a port without its flag turns the flag on.
+     *
+     * @return array{ProjectInput, string|null} the input with both sides equal, and an error for the `typesense` field
+     */
+    private function syncTypesense(ProjectInput $input, ?Project $existing): array
+    {
+        $name = self::TYPESENSE_PORT;
+        $hasPort = \in_array($name, $input->ports, true);
+        $flagMoved = $input->typesense !== (null !== $existing && $existing->typesense());
+        $portMoved = $hasPort !== (null !== $existing && \in_array($name, self::portNames($existing->ports()), true));
+
+        $wanted = match (true) {
+            $flagMoved => $input->typesense,
+            $portMoved => $hasPort,
+            default => $input->typesense || $hasPort,
+        };
+
+        $ports = array_values(array_filter($input->ports, static fn (string $port): bool => $port !== $name));
+        if ($wanted) {
+            if (null === $this->ports->findByName($name)) {
+                if ($flagMoved) {
+                    return [$input, 'The host has no "typesense" port in its catalogue: create it first (fleet port:create typesense 9108 8108).'];
+                }
+
+                // A legacy flag without a catalogue entry: leave it as stored rather than block an unrelated save.
+                return [$input->with(['typesense' => true, 'ports' => $input->ports]), null];
+            }
+            $ports[] = $name;
+        }
+
+        return [$input->with(['typesense' => $wanted, 'ports' => $ports]), null];
     }
 
     /**

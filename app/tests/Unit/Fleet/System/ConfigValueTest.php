@@ -175,4 +175,76 @@ final class ConfigValueTest extends TestCase
             }
         }
     }
+
+    #[DataProvider('goodPorts')]
+    public function testPortAcceptsTheValidRange(int $port): void
+    {
+        self::assertSame($port, ConfigValue::port($port));
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function goodPorts(): iterable
+    {
+        yield 'lowest' => [1];
+        yield 'typesense' => [9108];
+        yield 'highest' => [65535];
+    }
+
+    #[DataProvider('badPorts')]
+    public function testPortRefusesAnythingOutsideTheRange(int $port): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        ConfigValue::port($port);
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function badPorts(): iterable
+    {
+        yield 'zero' => [0];
+        yield 'negative' => [-1];
+        yield 'too high' => [65536];
+    }
+
+    #[DataProvider('goodPortNames')]
+    public function testPortNameAcceptsTheResourceNameShape(string $name): void
+    {
+        self::assertSame($name, ConfigValue::portName($name));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function goodPortNames(): iterable
+    {
+        yield 'plain' => ['typesense'];
+        yield 'dash and digit' => ['mail-2'];
+        yield 'single character' => ['a'];
+    }
+
+    #[DataProvider('badPortNames')]
+    public function testPortNameRefusesAnythingElse(string $name): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        ConfigValue::portName($name);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function badPortNames(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'newline' => ["a\nb"];
+        yield 'uppercase' => ['Mail'];
+        yield 'space' => ['my port'];
+        yield 'double dash' => ['a--b'];
+        yield 'leading dash' => ['-a'];
+        yield 'too long' => [str_repeat('a', 41)];
+    }
 }

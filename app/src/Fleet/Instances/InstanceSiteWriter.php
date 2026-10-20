@@ -140,11 +140,12 @@ final readonly class InstanceSiteWriter
             if (null !== $error) {
                 throw new \InvalidArgumentException(\sprintf('Named port "%s" cannot be served: %s', $port->name(), $error));
             }
+            $public = ConfigValue::port($port->publicPort());
             $blocks[] = [
-                'name' => $port->name(),
-                'public' => $port->publicPort(),
-                'router' => $port->routerPort(),
-                'hosts' => array_map(static fn (string $host): string => $host.':'.$port->publicPort(), $hosts),
+                'name' => ConfigValue::portName($port->name()),
+                'public' => $public,
+                'router' => ConfigValue::port($port->routerPort()),
+                'hosts' => array_map(static fn (string $host): string => $host.':'.$public, $hosts),
             ];
         }
 
