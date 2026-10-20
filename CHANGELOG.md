@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-20
+
+### Added
+- **FLE-92: In-network port mirror and `:443` site mirror (M0.07b).** `ddev-router` now also listens on the catalogue's
+  public ports inside the Docker network (two generated files in `~/.ddev/traefik/`), and the `:443` site mirror lets
+  `https://<host>/` work inside the network. The router restarts only when the live entrypoints differ from the wanted
+  ones; a failure removes the files and writes the marker `.fleet-port-mirror-failed`. `fleet port:refresh` syncs and
+  prints `router mirror: live|pending`. The first deploy after the upgrade restarts `ddev-router` once.
+- A port-mirror switch in the host settings (default on); off removes the mirror files at the next sync.
+- A catalogue port `typesense` (9108 / 8108); a project's Typesense flag and the assignment of that port stay in step.
+- The project Ports tab is editable: assign and unassign catalogue ports in the browser.
+- `fleet port:firewall [--json]` lists the public ports to open (80, 443 and the ports in use) with a `ufw allow` line
+  each. The installer still does not change the firewall.
+- `docs/networking.md`: every port, named-port sites and certificates (`http01` and `ovh_dns`), the port mirror, the
+  firewall list and the checks that need a live host.
+
+
+- **FLE-43: the nightly redeploy schedule, end to end** (milestone M0.09b). Integration tests drive a `redeploy` schedule from its cron time to the finished job (no fake action): the job and the run history, a busy instance (`skipped`), a destroyed instance (`failed`), a paused schedule and two schedules on two instances. A test matrix covers the catch-up window (10, 59 and 61 minutes of downtime, one fire only, `missed` after 60 minutes).
+- A reaper: each tick finishes a run left `claimed` without a job for over 5 minutes (the ticker died between the claim and the launch) as `failed`, "The ticker stopped before the job was queued.". It is never fired again.
+- The schedule form and `fleet:schedule:create` / `update --help` list the registered actions; the run history and the schedule list link to the job. `docs/schedules.md` has a "nightly redeploy" recipe.
+
+
+- **FLE-91: the installer installs the fleet shell profile.** A new step 35 writes `/etc/profile.d/10-fleet-shell.sh` (coloured prompt that names the host, `ls` colours, `l` alias, `EDITOR=nano`; interactive shells only) and appends one guarded hook block to `/etc/bash.bashrc` and to the `~/.bashrc` of root, `fleet` and the invoking `sudo` user, only when missing. A file copied by hand from the 0.x host is replaced. `--no-shell-profile` skips the step; the uninstaller removes the file and exactly that block.
+
+- **FLE-94: move a project between hosts.** `fleet export:project <project>` and the **Export** card on a project's General tab write one versioned JSON file (`fleet-project-export`, version 1) with the project settings, its templates and ports, webhook rules and the schedules that target its instances. `fleet import:preview <file>` and **Projects → Import** show a create / update / unchanged / skipped diff with every validation error, and `fleet import:apply <file>` (or the confirm button) writes it all in one transaction or not at all. Secrets are left out unless a passphrase seals them (libsodium Argon2id + secretbox); the passphrase comes from a prompt, `FLEET_EXPORT_PASSPHRASE` or stdin, never argv. Webhook secrets are issued afresh on the new host; assets are copied with rsync. Guide: `docs/moving-projects.md`.
+- **FLE-94: `fleet backup:verify <file>`** runs SQLite's integrity check and a schema-version comparison on a backup file, read-only, before a restore.
+
+### Changed
+- Port values and names rendered in the instance Caddy site go through `ConfigValue`, and the no-ports site test
+  compares the whole file byte for byte (FLE-79 review minors).
+
+### Fixed
+- **FLE-72 follow-up:** a tick more than 90 seconds late is a `catch-up` only when the ticker was down. The ticker now records the end of every tick (`scheduler_heartbeat`, migration `Version20261022100000`).
+
 ## [1.0.1] - 2026-10-20
 
 ### Added
@@ -605,7 +639,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/rcuny/ddev-fleet/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/rcuny/ddev-fleet/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...v1.0.0
 [0.20.0]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...v0.20.0
