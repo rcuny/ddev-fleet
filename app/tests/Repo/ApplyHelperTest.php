@@ -211,10 +211,11 @@ final class ApplyHelperTest extends TestCase
         yield 'comment line' => ['# hi'."\nFLEET_PROXY_SECRET=".$secret."\n"];
         yield 'carriage return' => ['FLEET_PROXY_SECRET='.$secret."\r\n"];
         yield 'short secret' => ["FLEET_PROXY_SECRET=short\n"];
-        yield 'missing secret' => ["OVH_ENDPOINT=ovh-eu\n"];
+        yield 'missing secret' => ["OVH_APPLICATION_KEY=abcdefgh\n"];
         yield 'value with space' => ['FLEET_PROXY_SECRET='.$secret." x\n"];
-        yield 'partial ovh' => ['FLEET_PROXY_SECRET='.$secret."\nOVH_ENDPOINT=ovh-eu\n"];
-        yield 'bad endpoint' => ['FLEET_PROXY_SECRET='.$secret."\nOVH_ENDPOINT=evil\nOVH_APPLICATION_KEY=abcdefgh\nOVH_APPLICATION_SECRET=abcdefgh\nOVH_CONSUMER_KEY=abcdefgh\n"];
+        yield 'partial ovh' => ['FLEET_PROXY_SECRET='.$secret."\nOVH_APPLICATION_KEY=abcdefgh\n"];
+        yield 'two of three ovh' => ['FLEET_PROXY_SECRET='.$secret."\nOVH_APPLICATION_KEY=abcdefgh\nOVH_APPLICATION_SECRET=abcdefgh\n"];
+        yield 'endpoint is not staged any more' => ['FLEET_PROXY_SECRET='.$secret."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh\nOVH_APPLICATION_SECRET=abcdefgh\nOVH_CONSUMER_KEY=abcdefgh\n"];
     }
 
     #[\PHPUnit\Framework\Attributes\DataProvider('hostileEnvFiles')]
@@ -237,7 +238,7 @@ final class ApplyHelperTest extends TestCase
     public function testAFullOvhEnvironmentIsAccepted(): void
     {
         $this->seedLive(self::SECRET);
-        $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n";
+        $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n";
         $this->stage('Caddyfile', "example.com {\n}\n");
         $this->stage('env', $env);
 
@@ -248,7 +249,7 @@ final class ApplyHelperTest extends TestCase
         self::assertSame('FLEET_PROXY_SECRET='.self::SECRET."\n", file_get_contents($this->root.'/etc/caddy/fleet.env'));
         self::assertSame(0o640, fileperms($this->root.'/etc/caddy/fleet.env') & 0o777);
         self::assertSame(0o750, fileperms($this->root.'/etc/caddy/ovh') & 0o777);
-        foreach (['endpoint' => 'ovh-eu', 'application_key' => 'abcdefgh12', 'application_secret' => 'ABCDEFGH12abcdefgh', 'consumer_key' => 'zzzzzzzz99'] as $name => $value) {
+        foreach (['application_key' => 'abcdefgh12', 'application_secret' => 'ABCDEFGH12abcdefgh', 'consumer_key' => 'zzzzzzzz99'] as $name => $value) {
             self::assertSame($value."\n", file_get_contents($this->root.'/etc/caddy/ovh/'.$name), $name);
             self::assertSame(0o640, fileperms($this->root.'/etc/caddy/ovh/'.$name) & 0o777, $name);
         }
@@ -264,7 +265,7 @@ final class ApplyHelperTest extends TestCase
         file_put_contents($this->root.'/etc/caddy/fleet.env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=oldoldold1\nOVH_APPLICATION_SECRET=oldoldoldold\nOVH_CONSUMER_KEY=oldoldold2\n");
         file_put_contents($this->root.'/etc/caddy/Caddyfile', "LIVE-CADDYFILE\n");
         $this->stage('Caddyfile', "example.com {\n}\n");
-        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
+        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
 
         [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
 
@@ -274,10 +275,25 @@ final class ApplyHelperTest extends TestCase
 
         // Applying the same thing again changes nothing (idempotent).
         $this->stage('Caddyfile', "example.com {\n}\n");
-        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
+        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
         [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
         self::assertSame(0, $status, $err);
         self::assertSame("abcdefgh12\n", file_get_contents($this->root.'/etc/caddy/ovh/application_key'));
+    }
+
+    public function testTheLegacyEndpointFileIsRemovedWhenTheCredentialsAreInstalled(): void
+    {
+        $this->seedLive(self::SECRET);
+        mkdir($this->root.'/etc/caddy/ovh', 0o750);
+        file_put_contents($this->root.'/etc/caddy/ovh/endpoint', "ovh-eu\n");
+        $this->stage('Caddyfile', "example.com {\n}\n");
+        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
+
+        [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
+
+        self::assertSame(0, $status, $err);
+        self::assertFileDoesNotExist($this->root.'/etc/caddy/ovh/endpoint');
+        self::assertSame(['application_key', 'application_secret', 'consumer_key'], array_map('basename', glob($this->root.'/etc/caddy/ovh/*') ?: []));
     }
 
     public function testSwitchAwayFromDnsRemovesTheOvhFiles(): void
@@ -302,8 +318,9 @@ final class ApplyHelperTest extends TestCase
         foreach (['endpoint', 'application_key', 'application_secret', 'consumer_key'] as $name) {
             file_put_contents($this->root.'/etc/caddy/ovh/'.$name, "old-$name\n");
         }
+        // The endpoint file of an older apply is a legacy file: removed on success, put back on a rollback.
         $this->stage('Caddyfile', "new.example.com {\n}\n");
-        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-ca\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
+        $this->stage('env', 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n");
 
         [$status] = $this->apply(['caddy'], $this->defaultStubs(reloadFailures: 1));
 
@@ -379,7 +396,7 @@ final class ApplyHelperTest extends TestCase
         // Live: HTTP-01, only the proxy secret. Staged: the OVH block and its four values (a first-time switch). The
         // values are files read at load time, so a reload sees them and no restart is needed.
         $this->seedLive(self::SECRET);
-        $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n";
+        $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_APPLICATION_KEY=abcdefgh12\nOVH_APPLICATION_SECRET=ABCDEFGH12abcdefgh\nOVH_CONSUMER_KEY=zzzzzzzz99\n";
         $this->stage('Caddyfile', "example.com {\n}\n");
         $this->stage('env', $env);
         $stubs = $this->defaultStubs();
@@ -626,7 +643,7 @@ final class ApplyHelperTest extends TestCase
     public function testNoSecretIsEverInAnArgvOfTheValidatorChain(): void
     {
         $this->seedLive();
-        $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=appkey12345\nOVH_APPLICATION_SECRET=appsecret987654\nOVH_CONSUMER_KEY=consumer-key-abc\n";
+        $env = 'FLEET_PROXY_SECRET='.self::SECRET."\nOVH_APPLICATION_KEY=appkey12345\nOVH_APPLICATION_SECRET=appsecret987654\nOVH_CONSUMER_KEY=consumer-key-abc\n";
         $this->stage('Caddyfile', "x {\n}\n");
         $this->stage('env', $env);
         $argv = $this->scratch().'/argv.log';

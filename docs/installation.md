@@ -115,7 +115,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
 | `/etc/caddy/fleet/` | `fleet:caddy` 2750 | `gate.conf` (0640), the sign-in gate, written by the app; `instances/` and `ports/` for later milestones. |
 | `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret (Caddy reads it from its environment, so it only takes effect at the next start). It holds no OVH credential: an `OVH_*` line left by an older apply is dropped at the next `apply caddy`. |
-| `/etc/caddy/ovh/` | `root:caddy` 0750 | DNS mode only: four files (`endpoint`, `application_key`, `application_secret`, `consumer_key`), `root:caddy` 0640, one **clear-text** value each, which the Caddyfile reads through `{file./etc/caddy/ovh/…}` placeholders each time Caddy loads its configuration. Nothing sits in Caddy's process environment. Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Removed when the host leaves DNS mode. |
+| `/etc/caddy/ovh/` | `root:caddy` 0750 | DNS mode only: three files (`application_key`, `application_secret`, `consumer_key`), `root:caddy` 0640, one **clear-text** value each (the endpoint is no secret: it is written into the Caddyfile; an `endpoint` file of an older apply is removed), which the Caddyfile reads through `{file./etc/caddy/ovh/…}` placeholders each time Caddy loads its configuration. Nothing sits in Caddy's process environment. Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Removed when the host leaves DNS mode. |
 | `/etc/authelia/` | `authelia:authelia` | `configuration.yml` (0640, written by the helper); `secrets/` (`root:authelia` 0750, three secret files 0640, generated once). |
 | `/etc/fleet-mercure/Caddyfile` | `root:root` 0644 | The Mercure hub configuration (it lives apart from `/etc/ddev-fleet` because the hub runs as a dynamic user). |
 | `/run/php/fleet.sock` | `fleet:caddy` 0660 | The only way into the app. |
@@ -188,13 +188,24 @@ step is saved as you go, and the wizard works at phone width.
 
      **Implemented, not yet verified live.** Only `http01` has run end to end on a real host; the DNS-01 path is
      covered by unit and helper tests with stand-ins, never against the OVH API. Finish installs the new Caddyfile
-     and the four credential files in `/etc/caddy/ovh/` and **reloads** Caddy (the files are read at every load, so a
+     (the endpoint is written into it; it is a public API name, not a secret) and the three credential files in
+     `/etc/caddy/ovh/` and **reloads** Caddy (the files are read at every load, so a
      rotation of the credentials needs a reload only, never a restart). What to check after choosing it:
      `systemctl is-active caddy` a minute after Finish, `journalctl -u caddy -n 100 --no-pager` free of `ovh` or
      `dns` errors, and `sudo -u caddy env -i bash -c 'set -a; . /etc/caddy/fleet.env; caddy validate --config
      /etc/caddy/Caddyfile --adapter caddyfile'` succeeding (it reads `/etc/caddy/ovh/*` as `caddy`). Caddy keeps the certificates it already has, so the first
      DNS-01 issuance happens at the next renewal (about 30 days before expiry): to prove the credentials earlier,
-     move the certificate storage aside and restart Caddy while watching the journal. If Caddy does not come back
+     move the certificate storage aside and restart Caddy while watching the journal.
+
+     **Rotating the credentials later** (a leaked or expired consumer key, a new token): no `fleet setup:reset`. Run
+     `sudo fleet host:ovh-credentials` (hidden prompts for the application key, the secret and the consumer key; add
+     `--endpoint=ovh-ca` to change the endpoint too; or pipe the three values, one per line, on standard input). It
+     stores them and installs the Caddyfile and the credential files through the root helper, and Caddy **reloads**.
+     A `403 This call has not been granted` in the Caddy journal means the token lacks one of the rights above (or is
+     restricted to another IP address: if you limited the credentials to an address, it must be this host's), not that
+     the files are missing. Create the consumer key with exactly those rights, then rotate.
+
+     If Caddy does not come back
      (the web UI is behind it, so the wizard cannot help), go back to HTTP-01 from the shell:
      `sudo fleet host:init --tls-mode=http01 --force && sudo fleet host:render --apply && sudo systemctl restart caddy`.
 3. **SSH keys.** Fleet clones and pushes with two ed25519 keys, **deploy** (read) and **push** (write). Copy each
@@ -287,6 +298,7 @@ The remaining commands exist mostly for the installer:
 | Command | Purpose |
 |---|---|
 | `fleet:host:init --domain=<fqdn> [--acme-email=] [--tls-mode=http01\|ovh_dns] [--force]` | Create the state directories, the secret key and the host settings. Idempotent. Changing the domain or the TLS mode after setup needs `--force`. |
+| `fleet:host:ovh-credentials [--endpoint=ovh-eu\|ovh-ca\|ovh-us]` | DNS mode only: replace the OVH application key, secret and consumer key (hidden prompts, or three lines on standard input), then install them through the root helper and reload Caddy. Nothing is stored unless all three are valid. |
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
 | `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity, schema version and whether it was sealed by this host's secret key, read-only (see below). |
