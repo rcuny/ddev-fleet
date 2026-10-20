@@ -10,8 +10,9 @@ use App\Domain\User\UserRepository;
  * The one way to change users and project memberships so the sign-in service follows. A change runs in a database
  * transaction that also checks the users render: a user that cannot be rendered commits nothing. Only after the commit
  * is users.yml written (with the Authelia hash read-back, see AutheliaUsersFile), so a file never holds a change that
- * was rolled back, and the transaction does not hold the database write lock while files are written. Then the access
- * rules are re-rendered and, when they changed, installed (AutheliaAccessSync).
+ * was rolled back, and the transaction does not hold the database write lock while files are written. Project access
+ * is part of that file (the `fleet-project-<name>` groups, ProjectGroup), which Authelia reloads live: nothing is
+ * restarted and no session ends.
  *
  * The pages and the `fleet user` commands call commit() around UserService / ProjectAccessService calls.
  */
@@ -20,7 +21,6 @@ final readonly class IdentitySync
     public function __construct(
         private UserRepository $users,
         private AutheliaUsersFile $usersFile,
-        private AutheliaAccessSync $access,
     ) {
     }
 
@@ -50,7 +50,6 @@ final readonly class IdentitySync
         });
         try {
             $this->usersFile->sync($this->users);
-            $this->access->sync();
         } catch (\RuntimeException|\InvalidArgumentException $e) {
             throw new AccessInstallFailed($result, $e);
         }
@@ -59,10 +58,12 @@ final readonly class IdentitySync
     }
 
     /**
-     * Re-renders the access rules and installs them when they changed (see AutheliaAccessSync::sync()).
+     * Rewrites users.yml from the stored users and memberships (after a project was deleted, its group goes).
+     *
+     * @return bool true when the file changed
      */
-    public function refreshAccess(bool $force = false): bool
+    public function refreshAccess(): bool
     {
-        return $this->access->sync($force);
+        return $this->usersFile->sync($this->users);
     }
 }

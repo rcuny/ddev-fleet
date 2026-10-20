@@ -9,6 +9,7 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\FleetPaths;
 use App\Fleet\Projects\NamedPortInput;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\ProjectInput;
@@ -17,8 +18,6 @@ use App\Fleet\Projects\Rule\GitUrl;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\TemplateInput;
 use App\Fleet\Projects\TemplateService;
-use App\Fleet\Shell\CommandResult;
-use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DomCrawler\Crawler;
@@ -46,9 +45,13 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertInstanceOf(HostSettingsRepository::class, $settings);
         $settings->save($host);
 
-        $runner = $this->container()->get('fleet.test_alias.recording_command_runner');
-        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
-        $runner->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
+        // A directory where users.yml should be: the atomic rename cannot replace it, so the refresh fails.
+        $paths = $this->container()->get(FleetPaths::class);
+        self::assertInstanceOf(FleetPaths::class, $paths);
+        if (is_file($paths->usersFile())) {
+            unlink($paths->usersFile());
+        }
+        @mkdir($paths->usersFile(), 0o750, true);
     }
 
     private function makeTemplate(string $project, string $name): void

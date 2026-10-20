@@ -243,10 +243,11 @@ sign in, so there is no other place to add them:
   configured, see above), **Disable** or **Enable** the account (a disabled user cannot sign in; nothing is deleted)
   and **Delete** it (with its project access).
 
-Every change is written to the Authelia users file before it is saved, and the per-project access rules are installed
-into Authelia when they changed (that restarts Authelia, so signed-in users sign in again; it happens only when the
-rules differ). If installing the rules fails the page says so: the change is saved and the next user or project change
-tries again.
+Every change is checked against the Authelia users file before it is saved and written to it right after. Project
+access is part of that file: a member carries the group `fleet-project-<project>`. Authelia reloads the file by
+itself, so creating a user or a project, changing a membership or deleting either **never restarts Authelia and nobody is
+signed out**; the change applies at once (Authelia re-reads the user's groups on every request). If writing the file
+fails the page says so: the change is saved and the next user or project change tries again.
 
 Safeguards: nobody can delete, disable or demote **themselves**, and the **last enabled administrator** can never be
 deleted, disabled or demoted (create or enable another one first), so the fleet cannot lock itself out. Everything on
@@ -425,9 +426,15 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   Encrypt limits how many certificates one registered domain may obtain per week, so deploying dozens of new instances in
   a week can hit the limit: the site then stays without a certificate until the limit passes. Reusing a label (redeploy)
   reuses the certificate.
-- **Who can open a site.** The installer's Authelia rule for `*.<domain>` admits **administrators only**. Project members
-  can operate their instances in the app but cannot open the sites until per-project access rules are rendered
-  (users and access, milestone M0.10).
+- **Who can open a site.** Authelia has one rule for `*.<domain>`: any signed-in user. The per-project check is made by
+  the Caddy site of each instance (`instances/<id>.conf`, aliases and named-port blocks included): it reads the
+  `Remote-Groups` header that Authelia returns and answers **403** unless it holds the administrators' group
+  (`FLEET_ADMIN_GROUP`) or the instance's project group `fleet-project-<project>`. Administrators open every site,
+  members only their projects' sites, and no project name matches another (the group is compared as a whole list entry).
+  Access therefore changes through `users.yml` and a graceful Caddy reload, never through a restart. **After upgrading from
+  an earlier 1.0.x** install the new Authelia configuration (re-run the installer, or `sudo fleet host:render --apply`;
+  that restart signs everyone out once) and rewrite the sites of the running instances with `fleet port:refresh`.
+  Until then those sites keep the old rule (administrators only).
 - **Upgrading while a job runs.** Re-running the installer restarts the workers when the code changed. A job running at that
   moment is marked `interrupted` (its worker is gone) and can be retried; wait for running deploys before upgrading when you can.
 - **Root-owned leftovers.** A container can leave files owned by root in an instance checkout. Destroy then fails with the
@@ -448,8 +455,10 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   Symfony's routing is case-sensitive, and the identity headers are stripped on these paths too, so nothing there
   can act as a signed-in user. Everything else, `/setup` included, needs an Authelia session.
 - **Authelia** uses the `one_factor` policy (password only) for `<domain>`, bypasses its own portal and denies every
-  other host by default. Nothing under `*.<domain>` is served yet; instances and their per-project access arrive in later
-  milestones.
+  other host by default. It has one static rule for `*.<domain>` (any signed-in user); who may open which project is
+  decided by the instance's Caddy site from the user's `fleet-project-<name>` groups (see "Who can open a site"). The
+  configuration changes only with host-level settings (domain, outgoing mail); installing it restarts Authelia and
+  signs everyone out, so such a change is announced as that.
 - **The root helper.** The app never runs as root. To install a rendered Caddy or Authelia configuration it writes
   the files into `/srv/fleet/staging/<target>/` and runs `sudo -n /usr/local/libexec/fleet/apply <target>`. The
   sudoers file contains exactly one line, allowing `apply caddy` and `apply authelia` for `fleet`, with the

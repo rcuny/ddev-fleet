@@ -82,9 +82,6 @@ services:
     # A project with instance rows cannot be deleted (the real guard; the test environment swaps in a scripted one).
     App\Domain\Project\ProjectInstanceGuard:
         alias: App\Domain\Instance\InstanceGuard
-    # The per-project Authelia access rules come from the project_access rows (M0.10).
-    App\Fleet\System\AccessRuleSource:
-        alias: App\Fleet\Auth\ProjectAccessRules
     # The git identity instances commit with by default (FLE-51 re-points this at the host page's setting).
     App\Fleet\Instances\HostGitIdentity:
         alias: App\Fleet\Instances\DomainGitIdentity
@@ -199,9 +196,6 @@ when@test:
         # Users and access (M0.10): consumed by pages and commands of the next phase; kept reachable for the wiring tests.
         fleet.test_alias.project_membership:
             alias: App\Domain\Project\ProjectMembership
-            public: true
-        fleet.test_alias.access_rule_source:
-            alias: App\Fleet\System\AccessRuleSource
             public: true
         fleet.test_alias.identity_sync:
             alias: App\Fleet\Auth\IdentitySync

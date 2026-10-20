@@ -6,8 +6,8 @@
         -Server
     }
 
-    # The identity headers never come from the client, and nothing is copied back from Authelia: the app behind the
-    # instance does not read them. Only the session decides who may open the site.
+    # The identity headers never come from the client. Only Remote-Groups is copied back from Authelia, to check the
+    # project group below, and it is removed again: the app behind the instance does not read identity headers.
     route {
 {% for header in stripped_headers %}
         request_header -{{ header }}
@@ -15,7 +15,13 @@
 
         forward_auth {{ authelia }} {
             uri /api/authz/forward-auth
+            copy_headers Remote-Groups
         }
+
+        # Per-project access: the groups come from Authelia (the client's own header was stripped above).
+        @forbidden not header_regexp Remote-Groups `{{ groups_pattern }}`
+        respond @forbidden "Forbidden" 403
+        request_header -Remote-Groups
 
         reverse_proxy {{ router }}
     }
@@ -36,7 +42,13 @@
 
         forward_auth {{ authelia }} {
             uri /api/authz/forward-auth
+            copy_headers Remote-Groups
         }
+
+        # Per-project access: the groups come from Authelia (the client's own header was stripped above).
+        @forbidden not header_regexp Remote-Groups `{{ groups_pattern }}`
+        respond @forbidden "Forbidden" 403
+        request_header -Remote-Groups
 
         reverse_proxy {{ router_host }}:{{ port.router }}
     }

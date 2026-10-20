@@ -34,6 +34,26 @@ final class AutheliaUsersRendererTest extends TestCase
         return $parsed;
     }
 
+    public function testProjectMembershipsBecomeProjectGroupsOnce(): void
+    {
+        $parsed = self::parse(new AutheliaUsersRenderer()->render(
+            [self::user('alice', groups: ['dev', 'fleet-project-blog']), self::user('bob', groups: []), self::user('carol')],
+            ['alice' => ['blog', 'demo'], 'bob' => ['demo'], 'ghost' => ['demo']],
+        ));
+
+        self::assertSame(['dev', 'fleet-project-blog', 'fleet-project-demo'], $parsed['users']['alice']['groups']);
+        self::assertSame(['fleet-project-demo'], $parsed['users']['bob']['groups']);
+        self::assertSame(['fleet-admins'], $parsed['users']['carol']['groups'], 'no membership, no project group');
+        self::assertArrayNotHasKey('ghost', $parsed['users'], 'a membership of an unknown user renders nothing');
+    }
+
+    public function testAProjectNameThatIsNotAValidNameIsRefused(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+
+        new AutheliaUsersRenderer()->render([self::user('alice')], ['alice' => ["blog\ngroups: [fleet-admins]"]]);
+    }
+
     public function testGoldenOutput(): void
     {
         $out = new AutheliaUsersRenderer()->render([

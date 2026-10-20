@@ -13,7 +13,6 @@ use App\Fleet\Auth\UserService;
 use App\Fleet\FleetPaths;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
-use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Fleet\System\PrivilegedApply;
 use App\Tests\Support\FleetDatabase;
@@ -268,7 +267,8 @@ final class UserCommandsTest extends KernelTestCase
         self::assertSame(3, $created->getStatusCode());
         self::assertStringContainsString('ghost', $this->json($created)['error']);
         self::assertNull($this->stored('bob'));
-        self::assertFileDoesNotExist(self::getContainer()->get(FleetPaths::class)->usersFile(), 'nothing was rendered');
+        $usersFile = self::getContainer()->get(FleetPaths::class)->usersFile();
+        self::assertStringNotContainsString('bob', is_file($usersFile) ? (string) file_get_contents($usersFile) : '', 'the user was never rendered');
     }
 
     public function testListJsonAndTable(): void
@@ -471,27 +471,30 @@ final class UserCommandsTest extends KernelTestCase
         self::assertSame([], $this->projectsOf('bob'));
     }
 
-    public function testAMembershipChangeInstallsTheAccessRulesOnceSetupIsComplete(): void
+    public function testAMembershipChangeIsAUsersFileEditAndNeverRestartsAuthelia(): void
     {
         $this->create('bob');
-        self::assertSame(0, $this->installs(), 'nothing is installed before setup completes');
         $this->completeSetup();
+        $paths = self::getContainer()->get(FleetPaths::class);
 
         $this->cli('fleet:user:grant', ['username' => 'bob', 'project' => 'blog']);
-        self::assertSame(1, $this->installs());
+        self::assertContains('fleet-project-blog', Yaml::parseFile($paths->usersFile())['users']['bob']['groups']);
 
         $this->cli('fleet:user:grant', ['username' => 'bob', 'project' => 'blog']);
-        self::assertSame(1, $this->installs(), 'nothing changed: Authelia is not restarted');
-
         $this->cli('fleet:user:revoke', ['username' => 'bob', 'project' => 'blog']);
-        self::assertSame(2, $this->installs());
+        self::assertNotContains('fleet-project-blog', Yaml::parseFile($paths->usersFile())['users']['bob']['groups']);
+
+        self::assertSame(0, $this->installs(), 'creating, granting and revoking never run `apply authelia`: it would sign everyone out');
     }
 
-    public function testAFailedInstallIsAWarningNotARollback(): void
+    public function testAFailedUsersFileWriteIsAWarningNotARollback(): void
     {
         $this->create('bob');
         $this->completeSetup();
-        $this->runner()->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
+        $usersFile = self::getContainer()->get(FleetPaths::class)->usersFile();
+        // A directory where users.yml should be: the atomic rename cannot replace it.
+        unlink($usersFile);
+        mkdir($usersFile);
 
         $granted = $this->cli('fleet:user:grant', ['username' => 'bob', 'project' => 'blog', '--json' => true]);
 
@@ -502,11 +505,11 @@ final class UserCommandsTest extends KernelTestCase
         self::assertStringContainsString('the sign-in service was not updated', $document['warning']);
         self::assertSame(['blog'], $this->projectsOf('bob'), 'the membership stands');
 
-        $this->runner()->expect(['sudo'], new CommandResult(1, '', "apply: boom\n"));
         $text = $this->cli('fleet:user:revoke', ['username' => 'bob', 'project' => 'blog']);
         self::assertSame(0, $text->getStatusCode());
         self::assertStringContainsString('Warning: The change was saved', $text->getErrorOutput());
         self::assertSame([], $this->projectsOf('bob'));
+        rmdir($usersFile);
     }
 
     public function testAFailedUsersFileWriteRollsTheChangeBack(): void
