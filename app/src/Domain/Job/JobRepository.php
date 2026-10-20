@@ -150,6 +150,17 @@ final readonly class JobRepository
     }
 
     /**
+     * How many jobs are queued or running (a restore of the databases must wait until there are none).
+     */
+    public function countActive(): int
+    {
+        return (int) $this->em->getConnection()->fetchOne(
+            'SELECT COUNT(*) FROM job WHERE status IN (:queued, :running)',
+            ['queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
+        );
+    }
+
+    /**
      * @return list<Job> ordered by id
      */
     public function running(): array

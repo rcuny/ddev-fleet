@@ -56,7 +56,7 @@ final readonly class BackupVerifier
             if ('ok' !== $integrity) {
                 $problems[] = 'integrity_check: '.$integrity;
             }
-            [$status, $pending, $schemaProblems] = $this->schema($pdo, str_starts_with(basename($real), 'queue-'));
+            [$status, $pending, $schemaProblems] = $this->schema($pdo, str_starts_with(basename($real), 'queue-') || str_starts_with(basename($real), 'queue.sqlite'));
         } catch (\PDOException $e) {
             return new BackupVerification($real, false, null, [], ['SQLite refused the file: '.$e->getMessage()]);
         }
