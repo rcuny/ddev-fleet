@@ -41,4 +41,17 @@ test.describe('design system page @smoke', () => {
     await expect(page.locator('#buttons')).toBeInViewport();
     expect(await hasHorizontalOverflow(page)).toBe(false);
   });
+
+  test('the shared select is 44 px tall on the phone and stays compact on desktop', async ({ page }, testInfo) => {
+    await page.goto('/admin/design-system');
+
+    const select = page.locator('#ds-form-country');
+    await select.scrollIntoViewIfNeeded();
+    const box = (await select.boundingBox())!;
+    if (testInfo.project.name === 'phone') {
+      expect(box.height).toBeGreaterThanOrEqual(43.5);
+    } else {
+      expect(box.height).toBeLessThan(40);
+    }
+  });
 });

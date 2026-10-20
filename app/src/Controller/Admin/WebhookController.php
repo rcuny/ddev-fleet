@@ -95,8 +95,12 @@ final class WebhookController extends AbstractController
 
         try {
             if ('1' === $request->request->get('clear')) {
-                $this->service->clearPipelineToken($name);
-                $this->addFlash('success', 'The pipeline token was removed.');
+                // A second tab that still offered "Remove token": say so instead of reporting a removal.
+                if ($this->service->clearPipelineToken($name)) {
+                    $this->addFlash('success', 'The pipeline token was removed.');
+                } else {
+                    $this->addFlash('warning', 'The pipeline token was already removed.');
+                }
             } else {
                 $value = $request->request->get('token');
                 $this->service->setPipelineToken($name, \is_string($value) ? $value : '');

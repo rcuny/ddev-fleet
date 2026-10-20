@@ -217,6 +217,18 @@ final class WebhookPagesTest extends AdminTestCase
         self::assertStringContainsString('No pipeline token', $this->client->getCrawler()->filter('[data-testid=webhook-token-state]')->text());
     }
 
+    public function testAStaleRemoveTokenSubmitSaysTheTokenWasAlreadyRemoved(): void
+    {
+        $this->bitbucketSecret();
+
+        $this->post('/admin/projects/blog/webhooks/bitbucket/token', ['clear' => '1']);
+        $crawler = $this->client->followRedirect();
+
+        self::assertFalse($this->endpoint()->hasToken());
+        self::assertStringContainsString('already removed', $crawler->filter('[role=alert], [data-testid=flash]')->text(''));
+        self::assertStringNotContainsString('token was removed.', $this->body());
+    }
+
     public function testABadTokenOrAMissingBitbucketSecretIsAWarningAndStoresNothing(): void
     {
         $this->post('/admin/projects/blog/webhooks/bitbucket/token', ['token' => 'ATCTT-x']);
