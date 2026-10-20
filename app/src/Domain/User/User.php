@@ -159,6 +159,9 @@ class User
         return $this->updatedAt;
     }
 
+    /** Groups with this prefix stand for project membership and are written by Fleet only (ProjectGroup). */
+    public const string RESERVED_GROUP_PREFIX = 'fleet-project-';
+
     /**
      * @param array<mixed> $groups
      *
@@ -170,6 +173,9 @@ class User
         foreach ($groups as $group) {
             if (!\is_string($group) || '' === $group) {
                 throw new \InvalidArgumentException('Groups must be non-empty strings.');
+            }
+            if (str_starts_with($group, self::RESERVED_GROUP_PREFIX)) {
+                throw new \InvalidArgumentException(\sprintf('Groups starting with "%s" are reserved for project access.', self::RESERVED_GROUP_PREFIX));
             }
             $clean[$group] = $group;
         }

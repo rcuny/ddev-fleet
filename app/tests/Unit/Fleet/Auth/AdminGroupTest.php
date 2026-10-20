@@ -59,4 +59,19 @@ final class AdminGroupTest extends TestCase
 
         new AdminGroup($name);
     }
+
+    public function testAGroupWithTheProjectPrefixIsReserved(): void
+    {
+        $user = self::user(['dev']);
+
+        foreach ([static fn () => self::user(['fleet-project-blog']), static fn () => $user->changeGroups(['fleet-project-x'])] as $attempt) {
+            try {
+                $attempt();
+                self::fail('Expected the reserved group to be refused.');
+            } catch (\InvalidArgumentException $e) {
+                self::assertStringContainsString('reserved', $e->getMessage());
+            }
+        }
+        self::assertSame(['dev'], $user->groups());
+    }
 }

@@ -5,15 +5,16 @@ declare(strict_types=1);
 namespace App\Fleet\System;
 
 use App\Domain\Host\HostSettings;
-use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use Twig\Environment;
 
 /**
  * Renders Authelia's main configuration (installed as root through `apply authelia`). The secrets (session secret,
  * storage encryption key, reset-password JWT secret) are deliberately absent: the installer supplies them through
- * AUTHELIA_*_FILE variables. users.yml is the app's own file; this configuration changes when the access rules do
- * (one per project, from AccessRuleSource) or the notifier settings (AutheliaNotifier).
+ * AUTHELIA_*_FILE variables. users.yml is the app's own file. Who may open which project is NOT in this configuration:
+ * it has one rule for every instance host (any signed-in user), and the per-project check is the instance's Caddy site
+ * (group `fleet-project-<name>` in users.yml, see ProjectGroup). So the configuration changes only with host-level
+ * settings (domain, notifier), the only reason to restart Authelia and so end every session.
  *
  * The self-service password reset is enabled only when an SMTP notifier is configured: without one the reset link
  * could not be delivered, so the flow stays disabled and `fleet user:reset-password` is the recovery path.
@@ -36,8 +37,6 @@ final readonly class AutheliaConfigRenderer
     public function __construct(
         private Environment $twig,
         private FleetPaths $paths,
-        private AdminGroup $admins,
-        private ?AccessRuleSource $rules = null,
         private ?AutheliaNotifier $notifier = null,
     ) {
     }
@@ -49,9 +48,6 @@ final readonly class AutheliaConfigRenderer
 
         return $this->twig->render('system/authelia-configuration.twig', [
             'domain' => $domain,
-            // Last rule: the hosts of projects without a rule of their own stay admin-only (Authelia is first match).
-            'admin_group' => ConfigValue::group($this->admins->name()),
-            'rules' => $this->projectRules($domain),
             'smtp' => $smtp,
             'reset_enabled' => null !== $smtp,
             'address' => CaddyfileRenderer::AUTHELIA,
@@ -76,47 +72,5 @@ final readonly class AutheliaConfigRenderer
             self::MAX_RETRIES,
             self::FIND_TIME,
         );
-    }
-
-    /**
-     * @return list<array{regex: string, subjects: list<string>}>
-     */
-    private function projectRules(string $domain): array
-    {
-        $hostPattern = str_replace('.', '\\.', $domain);
-
-        $all = $this->rules?->rules() ?? [];
-        $projects = array_flip(array_map(static fn (AccessRule $rule): string => $rule->project, $all));
-
-        $rules = [];
-        foreach ($all as $rule) {
-            $subjects = ['group:'.ConfigValue::group($rule->adminGroup)];
-            foreach ($rule->users as $username) {
-                $subjects[] = 'user:'.ConfigValue::username($username);
-            }
-
-            // `<project>--<label>.<domain>` and the aliases `<hostname>-<project>--<label>.<domain>`, with the project's
-            // own hostnames listed (never a free prefix: "x" must not match the alias of project "blog-x"). The label
-            // is one DNS label. Names cannot contain "--" or ".", so the project part is unambiguous, and the domain is
-            // validated lowercase letters, digits, dots and dashes.
-            // The alias "<hostname>-<project>" of one project can spell another project's own name ("x" + "blog" vs the
-            // project "x-blog"): the host string is the same, and no regex can tell them apart (RE2 has no lookahead).
-            // That alias is left out, so the other project's hosts never match this rule (deny by default).
-            $hostnames = array_filter(
-                $rule->hostnames,
-                static fn (string $hostname): bool => !isset($projects[$hostname.'-'.$rule->project]),
-            );
-            $prefix = '';
-            if ([] !== $hostnames) {
-                $prefix = '(?:(?:'.implode('|', array_map(ConfigValue::hostnameLabel(...), $hostnames)).')-)?';
-            }
-
-            $rules[] = [
-                'regex' => '^'.$prefix.ConfigValue::projectName($rule->project).'--[a-z0-9-]+\\.'.$hostPattern.'$',
-                'subjects' => array_values(array_unique($subjects)),
-            ];
-        }
-
-        return $rules;
     }
 }

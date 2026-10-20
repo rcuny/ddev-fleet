@@ -5,13 +5,13 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Fleet\Auth;
 
 use App\Domain\Host\HostSettings;
+use App\Domain\User\UserRepository;
 use App\Fleet\Auth\AutheliaUsersFile;
-use App\Fleet\Auth\ProjectAccessRules;
 use App\Fleet\Auth\ProjectAccessService;
 use App\Fleet\Auth\UserService;
+use App\Fleet\FleetPaths;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
-use App\Fleet\System\AccessRuleSource;
 use App\Fleet\System\AutheliaConfigRenderer;
 use App\Tests\Support\FleetDatabase;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -50,11 +50,9 @@ final class AccessWiringTest extends KernelTestCase
         return $parsed;
     }
 
-    public function testRulesAreRenderedFromTheDatabase(): void
+    public function testMembershipsAreRenderedAsProjectGroupsAndNotAsRules(): void
     {
         $em = $this->setUpFleetDatabase();
-        self::assertInstanceOf(ProjectAccessRules::class, self::getContainer()->get('fleet.test_alias.access_rule_source'));
-        self::assertInstanceOf(AccessRuleSource::class, self::getContainer()->get('fleet.test_alias.access_rule_source'));
 
         $accounts = self::getContainer()->get(UserService::class);
         self::assertInstanceOf(UserService::class, $accounts);
@@ -67,11 +65,20 @@ final class AccessWiringTest extends KernelTestCase
         $access->grant('bob', 'blog');
         $em->clear();
 
+        // Authelia's configuration has one static rule for the instance hosts, whatever the memberships are.
         $rules = $this->rendered()['access_control']['rules'];
+        self::assertCount(3, $rules);
+        self::assertSame(['domain' => '*.fleet.example.com', 'policy' => 'one_factor'], $rules[2]);
 
-        self::assertCount(4, $rules);
-        self::assertSame('^blog--[a-z0-9-]+\.fleet\.example\.com$', $rules[2]['domain_regex']);
-        self::assertSame([['group:fleet-admins'], ['user:bob']], $rules[2]['subject']);
+        // The membership is in users.yml, which Authelia reloads live.
+        $users = self::getContainer()->get('fleet.test_alias.authelia_users_file');
+        self::assertInstanceOf(AutheliaUsersFile::class, $users);
+        $repository = self::getContainer()->get(UserRepository::class);
+        self::assertInstanceOf(UserRepository::class, $repository);
+        $users->sync($repository);
+        $paths = self::getContainer()->get(FleetPaths::class);
+        self::assertInstanceOf(FleetPaths::class, $paths);
+        self::assertSame(['fleet-admins', 'fleet-project-blog'], Yaml::parseFile($paths->usersFile())['users']['bob']['groups']);
     }
 
     public function testTheSelfServiceResetIsDisabledUntilAnSmtpServerIsConfigured(): void

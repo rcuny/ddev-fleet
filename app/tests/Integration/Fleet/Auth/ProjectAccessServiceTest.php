@@ -11,7 +11,6 @@ use App\Domain\Project\ProjectRepository;
 use App\Domain\User\UserRepository;
 use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\PasswordPolicy;
-use App\Fleet\Auth\ProjectAccessRules;
 use App\Fleet\Auth\ProjectAccessService;
 use App\Fleet\Auth\UnknownUser;
 use App\Fleet\Auth\UserService;
@@ -165,20 +164,17 @@ final class ProjectAccessServiceTest extends KernelTestCase
         $this->em->getConnection()->executeStatement("DELETE FROM project WHERE name = 'blog'");
 
         self::assertSame(0, $this->rowCount());
-        $rules = new ProjectAccessRules(new ProjectAccessRepository($this->em), new AdminGroup('fleet-admins'))->rules();
-        self::assertSame(['demo', 'shop'], array_map(static fn ($rule): string => $rule->project, $rules));
+        $members = new ProjectAccessRepository($this->em)->membersByProject();
+        self::assertSame(['demo', 'shop'], array_keys($members));
     }
 
-    public function testRulesListEveryProjectWithItsMembers(): void
+    public function testMembersByProjectListsEveryProjectWithItsMembers(): void
     {
         $this->service->grant('bob', 'demo');
         $this->service->grant('alice', 'demo');
 
-        $rules = new ProjectAccessRules(new ProjectAccessRepository($this->em), new AdminGroup('ops'))->rules();
+        $members = new ProjectAccessRepository($this->em)->membersByProject();
 
-        self::assertSame(['blog', 'demo', 'shop'], array_map(static fn ($rule): string => $rule->project, $rules));
-        self::assertSame([[], ['alice', 'bob'], []], array_map(static fn ($rule): array => $rule->users, $rules));
-        self::assertSame('ops', $rules[0]->adminGroup);
-        self::assertSame([[], [], []], array_map(static fn ($rule): array => $rule->hostnames, $rules));
+        self::assertSame(['blog' => [], 'demo' => ['alice', 'bob'], 'shop' => []], $members);
     }
 }

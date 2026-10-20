@@ -10,6 +10,7 @@ use App\Domain\Instance\InstanceState;
 use App\Domain\Port\NamedPort;
 use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceHostnames;
 use App\Fleet\Instances\InstanceSiteRefresher;
@@ -55,6 +56,7 @@ final class InstanceSiteRefresherTest extends KernelTestCase
             new CaddyReloader($this->runner, $this->paths),
             new InstanceHostnames($host),
             new LockFactory(new FlockStore($this->paths->locksDir())),
+            new AdminGroup('fleet-admins'),
         );
         $this->refresher = new InstanceSiteRefresher(new InstanceRepository($this->em), $this->writer, $this->paths);
         $this->service = new ProjectService(new ProjectRepository($this->em), new NamedPortRepository($this->em), new FakeInstanceGuard(), null, null, $this->refresher);

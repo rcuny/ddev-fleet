@@ -7,7 +7,6 @@ namespace App\Tests\Integration\Fleet\System;
 use App\Domain\Host\HostSettings;
 use App\Domain\Host\TlsMode;
 use App\Domain\Secret\SecretRepository;
-use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use App\Fleet\Secrets\SecretBox;
 use App\Fleet\Secrets\SecretKeyFile;
@@ -62,7 +61,7 @@ final class SystemRendererTest extends KernelTestCase
         return new SystemRenderer(
             new CaddyfileRenderer($twig, $this->paths, new StoredOvhEndpoint($this->store), '/opt/ddev-fleet/app'),
             new CaddyEnvRenderer($this->store, self::PROXY_SECRET),
-            new AutheliaConfigRenderer($twig, $this->paths, new AdminGroup('fleet-admins')),
+            new AutheliaConfigRenderer($twig, $this->paths),
             new GateWriter($twig, $this->paths, new CaddyReloader($this->runner, $this->paths)),
             $this->paths,
             $applier,

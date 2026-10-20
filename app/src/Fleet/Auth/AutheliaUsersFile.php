@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Fleet\Auth;
 
+use App\Domain\Project\ProjectAccessRepository;
 use App\Domain\User\PasswordHash;
 use App\Domain\User\User;
 use App\Domain\User\UserRepository;
@@ -40,6 +41,7 @@ final readonly class AutheliaUsersFile
         private FleetPaths $paths,
         private AutheliaUsersRenderer $renderer,
         private ?AutheliaNotifier $notifier = null,
+        private ?ProjectAccessRepository $access = null,
     ) {
     }
 
@@ -65,7 +67,7 @@ final readonly class AutheliaUsersFile
      */
     public function check(UserRepository $users): void
     {
-        $this->renderer->render($users->allFresh());
+        $this->render($users->allFresh());
     }
 
     public function syncWithReport(UserRepository $users): UsersSyncResult
@@ -76,7 +78,7 @@ final readonly class AutheliaUsersFile
             if ([] !== $adopted) {
                 $users->flush();
             }
-            $rendered = $this->renderer->render($all);
+            $rendered = $this->render($all);
 
             return new UsersSyncResult($this->install($rendered), array_map(static fn (User $user): string => $user->username(), $adopted));
         });
@@ -94,7 +96,25 @@ final readonly class AutheliaUsersFile
      */
     public function write(array $users): bool
     {
-        return $this->locked(fn (): bool => $this->install($this->renderer->render($users)));
+        return $this->locked(fn (): bool => $this->install($this->render($users)));
+    }
+
+    /**
+     * The users with their project groups: a member of a project carries `fleet-project-<name>` (ProjectGroup), so a
+     * membership change is a change of this file, which Authelia reloads without a restart.
+     *
+     * @param list<User> $users
+     */
+    private function render(array $users): string
+    {
+        $projectsByUser = [];
+        foreach ($this->access?->membersByProject() ?? [] as $project => $usernames) {
+            foreach ($usernames as $username) {
+                $projectsByUser[$username][] = $project;
+            }
+        }
+
+        return $this->renderer->render($users, $projectsByUser);
     }
 
     /**

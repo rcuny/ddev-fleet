@@ -92,6 +92,7 @@ final class InstanceSiteValidatesTest extends TestCase
             'ports' => [],
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
+            'groups_pattern' => '(?:^|,)(?:fleet\\-admins|fleet\\-project\\-acme)(?:,|$)',
             'router' => CaddyfileRenderer::DDEV_ROUTER,
             'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
         ]);
@@ -114,6 +115,7 @@ final class InstanceSiteValidatesTest extends TestCase
             ],
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
+            'groups_pattern' => '(?:^|,)(?:fleet\\-admins|fleet\\-project\\-acme)(?:,|$)',
             'router' => CaddyfileRenderer::DDEV_ROUTER,
             'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
         ]);

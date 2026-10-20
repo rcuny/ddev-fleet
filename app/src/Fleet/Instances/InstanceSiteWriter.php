@@ -7,6 +7,8 @@ namespace App\Fleet\Instances;
 use App\Domain\Instance\Instance;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
+use App\Fleet\Auth\AdminGroup;
+use App\Fleet\Auth\ProjectGroup;
 use App\Fleet\FleetPaths;
 use App\Fleet\Projects\Rule\PortNumbers;
 use App\Fleet\Ssh\AtomicFile;
@@ -25,7 +27,9 @@ use Twig\Environment;
  * port on ddev's router.
  *
  * A site is never live without the gate: every request passes Authelia's forward_auth before it is proxied to ddev's
- * router. A snippet that Caddy refuses is rolled back, so one bad instance cannot take the other sites down.
+ * router, and is then answered 403 unless Authelia's Remote-Groups carries the administrators' group or the project's
+ * group (ProjectGroup). Authelia itself lets any signed-in user through its one static rule, so access changes are
+ * edits of users.yml and never restart it. The aliases and the named-port blocks of the instance are the same site. A snippet that Caddy refuses is rolled back, so one bad instance cannot take the other sites down.
  */
 final readonly class InstanceSiteWriter
 {
@@ -38,6 +42,7 @@ final readonly class InstanceSiteWriter
         private CaddyReloader $reloader,
         private InstanceHostnames $hostnames,
         private LockFactory $locks,
+        private AdminGroup $admins,
     ) {
     }
 
@@ -60,6 +65,7 @@ final readonly class InstanceSiteWriter
             'ports' => self::portBlocks($project, $hosts),
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
+            'groups_pattern' => $this->groupsPattern($project),
             'router' => CaddyfileRenderer::DDEV_ROUTER,
             'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
         ]);
@@ -117,6 +123,17 @@ final readonly class InstanceSiteWriter
     public function validate(): void
     {
         $this->reloader->validate();
+    }
+
+    /**
+     * The RE2 pattern the Remote-Groups header (comma separated) must match: the admin group or the project's group as
+     * a whole list entry. Both names are validated (letters, digits, dot, underscore, dash) and quoted.
+     */
+    private function groupsPattern(Project $project): string
+    {
+        $groups = [ConfigValue::group($this->admins->name()), ProjectGroup::name($project->name())];
+
+        return '(?:^|,)(?:'.implode('|', array_map(static fn (string $group): string => preg_quote($group, '/'), $groups)).')(?:,|$)';
     }
 
     /**

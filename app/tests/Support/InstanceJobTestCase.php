@@ -16,6 +16,7 @@ use App\Domain\Project\ProjectRepository;
 use App\Domain\Secret\SecretRepository;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Git\GitClient;
@@ -102,6 +103,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             new CaddyReloader($this->runner, $this->paths),
             $hostnames,
             new LockFactory(new FlockStore($this->paths->locksDir())),
+            new AdminGroup('fleet-admins'),
         );
         $this->tmux = new Tmux($this->runner, $this->paths, '/opt/ddev-fleet/app/bin/console');
         $this->teardown = new Teardown($this->paths, $this->ddev, $this->sites, $this->tmux);

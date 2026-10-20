@@ -250,7 +250,7 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
 Everything on this page is **administrator-only**: the pages need `ROLE_ADMIN` (the group `FLEET_ADMIN_GROUP`, see
 [`installation.md`](installation.md)), the issue id tester's endpoint is admin-only too, and every state change is a
 POST with a CSRF token. A member gets 403, a signed-out visitor is sent to sign in. The commands are for whoever can
-use `sudo fleet` on the host. Operating the instances of a project (start, stop, redeploy, logs) is open to the project's members; deploying and destroying are administrators only, and changing a project's settings never can be given away.
+use `sudo fleet` on the host. Operating the instances of a project (start, stop, redeploy, logs) is open to the project's members; deploying and destroying are administrators only, and changing a project's settings never can be given away. A member opens the sites of their projects only: the project's instance sites answer 403 to everyone else except administrators (the access is the group `fleet-project-<name>` in the Authelia users file, see `docs/installation.md`).
 
 ## Deleting
 
