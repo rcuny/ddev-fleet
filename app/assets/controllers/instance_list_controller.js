@@ -18,6 +18,7 @@ export default class extends Controller {
     #timer = null;
     #source = null;
     #wake = null;
+    #holdUntil = 0;
 
     connect() {
         this.element.addEventListener('turbo:frame-load', this.#restore);
@@ -81,6 +82,12 @@ export default class extends Controller {
         return this.element.querySelector('turbo-frame#instances');
     }
 
+    // A refresh we started that no turbo:frame-load has answered yet (given up after 15 s, so a failed one cannot freeze
+    // the list), and the second after one: Turbo is still closing that request when the event fires.
+    #loading() {
+        return Date.now() < this.#holdUntil;
+    }
+
     #paused() {
         if (document.hidden || document.querySelector('dialog[open]')) {
             return true;
@@ -94,9 +101,13 @@ export default class extends Controller {
 
     refresh = () => {
         const frame = this.#frame();
-        if (!frame || this.#paused()) {
+        // A frame that is still loading is left alone: reloading it cancels the request in flight, and Turbo lets the
+        // cancelled response body reject unhandled ("The user aborted a request.", a page error under load). `busy`
+        // alone is not enough: it is gone before the frame has read and rendered the answer.
+        if (!frame || frame.hasAttribute('busy') || this.#loading() || this.#paused()) {
             return;
         }
+        this.#holdUntil = Date.now() + 15000;
         const url = frame.src || this.urlValue + window.location.search;
         if (frame.src === url) {
             frame.reload();
@@ -136,6 +147,7 @@ export default class extends Controller {
     }
 
     #restore = () => {
+        this.#holdUntil = Date.now() + 1000;
         this.rowTargets.forEach((box) => {
             box.checked = this.#selected.has(box.value);
         });
