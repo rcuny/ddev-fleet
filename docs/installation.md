@@ -324,6 +324,7 @@ All commands run on the host. `fleet` is the wrapper the installer puts in `/usr
 | Lost the setup URL (setup not complete) | `sudo fleet setup:token` prints a new setup URL; the old one stops working. It refuses once setup is complete. |
 | Nobody can sign in, or a password is forgotten | `ssh -t admin@fleet.example.com sudo fleet user:reset-password alice` |
 | Start the wizard over (change certificates, replace the administrator, ...) | `sudo fleet setup:reset` |
+| Get into the agent workspace (the `fleet` tmux session) | `ssh -t admin@fleet.example.com sudo fleet tmux`, or `sudo fleet tmux <instance-id>` for one instance's window. Needs a terminal: without `ssh -t` it exits with status 2. See [`agent-workspace.md`](agent-workspace.md). |
 
 **`fleet:user:reset-password <username>`** asks for the new password twice **without echo** and stores its
 argon2id hash, rewrites the Authelia users file and restarts Authelia. It needs a real terminal: over SSH use
