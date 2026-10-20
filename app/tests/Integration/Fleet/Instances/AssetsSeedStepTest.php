@@ -322,6 +322,97 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         }
     }
 
+    public function testAFileSwappedForAnotherInodeBetweenTheOpenAndTheRecheckFailsTheDeploy(): void
+    {
+        file_put_contents($this->assets.'/blob.bin', "\x00data");
+
+        $swap = static function (string $src): void {
+            if (str_ends_with($src, '/blob.bin')) {
+                rename($src, $src.'.old');
+                file_put_contents($src, "\x00other");
+            }
+        };
+        $this->steps->exchangeArray([new AssetsSeedStep($this->paths, null, $swap)]);
+
+        $this->expectException(JobFailed::class);
+        $this->expectExceptionMessage('changed while it was being seeded');
+        $instance = $this->instance();
+        $this->workflow->run($instance, $this->project, false, $this->logFor($this->job('deploy', $instance)), false);
+    }
+
+    public function testAFolderSwappedForALinkAfterTheWalkCheckedTheLeafIsRefusedByTheDescriptorPath(): void
+    {
+        $outside = sys_get_temp_dir().'/seed-outside-'.bin2hex(random_bytes(3));
+        mkdir($outside);
+        file_put_contents($outside.'/settings.local.php', 'TOP SECRET');
+        file_put_contents($this->assets.'/web/sites/default/settings.local.php', 'inside');
+        $folder = $this->assets.'/web/sites/default';
+
+        // Swapped in the afterCheck seam (before the first lstat): the leaf then resolves outside, is a regular file and
+        // keeps one inode through the open, so only the real path of the descriptor can refuse it. (A swap after the open
+        // would not do: the descriptor's /proc path follows a renamed folder and the inode recheck fails instead.)
+        $swap = static function (string $src) use ($outside, $folder): void {
+            if (str_ends_with($src, '/settings.local.php') && !is_link($folder)) {
+                rename($folder, $folder.'.old');
+                symlink($outside, $folder);
+            }
+        };
+        $this->steps->exchangeArray([new AssetsSeedStep($this->paths, $swap)]);
+        $instance = $this->instance();
+
+        try {
+            $this->workflow->run($instance, $this->project, false, $this->logFor($this->job('deploy', $instance)), false);
+            self::fail('expected a failure');
+        } catch (JobFailed $e) {
+            self::assertStringContainsString('is not inside the project\'s assets', $e->getMessage());
+        } finally {
+            @unlink($outside.'/settings.local.php');
+            @rmdir($outside);
+        }
+        $copy = $this->dir().'/web/sites/default/settings.local.php';
+        self::assertTrue(!file_exists($copy) || 'TOP SECRET' !== file_get_contents($copy));
+    }
+
+    public function testAFifoSwappedInAfterTheCheckDoesNotHangTheDeploy(): void
+    {
+        if (!\function_exists('posix_mkfifo')) {
+            self::markTestSkipped('posix_mkfifo is not available');
+        }
+        file_put_contents($this->assets.'/blob.bin', "\x00data");
+
+        $swap = static function (string $src): void {
+            if (str_ends_with($src, '/blob.bin')) {
+                unlink($src);
+                posix_mkfifo($src, 0o600);
+            }
+        };
+        $this->steps->exchangeArray([new AssetsSeedStep($this->paths, $swap)]);
+        $instance = $this->instance();
+
+        $this->expectException(JobFailed::class);
+        $this->expectExceptionMessage('changed while it was being seeded');
+        $this->workflow->run($instance, $this->project, false, $this->logFor($this->job('deploy', $instance)), false);
+    }
+
+    public function testAHardLinkInsideTheAssetsIsTheSameInodeAndIsCopied(): void
+    {
+        $outside = sys_get_temp_dir().'/seed-hard-'.bin2hex(random_bytes(3));
+        file_put_contents($outside, 'OUTSIDE CONTENT');
+        if (!@link($outside, $this->assets.'/linked.bin')) {
+            @unlink($outside);
+            self::markTestSkipped('hard links across these directories are not possible here');
+        }
+
+        try {
+            $this->deploy();
+        } finally {
+            @unlink($outside);
+        }
+
+        // Documented behaviour: a hard link is a regular file with its own name; whoever made it already could read the target.
+        self::assertSame('OUTSIDE CONTENT', file_get_contents($this->dir().'/linked.bin'));
+    }
+
     public function testAMissingAssetsDirectoryIsANoOp(): void
     {
         new \Symfony\Component\Filesystem\Filesystem()->remove($this->assets);

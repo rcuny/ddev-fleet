@@ -44,10 +44,13 @@ final class AssetsSeedStep implements DeployStep
     /**
      * @param (\Closure(string): void)|null $afterCheck test seam: called with a source path once the walk has checked it
      *                                                  and right before it is opened (production leaves it null)
+     * @param (\Closure(string): void)|null $afterOpen  test seam: called with a source path right after it was opened
+     *                                                  and before the descriptor is verified (production leaves it null)
      */
     public function __construct(
         private readonly FleetPaths $paths,
         private readonly ?\Closure $afterCheck = null,
+        private readonly ?\Closure $afterOpen = null,
     ) {
     }
 
@@ -127,7 +130,7 @@ final class AssetsSeedStep implements DeployStep
                     $context->exclude('/'.self::DUMPS.'/');
                 }
             } elseif (0o100000 === $type) {
-                $this->copyFile($src, $dst, $path, $info['mode'] & 0o755, $inDumps, $context, $counts);
+                $this->copyFile($root, $src, $dst, $path, $info['mode'] & 0o755, $inDumps, $context, $counts);
                 if (!$inDumps) {
                     $context->exclude('/'.self::escape($path));
                 }
@@ -152,7 +155,7 @@ final class AssetsSeedStep implements DeployStep
         }
 
         if ($inDumps && self::DUMPS === explode('/', $link->target)[0]) {
-            $this->linkOrCopy($root.'/'.$link->target, $dst, $path, $counts);
+            $this->linkOrCopy($root, $root.'/'.$link->target, $dst, $path, $counts);
 
             return;
         }
@@ -189,15 +192,15 @@ final class AssetsSeedStep implements DeployStep
     /**
      * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
      */
-    private function copyFile(string $src, string $dst, string $path, int $mode, bool $dump, DeployContext $context, array &$counts): void
+    private function copyFile(string $root, string $src, string $dst, string $path, int $mode, bool $dump, DeployContext $context, array &$counts): void
     {
         if ($dump) {
-            $this->linkOrCopy($src, $dst, $path, $counts);
+            $this->linkOrCopy($root, $src, $dst, $path, $counts);
 
             return;
         }
 
-        [$handle, $opened] = $this->openChecked($src, $path);
+        [$handle, $opened] = $this->openChecked($root, $src, $path);
         try {
             $size = $opened['size'];
             $content = $size <= self::MAX_TEXT_BYTES ? stream_get_contents($handle, self::MAX_TEXT_BYTES + 1) : false;
@@ -227,9 +230,9 @@ final class AssetsSeedStep implements DeployStep
     /**
      * @param array{copied: int, substituted: int, linked: int, skipped: int} $counts
      */
-    private function linkOrCopy(string $src, string $dst, string $path, array &$counts): void
+    private function linkOrCopy(string $root, string $src, string $dst, string $path, array &$counts): void
     {
-        [$handle, $opened] = $this->openChecked($src, $path);
+        [$handle, $opened] = $this->openChecked($root, $src, $path);
         try {
             $b = @lstat($dst);
             $same = false !== $b && self::isFile($b) && self::sameInode($opened, $b);
@@ -259,11 +262,14 @@ final class AssetsSeedStep implements DeployStep
     /**
      * Opens a source the walk has checked, and proves the descriptor is the regular file that was checked: the path is
      * lstat'ed before and after the open and compared (inode and device) with fstat of the descriptor, so a link, or
-     * another file, swapped in between makes the seed fail instead of copying from outside the assets.
+     * another file, swapped in between makes the seed fail instead of copying from outside the assets. The open is
+     * non-blocking (`n`), so a fifo swapped in after the lstat is refused by the fstat instead of hanging the deploy, and
+     * the real path of the descriptor (`/proc/self/fd`, Linux only) must be inside the assets directory, which covers a
+     * parent folder swapped for a link to somewhere else, a case the inode of the leaf cannot show.
      *
      * @return array{resource, array<int|string, int>}
      */
-    private function openChecked(string $src, string $path): array
+    private function openChecked(string $root, string $src, string $path): array
     {
         if (null !== $this->afterCheck) {
             ($this->afterCheck)($src);
@@ -273,9 +279,12 @@ final class AssetsSeedStep implements DeployStep
         if (false === $before || !self::isFile($before)) {
             throw $changed();
         }
-        $handle = @fopen($src, 'r');
+        $handle = @fopen($src, 'rn');
         if (false === $handle) {
             throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
+        }
+        if (null !== $this->afterOpen) {
+            ($this->afterOpen)($src);
         }
         $opened = fstat($handle);
         $after = @lstat($src);
@@ -289,8 +298,46 @@ final class AssetsSeedStep implements DeployStep
 
             throw $changed();
         }
+        if (!self::descriptorInside($root, $opened)) {
+            fclose($handle);
+
+            throw new \RuntimeException(\sprintf('"%s" is not inside the project\'s assets (a folder on its way was replaced); nothing was copied', $this->printable($path)));
+        }
 
         return [$handle, $opened];
+    }
+
+    /**
+     * PHP does not expose the descriptor number, so the open descriptors of this process that point at the opened
+     * inode are found in `/proc/self/fd`; at least one must exist, and every one must resolve below the real assets
+     * directory.
+     *
+     * @param array<int|string, int> $opened
+     */
+    private static function descriptorInside(string $root, array $opened): bool
+    {
+        $base = realpath($root);
+        $fds = @scandir('/proc/self/fd');
+        if (false === $base || false === $fds) {
+            return false;
+        }
+        $found = false;
+        foreach ($fds as $fd) {
+            if ('.' === $fd || '..' === $fd) {
+                continue;
+            }
+            $stat = @stat('/proc/self/fd/'.$fd);
+            if (!self::sameInode($opened, $stat)) {
+                continue;
+            }
+            $real = @readlink('/proc/self/fd/'.$fd);
+            if (false === $real || !str_starts_with($real, $base.'/')) {
+                return false;
+            }
+            $found = true;
+        }
+
+        return $found;
     }
 
     /**
