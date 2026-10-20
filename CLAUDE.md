@@ -206,6 +206,13 @@ php vendor/bin/phpunit --testsuite Repo   # one suite: Unit | Integration | Func
 `npm run typecheck` and `npx playwright test`. Never merge a red suite. Python CI tooling:
 `FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest` (as the pipeline does).
 
+### Playwright tiers
+
+`FLEET_PW_TIER=quick|full` (default `full`, so a bare `npx playwright test` and the gate above are unchanged). `quick`
+is the Fleet CI merge gate on `feature/*` and `renovate/*`: `desktop` without the `*-coverage` and the
+`projects-validation` / `templates-validation` specs, `phone` limited to `@smoke`. `release/*`, `develop` and the
+nightly run use `full`. Details: `tests/README-tests.md`.
+
 ### Playwright modes
 
 `tests/playwright/` runs the same specs two ways, chosen by `FLEET_E2E_BASE_URL`:
