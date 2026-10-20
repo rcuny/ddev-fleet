@@ -83,9 +83,20 @@ final class SchedulePagesTest extends AdminTestCase
         $page = $this->client->getCrawler();
         self::assertCount(1, $page->filter('[data-testid=error-cron]'));
         self::assertCount(1, $page->filter('[data-testid=error-timezone]'));
-        self::assertCount(1, $page->filter('[data-testid=error-instance]'));
+        self::assertCount(0, $page->filter('[data-testid=error-instance]'));
         self::assertSame('not a cron', $page->filter('input[name=cron]')->attr('value'));
         self::assertCount(0, $this->service()->list());
+    }
+
+    public function testAMissingTargetIsAcceptedWithAWarningAndABadgeInTheList(): void
+    {
+        $crawler = $this->open('/admin/schedules/new');
+        $this->submit($crawler, 'Create schedule', ['name' => 'later', 'cron' => '0 3 * * *', 'timezone' => 'UTC', 'action' => 'redeploy', 'instance' => 'blog--later']);
+
+        self::assertResponseRedirects('/admin/schedules');
+        $page = $this->client->followRedirect();
+        self::assertStringContainsString('blog--later does not exist yet; runs are skipped until it does', $page->filter('[data-testid=flashes]')->text());
+        self::assertCount(1, $page->filter('[data-testid=schedule-target-missing]'));
     }
 
     public function testPauseResumeAndRunNow(): void

@@ -36,6 +36,9 @@
                                 {% else %}
                                     <twig:Badge variant="secondary" data-testid="schedule-state">Paused</twig:Badge>
                                 {% endif %}
+                                {% if row.targetMissing %}
+                                    <twig:Badge variant="outline" class="border-signal text-signal-darker dark:text-signal" title="This instance does not exist yet; runs are skipped until it does." data-testid="schedule-target-missing">Target missing</twig:Badge>
+                                {% endif %}
                             </div>
                             <p class="mt-1 text-xs text-ink-muted [overflow-wrap:anywhere]">
                                 <code data-testid="schedule-cron">{{ schedule.cron }}</code> · {{ schedule.timezone }} · {{ schedule.action }}{% if schedule.instanceId %} · <span class="font-mono">{{ schedule.instanceId }}</span>{% endif %}

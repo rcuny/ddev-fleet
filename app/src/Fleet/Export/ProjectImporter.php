@@ -328,7 +328,7 @@ final readonly class ProjectImporter
             }
             // The instance may not exist on this host yet (it is deployed after the import): only a missing target is refused.
             $input = new ScheduleInput($schedule['name'], $schedule['cron'], $schedule['timezone'], $schedule['action'], $id);
-            foreach ($this->scheduleService->validate($input, null === $stored, null === $id) as $field => $message) {
+            foreach ($this->scheduleService->validate($input, null === $stored) as $field => $message) {
                 $errors[] = "schedules[$i].".('instance' === $field ? 'instance' : $field).': '.$message;
             }
             $items[] = isset($before[$schedule['name']])
@@ -479,9 +479,9 @@ final readonly class ProjectImporter
         $input = new ScheduleInput($schedule['name'], $schedule['cron'], $schedule['timezone'], $schedule['action'], $id);
 
         if (ImportItem::CREATE === $action) {
-            $this->scheduleService->create($input, $by, false);
+            $this->scheduleService->create($input, $by);
         } else {
-            $this->scheduleService->update($schedule['name'], $input, $by, false);
+            $this->scheduleService->update($schedule['name'], $input, $by);
         }
         if ($schedule['enabled']) {
             $this->scheduleService->resume($schedule['name'], $by);

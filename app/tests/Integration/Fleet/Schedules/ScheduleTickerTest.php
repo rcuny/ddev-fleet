@@ -331,6 +331,28 @@ final class ScheduleTickerTest extends ScheduleTestCase
         self::assertNull($created[0]->jobId());
     }
 
+    public function testAMissingTargetIsSkippedWithAReasonUntilItExists(): void
+    {
+        $this->create('nightly', '0 3 * * *', 'UTC', 'gone');
+        $this->at('2026-10-21 03:00:10 UTC');
+
+        $created = $this->ticker->tick();
+
+        self::assertSame(ScheduleOutcome::Skipped, $created[0]->outcome());
+        self::assertStringContainsString('gone does not exist yet', (string) $created[0]->detail());
+        self::assertNull($created[0]->jobId());
+        self::assertSame([], $this->fakeJobs());
+        self::assertSame(0, $this->action->started);
+
+        // The same schedule pointed at an existing instance runs normally.
+        $this->scheduleService->update('nightly', new \App\Fleet\Schedules\ScheduleInput('nightly', '0 3 * * *', 'UTC', 'fake', 'acme--main'), 'admin');
+        $this->at('2026-10-22 03:00:10 UTC');
+        $created = $this->ticker->tick();
+
+        self::assertSame(ScheduleOutcome::Claimed, $created[0]->outcome());
+        self::assertSame(1, $this->action->started);
+    }
+
     public function testResultFollowsTheJobStatus(): void
     {
         $this->create();

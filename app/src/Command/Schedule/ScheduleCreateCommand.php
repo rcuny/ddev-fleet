@@ -42,7 +42,7 @@ final class ScheduleCreateCommand extends Command
             $input = new ScheduleInput((string) $in->getArgument('name'), (string) $in->getOption('cron'), (string) $in->getOption('timezone'), (string) $in->getOption('action'), $in->getOption('instance'));
             $by = AuditLog::CLI_ACTOR;
             $schedule = $this->schedules->create($input, $by);
-            $out->emit($this->shapes->schedule($schedule), static function (JsonOutput $out) use ($schedule): void {
+            $out->emit($out->withWarning($this->shapes->schedule($schedule), $this->schedules->targetWarning($schedule)), static function (JsonOutput $out) use ($schedule): void {
                 $out->success(\sprintf('Schedule "%s" created (%s, %s).', $schedule->name(), $schedule->cron(), $schedule->timezone()));
             });
         });

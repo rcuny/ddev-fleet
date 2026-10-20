@@ -189,7 +189,7 @@ final class NightlyRedeployTest extends InstanceJobTestCase
         self::assertSame([$busy->id()], array_map(static fn (Job $j): ?int => $j->id(), $this->redeployJobs()));
     }
 
-    public function testADestroyedInstanceIsFailedWithoutAJob(): void
+    public function testADestroyedInstanceIsSkippedWithAReasonAndWithoutAJob(): void
     {
         $instance = $this->running('main');
         $this->schedule('nightly', $instance);
@@ -200,8 +200,9 @@ final class NightlyRedeployTest extends InstanceJobTestCase
         $created = $this->ticker->tick();
 
         self::assertCount(1, $created);
-        self::assertSame(ScheduleOutcome::Failed, $created[0]->outcome());
-        self::assertSame('failed', $this->scheduleService->result($created[0]));
+        self::assertSame(ScheduleOutcome::Skipped, $created[0]->outcome());
+        self::assertSame('skipped', $this->scheduleService->result($created[0]));
+        self::assertStringContainsString('does not exist yet', (string) $created[0]->detail());
         self::assertNull($created[0]->jobId());
         self::assertSame([], $this->redeployJobs());
         // The occurrence is consumed: the next tick does not retry it.

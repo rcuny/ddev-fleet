@@ -56,6 +56,10 @@ final readonly class ScheduleLauncher
             return [ScheduleOutcome::Failed, null, \sprintf('The action "%s" is not available.', $schedule->action())];
         }
 
+        if ($action->targetMissing($schedule->instanceId())) {
+            return [ScheduleOutcome::Skipped, null, \sprintf('Instance %s does not exist yet; the run is skipped until it does.', $schedule->instanceId() ?? '(none)')];
+        }
+
         try {
             return [ScheduleOutcome::Claimed, $action->start($schedule, $trigger, $requestedBy), null];
         } catch (Refused $e) {
