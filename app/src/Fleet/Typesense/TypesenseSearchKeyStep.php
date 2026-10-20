@@ -16,8 +16,9 @@ use Symfony\Contracts\HttpClient\HttpClientInterface;
  * Once ddev is up, for a Typesense project: registers the search-only key in the instance's Typesense through its admin
  * API, like 0.x `register_search_key`. The request goes to the ddev router on loopback (its Typesense entrypoint) with
  * the instance's host name in the Host header. A key with the description `fleet-search-only` is left alone, so a
- * redeploy adds nothing. Never fails a deploy: a problem is a WARNING line, and a redeploy tries again. The admin key
- * travels in a header only, and the job log masks it.
+ * redeploy adds nothing. A cold Typesense container needs a while after `ddev start`, so a failed attempt is retried
+ * with a doubling delay (capped) until MAX_WAIT_SECONDS have passed. Never fails a deploy: giving up is a WARNING line,
+ * and a redeploy tries again. The admin key travels in a header only, and the job log masks it.
  */
 #[AutoconfigureTag('fleet.deploy_step', ['priority' => 150])]
 final class TypesenseSearchKeyStep implements DeployStep
@@ -26,14 +27,36 @@ final class TypesenseSearchKeyStep implements DeployStep
 
     private const float TIMEOUT = 10.0;
 
+    /** How long after the first attempt the step keeps retrying before it gives up with a warning. */
+    public const float MAX_WAIT_SECONDS = 60.0;
+
+    private const float FIRST_DELAY_SECONDS = 1.0;
+
+    private const float MAX_DELAY_SECONDS = 8.0;
+
+    /** @var \Closure(): float */
+    private \Closure $now;
+
+    /** @var \Closure(float): void */
+    private \Closure $sleep;
+
+    /**
+     * @param (\Closure(): float)|null     $now   the clock in seconds, injectable for tests
+     * @param (\Closure(float): void)|null $sleep waits the given seconds, injectable for tests
+     */
     public function __construct(
         private readonly TypesenseKeys $keys,
         private readonly TypesenseEnvironment $environment,
         private readonly InstanceHostnames $hostnames,
         private readonly HttpClientInterface $http,
-        private readonly int $attempts = 3,
-        private readonly int $retryDelaySeconds = 3,
+        private readonly float $maxWaitSeconds = self::MAX_WAIT_SECONDS,
+        ?\Closure $now = null,
+        ?\Closure $sleep = null,
     ) {
+        $this->now = $now ?? static fn (): float => microtime(true);
+        $this->sleep = $sleep ?? static function (float $seconds): void {
+            usleep((int) ($seconds * 1_000_000));
+        };
     }
 
     public function phase(): StepPhase
@@ -62,7 +85,9 @@ final class TypesenseSearchKeyStep implements DeployStep
         ];
 
         $last = '';
-        for ($attempt = 1; $attempt <= $this->attempts; ++$attempt) {
+        $deadline = ($this->now)() + $this->maxWaitSeconds;
+        $delay = self::FIRST_DELAY_SECONDS;
+        while (true) {
             try {
                 if ($this->registered($base, $headers, $keys->search)) {
                     $context->log->line('typesense: search-only key registered');
@@ -73,9 +98,11 @@ final class TypesenseSearchKeyStep implements DeployStep
                 return;
             } catch (\Throwable $e) {
                 $last = $e->getMessage();
-                if ($attempt < $this->attempts && $this->retryDelaySeconds > 0) {
-                    sleep($this->retryDelaySeconds);
+                if (($this->now)() + $delay > $deadline) {
+                    break;
                 }
+                ($this->sleep)($delay);
+                $delay = min($delay * 2, self::MAX_DELAY_SECONDS);
             }
         }
         $context->log->line('WARNING: typesense: the search-only key was not registered ('.$last.'); a redeploy tries again.');

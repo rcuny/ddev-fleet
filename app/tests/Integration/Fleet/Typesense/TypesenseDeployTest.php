@@ -27,6 +27,11 @@ final class TypesenseDeployTest extends InstanceJobTestCase
     /** @var list<array{method: string, url: string, options: array<string, mixed>}> */
     private array $requests = [];
 
+    private float $elapsed = 0.0;
+
+    /** @var list<float> */
+    private array $sleeps = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -44,7 +49,7 @@ final class TypesenseDeployTest extends InstanceJobTestCase
     /**
      * @param list<MockResponse> $responses
      */
-    private function searchStep(array $responses): TypesenseSearchKeyStep
+    private function searchStep(array $responses, float $maxWait = 60.0): TypesenseSearchKeyStep
     {
         $client = new MockHttpClient(function (string $method, string $url, array $options) use (&$responses): MockResponse {
             $this->requests[] = ['method' => $method, 'url' => $url, 'options' => $options];
@@ -52,7 +57,20 @@ final class TypesenseDeployTest extends InstanceJobTestCase
             return array_shift($responses) ?? new MockResponse('', ['http_code' => 500]);
         });
 
-        return new TypesenseSearchKeyStep($this->keys, $this->environment, $this->hostnames, $client, 2, 0);
+        $this->elapsed = 0.0;
+
+        return new TypesenseSearchKeyStep(
+            $this->keys,
+            $this->environment,
+            $this->hostnames,
+            $client,
+            $maxWait,
+            fn (): float => $this->elapsed,
+            function (float $seconds): void {
+                $this->sleeps[] = $seconds;
+                $this->elapsed += $seconds;
+            },
+        );
     }
 
     private function deploy(TypesenseSearchKeyStep $search): \App\Domain\Job\Job
@@ -162,18 +180,52 @@ final class TypesenseDeployTest extends InstanceJobTestCase
         self::assertStringNotContainsString('typesense', $this->logText($job));
     }
 
-    public function testAnApiFailureIsAWarningAndTheDeploySucceeds(): void
+    public function testAnApiFailureIsAWarningWithinTheBoundAndTheDeploySucceeds(): void
     {
         $this->enable();
 
-        $job = $this->deploy($this->searchStep([new MockResponse('nope', ['http_code' => 503]), new MockResponse('nope', ['http_code' => 503])]));
+        $job = $this->deploy($this->searchStep([], 20.0));
 
         $keys = $this->keys->ensure($this->project);
         $log = $this->logText($job);
         self::assertStringContainsString('WARNING: typesense: the search-only key was not registered', $log);
         self::assertStringNotContainsString($keys->admin, $log);
-        self::assertCount(2, $this->requests);
+        self::assertSame([1.0, 2.0, 4.0, 8.0], $this->sleeps);
+        self::assertLessThanOrEqual(20.0, array_sum($this->sleeps));
+        self::assertCount(5, $this->requests);
         self::assertSame(InstanceState::Running, $this->instances->find('acme--main')?->state());
+    }
+
+    public function testASlowStartingTypesenseIsWaitedFor(): void
+    {
+        $this->enable();
+        $down = static fn (): MockResponse => new MockResponse('nope', ['http_code' => 503]);
+
+        $job = $this->deploy($this->searchStep([$down(), $down(), $down(), $down(), $this->emptyKeys(), new MockResponse('{}')]));
+
+        self::assertSame([1.0, 2.0, 4.0, 8.0], $this->sleeps);
+        self::assertCount(6, $this->requests);
+        $log = $this->logText($job);
+        self::assertStringContainsString('typesense: search-only key registered', $log);
+        self::assertStringNotContainsString('WARNING: typesense', $log);
+    }
+
+    public function testAKeyInAnExceptionMessageIsMaskedInTheJobLog(): void
+    {
+        $this->enable();
+        $keys = $this->keys->ensure($this->project);
+        $client = new MockHttpClient(static function () use ($keys): never {
+            throw new \RuntimeException('transport failed for X-TYPESENSE-API-KEY: '.$keys->admin.' and '.$keys->search);
+        });
+        $step = new TypesenseSearchKeyStep($this->keys, $this->environment, $this->hostnames, $client, 0.0);
+
+        $job = $this->deploy($step);
+
+        $log = $this->logText($job);
+        self::assertStringContainsString('WARNING: typesense: the search-only key was not registered', $log);
+        self::assertStringContainsString('transport failed for X-TYPESENSE-API-KEY: [masked]', $log);
+        self::assertStringNotContainsString($keys->admin, $log);
+        self::assertStringNotContainsString($keys->search, $log);
     }
 
     public function testASecondDeployReusesTheKeysAndRewritesTheSameValues(): void
