@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Fleet\Instances;
 
 use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Instance\Instance;
+use App\Domain\Port\NamedPort;
 use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
@@ -145,5 +146,27 @@ final class InstanceConfigWriterTest extends KernelTestCase
         self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][2]);
         self::assertCount(6, $config['web_environment']);
         self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment'], array_keys($config));
+    }
+
+    public function testEveryNamedPortOfTheProjectGetsAFleetPortVariable(): void
+    {
+        $project = $this->project(GitBotMode::Disabled);
+        $project->changePorts([new NamedPort('ts-dashboard', 9111, 8110), new NamedPort('playwright', 9325, 8323)]);
+
+        $environment = $this->written($project)['web_environment'];
+
+        self::assertSame([
+            'DRUSH_OPTIONS_URI=https://acme--main.fleet.example.com',
+            'FLEET_INSTANCE_HOST=acme--main.fleet.example.com',
+            'FLEET_PORT_TS_DASHBOARD=9111',
+            'FLEET_PORT_PLAYWRIGHT=9325',
+        ], $environment);
+    }
+
+    public function testAProjectWithoutPortsGetsNoFleetPortVariable(): void
+    {
+        $environment = $this->written($this->project())['web_environment'];
+
+        self::assertSame([], array_filter($environment, static fn (string $e): bool => str_starts_with($e, 'FLEET_PORT_')));
     }
 }

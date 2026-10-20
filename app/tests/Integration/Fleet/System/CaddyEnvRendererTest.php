@@ -73,9 +73,19 @@ final class CaddyEnvRendererTest extends KernelTestCase
         $out = new CaddyEnvRenderer($this->store, self::PROXY_SECRET)->render(self::host(TlsMode::OvhDns));
 
         self::assertSame(
-            'FLEET_PROXY_SECRET='.self::PROXY_SECRET."\nOVH_ENDPOINT=ovh-eu\nOVH_APPLICATION_KEY=app-key-12345678\nOVH_APPLICATION_SECRET=app-secret-12345678\nOVH_CONSUMER_KEY=consumer-key-12345678\n",
+            'FLEET_PROXY_SECRET='.self::PROXY_SECRET."\nOVH_APPLICATION_KEY=app-key-12345678\nOVH_APPLICATION_SECRET=app-secret-12345678\nOVH_CONSUMER_KEY=consumer-key-12345678\n",
             $out,
         );
+    }
+
+    public function testTheEndpointIsNeverPartOfTheEnvironmentFile(): void
+    {
+        $this->storeOvh();
+
+        $out = new CaddyEnvRenderer($this->store, self::PROXY_SECRET)->render(self::host(TlsMode::OvhDns));
+
+        self::assertStringNotContainsString('ENDPOINT', $out);
+        self::assertSame(4, substr_count($out, "\n"), 'the proxy secret and three credentials');
     }
 
     public function testMissingOvhSecretFails(): void
@@ -109,8 +119,6 @@ final class CaddyEnvRendererTest extends KernelTestCase
         yield 'quote in the consumer key' => ['ovh_consumer_key', 'consumer"key-12345678'];
         yield 'hash in a key' => ['ovh_application_key', 'app-key-1234#comment'];
         yield 'brace in a secret' => ['ovh_application_secret', 'app-secret-}{1234'];
-        yield 'unknown endpoint' => ['ovh_endpoint', 'ovh-eu.evil.example'];
-        yield 'endpoint with newline' => ['ovh_endpoint', "ovh-eu\nOVH_X=1"];
     }
 
     #[DataProvider('unsafeStoredValues')]

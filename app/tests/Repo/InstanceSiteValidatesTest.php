@@ -14,6 +14,7 @@ use App\Fleet\System\CaddyfileRenderer;
 use App\Fleet\System\CaddyReloader;
 use App\Fleet\System\GateMode;
 use App\Fleet\System\GateWriter;
+use App\Tests\Support\FixedOvhEndpoint;
 use App\Tests\Support\SystemTemplates;
 use PHPUnit\Framework\TestCase;
 
@@ -43,7 +44,7 @@ final class InstanceSiteValidatesTest extends TestCase
         $twig = SystemTemplates::twig();
         $host = new HostSettings('fleet.example.com');
         $host->changeTlsMode(TlsMode::Http01);
-        file_put_contents($this->paths->caddyMainFile(), new CaddyfileRenderer($twig, $this->paths, $this->tree.'/project')->render($host));
+        file_put_contents($this->paths->caddyMainFile(), new CaddyfileRenderer($twig, $this->paths, new FixedOvhEndpoint(), $this->tree.'/project')->render($host));
         file_put_contents($this->paths->gateFile(), new GateWriter($twig, $this->paths, new CaddyReloader(new RecordingCommandRunner(), $this->paths))->render(GateMode::Authelia));
     }
 
@@ -91,6 +92,7 @@ final class InstanceSiteValidatesTest extends TestCase
             'ports' => [],
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
+            'groups_pattern' => '(?:^|,)(?:fleet\\-admins|fleet\\-project\\-acme)(?:,|$)',
             'router' => CaddyfileRenderer::DDEV_ROUTER,
             'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
         ]);
@@ -113,6 +115,7 @@ final class InstanceSiteValidatesTest extends TestCase
             ],
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
+            'groups_pattern' => '(?:^|,)(?:fleet\\-admins|fleet\\-project\\-acme)(?:,|$)',
             'router' => CaddyfileRenderer::DDEV_ROUTER,
             'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
         ]);

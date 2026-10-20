@@ -11,6 +11,8 @@ authentication_backend:
   file:
     path: '{{ users_file }}'
     watch: true
+  # Re-read the user's groups on every request, so a membership change applies at once (the file is small and local).
+  refresh_interval: always
 session:
   cookies:
     - domain: '{{ domain }}'
@@ -41,16 +43,8 @@ access_control:
       policy: bypass
     - domain: '{{ domain }}'
       policy: one_factor
-{% for rule in rules %}
-    - domain_regex: '{{ rule.regex }}'
-      policy: one_factor
-      subject:
-{% for subject in rule.subjects %}
-        - ['{{ subject }}']
-{% endfor %}
-{% endfor %}
+    # Instance hosts: any signed-in user. Which project a user may open is checked by the instance's Caddy site from
+    # the Remote-Groups header, so access changes never touch this file (and never restart Authelia).
     - domain: '*.{{ domain }}'
       policy: one_factor
-      subject:
-        - ['group:{{ admin_group }}']
 {% endautoescape %}

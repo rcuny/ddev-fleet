@@ -18,7 +18,6 @@ use App\Fleet\Auth\AutheliaUsersFile;
 use App\Fleet\Auth\AutheliaUsersRenderer;
 use App\Fleet\Auth\IdentitySync;
 use App\Fleet\Auth\PasswordPolicy;
-use App\Fleet\Auth\ProjectAccessRules;
 use App\Fleet\Auth\ProjectAccessService;
 use App\Fleet\Auth\UserService;
 use App\Fleet\FleetPaths;
@@ -34,6 +33,7 @@ use App\Fleet\System\CaddyEnvRenderer;
 use App\Fleet\System\CaddyfileRenderer;
 use App\Fleet\System\CaddyReloader;
 use App\Fleet\System\GateWriter;
+use App\Fleet\System\StoredOvhEndpoint;
 use App\Fleet\System\SystemRenderer;
 use App\Tests\Support\FakeInstanceGuard;
 use App\Tests\Support\FleetDatabase;
@@ -46,8 +46,9 @@ use Symfony\Component\Lock\Store\FlockStore;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * IdentitySync (users + memberships -> users.yml in one transaction, then the Authelia rules) and AutheliaAccessSync
- * (install the rules only when they changed, only after setup).
+ * IdentitySync (users + memberships -> users.yml with the project groups, in one transaction) and AutheliaAccessSync
+ * (install Authelia's configuration only when it changed, only after setup). Changing users or access never installs
+ * the configuration: that restarts Authelia and signs everyone out (FLE-100).
  */
 final class IdentitySyncTest extends KernelTestCase
 {
@@ -80,11 +81,11 @@ final class IdentitySyncTest extends KernelTestCase
         $this->applier = new RecordingApplier();
 
         $twig = SystemTemplates::twig();
-        $config = new AutheliaConfigRenderer($twig, $paths, $admins, new ProjectAccessRules($accessRepository, $admins));
+        $config = new AutheliaConfigRenderer($twig, $paths);
         $runner = new RecordingCommandRunner();
         $store = new SecretStore(new SecretRepository($em), new SecretBox(new SecretKeyFile($paths)), new MockClock('2026-10-19 10:00:00 UTC'));
         $system = new SystemRenderer(
-            new CaddyfileRenderer($twig, $paths, '/opt/ddev-fleet/app'),
+            new CaddyfileRenderer($twig, $paths, new StoredOvhEndpoint($store), '/opt/ddev-fleet/app'),
             new CaddyEnvRenderer($store, 'proxy-secret-0123456789abcdef-0123456789'),
             $config,
             new GateWriter($twig, $paths, new CaddyReloader($runner, $paths)),
@@ -92,7 +93,7 @@ final class IdentitySyncTest extends KernelTestCase
             $this->applier,
         );
         $this->accessSync = new AutheliaAccessSync($this->settings, $config, $system, $paths, new LockFactory(new FlockStore($paths->locksDir())));
-        $this->sync = new IdentitySync($this->users, new AutheliaUsersFile($paths, new AutheliaUsersRenderer()), $this->accessSync);
+        $this->sync = new IdentitySync($this->users, new AutheliaUsersFile($paths, new AutheliaUsersRenderer(), null, $accessRepository));
 
         $this->accounts->upsertAdmin('alice', 'Alice', 'alice@example.com', self::PASSWORD);
         $this->accounts->upsertAdmin('bob', 'Bob', 'bob@example.com', self::PASSWORD);
@@ -115,31 +116,6 @@ final class IdentitySyncTest extends KernelTestCase
         $this->settings->save($host);
     }
 
-    /**
-     * @return list<array<string, mixed>>
-     */
-    private function installedRules(): array
-    {
-        // The helper removes staged files after each apply; the recorder does not run it, so read what was rendered.
-        $rendered = Yaml::parse(self::getContainer()->get(AutheliaConfigRenderer::class)->render($this->host()));
-
-        $rules = [];
-        foreach (\array_slice($rendered['access_control']['rules'], 2, -1) as $rule) {
-            self::assertIsArray($rule);
-            $rules[] = $rule;
-        }
-
-        return $rules;
-    }
-
-    private function host(): HostSettings
-    {
-        $host = $this->settings->get();
-        self::assertNotNull($host);
-
-        return $host;
-    }
-
     public function testNothingIsInstalledBeforeSetupIsComplete(): void
     {
         self::assertFalse($this->accessSync->sync());
@@ -150,7 +126,7 @@ final class IdentitySyncTest extends KernelTestCase
         self::assertFileDoesNotExist($this->paths->autheliaConfigMarker());
     }
 
-    public function testInstallsOnceAndOnlyAgainWhenTheRulesChange(): void
+    public function testInstallsOnceAndOnlyAgainWhenTheConfigurationChanges(): void
     {
         $this->completeSetup();
 
@@ -158,13 +134,8 @@ final class IdentitySyncTest extends KernelTestCase
         self::assertFalse($this->accessSync->sync(), 'nothing changed: no restart of Authelia');
         self::assertSame([ApplyTarget::Authelia], $this->applier->applied);
 
-        $this->access->grant('bob', 'blog');
-        self::assertTrue($this->accessSync->sync());
-        self::assertFalse($this->accessSync->sync());
-        self::assertSame([ApplyTarget::Authelia, ApplyTarget::Authelia], $this->applier->applied);
-
         self::assertTrue($this->accessSync->sync(true), 'force installs anyway');
-        self::assertCount(3, $this->applier->applied);
+        self::assertCount(2, $this->applier->applied);
         self::assertSame(0o600, fileperms($this->paths->autheliaConfigMarker()) & 0o777);
     }
 
@@ -186,7 +157,7 @@ final class IdentitySyncTest extends KernelTestCase
         self::assertTrue($this->accessSync->sync());
     }
 
-    public function testCommitWritesUsersAndInstallsTheRulesAfterTheCommit(): void
+    public function testCommitWritesUsersAndProjectGroupsWithoutRestartingAuthelia(): void
     {
         $this->completeSetup();
         $this->accessSync->sync();
@@ -198,28 +169,25 @@ final class IdentitySyncTest extends KernelTestCase
 
         $users = Yaml::parseFile($this->paths->usersFile())['users'];
         self::assertSame(['alice', 'bob'], array_keys($users));
-        self::assertSame([ApplyTarget::Authelia], $this->applier->applied);
-        $rules = $this->installedRules();
-        self::assertSame([['group:fleet-admins']], $rules[0]['subject']);
-        self::assertSame([['group:fleet-admins'], ['user:bob']], $rules[1]['subject']);
+        self::assertSame(['fleet-admins'], $users['alice']['groups']);
+        self::assertSame(['fleet-admins', 'fleet-project-demo'], $users['bob']['groups']);
+        self::assertSame([], $this->applier->applied, 'a membership is a users.yml edit, which Authelia reloads: no `apply authelia`');
         self::assertSame(['demo'], $this->access->projectsOf('bob'));
+    }
+
+    public function testRevokingAMembershipRemovesTheProjectGroup(): void
+    {
+        $this->sync->commit(fn () => $this->access->setProjects('bob', ['blog', 'demo']));
+        self::assertSame(['fleet-admins', 'fleet-project-blog', 'fleet-project-demo'], Yaml::parseFile($this->paths->usersFile())['users']['bob']['groups']);
+
+        $this->sync->commit(fn () => $this->access->revoke('bob', 'blog'));
+
+        self::assertSame(['fleet-admins', 'fleet-project-demo'], Yaml::parseFile($this->paths->usersFile())['users']['bob']['groups']);
     }
 
     public function testCommitReturnsWhatTheChangeReturned(): void
     {
         self::assertSame(42, $this->sync->commit(static fn (): int => 42));
-    }
-
-    public function testAUsersChangeThatDoesNotTouchMembershipsDoesNotRestartAuthelia(): void
-    {
-        $this->completeSetup();
-        $this->accessSync->sync();
-        $this->applier->applied = [];
-
-        $this->sync->commit(fn () => $this->accounts->setPassword('bob', 'a different passphrase'));
-
-        self::assertSame([], $this->applier->applied, 'a new password changes users.yml only, which Authelia watches');
-        self::assertTrue(password_verify('a different passphrase', Yaml::parseFile($this->paths->usersFile())['users']['bob']['password']));
     }
 
     public function testAFailedRenderCommitsNothing(): void
@@ -256,7 +224,7 @@ final class IdentitySyncTest extends KernelTestCase
         self::assertSame($before, (string) file_get_contents($this->paths->usersFile()), 'the file never holds a rolled-back change');
     }
 
-    public function testNothingIsInstalledWhenTheChangeFails(): void
+    public function testNothingIsWrittenWhenTheChangeFails(): void
     {
         $this->completeSetup();
         $this->accessSync->sync();
@@ -272,38 +240,50 @@ final class IdentitySyncTest extends KernelTestCase
         }
 
         self::assertSame([], $this->applier->applied);
+        self::assertFileDoesNotExist($this->paths->usersFile());
     }
 
-    public function testAFailedInstallAfterTheCommitCarriesTheResultAndKeepsTheChange(): void
+    public function testAFailedWriteAfterTheCommitCarriesTheResultAndKeepsTheChange(): void
     {
-        $this->completeSetup();
-        $this->applier->fails = new \RuntimeException('apply authelia failed (exit 1)');
+        // A directory where users.yml should be: the atomic rename cannot replace it.
+        mkdir($this->paths->usersFile(), 0o750, true);
 
         try {
             $this->sync->commit(fn (): bool => $this->access->grant('bob', 'blog'));
-            self::fail('Expected the install failure.');
+            self::fail('Expected the write failure.');
         } catch (AccessInstallFailed $e) {
             self::assertTrue($e->result, 'what the change returned');
             self::assertStringContainsString('the change was saved', strtolower($e->getMessage()));
-            self::assertStringContainsString('apply authelia failed', $e->getMessage());
         }
 
         $this->entityManager()->clear();
-        self::assertSame(['blog'], $this->access->projectsOf('bob'), 'a failed install is not a rollback');
-        $this->applier->fails = null;
-        self::assertTrue($this->sync->refreshAccess(), 'the install is retried');
+        self::assertSame(['blog'], $this->access->projectsOf('bob'), 'a failed write is not a rollback');
+        rmdir($this->paths->usersFile());
+        self::assertTrue($this->sync->refreshAccess(), 'the write is retried');
     }
 
-    public function testRefreshAccessIsTheCallForProjectChanges(): void
+    public function testDeletingAProjectRemovesItsGroupFromEveryMember(): void
+    {
+        $this->sync->commit(fn () => $this->access->setProjects('bob', ['blog', 'demo']));
+        $projectService = new ProjectService(new ProjectRepository($this->entityManager()), new NamedPortRepository($this->entityManager()), new FakeInstanceGuard());
+
+        $projectService->delete('demo', 'tester');
+        self::assertTrue($this->sync->refreshAccess());
+
+        self::assertSame(['fleet-admins', 'fleet-project-blog'], Yaml::parseFile($this->paths->usersFile())['users']['bob']['groups']);
+        self::assertFalse($this->sync->refreshAccess(), 'nothing changed');
+        self::assertSame([], $this->applier->applied, 'no `apply authelia` for a project change');
+    }
+
+    public function testCreatingAProjectNeverTouchesAuthelia(): void
     {
         $this->completeSetup();
-        $this->accessSync->sync();
+        $this->sync->commit(fn () => $this->access->grant('bob', 'blog'));
         $projectService = new ProjectService(new ProjectRepository($this->entityManager()), new NamedPortRepository($this->entityManager()), new FakeInstanceGuard());
 
         $projectService->create(new ProjectInput(name: 'shop', git: 'https://git.example.com/acme/shop.git'));
-        self::assertTrue($this->sync->refreshAccess(), 'a new project needs its rule (administrators open its sites)');
-        $projectService->delete('shop', 'tester');
-        self::assertTrue($this->sync->refreshAccess(), 'a deleted project loses its rule');
-        self::assertFalse($this->sync->refreshAccess());
+
+        self::assertFalse($this->sync->refreshAccess(), 'a project without members changes no group');
+        self::assertSame([], $this->applier->applied);
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command;
 
 use App\Domain\Host\HostSettingsRepository;
+use App\Fleet\Auth\AccessModelUpgrade;
 use App\Fleet\System\ApplyTarget;
 use App\Fleet\System\GateMode;
 use App\Fleet\System\SystemRenderer;
@@ -32,6 +33,9 @@ use Symfony\Component\Console\Style\SymfonyStyle;
         <info>--stage</info> leaves the rendered files staged for a root <info>apply caddy|authelia</info> run by the installer (the
         helper removes what it installs; the installer removes the rest if it fails).
         <info>--gate=setup</info> after setup completed needs <info>--force</info>.
+        Before an apply or stage of a completed host the command writes the project groups into users.yml and rewrites every
+        instance site with the group check, and stops (nothing installed) if a site cannot be rewritten: Authelia's
+        configuration admits any signed-in user, the sites decide.
         <info>--no-reload</info> only writes the gate file; the installer needs it because Caddy is not installed yet.
         HELP,
 )]
@@ -40,6 +44,7 @@ final class HostRenderCommand extends Command
     public function __construct(
         private readonly HostSettingsRepository $settings,
         private readonly SystemRenderer $system,
+        private readonly ?AccessModelUpgrade $upgrade = null,
     ) {
         parent::__construct();
     }
@@ -88,6 +93,14 @@ final class HostRenderCommand extends Command
         }
 
         try {
+            if ($input->getOption('apply') || $input->getOption('stage')) {
+                // Before Authelia gets the relaxed rule: the sites of running instances must check the project group
+                // first. A failure stops here, so the old per-project rules stay installed (fail closed).
+                $rewritten = $this->upgrade?->prepare($host) ?? 0;
+                if ($rewritten > 0) {
+                    $io->writeln(\sprintf('Project access check written to %d instance site(s).', $rewritten));
+                }
+            }
             if ($input->getOption('apply')) {
                 foreach ([ApplyTarget::Authelia, ApplyTarget::Caddy] as $target) {
                     $this->system->stageAndApply($target, $host);

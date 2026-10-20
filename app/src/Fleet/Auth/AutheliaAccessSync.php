@@ -14,10 +14,11 @@ use App\Fleet\System\SystemRenderer;
 use Symfony\Component\Lock\LockFactory;
 
 /**
- * Puts the per-project access rules (AutheliaConfigRenderer, from the project_access rows) into the running Authelia:
- * renders the configuration, and when it differs from what was installed last, stages it and installs it through the
- * root helper (`apply authelia`, which restarts Authelia and so ends every session). Call it after anything that
- * changes who may open which project: a membership, a user's enabled flag or deletion, a project created or deleted.
+ * Puts Authelia's main configuration into the running Authelia: renders it, and when it differs from what was
+ * installed last, stages it and installs it through the root helper (`apply authelia`, which restarts Authelia and so
+ * ends every session). Only host-level settings change that configuration (domain, notifier): users and project access
+ * live in users.yml (AutheliaUsersFile), which Authelia reloads without a restart, so never call this after a user or
+ * project change.
  *
  * Nothing happens before setup is complete: SetupFinisher installs the configuration, rules included.
  */

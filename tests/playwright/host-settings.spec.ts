@@ -1,5 +1,6 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, type Page } from '@playwright/test';
 import { blockingViolations } from './support/axe';
+import { test } from './support/host';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
 
@@ -176,7 +177,8 @@ test.describe('host settings', () => {
     expect(await page.content()).not.toContain(TOKEN);
   });
 
-  test('the git identity needs both fields and keeps the saved values', async ({ page }) => {
+  test('the git identity needs both fields and keeps the saved values', async ({ page, hostLock }) => {
+    void hostLock;
     await openTab(page, 'git');
     // The host settings are shared by every test (and by the desktop and phone projects): an earlier run may have
     // saved both fields, so empty the e-mail explicitly to get a name without an e-mail.
@@ -192,7 +194,8 @@ test.describe('host settings', () => {
     await expect(page.getByLabel('E-mail')).toHaveValue('bot@example.com');
   });
 
-  test('notification e-mail is saved and the SMTP password is never shown back', async ({ page }) => {
+  test('notification e-mail is saved and the SMTP password is never shown back', async ({ page, hostLock }) => {
+    void hostLock;
     await openTab(page, 'notifications');
     await page.getByLabel('SMTP host').fill('smtp.example.com');
     await page.getByLabel('SMTP port').fill('587');
@@ -224,7 +227,8 @@ test.describe('host settings', () => {
     expect(await hasHorizontalOverflow(page)).toBe(false);
   });
 
-  test('the retention field accepts 1 to 3650 days', async ({ page }) => {
+  test('the retention field accepts 1 to 3650 days', async ({ page, hostLock }) => {
+    void hostLock;
     await openTab(page, 'backups');
     await page.getByLabel(/Keep backups for/).fill('0');
     await page.getByRole('button', { name: 'Save' }).click();

@@ -147,6 +147,9 @@ final class AssetStoreTest extends TestCase
         self::assertSame('', $entries['weird:name.sql']->path);
         self::assertSame(AssetEntry::LINK, $entries['link']->kind);
         self::assertFalse($entries['link']->usable);
+        self::assertFalse($entries['link']->linkSeeded);
+        self::assertSame($this->outside.'/secret.txt', $entries['link']->linkTarget);
+        self::assertStringContainsString('outside', $entries['link']->linkNote);
         self::assertNull($entries['link']->size);
         $printable = array_keys($entries);
         foreach ($printable as $name) {

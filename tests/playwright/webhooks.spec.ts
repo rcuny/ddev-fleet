@@ -86,7 +86,7 @@ test.describe('webhooks', () => {
       expect(await blockingViolations(page)).toEqual([]);
 
       // Rotation: confirm inside the details, then the old secret stops working.
-      const jira = page.locator('[data-testid=webhook-endpoint][data-source=jira]');
+      const jira = page.locator(`[data-testid=webhook-endpoint][data-source=jira][data-project=${project}]`);
       await jira.getByText('Rotate secret').click();
       await submitAndWait(page, jira.getByTestId('webhook-rotate'));
       await expect(page.getByTestId('webhook-secret-once')).toBeVisible();

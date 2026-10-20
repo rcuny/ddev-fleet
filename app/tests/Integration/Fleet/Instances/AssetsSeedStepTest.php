@@ -15,6 +15,7 @@ use App\Tests\Support\InstanceJobTestCase;
 final class AssetsSeedStepTest extends InstanceJobTestCase
 {
     private string $assets;
+    private string $secretPath = '';
 
     protected function setUp(): void
     {
@@ -130,8 +131,195 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         self::assertFileDoesNotExist($dir.'/.git/config');
         self::assertFileDoesNotExist($dir.'/.fleet-upload-abc');
         $log = $this->logText($job);
-        self::assertStringContainsString('skipped "link.txt" (symbolic link)', $log);
+        self::assertStringContainsString("skipped \"link.txt\" (symbolic link to \"/etc/passwd\": points outside the project's assets)", $log);
         self::assertStringContainsString('skipped ".git"', $log);
+    }
+
+    public function testALinkInDumpsToAnotherDumpBecomesAHardLink(): void
+    {
+        file_put_contents($this->assets.'/dumps/dump-prod-2026-10-15.sql', 'seed [[project]]');
+        symlink('dump-prod-2026-10-15.sql', $this->assets.'/dumps/default.sql');
+
+        $job = $this->deploy();
+
+        $copy = $this->dir().'/dumps/default.sql';
+        self::assertFalse(is_link($copy));
+        self::assertSame('seed [[project]]', file_get_contents($copy));
+        self::assertSame(fileinode($this->assets.'/dumps/dump-prod-2026-10-15.sql'), fileinode($copy));
+        self::assertStringContainsString('0 entry(ies) skipped', $this->logText($job));
+    }
+
+    public function testARelativeLinkOutsideDumpsStaysARelativeLinkToTheSeededTarget(): void
+    {
+        file_put_contents($this->assets.'/web/sites/default/settings.real.php', '<?php // [[project]]');
+        file_put_contents($this->assets.'/dumps/db.sql', 'x');
+        symlink('../../../web/sites/default/settings.real.php', $this->assets.'/web/sites/default/settings.local.php');
+        symlink('settings.real.php', $this->assets.'/web/sites/default/other.php');
+        symlink('../../../dumps/db.sql', $this->assets.'/web/sites/default/db.sql');
+
+        $this->deploy();
+
+        $default = $this->dir().'/web/sites/default';
+        self::assertSame('settings.real.php', readlink($default.'/settings.local.php'));
+        self::assertSame('settings.real.php', readlink($default.'/other.php'));
+        self::assertSame('<?php // acme', file_get_contents($default.'/settings.local.php'));
+        self::assertSame('../../../dumps/db.sql', readlink($default.'/db.sql'));
+        self::assertSame('x', file_get_contents($default.'/db.sql'));
+        $exclude = (string) file_get_contents($this->dir().'/.git/info/exclude');
+        self::assertStringContainsString("/web/sites/default/other.php\n", $exclude);
+    }
+
+    public function testALinkChainInsideTheAssetsIsHonoured(): void
+    {
+        file_put_contents($this->assets.'/dumps/real.sql', 'r');
+        symlink('real.sql', $this->assets.'/dumps/mid.sql');
+        symlink('mid.sql', $this->assets.'/dumps/default.sql');
+
+        $this->deploy();
+
+        self::assertSame('r', file_get_contents($this->dir().'/dumps/default.sql'));
+        self::assertSame(fileinode($this->assets.'/dumps/real.sql'), fileinode($this->dir().'/dumps/default.sql'));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function refusedLinks(): iterable
+    {
+        yield 'escape by ..' => ['../../outside.sql', 'points outside the project\'s assets'];
+        yield 'absolute outside' => ['/etc/hostname', 'points outside the project\'s assets'];
+        yield 'dangling' => ['nowhere.sql', 'dangling'];
+        yield 'folder' => ['../web', 'points at a folder'];
+        yield 'loop' => ['default.sql', 'a loop or a chain'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('refusedLinks')]
+    public function testARefusedLinkIsSkippedWithItsReason(string $target, string $reason): void
+    {
+        file_put_contents($this->assets.'/dumps/ok.sql', 'ok');
+        symlink($target, $this->assets.'/dumps/default.sql');
+
+        $job = $this->deploy();
+
+        self::assertFileDoesNotExist($this->dir().'/dumps/default.sql');
+        self::assertFileExists($this->dir().'/dumps/ok.sql');
+        $log = $this->logText($job);
+        self::assertStringContainsString('skipped "dumps/default.sql" (symbolic link to "'.$target.'": '.$reason, $log);
+    }
+
+    public function testAChainThatLeavesTheTreeAndComesBackIsRefused(): void
+    {
+        $outside = \dirname($this->assets).'/outside-hop.sql';
+        symlink($this->assets.'/dumps/real.sql', $outside);
+        file_put_contents($this->assets.'/dumps/real.sql', 'r');
+        symlink($outside, $this->assets.'/dumps/default.sql');
+
+        $job = $this->deploy();
+
+        self::assertFileDoesNotExist($this->dir().'/dumps/default.sql');
+        self::assertStringContainsString('points outside the project\'s assets', $this->logText($job));
+        @unlink($outside);
+    }
+
+    public function testALinkBehindAFolderLinkIsRefused(): void
+    {
+        mkdir($this->assets.'/real', 0o750);
+        file_put_contents($this->assets.'/real/x.sql', 'x');
+        symlink('real', $this->assets.'/alias');
+        symlink('../alias/x.sql', $this->assets.'/dumps/default.sql');
+
+        $job = $this->deploy();
+
+        self::assertFileDoesNotExist($this->dir().'/dumps/default.sql');
+        self::assertStringContainsString('goes through a folder that is a symbolic link', $this->logText($job));
+    }
+
+    public function testALinkIntoAnotherProjectsAssetsIsRefused(): void
+    {
+        $other = $this->paths->assetsDir('other');
+        mkdir($other.'/dumps', 0o750, true);
+        file_put_contents($other.'/dumps/x.sql', 'secret');
+        file_put_contents($this->assets.'/dumps/ok.sql', 'ok');
+        symlink('../../other/dumps/x.sql', $this->assets.'/dumps/default.sql');
+        symlink($other.'/dumps/x.sql', $this->assets.'/dumps/abs.sql');
+        // `../<this project>/x` climbs out of the assets directory and back in: refused as well.
+        symlink('../acme/dumps/ok.sql', $this->assets.'/back.sql');
+
+        $job = $this->deploy();
+
+        self::assertFileDoesNotExist($this->dir().'/dumps/default.sql');
+        self::assertFileDoesNotExist($this->dir().'/dumps/abs.sql');
+        self::assertFileDoesNotExist($this->dir().'/back.sql');
+        self::assertFalse(is_link($this->dir().'/back.sql'));
+        self::assertSame(3, substr_count($this->logText($job), 'points outside the project\'s assets'));
+    }
+
+    public function testALinkToASpecialFileIsRefused(): void
+    {
+        if (!\function_exists('posix_mkfifo') || !posix_mkfifo($this->assets.'/pipe', 0o600)) {
+            self::markTestSkipped('cannot create a fifo here');
+        }
+        symlink('../pipe', $this->assets.'/dumps/default.sql');
+        symlink('/dev/null', $this->assets.'/dev.sql');
+
+        $job = $this->deploy();
+
+        self::assertFileDoesNotExist($this->dir().'/dumps/default.sql');
+        $log = $this->logText($job);
+        self::assertStringContainsString('skipped "dumps/default.sql" (symbolic link to "../pipe": points at a special file', $log);
+        self::assertStringContainsString('skipped "dev.sql" (symbolic link to "/dev/null": points outside', $log);
+        self::assertStringContainsString('skipped "pipe" (not a regular file)', $log);
+    }
+
+    public function testAChainOfExactlyTheCapIsHonouredAndOneMoreIsRefused(): void
+    {
+        file_put_contents($this->assets.'/dumps/real.sql', 'r');
+        // four links in a row end at the file: allowed
+        symlink('real.sql', $this->assets.'/dumps/l4.sql');
+        symlink('l4.sql', $this->assets.'/dumps/l3.sql');
+        symlink('l3.sql', $this->assets.'/dumps/l2.sql');
+        symlink('l2.sql', $this->assets.'/dumps/l1.sql');
+        // a fifth hop is over the cap
+        symlink('l1.sql', $this->assets.'/dumps/l0.sql');
+
+        $job = $this->deploy();
+
+        self::assertSame('r', file_get_contents($this->dir().'/dumps/l1.sql'));
+        self::assertFileDoesNotExist($this->dir().'/dumps/l0.sql');
+        self::assertStringContainsString('skipped "dumps/l0.sql" (symbolic link to "l1.sql": a loop or a chain of more than 4 links', $this->logText($job));
+    }
+
+    public function testASourceSwappedForALinkAfterTheCheckFailsTheDeployWithoutCopyingIt(): void
+    {
+        $secret = sys_get_temp_dir().'/seed-secret-'.bin2hex(random_bytes(3));
+        file_put_contents($secret, 'TOP SECRET');
+        file_put_contents($this->assets.'/dumps/real.sql', 'r');
+        symlink('real.sql', $this->assets.'/dumps/default.sql');
+        file_put_contents($this->assets.'/blob.bin', "\x00data");
+
+        $swap = function (string $src): void {
+            if (str_ends_with($src, '/dumps/real.sql') || str_ends_with($src, '/blob.bin')) {
+                unlink($src);
+                symlink($this->secretPath, $src);
+            }
+        };
+        $this->secretPath = $secret;
+        $this->steps->exchangeArray([new AssetsSeedStep($this->paths, $swap)]);
+        $instance = $this->instance();
+        $job = $this->job('deploy', $instance);
+
+        try {
+            $this->workflow->run($instance, $this->project, false, $this->logFor($job), false);
+            self::fail('expected a failure');
+        } catch (JobFailed $e) {
+            self::assertStringContainsString('changed while it was being seeded', $e->getMessage());
+        } finally {
+            @unlink($secret);
+        }
+        foreach (['dumps/real.sql', 'dumps/default.sql', 'blob.bin'] as $name) {
+            $copy = $this->dir().'/'.$name;
+            self::assertTrue(!file_exists($copy) || 'TOP SECRET' !== file_get_contents($copy), $name.' must not hold the secret');
+        }
     }
 
     public function testAMissingAssetsDirectoryIsANoOp(): void

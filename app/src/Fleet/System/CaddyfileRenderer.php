@@ -33,6 +33,7 @@ final readonly class CaddyfileRenderer
     public function __construct(
         private Environment $twig,
         private FleetPaths $paths,
+        private OvhEndpointSource $ovhEndpoint,
         #[Autowire('%kernel.project_dir%')]
         private string $projectDir,
     ) {
@@ -55,6 +56,10 @@ final readonly class CaddyfileRenderer
         return $names;
     }
 
+    /**
+     * @throws \RuntimeException         when DNS mode has no stored OVH endpoint
+     * @throws \InvalidArgumentException when a value has an unsafe shape
+     */
     public function render(HostSettings $host): string
     {
         $domain = ConfigValue::domain($host->domain());
@@ -64,6 +69,7 @@ final readonly class CaddyfileRenderer
             'email' => ConfigValue::acmeEmail($host->acmeEmail()),
             'ovh' => TlsMode::OvhDns === $host->tlsMode(),
             'ovh_dir' => self::OVH_DIR,
+            'ovh_endpoint' => TlsMode::OvhDns === $host->tlsMode() ? $this->endpoint() : '',
             'stripped_headers' => self::strippedHeaders(),
             'snippet_dir' => ConfigValue::path('The Caddy snippet directory', $this->paths->caddySnippetDir()),
             'gate_import' => ConfigValue::path('The Caddy snippet directory', $this->paths->caddySnippetDir()).'/gate.conf',
@@ -74,5 +80,20 @@ final readonly class CaddyfileRenderer
             // The name is rendered from the constant the app reads, so the two cannot drift apart.
             'proxy_param' => TrustedProxyChecker::PROXY_PARAM,
         ]);
+    }
+
+    /**
+     * The endpoint is a public API name, not a secret, and ConfigValue allow-lists it, so it is written into the
+     * Caddyfile: one file fewer for the helper to stage and for Caddy to read, and a host on ovh-ca or ovh-us can
+     * never silently fall back to the library's EU default.
+     */
+    private function endpoint(): string
+    {
+        $endpoint = $this->ovhEndpoint->endpoint();
+        if (null === $endpoint) {
+            throw new \RuntimeException('The secret "ovh_endpoint" is not set; DNS mode needs the OVH endpoint.');
+        }
+
+        return ConfigValue::ovhEndpoint($endpoint);
     }
 }

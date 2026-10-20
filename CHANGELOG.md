@@ -7,6 +7,64 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.0.5] - 2026-10-20
+
+### Added
+- **FLE-102: Named ports reach the instance as `FLEET_PORT_<NAME>`.** Each instance's `web_environment` gets
+  `FLEET_PORT_PLAYWRIGHT=9325`-style variables for the named ports its project uses (0.x parity), and
+  `docs/networking.md` documents the `playwright` (9325 to 8323) and `ts-dashboard` (9111 to 8110) catalogue examples.
+- **FLE-105: Playwright coverage of the secrets, the audit log and the host settings.** New specs `secrets-coverage`, `audit` and `host-settings-coverage` check every message the services return, the reveal throttle, the "No placeholder" warning, the audit entries and every host settings tab, in both themes and at 390 px. In `dev` and `test` the cookie `fleet_stand_in_user` renames the stand-in user, so a test owns its reveal throttle and its audit actor.
+
+
+- **FLE-106: Playwright coverage of the Webhooks and Schedules pages.** New specs `webhooks-coverage.spec.ts` and `schedules-coverage.spec.ts` (desktop and phone, axe in both themes) walk every field, every refusal message, the secret create / rotate flow, the delivery log outcomes, filters and paging, the pipeline token, the schedule lifecycle and history, stale tabs, CSRF and the member role. `support/fleetData.ts` gives specs the console and the data directory of the app under test.
+
+
+- **FLE-108: `fleet tmux` attaches to the agent workspace again (0.x parity).** `sudo fleet tmux` (also `fleet tmux:attach`)
+  makes sure the `fleet` session exists and attaches the caller's terminal to it; `fleet tmux <instance-id>` selects that
+  instance's window first. Without a terminal (`ssh host fleet tmux`) it stops with "needs a terminal: use ssh -t" and
+  exit status 2. `fleet tmux list|ensure|reset|sidebar` are unchanged.
+
+- `fleet host:ovh-credentials`: replace the OVH application key, secret and consumer key after setup without `fleet setup:reset` (hidden prompts or standard input; `--endpoint=` to change the endpoint), then install them and reload Caddy. The installation guide lists the OVH token rights and the IP restriction note.
+
+### Changed
+- The reveal throttle is now the same in `dev` as in production (10 reveals a minute per user); the `dev` limit of 1000 is gone.
+
+### Fixed
+- **FLE-100: creating or deleting a project or a user no longer restarts Authelia and signs everyone out.** Per-project
+  access moved out of Authelia's configuration: Authelia keeps one static rule for the instance hosts (any signed-in
+  user) and a member's projects are the groups `fleet-project-<name>` in `users.yml`, which Authelia reloads live.
+  Each instance's Caddy site checks the `Remote-Groups` header (admin group or the project's group) and answers 403
+  otherwise, aliases and named-port blocks included. Authelia is restarted only by host-level edits (domain, outgoing mail).
+  The upgrade (re-run the installer, or `fleet host:render --apply`) first writes the project groups and rewrites every
+  existing instance site with the group check, and only then installs the new Authelia configuration; if a site cannot be
+  rewritten it stops and leaves Authelia as it is (fail closed). Groups starting with `fleet-project-` are reserved.
+- Storing or removing the notification SMTP password on the host settings page is now recorded in the audit log (`secret.put`, `secret.delete`, subject `fleet/smtp_password`), as the Claude token already was. No value is recorded.
+- The audit log's action filter is a 44 px target on a phone, and long actors, actions and subjects wrap in the table instead of scrolling it sideways.
+
+- **FLE-106:** Creating a webhook secret from a tab that still offered "Create secret" after another tab had made one now answers with a message and keeps the secret, instead of an error page.
+- **FLE-106:** The action select of the schedule form and the Source and Outcome filters of the delivery log are 44 px tall on a phone (the height class sat on the wrapper, not on the select).
+- **FLE-106:** The "job #N" link under a schedule is underlined: colour alone did not distinguish it from the text around it (WCAG link-in-text-block).
+- **FLE-106:** The schedule form no longer says aliases such as `@daily` are accepted; the validator has always refused them.
+
+- DNS mode no longer depends on an `/etc/caddy/ovh/endpoint` file that was not always written (a host on `ovh-ca` or `ovh-us` would have talked to the EU API). The endpoint is a public API name, so the Caddyfile now carries it (`endpoint ovh-eu`), validated against the three known endpoints, and DNS mode refuses to render without a stored one. The root helper installs the three credential files, checks that each exists, refuses a partial set, and removes the `endpoint` file an older apply left.
+
+
+- **FLE-111: deploy asset seeding honours symbolic links that stay inside the project's assets.** A `dumps/default.sql`
+  pointing at `dump-prod-….sql` was skipped, so the instance had no seed DB. A link is now resolved without being
+  followed (relative or absolute target below `assets/<project>/`, folders on the way real, at most 4 hops, ends at a
+  regular file): in `dumps/` it becomes a hard link to the target's inode, elsewhere a relative symbolic link to the
+  seeded target. A link outside the assets, dangling, to a folder, in a loop or behind a folder link is still skipped,
+  now with the reason in the deploy log. The Assets tab and `fleet asset:list` show each link's target and whether it
+  is seeded.
+
+- **FLE-113: deploy asset seeding re-checks the source right before it copies it.** The check that a symbolic link
+  stays inside the project's assets and the later hard link or copy were separate steps, so a link swapped in
+  between could be followed by the copy fallback. The source is now opened, and the opened file must be the regular
+  file that was checked (device and inode compared before and after); otherwise the deploy fails with "changed while
+  it was being seeded". The seed step also no longer keeps the assets directory as state on the shared service, and
+  `docs/assets.md` states the remaining limit (write access to the assets during a deploy) and that
+  `../<project>/x` back into the same project is refused.
+
 ## [1.0.4] - 2026-10-20
 
 ### Added
@@ -662,7 +720,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.4...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/rcuny/ddev-fleet/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/rcuny/ddev-fleet/compare/v1.0.3...v1.0.4
 [1.0.3]: https://github.com/rcuny/ddev-fleet/compare/v1.0.2...v1.0.3
 [1.0.2]: https://github.com/rcuny/ddev-fleet/compare/v1.0.1...v1.0.2
