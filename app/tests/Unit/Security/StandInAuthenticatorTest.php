@@ -75,6 +75,20 @@ final class StandInAuthenticatorTest extends TestCase
         self::assertSame('dev-member', self::userOf($this->authenticator('admin')->authenticate($headerMember))->getUserIdentifier());
     }
 
+    public function testTheUserCookieRenamesTheIdentityAndAnInvalidNameIsIgnored(): void
+    {
+        $authenticator = $this->authenticator('admin');
+
+        $renamed = self::userOf($authenticator->authenticate($this->request([], [StandInSettings::USER_COOKIE => 'pw-abc123'])));
+        self::assertSame('pw-abc123', $renamed->getUserIdentifier());
+        self::assertContains('ROLE_ADMIN', $renamed->getRoles());
+
+        foreach (['A', 'ab', '1abc', 'a b', 'a/b', str_repeat('a', 33), ''] as $bad) {
+            $user = self::userOf($authenticator->authenticate($this->request([], [StandInSettings::USER_COOKIE => $bad])));
+            self::assertSame('dev-admin', $user->getUserIdentifier(), $bad);
+        }
+    }
+
     public function testNoneMeansNoAuthentication(): void
     {
         $authenticator = $this->authenticator('admin');

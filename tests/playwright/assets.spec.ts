@@ -113,7 +113,8 @@ test.describe('assets', () => {
       await openAssets(page);
 
       await expect(page.getByTestId('assets-empty')).toBeVisible();
-      await expect(page.getByTestId('asset-upload')).toContainText('2.0 GiB');
+      // The host settings tests change the cap: the size is shown, whatever it is now.
+      await expect(page.getByTestId('asset-upload')).toContainText(/\d+(\.\d)? (MiB|GiB|TiB)/);
       await expectNoOverflow(page, 'the empty Assets tab');
       if (isPhone()) {
         await expectTall(page.getByTestId('asset-input'));
