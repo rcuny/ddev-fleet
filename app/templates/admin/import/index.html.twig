@@ -10,7 +10,7 @@
         </twig:block>
     </twig:PageHeader>
 
-    <div class="mt-6 grid max-w-3xl gap-8">
+    <div class="mt-6 grid max-w-3xl grid-cols-[minmax(0,1fr)] gap-8">
         {% if error %}
             <twig:Alert variant="destructive" data-testid="import-error" role="alert">
                 <twig:ux:icon name="lucide:circle-alert" />
@@ -51,8 +51,8 @@
         {% endif %}
 
         {% if plan %}
-            <section aria-labelledby="preview-heading" class="grid gap-4" data-testid="import-preview-section">
-                <h2 id="preview-heading">{{ plan.project ? 'Preview: ' ~ plan.project : 'Preview' }}</h2>
+            <section aria-labelledby="preview-heading" class="grid grid-cols-[minmax(0,1fr)] gap-4" data-testid="import-preview-section">
+                <h2 id="preview-heading" class="[overflow-wrap:anywhere]">{{ plan.project ? 'Preview: ' ~ plan.project : 'Preview' }}</h2>
 
                 {% if plan.errors %}
                     <twig:Alert variant="destructive" data-testid="import-errors" role="alert">
@@ -60,7 +60,7 @@
                         <twig:Alert:Title>The file cannot be imported</twig:Alert:Title>
                         <twig:Alert:Description>
                             <ul class="mt-1 list-disc pl-5">
-                                {% for problem in plan.errors %}<li data-testid="import-error-item">{{ problem }}</li>{% endfor %}
+                                {% for problem in plan.errors %}<li class="[overflow-wrap:anywhere]" data-testid="import-error-item">{{ problem }}</li>{% endfor %}
                             </ul>
                             <span class="mt-2 block">Nothing was written.</span>
                         </twig:Alert:Description>
@@ -68,7 +68,7 @@
                 {% endif %}
 
                 {% for warning in plan.warnings %}
-                    <p class="text-sm text-ink-body" data-testid="import-warning">{{ warning }}</p>
+                    <p class="text-sm text-ink-body [overflow-wrap:anywhere]" data-testid="import-warning">{{ warning }}</p>
                 {% endfor %}
 
                 {% if plan.items %}
