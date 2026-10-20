@@ -14,7 +14,13 @@ export default class extends Controller {
     toggle() {
         const on = this.boxTarget.checked;
         this.emailTargets.forEach((row) => { row.hidden = on; });
-        this.adminTargets.forEach((row) => { row.hidden = on; });
+        this.adminTargets.forEach((row) => {
+            row.hidden = on;
+            // A hidden ticked box would still be submitted, and the refusal ("cannot be an administrator") would sit under a row nobody sees.
+            if (on) {
+                row.querySelectorAll('input[type=checkbox]:not(:disabled)').forEach((box) => { box.checked = false; });
+            }
+        });
         this.warningTargets.forEach((row) => { row.hidden = !on; });
     }
 }
