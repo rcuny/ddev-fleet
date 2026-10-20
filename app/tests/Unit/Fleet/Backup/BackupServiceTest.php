@@ -9,6 +9,8 @@ use App\Fleet\Backup\BackupNotFound;
 use App\Fleet\Backup\BackupService;
 use App\Fleet\Backup\BackupTooLarge;
 use App\Fleet\FleetPaths;
+use App\Fleet\Secrets\SecretKeyFile;
+use App\Fleet\Secrets\SecretKeyFingerprint;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Clock\MockClock;
 
@@ -25,7 +27,7 @@ final class BackupServiceTest extends TestCase
         $this->paths = new FleetPaths($this->home, $this->home.'/caddy');
         $this->paths->ensureLayout();
         $this->clock = new MockClock('2026-10-19 08:30:15 UTC');
-        $this->service = new BackupService($this->paths, $this->clock);
+        $this->service = new BackupService($this->paths, $this->clock, new SecretKeyFingerprint(new SecretKeyFile($this->paths)));
         $this->seed($this->paths->fleetDb(), 'host', 'fleet.example.com');
     }
 

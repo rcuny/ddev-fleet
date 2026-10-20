@@ -1,0 +1,3 @@
+### Changed
+
+- **FLE-97: `fleet backup:restore` is safer.** A fleet backup now records a fingerprint of the secret key that sealed it (never the key), `fleet backup:verify` shows it (`secret key: match`, `mismatch` or `not recorded`), and the restore refuses a backup sealed by another key unless you pass `--accept-key-mismatch` (every secret must then be set again); a backup without a fingerprint is restored with a warning. The restore also refuses while `fleet-status` or php-fpm is active (besides the worker and the scheduler; the printed stop and start lines list all four), and when it runs as another user than the owner of `FLEET_HOME`. A leftover `-wal` or `-shm` next to the live database is covered by a test. `docs/installation.md` describes all of it.

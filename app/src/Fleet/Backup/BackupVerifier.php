@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Backup;
 
 use App\Fleet\FleetPaths;
+use App\Fleet\Secrets\SecretKeyFingerprint;
 use Doctrine\Migrations\DependencyFactory;
 use Doctrine\Migrations\Metadata\AvailableMigration;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
@@ -24,6 +25,7 @@ final readonly class BackupVerifier
         private FleetPaths $paths,
         #[Autowire(service: 'doctrine.migrations.dependency_factory')]
         private DependencyFactory $migrations,
+        private SecretKeyFingerprint $fingerprint,
     ) {
     }
 
@@ -56,12 +58,27 @@ final readonly class BackupVerifier
             if ('ok' !== $integrity) {
                 $problems[] = 'integrity_check: '.$integrity;
             }
-            [$status, $pending, $schemaProblems] = $this->schema($pdo, str_starts_with(basename($real), 'queue-') || str_starts_with(basename($real), 'queue.sqlite'));
+            $queue = str_starts_with(basename($real), 'queue-') || str_starts_with(basename($real), 'queue.sqlite');
+            [$status, $pending, $schemaProblems] = $this->schema($pdo, $queue);
+            $recorded = $queue ? null : BackupMeta::readKeyFingerprint($pdo);
         } catch (\PDOException $e) {
             return new BackupVerification($real, false, null, [], ['SQLite refused the file: '.$e->getMessage()]);
         }
 
-        return new BackupVerification($real, [] === $problems, $status, $pending, [...$problems, ...$schemaProblems]);
+        return new BackupVerification($real, [] === $problems, $status, $pending, [...$problems, ...$schemaProblems], $recorded, $queue ? null : $this->keyStatus($recorded));
+    }
+
+    /**
+     * A backup that records no fingerprint (older than FLE-97, or made on a host without a key) is not refused: only a
+     * recorded fingerprint that differs from this host's key is a mismatch.
+     */
+    private function keyStatus(?string $recorded): string
+    {
+        if (null === $recorded) {
+            return 'not recorded';
+        }
+
+        return $recorded === $this->fingerprint->current() ? 'match' : 'mismatch';
     }
 
     private function integrity(\PDO $pdo): string

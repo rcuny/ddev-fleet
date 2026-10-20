@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Backup;
 
 use App\Fleet\FleetPaths;
+use App\Fleet\Secrets\SecretKeyFingerprint;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -13,7 +14,8 @@ use Psr\Clock\ClockInterface;
  * A copy is made with `VACUUM INTO` on a separate read handle, so it is a point-in-time snapshot even while php-fpm
  * and the workers write (WAL), it is never a half-copied file, and it needs no stopped service. The snapshot is
  * checked, then renamed into place atomically. `fleet.sqlite` holds password hashes and sealed secrets: the key that
- * opens the secrets (`keys/secret.key`) is deliberately NOT part of a backup.
+ * opens the secrets (`keys/secret.key`) is deliberately NOT part of a backup; only its fingerprint is recorded in the
+ * fleet backup (BackupMeta), so a restore can refuse a backup sealed by another key.
  */
 final readonly class BackupService
 {
@@ -30,6 +32,7 @@ final readonly class BackupService
     public function __construct(
         private FleetPaths $paths,
         private ClockInterface $clock,
+        private SecretKeyFingerprint $fingerprint,
     ) {
     }
 
@@ -171,6 +174,9 @@ final readonly class BackupService
                 unset($pdo);
 
                 $check = new \PDO('sqlite:'.$tmp, null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+                if (BackupKind::Fleet === $kind) {
+                    BackupMeta::writeKeyFingerprint($check, $this->fingerprint->current());
+                }
                 $statement = $check->query('PRAGMA quick_check');
                 $verdict = false === $statement ? false : $statement->fetchColumn();
                 unset($statement, $check);

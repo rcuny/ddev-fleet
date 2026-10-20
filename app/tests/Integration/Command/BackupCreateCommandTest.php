@@ -8,6 +8,8 @@ use App\Command\BackupCreateCommand;
 use App\Domain\Host\HostSettingsRepository;
 use App\Fleet\Backup\BackupService;
 use App\Fleet\FleetPaths;
+use App\Fleet\Secrets\SecretKeyFile;
+use App\Fleet\Secrets\SecretKeyFingerprint;
 use App\Tests\Support\FleetDatabase;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Clock\MockClock;
@@ -39,7 +41,7 @@ final class BackupCreateCommandTest extends KernelTestCase
 
     private function run_(): CommandTester
     {
-        $tester = new CommandTester(new BackupCreateCommand(new BackupService($this->paths, $this->clock), $this->settings));
+        $tester = new CommandTester(new BackupCreateCommand(new BackupService($this->paths, $this->clock, new SecretKeyFingerprint(new SecretKeyFile($this->paths))), $this->settings));
         $tester->execute([], ['capture_stderr_separately' => true]);
 
         return $tester;

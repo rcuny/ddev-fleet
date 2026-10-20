@@ -6,6 +6,7 @@ namespace App\Fleet\Backup;
 
 use App\Domain\Job\JobRepository;
 use App\Fleet\FleetPaths;
+use App\Fleet\Secrets\SecretKeyFingerprint;
 use App\Fleet\Shell\CommandRunner;
 use App\Fleet\Shell\CommandRunnerException;
 use Psr\Clock\ClockInterface;
@@ -14,7 +15,9 @@ use Psr\Clock\ClockInterface;
  * Puts a backup made by BackupService back as the live database, safely and reversibly.
  *
  * preflight() decides without touching anything: the backup (and its queue sibling) pass BackupVerifier, no job is
- * queued or running, no worker or scheduler unit is active. restore() then copies the backup next to the live file
+ * queued or running, no unit that writes the databases is active (workers, scheduler, status watcher, php-fpm), the
+ * backup was sealed by this host's secret key (or the operator accepted that it was not), and the process runs as the
+ * user that owns FLEET_HOME. restore() then copies the backup next to the live file
  * (same filesystem), keeps the current database as `<name>.sqlite.pre-restore-<UTC stamp>` in the backups directory
  * (BackupService never lists, serves or prunes that name), and renames the copy over the live file. Whatever fails
  * after the first rename, including the $migrate step, puts the previous databases back. The units are stopped and
@@ -24,7 +27,8 @@ final readonly class BackupRestorer
 {
     /** `fleet-<stamp>.sqlite` (a backup) or `fleet.sqlite.pre-restore-<stamp>` (what a restore kept). */
     private const string FLEET_NAME = '/^fleet(?|-(\d{8}-\d{6})\.sqlite|\.sqlite\.pre-restore-(\d{8}-\d{6}))$/D';
-    private const string UNIT_NAME = '/^fleet-(?:worker@[A-Za-z0-9_.:-]+|scheduler)\.service$/D';
+    /** Every unit that writes the databases: the restore needs all of them stopped (STOP_UNITS in the command). */
+    private const string UNIT_NAME = '/^(?:fleet-(?:worker@[A-Za-z0-9_.:-]+|scheduler|status)|php\d+(?:\.\d+)?-fpm)\.service$/D';
 
     public function __construct(
         private FleetPaths $paths,
@@ -32,13 +36,18 @@ final readonly class BackupRestorer
         private JobRepository $jobs,
         private CommandRunner $runner,
         private ClockInterface $clock,
+        private SecretKeyFingerprint $fingerprint,
+        /** The uid the process runs as; tests only, null reads it from the process. */
+        private ?int $effectiveUid = null,
     ) {
     }
 
     /**
+     * @param bool $acceptKeyMismatch restore a backup sealed by another secret key (every secret must then be set again)
+     *
      * @throws \InvalidArgumentException when the path is not a fleet backup file to look at (missing, a link, the live database, another name)
      */
-    public function preflight(string $file): RestorePlan
+    public function preflight(string $file, bool $acceptKeyMismatch = false): RestorePlan
     {
         $real = realpath($file);
         if (false === $real || !is_file($real)) {
@@ -56,6 +65,17 @@ final readonly class BackupRestorer
             $refusals[] = $problem;
         }
 
+        $warnings = [];
+        if ('mismatch' === $verification->keyStatus) {
+            if ($acceptKeyMismatch) {
+                $warnings[] = 'This backup was sealed by another secret key than keys/secret.key: every secret in it (OVH credentials, Claude token, project secrets) cannot be read and must be set again.';
+            } else {
+                $refusals[] = 'This backup was sealed by another secret key than this host\'s keys/secret.key, so its secrets would be unreadable after the restore. Put the matching keys/secret.key back, or pass --accept-key-mismatch and set every secret again.';
+            }
+        } elseif ('not recorded' === $verification->keyStatus) {
+            $warnings[] = 'This backup records no secret key fingerprint (made before it was recorded, or on a host without a key): it cannot be checked against keys/secret.key.';
+        }
+
         $queue = \dirname($real).'/'.($pre ? 'queue.sqlite.pre-restore-'.$stamp : 'queue-'.$stamp.'.sqlite');
         $queueBackup = is_file($queue) && !is_link($queue) ? $queue : null;
         if (null !== $queueBackup) {
@@ -64,10 +84,10 @@ final readonly class BackupRestorer
             }
         }
 
-        $refusals = [...$refusals, ...$this->jobRefusals()];
+        $refusals = [...$refusals, ...$this->ownerRefusals(), ...$this->jobRefusals()];
         [$unitRefusals, $units] = $this->unitRefusals();
 
-        return new RestorePlan($real, $queueBackup, $verification, [...$refusals, ...$unitRefusals], $units);
+        return new RestorePlan($real, $queueBackup, $verification, [...$refusals, ...$unitRefusals], $units, $warnings);
     }
 
     /**
@@ -103,7 +123,7 @@ final readonly class BackupRestorer
             foreach ($steps as $kind => $step) {
                 $staged[$kind] = $this->stage($step['source'], $step['live']);
                 if (null !== $step['kept']) {
-                    $this->keep($step['live'], $step['kept']);
+                    $this->keep($step['live'], $step['kept'], 'fleet' === $kind);
                 }
             }
         } catch (\Throwable $e) {
@@ -146,6 +166,27 @@ final readonly class BackupRestorer
     }
 
     /**
+     * The restored files are created by this process: run by another user (root through a plain `sudo`), they would be
+     * owned by that user and the services could not open them.
+     *
+     * @return list<string>
+     */
+    private function ownerRefusals(): array
+    {
+        $owner = @fileowner($this->paths->home());
+        $uid = $this->effectiveUid ?? (\function_exists('posix_geteuid') ? posix_geteuid() : null);
+        if (false === $owner || null === $uid) {
+            return ['Cannot tell which user owns '.$this->paths->home().', so the restored files could end up with the wrong owner.'];
+        }
+        if ($owner === $uid) {
+            return [];
+        }
+        $name = \function_exists('posix_getpwuid') ? (posix_getpwuid($owner)['name'] ?? (string) $owner) : (string) $owner;
+
+        return [\sprintf('Run the restore as "%s", the user that owns %s (for example "sudo fleet backup:restore ..."): as another user the restored databases would be owned by that user and the services could not open them.', $name, $this->paths->home())];
+    }
+
+    /**
      * @return list<string>
      */
     private function jobRefusals(): array
@@ -170,7 +211,7 @@ final readonly class BackupRestorer
     {
         try {
             $result = $this->runner->run(
-                ['systemctl', 'list-units', '--plain', '--no-legend', '--no-pager', '--state=active,activating,reloading,deactivating', 'fleet-worker@*.service', 'fleet-scheduler.service'],
+                ['systemctl', 'list-units', '--plain', '--no-legend', '--no-pager', '--state=active,activating,reloading,deactivating', 'fleet-worker@*.service', 'fleet-scheduler.service', 'fleet-status.service', 'php*-fpm.service'],
                 null,
                 [],
                 null,
@@ -224,7 +265,7 @@ final readonly class BackupRestorer
     /**
      * Keeps the live database as a consistent snapshot (`VACUUM INTO` sees the WAL), flushed and mode 0600.
      */
-    private function keep(string $live, string $target): void
+    private function keep(string $live, string $target, bool $fleet): void
     {
         $tmp = \dirname($target).'/.tmp-'.bin2hex(random_bytes(6));
         try {
@@ -232,6 +273,12 @@ final readonly class BackupRestorer
                 $pdo = new \PDO('sqlite:'.$live, null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION, \PDO::ATTR_TIMEOUT => 30]);
                 $pdo->prepare('VACUUM INTO ?')->execute([$tmp]);
                 unset($pdo);
+                if ($fleet) {
+                    // The kept copy is sealed by the key this host has now, whatever the live file still records.
+                    $copy = new \PDO('sqlite:'.$tmp, null, null, [\PDO::ATTR_ERRMODE => \PDO::ERRMODE_EXCEPTION]);
+                    BackupMeta::writeKeyFingerprint($copy, $this->fingerprint->current());
+                    unset($copy);
+                }
             } catch (\PDOException $e) {
                 throw new \RuntimeException('Cannot keep the current database (move a damaged file aside first): '.$e->getMessage(), 0, $e);
             }
