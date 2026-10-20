@@ -158,6 +158,42 @@ final class FleetWrapperTest extends TestCase
         self::assertStringNotContainsString('attach', (string) file_get_contents($log));
     }
 
+    public function testTmuxValidatesTheInstanceIdBeforeTheSessionIsEnsured(): void
+    {
+        foreach ([['tmux', 'attach', 'Bad_Id'], ['tmux:attach', 'no-double-dash'], ['tmux', 'attach', '--x']] as $args) {
+            $log = $this->scratch().'/calls.log';
+            @unlink($log);
+            [$status, , $err] = $this->attach($args, $log, tty: true);
+
+            self::assertSame(2, $status, implode(' ', $args));
+            self::assertStringContainsString('is not an instance id', $err);
+            self::assertFileDoesNotExist($log, 'neither the ensure step nor tmux runs');
+        }
+    }
+
+    public function testTmuxRefusesExtraArgumentsWithUsage(): void
+    {
+        foreach ([['tmux', 'attach', 'acme--main', 'more'], ['tmux:attach', 'acme--main', 'more'], ['tmux', 'acme--main', 'more']] as $args) {
+            $log = $this->scratch().'/calls.log';
+            @unlink($log);
+            [$status, , $err] = $this->attach($args, $log, tty: true);
+
+            self::assertSame(2, $status, implode(' ', $args));
+            self::assertStringContainsString('usage: fleet tmux [attach] [<instance-id>]', $err);
+            self::assertFileDoesNotExist($log);
+        }
+    }
+
+    public function testTmuxInsideAnExistingTmuxClientPrintsAHintInsteadOfNesting(): void
+    {
+        $log = $this->scratch().'/calls.log';
+        [$status, , $err] = $this->attach(['tmux', 'acme--main'], $log, tty: true, env: ['TMUX' => '/tmp/tmux-1000/default,1,0']);
+
+        self::assertSame(2, $status);
+        self::assertStringContainsString('already inside tmux', $err);
+        self::assertFileDoesNotExist($log);
+    }
+
     public function testTmuxDoesNotTreatOtherWordsAsAWindow(): void
     {
         // Not an instance id: goes to the console as it is, and tmux never runs.
@@ -172,11 +208,12 @@ final class FleetWrapperTest extends TestCase
     /**
      * Runs the wrapper as the fleet user with stub php8.4 and tmux that log their calls to $log.
      *
-     * @param list<string> $args
+     * @param list<string>          $args
+     * @param array<string, string> $env  extra environment, e.g. TMUX
      *
      * @return array{int, string, string}
      */
-    private function attach(array $args, string $log, bool $tty, string $selectBody = ''): array
+    private function attach(array $args, string $log, bool $tty, string $selectBody = '', array $env = []): array
     {
         $envFile = $this->scratch().'/fleet.env';
         file_put_contents($envFile, "APP_ENV=prod\n");
@@ -188,9 +225,10 @@ final class FleetWrapperTest extends TestCase
             'tmux' => 'echo "tmux $*" >> '.$logArg.'; '.('' !== $selectBody ? 'if [ "$3" = select-window ]; then '.$selectBody.'; fi' : ':'),
         ]);
 
-        return $this->wrapper($args, $stubs, [
+        return $this->wrapper($args, $stubs, $env + [
             'FLEET_WRAPPER_ENV_FILE' => $envFile,
             'FLEET_WRAPPER_CONSOLE' => '/app/bin/console',
+            'TMUX' => false, // a developer's own tmux must not leak into the tests
         ] + ($tty ? ['FLEET_WRAPPER_TTY' => '1'] : []));
     }
 
@@ -270,8 +308,8 @@ final class FleetWrapperTest extends TestCase
     }
 
     /**
-     * @param list<string>          $args
-     * @param array<string, string> $env
+     * @param list<string>                $args
+     * @param array<string, string|false> $env
      *
      * @return array{int, string, string}
      */

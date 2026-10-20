@@ -22,19 +22,47 @@ ENV_FILE=${FLEET_WRAPPER_ENV_FILE:-/etc/ddev-fleet/fleet.env}
 CONSOLE=${FLEET_WRAPPER_CONSOLE:-/opt/ddev-fleet/app/bin/console}
 PHP=${FLEET_WRAPPER_PHP:-php8.4}
 
+# `fleet tmux` and `fleet tmux attach|:attach`, with an optional instance id: attach to the agent workspace. Parsed and
+# checked before the switch to `fleet`, because sudo resets the environment and $TMUX would be lost on the way. Only
+# `attach` and an instance-id-shaped word are ours; any other `fleet tmux <verb>` goes to the console unchanged.
+attach=0
+window=''
+extra=0
+if [ "${1:-}" = tmux ]; then
+  if [ "$#" -eq 1 ]; then
+    attach=1
+  elif [ "$2" = attach ]; then
+    attach=1; window=${3:-}; [ "$#" -gt 3 ] && extra=1
+  elif [[ $2 =~ ^[a-z0-9-]+--[a-z0-9-]+$ ]]; then
+    attach=1; window=$2; [ "$#" -gt 2 ] && extra=1
+  fi
+elif [ "${1:-}" = tmux:attach ]; then
+  attach=1; window=${2:-}; [ "$#" -gt 2 ] && extra=1
+fi
+if [ "$attach" -eq 1 ]; then
+  if [ "$extra" -eq 1 ]; then
+    printf 'usage: fleet tmux [attach] [<instance-id>]\n' >&2
+    exit 2
+  fi
+  # The id is validated before anything runs (the session is not even ensured for a bad one) and is later passed as one
+  # argv word, never through a shell.
+  if [ -n "$window" ] && [[ ! $window =~ ^[a-z0-9]+(-[a-z0-9]+)*--[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+    printf 'fleet: %s is not an instance id\n' "$window" >&2
+    exit 2
+  fi
+  if [ -n "${TMUX:-}" ]; then
+    printf 'fleet: already inside tmux: attaching would nest it. Detach first (Ctrl-b d) or use the tmux prefix to switch sessions\n' >&2
+    exit 2
+  fi
+fi
+
 if [ "$(id -un)" != "$FLEET_USER" ]; then
   exec sudo -u "$FLEET_USER" -- /usr/local/bin/fleet "$@"
 fi
 
-# `fleet tmux` and `fleet tmux attach|:attach`, with an optional instance id: attach to the agent workspace. It needs a
-# terminal on both ends; without one (ssh host fleet tmux) tmux would only fail with a cryptic message. FLEET_WRAPPER_TTY=1
-# skips the check for the unit tests (read after the switch to `fleet`, like the other FLEET_WRAPPER_* variables).
-attach=0
-if [ "${1:-}" = tmux ] && { [ "$#" -eq 1 ] || [ "$2" = attach ] || [[ ${2:-} =~ ^[a-z0-9-]+--[a-z0-9-]+$ ]]; }; then
-  attach=1; window=${2:-}; [ "$window" = attach ] && window=${3:-}
-elif [ "${1:-}" = tmux:attach ]; then
-  attach=1; window=${2:-}
-fi
+# Attaching needs a terminal on both ends; without one (ssh host fleet tmux) tmux would only fail with a cryptic message.
+# FLEET_WRAPPER_TTY=1 skips the check for the unit tests (read after the switch to `fleet`, like the other
+# FLEET_WRAPPER_* variables).
 if [ "$attach" -eq 1 ] && [ "${FLEET_WRAPPER_TTY:-}" != 1 ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
   printf 'fleet: tmux needs a terminal: use ssh -t\n' >&2
   exit 2
@@ -54,14 +82,9 @@ set -a
 set +a
 
 if [ "$attach" -eq 1 ]; then
-  # Make sure the session exists (quiet), then select the instance's window and attach. The id is matched by the pattern
-  # above and passed as one argv word, never through a shell.
+  # Make sure the session exists (quiet), then select the instance's window and attach.
   "$PHP" "$CONSOLE" fleet:tmux:ensure -q
   if [ -n "$window" ]; then
-    if [[ ! $window =~ ^[a-z0-9]+(-[a-z0-9]+)*--[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
-      printf 'fleet: %s is not an instance id\n' "$window" >&2
-      exit 2
-    fi
     tmux -L fleet select-window -t "=fleet:=$window" || { printf 'fleet: instance %s has no window\n' "$window" >&2; exit 1; }
   fi
   exec tmux -L fleet attach -t =fleet

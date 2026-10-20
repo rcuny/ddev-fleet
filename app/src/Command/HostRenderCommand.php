@@ -44,7 +44,7 @@ final class HostRenderCommand extends Command
     public function __construct(
         private readonly HostSettingsRepository $settings,
         private readonly SystemRenderer $system,
-        private readonly ?AccessModelUpgrade $upgrade = null,
+        private readonly AccessModelUpgrade $upgrade,
     ) {
         parent::__construct();
     }
@@ -96,7 +96,7 @@ final class HostRenderCommand extends Command
             if ($input->getOption('apply') || $input->getOption('stage')) {
                 // Before Authelia gets the relaxed rule: the sites of running instances must check the project group
                 // first. A failure stops here, so the old per-project rules stay installed (fail closed).
-                $rewritten = $this->upgrade?->prepare($host) ?? 0;
+                $rewritten = $this->upgrade->prepare($host);
                 if ($rewritten > 0) {
                     $io->writeln(\sprintf('Project access check written to %d instance site(s).', $rewritten));
                 }

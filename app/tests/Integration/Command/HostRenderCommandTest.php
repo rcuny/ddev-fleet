@@ -58,7 +58,7 @@ final class HostRenderCommandTest extends KernelTestCase
      */
     private function render(array $options = []): CommandTester
     {
-        $tester = new CommandTester(new HostRenderCommand($this->fx->settings, $this->fx->system));
+        $tester = new CommandTester(new HostRenderCommand($this->fx->settings, $this->fx->system, $this->upgradeStep(false)));
         $tester->execute($options, ['capture_stderr_separately' => true]);
 
         return $tester;
@@ -215,6 +215,14 @@ final class HostRenderCommandTest extends KernelTestCase
         @mkdir($this->fx->paths->caddyInstancesDir(), 0o750, true);
         file_put_contents($this->fx->paths->instanceSiteFile($instance->id()), "# old site, no group check\n");
 
+        return $this->upgradeStep($caddyFails);
+    }
+
+    /**
+     * The upgrade step wired to a Caddy runner that records into the fixture's event list (and fails on request).
+     */
+    private function upgradeStep(bool $caddyFails): AccessModelUpgrade
+    {
         $fixture = $this->fx;
         $runner = new class($fixture, $caddyFails) implements CommandRunner {
             public function __construct(private readonly SetupFixture $fixture, private readonly bool $fails)
