@@ -153,13 +153,21 @@ A target that climbs out of the project's directory and back in (`../<project>/d
 check is on the path as written, and a `..` above the assets directory is outside it, even when it lands in the same
 project again. Use a path below the link's own folder (`../dumps/x.sql` from `web/`).
 
-**The remaining limit:** the checks run while the deploy walks the tree, and the file is then opened and verified (the
-opened file must be the regular file that was checked, by device and inode, before and after the open; a link or another
-file swapped in between fails the deploy with "changed while it was being seeded" and nothing is copied from it).
-Whoever can write to `assets/<project>/` while a deploy runs can still make a deploy fail or choose which file in the
-assets is seeded. The device/inode check covers the file itself, not its parent directories: someone who can swap a
-directory inside the assets for a link while a deploy runs could still make it read a file outside. Keep write access to the assets to the people who manage the
-project (the Assets tab and `scp` as the fleet user are the intended ways in).
+**Verified when it is opened.** The checks run while the deploy walks the tree, and the file is then opened and
+verified: the opened file must be the regular file that was checked (by device and inode, before and after the open),
+and the real path of the open descriptor (`/proc/self/fd`, so Linux only) must be inside the project's assets
+directory. A link or another file swapped in between, or a folder on the way replaced by a link to somewhere else,
+fails the deploy ("changed while it was being seeded", or "is not inside the project's assets") and nothing is copied
+from it, so a deploy **cannot be made to read outside** the project's assets. The file is opened without blocking, so a
+named pipe or another special file swapped in does not hang the deploy: it is refused the same way.
+
+**Hard links.** A hard link is the same inode under another name, so it is a regular file like any other and is
+copied. A hard link inside `assets/<project>/` to a file outside it is possible only for someone who can already write
+in the assets and read the target, so it grants nothing new; a test pins this behaviour.
+
+**The remaining limit:** whoever can write to `assets/<project>/` while a deploy runs can still make a deploy fail or
+choose which file in the assets is seeded. Keep write access to the assets to the people who manage the project (the
+Assets tab and `scp` as the fleet user are the intended ways in).
 
 ## Snapshot a running instance
 
