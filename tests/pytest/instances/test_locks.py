@@ -3,7 +3,12 @@ import errno
 import pytest
 
 from fleet.core.errors import LockHeldError
-from fleet.core.locks import ALLOCATION_LOCK_ID, instance_lock, retry_while_locked
+from fleet.core.locks import (
+    ALLOCATION_LOCK_ID,
+    instance_lock,
+    is_instance_locked,
+    retry_while_locked,
+)
 
 
 def test_allocation_lock_id_is_the_original_multideploy_lock_file_name():
@@ -115,3 +120,22 @@ def test_retry_while_locked_does_not_retry_other_errors():
     with pytest.raises(ValueError):
         retry_while_locked(fn, interval=5, max_wait=60, sleep=lambda s: None)
     assert len(calls) == 1
+
+
+def test_is_instance_locked_true_while_held_false_otherwise(tmp_path):
+    locks_dir = tmp_path / "locks"
+    assert is_instance_locked(locks_dir, "oak--develop") is False  # no lock file
+    assert not locks_dir.exists()  # probe creates nothing
+    with instance_lock(locks_dir, "oak--develop"):
+        assert is_instance_locked(locks_dir, "oak--develop") is True
+        assert is_instance_locked(locks_dir, "other--x") is False
+    assert is_instance_locked(locks_dir, "oak--develop") is False
+
+
+def test_is_instance_locked_does_not_leave_the_lock_held(tmp_path):
+    locks_dir = tmp_path / "locks"
+    with instance_lock(locks_dir, "oak--develop"):
+        pass
+    assert is_instance_locked(locks_dir, "oak--develop") is False
+    with instance_lock(locks_dir, "oak--develop"):  # would raise if probe held it
+        pass

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-20
+
+### Fixed
+- **tmux reconcile no longer opens a window for an instance that is still deploying.** `fleet tmux` (and the `fleet-tmux.service` boot reconcile) used to create a plain-shell window for every instance directory, including one in the middle of a deploy. When the deploy finished, `ensure_instance_window()` found that window and did not type the template's `tty1`/`tty2` commands, so a CI runner started from `tty1` silently never ran (only a `tty commands not typed` warning in the deploy log). New `locks.is_instance_locked()` probes the per-instance lock without holding it; reconcile neither creates nor prunes the window of a locked instance, and the deploy then creates it and types the commands as usual. Port to 1.x: FLE-119.
+
 ## [0.20.0] - 2026-10-18
 
 ### Added
@@ -450,7 +455,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/rcuny/ddev-fleet/compare/v0.17.0...v0.18.0

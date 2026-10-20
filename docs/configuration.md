@@ -323,6 +323,11 @@ succeeded and the instance is recorded:
 | A closed window recreated by `fleet tmux` | **plain shells** — nothing typed |
 | `^b R` (`fleet tmux-reset`) | plain shells (panes rebuilt, nothing typed) |
 
+`fleet tmux` / reconcile also skips any instance whose per-instance lock is held
+(a deploy in progress), so it can never pre-empt the deploy's own window and
+swallow its tty commands; the window appears once the deploy creates it (or on the
+next reconcile).
+
 Operationally this means a reboot can no longer relaunch autonomous commands
 (e.g. `/jira work`) on every templated instance; a redeploy is the explicit
 way to run them again.
