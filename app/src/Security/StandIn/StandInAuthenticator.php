@@ -45,7 +45,8 @@ final class StandInAuthenticator extends AbstractAuthenticator
 
     public function authenticate(Request $request): Passport
     {
-        $user = $this->settings->userFor($this->role($request));
+        $name = $request->cookies->get(StandInSettings::USER_COOKIE);
+        $user = $this->settings->userFor($this->role($request), \is_string($name) ? $name : null);
         if (null === $user) {
             throw new AuthenticationException('No stand-in identity selected.');
         }

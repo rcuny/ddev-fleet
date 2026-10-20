@@ -1,13 +1,15 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
+import { test } from './support/secrets';
 import { setStandInRole } from './support/standIn';
 
 // Secrets in a real browser, at 1280 px (desktop project) and 390 px (phone project): the fleet-wide page, the project's
 // Secrets tab, reveal, the audit log. Every test owns uniquely named secrets and removes them in `finally`, so the
-// suite is repeatable against the shared dev database and safe in parallel. The "no placeholder" warning needs asset
+// suite is repeatable against the shared dev database and safe in parallel. `test` is the fixture-extended one: each
+// test signs in as an admin of its own, so the reveal throttle (10 a minute per user) never crosses tests. The "no placeholder" warning needs asset
 // files on the server's disk, which a browser test cannot create: the functional tests cover it.
 
 const isPhone = (): boolean => test.info().project.name === 'phone';

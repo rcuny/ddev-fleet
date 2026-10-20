@@ -37,3 +37,8 @@ export function hasHorizontalOverflow(page: Page): Promise<boolean> {
   const width = page.viewportSize()?.width;
   return page.evaluate((expected) => document.documentElement.scrollWidth > (expected ?? window.innerWidth), width);
 }
+
+/** The errors collected by {@link collectBrowserErrors} minus the browser's own line for a 4xx answer a test provokes on purpose. */
+export function unexpectedErrors(errors: string[]): string[] {
+  return errors.filter((message) => !/Failed to load resource: the server responded with a status of 4\d\d/.test(message));
+}

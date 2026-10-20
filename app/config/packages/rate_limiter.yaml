@@ -20,11 +20,3 @@ when@test:
             secret_reveal:
                 # In memory and without a reset between requests, so a test sees its own reveals and no other test's.
                 storage_service: fleet.test.reveal_storage
-
-when@dev:
-    framework:
-        rate_limiter:
-            secret_reveal:
-                # The Playwright suite runs in dev as one stand-in user and reveals dozens of values in a minute, across
-                # runs (the dev cache outlives them); the throttle itself is covered by the functional test.
-                limit: 1000

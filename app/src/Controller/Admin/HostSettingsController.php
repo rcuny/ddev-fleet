@@ -6,6 +6,7 @@ namespace App\Controller\Admin;
 
 use App\Domain\Host\HostSettings;
 use App\Domain\Host\HostSettingsRepository;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Backup\BackupInfo;
 use App\Fleet\Backup\BackupKind;
 use App\Fleet\Backup\BackupNotFound;
@@ -18,6 +19,7 @@ use App\Fleet\Host\NotificationMailRule;
 use App\Fleet\PortMirror\PortMirror;
 use App\Fleet\PortMirror\PortMirrorSwitch;
 use App\Fleet\Secrets\SecretConflict;
+use App\Fleet\Secrets\SecretService;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\System\ConfigValue;
 use App\Fleet\Workspace\ClaudeTokenRotation;
@@ -66,6 +68,7 @@ final class HostSettingsController extends AbstractController
         private readonly WorkspaceCheck $workspace,
         private readonly PortMirror $portMirror,
         private readonly PortMirrorSwitch $portMirrorSwitch,
+        private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -203,8 +206,10 @@ final class HostSettingsController extends AbstractController
                     // The secret first: if it cannot be written nothing else changes.
                     if ($clear) {
                         $this->secrets->forgetFleetWide(HostSecrets::SMTP_PASSWORD);
+                        $this->audit->record($this->actor(), AuditLog::SECRET_DELETE, SecretService::subject(null, HostSecrets::SMTP_PASSWORD));
                     } elseif ('' !== $password) {
                         $this->secrets->putFleetWide(HostSecrets::SMTP_PASSWORD, $password, $this->actor());
+                        $this->audit->record($this->actor(), AuditLog::SECRET_PUT, SecretService::subject(null, HostSecrets::SMTP_PASSWORD));
                     }
                     $host->changeNotificationMail(
                         $this->text($form, 'smtpHost'),
