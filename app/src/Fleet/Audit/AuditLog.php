@@ -28,6 +28,9 @@ final readonly class AuditLog
     public const string SCHEDULE_RESUME = 'schedule.resume';
     public const string SCHEDULE_RUN = 'schedule.run';
 
+    public const string PROJECT_EXPORT = 'project.export';
+    public const string PROJECT_IMPORT = 'project.import';
+
     private const string ELLIPSIS = '…';
 
     /** The actor of changes made on the command line. */

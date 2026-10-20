@@ -64,10 +64,10 @@ final readonly class ScheduleService
     /**
      * @throws ValidationFailed
      */
-    public function create(ScheduleInput $input, string $by): Schedule
+    public function create(ScheduleInput $input, string $by, bool $requireTarget = true): Schedule
     {
         $input = $input->normalised();
-        $errors = $this->errors($input, true);
+        $errors = $this->errors($input, true, $requireTarget);
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -93,12 +93,12 @@ final readonly class ScheduleService
      * @throws NotFound
      * @throws ValidationFailed
      */
-    public function update(string $name, ScheduleInput $input, string $by): Schedule
+    public function update(string $name, ScheduleInput $input, string $by, bool $requireTarget = true): Schedule
     {
         $schedule = $this->get($name);
         $input = new ScheduleInput($schedule->name(), $input->cron, $input->timezone, $input->action, $input->instance);
         $input = $input->normalised();
-        $errors = $this->errors($input, false);
+        $errors = $this->errors($input, false, $requireTarget);
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -224,9 +224,20 @@ final readonly class ScheduleService
     }
 
     /**
+     * The field => message map create() would refuse the input with, without touching the database. A project import
+     * checks a file with it before it writes anything; $checkTarget false accepts an instance that does not exist yet.
+     *
+     * @return array<string, string>
+     */
+    public function validate(ScheduleInput $input, bool $checkName = true, bool $checkTarget = true): array
+    {
+        return $this->errors($input->normalised(), $checkName, $checkTarget);
+    }
+
+    /**
      * @return array<string, string> field => message
      */
-    private function errors(ScheduleInput $input, bool $checkName): array
+    private function errors(ScheduleInput $input, bool $checkName, bool $checkTarget): array
     {
         $errors = [];
         if ($checkName) {
@@ -241,7 +252,7 @@ final readonly class ScheduleService
         $action = $this->actions->get($input->action);
         if (null === $action) {
             $errors['action'] = \sprintf('Choose one of: %s.', implode(', ', $this->actions->names()));
-        } elseif (null !== $error = $action->targetError($input->instance)) {
+        } elseif ($checkTarget && null !== $error = $action->targetError($input->instance)) {
             $errors['instance'] = $error;
         }
 

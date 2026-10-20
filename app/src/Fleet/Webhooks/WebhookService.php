@@ -68,9 +68,14 @@ final readonly class WebhookService
         $endpoint = $this->webhooks->endpoint($projectName, $source)
             ?? throw new NotFound(\sprintf('%s has no %s webhook yet: create its secret first.', $projectName, $source->label()));
 
-        $errors = WebhookSource::Jira === $source
-            ? $this->jiraErrors($project, $endpoint, $action, $match, $params)
-            : $this->bitbucketErrors($project, $action, $match, $params);
+        $errors = $this->ruleErrors(
+            $source,
+            $action,
+            $match,
+            $params,
+            $this->projects->templateNames($project),
+            array_map(static fn (WebhookRule $rule): array => $rule->match(), $endpoint->rules()),
+        );
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }
@@ -139,12 +144,32 @@ final readonly class WebhookService
     }
 
     /**
-     * @param array<string, string> $match
-     * @param array<string, string> $params
+     * The field => message map for a rule that would be added to an endpoint of $source: the rules addRule() applies,
+     * without touching the database. The project import checks a whole file with it before it writes anything.
+     *
+     * @param array<string, string>       $match
+     * @param array<string, string>       $params
+     * @param list<string>                $templateNames  the templates the rule may deploy
+     * @param list<array<string, string>> $siblingMatches the `match` of the rules the endpoint has already
      *
      * @return array<string, string>
      */
-    private function jiraErrors(Project $project, WebhookEndpoint $endpoint, string $action, array $match, array $params): array
+    public function ruleErrors(WebhookSource $source, string $action, array $match, array $params, array $templateNames, array $siblingMatches = []): array
+    {
+        return WebhookSource::Jira === $source
+            ? $this->jiraErrors($templateNames, $siblingMatches, $action, $match, $params)
+            : $this->bitbucketErrors($templateNames, $action, $match, $params);
+    }
+
+    /**
+     * @param list<string>                $templateNames
+     * @param list<array<string, string>> $siblingMatches
+     * @param array<string, string>       $match
+     * @param array<string, string>       $params
+     *
+     * @return array<string, string>
+     */
+    private function jiraErrors(array $templateNames, array $siblingMatches, string $action, array $match, array $params): array
     {
         $errors = [];
         if (WebhookRule::ACTION_DEPLOY !== $action) {
@@ -154,23 +179,24 @@ final readonly class WebhookService
         if ('' === $status || \strlen($status) > 100 || 1 === preg_match('/[\x00-\x1F\x7F]/', $status)) {
             $errors['onStatus'] = 'Enter the Jira status the issue moves into (at most 100 characters).';
         } else {
-            foreach ($endpoint->rules() as $rule) {
-                if (0 === strcasecmp($rule->match()['on_status'] ?? '', $status)) {
+            foreach ($siblingMatches as $sibling) {
+                if (0 === strcasecmp($sibling['on_status'] ?? '', $status)) {
                     $errors['onStatus'] = 'There is already a rule for this status.';
                 }
             }
         }
 
-        return $errors + $this->deployErrors($project, $params, false);
+        return $errors + $this->deployErrors($templateNames, $params, false);
     }
 
     /**
+     * @param list<string>          $templateNames
      * @param array<string, string> $match
      * @param array<string, string> $params
      *
      * @return array<string, string>
      */
-    private function bitbucketErrors(Project $project, string $action, array $match, array $params): array
+    private function bitbucketErrors(array $templateNames, string $action, array $match, array $params): array
     {
         $errors = [];
         if (1 !== preg_match(self::EVENT_PATTERN, $match['on_event'] ?? '')) {
@@ -206,23 +232,24 @@ final readonly class WebhookService
             $errors['branch'] = 'A deploy rule needs the branch glob to deploy.';
         }
 
-        return $errors + $this->deployErrors($project, $params, true, $match);
+        return $errors + $this->deployErrors($templateNames, $params, true, $match);
     }
 
     /**
+     * @param list<string>          $templateNames
      * @param array<string, string> $params
      * @param array<string, string> $match
      *
      * @return array<string, string>
      */
-    private function deployErrors(Project $project, array $params, bool $labelAllowed, array $match = []): array
+    private function deployErrors(array $templateNames, array $params, bool $labelAllowed, array $match = []): array
     {
         $errors = [];
         $template = $params['template'] ?? '';
         if (!$labelAllowed && (isset($params['label_prefix']) || isset($params['strip_suffix']))) {
             $errors['labelPrefix'] = 'A Jira rule names its instance after the issue key.';
         }
-        if (!\in_array($template, $this->projects->templateNames($project), true)) {
+        if (!\in_array($template, $templateNames, true)) {
             $errors['template'] = 'Choose one of the project\'s templates.';
         }
         if (isset($params['branch']) && null !== BranchName::error($params['branch'])) {

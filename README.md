@@ -108,6 +108,7 @@ executed. The merge gate is `composer run gates` in `app/`, plus the Playwright 
 |---|---|
 | [`docs/README.md`](docs/README.md) | Index of every document with its status |
 | [`docs/installation.md`](docs/installation.md) | Installing 1.x: prerequisites, the installer and its flags, the setup wizard, what is installed where, recovery, upgrades, security model, uninstalling |
+| [`docs/moving-projects.md`](docs/moving-projects.md) | Moving a project between hosts: export and import with a preview, sealed secrets, assets over rsync, `fleet backup:verify` |
 | [`docs/assets.md`](docs/assets.md) | Assets: the project Assets tab, chunked browser upload and its cap, copying large files over SSH, path rules, the `fleet asset:*` commands |
 | [`docs/secrets.md`](docs/secrets.md) | Secrets: fleet-wide and project secrets, `[[token]]` placeholders, reveal and the audit log, the `fleet secret:list\|set\|unset` commands, the security model |
 | [`docs/instances-and-jobs.md`](docs/instances-and-jobs.md) | Instances and jobs: deploy, redeploy, start, stop, destroy, bulk work, the live log, the `fleet instance\|job` commands, exit codes, troubleshooting |

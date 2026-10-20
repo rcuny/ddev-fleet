@@ -9,6 +9,10 @@
                 <twig:ux:icon name="lucide:plus" />
                 New project
             </twig:Button>
+            <twig:Button as="a" variant="outline" href="{{ path('import') }}" class="h-11 md:h-8" data-testid="import-project">
+                <twig:ux:icon name="lucide:upload" />
+                Import
+            </twig:Button>
         </twig:block>
     </twig:PageHeader>
 

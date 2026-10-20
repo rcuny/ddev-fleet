@@ -289,6 +289,7 @@ The remaining commands exist mostly for the installer:
 | `fleet:host:init --domain=<fqdn> [--acme-email=] [--tls-mode=http01\|ovh_dns] [--force]` | Create the state directories, the secret key and the host settings. Idempotent. Changing the domain or the TLS mode after setup needs `--force`. |
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
+| `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity and schema version, read-only (see below). |
 | `fleet:setup:token` | Mint a setup token and print the URL. |
 | `fleet:setup:reset [--yes]` | See above. |
 | `fleet:user:reset-password <username> [--no-apply]` | See above. |
@@ -332,6 +333,8 @@ disaster recovery.
 downloads one (an attachment, never cached) and has a "Back up now" button. On the host, `sudo fleet backup:create` prints the name of the new file (it is short for
 `fleet fleet:backup:create`); a failure exits non-zero. `systemctl list-timers fleet-backup.timer` shows the next
 run and `journalctl -u fleet-backup.service` the last ones.
+
+**Check before you restore.** `sudo fleet backup:verify /srv/fleet/backups/fleet-20261019-083015.sqlite` opens the file read-only and runs SQLite's integrity check and a schema comparison. It exits 0 when the file is sound (`schema: behind` says how many migrations to run after the restore), 1 when it is not, and it refuses the live database. See [`moving-projects.md`](moving-projects.md) for moving a single project between hosts.
 
 **Restore.** Stop everything that writes to the database, put the file back and start again. Replace
 `fleet-20261019-083015.sqlite` with the backup you chose:

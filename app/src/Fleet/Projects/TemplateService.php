@@ -120,6 +120,17 @@ final readonly class TemplateService
     }
 
     /**
+     * The field => message map create() would refuse the input with (the name's uniqueness and the project's limit
+     * aside), without touching the database. A project import checks a whole file with it before it writes anything.
+     *
+     * @return array<string, string>
+     */
+    public function validate(TemplateInput $input): array
+    {
+        return $this->check($input->normalised());
+    }
+
+    /**
      * @return array<string, string> the first error of every field except the name rules that need the database
      */
     private function check(TemplateInput $input): array
