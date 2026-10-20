@@ -153,6 +153,21 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         self::assertNotSame([], $kills, 'the old window was closed');
     }
 
+    public function testAWindowCreatedByAReconcileDuringTheDeployStillGetsItsCommandsTyped(): void
+    {
+        $this->template(['echo one'], ['echo two']);
+        // fleet:tmux:ensure ran while the deploy was in progress and opened a plain-shell window for the checkout.
+        $this->tmuxRunner->windows = ['acme--main'];
+
+        $job = $this->deploy();
+
+        self::assertSame(['echo one'], $this->tmuxRunner->typedIn('tty1'));
+        self::assertSame(['echo two'], $this->tmuxRunner->typedIn('tty2'));
+        self::assertSame(['acme--main'], $this->tmuxRunner->windows);
+        self::assertStringContainsString('tmux window ready (2 commands typed)', $this->logText($job));
+        self::assertStringNotContainsString('already existed', $this->logText($job));
+    }
+
     public function testDestroyingClosesTheWindow(): void
     {
         $this->template([], ['echo hi']);
