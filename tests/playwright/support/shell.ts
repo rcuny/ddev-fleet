@@ -21,7 +21,7 @@ export function collectBrowserErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('console', (message) => {
     if (message.type() === 'error') {
-      errors.push(`console.error: ${message.text()}`);
+      errors.push(`console.error: ${message.text()} ${message.location().url}`.trimEnd());
     }
   });
   page.on('pageerror', (error) => errors.push(`pageerror: ${error.message}`));
