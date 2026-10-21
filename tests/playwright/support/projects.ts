@@ -51,18 +51,31 @@ export async function navigate(page: Page, trigger: () => Promise<unknown>): Pro
   await page.evaluate(() => {
     const html = document.documentElement;
     html.dataset.navPending = '1';
+    html.dataset.navLog = '';
+    // Which Turbo events the visit went through, for the failure message (a visit with no before-fetch-request never started: the click was lost).
+    const seen = ['turbo:before-fetch-request', 'turbo:before-fetch-response', 'turbo:submit-end', 'turbo:before-render', 'turbo:frame-render', 'turbo:render'];
+    const note = (event: Event): void => {
+      html.dataset.navLog = `${html.dataset.navLog ?? ''} ${event.type}`.trim();
+    };
     // A form inside a <turbo-frame> renders the frame only (turbo:frame-render), a visit renders the page.
     const done = (): void => {
       delete html.dataset.navPending;
       document.removeEventListener('turbo:render', done);
       document.removeEventListener('turbo:frame-render', done);
+      seen.forEach((name) => document.removeEventListener(name, note));
     };
+    seen.forEach((name) => document.addEventListener(name, note));
     document.addEventListener('turbo:render', done);
     document.addEventListener('turbo:frame-render', done);
   });
   await trigger();
   const html = page.locator('html');
-  await expect(html).not.toHaveAttribute('data-nav-pending');
+  try {
+    await expect(html).not.toHaveAttribute('data-nav-pending');
+  } catch (error) {
+    const log = (await html.getAttribute('data-nav-log').catch(() => null)) ?? '(page gone)';
+    throw new Error(`The visit never rendered. Turbo events seen: ${log || '(none)'}\n${String(error)}`);
+  }
   await expect(html).not.toHaveAttribute('data-turbo-preview');
 }
 
