@@ -362,13 +362,13 @@ final class HostPageTest extends HostPageTestCase
     {
         $repository = new HostSettingsRepository($this->em());
         $host = $repository->get() ?? self::fail('No host row.');
-        $host->changeGitIdentity('Fleet Bot', 'bot@localhost');
+        $host->changeGitIdentity('Fleet Bot', 'bot@localhost', new \DateTimeImmutable());
         $repository->save($host);
 
         $crawler = $this->open('/admin/host?tab=git');
         self::assertCount(1, $crawler->filter('[data-testid=host-git-stored-invalid]'));
 
-        $host->changeGitIdentity('Fleet Bot', 'bot@example.com');
+        $host->changeGitIdentity('Fleet Bot', 'bot@example.com', new \DateTimeImmutable());
         $repository->save($host);
         $crawler = $this->open('/admin/host?tab=git');
         self::assertCount(0, $crawler->filter('[data-testid=host-git-stored-invalid]'));

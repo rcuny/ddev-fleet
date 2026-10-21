@@ -212,7 +212,7 @@ final class SetupFinisherTest extends KernelTestCase
     public function testAnUnsafeDomainIsRefusedBeforeAnySideEffect(): void
     {
         $host = $this->fx->readyHost();
-        $host->changeDomain("evil.example.com\n}\nimport /etc/passwd");
+        $host->changeDomain("evil.example.com\n}\nimport /etc/passwd", new \DateTimeImmutable());
         $this->fx->settings->save($host);
 
         try {

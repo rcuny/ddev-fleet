@@ -47,7 +47,7 @@ services:
             - '../src/Fleet/Shell/RecordingCommandRunner.php'
             # Doctrine builds the DBAL type itself (config/packages/doctrine.yaml); it is not a service.
             - '../src/Doctrine/UtcDateTimeImmutableType.php'
-            # Entities are mapped, not services (DomainEntitiesAreNotServicesTest keeps this list complete).
+            # Entities are mapped, not services (DoctrineTypesAndEntitiesTest keeps this list complete).
             - '../src/Domain/Audit/AuditEntry.php'
             - '../src/Domain/Host/HostSettings.php'
             - '../src/Domain/Instance/Instance.php'

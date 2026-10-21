@@ -62,10 +62,10 @@ final class PortMirrorMigrationTest extends KernelTestCase
     {
         $em = $this->setUpFleetDatabase();
         $repository = new HostSettingsRepository($em);
-        $host = $repository->getOrCreate('fleet.example.com');
+        $host = $repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         self::assertTrue($host->portMirror());
 
-        $host->changePortMirror(false);
+        $host->changePortMirror(false, new \DateTimeImmutable());
         $repository->save($host);
         $em->clear();
 

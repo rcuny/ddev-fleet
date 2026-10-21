@@ -81,7 +81,7 @@ final class SetupResetCommand extends Command
         $previousHash = $host->setupTokenHash();
         $previousExpiry = $host->setupTokenExpiresAt();
 
-        $host->reopenSetup();
+        $host->reopenSetup($this->clock->now());
         $this->settings->save($host);
         try {
             $token = $this->tokens->mint();
@@ -118,9 +118,9 @@ final class SetupResetCommand extends Command
 
     private function restore(HostSettings $host, ?\DateTimeImmutable $completedAt, ?string $hash, ?\DateTimeImmutable $expiry): void
     {
-        $host->clearSetupToken();
+        $host->clearSetupToken($this->clock->now());
         if (null !== $hash && null !== $expiry) {
-            $host->storeSetupToken($hash, $expiry);
+            $host->storeSetupToken($hash, $expiry, $this->clock->now());
         }
         if (null !== $completedAt) {
             $host->markSetupComplete($completedAt);

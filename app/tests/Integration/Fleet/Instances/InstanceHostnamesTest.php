@@ -39,7 +39,7 @@ final class InstanceHostnamesTest extends KernelTestCase
 
     public function testPrimaryAliasesAndSiteUrl(): void
     {
-        $this->host->getOrCreate('fleet.example.com');
+        $this->host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $hostnames = new InstanceHostnames($this->host);
 
         self::assertSame('acme--dev.fleet.example.com', $hostnames->primary('acme--dev'));
@@ -53,7 +53,7 @@ final class InstanceHostnamesTest extends KernelTestCase
 
     public function testALabelOver63IsRefused(): void
     {
-        $this->host->getOrCreate('fleet.example.com');
+        $this->host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
 
         $this->expectException(ValidationFailed::class);
         new InstanceHostnames($this->host)->aliases($this->project('edge'), 'acme--'.str_repeat('a', 56));

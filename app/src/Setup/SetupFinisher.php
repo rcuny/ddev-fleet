@@ -137,7 +137,7 @@ final readonly class SetupFinisher
             $step = 'complete';
             $completedAt = $this->clock->now();
             // One flush: the token is gone in the same write that marks setup complete.
-            $host->clearSetupToken();
+            $host->clearSetupToken($completedAt);
             $host->markSetupComplete($completedAt);
             $this->settings->save($host);
             $steps[] = $step;

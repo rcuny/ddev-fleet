@@ -41,7 +41,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
     {
         $em = $this->setUpFleetDatabase();
         $host = new HostSettingsRepository($em);
-        $host->getOrCreate('fleet.example.com');
+        $host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $hostnames = new InstanceHostnames($host);
         $this->secrets = new SecretStore(
             new SecretRepository($em),

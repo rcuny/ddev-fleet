@@ -35,8 +35,8 @@ final class HostSettingsRepositoryTest extends KernelTestCase
 
     public function testGetOrCreateIsASingletonRowWithId1(): void
     {
-        $first = $this->repository->getOrCreate('fleet.example.com');
-        $second = $this->repository->getOrCreate('other.example.com');
+        $first = $this->repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
+        $second = $this->repository->getOrCreate('other.example.com', new \DateTimeImmutable());
 
         self::assertSame(1, $first->id());
         self::assertSame($first, $second);
@@ -51,10 +51,10 @@ final class HostSettingsRepositoryTest extends KernelTestCase
 
     public function testTheUploadCapDefaultsToTwoGiBAndRoundTrips(): void
     {
-        $settings = $this->repository->getOrCreate('fleet.example.com');
+        $settings = $this->repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         self::assertSame(2_147_483_648, $settings->assetUploadMaxBytes());
 
-        $settings->changeAssetUploadMaxBytes(5_000_000_000);
+        $settings->changeAssetUploadMaxBytes(5_000_000_000, new \DateTimeImmutable());
         $this->repository->save($settings);
         $this->entityManager()->clear();
 
@@ -62,7 +62,7 @@ final class HostSettingsRepositoryTest extends KernelTestCase
         self::assertSame(5_000_000_000, (int) $this->entityManager()->getConnection()->fetchOne('SELECT asset_upload_max_bytes FROM host_settings'));
 
         $this->expectException(\InvalidArgumentException::class);
-        $settings->changeAssetUploadMaxBytes(0);
+        $settings->changeAssetUploadMaxBytes(0, new \DateTimeImmutable());
     }
 
     public function testTheCapColumnHasADatabaseDefaultSoExistingRowsGetOne(): void
@@ -77,14 +77,14 @@ final class HostSettingsRepositoryTest extends KernelTestCase
 
     public function testTokenAndCompletionFieldsRoundTrip(): void
     {
-        $settings = $this->repository->getOrCreate('fleet.example.com');
+        $settings = $this->repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $hash = hash('sha256', 'token');
         $expires = new \DateTimeImmutable('2026-10-19 12:00:00', new \DateTimeZone('Europe/Paris'));
         $done = new \DateTimeImmutable('2026-10-19 13:00:00 UTC');
 
-        $settings->changeAcmeEmail('ops@example.com');
-        $settings->changeTlsMode(TlsMode::OvhDns);
-        $settings->storeSetupToken($hash, $expires);
+        $settings->changeAcmeEmail('ops@example.com', new \DateTimeImmutable());
+        $settings->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
+        $settings->storeSetupToken($hash, $expires, new \DateTimeImmutable());
         $settings->markSetupComplete($done);
         $this->repository->save($settings);
         $this->entityManager()->clear();
@@ -100,7 +100,7 @@ final class HostSettingsRepositoryTest extends KernelTestCase
         self::assertEquals($done, $loaded->setupCompletedAt());
         self::assertTrue($loaded->isSetupComplete());
 
-        $loaded->clearSetupToken();
+        $loaded->clearSetupToken(new \DateTimeImmutable());
         $this->repository->save($loaded);
         $this->entityManager()->clear();
         self::assertNull($this->repository->get()?->setupTokenHash());
@@ -109,7 +109,7 @@ final class HostSettingsRepositoryTest extends KernelTestCase
 
     public function testNewHostSettingsFieldsDefaultAndRoundTrip(): void
     {
-        $settings = $this->repository->getOrCreate('fleet.example.com');
+        $settings = $this->repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         self::assertSame(14, $settings->backupRetentionDays());
         self::assertNull($settings->gitUserName());
         self::assertNull($settings->gitUserEmail());
@@ -119,9 +119,9 @@ final class HostSettingsRepositoryTest extends KernelTestCase
         self::assertNull($settings->mailFrom());
         self::assertNull($settings->mailTo());
 
-        $settings->changeBackupRetentionDays(30);
-        $settings->changeGitIdentity('Fleet Bot', 'bot@example.com');
-        $settings->changeNotificationMail('smtp.example.com', 587, 'mailer', 'fleet@example.com', '  ops@example.com ');
+        $settings->changeBackupRetentionDays(30, new \DateTimeImmutable());
+        $settings->changeGitIdentity('Fleet Bot', 'bot@example.com', new \DateTimeImmutable());
+        $settings->changeNotificationMail('smtp.example.com', 587, 'mailer', 'fleet@example.com', '  ops@example.com ', new \DateTimeImmutable());
         $this->repository->save($settings);
         $this->entityManager()->clear();
 
@@ -136,8 +136,8 @@ final class HostSettingsRepositoryTest extends KernelTestCase
         self::assertSame('fleet@example.com', $loaded->mailFrom());
         self::assertSame('ops@example.com', $loaded->mailTo());
 
-        $loaded->changeGitIdentity('', null);
-        $loaded->changeNotificationMail(null, null, '', null, null);
+        $loaded->changeGitIdentity('', null, new \DateTimeImmutable());
+        $loaded->changeNotificationMail(null, null, '', null, null, new \DateTimeImmutable());
         $this->repository->save($loaded);
         $this->entityManager()->clear();
 
@@ -152,7 +152,7 @@ final class HostSettingsRepositoryTest extends KernelTestCase
 
     public function testRowsCreatedBeforeTheMigrationGetTheDefaultRetention(): void
     {
-        $this->repository->getOrCreate('fleet.example.com');
+        $this->repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $connection = $this->entityManager()->getConnection();
         $connection->executeStatement('UPDATE host_settings SET backup_retention_days = 14');
         $this->entityManager()->clear();
@@ -168,7 +168,7 @@ final class HostSettingsRepositoryTest extends KernelTestCase
     public function testInvalidValuesAreRefused(\Closure $change): void
     {
         $this->expectException(\InvalidArgumentException::class);
-        $change(new HostSettings('fleet.example.com'));
+        $change(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
     }
 
     /**
@@ -176,18 +176,18 @@ final class HostSettingsRepositoryTest extends KernelTestCase
      */
     public static function invalidValues(): iterable
     {
-        yield 'retention 0' => [static fn (HostSettings $s) => $s->changeBackupRetentionDays(0)];
-        yield 'retention too long' => [static fn (HostSettings $s) => $s->changeBackupRetentionDays(HostSettings::MAX_BACKUP_RETENTION_DAYS + 1)];
-        yield 'port 0' => [static fn (HostSettings $s) => $s->changeNotificationMail('smtp.example.com', 0, null, null, null)];
-        yield 'port too high' => [static fn (HostSettings $s) => $s->changeNotificationMail('smtp.example.com', 65536, null, null, null)];
+        yield 'retention 0' => [static fn (HostSettings $s) => $s->changeBackupRetentionDays(0, new \DateTimeImmutable())];
+        yield 'retention too long' => [static fn (HostSettings $s) => $s->changeBackupRetentionDays(HostSettings::MAX_BACKUP_RETENTION_DAYS + 1, new \DateTimeImmutable())];
+        yield 'port 0' => [static fn (HostSettings $s) => $s->changeNotificationMail('smtp.example.com', 0, null, null, null, new \DateTimeImmutable())];
+        yield 'port too high' => [static fn (HostSettings $s) => $s->changeNotificationMail('smtp.example.com', 65536, null, null, null, new \DateTimeImmutable())];
     }
 
     public function testStoreSetupTokenRejectsAnythingButASha256Digest(): void
     {
-        $settings = new HostSettings('fleet.example.com');
+        $settings = new HostSettings('fleet.example.com', new \DateTimeImmutable());
 
         $this->expectException(\InvalidArgumentException::class);
-        $settings->storeSetupToken('plain-token', new \DateTimeImmutable());
+        $settings->storeSetupToken('plain-token', new \DateTimeImmutable(), new \DateTimeImmutable());
     }
 
     public function testDatesAreStoredAsUtcWhateverThePhpTimezone(): void
@@ -196,7 +196,7 @@ final class HostSettingsRepositoryTest extends KernelTestCase
         date_default_timezone_set('Asia/Tokyo');
 
         try {
-            $settings = $this->repository->getOrCreate('fleet.example.com');
+            $settings = $this->repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
             $settings->markSetupComplete(new \DateTimeImmutable('2026-10-19 13:00:00', new \DateTimeZone('Asia/Tokyo')));
             $this->repository->save($settings);
             $this->entityManager()->clear();
@@ -217,12 +217,12 @@ final class HostSettingsRepositoryTest extends KernelTestCase
 
     public function testReopenSetupClearsCompletionAndTheToken(): void
     {
-        $settings = $this->repository->getOrCreate('fleet.example.com');
-        $settings->storeSetupToken(str_repeat('a', 64), new \DateTimeImmutable('+1 day'));
-        $settings->markSetupComplete();
+        $settings = $this->repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
+        $settings->storeSetupToken(str_repeat('a', 64), new \DateTimeImmutable('+1 day'), new \DateTimeImmutable());
+        $settings->markSetupComplete(new \DateTimeImmutable());
         $this->repository->save($settings);
 
-        $settings->reopenSetup();
+        $settings->reopenSetup(new \DateTimeImmutable());
         $this->repository->save($settings);
         $this->entityManager()->clear();
 

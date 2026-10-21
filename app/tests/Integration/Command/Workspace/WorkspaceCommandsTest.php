@@ -182,7 +182,7 @@ final class WorkspaceCommandsTest extends KernelTestCase
         $repository = new HostSettingsRepository($this->em);
         $host = $repository->get();
         self::assertNotNull($host);
-        $host->changeGitIdentity('Fleet Bot', 'bot@fleet.example.com');
+        $host->changeGitIdentity('Fleet Bot', 'bot@fleet.example.com', new \DateTimeImmutable());
         $repository->save($host);
         $this->store()->putFleetWide('claude_oauth_token', self::TOKEN, 'admin');
 

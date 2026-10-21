@@ -39,8 +39,8 @@ final class ProjectPagesTest extends AdminTestCase
      */
     private function completeSetupWithFailingInstall(): void
     {
-        $host = new HostSettings('fleet.example.com');
-        $host->markSetupComplete();
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->markSetupComplete(new \DateTimeImmutable());
         $settings = $this->container()->get(HostSettingsRepository::class);
         self::assertInstanceOf(HostSettingsRepository::class, $settings);
         $settings->save($host);

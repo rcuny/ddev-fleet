@@ -297,7 +297,7 @@ final class HostRenderCommandTest extends KernelTestCase
         $host = $this->fx->settings->get();
         self::assertNotNull($host);
         $this->fx->events = [];
-        $incomplete = new \App\Domain\Host\HostSettings('fleet.example.com');
+        $incomplete = new \App\Domain\Host\HostSettings('fleet.example.com', new \DateTimeImmutable());
 
         self::assertSame(0, $upgrade->prepare($incomplete));
         self::assertSame([], $this->fx->events);

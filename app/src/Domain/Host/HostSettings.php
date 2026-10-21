@@ -91,10 +91,10 @@ class HostSettings
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $updatedAt;
 
-    public function __construct(string $domain, ?\DateTimeImmutable $now = null)
+    public function __construct(string $domain, \DateTimeImmutable $now)
     {
         $this->domain = $domain;
-        $this->createdAt = $this->updatedAt = $now ?? new \DateTimeImmutable();
+        $this->createdAt = $this->updatedAt = $now;
     }
 
     public function id(): int
@@ -107,10 +107,10 @@ class HostSettings
         return $this->domain;
     }
 
-    public function changeDomain(string $domain): void
+    public function changeDomain(string $domain, \DateTimeImmutable $now): void
     {
         $this->domain = $domain;
-        $this->touch();
+        $this->touch($now);
     }
 
     public function acmeEmail(): ?string
@@ -118,10 +118,10 @@ class HostSettings
         return $this->acmeEmail;
     }
 
-    public function changeAcmeEmail(?string $acmeEmail): void
+    public function changeAcmeEmail(?string $acmeEmail, \DateTimeImmutable $now): void
     {
         $this->acmeEmail = $acmeEmail;
-        $this->touch();
+        $this->touch($now);
     }
 
     public function tlsMode(): TlsMode
@@ -129,10 +129,10 @@ class HostSettings
         return $this->tlsMode;
     }
 
-    public function changeTlsMode(TlsMode $tlsMode): void
+    public function changeTlsMode(TlsMode $tlsMode, \DateTimeImmutable $now): void
     {
         $this->tlsMode = $tlsMode;
-        $this->touch();
+        $this->touch($now);
     }
 
     public function setupTokenHash(): ?string
@@ -150,21 +150,21 @@ class HostSettings
      *
      * @param string $tokenHash sha256 hex digest of the token
      */
-    public function storeSetupToken(string $tokenHash, \DateTimeImmutable $expiresAt): void
+    public function storeSetupToken(string $tokenHash, \DateTimeImmutable $expiresAt, \DateTimeImmutable $now): void
     {
         if (1 !== preg_match('/^[0-9a-f]{64}$/D', $tokenHash)) {
             throw new \InvalidArgumentException('The setup token hash must be a sha256 hex digest.');
         }
         $this->setupTokenHash = $tokenHash;
         $this->setupTokenExpiresAt = $expiresAt;
-        $this->touch();
+        $this->touch($now);
     }
 
-    public function clearSetupToken(): void
+    public function clearSetupToken(\DateTimeImmutable $now): void
     {
         $this->setupTokenHash = null;
         $this->setupTokenExpiresAt = null;
-        $this->touch();
+        $this->touch($now);
     }
 
     public function setupCompletedAt(): ?\DateTimeImmutable
@@ -172,19 +172,19 @@ class HostSettings
         return $this->setupCompletedAt;
     }
 
-    public function markSetupComplete(?\DateTimeImmutable $at = null): void
+    public function markSetupComplete(\DateTimeImmutable $at): void
     {
-        $this->setupCompletedAt = $at ?? new \DateTimeImmutable();
-        $this->touch($this->setupCompletedAt);
+        $this->setupCompletedAt = $at;
+        $this->touch($at);
     }
 
     /**
      * Setup is open again (fleet:setup:reset). The caller mints a new token; the old one is gone.
      */
-    public function reopenSetup(): void
+    public function reopenSetup(\DateTimeImmutable $now): void
     {
         $this->setupCompletedAt = null;
-        $this->clearSetupToken();
+        $this->clearSetupToken($now);
     }
 
     public function isSetupComplete(): bool
@@ -200,13 +200,13 @@ class HostSettings
         return $this->assetUploadMaxBytes;
     }
 
-    public function changeAssetUploadMaxBytes(int $bytes): void
+    public function changeAssetUploadMaxBytes(int $bytes, \DateTimeImmutable $now): void
     {
         if ($bytes < 1) {
             throw new \InvalidArgumentException('The upload cap must be at least one byte.');
         }
         $this->assetUploadMaxBytes = $bytes;
-        $this->touch();
+        $this->touch($now);
     }
 
     public function backupRetentionDays(): int
@@ -214,13 +214,13 @@ class HostSettings
         return $this->backupRetentionDays;
     }
 
-    public function changeBackupRetentionDays(int $days): void
+    public function changeBackupRetentionDays(int $days, \DateTimeImmutable $now): void
     {
         if ($days < 1 || $days > self::MAX_BACKUP_RETENTION_DAYS) {
             throw new \InvalidArgumentException(\sprintf('The backup retention must be between 1 and %d days.', self::MAX_BACKUP_RETENTION_DAYS));
         }
         $this->backupRetentionDays = $days;
-        $this->touch();
+        $this->touch($now);
     }
 
     public function portMirror(): bool
@@ -228,10 +228,10 @@ class HostSettings
         return $this->portMirror;
     }
 
-    public function changePortMirror(bool $enabled): void
+    public function changePortMirror(bool $enabled, \DateTimeImmutable $now): void
     {
         $this->portMirror = $enabled;
-        $this->touch();
+        $this->touch($now);
     }
 
     public function gitUserName(): ?string
@@ -247,11 +247,11 @@ class HostSettings
     /**
      * The validation of the values (the same rule as a project's git identity) is the caller's job; null clears one.
      */
-    public function changeGitIdentity(?string $name, ?string $email): void
+    public function changeGitIdentity(?string $name, ?string $email, \DateTimeImmutable $now): void
     {
         $this->gitUserName = self::blankToNull($name);
         $this->gitUserEmail = self::blankToNull($email);
-        $this->touch();
+        $this->touch($now);
     }
 
     public function smtpHost(): ?string
@@ -282,7 +282,7 @@ class HostSettings
     /**
      * The non-secret notification e-mail settings (the SMTP password is a SecretStore secret). Blank strings become null.
      */
-    public function changeNotificationMail(?string $smtpHost, ?int $smtpPort, ?string $smtpUser, ?string $mailFrom, ?string $mailTo): void
+    public function changeNotificationMail(?string $smtpHost, ?int $smtpPort, ?string $smtpUser, ?string $mailFrom, ?string $mailTo, \DateTimeImmutable $now): void
     {
         if (null !== $smtpPort && ($smtpPort < 1 || $smtpPort > 65535)) {
             throw new \InvalidArgumentException('The SMTP port must be between 1 and 65535.');
@@ -292,7 +292,7 @@ class HostSettings
         $this->smtpUser = self::blankToNull($smtpUser);
         $this->mailFrom = self::blankToNull($mailFrom);
         $this->mailTo = self::blankToNull($mailTo);
-        $this->touch();
+        $this->touch($now);
     }
 
     public function createdAt(): \DateTimeImmutable
@@ -312,8 +312,8 @@ class HostSettings
         return '' === $value ? null : $value;
     }
 
-    private function touch(?\DateTimeImmutable $now = null): void
+    private function touch(\DateTimeImmutable $now): void
     {
-        $this->updatedAt = $now ?? new \DateTimeImmutable();
+        $this->updatedAt = $now;
     }
 }

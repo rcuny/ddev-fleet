@@ -75,9 +75,9 @@ final class RenderedCaddyfileValidatesTest extends TestCase
 
     private function stage(TlsMode $tls, GateMode $gate, ?string $email = 'ops@example.com'): void
     {
-        $host = new HostSettings('fleet.example.com');
-        $host->changeTlsMode($tls);
-        $host->changeAcmeEmail($email);
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->changeTlsMode($tls, new \DateTimeImmutable());
+        $host->changeAcmeEmail($email, new \DateTimeImmutable());
         $twig = SystemTemplates::twig();
 
         file_put_contents($this->paths->caddyMainFile(), new CaddyfileRenderer($twig, $this->paths, new FixedOvhEndpoint(), $this->tree.'/project')->render($host));

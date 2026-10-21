@@ -32,6 +32,7 @@ use App\Form\Host\HostNotificationType;
 use App\Form\Host\HostPortMirrorType;
 use App\Form\Host\HostUploadLimitType;
 use App\Health\HostHealthReport;
+use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Form\FormError;
@@ -70,6 +71,7 @@ final class HostSettingsController extends AbstractController
         private readonly PortMirrorSwitch $portMirrorSwitch,
         private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
+        private readonly ClockInterface $clock,
     ) {
     }
 
@@ -98,7 +100,7 @@ final class HostSettingsController extends AbstractController
 
                 return $this->show('general', $host, $form);
             }
-            $host->changeAcmeEmail($email);
+            $host->changeAcmeEmail($email, $this->clock->now());
             $this->settings->save($host);
             $this->addFlash('success', 'ACME contact saved. Apply it to Caddy with "sudo fleet host:render --apply" on the host.');
 
@@ -126,7 +128,7 @@ final class HostSettingsController extends AbstractController
             }
             if ([] === $violations) {
                 ['name' => $name, 'email' => $email] = GitIdentityRule::normalise($name, $email);
-                $host->changeGitIdentity($name, $email);
+                $host->changeGitIdentity($name, $email, $this->clock->now());
                 $this->settings->save($host);
                 $this->addFlash('success', 'Git identity saved.');
 
@@ -217,6 +219,7 @@ final class HostSettingsController extends AbstractController
                         $this->text($form, 'smtpUser'),
                         $this->text($form, 'mailFrom'),
                         $this->text($form, 'mailTo'),
+                        $this->clock->now(),
                     );
                     $this->settings->save($host);
                     $this->addFlash('success', 'Notification e-mail settings saved.');
@@ -268,7 +271,7 @@ final class HostSettingsController extends AbstractController
             if (!\is_int($mebibytes) || $mebibytes < 1 || $mebibytes > HostSettings::MAX_ASSET_UPLOAD_MEBIBYTES) {
                 $form->get('megabytes')->addError(new FormError(\sprintf('Enter a number of MiB from 1 to %d.', HostSettings::MAX_ASSET_UPLOAD_MEBIBYTES)));
             } else {
-                $host->changeAssetUploadMaxBytes($mebibytes * 1_048_576);
+                $host->changeAssetUploadMaxBytes($mebibytes * 1_048_576, $this->clock->now());
                 $this->settings->save($host);
                 $this->addFlash('success', 'Upload limit saved.');
 
@@ -318,7 +321,7 @@ final class HostSettingsController extends AbstractController
             if (!\is_int($days) || $days < 1 || $days > HostSettings::MAX_BACKUP_RETENTION_DAYS) {
                 $form->get('days')->addError(new FormError(\sprintf('Enter a number of days from 1 to %d.', HostSettings::MAX_BACKUP_RETENTION_DAYS)));
             } else {
-                $host->changeBackupRetentionDays($days);
+                $host->changeBackupRetentionDays($days, $this->clock->now());
                 $this->settings->save($host);
                 $this->addFlash('success', 'Backup retention saved.');
 

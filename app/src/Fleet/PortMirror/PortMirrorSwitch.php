@@ -6,6 +6,7 @@ namespace App\Fleet\PortMirror;
 
 use App\Domain\Host\HostSettingsRepository;
 use App\Fleet\Projects\Refused;
+use Psr\Clock\ClockInterface;
 
 /**
  * Turns the in-network port mirror on or off (HostSettings::portMirror()). The setting is saved first; the files are
@@ -14,7 +15,7 @@ use App\Fleet\Projects\Refused;
  */
 final readonly class PortMirrorSwitch
 {
-    public function __construct(private HostSettingsRepository $settings, private PortMirror $mirror)
+    public function __construct(private HostSettingsRepository $settings, private PortMirror $mirror, private ClockInterface $clock)
     {
     }
 
@@ -27,7 +28,7 @@ final readonly class PortMirrorSwitch
     {
         $host = $this->settings->get() ?? throw new Refused('The host is not initialised; run "fleet host:init" first.');
         if ($host->portMirror() !== $enabled) {
-            $host->changePortMirror($enabled);
+            $host->changePortMirror($enabled, $this->clock->now());
             $this->settings->save($host);
         }
 

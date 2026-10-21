@@ -84,7 +84,7 @@ final class SetupStateTest extends KernelTestCase
         $old = $this->cookie->issue($host)->getValue();
         $this->fx->finisher->finish('alice');
 
-        $host->reopenSetup();
+        $host->reopenSetup(new \DateTimeImmutable());
         $this->fx->settings->save($host);
         $this->fx->tokens->mint();
 

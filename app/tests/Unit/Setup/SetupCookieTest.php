@@ -23,13 +23,13 @@ final class SetupCookieTest extends TestCase
     {
         $this->clock = new MockClock('2026-10-19 10:00:00 UTC');
         $this->cookie = new SetupCookie(self::SECRET, $this->clock);
-        $this->host = new HostSettings('fleet.example.com');
+        $this->host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
         $this->mint('a');
     }
 
     private function mint(string $char): void
     {
-        $this->host->storeSetupToken(str_repeat($char, 64), $this->clock->now()->modify('+24 hours'));
+        $this->host->storeSetupToken(str_repeat($char, 64), $this->clock->now()->modify('+24 hours'), new \DateTimeImmutable());
     }
 
     public function testRoundTrip(): void
@@ -80,7 +80,7 @@ final class SetupCookieTest extends TestCase
         $this->host->markSetupComplete($this->clock->now());
         self::assertFalse($this->cookie->isValid($value, $this->host));
 
-        $this->host->clearSetupToken();
+        $this->host->clearSetupToken(new \DateTimeImmutable());
         self::assertFalse($this->cookie->isValid($value, $this->host));
         $this->expectException(SetupRefused::class);
         $this->cookie->issue($this->host);
@@ -89,7 +89,7 @@ final class SetupCookieTest extends TestCase
     public function testInvalidAfterTheTokenWasConsumed(): void
     {
         $value = $this->cookie->issue($this->host)->getValue();
-        $this->host->clearSetupToken();
+        $this->host->clearSetupToken(new \DateTimeImmutable());
 
         self::assertFalse($this->cookie->isValid($value, $this->host));
     }
@@ -106,7 +106,7 @@ final class SetupCookieTest extends TestCase
 
     public function testNeverOutlivesTheToken(): void
     {
-        $this->host->storeSetupToken(str_repeat('c', 64), $this->clock->now()->modify('+10 minutes'));
+        $this->host->storeSetupToken(str_repeat('c', 64), $this->clock->now()->modify('+10 minutes'), new \DateTimeImmutable());
         $issued = $this->cookie->issue($this->host);
 
         self::assertSame($this->clock->now()->getTimestamp() + 600, $issued->getExpiresTime());

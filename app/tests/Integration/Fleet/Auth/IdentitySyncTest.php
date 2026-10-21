@@ -111,8 +111,8 @@ final class IdentitySyncTest extends KernelTestCase
 
     private function completeSetup(): void
     {
-        $host = new HostSettings('fleet.example.com');
-        $host->markSetupComplete();
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->markSetupComplete(new \DateTimeImmutable());
         $this->settings->save($host);
     }
 
@@ -120,7 +120,7 @@ final class IdentitySyncTest extends KernelTestCase
     {
         self::assertFalse($this->accessSync->sync());
 
-        $this->settings->save(new HostSettings('fleet.example.com'));
+        $this->settings->save(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
         self::assertFalse($this->accessSync->sync());
         self::assertSame([], $this->applier->applied);
         self::assertFileDoesNotExist($this->paths->autheliaConfigMarker());

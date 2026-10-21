@@ -41,7 +41,7 @@ final class UploadServiceTest extends KernelTestCase
         $settings = self::getContainer()->get(HostSettingsRepository::class);
         self::assertInstanceOf(HostSettingsRepository::class, $settings);
         $this->settings = $settings;
-        $this->settings->save(new HostSettings('fleet.example.com'));
+        $this->settings->save(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
 
         $this->clock = new MockClock('2026-10-19 10:00:00 UTC');
         $this->uploads = new UploadService($this->paths, new AssetStore($this->paths), $this->settings, $this->clock);
@@ -240,7 +240,7 @@ final class UploadServiceTest extends KernelTestCase
     {
         $host = $this->settings->get();
         self::assertNotNull($host);
-        $host->changeAssetUploadMaxBytes(100_000);
+        $host->changeAssetUploadMaxBytes(100_000, new \DateTimeImmutable());
         $this->settings->save($host);
 
         $this->uploads->begin('blog', '', 'exact.sql', 100_000, self::CHUNK);

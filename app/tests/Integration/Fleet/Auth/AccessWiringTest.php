@@ -44,7 +44,7 @@ final class AccessWiringTest extends KernelTestCase
     {
         $renderer = self::getContainer()->get('fleet.test_alias.authelia_config_renderer');
         self::assertInstanceOf(AutheliaConfigRenderer::class, $renderer);
-        $parsed = Yaml::parse($renderer->render(new HostSettings('fleet.example.com')));
+        $parsed = Yaml::parse($renderer->render(new HostSettings('fleet.example.com', new \DateTimeImmutable())));
         self::assertIsArray($parsed);
 
         return $parsed;

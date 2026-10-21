@@ -42,8 +42,8 @@ final class InstanceSiteValidatesTest extends TestCase
         $this->paths = new FleetPaths($this->tree.'/srv', $this->tree.'/etc/caddy/fleet');
 
         $twig = SystemTemplates::twig();
-        $host = new HostSettings('fleet.example.com');
-        $host->changeTlsMode(TlsMode::Http01);
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->changeTlsMode(TlsMode::Http01, new \DateTimeImmutable());
         file_put_contents($this->paths->caddyMainFile(), new CaddyfileRenderer($twig, $this->paths, new FixedOvhEndpoint(), $this->tree.'/project')->render($host));
         file_put_contents($this->paths->gateFile(), new GateWriter($twig, $this->paths, new CaddyReloader(new RecordingCommandRunner(), $this->paths))->render(GateMode::Authelia));
     }

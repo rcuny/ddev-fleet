@@ -76,7 +76,7 @@ abstract class PortMirrorTestCase extends InstanceJobTestCase
     {
         $host = $this->hostSettings->get();
         self::assertNotNull($host);
-        $host->changePortMirror($enabled);
+        $host->changePortMirror($enabled, new \DateTimeImmutable());
         $this->hostSettings->save($host);
     }
 

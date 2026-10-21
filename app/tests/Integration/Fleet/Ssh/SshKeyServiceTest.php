@@ -35,7 +35,7 @@ final class SshKeyServiceTest extends KernelTestCase
         $this->paths = $paths;
         $this->repository = new SshKeyRepository($em);
         $settings = new HostSettingsRepository($em);
-        $settings->getOrCreate('fleet.example.com');
+        $settings->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $this->runner = new RecordingCommandRunner();
         $this->service = $this->serviceWith($this->runner);
     }

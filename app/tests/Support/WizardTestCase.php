@@ -169,8 +169,8 @@ abstract class WizardTestCase extends WebTestCase
     {
         $repository = new HostSettingsRepository($this->em());
         $host = $repository->get() ?? self::fail('No host row.');
-        $host->clearSetupToken();
-        $host->markSetupComplete();
+        $host->clearSetupToken(new \DateTimeImmutable());
+        $host->markSetupComplete(new \DateTimeImmutable());
         $repository->save($host);
     }
 

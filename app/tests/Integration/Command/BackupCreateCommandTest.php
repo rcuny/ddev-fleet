@@ -49,7 +49,7 @@ final class BackupCreateCommandTest extends KernelTestCase
 
     public function testPrintsTheFileNameAndWritesAReadableBackupOfTheRealDatabase(): void
     {
-        $this->settings->getOrCreate('fleet.example.com');
+        $this->settings->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $queue = new \PDO('sqlite:'.$this->paths->queueDb());
         $queue->exec('CREATE TABLE messenger_messages (id INTEGER PRIMARY KEY, body TEXT)');
         unset($queue);
@@ -71,8 +71,8 @@ final class BackupCreateCommandTest extends KernelTestCase
 
     public function testPrunesWithTheStoredRetention(): void
     {
-        $host = $this->settings->getOrCreate('fleet.example.com');
-        $host->changeBackupRetentionDays(3);
+        $host = $this->settings->getOrCreate('fleet.example.com', new \DateTimeImmutable());
+        $host->changeBackupRetentionDays(3, new \DateTimeImmutable());
         $this->settings->save($host);
         $dir = $this->paths->backupsDir();
         $now = $this->clock->now()->getTimestamp();
