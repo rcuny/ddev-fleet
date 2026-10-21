@@ -21,9 +21,8 @@
   "commitMessagePrefix": "FLE-10",
   "packageRules": [
     {
-      "description": "Composer and npm keep their constraints and move only the lock file when the new version is in range (no floor bumps, no exact pins); out-of-range updates fall back to widening the range",
+      "description": "npm keeps its constraints and moves only package-lock.json when the new version is in range (package-lock.json has no content-hash tied to package.json, so a lock-only change stays consistent). Composer must NOT use update-lockfile: composer.lock carries a content-hash of composer.json, and a lock-only PR leaves it stale (FLE-130)",
       "matchManagers": [
-        "composer",
         "npm"
       ],
       "rangeStrategy": "update-lockfile"
@@ -38,6 +37,29 @@
       ],
       "groupName": "symfony",
       "automerge": false
+    },
+    {
+      "description": "Symfony constraints are wildcard series (8.1.*): replace them (8.1.* becomes 8.2.*, never an exact pin). Update-type rules cannot carry a rangeStrategy, so it sits here; patches are disabled below, only minor and major reach this",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "rangeStrategy": "replace"
+    },
+    {
+      "description": "Symfony patch releases are not separate PRs (app/composer.json pins 8.1.*, so a patch needs no constraint change and a lock-only update would leave composer.lock content-hash stale, FLE-130): they arrive through the weekly lockFileMaintenance PR",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "enabled": false
     },
     {
       "description": "Symfony minor bumps (8.1 -> 8.2) get their own PR: they change the pinned series and need a changelog read",
@@ -156,5 +178,14 @@
       ],
       "enabled": false
     }
-  ]
+  ],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 5am on monday"
+    ],
+    "timezone": "Europe/Paris",
+    "commitMessageAction": "Refresh lock files",
+    "automerge": false
+  }
 }
