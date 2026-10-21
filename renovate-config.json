@@ -21,6 +21,19 @@
   "commitMessagePrefix": "FLE-10",
   "packageRules": [
     {
+      "description": "Owner 2026-10-21: Renovate merges its own green patch/minor PRs (fleet-gates SUCCESSFUL), at most one per run (the runner is hourly). Later rules switch it off for Symfony groups; majors are never automerged.",
+      "matchUpdateTypes": [
+        "minor",
+        "patch",
+        "pin",
+        "digest"
+      ],
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "merge-commit",
+      "platformAutomerge": false
+    },
+    {
       "description": "npm keeps its constraints and moves only package-lock.json when the new version is in range (package-lock.json has no content-hash tied to package.json, so a lock-only change stays consistent). Composer must NOT use update-lockfile: composer.lock carries a content-hash of composer.json, and a lock-only PR leaves it stale (FLE-130)",
       "matchManagers": [
         "npm"
@@ -186,6 +199,8 @@
     ],
     "timezone": "Europe/Paris",
     "commitMessageAction": "Refresh lock files",
-    "automerge": false
+    "automerge": true,
+    "automergeType": "pr",
+    "automergeStrategy": "merge-commit"
   }
 }
