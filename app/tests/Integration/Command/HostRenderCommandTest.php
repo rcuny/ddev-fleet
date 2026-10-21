@@ -156,20 +156,31 @@ final class HostRenderCommandTest extends KernelTestCase
         self::assertSame([], $this->fx->staged(), 'the OVH credentials do not stay behind');
     }
 
-    public function testAnApplyFailingMidwayLeavesNothingStagedAndTheGateUntouched(): void
+    public function testAnApplyFailingMidwayKeepsAutheliaAppliedAndARerunReachesTheCleanState(): void
     {
         $this->fx->host(TlsMode::OvhDns);
         $this->fx->addOvhSecrets();
         $this->fx->applyFails['caddy'] = new \RuntimeException('caddy validate rejected the staged Caddyfile');
 
-        $tester = $this->render(['--apply' => true]);
+        $failed = $this->render(['--apply' => true]);
 
-        self::assertSame(1, $tester->getStatusCode());
-        self::assertStringContainsString('caddy validate rejected', $tester->getErrorOutput());
-        // Authelia went in, Caddy failed: the run stops there, so no gate is written or reloaded.
+        // Contract: no rollback. Authelia stays applied, but nothing stays staged and no gate is written or reloaded.
+        self::assertSame(1, $failed->getStatusCode());
+        self::assertStringContainsString('caddy validate rejected', $failed->getErrorOutput());
         self::assertSame(['apply:authelia', 'apply:caddy'], $this->fx->events);
         self::assertSame([], $this->fx->staged(), 'the OVH credentials do not stay behind');
         self::assertFileDoesNotExist($this->fx->paths->gateFile());
+
+        // Re-runnable: once the cause is fixed, the same command ends in the state of a clean run.
+        unset($this->fx->applyFails['caddy']);
+        $this->fx->events = [];
+
+        $rerun = $this->render(['--apply' => true]);
+
+        self::assertSame(0, $rerun->getStatusCode(), $rerun->getErrorOutput());
+        self::assertSame(['apply:authelia', 'apply:caddy', 'caddy:validate', 'caddy:reload'], $this->fx->events);
+        self::assertSame([], $this->fx->staged());
+        self::assertFileExists($this->fx->paths->gateFile());
     }
 
     public function testAFailureStagesNothingAndExitsNonZero(): void
