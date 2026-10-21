@@ -93,6 +93,8 @@ async function expectOnlyError(page: Page, form: string, field: string, message:
 
 test.describe('users: the New user form refuses', () => {
   test('a username, display name, email or password that breaks a rule: one message under its field, answered 422', async ({ page }) => {
+    // 22 form round trips in one test: about 50 s on a loaded phone run, against the 60 s limit.
+    test.slow();
     const errors = collectBrowserErrors(page);
     const existing = uniqueName('usr');
     const base = shortName();

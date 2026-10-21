@@ -1192,6 +1192,8 @@ test.describe('step 5: finish', () => {
 
     test('a second Finish while one is running is told to wait', async ({ page, host }) => {
       test.skip(spawnSync('flock', ['--version'], { stdio: 'ignore' }).error !== undefined, 'needs flock (util-linux)');
+      // Five wizard steps, three Finish presses and an axe pass: it runs close to the 60 s limit on a loaded phone run.
+      test.slow();
       await toFinish(page, host);
       // The first press leaves the lock file behind; another process holding its lock is "a Finish that is running".
       expect(await finish(page)).toBe(422);
