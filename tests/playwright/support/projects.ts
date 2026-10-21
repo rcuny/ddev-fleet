@@ -51,18 +51,44 @@ export async function navigate(page: Page, trigger: () => Promise<unknown>): Pro
   await page.evaluate(() => {
     const html = document.documentElement;
     html.dataset.navPending = '1';
-    // A form inside a <turbo-frame> renders the frame only (turbo:frame-render), a visit renders the page.
+    html.dataset.navLog = '';
+    // Which Turbo events the visit went through, for the failure message (a visit with no before-fetch-request never started: the click was lost).
+    const seen = [
+      'turbo:click', 'turbo:visit', 'turbo:before-fetch-request', 'turbo:before-fetch-response', 'turbo:submit-end',
+      'turbo:fetch-request-error', 'turbo:before-render', 'turbo:frame-render', 'turbo:render', 'turbo:load',
+    ];
+    const note = (event: Event): void => {
+      html.dataset.navLog = `${html.dataset.navLog ?? ''} ${event.type}`.trim();
+    };
+    // Every way a visit can end clears the marker: a page or frame render (a form inside a <turbo-frame> renders the
+    // frame only; a 422 or a redirect ends in a render too), turbo:load (the visit finished, also when it was served
+    // from the cache), a request that failed (turbo:fetch-request-error: offline, aborted or cancelled), and an answer
+    // that has nothing to render (204/205). Without these the flag stayed set for the whole expect timeout.
+    const terminal = ['turbo:render', 'turbo:frame-render', 'turbo:load', 'turbo:fetch-request-error'];
     const done = (): void => {
       delete html.dataset.navPending;
-      document.removeEventListener('turbo:render', done);
-      document.removeEventListener('turbo:frame-render', done);
+      terminal.forEach((name) => document.removeEventListener(name, done));
+      document.removeEventListener('turbo:before-fetch-response', noContent);
+      seen.forEach((name) => document.removeEventListener(name, note));
     };
-    document.addEventListener('turbo:render', done);
-    document.addEventListener('turbo:frame-render', done);
+    const noContent = (event: Event): void => {
+      const status = (event as CustomEvent<{ fetchResponse?: { statusCode?: number } }>).detail?.fetchResponse?.statusCode;
+      if (status === 204 || status === 205) {
+        done();
+      }
+    };
+    seen.forEach((name) => document.addEventListener(name, note));
+    terminal.forEach((name) => document.addEventListener(name, done));
+    document.addEventListener('turbo:before-fetch-response', noContent);
   });
   await trigger();
   const html = page.locator('html');
-  await expect(html).not.toHaveAttribute('data-nav-pending');
+  try {
+    await expect(html).not.toHaveAttribute('data-nav-pending');
+  } catch (error) {
+    const log = (await html.getAttribute('data-nav-log').catch(() => null)) ?? '(page gone)';
+    throw new Error(`The visit never rendered. Turbo events seen: ${log || '(none)'}\n${String(error)}`);
+  }
   await expect(html).not.toHaveAttribute('data-turbo-preview');
 }
 
