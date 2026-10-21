@@ -189,6 +189,26 @@ final class NightlyRedeployTest extends InstanceJobTestCase
         self::assertSame([$busy->id()], array_map(static fn (Job $j): ?int => $j->id(), $this->redeployJobs()));
     }
 
+    public function testAScheduleWhosePreviousRunIsStillGoingSkipsTheNextOccurrenceInsteadOfQueueingIt(): void
+    {
+        $instance = $this->running('main');
+        $this->schedule('hourly', $instance, '0 * * * *');
+
+        $this->clock->modify('2026-10-21 03:00:10 UTC');
+        $first = $this->ticker->tick();
+        self::assertSame(ScheduleOutcome::Claimed, $first[0]->outcome());
+        self::assertCount(1, $this->redeployJobs());
+
+        // The first redeploy is still queued (the recording bus runs nothing) when the next occurrence comes.
+        $this->clock->modify('2026-10-21 04:00:10 UTC');
+        $second = $this->ticker->tick();
+
+        self::assertCount(1, $second);
+        self::assertSame(ScheduleOutcome::Skipped, $second[0]->outcome());
+        self::assertNull($second[0]->jobId());
+        self::assertCount(1, $this->redeployJobs());
+    }
+
     public function testADestroyedInstanceIsSkippedWithAReasonAndWithoutAJob(): void
     {
         $instance = $this->running('main');
