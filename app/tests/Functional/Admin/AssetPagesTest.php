@@ -424,8 +424,8 @@ final class AssetPagesTest extends AdminTestCase
         $this->makeProject();
         $hosts = $this->container()->get(HostSettingsRepository::class);
         self::assertInstanceOf(HostSettingsRepository::class, $hosts);
-        $host = new HostSettings('fleet.example.com');
-        $host->changeAssetUploadMaxBytes(1_000_000);
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->changeAssetUploadMaxBytes(1_000_000, new \DateTimeImmutable());
         $hosts->save($host);
 
         $answer = $this->api('POST', '/admin/projects/blog/assets/uploads', json_encode(['path' => '', 'name' => 'big.sql', 'size' => 1_000_001], \JSON_THROW_ON_ERROR));

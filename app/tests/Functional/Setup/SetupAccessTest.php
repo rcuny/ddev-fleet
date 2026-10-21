@@ -199,7 +199,7 @@ final class SetupAccessTest extends WizardTestCase
 
         $repository = new HostSettingsRepository($this->em());
         $host = $repository->get() ?? self::fail('No host row.');
-        $host->storeSetupToken(hash('sha256', $this->token), new \DateTimeImmutable('-1 minute'));
+        $host->storeSetupToken(hash('sha256', $this->token), new \DateTimeImmutable('-1 minute'), new \DateTimeImmutable());
         $repository->save($host);
 
         $this->client->request('GET', self::BASE.'/setup?token='.$this->token);

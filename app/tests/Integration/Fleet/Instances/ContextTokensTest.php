@@ -21,7 +21,7 @@ final class ContextTokensTest extends KernelTestCase
     protected function setUp(): void
     {
         $host = new HostSettingsRepository($this->setUpFleetDatabase());
-        $host->getOrCreate('fleet.example.com');
+        $host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $this->tokens = new ContextTokens(new InstanceHostnames($host));
     }
 

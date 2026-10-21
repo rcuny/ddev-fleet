@@ -26,7 +26,7 @@ final class JobControllerTest extends AdminTestCase
     {
         parent::setUp();
         $em = $this->em();
-        new HostSettingsRepository($em)->getOrCreate('fleet.example.com');
+        new HostSettingsRepository($em)->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         foreach (['acme', 'demo'] as $name) {
             $project = new Project($name, \sprintf('https://git.example.com/%s/blog.git', $name));
             $project->changeDefaults('develop', 'full');

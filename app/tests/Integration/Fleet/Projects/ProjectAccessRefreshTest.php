@@ -72,8 +72,8 @@ final class ProjectAccessRefreshTest extends KernelTestCase
 
     private function completeSetup(): void
     {
-        $host = new HostSettings('fleet.example.com');
-        $host->markSetupComplete();
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->markSetupComplete(new \DateTimeImmutable());
         $repository = self::getContainer()->get(HostSettingsRepository::class);
         self::assertInstanceOf(HostSettingsRepository::class, $repository);
         $repository->save($host);

@@ -48,7 +48,7 @@ final class InstanceSiteRefresherTest extends KernelTestCase
         self::assertInstanceOf(FleetPaths::class, $paths);
         $this->paths = $paths;
         $host = new HostSettingsRepository($this->em);
-        $host->getOrCreate('fleet.example.com');
+        $host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $this->runner = new RecordingCommandRunner();
         $this->writer = new InstanceSiteWriter(
             SystemTemplates::twig(),

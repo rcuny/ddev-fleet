@@ -13,6 +13,7 @@ use App\Fleet\System\ConfigValue;
 use App\Form\Setup\TlsType;
 use App\Setup\SetupActor;
 use App\Setup\SetupStep;
+use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Form\FormError;
 use Symfony\Component\HttpFoundation\Request;
@@ -37,6 +38,7 @@ final class TlsController extends AbstractSetupController
         private readonly SecretStore $secrets,
         private readonly SetupActor $actor,
         private readonly LoggerInterface $logger,
+        private readonly ClockInterface $clock,
     ) {
     }
 
@@ -68,7 +70,7 @@ final class TlsController extends AbstractSetupController
             if ([] === $failures) {
                 try {
                     $this->secrets->putManyFleetWide($values, $this->actor->name());
-                    $host->changeTlsMode($mode);
+                    $host->changeTlsMode($mode, $this->clock->now());
                     $this->settings->save($host);
                     $this->addFlash('success', 'Certificate settings saved.');
 

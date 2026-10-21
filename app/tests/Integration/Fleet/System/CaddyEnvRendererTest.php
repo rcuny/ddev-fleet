@@ -43,8 +43,8 @@ final class CaddyEnvRendererTest extends KernelTestCase
 
     private static function host(TlsMode $mode): HostSettings
     {
-        $host = new HostSettings('fleet.example.com');
-        $host->changeTlsMode($mode);
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->changeTlsMode($mode, new \DateTimeImmutable());
 
         return $host;
     }

@@ -41,7 +41,7 @@ final class InstanceServiceTest extends JobTestCase
         $this->project->changeDefaults('develop', 'full');
         new ProjectRepository($this->em)->save($this->project);
         new TemplateRepository($this->em)->save(new Template($this->project, 'full'));
-        new HostSettingsRepository($this->em)->getOrCreate('fleet.example.com');
+        new HostSettingsRepository($this->em)->getOrCreate('fleet.example.com', new \DateTimeImmutable());
     }
 
     private function service(float $minFree = 0.0): InstanceService

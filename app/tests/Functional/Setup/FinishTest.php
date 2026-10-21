@@ -96,7 +96,7 @@ final class FinishTest extends WizardTestCase
         $store->putFleetWide('ovh_consumer_key', 'ConsumerCCCC33', 'test');
         $repository = new \App\Domain\Host\HostSettingsRepository($this->em());
         $host = $repository->get() ?? self::fail('No host row.');
-        $host->changeTlsMode(TlsMode::OvhDns);
+        $host->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
         $repository->save($host);
 
         $this->post('/setup/finish', []);

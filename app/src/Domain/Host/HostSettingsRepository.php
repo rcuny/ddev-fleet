@@ -36,11 +36,11 @@ final readonly class HostSettingsRepository
      * Returns the singleton row, creating it for $domain when absent. An existing row is returned untouched
      * (changing its domain is an explicit HostSettings::changeDomain()).
      */
-    public function getOrCreate(string $domain): HostSettings
+    public function getOrCreate(string $domain, \DateTimeImmutable $now): HostSettings
     {
         $settings = $this->get();
         if (null === $settings) {
-            $settings = new HostSettings($domain);
+            $settings = new HostSettings($domain, $now);
             $this->save($settings);
         }
 

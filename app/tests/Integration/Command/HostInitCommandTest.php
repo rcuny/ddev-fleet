@@ -45,6 +45,7 @@ final class HostInitCommandTest extends KernelTestCase
             new SecretKeyFile($paths),
             new KnownHostsFile($paths, \dirname(__DIR__, 3).'/resources/ssh/known_hosts.seed'),
             $this->fx->settings,
+            new \Symfony\Component\Clock\MockClock('2026-10-21 12:00:00'),
         );
         $tester = new CommandTester($command);
         $tester->execute($options, ['capture_stderr_separately' => true]);

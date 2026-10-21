@@ -228,7 +228,7 @@ final class SecretStoreTest extends KernelTestCase
         self::assertInstanceOf(Secret::class, $secret);
         $flipped = $secret->ciphertext();
         $flipped = substr_replace($flipped, \chr(\ord($flipped[0]) ^ 1), 0, 1);
-        $secret->replace($flipped, $secret->nonce(), 1, 'admin');
+        $secret->replace($flipped, $secret->nonce(), 1, 'admin', new \DateTimeImmutable());
         $repository->save($secret);
         $this->entityManager()->clear();
 

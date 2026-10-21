@@ -70,8 +70,8 @@ final class SystemRendererTest extends KernelTestCase
 
     private static function host(TlsMode $mode = TlsMode::Http01): HostSettings
     {
-        $host = new HostSettings('fleet.example.com');
-        $host->changeTlsMode($mode);
+        $host = new HostSettings('fleet.example.com', new \DateTimeImmutable());
+        $host->changeTlsMode($mode, new \DateTimeImmutable());
 
         return $host;
     }
@@ -204,7 +204,7 @@ final class SystemRendererTest extends KernelTestCase
         self::assertSame(GateMode::Setup, $renderer->renderGate($host));
         self::assertStringContainsString('redir @fleet_closed /setup 302', (string) file_get_contents($this->paths->gateFile()));
 
-        $host->markSetupComplete();
+        $host->markSetupComplete(new \DateTimeImmutable());
         self::assertSame(GateMode::Authelia, $renderer->renderGate($host));
         self::assertStringContainsString('forward_auth', (string) file_get_contents($this->paths->gateFile()));
 

@@ -142,8 +142,8 @@ final class SetupFixture
 
     public function host(TlsMode $mode = TlsMode::Http01): HostSettings
     {
-        $host = $this->settings->getOrCreate('fleet.example.com');
-        $host->changeTlsMode($mode);
+        $host = $this->settings->getOrCreate('fleet.example.com', new \DateTimeImmutable());
+        $host->changeTlsMode($mode, new \DateTimeImmutable());
         $this->settings->save($host);
 
         return $host;

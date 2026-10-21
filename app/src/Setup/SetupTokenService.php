@@ -40,7 +40,8 @@ final readonly class SetupTokenService
         }
 
         $token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-        $host->storeSetupToken(self::digest($token), $this->clock->now()->add(new \DateInterval('PT'.self::TTL_SECONDS.'S')));
+        $now = $this->clock->now();
+        $host->storeSetupToken(self::digest($token), $now->add(new \DateInterval('PT'.self::TTL_SECONDS.'S')), $now);
         $this->settings->save($host);
 
         return $token;
@@ -76,7 +77,7 @@ final readonly class SetupTokenService
         if (null === $host || null === $host->setupTokenHash()) {
             return;
         }
-        $host->clearSetupToken();
+        $host->clearSetupToken($this->clock->now());
         $this->settings->save($host);
     }
 

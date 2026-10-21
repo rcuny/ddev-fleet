@@ -10,6 +10,7 @@ use App\Fleet\FleetPaths;
 use App\Fleet\Secrets\SecretKeyFile;
 use App\Fleet\Ssh\KnownHostsFile;
 use App\Fleet\System\ConfigValue;
+use Psr\Clock\ClockInterface;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -33,6 +34,7 @@ final class HostInitCommand extends Command
         private readonly SecretKeyFile $secretKey,
         private readonly KnownHostsFile $knownHosts,
         private readonly HostSettingsRepository $settings,
+        private readonly ClockInterface $clock,
     ) {
         parent::__construct();
     }
@@ -92,15 +94,16 @@ final class HostInitCommand extends Command
             return Command::FAILURE;
         }
 
-        $host ??= $this->settings->getOrCreate((string) $domain);
+        $now = $this->clock->now();
+        $host ??= $this->settings->getOrCreate((string) $domain, $now);
         if (null !== $domain) {
-            $host->changeDomain($domain);
+            $host->changeDomain($domain, $now);
         }
         if (null !== $emailOption) {
-            $host->changeAcmeEmail($email);
+            $host->changeAcmeEmail($email, $now);
         }
         if (null !== $mode) {
-            $host->changeTlsMode($mode);
+            $host->changeTlsMode($mode, $now);
         }
         $this->settings->save($host);
 

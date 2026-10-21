@@ -27,9 +27,14 @@ final class SecretRepositoryTest extends KernelTestCase
         parent::tearDown();
     }
 
-    private static function secret(string $name, string $ciphertext = 'c', string $nonce = 'n'): Secret
+    private static function secret(string $name, string $ciphertext = 'c', ?string $nonce = null): Secret
     {
-        return new Secret(Secret::SCOPE_FLEET, '', $name, $ciphertext, $nonce, 1, 'wizard');
+        return new Secret(Secret::SCOPE_FLEET, '', $name, $ciphertext, $nonce ?? self::nonce('n'), 1, 'wizard', new \DateTimeImmutable());
+    }
+
+    private static function nonce(string $fill): string
+    {
+        return str_repeat($fill, \SODIUM_CRYPTO_SECRETBOX_NONCEBYTES);
     }
 
     public function testFleetScopeNameIsUnique(): void
@@ -70,7 +75,7 @@ final class SecretRepositoryTest extends KernelTestCase
         self::assertSame($nonce, $loaded->nonce());
         self::assertSame(1, $loaded->keyVersion());
 
-        $loaded->replace('new', 'nonce2', 2, 'admin');
+        $loaded->replace('new', self::nonce('2'), 2, 'admin', new \DateTimeImmutable());
         $this->repository->save($loaded);
         $this->entityManager()->clear();
         $again = $this->repository->find('fleet', '', 'binary');

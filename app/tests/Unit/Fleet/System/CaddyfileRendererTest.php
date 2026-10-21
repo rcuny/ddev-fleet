@@ -23,9 +23,9 @@ final class CaddyfileRendererTest extends TestCase
 
     private static function host(string $domain = 'fleet.example.com', ?string $email = null, TlsMode $mode = TlsMode::Http01): HostSettings
     {
-        $host = new HostSettings($domain);
-        $host->changeAcmeEmail($email);
-        $host->changeTlsMode($mode);
+        $host = new HostSettings($domain, new \DateTimeImmutable());
+        $host->changeAcmeEmail($email, new \DateTimeImmutable());
+        $host->changeTlsMode($mode, new \DateTimeImmutable());
 
         return $host;
     }

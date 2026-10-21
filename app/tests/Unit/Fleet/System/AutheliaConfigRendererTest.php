@@ -22,7 +22,7 @@ final class AutheliaConfigRendererTest extends TestCase
 
     public function testRegulationIsRenderedExplicitly(): void
     {
-        $config = Yaml::parse(self::renderer()->render(new HostSettings('fleet.example.com')));
+        $config = Yaml::parse(self::renderer()->render(new HostSettings('fleet.example.com', new \DateTimeImmutable())));
 
         self::assertSame(
             ['max_retries' => AutheliaConfigRenderer::MAX_RETRIES, 'find_time' => '2m', 'ban_time' => '5m'],
@@ -84,12 +84,12 @@ final class AutheliaConfigRendererTest extends TestCase
 
             YAML;
 
-        self::assertSame($expected, self::renderer()->render(new HostSettings('fleet.example.com')));
+        self::assertSame($expected, self::renderer()->render(new HostSettings('fleet.example.com', new \DateTimeImmutable())));
     }
 
     public function testTheOutputIsValidYamlWithTheExpectedStructure(): void
     {
-        $parsed = Yaml::parse(self::renderer()->render(new HostSettings('fleet.example.com')));
+        $parsed = Yaml::parse(self::renderer()->render(new HostSettings('fleet.example.com', new \DateTimeImmutable())));
 
         self::assertIsArray($parsed);
         self::assertSame('deny', $parsed['access_control']['default_policy']);
@@ -100,7 +100,7 @@ final class AutheliaConfigRendererTest extends TestCase
 
     public function testPerProjectAccessIsNotPartOfTheConfiguration(): void
     {
-        $out = self::renderer()->render(new HostSettings('fleet.example.com'));
+        $out = self::renderer()->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
         $rules = Yaml::parse($out)['access_control']['rules'];
 
         // One static rule for every instance host and no subject: nothing here changes with a project or a user.
@@ -114,7 +114,7 @@ final class AutheliaConfigRendererTest extends TestCase
     {
         $paths = new FleetPaths('/data/fleet-x', '/etc/caddy/fleet');
 
-        $out = new AutheliaConfigRenderer(SystemTemplates::twig(), $paths)->render(new HostSettings('fleet.example.com'));
+        $out = new AutheliaConfigRenderer(SystemTemplates::twig(), $paths)->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
 
         self::assertStringContainsString("path: '".$paths->usersFile()."'", $out);
         self::assertStringContainsString("path: '/data/fleet-x/authelia/users.yml'", $out);
@@ -135,20 +135,20 @@ final class AutheliaConfigRendererTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        self::renderer()->render(new HostSettings($domain));
+        self::renderer()->render(new HostSettings($domain, new \DateTimeImmutable()));
     }
 
     public function testRefusesAHomeThatCouldChangeTheYamlStructure(): void
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        self::renderer("/srv/fl'eet")->render(new HostSettings('fleet.example.com'));
+        self::renderer("/srv/fl'eet")->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
     }
 
     public function testSelfServiceResetIsDisabledWithoutANotifier(): void
     {
         foreach ([null, new AutheliaNotifier(), new AutheliaNotifier('', '', ''), new AutheliaNotifier(null, 'fleet@example.com')] as $notifier) {
-            $out = self::renderer('/srv/fleet', $notifier)->render(new HostSettings('fleet.example.com'));
+            $out = self::renderer('/srv/fleet', $notifier)->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
             $parsed = Yaml::parse($out);
 
             self::assertTrue($parsed['authentication_backend']['password_reset']['disable']);
@@ -160,7 +160,7 @@ final class AutheliaConfigRendererTest extends TestCase
     {
         $notifier = new AutheliaNotifier('submission://mail.example.com:587', 'fleet@example.com', 'fleet-mailer');
 
-        $out = self::renderer('/srv/fleet', $notifier)->render(new HostSettings('fleet.example.com'));
+        $out = self::renderer('/srv/fleet', $notifier)->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
         $parsed = Yaml::parse($out);
 
         self::assertFalse($parsed['authentication_backend']['password_reset']['disable']);
@@ -171,7 +171,7 @@ final class AutheliaConfigRendererTest extends TestCase
 
     public function testTheSmtpUsernameIsOptional(): void
     {
-        $out = self::renderer('/srv/fleet', new AutheliaNotifier('smtp://localhost:25', 'fleet@example.com'))->render(new HostSettings('fleet.example.com'));
+        $out = self::renderer('/srv/fleet', new AutheliaNotifier('smtp://localhost:25', 'fleet@example.com'))->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
 
         self::assertSame(['smtp' => ['address' => 'smtp://localhost:25', 'sender' => 'fleet@example.com']], Yaml::parse($out)['notifier']);
     }
@@ -194,6 +194,6 @@ final class AutheliaConfigRendererTest extends TestCase
     {
         $this->expectException(\InvalidArgumentException::class);
 
-        self::renderer('/srv/fleet', $notifier)->render(new HostSettings('fleet.example.com'));
+        self::renderer('/srv/fleet', $notifier)->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
     }
 }

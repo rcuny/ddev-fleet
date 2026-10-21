@@ -97,7 +97,7 @@ final class ProxySecretWiringTest extends KernelTestCase
         self::assertInstanceOf(CaddyEnvRenderer::class, $env);
 
         // The value Caddy will hand to the app is exactly the one the app compares against.
-        $line = trim($env->render(new HostSettings('fleet.example.com')));
+        $line = trim($env->render(new HostSettings('fleet.example.com', new \DateTimeImmutable())));
         self::assertSame('FLEET_PROXY_SECRET='.self::SECRET, $line);
         self::assertTrue($checker->isTrustedRequest(self::request(substr($line, \strlen('FLEET_PROXY_SECRET=')))));
         self::assertFalse($checker->isTrustedRequest(self::request(self::SECRET.'x')));
@@ -117,7 +117,7 @@ final class ProxySecretWiringTest extends KernelTestCase
         self::assertFalse($checker->isTrustedRequest(self::request('')), 'empty must never equal empty');
         $this->expectException(\InvalidArgumentException::class);
 
-        $env->render(new HostSettings('fleet.example.com'));
+        $env->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
     }
 
     public function testTheContainerRendersTheParameterNameTheCheckerReads(): void
@@ -127,7 +127,7 @@ final class ProxySecretWiringTest extends KernelTestCase
         $caddyfile = self::getContainer()->get('fleet.test_alias.caddyfile_renderer');
         self::assertInstanceOf(CaddyfileRenderer::class, $caddyfile);
 
-        $out = $caddyfile->render(new HostSettings('fleet.example.com'));
+        $out = $caddyfile->render(new HostSettings('fleet.example.com', new \DateTimeImmutable()));
 
         self::assertStringContainsString('env '.TrustedProxyChecker::PROXY_PARAM.' {env.FLEET_PROXY_SECRET}', $out);
         self::assertStringContainsString('/run/php/fleet.sock', $out);

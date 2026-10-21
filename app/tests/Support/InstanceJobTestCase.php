@@ -93,7 +93,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
         $this->templates = new TemplateRepository($this->em);
 
         $host = new HostSettingsRepository($this->em);
-        $host->getOrCreate('fleet.example.com');
+        $host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $hostnames = new InstanceHostnames($host);
         $this->secretStore = $secrets = new SecretStore(new SecretRepository($this->em), new SecretBox(new SecretKeyFile($this->paths)), $this->clock);
         $this->ddev = new Ddev($this->runner, '/home/fleet');

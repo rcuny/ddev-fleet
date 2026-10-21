@@ -48,8 +48,8 @@ final class SetupWiringTest extends KernelTestCase
         self::assertInstanceOf(SetupCookie::class, $cookie);
         $repository = $c->get(HostSettingsRepository::class);
         self::assertInstanceOf(HostSettingsRepository::class, $repository);
-        $host = $repository->getOrCreate('fleet.example.com');
-        $host->storeSetupToken(str_repeat('a', 64), new \DateTimeImmutable('+1 hour'));
+        $host = $repository->getOrCreate('fleet.example.com', new \DateTimeImmutable());
+        $host->storeSetupToken(str_repeat('a', 64), new \DateTimeImmutable('+1 hour'), new \DateTimeImmutable());
 
         $issued = $cookie->issue($host);
 

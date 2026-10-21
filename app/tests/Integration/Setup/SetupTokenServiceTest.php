@@ -24,7 +24,7 @@ final class SetupTokenServiceTest extends KernelTestCase
         $this->settings = new HostSettingsRepository($this->setUpFleetDatabase());
         $this->clock = new MockClock('2026-10-19 10:00:00 UTC');
         $this->service = new SetupTokenService($this->settings, $this->clock);
-        $this->settings->getOrCreate('fleet.example.com');
+        $this->settings->getOrCreate('fleet.example.com', new \DateTimeImmutable());
     }
 
     protected function tearDown(): void

@@ -37,7 +37,7 @@ abstract class InstanceCliTestCase extends KernelTestCase
         $this->project->changeDefaults('develop', 'full');
         new ProjectRepository($this->em)->save($this->project);
         new TemplateRepository($this->em)->save(new Template($this->project, 'full'));
-        new HostSettingsRepository($this->em)->getOrCreate('fleet.example.com');
+        new HostSettingsRepository($this->em)->getOrCreate('fleet.example.com', new \DateTimeImmutable());
     }
 
     protected function tearDown(): void
