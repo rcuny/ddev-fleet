@@ -148,6 +148,13 @@ final class CaddyfileRendererTest extends TestCase
         self::assertStringNotContainsString("\n    log {", substr($out, (int) strpos($out, 'fleet.example.com {')), 'no access log: every request would otherwise be recorded');
     }
 
+    public function testTheRefererQueryStringIsCutFromEveryLogLine(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        self::assertStringContainsString("                request>headers>Referer regexp \"\\?.*\" \"\"\n", $out);
+    }
+
     public function testHooksBodyCapped(): void
     {
         $out = self::renderer()->render(self::host());
@@ -278,7 +285,9 @@ final class CaddyfileRendererTest extends TestCase
                 }
 
                 # Caddy's error log (a 502 while php-fpm restarts, say) records the full request URI. The setup link carries its
-                # token in the query string, so the query parameter is removed from every log line.
+                # token in the query string, so the query parameter is removed from every log line. The log also records the request
+                # headers, and the Referer carries the full URL of the page that linked here, query string included: everything
+                # from the first "?" is cut.
                 log {
                     format filter {
                         wrap json
@@ -286,6 +295,7 @@ final class CaddyfileRendererTest extends TestCase
                             request>uri query {
                                 delete token
                             }
+                            request>headers>Referer regexp "\?.*" ""
                         }
                     }
                 }
