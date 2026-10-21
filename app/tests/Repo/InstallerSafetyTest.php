@@ -23,6 +23,58 @@ final class InstallerSafetyTest extends TestCase
         self::assertSame([], $hits, "forbidden host-hardening references:\n".implode("\n", $hits));
     }
 
+    public function testNoScriptTouchesRemoteAccessOrTheFirewallThroughAnyOtherDoor(): void
+    {
+        // The first guard names the daemons. The same lock-out comes from the unit (ssh.service / ssh.socket), the
+        // config tree, root's or a user's authorized keys, another firewall front end, a package that brings one in, or
+        // a kernel switch that changes how packets are handled. None of them may appear in code or in any shipped file.
+        $hits = $this->grepCode('~(firewalld|firewall-cmd|\bnftables?\b|\bnft\s|netfilter|iptables-(save|restore)|ip6tables|\bufw\b|\bfail2ban|'
+            .'\bssh(d)?\.(service|socket)\b|systemctl\s+\S+\s+(--now\s+)?ssh(d)?\b|/etc/ssh\b|openssh-server|PermitRootLogin|PasswordAuthentication|'
+            .'authorized_keys|/root/\.ssh|/home/[a-z]+/\.ssh|\bnet\.ipv[46]\.(ip_forward|conf)|DOCKER-USER|/etc/hosts\.(allow|deny)|\bsshguard\b|\bcsf\b)~i');
+
+        self::assertSame([], $hits, "remote-access or firewall changes:\n".implode("\n", $hits));
+    }
+
+    public function testOnlyTheSshClientIsInstalled(): void
+    {
+        // ssh-keygen and ssh-keyscan come from openssh-client; the server package would also start sshd.
+        $packages = (string) file_get_contents(self::installDir().'/steps/10-packages.sh');
+
+        self::assertStringContainsString('openssh-client', $packages);
+        self::assertStringNotContainsString('openssh-server', $packages);
+        self::assertStringNotContainsString('openssh-sftp-server', $packages);
+    }
+
+    public function testEveryAptRepositoryPinsTheFingerprintOfItsSigningKey(): void
+    {
+        $calls = 0;
+        foreach (glob(self::installDir().'/steps/*.sh') ?: [] as $file) {
+            $code = implode("\n", self::codeLines($file));
+            // apt_repo <name> <url> <keyfile> "<deb line>" \ <40 hex digits>
+            if (0 < preg_match_all('/\bapt_repo(?:[\s\\\\]+\S+){3}[\s\\\\]+"[^"]*"[\s\\\\]+(\S+)/', $code, $matches)) {
+                foreach ($matches[1] as $fingerprint) {
+                    ++$calls;
+                    self::assertMatchesRegularExpression('/^[0-9A-F]{40}$/', $fingerprint, basename($file).': apt_repo without a pinned fingerprint');
+                }
+            }
+        }
+        self::assertSame(4, $calls, 'docker, ddev, caddy and authelia');
+    }
+
+    public function testTheDryRunPlanShowsEachFingerprintCheck(): void
+    {
+        [, $out] = $this->dryRun();
+
+        foreach ([
+            'docker.asc' => '9DC858229FC7DD38854AE2D88D81803C0EBFCD88',
+            'ddev.asc' => 'DBD730A3A581BDAC98BAF17FC16711FC1179C7CA',
+            'caddy.asc' => '65760C51EDEA2017CEA2CA15155B6D79CA56EA34',
+            'authelia-security.gpg' => '192085915BD608A458AC58DCE461FA1531286EEA',
+        ] as $file => $fingerprint) {
+            self::assertStringContainsString('+ verify /etc/apt/keyrings/'.$file.': primary key fingerprint '.$fingerprint."\n", $out);
+        }
+    }
+
     public function testNoRecursiveChownToRootOnOpt(): void
     {
         $root = $this->grepCode('/\bchown\b.*(-[a-zA-Z]*R|--recursive).*\broot\b/');
