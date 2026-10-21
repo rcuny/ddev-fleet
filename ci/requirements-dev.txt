@@ -1,4 +1,4 @@
 pytest>=9.1.1
 jinja2>=3.1.6
-PyYAML>=6.0
+PyYAML>=6.0.3
 ruamel.yaml>=0.19.1
