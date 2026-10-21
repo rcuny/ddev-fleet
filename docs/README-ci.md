@@ -327,6 +327,8 @@ steps of `bitbucket-pipelines.yml`; change both together.
 ```bash
 ci/run-gates.sh [--quick|--full] [--report-dir DIR]     # from anywhere; --full is the default
 FLEET_CI_WORKERS=2 ci/run-gates.sh --full               # Playwright --workers (default: Playwright's own)
+FLEET_PW_TIER=quick ci/run-gates.sh --full              # Playwright tier (FLE-126); Fleet CI sets it per branch
+FLEET_CI_INSTALL_DEPS=1 ci/run-gates.sh --full          # sudo playwright install-deps first (Fleet CI web container)
 ```
 
 | Mode | Gates (log name) |
