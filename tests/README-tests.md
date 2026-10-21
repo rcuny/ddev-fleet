@@ -93,10 +93,17 @@ cd tests/playwright
 npm run typecheck                                  # tsc --noEmit
 env -u FLEET_E2E_BASE_URL npx playwright test      # the self-contained gate
 npm run test:smoke                                 # @smoke specs only
+FLEET_PW_TIER=quick npx playwright test            # the quick tier (see below); unset or `full` = every spec
 npx playwright test -g "dark mode"                 # one group, by title
 npx playwright test --project=phone --headed       # watch the 390 px project
 npx playwright show-report                         # the HTML report of the last run
 ```
+
+**Tiers (`FLEET_PW_TIER`, FLE-126).** `full` (the default, also when the variable is unset) runs every spec: the
+documented gate and what Fleet CI runs on `release/*`, `develop` and nightly. `quick` is the Fleet CI merge gate on
+`feature/*` and `renovate/*`: project `desktop` without `*-coverage.spec.ts`, `projects-validation.spec.ts` and
+`templates-validation.spec.ts`, project `phone` limited to `@smoke` tests (about 250 tests instead of 1300). Any other
+value is an error. No test is removed; `npx playwright test --list` shows what a tier runs.
 
 With `FLEET_E2E_BASE_URL` unset, Playwright starts the app itself (`support/start-app.mjs`: a throw-away
 `FLEET_HOME`, `importmap:install`, `tailwind:build`, migrations, an initialised host with a fresh setup link
