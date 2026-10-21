@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.2] - 2026-10-21
+
+### Changed
+- **Marker release, no code change.** Marks the config change deployed to ddev4 with it: the osce template
+  `jira-work-orchestrated` (config `0946489`, PWD8-1720), used by the PWS orchestrator to dispatch `/jira work
+  <KEY> --create-branch --orchestrated` agents (milestone comments, no Jira status changes, out-of-scope findings on the
+  orchestrator ticket).
+
 ## [0.20.1] - 2026-10-20
 
 ### Fixed
