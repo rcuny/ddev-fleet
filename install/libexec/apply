@@ -9,7 +9,7 @@
 #   - pins the staging directory once: it is opened, and the opened directory must be the real
 #     /srv/fleet/staging/<target> (no symlink at any component), owned by fleet and not writable by anyone else; every
 #     later access goes through that descriptor, and cleanup removes only the known file names inside it;
-#   - opens every staged file once (never blocking on a FIFO) and checks the opened file (regular, one link, owned by
+#   - opens every staged file once, read-only (a FIFO is refused before, a watchdog ends a run that one blocks) and checks the opened file (regular, one link, owned by
 #     fleet, <= 256 KiB), then copies from that descriptor into a root-owned temporary directory, so the file cannot
 #     change between the check and the copy; validation and installation use that copy only;
 #   - never sources anything: the Caddy environment file is parsed line by line against an allowlist of keys and a
@@ -45,8 +45,9 @@ readonly OVH_LEGACY_FILES='endpoint'
 readonly OVH_FILES='OVH_APPLICATION_KEY:application_key OVH_APPLICATION_SECRET:application_secret OVH_CONSUMER_KEY:consumer_key'
 # Secret files of the Authelia unit drop-in (install/etc/authelia-secrets.conf); `authelia config validate` needs them.
 readonly AUTHELIA_SECRET_FILES='AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secrets/session_secret AUTHELIA_STORAGE_ENCRYPTION_KEY_FILE=/etc/authelia/secrets/storage_encryption_key AUTHELIA_IDENTITY_VALIDATION_RESET_PASSWORD_JWT_SECRET_FILE=/etc/authelia/secrets/reset_password_jwt_secret'
-# Budget: the app gives one apply 60 s. validate 15 + reload 15 + rollback reload 15 (authelia: 15 + 20 + 20).
-readonly T_VALIDATE=15 T_RELOAD=15 T_RESTART=20
+# Budget: the app gives one apply 60 s, lock wait included. Caddy: lock 5 + validate 15 + reload 15 + rollback reload
+# 15 = 50; authelia: lock 5 + validate 15 + restart 20 + rollback restart 20 = 60.
+readonly T_LOCK=5 T_VALIDATE=15 T_RELOAD=15 T_RESTART=20 T_OPEN=5
 
 umask 077
 IFS=$' \t\n'
@@ -96,13 +97,16 @@ readonly ROOT REAL_ROOT AS_ROOT STAGING_OWNER WORK_PARENT
 
 STAGE="$ROOT/srv/fleet/staging/$TARGET"
 # What the staging directory must really be once opened (no symlink at any component).
-STAGE_EXPECTED="$REAL_ROOT/srv/fleet/staging/$TARGET"
+# Only the /srv component is resolved: /srv may legitimately be a symlink (a data disk), the literal path below it
+# (fleet/staging/<target>) may not.
+SRV_REAL=$(realpath -e -- "$ROOT/srv" 2>/dev/null) || SRV_REAL="$REAL_ROOT/srv"
+STAGE_EXPECTED="$SRV_REAL/fleet/staging/$TARGET"
 CADDYFILE="$ROOT/etc/caddy/Caddyfile"
 CADDY_ENV="$ROOT/etc/caddy/fleet.env"
 CADDY_OVH_DIR="$ROOT/etc/caddy/ovh"
 AUTHELIA_CONFIG="$ROOT/etc/authelia/configuration.yml"
 LOCK="$WORK_PARENT/fleet-apply.lock"
-readonly STAGE STAGE_EXPECTED CADDYFILE CADDY_ENV CADDY_OVH_DIR AUTHELIA_CONFIG LOCK
+readonly SRV_REAL STAGE STAGE_EXPECTED CADDYFILE CADDY_ENV CADDY_OVH_DIR AUTHELIA_CONFIG LOCK
 
 # The file names each target consumes; cleanup removes exactly these from the pinned directory.
 case $TARGET in
@@ -114,7 +118,7 @@ readonly STAGED_NAMES
 # One apply at a time: two runs would interleave their rollbacks and the first one's cleanup would eat the files the
 # second has not read yet.
 exec 9>"$LOCK"
-flock -w 20 9 || fail 'another apply is running' 75
+flock -w "$T_LOCK" 9 || fail 'another apply is running' 75
 
 # PRIV (0700, root) holds the copies of the staged files and everything installed comes from there. PUB (0755) holds
 # what the validator user must read: its own copy of the config, the environment file (readable by that user only) and
@@ -170,16 +174,21 @@ pin_staging() {
 # unsafe. The checks are made on the opened descriptor, the copy is read from it. Called under `||`/`if`, where errexit
 # is off, so every command is checked by hand.
 stage_in() {
-  local src="/proc/self/fd/4/$1" dest=$2 path_id fd_id facts type owner links size copied
+  local src="/proc/self/fd/4/$1" dest=$2 watchdog path_id fd_id facts type owner links size copied
   [ "$STAGE_PINNED" -eq 1 ] || return 1
   if [ -L "$src" ]; then
     fail "staged file $1 is a symlink" 65
   fi
   [ -e "$src" ] || return 1
-  # A FIFO would block open() for ever; refuse it first, and open read-write below (which never blocks on one).
+  # Refuse a FIFO first. The file is opened read-only (a read-write open of a device node swapped in after the checks
+  # could do harm); a FIFO swapped in during that instant would block the open, so a watchdog ends the run (the
+  # cleanup trap still runs) instead of letting it hang with the lock held.
   [ ! -p "$src" ] || fail "staged file $1 is not a regular file" 65
   [ -f "$src" ] || fail "staged file $1 is not a regular file" 65
-  exec 3<>"$src" || fail "cannot open staged file $1" 65
+  ( sleep "$T_OPEN" && kill -TERM "$$" ) 2>/dev/null 4<&- 9<&- &
+  watchdog=$!
+  exec 3<"$src" || fail "cannot open staged file $1" 65
+  kill "$watchdog" 2>/dev/null || true
   path_id=$(stat -c '%d:%i' -- "$src") || fail "cannot inspect staged file $1" 65
   fd_id=$(stat -L -c '%d:%i' -- /proc/self/fd/3) || fail "cannot inspect staged file $1" 65
   [ "$path_id" = "$fd_id" ] || fail "staged file $1 changed while it was being opened" 65
@@ -248,7 +257,8 @@ parse_caddy_env() {
 # validator_run <user> <timeout> <envfile|-> <non-secret assignment>... -- <command>...
 # Runs with an empty environment plus the assignments, a throw-away HOME, and (when an environment file is given) the
 # KEY=VALUE lines of that file, which the child shell reads itself: a secret never appears in any argv. As `user` when
-# root. Only the values already validated by parse_caddy_env ever reach the `export` of the child.
+# root. The staging directory (fd 4), the staged file (3) and the lock (9) are closed in the child: it must not
+# hold the lock after the helper has gone, nor reach the pinned directory. Only the values already validated by parse_caddy_env ever reach the `export` of the child.
 validator_run() {
   local user=$1 limit=$2 envfile=$3 assignments=() cmd=() base
   shift 3
@@ -265,9 +275,9 @@ validator_run() {
   local loader='while IFS= read -r l || [ -n "$l" ]; do export "$l"; done <"$1"; shift; exec "$@"'
   if [ "$AS_ROOT" -eq 1 ] && [ "$user" != root ]; then
     chown "$user" "$PUB/home"
-    timeout "$limit" runuser -u "$user" -- "${base[@]}" /bin/bash -c "$loader" validator "$envfile" "${cmd[@]}" </dev/null
+    timeout "$limit" runuser -u "$user" -- "${base[@]}" /bin/bash -c "$loader" validator "$envfile" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-
   else
-    timeout "$limit" "${base[@]}" /bin/bash -c "$loader" validator "$envfile" "${cmd[@]}" </dev/null
+    timeout "$limit" "${base[@]}" /bin/bash -c "$loader" validator "$envfile" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-
   fi
 }
 

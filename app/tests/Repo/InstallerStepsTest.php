@@ -39,7 +39,7 @@ final class InstallerStepsTest extends TestCase
         [, $out] = $this->dryRun();
 
         self::assertStringContainsString(
-            '+ runuser -u fleet -- env HOME=/home/fleet DDEV_NONINTERACTIVE=true ddev config global --router-http-port=8080 --router-https-port=8443 --instrumentation-opt-in=false',
+            '+ runuser -u fleet -- env HOME=/home/fleet DDEV_NONINTERACTIVE=true ddev config global --router-http-port=8080 --router-https-port=8443 --router-bind-all-interfaces=false --instrumentation-opt-in=false',
             $out,
         );
         self::assertStringContainsString('TRUST_STORES=nss mkcert -install', $out);

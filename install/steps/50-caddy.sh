@@ -103,7 +103,8 @@ step_main() {
   local diverted wanted changed=0
 
   apt_repo caddy https://dl.cloudsmith.io/public/caddy/stable/gpg.key "$KEYRING_DIR/caddy.asc" \
-    "deb [signed-by=$KEYRING_DIR/caddy.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+    "deb [signed-by=$KEYRING_DIR/caddy.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main" \
+    65760C51EDEA2017CEA2CA15155B6D79CA56EA34
   # The package would start its stock service on :80 with the default Caddyfile; ours starts it once configured.
   policy_deny_start
   apt_install caddy

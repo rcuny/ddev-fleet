@@ -25,6 +25,7 @@ main() {
   parse_args "$@"
   check_root
   check_os
+  check_install_dir
 
   MAIN_PID=$BASHPID
   trap 'on_error $? "${BASH_SOURCE[0]}" "$LINENO"' ERR

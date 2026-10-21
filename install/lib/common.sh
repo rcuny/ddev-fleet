@@ -32,6 +32,27 @@ INSTALL_LOG=/var/log/ddev-fleet-install.log
 HELPER_DIR=/usr/local/libexec/fleet
 SUDOERS_DIR=/etc/sudoers.d
 MERCURE_ETC_DIR=/etc/fleet-mercure
+# Test harness (FLEET_ROOT_PREFIX): an unprivileged, non-dry run of the helpers against a scratch tree. Root never reads
+# it (as FLEET_APPLY_TEST_ROOT in libexec/apply), so a stray variable cannot redirect a real install. With it the
+# layout paths above live under the prefix and nothing is chowned to another account (SUDO_OWN stays empty).
+SUDO_OWN='-o root -g root'
+if [ -n "${FLEET_ROOT_PREFIX:-}" ] && [ "$(id -u)" -ne 0 ]; then
+  case $FLEET_ROOT_PREFIX in
+    /*) ;;
+    *)
+      printf 'ERROR: FLEET_ROOT_PREFIX must be an absolute path\n' >&2
+      exit "$EX_USAGE"
+      ;;
+  esac
+  for _v in FLEET_HOME_DIR FLEET_OPT_DIR FLEET_SRV_DIR FLEET_ETC_DIR CADDY_ETC_DIR CADDY_FLEET_DIR SYSTEMD_DIR KEYRING_DIR \
+    APT_SOURCES_DIR INSTALL_LOG HELPER_DIR SUDOERS_DIR MERCURE_ETC_DIR; do
+    printf -v "$_v" '%s%s' "${FLEET_ROOT_PREFIX%/}" "${!_v}"
+  done
+  unset _v
+  SUDO_OWN=''
+else
+  FLEET_ROOT_PREFIX=
+fi
 # The checkout stage 1 made (fleet-owned); install.sh exports it. Code runs from here, privileged files never do.
 : "${FLEET_SRC_DIR:=$FLEET_OPT_DIR}"
 
@@ -293,6 +314,18 @@ check_root() {
   [ "$(id -u)" -eq 0 ] || die "$EX_NOTROOT" "run as root (sudo bash install.sh ...), or add --dry-run to only print the plan"
 }
 
+# The installer runs as root and sources INSTALL_DIR/steps/*.sh and installs INSTALL_DIR/etc and libexec files, so
+# nothing under it may be changeable by another account (a checkout owned by a developer, or the fleet-owned /opt
+# checkout). install.sh hands over a root-owned export; a dry-run changes nothing and may run from any checkout.
+check_install_dir() {
+  local bad
+  is_dry && return 0
+  # Under the test prefix nothing runs as root and nothing is root-owned: the check has no meaning there.
+  [ -z "$FLEET_ROOT_PREFIX" ] || return 0
+  bad=$(find "$INSTALL_DIR" \( ! -user root -o -perm /022 \) ! -type l -print -quit 2>/dev/null || true)
+  [ -z "$bad" ] || die "$EX_USAGE" "$bad is not owned by root or is writable by others; run the installer from a root-owned copy (install.sh makes one)"
+}
+
 # Debian 13 only. FLEET_OS_RELEASE (a fixture for the tests) is honoured in dry-run only; FLEET_FORCE_OS=1 overrides.
 check_os() {
   local file=/etc/os-release id version
@@ -373,12 +406,23 @@ dns_records() {
     [ -z "$recs" ] || printf '\n'
     return 0
   fi
+  # Every public resolver is asked and the answers must agree: the first one to answer does not win blindly (a
+  # resolver with a stale or poisoned cache would decide the whole check). Disagreement is inconclusive.
+  local agreed='' answered=0
   for server in $DNS_FALLBACK_RESOLVERS; do
     alt=$(dns_records_from "$1" "$2" "$server") || continue
-    printf '%s' "$alt"
-    [ -z "$alt" ] || printf '\n'
-    return 0
+    if [ "$answered" = 1 ] && [ "$alt" != "$agreed" ]; then
+      log_warn "the public resolvers disagree about the $2 record(s): '$(printf '%s' "$agreed" | paste -sd, -)' and '$(printf '%s' "$alt" | paste -sd, -)'"
+      return 3
+    fi
+    agreed=$alt
+    answered=1
   done
+  if [ "$answered" = 1 ]; then
+    printf '%s' "$agreed"
+    [ -z "$agreed" ] || printf '\n'
+    return 0
+  fi
   # No public resolver answered: keep what the system resolver said (a loopback address then fails the comparison).
   [ "$rc" = 0 ] || return "$rc"
   printf '%s\n' "$recs"
@@ -455,8 +499,14 @@ ensure_dir() {
     return 0
   fi
   mkdir -p "$dir"
-  chown "$owner" "$dir"
+  set_owner "$owner" "$dir"
   chmod "$mode" "$dir"
+}
+
+# chown, except under the test prefix (an unprivileged run cannot hand files to root or fleet).
+set_owner() {
+  [ -z "$FLEET_ROOT_PREFIX" ] || return 0
+  chown "$1" "$2"
 }
 
 # write_file <path> <mode> <owner:group>  (content on stdin). Atomic (temp file in the same directory, then rename).
@@ -473,11 +523,11 @@ write_file() {
   fi
   tmp=$(mktemp "$path.XXXXXX")
   cat >"$tmp"
-  chown "$owner" "$tmp"
+  set_owner "$owner" "$tmp"
   chmod "$mode" "$tmp"
   if [ -f "$path" ] && cmp -s "$tmp" "$path"; then
     rm -f "$tmp"
-    chown "$owner" "$path"
+    set_owner "$owner" "$path"
     chmod "$mode" "$path"
     return 0
   fi
@@ -592,21 +642,36 @@ policy_allow_start() {
   return 0
 }
 
-# apt_repo <name> <key-url> <key-file> <sources line>: key and one-line source, updated only when they changed.
+# apt_key_fingerprint <key file>: the fingerprint of the primary key in an armored or binary key file.
+apt_key_fingerprint() {
+  gpg --batch --show-keys --with-colons --fingerprint "$1" 2>/dev/null | awk -F: '$1 == "pub" {want = 1; next} want && $1 == "fpr" {print $10; exit}'
+}
+
+# apt_repo <name> <key-url> <key-file> <sources line> <primary key fingerprint>: key and one-line source, updated only
+# when they changed. The key is checked against the pinned fingerprint before it is installed: a download over TLS
+# only proves the vendor's web server, not the key that will sign every later package.
 apt_repo() {
-  local name=$1 key_url=$2 key_file=$3 line=$4 tmp
+  local name=$1 key_url=$2 key_file=$3 line=$4 fingerprint=$5 tmp got
   if is_dry; then
     fetch "$key_url" "$key_file"
+    printf '+ verify %s: primary key fingerprint %s\n' "$key_file" "$fingerprint"
     printf '+ write %s/%s.list: %s\n' "$APT_SOURCES_DIR" "$name" "$line"
     APT_DIRTY=1
     return 0
   fi
-  install -d -m 0755 -o root -g root "$KEYRING_DIR"
+  # shellcheck disable=SC2086  # SUDO_OWN is "-o root -g root" or empty, and must split
+  install -d -m 0755 $SUDO_OWN "$KEYRING_DIR"
   tmp=$(mktemp)
   fetch "$key_url" "$tmp"
   [ -s "$tmp" ] || die 1 "empty signing key from $key_url"
+  got=$(apt_key_fingerprint "$tmp")
+  if [ "$got" != "$fingerprint" ]; then
+    rm -f "$tmp"
+    die 1 "the signing key from $key_url has the fingerprint '${got:-unreadable}', expected $fingerprint; refusing to trust it"
+  fi
   if ! cmp -s "$tmp" "$key_file" 2>/dev/null; then
-    install -m 0644 -o root -g root "$tmp" "$key_file"
+    # shellcheck disable=SC2086
+    install -m 0644 $SUDO_OWN "$tmp" "$key_file"
     APT_DIRTY=1
   fi
   rm -f "$tmp"
