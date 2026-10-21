@@ -45,6 +45,26 @@ services:
             # The concrete runners are not autowirable on purpose: consumers type-hint CommandRunner (the seam).
             - '../src/Fleet/Shell/ProcessCommandRunner.php'
             - '../src/Fleet/Shell/RecordingCommandRunner.php'
+            # Doctrine builds the DBAL type itself (config/packages/doctrine.yaml); it is not a service.
+            - '../src/Doctrine/UtcDateTimeImmutableType.php'
+            # Entities are mapped, not services (DomainEntitiesAreNotServicesTest keeps this list complete).
+            - '../src/Domain/Audit/AuditEntry.php'
+            - '../src/Domain/Host/HostSettings.php'
+            - '../src/Domain/Instance/Instance.php'
+            - '../src/Domain/Job/Job.php'
+            - '../src/Domain/Port/NamedPort.php'
+            - '../src/Domain/Project/Project.php'
+            - '../src/Domain/Project/ProjectAccess.php'
+            - '../src/Domain/Schedule/Schedule.php'
+            - '../src/Domain/Schedule/ScheduleRun.php'
+            - '../src/Domain/Schedule/SchedulerHeartbeat.php'
+            - '../src/Domain/Secret/Secret.php'
+            - '../src/Domain/Ssh/SshKey.php'
+            - '../src/Domain/Template/Template.php'
+            - '../src/Domain/User/User.php'
+            - '../src/Domain/Webhook/WebhookDelivery.php'
+            - '../src/Domain/Webhook/WebhookEndpoint.php'
+            - '../src/Domain/Webhook/WebhookRule.php'
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

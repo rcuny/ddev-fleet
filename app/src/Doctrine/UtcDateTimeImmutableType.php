@@ -6,6 +6,7 @@ namespace App\Doctrine;
 
 use Doctrine\DBAL\Platforms\AbstractPlatform;
 use Doctrine\DBAL\Types\DateTimeImmutableType;
+use Doctrine\DBAL\Types\Exception\InvalidFormat;
 
 /**
  * DateTimeImmutable stored as a UTC wall-clock string.
@@ -41,7 +42,16 @@ final class UtcDateTimeImmutableType extends DateTimeImmutableType
             }
         }
 
-        return parent::convertToPHPValue($value, $platform);
+        if (null === $value || $value instanceof \DateTimeImmutable) {
+            return $value;
+        }
+
+        // Not the stored format: parse it in UTC too, never in PHP's default zone (the stock fallback does).
+        try {
+            return new \DateTimeImmutable(\is_string($value) ? $value : '', self::utc());
+        } catch (\Exception $e) {
+            throw InvalidFormat::new(\is_string($value) ? $value : get_debug_type($value), static::class, $platform->getDateTimeFormatString(), $e);
+        }
     }
 
     private static function utc(): \DateTimeZone

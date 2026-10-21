@@ -46,7 +46,7 @@ try {
     $write = static function (string $name) use ($secrets, $scopeId): void {
         $secrets->transactional(static function () use ($secrets, $scopeId, $name): void {
             if (null === $secrets->find(Secret::SCOPE_PROJECT, $scopeId, $name)) {
-                $secrets->save(new Secret(Secret::SCOPE_PROJECT, $scopeId, $name, 'cipher', 'nonce', 1, 'test'));
+                $secrets->save(new Secret(Secret::SCOPE_PROJECT, $scopeId, $name, 'cipher', str_repeat('n', \SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), 1, 'test', new DateTimeImmutable()));
             }
         });
     };
@@ -57,7 +57,7 @@ try {
             $round > 1 && $waitFor('b-done-'.($round - 1));
             $secrets->transactional(static function () use ($secrets, $scopeId, $round, $raise, $waitFor): void {
                 $secrets->find(Secret::SCOPE_PROJECT, $scopeId, 'A_'.$round);
-                $secrets->save(new Secret(Secret::SCOPE_PROJECT, $scopeId, 'A_'.$round, 'cipher', 'nonce', 1, 'test'));
+                $secrets->save(new Secret(Secret::SCOPE_PROJECT, $scopeId, 'A_'.$round, 'cipher', str_repeat('n', \SODIUM_CRYPTO_SECRETBOX_NONCEBYTES), 1, 'test', new DateTimeImmutable()));
                 $raise('a-in-tx-'.$round);
                 $waitFor('b-starting-'.$round);
             });

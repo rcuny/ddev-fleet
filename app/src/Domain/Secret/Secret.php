@@ -60,8 +60,10 @@ class Secret
         string $nonce,
         int $keyVersion,
         string $updatedBy,
-        ?\DateTimeImmutable $now = null,
+        \DateTimeImmutable $now,
     ) {
+        self::guardScope($scope, $scopeId);
+        self::guardNonce($nonce);
         $this->scope = $scope;
         $this->scopeId = $scopeId;
         $this->name = $name;
@@ -69,7 +71,7 @@ class Secret
         $this->nonce = $nonce;
         $this->keyVersion = $keyVersion;
         $this->updatedBy = $updatedBy;
-        $this->updatedAt = $now ?? new \DateTimeImmutable();
+        $this->updatedAt = $now;
     }
 
     public function id(): ?int
@@ -117,12 +119,37 @@ class Secret
         return $this->updatedAt;
     }
 
-    public function replace(string $ciphertext, string $nonce, int $keyVersion, string $updatedBy, ?\DateTimeImmutable $now = null): void
+    public function replace(string $ciphertext, string $nonce, int $keyVersion, string $updatedBy, \DateTimeImmutable $now): void
     {
+        self::guardNonce($nonce);
         $this->ciphertext = $ciphertext;
         $this->nonce = $nonce;
         $this->keyVersion = $keyVersion;
         $this->updatedBy = $updatedBy;
-        $this->updatedAt = $now ?? new \DateTimeImmutable();
+        $this->updatedAt = $now;
+    }
+
+    private static function guardScope(string $scope, string $scopeId): void
+    {
+        if (self::SCOPE_FLEET === $scope) {
+            if ('' !== $scopeId) {
+                throw new \InvalidArgumentException('A fleet-scope secret has an empty scope id.');
+            }
+
+            return;
+        }
+        if (self::SCOPE_PROJECT !== $scope) {
+            throw new \InvalidArgumentException(\sprintf('Unknown secret scope "%s".', $scope));
+        }
+        if ('' === $scopeId) {
+            throw new \InvalidArgumentException('A project-scope secret needs the project name as its scope id.');
+        }
+    }
+
+    private static function guardNonce(string $nonce): void
+    {
+        if (\SODIUM_CRYPTO_SECRETBOX_NONCEBYTES !== \strlen($nonce)) {
+            throw new \InvalidArgumentException(\sprintf('A secretbox nonce is %d bytes, got %d.', \SODIUM_CRYPTO_SECRETBOX_NONCEBYTES, \strlen($nonce)));
+        }
     }
 }
