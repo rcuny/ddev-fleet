@@ -219,6 +219,31 @@ final class InstallerDnsCheckTest extends TestCase
         self::assertStringNotContainsString('127.0.1.1', $err);
     }
 
+    public function testPublicResolversThatDisagreeAreInconclusiveNotFirstAnswerWins(): void
+    {
+        // The stub resolver says loopback; 1.1.1.1 says this host, 9.9.9.9 says someone else. Believing the first
+        // would pass the check on one resolver's (possibly stale) cache.
+        $stubs = $this->dnsStubs([], localV4: ['203.0.113.7'], publicV4: null);
+        file_put_contents($stubs.'/dig', $this->twoResolverDig('203.0.113.7', '198.51.100.9'));
+
+        [$status, , $err] = $this->check($stubs);
+
+        self::assertSame(2, $status);
+        self::assertStringContainsString('the public resolvers disagree', $err);
+        self::assertStringContainsString('DNS check inconclusive', $err);
+    }
+
+    public function testPublicResolversThatAgreePass(): void
+    {
+        $stubs = $this->dnsStubs([], localV4: ['203.0.113.7'], publicV4: null);
+        file_put_contents($stubs.'/dig', $this->twoResolverDig('203.0.113.7', '203.0.113.7'));
+
+        [$status, $out, $err] = $this->check($stubs);
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString('DNS ok', $out);
+    }
+
     public function testCnameLinesAreIgnored(): void
     {
         $stubs = $this->dnsStubs(
@@ -350,6 +375,16 @@ final class InstallerDnsCheckTest extends TestCase
             'ip' => "case \"\$2\" in\n-4) ".$ip($localV4, '4').";;\n-6) ".$ip($localV6, '6').";;\nesac",
             'curl' => "case \"\$1\" in\n-6) ".(null === $publicV6 ? 'exit 22' : "echo '{$publicV6}'").";;\n*) ".(null === $publicV4 ? 'exit 22' : "echo '{$publicV4}'").";;\nesac",
         ]);
+    }
+
+    /** A dig that answers 127.0.1.1 through the system resolver, $a through @1.1.1.1 and $b through @9.9.9.9. */
+    private function twoResolverDig(string $a, string $b): string
+    {
+        return "#!/bin/sh\n".
+            "echo ';; ->>HEADER<<- opcode: QUERY, status: NOERROR, id: 1'; echo ';; flags: qr rd ra; QUERY: 1'; echo\n".
+            "case \"\$8\" in\n".
+            "'') ip=127.0.1.1;;\n@1.1.1.1) ip={$a};;\n@9.9.9.9) ip={$b};;\n*) exit 9;;\nesac\n".
+            "[ \"\$6\" = A ] && echo \"\$7. 300 IN A \$ip\"\nexit 0\n";
     }
 
     /**

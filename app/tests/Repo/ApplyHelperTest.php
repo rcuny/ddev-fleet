@@ -584,6 +584,69 @@ final class ApplyHelperTest extends TestCase
         self::assertSame('', file_get_contents($this->log));
     }
 
+    public function testASymlinkedSrvIsAcceptedBecauseOnlyTheLiteralPathBelowItIsChecked(): void
+    {
+        // /srv may be a data disk behind a symlink: that is the administrator's, not fleet's (fleet cannot change /srv).
+        $this->seedLive();
+        $this->stageCaddy("new.example.com {\n}\n");
+        $real = $this->scratch().'/real-srv';
+        rename($this->root.'/srv', $real);
+        symlink($real, $this->root.'/srv');
+
+        [$status, , $err] = $this->apply(['caddy'], $this->defaultStubs());
+
+        self::assertSame(0, $status, $err);
+        self::assertSame("new.example.com {\n}\n", file_get_contents($this->root.'/etc/caddy/Caddyfile'));
+    }
+
+    public function testStagedFilesAreOpenedReadOnly(): void
+    {
+        // A read-write open would act on a device node swapped in after the checks; read-only cannot write to one.
+        $code = implode("\n", self::codeLines(self::installDir().'/libexec/apply'));
+
+        self::assertStringNotContainsString('3<>', $code);
+        self::assertStringContainsString('exec 3<"$src"', $code);
+    }
+
+    public function testTheValidatorChildHoldsNeitherTheLockNorThePinnedDirectory(): void
+    {
+        $this->seedLive();
+        $this->stageCaddy("x {\n}\n");
+        $fds = $this->scratch().'/fds.log';
+        $stubs = $this->stubs([
+            'caddy' => 'ls -l /proc/$$/fd >> '.$fds.' 2>&1; exit 0',
+            'systemctl' => 'exit 0',
+            'systemd-run' => 'exit 0',
+        ]);
+
+        [$status, , $err] = $this->apply(['caddy'], $stubs);
+
+        self::assertSame(0, $status, $err);
+        $listing = (string) file_get_contents($fds);
+        self::assertStringContainsString('/proc/', $listing.'/proc/', 'the stub ran');
+        self::assertStringNotContainsString('fleet-apply.lock', $listing, 'fd 9 must not reach the validator');
+        self::assertStringNotContainsString('srv/fleet/staging', $listing, 'fd 4 must not reach the validator');
+    }
+
+    public function testTheLockWaitAndTheStepsFitTheAppBudget(): void
+    {
+        $source = (string) file_get_contents(self::installDir().'/libexec/apply');
+        if (1 !== preg_match('/readonly T_LOCK=(\d+) T_VALIDATE=(\d+) T_RELOAD=(\d+) T_RESTART=(\d+)/', $source, $m)) {
+            self::fail('the helper declares no T_LOCK/T_VALIDATE/T_RELOAD/T_RESTART line');
+        }
+        [, $lock, $validate, $reload, $restart] = array_map('intval', $m);
+        self::assertStringContainsString('flock -w "$T_LOCK" 9', $source);
+
+        $app = (string) file_get_contents(self::productRoot().'/app/src/Fleet/System/PrivilegedApply.php');
+        if (1 !== preg_match('/const float TIMEOUT = (\d+)/', $app, $t)) {
+            self::fail('PrivilegedApply::TIMEOUT not found');
+        }
+        $budget = (int) $t[1];
+
+        self::assertLessThanOrEqual($budget, $lock + $validate + 2 * $reload, 'caddy: lock, validate, reload, rollback reload');
+        self::assertLessThanOrEqual($budget, $lock + $validate + 2 * $restart, 'authelia: lock, validate, restart, rollback restart');
+    }
+
     public function testAnAuthelialessStagingDirectoryStillAllowsTheRestartOnlyPath(): void
     {
         rmdir($this->root.'/srv/fleet/staging/authelia');
