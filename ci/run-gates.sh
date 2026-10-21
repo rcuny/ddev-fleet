@@ -9,7 +9,8 @@
 #   --full    quick + Playwright (npm ci, browser install, typecheck, the whole suite) + infra tests (pytest,
 #             systemd security score) + ansible-lint (non-blocking)      [default]
 #
-# Environment: FLEET_CI_WORKERS (Playwright --workers, default unset), FLEET_PHP (run composer through this PHP binary,
+# Environment: FLEET_CI_WORKERS (Playwright --workers, default unset), FLEET_PW_TIER (quick|full, read by the Playwright
+# config, FLE-126), FLEET_CI_INSTALL_DEPS=1 (install the Chromium system libraries with sudo first; Fleet CI, FLE-128), FLEET_PHP (run composer through this PHP binary,
 # default: composer as found on PATH). Every gate runs with a throw-away FLEET_HOME and without APP_ENV.
 # The report directory (default var/ci-report/, git-ignored) gets <gate>.log per gate, gates.tsv, summary.json,
 # summary.txt and, in full mode, playwright-report/. Exit 0 only if every blocking gate passed.
@@ -113,7 +114,9 @@ if [ "$mode" = full ]; then
     pw_workers=()
     [ -z "${FLEET_CI_WORKERS:-}" ] || pw_workers=(--workers="$FLEET_CI_WORKERS")
 
-    if run_gate playwright-install 1 in_pw bash -c 'npm ci && npx playwright install --only-shell chromium'; then
+    pw_deps=''
+    [ "${FLEET_CI_INSTALL_DEPS:-}" != 1 ] || pw_deps='sudo -E env "PATH=$PATH" npx playwright install-deps chromium && '
+    if run_gate playwright-install 1 in_pw bash -c "npm ci && ${pw_deps}npx playwright install --only-shell chromium"; then
         run_gate playwright-typecheck 1 in_pw npm run typecheck || true
         # The merge gate runs with FLEET_E2E_BASE_URL unset: Playwright starts its own throw-away server.
         run_gate playwright 1 in_pw env -u FLEET_E2E_BASE_URL npx playwright test "${pw_workers[@]}" || true
