@@ -1198,9 +1198,19 @@ test.describe('step 5: finish', () => {
       const lockDir = join(host.home, 'locks');
       const lockFile = readdirSync(lockDir).find((name) => name.includes('setup-finish'));
       expect(lockFile, 'the Finish lock file').toBeDefined();
-      const holder = spawn('flock', ['--exclusive', join(lockDir, lockFile!), 'sleep', '60'], { stdio: 'ignore', detached: true });
+      // The holder says so on stdout once flock has the lock, so nothing here races the process start on a busy host.
+      const holder = spawn('flock', ['--exclusive', join(lockDir, lockFile!), 'sh', '-c', 'echo locked; exec sleep 60'], {
+        stdio: ['ignore', 'pipe', 'ignore'],
+        detached: true,
+      });
+      // 'close' fires once every process holding the pipe (flock and the sleep it runs) is gone, i.e. the lock is released.
+      const holderGone = new Promise<void>((resolve) => holder.once('close', () => resolve()));
       try {
-        await expect.poll(() => spawnSync('flock', ['--nonblock', join(lockDir, lockFile!), 'true']).status, 'the holder has the lock').not.toBe(0);
+        await new Promise<void>((resolve, reject) => {
+          holder.stdout!.once('data', () => resolve());
+          holder.once('error', reject);
+          holder.once('close', () => reject(new Error('the lock holder ended before it had the lock')));
+        });
         expect(await finish(page)).toBe(409);
         const running = page.getByTestId('setup-finish-running');
         await expect(running).toContainText('Finish is already running');
@@ -1212,7 +1222,7 @@ test.describe('step 5: finish', () => {
         process.kill(-holder.pid!, 'SIGKILL');
       }
       // Once the other one is gone the button works again (and gives the ordinary refusal of this host).
-      await expect.poll(() => spawnSync('flock', ['--nonblock', join(lockDir, lockFile!), 'true']).status).toBe(0);
+      await holderGone;
       expect(await finish(page)).toBe(422);
       await expect(page.getByTestId('setup-finish-error')).toBeVisible();
     });
