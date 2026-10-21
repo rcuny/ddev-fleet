@@ -156,6 +156,22 @@ final class HostRenderCommandTest extends KernelTestCase
         self::assertSame([], $this->fx->staged(), 'the OVH credentials do not stay behind');
     }
 
+    public function testAnApplyFailingMidwayLeavesNothingStagedAndTheGateUntouched(): void
+    {
+        $this->fx->host(TlsMode::OvhDns);
+        $this->fx->addOvhSecrets();
+        $this->fx->applyFails['caddy'] = new \RuntimeException('caddy validate rejected the staged Caddyfile');
+
+        $tester = $this->render(['--apply' => true]);
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('caddy validate rejected', $tester->getErrorOutput());
+        // Authelia went in, Caddy failed: the run stops there, so no gate is written or reloaded.
+        self::assertSame(['apply:authelia', 'apply:caddy'], $this->fx->events);
+        self::assertSame([], $this->fx->staged(), 'the OVH credentials do not stay behind');
+        self::assertFileDoesNotExist($this->fx->paths->gateFile());
+    }
+
     public function testAFailureStagesNothingAndExitsNonZero(): void
     {
         $this->fx->host(TlsMode::OvhDns); // no OVH secrets yet
