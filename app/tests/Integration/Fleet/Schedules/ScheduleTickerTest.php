@@ -369,6 +369,18 @@ final class ScheduleTickerTest extends ScheduleTestCase
         self::assertSame('succeeded', $this->scheduleService->result($run));
     }
 
+    public function testEditingOnlyTheTimezoneRebaselinesWithoutACatchUp(): void
+    {
+        $this->create();
+        // 03:00 UTC has passed; the edit moves the schedule to 03:00 Paris (01:00 UTC, also passed), still inside the 60-minute window.
+        $this->at('2026-10-21 03:30:00 UTC');
+        $this->scheduleService->update('nightly', new \App\Fleet\Schedules\ScheduleInput('nightly', '0 3 * * *', 'Europe/Paris', 'fake', null), 'admin');
+        $this->at('2026-10-21 03:45:00 UTC');
+
+        self::assertSame([], $this->ticker->tick());
+        self::assertSame([], $this->fakeJobs());
+    }
+
     public function testATimezoneIsHonoured(): void
     {
         $this->create('brussels', '0 3 * * *', 'Europe/Brussels');

@@ -127,6 +127,23 @@ final class JobExecutorTest extends JobTestCase
         $holder->release();
     }
 
+    public function testTheGiveUpWindowIsThirtyMinutesAndABusyJobStaysQueuedJustInsideIt(): void
+    {
+        // 1.x deliberately waits 30 minutes (docs/instances-and-jobs.md), not the 0.x 45 of FLE-27: pin the number itself.
+        self::assertSame(1800, JobExecutor::GIVE_UP_SECONDS);
+
+        $job = $this->queuedJob();
+        $holder = $this->locks->createLock('instance.acme--main');
+        self::assertTrue($holder->acquire());
+        $this->clock->modify('+29 minutes');
+
+        $this->executor([$this->jobType('deploy', static fn () => null)])->run((int) $job->id());
+
+        self::assertSame(JobStatus::Queued, $job->status());
+        self::assertSame([3000], $this->bus->delays());
+        $holder->release();
+    }
+
     public function testTheBusyRequeueCarriesTheGiveUpClockAndTheNextDeliveryUsesIt(): void
     {
         $job = $this->queuedJob();
