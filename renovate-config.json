@@ -21,6 +21,14 @@
   "commitMessagePrefix": "FLE-10",
   "packageRules": [
     {
+      "description": "Composer and npm keep their constraints and move only the lock file when the new version is in range (no floor bumps, no exact pins); out-of-range updates fall back to widening the range",
+      "matchManagers": [
+        "composer",
+        "npm"
+      ],
+      "rangeStrategy": "update-lockfile"
+    },
+    {
       "description": "Symfony components (app/composer.json pins 8.1.*): one grouped PR for patch bumps, never merged by Renovate itself",
       "matchManagers": [
         "composer"
