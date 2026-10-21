@@ -38,11 +38,19 @@ final class GateWriterTest extends TestCase
         @rmdir($this->root);
     }
 
-    private function writer(?string $caddyDir = null): GateWriter
+    private function writer(?string $caddyDir = null, ?string $group = null): GateWriter
     {
         $paths = new FleetPaths($this->root.'/srv', $caddyDir ?? $this->root.'/srv/caddy');
 
-        return new GateWriter(SystemTemplates::twig(), $paths, new CaddyReloader($this->runner, $paths));
+        return new GateWriter(SystemTemplates::twig(), $paths, new CaddyReloader($this->runner, $paths), $group ?? $this->ownGroup());
+    }
+
+    private function ownGroup(): string
+    {
+        $group = posix_getgrgid(posix_getegid());
+        self::assertIsArray($group);
+
+        return $group['name'];
     }
 
     private function gate(string $caddyDir): string
@@ -214,5 +222,47 @@ final class GateWriterTest extends TestCase
 
         self::assertFileExists($this->gate($this->root.'/srv/caddy'));
         self::assertSame([], $this->runner->calls(), 'Caddy is not running yet when the installer renders the gate');
+    }
+
+    public function testAGateFileOfAnotherGroupOutsideHomeIsRefusedAndRemoved(): void
+    {
+        $dir = $this->root.'/etc/caddy/fleet';
+        mkdir($dir, 0o750, true);
+        chmod($dir, 0o2750);
+        clearstatcache();
+        if (0 === (fileperms($dir) & 0o2000)) {
+            self::markTestSkipped('This filesystem does not keep the setgid bit.');
+        }
+
+        try {
+            // setgid is present, but the file's group is not the one Caddy runs as.
+            $this->writer($dir, 'fleet-no-such-group')->write(GateMode::Setup);
+            self::fail('Expected a refusal.');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('"fleet-no-such-group" group', $e->getMessage());
+            self::assertStringContainsString('chgrp -R fleet-no-such-group', $e->getMessage());
+        }
+        self::assertFileDoesNotExist($this->gate($dir));
+        self::assertSame([], $this->runner->calls(), 'nothing is validated or reloaded');
+    }
+
+    public function testAGateFileOfAnotherGroupRestoresThePreviousGate(): void
+    {
+        $dir = $this->root.'/etc/caddy/fleet';
+        mkdir($dir, 0o750, true);
+        chmod($dir, 0o2750);
+        clearstatcache();
+        if (0 === (fileperms($dir) & 0o2000)) {
+            self::markTestSkipped('This filesystem does not keep the setgid bit.');
+        }
+        $this->writer($dir)->write(GateMode::Setup);
+        $before = (string) file_get_contents($this->gate($dir));
+
+        try {
+            $this->writer($dir, 'fleet-no-such-group')->write(GateMode::Authelia);
+            self::fail('Expected a refusal.');
+        } catch (\RuntimeException) {
+            self::assertSame($before, file_get_contents($this->gate($dir)));
+        }
     }
 }

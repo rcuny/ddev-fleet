@@ -19,10 +19,14 @@ final readonly class GateWriter
 {
     public const int MODE = 0o640;
 
+    /** The group Caddy runs as; outside FLEET_HOME the gate file must belong to it, or Caddy cannot read it. */
+    public const string CADDY_GROUP = 'caddy';
+
     public function __construct(
         private Environment $twig,
         private FleetPaths $paths,
         private CaddyReloader $reloader,
+        private string $caddyGroup = self::CADDY_GROUP,
     ) {
     }
 
@@ -59,10 +63,11 @@ final readonly class GateWriter
             }
 
             AtomicFile::write($file, $contents, self::MODE);
-            if (!$reload) {
-                return;
-            }
             try {
+                $this->assertReadableByCaddy($file);
+                if (!$reload) {
+                    return;
+                }
                 $this->reloader->validateAndReload();
             } catch (\Throwable $e) {
                 $this->restore($file, $previous, $e);
@@ -72,6 +77,23 @@ final readonly class GateWriter
         } finally {
             flock($lock, \LOCK_UN);
             fclose($lock);
+        }
+    }
+
+    /**
+     * The setgid bit on the directory only makes new files inherit ITS group, so a directory that is setgid but owned
+     * by another group would still produce a file Caddy cannot read. Checked on the file itself, outside FLEET_HOME.
+     */
+    private function assertReadableByCaddy(string $file): void
+    {
+        if (str_starts_with($this->paths->caddySnippetDir().'/', $this->paths->home().'/')) {
+            return;
+        }
+
+        clearstatcache(true, $file);
+        $group = posix_getgrnam($this->caddyGroup);
+        if (false === $group || false === ($gid = @filegroup($file)) || $gid !== $group['gid']) {
+            throw new \RuntimeException(\sprintf('The gate file %1$s does not belong to the "%2$s" group, so Caddy could not read it. As root: chgrp -R %2$s %3$s; find %3$s -type d -exec chmod 2750 {} +; systemctl restart caddy', escapeshellarg($file), $this->caddyGroup, escapeshellarg(\dirname($file))));
         }
     }
 
