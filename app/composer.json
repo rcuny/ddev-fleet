@@ -10,7 +10,7 @@
         "ext-pdo_sqlite": "*",
         "ext-posix": "*",
         "ext-sodium": "*",
-        "doctrine/doctrine-bundle": "^3.3.2",
+        "doctrine/doctrine-bundle": "^3.3.3",
         "doctrine/doctrine-migrations-bundle": "^4.0.1",
         "doctrine/orm": "^3.7.5",
         "dragonmantank/cron-expression": "^3.6.1",
