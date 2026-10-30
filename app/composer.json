@@ -12,7 +12,7 @@
         "ext-sodium": "*",
         "doctrine/doctrine-bundle": "^3.3.4",
         "doctrine/doctrine-migrations-bundle": "^4.0.1",
-        "doctrine/orm": "^3.7.5",
+        "doctrine/orm": "^3.7.6",
         "dragonmantank/cron-expression": "^3.6.1",
         "symfony/asset": "8.1.*",
         "symfony/asset-mapper": "8.1.*",
