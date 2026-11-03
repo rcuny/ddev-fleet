@@ -23,6 +23,8 @@ use Psr\Log\LoggerInterface;
 final class InstanceSiteRefresher
 {
     private ?string $warning = null;
+    /** @var list<string> */
+    private array $skipped = [];
 
     public function __construct(
         private readonly InstanceRepository $instances,
@@ -39,8 +41,17 @@ final class InstanceSiteRefresher
     {
         $rewritten = 0;
         $failed = [];
+        $skipped = [];
         foreach (null === $project ? $this->instances->all() : $this->instances->byProject($project) as $instance) {
             if (!$this->hasSite($instance)) {
+                continue;
+            }
+            if (!InstanceNaming::isInstanceId($instance->id())) {
+                // Created before the 59 character cap (FLE-144): it cannot run (Docker refuses its host name), so its
+                // site is left alone rather than failing the whole refresh and the host upgrade.
+                $skipped[] = $instance->id();
+                $this->logger?->warning('The Caddy site of an over-long instance id was not refreshed.', ['instance' => $instance->id()]);
+
                 continue;
             }
             try {
@@ -52,7 +63,9 @@ final class InstanceSiteRefresher
             }
         }
 
-        $this->warning = [] === $failed ? null : \sprintf(
+        $notice = [] === $skipped ? '' : \sprintf('Skipped over-long instance id(s) (more than 59 characters, they cannot run): %s. Destroy them with "fleet instance:destroy <id>".', implode(', ', $skipped));
+        $this->skipped = $skipped;
+        $this->warning = [] === $failed ? ([] === $skipped ? null : $notice) : \sprintf(
             'The change was saved, but the Caddy site of %d instance(s) was not updated (%s). Fix the cause and run "fleet port:refresh".',
             \count($failed),
             implode('; ', array_map(static fn (string $id, string $reason): string => $id.': '.$reason, array_keys($failed), $failed)),
@@ -64,6 +77,16 @@ final class InstanceSiteRefresher
     /**
      * The warning left by the last refresh(), once.
      */
+    /**
+     * The over-long ids the last refresh() skipped.
+     *
+     * @return list<string>
+     */
+    public function skipped(): array
+    {
+        return $this->skipped;
+    }
+
     public function takeWarning(): ?string
     {
         $warning = $this->warning;
@@ -74,6 +97,6 @@ final class InstanceSiteRefresher
 
     private function hasSite(Instance $instance): bool
     {
-        return InstanceState::Destroying !== $instance->state() && is_file($this->paths->instanceSiteFile($instance->id()));
+        return InstanceState::Destroying !== $instance->state() && InstanceNaming::isExistingInstanceId($instance->id()) && is_file($this->paths->instanceSiteFile($instance->id()));
     }
 }

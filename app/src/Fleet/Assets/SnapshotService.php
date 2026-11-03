@@ -61,7 +61,7 @@ final readonly class SnapshotService
      */
     public function request(string $instanceId, JobTrigger $trigger, string $by, ?string $project = null): Job
     {
-        $instance = InstanceNaming::isInstanceId($instanceId) ? $this->instances->find($instanceId) : null;
+        $instance = InstanceNaming::isExistingInstanceId($instanceId) ? $this->instances->find($instanceId) : null;
         if (null === $instance || (null !== $project && $instance->project()->name() !== $project)) {
             throw NotFound::instance($instanceId);
         }
