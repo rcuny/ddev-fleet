@@ -85,6 +85,55 @@ final class ChangelogAssembleTest extends TestCase
         self::assertSame([], glob($this->root.'/changelog.d/*.md'));
     }
 
+    public function testRolloutBulletsOfSeveralFragmentsMergeIntoOneSubsectionAtTheEnd(): void
+    {
+        file_put_contents($this->root.'/changelog.d/FLE-1.md', "### Added\n- **FLE-1: a**\n\n## Rollout\n- ACTION: set FOO in fleet.env\n");
+        file_put_contents($this->root.'/changelog.d/FLE-2.md', "### Fixed\n- **FLE-2: b**\n\n## Rollout\n- the cache is rebuilt once\n  and the first page is slow\n");
+
+        [$status, $out] = $this->assemble([]);
+
+        self::assertSame(0, $status);
+        self::assertSame(
+            "### Added\n- **FLE-1: a**\n\n### Fixed\n- **FLE-2: b**\n\n### Dependencies\n- Renovate group A\n\n#### Rollout\n- ACTION: set FOO in fleet.env\n- the cache is rebuilt once\n  and the first page is slow\n",
+            $out,
+        );
+    }
+
+    public function testAssembledRolloutSurvivesAReleaseAndReadsBackWithTheAppParser(): void
+    {
+        file_put_contents($this->root.'/changelog.d/FLE-1.md', "### Added\n- **FLE-1: a**\n\n## Rollout\n- ACTION: run the thing\n");
+
+        [$status] = $this->assemble(['1.1.0', '2026-02-02']);
+
+        self::assertSame(0, $status);
+        $changelog = (string) file_get_contents($this->root.'/CHANGELOG.md');
+        self::assertStringContainsString("- Renovate group A\n\n#### Rollout\n- ACTION: run the thing\n\n## [1.0.0]", $changelog);
+        $sections = new \App\Fleet\Upgrade\ChangelogParser()->parse($changelog);
+        self::assertSame('1.1.0', (string) $sections[0]->version);
+        self::assertSame(['run the thing'], $sections[0]->rollout->actions());
+        self::assertTrue($sections[1]->rollout->isEmpty());
+
+        // Assembling again over an already assembled [Unreleased] keeps one Rollout subsection (an old body may carry it).
+        file_put_contents($this->root.'/CHANGELOG.md', "# Changelog\n\n## [Unreleased]\n\n### Added\n- x\n\n#### Rollout\n- ACTION: old\n\n## [1.0.0] - 2026-01-01\n");
+        file_put_contents($this->root.'/changelog.d/FLE-9.md', "### Fixed\n- y\n\n## Rollout\n- new note\n");
+        [, $out] = $this->assemble([]);
+        self::assertSame("### Added\n- x\n\n### Fixed\n- y\n\n#### Rollout\n- ACTION: old\n- new note\n", $out);
+    }
+
+    public function testARolloutLineThatIsNotABulletOrAnEmptyActionIsRefused(): void
+    {
+        file_put_contents($this->root.'/changelog.d/FLE-4.md', "### Added\n- a\n\n## Rollout\nplain sentence\n");
+        [$status, , $err] = $this->assemble([]);
+        self::assertSame(1, $status);
+        self::assertStringContainsString('FLE-4.md', $err);
+        self::assertStringContainsString('must be a bullet', $err);
+
+        file_put_contents($this->root.'/changelog.d/FLE-4.md', "### Added\n- a\n\n## Rollout\n- ACTION:\n");
+        [$status, , $err] = $this->assemble([]);
+        self::assertSame(1, $status);
+        self::assertStringContainsString('needs a text', $err);
+    }
+
     public function testAFragmentWithoutASectionHeadingIsRefused(): void
     {
         file_put_contents($this->root.'/changelog.d/FLE-3.md', "- loose bullet\n");
