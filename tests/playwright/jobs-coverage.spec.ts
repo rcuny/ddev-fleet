@@ -372,6 +372,8 @@ test.describe('job history: admin', () => {
   });
 
   test('50 jobs a page (51 jobs): Next, Previous, the filters kept, a page past the end, a bad page number', async ({ page }) => {
+    // Deploys 51 jobs through the UI, then walks ten pages with axe: about 25 s alone, more than 60 s on a CPU-capped CI box.
+    test.slow();
     const project = uniqueName('pg');
     await createDeployableProject(project);
     await jobsForProject(page, project);

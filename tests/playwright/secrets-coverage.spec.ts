@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { expectNoBlockingViolations } from './support/axe';
-import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, navigate, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { placeholderOf, removeSecret, revealSecret, saveSecret, secretRow, submitSecret, test, uniqueSecret, uniqueValue } from './support/secrets';
 import { collectBrowserErrors, hasHorizontalOverflow, unexpectedErrors } from './support/shell';
 
@@ -41,7 +41,9 @@ async function saveAndWait(page: Page, name: string, value: string): Promise<num
   await form.getByLabel('Value').fill(value);
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
-    submitAndWait(page, form.getByTestId('secret-save')),
+    // requestSubmit, not a click: on a CPU-starved box the page can shift between Playwright's hit-target check and the
+    // click, and a click that lands beside the button starts no visit (FLE-143: "Turbo events seen: (none)").
+    navigate(page, () => form.evaluate((node) => (node as HTMLFormElement).requestSubmit(node.querySelector('[data-testid="secret-save"]') as HTMLElement))),
   ]);
   return response.status();
 }

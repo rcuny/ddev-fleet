@@ -112,7 +112,18 @@ if [ "$mode" = full ]; then
     pw="$root/tests/playwright"
     in_pw() { (cd "$pw" && "$@"); }
     pw_workers=()
-    [ -z "${FLEET_CI_WORKERS:-}" ] || pw_workers=(--workers="$FLEET_CI_WORKERS")
+    # Workers: FLEET_CI_WORKERS wins. Otherwise a container with a CPU quota (docker cpus: N, cgroup v2 cpu.max) gets
+    # two thirds of its CPUs, at least 1: every worker is a chromium plus the shared php server, and FLE-143 showed
+    # 5 workers on 3 CPUs turning a 1 s page load into 10 s and axe runs into 18 s (60 s test timeouts, lost clicks).
+    pw_wanted="${FLEET_CI_WORKERS:-}"
+    if [ -z "$pw_wanted" ] && [ -r /sys/fs/cgroup/cpu.max ]; then
+        read -r pw_quota pw_period < /sys/fs/cgroup/cpu.max || true
+        if [[ "${pw_quota:-max}" =~ ^[0-9]+$ ]] && [[ "${pw_period:-}" =~ ^[0-9]+$ ]] && [ "$pw_period" -gt 0 ]; then
+            pw_wanted=$(( pw_quota * 2 / (pw_period * 3) ))
+            [ "$pw_wanted" -ge 1 ] || pw_wanted=1
+        fi
+    fi
+    [ -z "$pw_wanted" ] || pw_workers=(--workers="$pw_wanted")
 
     pw_deps=''
     [ "${FLEET_CI_INSTALL_DEPS:-}" != 1 ] || pw_deps='sudo -E env "PATH=$PATH" npx playwright install-deps chromium && '
