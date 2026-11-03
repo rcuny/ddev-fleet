@@ -1,0 +1,16 @@
+{# Development/test role switch: the target page is kept so a switch never loses your place. #}
+<div data-testid="stand-in-switch" class="flex flex-col gap-2">
+    <p class="text-xs font-semibold tracking-wider text-ink-muted uppercase">Dev role</p>
+    <div class="flex gap-2">
+        {% for role, label in {admin: 'Admin', member: 'Member'} %}
+            {% set active = (role == 'admin') == is_granted('ROLE_ADMIN') %}
+            <twig:Button
+                as="a"
+                :variant="active ? 'secondary' : 'outline'"
+                class="h-11 flex-1 md:h-8"
+                href="{{ path('dev_stand_in', {role: role, next: app.request.requestUri}) }}"
+                aria-current="{{ active ? 'true' : 'false' }}"
+            >{{ label }}</twig:Button>
+        {% endfor %}
+    </div>
+</div>

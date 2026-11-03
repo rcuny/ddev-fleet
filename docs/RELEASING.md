@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-06
+Last updated: 2026-11-03
 Type: documentation
 ---
 
@@ -9,79 +9,73 @@ Type: documentation
 
 The one place that describes how a release is cut: branching model,
 versioning, CHANGELOG conventions, the release and hotfix steps, and the
-push order the CI guard depends on. For what a contributor does day to day
+push order the tag guard depends on. For what a contributor does day to day
 see `CONTRIBUTING.md`.
 
 ## 1. Model
 
-Gitflow:
+Gitflow, with two release lines:
 
-- **`develop`** is the integration branch.
-- **`main`** holds releases only. Each release is an annotated tag `vX.Y.Z`
-  on `main`.
-- **Feature branches** are `feature/<KEY>-<slug>`, cut off `develop` and
-  merged back with `git merge --no-ff`. `<KEY>` is the Jira key of the
-  ticket.
-- Release branches are `release/X.Y.Z` (off `develop`) and hotfix branches
-  `hotfix/<slug>` (off `main`).
+| Branch | Holds | Tags |
+|---|---|---|
+| `main` | The 1.x (Symfony) releases. The default branch on GitHub and what a new install clones. | `v1.*`, annotated, on `main` |
+| `develop` | The integration branch for 1.x. Features, Renovate and CI target it. | none |
+| `release/1.X.Y` | Cut off `develop`, merged into `main` (tag), then back into `develop`. | |
+| `hotfix/<slug>` (1.x) | Cut off `main`, merged into `main` (tag) and back into `develop`. | |
+| `legacy` | The frozen Python 0.x line. Hotfixes only; never merged into `develop` or `main`. | `v0.*` (`v0.1.0` to `v0.20.2` and later 0.20.x) |
 
-Bitbucket (`origin`) is the source of truth. GitHub is a read-only mirror
-published by Bitbucket Pipelines (`bitbucket-pipelines.yml`):
+- **Feature branches** are `feature/<KEY>-<slug>`, cut off `develop` and merged back with `git merge --no-ff`
+  (in practice through a pull request). `<KEY>` is the Jira key of the ticket.
+- The `v1.0.0` to `v1.0.6` tags were cut on `develop` before the cut-over (release `v1.1.0`). They stay as they
+  are and are ancestors of `main`.
 
-- **`develop` pipeline:** gates (pytest, ruff, black, browser E2E), then "Mirror develop
-  to GitHub". The mirror step only pushes if `develop` is still the pushed
-  commit, so a newer push is mirrored by its own pipeline.
-- **`v*` tag pipeline:** gates, then "Publish release to GitHub mirror". That
-  step fetches `origin/main` and **fails unless it equals the tagged
-  commit**, then pushes `main` and the tag to the mirror. Pushes are never
-  forced.
-- Both mirror steps skip when `GITHUB_MIRROR_URL` is unset, so forks stay
-  inert.
+Bitbucket (`origin`) is the source of truth. GitHub is a read-only mirror, published from the Fleet CI host
+by `publish-github.sh`: `develop` after a green run, a release tag on request. `ci/tag-guard.sh` decides what a
+tag may publish (section 5). Nobody pushes to GitHub by hand.
 
-Installs and servers follow `main` (`bootstrap.sh` clones with
-`--branch main`), so only a release ever reaches them. Nobody pushes to
-GitHub by hand.
+A new install follows `main` (`install/install.sh --ref=main`, the default); an upgrade re-runs the installer, with
+`--ref=vX.Y.Z` to pin a release ([`installation.md`](installation.md)).
 
 ## 2. Versioning
 
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html). The version
-lives only in `pyproject.toml` (`version`).
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). The 1.x line has no version file: the annotated
+tag is the version.
 
-While the project is below 1.0:
-
-- **MINOR** (`0.8.0` -> `0.9.0`): new features, and any change in behaviour
-  or configuration that operators need to know about, breaking ones
-  included. Call breaking changes out under `### Changed` and add a
-  "Rollout" bullet saying what order servers must be updated in (see the
-  0.8.0 "Rollout order" entry).
-- **PATCH** (`0.8.0` -> `0.8.1`): fixes, documentation-only releases and
-  dependency-only releases.
+- **MAJOR**: a breaking change that needs operator action beyond re-running the installer.
+- **MINOR**: new features, and any change in behaviour or configuration that operators need to know about. Call
+  breaking changes out under `### Changed` and add a "Rollout" bullet when the order of steps matters.
+- **PATCH**: fixes, documentation-only releases and dependency-only releases.
 
 ## 3. CHANGELOG conventions
 
 `CHANGELOG.md` follows [Keep a Changelog 1.1.0](https://keepachangelog.com/en/1.1.0/).
 
-- **Every feature or fix branch adds its own bullet under `## [Unreleased]`
-  in the same branch**, so the release step never has to reconstruct it.
-  Headline items start with the ticket key in bold, as existing entries do
-  (`- **FLE-6: ...**`).
+- **Every feature or fix branch adds its own fragment, `changelog.d/<KEY>.md`,
+  in the same branch** (not a line in `CHANGELOG.md`: two branches editing the same lines
+  conflicted on nearly every merge). A fragment starts with a `### <Section>` heading and holds the
+  bullets; see `changelog.d/README.md`. Headline items start with the ticket key in bold, as existing
+  entries do (`- **FLE-6: ...**`).
+- **The release step assembles them:** `php ci/changelog-assemble.php` previews the unreleased text,
+  `php ci/changelog-assemble.php X.Y.Z [YYYY-MM-DD]` cuts the release (sections merged in the order below,
+  fragments read in file name order, fragments deleted). Anything still under `## [Unreleased]` in
+  `CHANGELOG.md` is kept and comes first, so a hand edit or a hotfix entry is not lost.
 - Sections, in this order: `### Added`, `### Changed`, `### Deprecated`,
   `### Removed`, `### Fixed`, `### Security`, then the project-specific
   `### Dependencies` (last).
 - `### Dependencies` holds **one condensed bullet per merged Renovate
-  group**, for example `Python tooling: ruff 0.x -> 0.y, black ...`. Add it
-  when the Renovate PR is merged, or at the latest when cutting the
-  release.
+  group**. Renovate does not edit the changelog: add it as a fragment
+  (`changelog.d/renovate-YYYY-MM-DD.md` with a `### Dependencies` heading) when the Renovate PR is merged, or at
+  the latest when cutting the release.
 - Renovate PRs merged into `develop` while a `release/*` branch is open
   simply ride the **next** release; Renovate is not paused.
 - Compare links at the bottom of the file: on release the `[Unreleased]`
   link becomes `.../compare/vX.Y.Z...HEAD`, and a new line
   `[X.Y.Z]: .../compare/vPREV...vX.Y.Z` is added below it.
 
-## 4. Cutting a release
+## 4. Cutting a 1.x release
 
-Replace `X.Y.Z` throughout. Run from a checkout of the Bitbucket repo with
-the dev venv set up (`CONTRIBUTING.md`).
+Replace `1.X.Y` throughout. Run from a checkout of the Bitbucket repo. The `/release` skill of the maintainers'
+companion repo drives these steps.
 
 1. **Preflight.**
 
@@ -93,121 +87,116 @@ the dev venv set up (`CONTRIBUTING.md`).
    ```
 
    - If there is no local `main`: `git branch main origin/main`.
-   - The latest `develop` pipeline must be green.
-   - `## [Unreleased]` in `CHANGELOG.md` must not be empty.
+   - The latest `develop` run of Fleet CI (commit status `fleet-gates`, full suite) must be green.
+   - `php ci/changelog-assemble.php` must print a non-empty changelog.
 
-2. **Release branch, version and CHANGELOG.**
-
-   ```bash
-   git switch -c release/X.Y.Z develop
-   ```
-
-   - Set `version = "X.Y.Z"` in `pyproject.toml`.
-   - In `CHANGELOG.md`: rename `## [Unreleased]` to
-     `## [X.Y.Z] - YYYY-MM-DD`, add a fresh empty `## [Unreleased]` above
-     it, point the `[Unreleased]` compare link at `vX.Y.Z...HEAD` and add
-     `[X.Y.Z]: .../compare/vPREV...vX.Y.Z`. Make sure `### Dependencies`
-     covers every Renovate group merged since the last release.
+2. **Release branch and CHANGELOG.**
 
    ```bash
-   git commit -am "chore(release): X.Y.Z"
+   git switch -c release/1.X.Y develop
+   php ci/changelog-assemble.php 1.X.Y
+   git commit -am "chore(release): 1.X.Y"
    ```
 
-3. **Gates.**
+   The script writes `## [1.X.Y] - YYYY-MM-DD` from `changelog.d/`, adds a fresh empty `## [Unreleased]` above it,
+   points the compare links at the new tag and deletes the fragments. Make sure `### Dependencies` covers every
+   Renovate group merged since the last release.
 
-   ```bash
-   .venv/bin/pytest -q
-   .venv/bin/ruff check .
-   .venv/bin/black --check .
-   node --test tests/node/*.test.mjs
-   (cd tests/playwright && npx playwright test)   # browser E2E; `npm ci` and the browser install once
-   ```
+3. **Gates.** `cd app && composer run gates`, then in `tests/playwright/`
+   `npm run typecheck && env -u FLEET_E2E_BASE_URL npx playwright test`, and
+   `FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest` for the CI tooling.
 
-4. **Merge to `main` and tag.**
+4. **Merge into `main` and tag.**
 
    ```bash
    git switch main
-   git merge --no-ff release/X.Y.Z -m "Merge branch 'release/X.Y.Z'"
-   git tag -a vX.Y.Z -m "vX.Y.Z — <one-line headline>"
+   git merge --no-ff release/1.X.Y -m "Merge branch 'release/1.X.Y'"
+   git tag -a v1.X.Y -m "v1.X.Y - <one-line headline>"
    ```
 
-   The tag must be **annotated**; deploy tooling refuses lightweight tags.
+   The tag must be **annotated** and on the merge commit that is the tip of `main`.
 
-5. **Back-merge** the release branch so `develop` gets the version bump and
-   the CHANGELOG heading:
+5. **Back-merge** the release branch so `develop` gets the CHANGELOG heading:
 
    ```bash
    git switch develop
-   git merge --no-ff release/X.Y.Z -m "Merge branch 'release/X.Y.Z' into develop"
-   git branch -d release/X.Y.Z
+   git merge --no-ff release/1.X.Y -m "Merge branch 'release/1.X.Y' into develop"
+   git branch -d release/1.X.Y
    ```
 
-   `main`'s own merge commits never reach `develop`, so
-   `git log develop..main` always lists them; that is expected. What must
-   hold is that the release branch tip is in `develop`:
-   `git merge-base --is-ancestor 'vX.Y.Z^{}^2' develop`.
+   `main`'s own merge commits never reach `develop`, so `git log develop..main` always lists them; that is
+   expected. What must hold is that the release branch tip is in `develop`.
 
-6. **Push, in one command.**
+6. **Push, in one command**, so `origin/main` is at the tagged commit before the tag is published:
 
    ```bash
-   git push origin main develop vX.Y.Z
+   git push origin main develop v1.X.Y
    ```
 
-7. **Watch the pipelines.** The tag pipeline must be green (gates and
-   "Publish release to GitHub mirror"), and so must the `develop` one. Then
-   check the mirror; both lines must show the `main` sha:
+7. **Publish to GitHub.** From the Fleet CI host, as the maintainer (the maintainers' companion repo holds the exact command):
 
    ```bash
-   git ls-remote https://github.com/rcuny/ddev-fleet.git refs/heads/main 'refs/tags/vX.Y.Z^{}'
+   ssh <ci-host> 'sudo -u fleet bash <ci-checkout>/.ddev/ci/publish-github.sh tag v1.X.Y'
+   ```
+
+   Then check the mirror: `main` and the tag must carry the tagged sha.
+
+   ```bash
+   git ls-remote https://github.com/rcuny/ddev-fleet.git refs/heads/main 'refs/tags/v1.X.Y^{}'
    git rev-parse main
    ```
 
-## 5. Push order and recovery
+## 5. The tag guard
 
-The tag pipeline fetches `origin/main` and refuses to publish unless it is
-the tagged commit. If the tag reaches Bitbucket **before** `main` does (for
-example `git push --tags` first, or a rejected `main` push), the guard fails
-and nothing is published. Sending `main`, `develop` and the tag in a single
-`git push origin main develop vX.Y.Z` puts all refs on the remote together,
-so `main` is already there when the pipeline starts.
+`ci/tag-guard.sh <tag> <commit>` runs before every publish to the mirror, in the publish script on the CI host and in
+the (inactive) tag pipeline. The local tag must point at the commit, and then:
 
-Recovery if it happened anyway:
+| Tag | Accepted when | Pushed to GitHub |
+|---|---|---|
+| `v1.X.Y`, `v1.X.Y-<prerelease>` (later majors alike) | the commit is the tip of `origin/main` | `main` (fast-forward) and the tag |
+| same | the commit is an older ancestor of `origin/main` (the `v1.0.x` tags) | the tag only |
+| same | the commit is only on `develop` or elsewhere | refused |
+| `v0.X.Y` | the commit is the tip of `origin/legacy` | `legacy` (fast-forward) and the tag |
+| anything else | never | refused |
 
-```bash
-git push origin main
-```
-
-then re-run the failed tag pipeline in Bitbucket (Pipelines -> the tag run
--> Rerun).
-
-Never delete and re-push a published tag, and never force-push `main`,
-`develop` or a tag: servers and the mirror follow them.
+If the guard fails with "not on origin/main", the tag reached the remote before `main` did: `git push origin main`
+and publish again. Never delete and re-push a published tag, and never force-push `main`, `develop`, `legacy` or a
+tag: servers and the mirror follow them.
 
 ## 6. Hotfixes
 
-For a fix that cannot wait for the next release from `develop`:
+**1.x**, for a fix that cannot wait for the next release from `develop`:
 
 ```bash
 git switch -c hotfix/<slug> main
 ```
 
-1. Fix it, with a test.
-2. Add the CHANGELOG entry under a new `## [X.Y.Z+1] - YYYY-MM-DD` heading
-   (a PATCH bump) and update the compare links; bump `pyproject.toml`.
-3. Run the gates (section 4, step 3).
-4. `git switch main`, `git merge --no-ff hotfix/<slug>`, annotated tag
-   `vX.Y.Z+1` (as in section 4, step 4).
-5. Back-merge: `git switch develop && git merge --no-ff hotfix/<slug>`. Resolve the
-   CHANGELOG conflict so `develop` keeps its `## [Unreleased]` on top, with
-   the hotfix section below it.
-6. Push with the same single command:
-   `git push origin main develop vX.Y.Z+1`, and watch the pipelines.
+1. Fix it, with a test, and add a `changelog.d/<KEY>.md` fragment.
+2. Run the gates (section 4, step 3).
+3. `git switch main`, `git merge --no-ff hotfix/<slug>`, assemble the changelog for the PATCH version
+   (`php ci/changelog-assemble.php 1.X.Y+1`), commit, and tag `v1.X.Y+1` as in section 4, step 4.
+4. Back-merge: `git switch develop && git merge --no-ff hotfix/<slug>`; resolve a CHANGELOG conflict so `develop`
+   keeps its empty `## [Unreleased]` on top.
+5. Push with `git push origin main develop v1.X.Y+1`, then publish (section 4, step 7).
+
+**0.x (Python)**, only for the frozen line, branch `legacy`:
+
+```bash
+git switch -c hotfix/<slug> legacy
+```
+
+1. Fix it, with a test, and run the Python gates: `pytest -q`, `ruff check .`, `black --check .`,
+   `node --test tests/node/*.test.mjs`.
+2. Add the CHANGELOG entry under a new `## [0.20.N] - YYYY-MM-DD` heading (a PATCH bump, written by hand: `legacy`
+   has no `changelog.d/`) and bump `pyproject.toml`.
+3. `git switch legacy`, `git merge --no-ff hotfix/<slug>`, annotated tag `v0.20.N`.
+4. **Never merge it into `develop` or `main`.** The Python tree does not exist there.
+5. Push: `git push origin legacy v0.20.N`, then publish the tag from the CI host as in section 4, step 7.
 
 ## 7. Deploying
 
-Releasing is not deploying. A release makes the tag available on `main`;
-each server updates when its operator pulls it. Read the CHANGELOG for any
-"Rollout" notes first (they state the order in which servers must be
-updated), then follow
-[Updating the code](operations.md#updating-the-code) and the precondition in
-[runbook-server-rollout.md](runbook-server-rollout.md#1-routine-rollout-code--config).
+Releasing is not deploying. A 1.x release makes the tag available on `main`; each host updates when its operator
+re-runs the installer (`install.sh --ref=v1.X.Y`, see [`installation.md`](installation.md)). Read the CHANGELOG for
+"Rollout" notes first. The 0.x host (if you still run one) follows `legacy`; its procedure is
+[Updating the code](v0/operations.md#updating-the-code) and the precondition in
+[runbook-server-rollout.md](v0/runbook-server-rollout.md#1-routine-rollout-code--config).

@@ -1,0 +1,30 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<footer class="rounded-md border border-hairline bg-page">
+    <div class="flex flex-col gap-2 px-4 py-6 text-sm text-ink-muted sm:flex-row sm:items-center sm:justify-between">
+        <span>© 2026 Acme</span>
+        <nav aria-label="Footer sample" class="flex gap-4">
+            <a href="#footers" class="inline-flex min-h-11 items-center text-ink-muted hover:text-ink-display sm:min-h-0">Privacy</a>
+            <a href="#footers" class="inline-flex min-h-11 items-center text-ink-muted hover:text-ink-display sm:min-h-0">Terms</a>
+        </nav>
+    </div>
+</footer>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="footers" title="Footers" :sample="sample|trim">
+    <twig:block name="description">
+        <p>The bottom edge of a page. Quiet and low contrast: it holds the copyright, version or legal links and, sparingly, secondary navigation.</p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Public-facing pages.</li>
+            <li>Screens that have a natural end of scroll.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Dense app screens (lists, editors): they do not need a footer.</li>
+            <li>Modals and sheets.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

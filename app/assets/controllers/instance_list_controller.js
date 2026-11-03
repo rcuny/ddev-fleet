@@ -1,0 +1,203 @@
+import { Controller } from '@hotwired/stimulus';
+
+// The instance list: select-all and the bulk bar, and a refresh of the <turbo-frame id="instances"> when Mercure says
+// something changed or every few seconds. The refresh is paused while a dialog or a menu is open or a field has focus,
+// and the selection survives it.
+//   <div data-controller="instance-list" data-instance-list-url-value="/instances" data-instance-list-mercure-value="<hub url>" data-instance-list-topics-value='["/instances/blog"]'>
+export default class extends Controller {
+    static targets = ['form', 'bar', 'count', 'all', 'row', 'ids'];
+
+    static values = {
+        url: String,
+        mercure: String,
+        topics: { type: Array, default: [] },
+        interval: { type: Number, default: 5000 },
+    };
+
+    #selected = new Set();
+    #timer = null;
+    #source = null;
+    #wake = null;
+    #holdUntil = 0;
+    #refreshing = false;
+
+    connect() {
+        this.element.addEventListener('turbo:frame-load', this.#restore);
+        this.element.addEventListener('turbo:before-frame-render', this.#keepEdits);
+        this.#schedule();
+        this.#subscribe();
+        this.#restore();
+    }
+
+    disconnect() {
+        this.element.removeEventListener('turbo:frame-load', this.#restore);
+        this.element.removeEventListener('turbo:before-frame-render', this.#keepEdits);
+        clearInterval(this.#timer);
+        clearTimeout(this.#wake);
+        this.#source?.close();
+    }
+
+    toggle() {
+        this.#selected = new Set(this.rowTargets.filter((box) => box.checked).map((box) => box.value));
+        this.#sync();
+    }
+
+    toggleAll(event) {
+        this.rowTargets.forEach((box) => {
+            box.checked = event.target.checked;
+        });
+        this.toggle();
+    }
+
+    // Filter without the CSRF field in the address: the frame navigates to a clean URL.
+    filter(event) {
+        if (event.submitter && event.submitter.hasAttribute('formaction')) {
+            return;
+        }
+        event.preventDefault();
+        const params = new URLSearchParams();
+        for (const name of ['q', 'project', 'state']) {
+            const value = this.formTarget.elements[name]?.value ?? '';
+            if (value !== '') {
+                params.set(name, value);
+            }
+        }
+        const query = params.toString();
+        this.#refreshing = false;
+        this.#frame().src = this.urlValue + (query === '' ? '' : '?' + query);
+    }
+
+    fillConfirm(event) {
+        const dialog = event.currentTarget.closest('[data-controller~="dialog"]');
+        const list = dialog?.querySelector('[data-instance-list-target="ids"]');
+        if (!list) {
+            return;
+        }
+        list.replaceChildren(
+            ...[...this.#selected].map((id) => {
+                const item = document.createElement('li');
+                item.textContent = id;
+                return item;
+            }),
+        );
+    }
+
+    #frame() {
+        return this.element.querySelector('turbo-frame#instances');
+    }
+
+    // A refresh we started that no turbo:frame-load has answered yet (given up after 15 s, so a failed one cannot freeze
+    // the list), and the second after one: Turbo is still closing that request when the event fires.
+    #loading() {
+        return Date.now() < this.#holdUntil;
+    }
+
+    #paused() {
+        if (document.hidden || document.querySelector('dialog[open]')) {
+            return true;
+        }
+        if (this.element.querySelector('[data-slot="dropdown-menu"][data-state="open"]')) {
+            return true;
+        }
+        const active = document.activeElement;
+        return !!active && this.element.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && active.type !== 'checkbox';
+    }
+
+    // An answer to a refresh that arrives after the person started editing the filters must not render: it would put
+    // the old values back into the fields (and a submit then sends the unchanged address, so nothing happens). The
+    // refresh is dropped; the next one runs once the filters are submitted or put back.
+    #keepEdits = (event) => {
+        const refreshing = this.#refreshing;
+        this.#refreshing = false;
+        if (!refreshing || !this.hasFormTarget) {
+            return;
+        }
+        const edited = ['q', 'project', 'state'].some((name) => {
+            const field = this.formTarget.elements[name];
+            if (!field) {
+                return false;
+            }
+            if (!field.options) {
+                return field.value !== field.defaultValue;
+            }
+            // A select without a `selected` option shows its first option: that is its default, not an edit.
+            const marked = [...field.options].findIndex((option) => option.defaultSelected);
+            return field.selectedIndex !== (marked < 0 ? 0 : marked);
+        });
+        if (edited) {
+            event.preventDefault();
+            this.#holdUntil = 0;
+        }
+    };
+
+    refresh = () => {
+        const frame = this.#frame();
+        // A frame that is still loading is left alone: reloading it cancels the request in flight, and Turbo lets the
+        // cancelled response body reject unhandled ("The user aborted a request.", a page error under load). `busy`
+        // alone is not enough: it is gone before the frame has read and rendered the answer.
+        if (!frame || frame.hasAttribute('busy') || this.#loading() || this.#paused()) {
+            return;
+        }
+        this.#holdUntil = Date.now() + 15000;
+        this.#refreshing = true;
+        const url = frame.src || this.urlValue + window.location.search;
+        if (frame.src === url) {
+            frame.reload();
+        } else {
+            frame.src = url;
+        }
+    };
+
+    #schedule() {
+        clearInterval(this.#timer);
+        this.#timer = setInterval(this.refresh, this.#source ? this.intervalValue * 6 : this.intervalValue);
+    }
+
+    #subscribe() {
+        if (this.mercureValue === '' || this.topicsValue.length === 0 || typeof EventSource === 'undefined') {
+            return;
+        }
+        try {
+            const hub = new URL(this.mercureValue, window.location.href);
+            for (const topic of this.topicsValue) {
+                hub.searchParams.append('topic', topic);
+            }
+            this.#source = new EventSource(hub, { withCredentials: true });
+            this.#source.onmessage = () => {
+                clearTimeout(this.#wake);
+                this.#wake = setTimeout(this.refresh, 300);
+            };
+            this.#source.onerror = () => {
+                this.#source?.close();
+                this.#source = null;
+                this.#schedule();
+            };
+            this.#schedule();
+        } catch {
+            this.#source = null;
+        }
+    }
+
+    #restore = () => {
+        this.#holdUntil = Date.now() + 1000;
+        this.rowTargets.forEach((box) => {
+            box.checked = this.#selected.has(box.value);
+        });
+        // Instances that left the list are no longer selected.
+        const present = new Set(this.rowTargets.map((box) => box.value));
+        this.#selected = new Set([...this.#selected].filter((id) => present.has(id)));
+        this.#sync();
+    };
+
+    #sync() {
+        if (this.hasBarTarget) {
+            this.barTarget.hidden = this.#selected.size === 0;
+        }
+        if (this.hasCountTarget) {
+            this.countTarget.textContent = this.#selected.size + ' selected';
+        }
+        if (this.hasAllTarget) {
+            this.allTarget.checked = this.rowTargets.length > 0 && this.#selected.size === this.rowTargets.length;
+        }
+    }
+}

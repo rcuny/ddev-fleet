@@ -1,0 +1,5 @@
+{# The product mark and name, linking home. Optional "class" adds layout classes (e.g. md:hidden). #}
+<a href="{{ path('home') }}" class="flex items-center gap-2 hover:no-underline {{ class|default('') }}">
+    <span class="flex size-7 items-center justify-center rounded-md bg-brand-faded font-display text-sm font-semibold text-brand-darker dark:text-brand" aria-hidden="true">F</span>
+    <span class="font-display text-sm font-semibold text-ink-display">Fleet</span>
+</a>

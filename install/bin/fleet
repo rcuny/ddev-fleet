@@ -1,0 +1,131 @@
+#!/usr/bin/env bash
+# The `fleet` command: runs the app's console commands on this host.
+#
+#   fleet setup:token              ->  php8.4 /opt/ddev-fleet/app/bin/console fleet:setup:token
+#   fleet user:reset-password bob  ->  ... fleet:user:reset-password bob
+#   fleet project list --json      ->  ... fleet:project:list --json   (a "<group> <verb>" pair works as "<group>:<verb>")
+#   fleet fleet:host:render        ->  an already prefixed name is accepted as it is
+#   fleet doctrine:migrations:status -> ... doctrine:migrations:status, with the application environment loaded
+#   fleet tmux [<instance-id>]     ->  attaches this terminal to the agent workspace (also: fleet tmux:attach, fleet tmux attach)
+#   fleet                          ->  lists the fleet:* commands
+#   fleet list | help <cmd> | ...  ->  anything that does not start with one of our groups goes to the console unchanged
+#
+# Installed by install/steps/90-privileged.sh as /usr/local/bin/fleet (root:root 0755). Everyone but the `fleet` user
+# is re-executed as `fleet` through sudo (root and sudoers members); `fleet` itself loads /etc/ddev-fleet/fleet.env,
+# the same configuration the web app and the workers run with, and starts the console.
+set -euo pipefail
+
+FLEET_USER=fleet
+# FLEET_WRAPPER_* exist for the unit tests only. They are read after the switch to `fleet` (sudo resets the
+# environment on the way), so they can never redirect a privileged run: this script has no privileges of its own.
+ENV_FILE=${FLEET_WRAPPER_ENV_FILE:-/etc/ddev-fleet/fleet.env}
+CONSOLE=${FLEET_WRAPPER_CONSOLE:-/opt/ddev-fleet/app/bin/console}
+PHP=${FLEET_WRAPPER_PHP:-php8.4}
+
+# `fleet tmux` and `fleet tmux attach|:attach`, with an optional instance id: attach to the agent workspace. Parsed and
+# checked before the switch to `fleet`, because sudo resets the environment and $TMUX would be lost on the way. Only
+# `attach` and an instance-id-shaped word are ours; any other `fleet tmux <verb>` goes to the console unchanged.
+attach=0
+window=''
+extra=0
+if [ "${1:-}" = tmux ]; then
+  if [ "$#" -eq 1 ]; then
+    attach=1
+  elif [ "$2" = attach ]; then
+    attach=1; window=${3:-}; [ "$#" -gt 3 ] && extra=1
+  elif [[ $2 =~ ^[a-z0-9-]+--[a-z0-9-]+$ ]]; then
+    attach=1; window=$2; [ "$#" -gt 2 ] && extra=1
+  fi
+elif [ "${1:-}" = tmux:attach ]; then
+  attach=1; window=${2:-}; [ "$#" -gt 2 ] && extra=1
+fi
+if [ "$attach" -eq 1 ]; then
+  if [ "$extra" -eq 1 ]; then
+    printf 'usage: fleet tmux [attach] [<instance-id>]\n' >&2
+    exit 2
+  fi
+  # The id is validated before anything runs (the session is not even ensured for a bad one) and is later passed as one
+  # argv word, never through a shell.
+  if [ -n "$window" ] && [[ ! $window =~ ^[a-z0-9]+(-[a-z0-9]+)*--[a-z0-9]+(-[a-z0-9]+)*$ ]]; then
+    printf 'fleet: %s is not an instance id\n' "$window" >&2
+    exit 2
+  fi
+  if [ -n "${TMUX:-}" ]; then
+    printf 'fleet: already inside tmux: attaching would nest it. Detach first (Ctrl-b d) or use the tmux prefix to switch sessions\n' >&2
+    exit 2
+  fi
+fi
+
+if [ "$(id -un)" != "$FLEET_USER" ]; then
+  exec sudo -u "$FLEET_USER" -- /usr/local/bin/fleet "$@"
+fi
+
+# Attaching needs a terminal on both ends; without one (ssh host fleet tmux) tmux would only fail with a cryptic message.
+# FLEET_WRAPPER_TTY=1 skips the check for the unit tests (read after the switch to `fleet`, like the other
+# FLEET_WRAPPER_* variables).
+if [ "$attach" -eq 1 ] && [ "${FLEET_WRAPPER_TTY:-}" != 1 ] && { [ ! -t 0 ] || [ ! -t 1 ]; }; then
+  printf 'fleet: tmux needs a terminal: use ssh -t\n' >&2
+  exit 2
+fi
+
+if [ ! -r "$ENV_FILE" ]; then
+  printf 'fleet: cannot read %s (is ddev-fleet installed on this host?)\n' "$ENV_FILE" >&2
+  exit 1
+fi
+export HOME=/home/fleet
+# Start from a directory the `fleet` user can always enter: the caller's (an administrator's home, say) is often closed
+# to it, and then every process the console starts fails ("posix_spawn() failed: Permission denied").
+cd "$HOME" 2>/dev/null || cd /
+set -a
+# shellcheck source=/dev/null
+. "$ENV_FILE"
+set +a
+
+if [ "$attach" -eq 1 ]; then
+  # Make sure the session exists (quiet), then select the instance's window and attach.
+  "$PHP" "$CONSOLE" fleet:tmux:ensure -q
+  if [ -n "$window" ]; then
+    tmux -L fleet select-window -t "=fleet:=$window" || { printf 'fleet: instance %s has no window\n' "$window" >&2; exit 1; }
+  fi
+  exec tmux -L fleet attach -t =fleet
+fi
+
+if [ "$#" -eq 0 ]; then
+  exec "$PHP" "$CONSOLE" list fleet
+fi
+
+command=$1
+shift
+# Only these groups get the `fleet:` prefix (every other console command, doctrine:* for one, keeps its own name).
+# One group per line, sorted, so two branches adding a group rarely touch the same line.
+# tests/Repo/CliGroupsTest.php keeps the list in step with the commands.
+FLEET_GROUPS=(
+  asset
+  backup
+  claude
+  export
+  host
+  import
+  instance
+  job
+  port
+  project
+  schedule
+  secret
+  setup
+  template
+  tmux
+  user
+  webhook
+  workspace
+)
+groups=$(IFS='|'; printf '%s' "${FLEET_GROUPS[*]}")
+if [[ $command =~ ^fleet:[a-z][a-z0-9:-]*$ ]]; then
+  :
+elif [[ $command =~ ^($groups):[a-z][a-z0-9:-]*$ ]]; then
+  command="fleet:$command"
+elif [[ $command =~ ^($groups)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
+  command="fleet:$command:$1"
+  shift
+fi
+exec "$PHP" "$CONSOLE" "$command" "$@"

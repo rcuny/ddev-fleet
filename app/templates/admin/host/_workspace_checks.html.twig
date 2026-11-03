@@ -1,0 +1,22 @@
+{# What the agent workspace needs from the host: present or missing, never a value (fleet workspace:check). #}
+<twig:Card data-testid="host-workspace-checks">
+    <twig:Card:Header>
+        <twig:Card:Title>Agent workspace checks</twig:Card:Title>
+        <twig:Card:Description>What the instances' agents need from this host. Only whether each item is there is shown.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content>
+        <ul class="grid gap-2 text-sm">
+            {% for key, label in {push_key: 'Push key', git_identity: 'Git identity', claude_token: 'Claude token'} %}
+                <li class="flex flex-wrap items-center gap-2" data-testid="host-check-{{ key|replace({'_': '-'}) }}">
+                    <span class="w-32 text-ink-body">{{ label }}</span>
+                    {% if workspace[key] %}
+                        <twig:Badge class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">Present</twig:Badge>
+                    {% else %}
+                        <twig:Badge variant="secondary">Missing</twig:Badge>
+                    {% endif %}
+                </li>
+            {% endfor %}
+        </ul>
+        <p class="mt-3 text-sm text-ink-muted">On the host: <code class="break-all">sudo fleet workspace:check</code></p>
+    </twig:Card:Content>
+</twig:Card>

@@ -1,0 +1,4 @@
+# Installed by ddev-fleet (install/steps/90-privileged.sh) as /etc/sudoers.d/fleet-apply, mode 0440.
+# The one thing the app may do as root: install the config it has rendered into /srv/fleet/staging. The arguments are
+# matched exactly, so no other target and no extra argument is allowed. See install/libexec/apply.
+fleet ALL=(root) NOPASSWD: /usr/local/libexec/fleet/apply caddy, /usr/local/libexec/fleet/apply authelia

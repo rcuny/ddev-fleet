@@ -1,0 +1,204 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<h1>The quick brown fox</h1>
+<h2>The quick brown fox</h2>
+<h3>The quick brown fox</h3>
+<h4>The quick brown fox</h4>
+<h5>The quick brown fox</h5>
+<h6>The quick brown fox</h6>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="heading-scale" title="Heading scale" :sample="sample|trim">
+    <twig:block name="description">
+        <p>All six heading levels at their base sizes. Headings inherit the display font, weight, colour and tightened line height from the base styles: no utility classes.</p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Semantic heading levels that form the document outline.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Overriding <code>font-family</code> or <code>color</code> on a heading.</li>
+            <li>A heading element chosen for its size: pick the level for the outline and change the design system if the size is wrong.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<h1>Page title</h1>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="h1" title="H1" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Page-level heading. One per page, rendered by <code>PageHeader</code>.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<h2>Section heading</h2>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="h2" title="H2" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Major section heading inside a page.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<h3>Sub-section</h3>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="h3" title="H3" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Sub-section heading.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<h4>Minor heading</h4>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="h4" title="H4" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Minor heading inside a sub-section.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<h5>Card title</h5>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="h5" title="H5" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Card or inline heading.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<h6>Eyebrow label</h6>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="h6" title="H6" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Eyebrow or label-style heading: uppercase, tracked, muted.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<p>Read more in <a href="#colors">the colour tokens</a> or <a href="https://symfony.com/bundles/ux-toolkit" rel="noreferrer">the kit documentation</a>.</p>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="anchor" title="Anchor (a)" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Inline links use <code>brand-darker</code> in light mode and <code>brand</code> in dark mode (4.5:1 on the page in both), no underline until hover.</p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Navigation and references in prose.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Actions: use a <code>Button</code> (<code>as="a"</code> for navigation styled as a button).</li>
+            <li>Dense navigation lists: those carry their own classes.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<p>A paragraph carries the bulk of the text. Its colour is <code>ink-body</code>, its line height 1.6, and it needs no utility classes.</p>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="paragraph" title="Paragraph (p)" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Body text. Inherits colour, font and line height from the base styles.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<p>Most of this sentence is body weight, but <strong>this part</strong> is emphasised.</p>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="strong" title="Strong" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Emphasised inline text: weight 600 and <code>ink-display</code>.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<div class="grid gap-6 sm:grid-cols-2">
+    <div>
+        <p class="mb-2 font-mono text-xs text-ink-muted">ul (default)</p>
+        <ul>
+            <li>Unstyled first item</li>
+            <li>Unstyled second item</li>
+        </ul>
+    </div>
+    <div class="body-content">
+        <p class="mb-2 font-mono text-xs text-ink-muted">ul inside .body-content</p>
+        <ul>
+            <li>Bulleted first item</li>
+            <li>Bulleted second item</li>
+        </ul>
+    </div>
+    <div>
+        <p class="mb-2 font-mono text-xs text-ink-muted">ol (default)</p>
+        <ol>
+            <li>Unstyled first item</li>
+            <li>Unstyled second item</li>
+        </ol>
+    </div>
+    <div class="body-content">
+        <p class="mb-2 font-mono text-xs text-ink-muted">ol inside .body-content</p>
+        <ol>
+            <li>Numbered first item</li>
+            <li>Numbered second item</li>
+        </ol>
+    </div>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="lists" title="Lists (ul / ol)" :sample="sample|trim">
+    <twig:block name="description">
+        <p>Lists are unstyled by default (no markers, no padding) so they are safe semantic containers in navigation and listings. Wrap a list, or its parent, in <code>.body-content</code> to get discs and numbers back.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<div class="body-content">
+    <ul>
+        <li>A single list item inside .body-content.</li>
+    </ul>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="list-item" title="List item (li)" :sample="sample|trim">
+    <twig:block name="description">
+        <p>An individual list item. Unstyled by default; it gets a marker and indent only inside <code>.body-content</code>.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<blockquote>"Make it work, make it right, make it fast."</blockquote>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="blockquote" title="Blockquote" :sample="sample|trim">
+    <twig:block name="description">
+        <p>A pull quote with a brand left border, italic and muted. For quotations and attributions in body content.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<div class="max-w-sm space-y-2">
+    <label for="ds-label-example">Email address</label>
+    <twig:Input id="ds-label-example" type="email" placeholder="you@example.com" />
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="label" title="Label / legend" :sample="sample|trim" :components="['Input', 'Label']">
+    <twig:block name="description">
+        <p>Form field labels (<code>&lt;label&gt;</code>) and <code>&lt;legend&gt;</code> use one style by default: small, medium weight, <code>ink-display</code>. The kit's <code>Label</code> component is the same look as a flex row for use next to checkboxes and radios; a bare <code>&lt;label&gt;</code> wrapping a checkbox gets <code>font-normal text-ink-body</code>.</p>
+    </twig:block>
+</twig:Ds:Section>
+
+{% set sample %}{% verbatim %}
+<div>
+    <p>Above the rule.</p>
+    <hr>
+    <p>Below the rule.</p>
+    <twig:Separator />
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="hr" title="Horizontal rule" :sample="sample|trim" :components="['Separator']">
+    <twig:block name="description">
+        <p>A visual break between content blocks: a 1 px <code>hairline</code> line with vertical margin. Use the kit's <code>Separator</code> inside menus and tight layouts where the margin of <code>&lt;hr&gt;</code> is too large.</p>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

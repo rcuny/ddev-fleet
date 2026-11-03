@@ -1,0 +1,41 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<nav aria-label="Section tabs" class="flex items-end justify-between gap-4 overflow-x-auto border-b border-hairline">
+    <div class="flex items-center gap-6">
+        <a href="#sub-navigation" aria-current="page" class="-mb-px shrink-0 whitespace-nowrap border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand">Overview</a>
+        <a href="#sub-navigation" class="-mb-px shrink-0 whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">Activity</a>
+        <a href="#sub-navigation" class="-mb-px shrink-0 whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">Members</a>
+    </div>
+    <div class="flex items-center gap-3 pb-2">
+        <a href="#sub-navigation" class="shrink-0 whitespace-nowrap text-sm text-ink-muted hover:text-ink-display">View all</a>
+    </div>
+</nav>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="sub-navigation" title="Sub navigation" :sample="sample|trim" :components="[]">
+    <twig:block name="description">
+        <p>
+            A horizontal tab list for moving within one section of the app (settings pages, project tabs). The active tab's underline merges with the row's bottom hairline.
+            The same strip is used at every width, with no script: each link is at least 44 px high, and if the labels ever outgrow a phone the strip scrolls inside its own container, never the page.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Three or more sibling sub-views with a stable structure.</li>
+            <li>Appended to a page header (the "with tabs" variant).</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>One or two sub-pages: link them inline in the body.</li>
+            <li>Top-level destinations: those belong in the main navigation.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><strong>Active tab</strong>: <code>border-brand text-brand-darker dark:text-brand font-medium</code> plus <code>aria-current="page"</code>; <code>-mb-px</code> overlaps the parent hairline.</li>
+            <li><strong>Right-hand slot</strong>: links, filters, small actions; <code>pb-2</code> centres them against the tab text.</li>
+            <li><strong>Phone</strong>: keep to two to four short labels (three fit 390 px); <code>overflow-x-auto</code> on the <code>nav</code> and <code>shrink-0 whitespace-nowrap</code> on the links keep an overlong strip inside its container.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

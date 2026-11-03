@@ -1,35 +1,18 @@
 /**
- * Where the two test daemons live. The ports are overridable so a busy machine can run the
- * suite next to a real fleet daemon; `start-daemon.mjs` writes one state file per daemon
- * (its FLEET_HOME and the host key fingerprint), which the tests read back.
+ * Where the suite runs and how it reaches the app.
+ *
+ * FLEET_E2E_BASE_URL set  -> external server (the companion DDEV serves https://fleet.ddev.site); no webServer.
+ * FLEET_E2E_BASE_URL unset -> Playwright's webServer starts `php -S` itself (support/start-app.mjs): the local and CI gate.
  */
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+export const externalBaseURL: string | undefined = process.env.FLEET_E2E_BASE_URL || undefined;
 
-export const PACKAGE_DIR = join(dirname(fileURLToPath(import.meta.url)), '..');
+export const port: number = Number(process.env.FLEET_E2E_PORT || 8000);
 
-export type DaemonKind = 'key' | 'nokey';
+export const baseURL: string = externalBaseURL ?? `http://127.0.0.1:${port}`;
 
-export const DAEMONS: Record<DaemonKind, { port: number; stateFile: string }> = {
-  key: {
-    port: Number(process.env.FLEET_E2E_PORT ?? 18791),
-    stateFile: join(PACKAGE_DIR, '.run', 'daemon-key.json'),
-  },
-  nokey: {
-    port: Number(process.env.FLEET_E2E_PORT_NOKEY ?? 18792),
-    stateFile: join(PACKAGE_DIR, '.run', 'daemon-nokey.json'),
-  },
-};
-
-export interface DaemonState {
-  /** The daemon's FLEET_HOME (a short /tmp directory, owned by the launcher). */
-  home: string;
-  /** Host key fingerprint, upper-case without spaces; empty for the daemon without a key. */
-  fingerprint: string;
-  port: number;
-}
-
-export function readDaemonState(kind: DaemonKind): DaemonState {
-  return JSON.parse(readFileSync(DAEMONS[kind].stateFile, 'utf8')) as DaemonState;
-}
+/**
+ * Chromium does not read the mkcert root of the companion, so certificate errors are ignored when asked
+ * (FLEET_E2E_IGNORE_HTTPS_ERRORS) and for the companion's own `*.ddev.site` hosts, which carry that mkcert certificate.
+ */
+export const ignoreHTTPSErrors: boolean =
+  !!process.env.FLEET_E2E_IGNORE_HTTPS_ERRORS || /^https:\/\/[^/]+\.ddev\.site(:\d+)?(\/|$)/.test(baseURL);

@@ -1,0 +1,7 @@
+"users":
+  "fleet-no-users-yet":
+    "disabled": true
+    "displayname": "No users yet"
+    "password": "$argon2id$v=19$m=65536,t=4,p=1$aXMuc1N4WFE2aEVYaXBEZQ$ZAstewOzdvBgoH5g+92NLoH0u3mlqP1dS8WCpjfjkII"
+    "email": "no-users@invalid"
+    "groups": []

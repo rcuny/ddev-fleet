@@ -1,166 +1,147 @@
-/** The Scheduled jobs screen in a real browser (FLE-31): real htmx, real CSP, seeded state. */
-import { appendFileSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
-import type { Daemon } from './support/fixtures';
-import { expect, test } from './support/fixtures';
+import { expect, test, type Page } from '@playwright/test';
+import { spawnSync } from 'node:child_process';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { expectNoBlockingViolations } from './support/axe';
+import { externalBaseURL } from './support/env';
+import { createProjectViaUi, deleteProjectViaUi, openDialog, submitAndWait, uniqueName } from './support/projects';
+import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
-const INSTANCE = 'demo--e2e-sched';
+// Schedules in a real browser, at 1280 px (desktop project) and 390 px (phone project): create, validation errors,
+// pause and resume, run now, history, edit, delete; axe in light and dark. The redeploy action needs an existing
+// instance and there is no browser path that creates one yet, so the test inserts one row straight into the SQLite
+// database of the server under test (FLEET_HOME: the throw-away home of the webServer, or the container's for the
+// served dev app). Every test owns uniquely named rows and removes them in `finally`.
 
-function schedDir(daemon: Daemon): string {
-  return join(daemon.home, 'schedules');
+const here = dirname(fileURLToPath(import.meta.url));
+
+function fleetHome(): string {
+  return externalBaseURL ? (process.env.FLEET_HOME ?? '/tmp/sqlite/fleet-home') : join(resolve(here), '.run', 'fleet-home');
 }
 
-function instanceDir(daemon: Daemon): string {
-  return join(daemon.home, 'instances', INSTANCE);
+/** Inserts (or, with remove, deletes) a Running instance of an existing project, bypassing the application. */
+function instanceRow(action: 'insert' | 'delete', project: string, label: string): void {
+  const script = `
+    $pdo = new PDO('sqlite:' . $argv[1] . '/var/fleet.sqlite');
+    $pdo->exec('PRAGMA busy_timeout=10000');
+    $id = $argv[3] . '--' . $argv[4];
+    if ($argv[2] === 'delete') { $pdo->prepare('DELETE FROM instance WHERE id = ?')->execute([$id]); exit(0); }
+    $p = $pdo->prepare('SELECT id FROM project WHERE name = ?'); $p->execute([$argv[3]]);
+    $projectId = $p->fetchColumn();
+    $now = gmdate('Y-m-d H:i:s');
+    $pdo->prepare("INSERT INTO instance (id, label, template_name, branch, state, requested_by, created_at, updated_at, project_id) VALUES (?, ?, 'full', 'develop', 'running', 'admin', ?, ?, ?)")
+        ->execute([$id, $argv[4], $now, $now, $projectId]);
+  `;
+  const result = spawnSync('php', ['-r', script, fleetHome(), action, project, label], { encoding: 'utf8' });
+  expect(result.status, `instance ${action}: ${result.stderr}`).toBe(0);
 }
 
-function seedHistory(daemon: Daemon, entries: object[]) {
-  mkdirSync(schedDir(daemon), { recursive: true });
-  appendFileSync(
-    join(schedDir(daemon), 'history.jsonl'),
-    entries.map((e) => JSON.stringify(e) + '\n').join(''),
-  );
+async function expectTall(page: Page, testId: string): Promise<void> {
+  const target = page.getByTestId(testId).first();
+  await expect(target).toBeVisible();
+  const box = await target.boundingBox();
+  expect(box!.height, testId).toBeGreaterThanOrEqual(43.5);
 }
 
-test.beforeEach(async ({ daemon }) => {
-  // The daemon (and its home) is shared by all tests: start from no state and no instance.
-  rmSync(schedDir(daemon), { recursive: true, force: true });
-  rmSync(instanceDir(daemon), { recursive: true, force: true });
-});
+test.describe('schedules', () => {
+  test('create, pause, resume, run now, history, edit, delete', async ({ page }) => {
+    test.setTimeout(180_000);
+    const errors = collectBrowserErrors(page);
+    const project = uniqueName('blog');
+    const name = uniqueName('nightly');
+    const phone = test.info().project.name === 'phone';
+    await createProjectViaUi(page, project);
+    instanceRow('insert', project, 'main');
+    try {
+      await page.goto('/admin/schedules');
+      await expect(page.getByRole('heading', { level: 1, name: 'Schedules' })).toBeVisible();
 
-test.afterEach(async ({ daemon }) => {
-  rmSync(schedDir(daemon), { recursive: true, force: true });
-  rmSync(instanceDir(daemon), { recursive: true, force: true });
-});
+      // Validation errors are shown next to the fields and nothing is created.
+      await page.getByTestId('schedule-new').click();
+      await expect(page.getByTestId('schedule-actions')).toHaveText('Available actions: redeploy.');
+      await page.getByLabel('Name', { exact: true }).fill(name);
+      await page.getByLabel('Cron expression').fill('not a cron');
+      await page.getByLabel('Timezone').fill('Mars/Base');
+      await page.getByLabel('Instance').fill('');
+      await page.getByTestId('schedule-save').click();
+      await expect(page.getByTestId('error-cron')).toBeVisible();
+      await expect(page.getByTestId('error-timezone')).toBeVisible();
+      await expect(page.getByTestId('error-instance')).toBeVisible();
+      await expectNoBlockingViolations(page);
 
-test('the page loads under the CSP with the nav link and the seeded schedules', async ({
-  page,
-  daemon,
-}) => {
-  seedHistory(daemon, [
-    {
-      schedule: 'e2e-nightly',
-      ts: '2026-10-18T01:00:00Z',
-      trigger: 'cron',
-      instance: INSTANCE,
-      result: 'succeeded',
-      reason: null,
-      job_id: 'abc123def456',
-    },
-  ]);
-  const response = await page.goto(daemon.url + '/schedules');
-  expect(response?.headers()['content-security-policy']).toContain("script-src 'self'");
+      // Create.
+      await page.getByLabel('Cron expression').fill('0 3 * * *');
+      await page.getByLabel('Timezone').fill('Europe/Paris');
+      await page.getByLabel('Instance').fill(`${project}--main`);
+      await page.getByTestId('schedule-save').click();
+      await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" created.`);
+      const row = page.getByTestId('schedule-row').filter({ hasText: name });
+      await expect(row).toHaveCount(1);
+      await expect(row.getByTestId('schedule-state')).toHaveText('Active');
+      await expect(row.getByTestId('schedule-next')).toContainText('UTC');
+      if (phone) {
+        await expectTall(page, 'schedule-run');
+      }
+      expect(await hasHorizontalOverflow(page), 'horizontal overflow').toBe(false);
+      await expectNoBlockingViolations(page);
 
-  await expect(page.locator('nav.main-nav a')).toHaveText([
-    'Instances',
-    'Secrets',
-    'Webhooks',
-    'Scheduled jobs',
-  ]);
-  await expect(page.getByRole('heading', { name: 'Scheduled jobs' })).toBeVisible();
+      // Pause, resume.
+      await submitAndWait(page, row.getByTestId('schedule-pause'));
+      await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" paused.`);
+      await expect(row.getByTestId('schedule-state')).toHaveText('Paused');
+      await expect(row.getByTestId('schedule-next')).toContainText('none');
+      await submitAndWait(page, row.getByTestId('schedule-resume'));
+      await expect(page.getByTestId('flashes')).toContainText('resumed');
+      await expect(row.getByTestId('schedule-state')).toHaveText('Active');
 
-  const rows = page.locator('tr.schedule-row');
-  await expect(rows).toHaveCount(3);
-  const nightly = page.locator('#schedule-e2e-nightly');
-  await expect(nightly).toContainText('0 3 * * *');
-  await expect(nightly).toContainText('Europe/Paris');
-  await expect(nightly).toContainText('redeploy');
-  await expect(nightly).toContainText(INSTANCE);
-  await expect(nightly.locator('.schedule-state')).toHaveText('active');
-  await expect(nightly).toContainText(/03:00 CES?T/); // next run, in the schedule's timezone
-  await expect(page.locator('#schedule-e2e-disabled .schedule-state')).toHaveText(
-    'disabled in fleet.yml',
-  );
-  const elsewhere = page.locator('#schedule-e2e-elsewhere');
-  await expect(elsewhere.locator('.schedule-state')).toHaveText('not on this server');
-  await expect(elsewhere.getByRole('button')).toHaveCount(0);
+      // Run now, then the history shows the manual run with its job.
+      await submitAndWait(page, row.getByTestId('schedule-run'));
+      await expect(page.getByTestId('flashes')).toContainText(/started job #\d+/);
+      await expect(row.getByTestId('schedule-last-job')).toHaveAttribute('href', /^\/jobs\/\d+$/);
+      await row.getByTestId('schedule-history').click();
+      await expect(page.getByRole('heading', { level: 1, name: `History of ${name}` })).toBeVisible();
+      const run = page.getByTestId('schedule-run-row');
+      await expect(run).toHaveCount(1);
+      await expect(run.getByTestId('run-trigger')).toHaveText('manual');
+      await expect(run.getByTestId('run-job')).toHaveText(/^#\d+$/);
+      await expect(run.getByTestId('run-job-link')).toHaveAttribute('href', /^\/jobs\/\d+$/);
+      expect(await hasHorizontalOverflow(page), 'horizontal overflow on history').toBe(false);
+      await expectNoBlockingViolations(page);
 
-  const history = page.locator('tr.schedule-history-row');
-  await expect(history).toHaveCount(1);
-  await expect(history.first()).toContainText('2026-10-18 01:00:00 UTC');
-  await expect(history.first()).toContainText('abc123def456');
-});
+      // Edit.
+      await page.goto('/admin/schedules');
+      await page.getByTestId('schedule-row').filter({ hasText: name }).getByTestId('schedule-edit').click();
+      await page.getByLabel('Cron expression').fill('30 4 * * *');
+      await submitAndWait(page, page.getByTestId('schedule-save'));
+      await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" saved.`);
+      await expect(page.getByTestId('schedule-row').filter({ hasText: name }).getByTestId('schedule-cron')).toHaveText('30 4 * * *');
 
-test('the nav link opens the page from the dashboard', async ({ page, daemon }) => {
-  await page.goto(daemon.url + '/');
-  await page.getByRole('link', { name: 'Scheduled jobs' }).click();
-  await expect(page).toHaveURL(/\/schedules$/);
-  await expect(page.locator('tr.schedule-row')).toHaveCount(3);
-});
+      // Delete through the dialog.
+      const dialog = await openDialog(page, page.getByTestId('schedule-row').filter({ hasText: name }).getByTestId('schedule-delete'));
+      await dialog.getByTestId('schedule-delete-confirm').click();
+      await expect(page.getByTestId('flashes')).toContainText(`Schedule "${name}" deleted.`);
+      await expect(page.getByTestId('schedule-row').filter({ hasText: name })).toHaveCount(0);
+      // The one expected console error is the 422 of the invalid form.
+      expect(errors.filter((e) => !e.includes('status of 422'))).toEqual([]);
+    } finally {
+      await page.goto('/admin/schedules');
+      const left = page.getByTestId('schedule-row').filter({ hasText: name });
+      if ((await left.count()) > 0) {
+        const dialog = await openDialog(page, left.getByTestId('schedule-delete'));
+        await dialog.getByTestId('schedule-delete-confirm').click();
+        await expect(page.getByTestId('flashes')).toContainText('deleted.');
+      }
+      // Jobs reference the instance by id only, so the row can go; the project then follows.
+      instanceRow('delete', project, 'main');
+      await deleteProjectViaUi(page, project);
+    }
+  });
 
-test('pause and resume toggle the state', async ({ page, daemon }) => {
-  await page.goto(daemon.url + '/schedules');
-  const nightly = page.locator('#schedule-e2e-nightly');
-  await expect(nightly.locator('.schedule-state')).toHaveText('active');
-
-  await nightly.getByRole('button', { name: 'Pause' }).click();
-  await expect(page.locator('.schedule-notice')).toContainText('Paused e2e-nightly.');
-  await expect(nightly.locator('.schedule-state')).toHaveText('paused');
-  await expect(nightly.getByRole('button', { name: 'Resume' })).toBeVisible();
-  await expect(nightly.getByRole('button', { name: 'Pause' })).toHaveCount(0);
-
-  // the state survives a reload (it is on disk)
-  await page.reload();
-  await expect(page.locator('#schedule-e2e-nightly .schedule-state')).toHaveText('paused');
-
-  await page.locator('#schedule-e2e-nightly').getByRole('button', { name: 'Resume' }).click();
-  await expect(page.locator('.schedule-notice')).toContainText('Resumed e2e-nightly.');
-  await expect(page.locator('#schedule-e2e-nightly .schedule-state')).toHaveText('active');
-});
-
-test('run now on a missing instance records a failure and keeps the page working', async ({
-  page,
-  daemon,
-}) => {
-  await page.goto(daemon.url + '/schedules');
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.locator('#schedule-e2e-nightly').getByRole('button', { name: 'Run now' }).click();
-
-  await expect(page.locator('.schedule-notice')).toContainText(`instance ${INSTANCE} not found`);
-  const last = page.locator('#schedule-e2e-nightly .schedule-result');
-  await expect(last).toHaveText('failed');
-  const history = page.locator('tr.schedule-history-row');
-  await expect(history).toHaveCount(1);
-  await expect(history.first()).toContainText('manual-ui');
-  await expect(history.first()).toContainText('failed');
-});
-
-test('run now submits a job whose end shows up on refresh', async ({ page, daemon }) => {
-  // An instance directory without recorded deploy parameters: redeploy() refuses at once.
-  mkdirSync(instanceDir(daemon), { recursive: true });
-  await page.goto(daemon.url + '/schedules');
-  page.once('dialog', (dialog) => dialog.accept());
-  await page.locator('#schedule-e2e-nightly').getByRole('button', { name: 'Run now' }).click();
-  await expect(page.locator('.schedule-notice')).toContainText(/Started e2e-nightly.*\(job \w+\)/);
-
-  const last = page.locator('#schedule-e2e-nightly .schedule-result');
-  await expect(async () => {
-    await page.getByRole('button', { name: 'Refresh' }).click();
-    await expect(last).toHaveText('failed', { timeout: 1_000 });
-  }).toPass({ timeout: 10_000 });
-  await expect(page.locator('#schedule-e2e-nightly')).toContainText('no recorded deploy parameters');
-});
-
-test('declining the confirmation runs nothing', async ({ page, daemon }) => {
-  await page.goto(daemon.url + '/schedules');
-  page.once('dialog', (dialog) => dialog.dismiss());
-  await page.locator('#schedule-e2e-nightly').getByRole('button', { name: 'Run now' }).click();
-  await expect(page.locator('.schedule-notice')).toHaveCount(0);
-  await expect(page.locator('tr.schedule-history-row')).toHaveCount(0);
-});
-
-test('a corrupt state file shows a banner and no actions instead of an error page', async ({
-  page,
-  daemon,
-}) => {
-  mkdirSync(schedDir(daemon), { recursive: true });
-  writeFileSync(join(schedDir(daemon), 'state.json'), '{ not json');
-  const response = await page.goto(daemon.url + '/schedules');
-  expect(response?.status()).toBe(200);
-  const banner = page.locator('.schedule-state-error');
-  await expect(banner).toContainText(join(schedDir(daemon), 'state.json'));
-  await expect(banner).toContainText('Fix:');
-  await expect(page.locator('tr.schedule-row')).toHaveCount(3);
-  await expect(page.locator('#schedule-e2e-nightly .schedule-state')).toHaveText('state unreadable');
-  await expect(page.locator('#schedule-e2e-nightly').getByRole('button')).toHaveCount(0);
+  // Asserts nothing about which schedules exist (parallel tests own theirs), so it does not depend on test order.
+  test('schedules page is accessible with or without rows', async ({ page }) => {
+    await page.goto('/admin/schedules');
+    await expect(page.getByRole('heading', { level: 1, name: 'Schedules' })).toBeVisible();
+    expect(await hasHorizontalOverflow(page)).toBe(false);
+    await expectNoBlockingViolations(page);
+  });
 });

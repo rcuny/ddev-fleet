@@ -1,0 +1,25 @@
+{#- The facts of a job. Needs: job. -#}
+<dl class="grid gap-4 sm:grid-cols-2" data-testid="job-meta">
+    <div><dt class="text-sm text-ink-muted">Type</dt><dd>{{ job.type }}</dd></div>
+    <div>
+        <dt class="text-sm text-ink-muted">Target</dt>
+        <dd class="[overflow-wrap:anywhere]">
+            {% if job.instanceId %}<a href="{{ path('instance_show', {id: job.instanceId}) }}">{{ job.instanceId }}</a>{% else %}<span class="text-ink-muted">None</span>{% endif %}
+        </dd>
+    </div>
+    <div><dt class="text-sm text-ink-muted">Status</dt><dd>{{ include('jobs/_status.html.twig', {status: job.status}) }}</dd></div>
+    <div><dt class="text-sm text-ink-muted">Trigger</dt><dd>{{ job.trigger.value }}</dd></div>
+    <div><dt class="text-sm text-ink-muted">Requested by</dt><dd class="[overflow-wrap:anywhere]">{{ job.requestedBy }}</dd></div>
+    <div><dt class="text-sm text-ink-muted">Queued</dt><dd>{{ job.createdAt|date('Y-m-d H:i:s') }} UTC</dd></div>
+    <div><dt class="text-sm text-ink-muted">Started</dt><dd>{{ job.startedAt ? job.startedAt|date('Y-m-d H:i:s') ~ ' UTC' : 'Not yet' }}</dd></div>
+    <div><dt class="text-sm text-ink-muted">Finished</dt><dd>{{ job.finishedAt ? job.finishedAt|date('Y-m-d H:i:s') ~ ' UTC' : 'Not yet' }}</dd></div>
+    {% if job.exitCode is not null %}
+        <div><dt class="text-sm text-ink-muted">Exit code</dt><dd>{{ job.exitCode }}</dd></div>
+    {% endif %}
+    {% if job.retryOf %}
+        <div><dt class="text-sm text-ink-muted">Retry of</dt><dd><a href="{{ path('job_show', {id: job.retryOf}) }}" data-testid="retry-of">#{{ job.retryOf }}</a></dd></div>
+    {% endif %}
+    {% if job.error %}
+        <div class="sm:col-span-2"><dt class="text-sm text-ink-muted">Error</dt><dd class="text-destructive [overflow-wrap:anywhere]" data-testid="job-error">{{ job.error }}</dd></div>
+    {% endif %}
+</dl>

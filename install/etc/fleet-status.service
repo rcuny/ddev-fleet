@@ -1,0 +1,22 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-status.service.
+# The status watcher: keeps the instance states and memory true to ddev and docker, reaps dead jobs, prunes old ones.
+[Unit]
+Description=ddev-fleet instance status watcher
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+User=fleet
+Group=fleet
+EnvironmentFile=/etc/ddev-fleet/fleet.env
+Environment=HOME=/home/fleet
+WorkingDirectory=/opt/ddev-fleet/app
+ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:instance:watch --interval=10
+Restart=always
+RestartSec=5
+# Same sandbox as the worker (see fleet-worker@.service for what is deliberately not set).
+ProtectSystem=full
+ReadWritePaths=/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var
+
+[Install]
+WantedBy=multi-user.target

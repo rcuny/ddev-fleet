@@ -1,71 +1,288 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-10-19
 Type: documentation
 ---
 
-# CLAUDE.md — working on the ddev-fleet product repo
+# CLAUDE.md — working on the ddev-fleet product repo (1.x)
 
-This file is for Claude (or any agent) editing code in this repo,
-`/var/www/html/ddev-fleet` (remote: `ddev-fleet.git`, public,
-`github.com/rcuny/ddev-fleet`). It is the **product**: the fleet manager
-itself, runs live on a host operated by the maintainer. For the
-workspace/tooling this repo is built *from* (rules, skills, memory), see
-`/var/www/html/.claude/rules/30-project.md` and the rest of
-`/var/www/html/.claude/rules/`.
+This file is for Claude (or any agent) editing code in this repository. It is the
+**product**: the fleet manager itself. The repository is public (Bitbucket is the
+source of truth, GitHub is a read-only mirror), so keep it free of owner
+hostnames, client or project names, workspace paths and Jira site names; examples
+use `fleet.example.com`, `demo` and `blog`.
 
-## Hard fact: this runs natively, not inside DDEV
+## Branches and release lines
 
-`fleet.service` is a `systemd` unit running FastAPI+uvicorn as `User=fleet`,
-bound to `127.0.0.1:8765`, on the bare-metal host. It is **not** a DDEV
-project and does not run in a container. It manages *other* DDEV projects
-(the fleet's instances) directly via the Docker socket and `ddev`/`git`
-subprocess calls. Do not add DDEV config to this repo assuming it will run
-inside one — see `/var/www/html/.claude/rules/11-ddev.md` for the companion
-shell's own (unrelated) DDEV setup.
+| Branch | Line | Contents |
+|---|---|---|
+| `main` | **1.x** (Symfony 8) | The releases (`v1.*` annotated tags), the GitHub default branch and what `install/install.sh` installs. The rewrite in `app/` and its installer in `install/`. No Python app, no `fleet.yml`, no `bootstrap.sh`. |
+| `develop` | **1.x** | The integration branch: `feature/*` branches are cut off it, pull requests and Renovate target it, Fleet CI gates it. |
+| `legacy` | **0.x** (Python) | Frozen: FastAPI daemon, `fleet` CLI, `fleet.yml`, `bootstrap.sh`, tags `v0.1.0` to `v0.20.2` and later 0.20.x. Python hotfixes only. |
 
-## Module map (`src/fleet/`)
+Gitflow: features are `feature/<KEY>-<slug>` cut off `develop` and merged back with `git merge --no-ff`;
+releases are `release/1.x.y` cut off `develop`, merged `--no-ff` into `main` with the annotated tag `v1.x.y` on the
+merge commit, then merged back into `develop`; one push sends `main`, `develop` and the tag. A 1.x hotfix is
+`hotfix/<slug>` off `main`, merged into `main` (+ tag) and `develop`. A 0.x hotfix is `hotfix/<slug>` off `legacy`,
+merged into `legacy` with a `v0.20.N` tag, and never merged into `develop` or `main`. `ci/tag-guard.sh` decides what a
+tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `v0.*` tag the tip of
+`origin/legacy`). Procedure: `docs/RELEASING.md`. Never push to GitHub by hand and never rewrite `main`, `develop`,
+`legacy` or a tag. The `v1.0.0` to `v1.0.6` tags were cut on `develop` before the cut-over (release `v1.1.0`).
 
-| File | Responsibility |
+## Hard facts
+
+- **It runs natively on the host, not in DDEV.** In production it is a PHP-FPM app
+  behind Caddy plus Messenger workers under systemd, and it manages *other* DDEV
+  projects (the fleet's instances) through the Docker socket. Do not add DDEV
+  configuration to this repository assuming the product runs in a container.
+- **`ddev`, `git` and `docker` never run inside an HTTP request.** They run only in
+  Messenger workers and console commands, always through the `CommandRunner` seam.
+- **Only Caddy faces the Internet.** The installed host serves the app through Caddy and a unix-socket php-fpm
+  pool; identity headers are trusted only from a request carrying the proxy secret (see "Production trust and the
+  installer"). Never expose `app/public` any other way (`php -S`, a DDEV project): outside the installed host there
+  is no proxy, and `dev` has the stand-in login.
+- The Python code of the 0.x line is gone from `main` and `develop`; it lives on the `legacy` branch, and its
+  documentation is kept under `docs/v0/` as history.
+
+## Repository map
+
+| Path | What |
 |---|---|
-| `cli.py` | Thin argparse CLI (`fleet …`); calls straight into `fleet.core`, never depends on the daemon |
-| `daemon.py` | FastAPI app: `/api/tls-authorize` (Caddy on-demand TLS callback), `/api/jobs/{id}`, `/ws/instances/{id}/log` (HMAC-token-gated WebSocket), `/` + `/ui/*` HTMX routes for the web UI, `/secrets` (FLE-22) and the read-only `/webhooks` page + `/ui/webhooks/table` partial (FLE-30, filters `source`/`project`/`result`/`limit`) and the `/schedules` Scheduled jobs page + `/ui/schedules/table` partial + `POST /ui/schedules/{name}/run|pause|resume` (FLE-31; `_submit_redeploy_job()` is the one redeploy-job path shared by the Redeploy button and the scheduler, `_ScheduleRunner` adapts the `JobManager` for it, and the lifespan starts/restarts the scheduler task). The `/` index also renders a footer of host stats via `core/sysinfo` |
-| `jobs.py` | In-memory `JobManager` backing the web UI's async deploy jobs (not a system of record — `.fleet/deploy.log` on disk is) |
-| `core/registry.py` | Loads/validates `fleet.yml` (`Registry`), resolves `(project, template, branch, label)` → `ResolvedInstance`; registry is declarative and read-only at runtime. `git_bot(project)` resolves the per-instance commit identity — per-project `git_bot: {name,email}` override or `false` opt-out, over fleet-level defaults |
-| `core/instances.py` | Orchestrates `deploy`/`redeploy`/`destroy`/`start`/`stop`/`list_instances`/`snapshot` — the core engine; `FleetPaths` maps `FLEET_HOME` to all on-disk paths. `deploy()`'s `replace` param (internal; the CLI/UI never pass it) is the destroy-then-rebuild-IN-PLACE primitive: `False` (the default) allocates a guaranteed-free id via `core/naming.py:allocate_free_label` under the `core/locks.py:ALLOCATION_LOCK_ID` advisory lock — a plain deploy never overwrites an existing instance — while `True` skips allocation and destroys+rebuilds at the SAME id, which is what `redeploy()` (and `multi_deploy()`, for its own already-allocated ids) rely on. `redeploy()` recovers project/template/branch/label/auth from `.fleet/instance.yml` and refuses (naming `--template`) if no template was recorded. `_write_instance_yaml()` writes that file (mode `0600` — it now holds a plaintext `auth-password`) on every deploy/redeploy |
-| `core/fleetconfig.py` | Writes the one fleet-owned file per instance, `.ddev/config.fleet.yaml` (name, project_tld, `web_environment` incl. Claude token, git bot identity, Typesense vars), plus `.ddev/.env`, `settings.local.php`/`services.fleet.yml`, and `.git/info/exclude` bookkeeping |. `set_env_file_var()` upserts one `KEY=value` in the project's OWN root `.env` line-by-line (comments/order/other values preserved, first assignment only) — used by `deploy()` for the template's `drupal_env`; deliberately not `write_ddev_env()`, which owns fleet-generated `.ddev/.env` and may rewrite it wholesale
-| `core/gitops.py` | `clone`/`update` of an instance's git worktree |
-| `core/ddev.py` | Subprocess wrappers: `start`/`stop`/`restart`/`delete`/`list_projects`/`ram_usage` |
-| `core/assets.py` | rsync-mirrors a project's asset tree into an instance, then runs the `[[token]]` substitution pass over copied files |
-| `core/bulk.py` | Bulk orchestration over the existing single-instance primitives in `core/instances.py` — `BulkResult`/`BulkOutcome`, `run_sequential`/`run_concurrent` (continue-on-error, no new locking), and `multi_deploy()` (multi-instance deploy: `core/naming.py:allocate_multi_deploy_labels` + `core/sysinfo.py:check_disk_headroom` disk gate + the `_multideploy` advisory lock via `core/locks.py:instance_lock`). Used by both `cli.py` (bulk `start`/`stop`/`destroy`, `deploy --count`) and `daemon.py` (`/ui/bulk/*`, `/ui/deploy` with `count>1`) |
-| `core/tokens.py` | The `[[token]]` substitution engine (`[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, `[[issue-id]]`, secret tokens, …) and `FLEET_*` env var derivation (incl. `FLEET_ISSUE_ID`) for `post_deploy` commands. `extract_issue_id()` resolves `[[issue-id]]` from a project's `issue_id_regexp` against the instance label then the branch (case-insensitive, result uppercased). Two substitution paths: `substitute_text()` (strict — raises `TokenError` on an unresolved token, used by `post_deploy`) and `substitute_lenient()` (reports unresolved names instead of raising, used by `tty1`/`tty2` via `core/ttycmds.py`) |
-| `core/webhooks.py` | Jira + Bitbucket webhook pure logic (HMAC `verify_signature`, payload parsing, rule matching) and `WebhookStore`: per-project secrets, delivery-id dedupe markers and the two JSONL delivery logs (`jira.jsonl`, `bitbucket.jsonl`). `append_log`/`tail_log` back `fleet webhook log`; `recent()`/`recent_with_options()` (FLE-30) read a bounded tail of both logs, tag `source`, merge newest first and filter for the web UI's Webhooks page. Never log secrets or bodies |
-| `core/schedules.py` | Scheduled jobs (FLE-31): in-house 5-field cron (`parse_cron`, `next_occurrence`/`latest_occurrence` in an IANA timezone, DST gap skipped / overlap fires once), `ScheduleStore` (`<fleet home>/schedules/state.json` atomic + flock'd, `history.jsonl` tolerant tail), `Scheduler` (30 s tick with an injectable clock and `Runner`: claims `last_fired` by compare-and-set with a `claimed` history line before running, per-schedule in-process starting guard, fails closed with `ScheduleStateError` on a bad state file, 60 min catch-up window, `missed`/`skipped`/`failed` outcomes, one run per schedule, completion noticed by `reconcile()`), `precheck_instance()`/`run_blocking()` (shared by the daemon and `fleet schedule run`) and `build_views()` for the UI/CLI. The `Schedule` dataclass and the `schedules:` validation live in `core/registry.py`; `Registry.schedules` exposes them. See `docs/README-schedules.md` |
-| `core/ttycmds.py` | Resolves a deploy's already-resolved `post_deploy.tty1`/`tty2` template commands (`plan_from_resolved`) into a `TtyPlan` (substituted commands + skip reasons for any left unresolved). Called only by `deploy()`'s tmux hook (`instances._tmux_deploy_hook`) — tty commands are a deploy action (FLE-6); `fleet tmux`/reconcile/the boot reconcile create plain-shell windows and never type. Keeps `core/tmux.py` registry-agnostic — it only ever sees plain command lists |
-| `core/secrets.py` | Read/write `KEY=VALUE` files (0600) — both the fleet-wide `.secrets` and per-project `secrets/<project>.env` |
-| `core/typesense.py` | Generates/persists per-project Typesense admin+search-only keys, registers the search-only key against a running instance's Typesense admin API |
-| `core/authelia.py` | Authelia admin account + `users.yml` management (spec §4.3): argon2id hashing (`hash_password`/`_verify`), atomic writes, and `render_users()` builds the file-backend `users.yml` from the registry's per-project `users:` plus the installer admin (always sole member of the `admins` group). Reuses an existing hash whenever the plaintext hasn't changed, so an unrelated `fleet.yml` edit doesn't churn `users.yml` (and thus doesn't trigger Authelia's file-watcher) for untouched users. Never touches Caddy or systemd — that's `core/caddyauth.py`'s and Ansible's job. Raises `AutheliaError` |
-| `core/caddyauth.py` | Rotates the Caddy dashboard `basic_auth` password WITHOUT Ansible: hashes via `caddy hash-password`, atomically rewrites the fleet-owned snippet `/etc/caddy/fleet/admin-auth.conf` (imported by `Caddyfile.j2`, seeded once by the `caddy` Ansible role), `caddy validate`s, then reloads Caddy via `caddy reload` (talks to the local Caddy admin API on 127.0.0.1:2019 — no sudo, no privilege escalation, works under `fleet.service`'s `NoNewPrivileges=yes` sandbox). Backs `fleet set-admin-password` / `fleet rotate-admin-password`. **Mode-aware, no more CIDR whitelist**: `enable_instance_auth(..., auth_mode=)` picks between `write_instance_auth_snippet` (basic mode, `basic_auth`, unchanged) and `write_instance_authelia_snippet` (Authelia mode: strips client `Remote-*` headers, `forward_auth`s to Authelia, then requires `Remote-Groups` to contain the instance's project or `admins`, all inside a `route` block — Caddy's directive reordering otherwise strips the very header the group check needs). The two are never both written for the same server — `auth_mode` is server-wide (`Registry.auth_mode`), not per-instance. The old `fleet.auth_bypass_cidrs` `not remote_ip …` clause is gone; the key is now accepted with a deprecation warning and otherwise ignored (see `core/registry.py`). `instances.sync_instance_auth()` (CLI `fleet refresh-auth`) re-renders every instance snippet (mode-appropriate) from the registry + each instance's recorded auth settings, with a single validate/reload for the whole fleet. `ensure_snippet_dir()` guards every snippet write: under `MANAGED_SNIPPET_ROOT` (`/etc/caddy`) the directory must already exist AND keep its setgid bit, else the write is refused with the repair command — a plain mkdir there loses setgid and makes every later snippet unreadable by Caddy (silent until Caddy restarts; cost ddev2 a week of downtime). `core/caddyports.py` re-raises that as `CaddyPortsError`
-| `core/caddyports.py` | Reconciles fleet-owned Caddy named-port exposure snippets (`/etc/caddy/fleet/ports/<name>.conf`) to `Registry.all_port_profiles()` — one snippet per port NAME with ≥1 subscribing project (Typesense, Playwright reports, etc.), imported by `Caddyfile.j2` via a glob. Mirrors `caddyauth.py`'s write/validate/reload pattern (`sync()`: atomic write → `caddy validate` → `caddy reload`, one batch per call) but raises the sibling `CaddyPortsError`, not `CaddyAuthError`. Called from `core/instances.py`'s `deploy()`/`destroy()`, the `fleet refresh-ports` CLI command, and once at daemon startup as a safety net |
-| `core/routermirror.py` | In-network mirror of the fleet's named public ports (FLE-29) so in-container clients (Playwright) reach `https://<fqdn>:<public>`, plus (FLE-32) a `:443` site mirror (entrypoint `fleet-mirror-443`, TLS passthrough to the router's https port from `~/.ddev/global_config.yaml` `router_https_port`, so `https://<fqdn>/` works without `:8443` in the Host header; `router_https_port()`, `site_mirror()`, `wanted_entrypoints()`; skipped when the port is 443 or a foreign static config owns `:443`; same files/lock/marker, same `fleet.port_mirror` switch): `mirror_profiles()` (from `Registry.all_port_profiles()`, skips reserved/colliding ports, incl. ones another `static_config.*.yaml` already declares, with reasons; `[]` when `fleet.port_mirror: false`), `sync()` atomically writes/removes two generic files in `~/.ddev/traefik/` (`static_config.fleet-port-mirror.yaml` entrypoints + `custom-global-config/fleet-port-mirror.yaml` TLS TCP routers to the router's own http port; files only, never touches the router), `live_entrypoints()` (Traefik API `127.0.0.1:10999`) and `converge()` (called by `deploy()` right after the instance's `ddev start`: restarts `ddev-router` only if live `fleet-mirror-*` entrypoints differ and the files are current; self-repairs by removing the files + writing the `.fleet-port-mirror-failed` marker (which disables `sync()`/`converge()` until the wanted ports change or `fleet refresh-ports` clears it) + `ddev start` + restart, raises `RouterMirrorError`; serialised by an flock on `<fleet home>/locks/_routermirror.lock`). Called from `deploy()`/`destroy()`, `fleet refresh-ports` and daemon startup; failures only warn, never fail the caller |
-| `core/locks.py` | Per-instance `flock`-based locking so concurrent CLI/daemon operations on the same instance can't race. Also owns the shared `ALLOCATION_LOCK_ID = "_multideploy"` constant — the same on-disk lock file `core/bulk.py`'s `multi_deploy()` and `core/instances.py:deploy()`'s own label-allocation step both take, so a single deploy and a bulk deploy can never allocate the same id |
-| `core/naming.py` | Validates project/template/label parts and composes `<project>--<label>` instance ids (DNS-label-safe). Two label allocators, deliberately not merged: `allocate_multi_deploy_labels()` (batch of N, always suffixed `-1`, `-2`, … — a batch has no single "the" instance to give the bare name to) for `deploy --count`/`multi_deploy()`, and `allocate_free_label()` (single free label, returns the BARE base when free) for a plain `deploy()`'s never-overwrite behavior |
-| `core/sysinfo.py` | Host stats for the web UI footer: `SystemStats.gather` (free/total RAM from `/proc/meminfo`, free/total disk from `shutil.disk_usage` on the instances mount) + `fmt_bytes`; memory → `n/a` if `/proc/meminfo` is unreadable |
-| `core/reboot.py` | Single shared reader for Debian's reboot-required marker (`/var/run/reboot-required` + `.pkgs`) — `RebootStatus`/`read_reboot_status()` — plus the anti-spam notification cadence and msmtp email send backing `fleet reboot-notify [--test]`. Consumed by `tmux_sidebar.py` (sidebar banner) and `core/sysinfo.py` (web UI footer badge) — one implementation, not three |
-| `core/runner.py` | `run_streamed()`/`run_interactive()` — subprocess execution with line-by-line logging, an optional bounded `timeout`, and (2026-09-23) a process-GROUP kill (`start_new_session=True` + `os.killpg`) on timeout so a grandchild holding stdout open (e.g. a stalled `ddev`/`git`/`docker` call) can't defeat the timeout and hang the reader thread forever — the bug behind the `fleet list` hang hardening below |
-| `core/shell.py` | Argv/cwd construction (unit-testable) + the single `exec_in_dir()` that actually `chdir()`s and `execvp()`s, behind `fleet shell`/`fleet ddev` — reproduces the retired `fleet-shell` script |
-| `core/errors.py` | `FleetError` hierarchy — every user-facing failure carries an actionable `.message` |
+| `app/` | The Symfony 8.1 project (PHP 8.4): `src/`, `templates/`, `assets/`, `config/`, `migrations/`, `tests/` |
+| `tests/playwright/` | TypeScript browser E2E (`@playwright/test`), its own npm package |
+| `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `tests/README-tests.md`) |
+| `ci/` | Tag guard (`tag-guard.sh`), the systemd security scorer and its baseline, requirements files for the Python CI steps |
+| `bitbucket-pipelines.yml`, `renovate-config.json` | CI and dependency updates |
+| `install/` | The 1.x installer (pure bash): `install.sh` (bootstrap), `run.sh`, `lib/common.sh`, `steps/NN-*.sh`, `etc/` (unit files, pool, sudoers line, env drop-ins), `libexec/apply` (the root helper), `bin/fleet` (the CLI wrapper), `uninstall.sh`. Tested by `app/tests/Repo/Installer*Test` and friends |
+| `ansible/` | Provisioning for the 0.x host layout, kept as reference and not used by the installer (`ansible/LEGACY-0x.md`) |
+| `docs/` | Documentation index in `docs/README.md`; `docs/v0/` holds the 0.x reference |
+| `demo/`, `scripts/` | A minimal DDEV project the 0.x installer seeds as `demo`; the Renovate merge helper |
 
-## Ansible roles (`ansible/roles/`)
+### Namespaces (`app/src/`, `App\`)
 
-Applied in this order by `ansible/site.yml`. `network_hardening` and
-`security_hardening` are independently optional (see
-`.claude/user/docs/specs/2026-07-24-fleet-security-hardening-design.md` in
-the companion repo) — every task in both gates on a single top-level
-`import_tasks ... when:`, so a bare `ansible-playbook site.yml` run with
-neither `fleet_network_hardening_enabled` nor `fleet_security_hardening_enabled`
-set stays fully inert for both.
+| Namespace | Holds |
+|---|---|
+| `App\Domain\Host` | `HostSettings` (single row: domain, ACME email, `TlsMode` http01 / ovh_dns, setup token hash and expiry, completion time) and its repository |
+| `App\Domain\User` | `User` (argon2id hash, groups; `fleet-admins` is the admin group), `PasswordHash` (strict argon2id check), `UserRepository` |
+| `App\Domain\Ssh` | `SshKey` (public key and fingerprint per `SshKeyRole` deploy / push; private keys live on disk, never in the database) |
+| `App\Domain\Secret` | `Secret` (sealed ciphertext, nonce, key version, scope `fleet` or `project`; the scope id is the project name) and its repository |
+| `App\Domain\Audit` | `AuditEntry` (actor, action, subject, time; never a value) and its repository |
+| `App\Domain\Project` | `Project` (name, git URL, defaults, hostnames, git identity mode `GitBotMode`, issue id pattern, submodule branch, Typesense; its ports and templates), `ProjectRepository`, `ProjectInstanceGuard` (deletion is refused while `instanceIds()` is not empty; `InstanceGuard` answers from the instance table), `ProjectMembership` (who may operate a project; `ProjectAccessMembership` answers from `ProjectAccess`, the user-to-project rows with a unique pair and cascading foreign keys, `ProjectAccessRepository`) |
+| `App\Domain\Instance` | `Instance` (id `<project>--<label>` is the primary key, at most 59 characters (DDEV adds `-web` to the container host name, max 63); project, label, template name, branch, `InstanceState`, head sha, memory, requester, times) and `InstanceRepository`. The database is the source of truth; there is no instance file on disk |
+| `App\Domain\Job` | `Job` (type, instance, `JobStatus` queued / running / succeeded / failed / interrupted, `JobTrigger` ui / cli / webhook / schedule, requester, params, batch, `retryOf`, `activeInstanceId` with a unique index so an instance has one active job) and `JobRepository` |
+| `App\Domain\Template` | `Template` (belongs to a project: Drupal environment and the `postDeploy`, `tty1`, `tty2` command lists) and its repository |
+| `App\Domain\Port` | `NamedPort` (the host-wide catalogue: name, public and router port) and its repository |
+| `App\Doctrine` | Doctrine plumbing: `SqlitePragmaMiddleware` (WAL, `busy_timeout=5000`, `foreign_keys=ON` on every connection), `UtcDateTimeImmutableType` (`utc_datetime_immutable`, always UTC: use it, not the stock datetime types, under SQLite) |
+| `App\Fleet` | `FleetPaths` and host-driving services; `App\Fleet\Shell` is the `CommandRunner` seam |
+| `App\Fleet\Secrets` | `SecretKeyFile` (`keys/secret.key`, 32 bytes, never overwritten), `SecretBox` (XChaCha20-Poly1305 with the scope and name as associated data), `SecretStore` (two kinds in one table: the host's own secrets with lowercase names, written by the setup wizard, and the managed secrets with `UPPER_CASE` names, fleet-wide or per project, set by an admin), `SecretService` (the only path the pages and `fleet secret:*` use: validates, seals, audits put / delete / reveal), `SecretName` (the name rule and the kebab-case `[[token]]` of a name), `SecretValue` (text, 1 byte to 64 KiB, normalised, no wrapping quotes), `TokenRenderer` (`[[token]]` substitution for the deploy: project secret over fleet-wide, built-ins over both, verbatim, single pass, unresolved reported; registers each inserted value with the log masker), `RevealThrottle` / `RevealThrottled` (10 reveals per minute per user, a refusal is audited as `secret.reveal-refused` and answers 429), `PlaceholderScanner` (which placeholders a project's asset files mention, for the "no placeholder" warning) |
+| `App\Fleet\Audit` | `AuditLog` (`record(actor, action, subject)`, `latest()`; actions `secret.put`, `secret.delete`, `secret.reveal`, `secret.reveal-refused`; a cut field ends in `…`; the CLI actor is `cli`) |
+| `App\Fleet\Ssh` | `SshKeyService` (generate / import / regenerate the deploy and push keys), `Ed25519KeyGenerator` (OpenSSH format in PHP, no process), `KnownHostsFile` (seeded provider keys, trust only after a fingerprint confirmation), `KnownHostScanner` (`ssh-keyscan` through the runner) |
+| `App\Fleet\Host` | The host settings page's rules and signals: `GitIdentityRule`, `NotificationMailRule`, `HostSecrets` (secret names), `RebootSignal` / `RebootStatus` (the `/run/reboot-required` flag behind the admin banner). Forms live in `App\Form\Host`, the page in `App\Controller\Admin\HostSettingsController` |
+| `App\Fleet\Auth` | `UserService`, `PasswordPolicy`, `AutheliaUsersRenderer` / `AutheliaUsersFile` (the Authelia `users.yml`, written atomically under a lock; before every render it adopts the password hashes Authelia changed, see the file's class comment), `ProjectAccessService` (grant, revoke, set a user's projects; database only), `ProjectGroup` (`fleet-project-<name>`, the group a member carries in `users.yml`; Authelia reloads that file live, so access never restarts it), `AccessModelUpgrade` (run by `fleet:host:render --apply|--stage` before Authelia's configuration is installed: writes the `users.yml` project groups and rewrites every existing instance site with the group check, and throws, so nothing is installed, when a site cannot be rewritten; a user group with the `fleet-project-` prefix is reserved and refused), `AutheliaAccessSync` (installs the Authelia configuration through `apply authelia` only when it changed; host-level settings only, never call it after a user or project change: it restarts Authelia and ends every session) and `IdentitySync` (**the way to change users and memberships**: `commit(fn)` runs the change and the `users.yml` render in one transaction; call `refreshAccess()` after a project is created or deleted; a failed write after the commit is `AccessInstallFailed`, a warning and not a rollback; `ProjectService` calls `ProjectAccessRefresher` itself), `LastAdminGuard` (refuses deleting, disabling or demoting the last enabled administrator, and the acting user themselves when a page passes one) |
+| `App\Fleet\System` | The renderers (`CaddyfileRenderer`, `CaddyEnvRenderer`, `AutheliaConfigRenderer`; templates in `templates/system/`), `AutheliaNotifier` (SMTP from `FLEET_AUTHELIA_SMTP_*`; the self-service reset is enabled only when it is set), `ConfigValue` (validates everything that is rendered), `SystemRenderer` (staging), `GateWriter` / `GateMode` (the Caddy gate snippet), `CaddyReloader`, and the `Applier` seam with `PrivilegedApply` (see "Privileged apply") |
+| `App\Fleet\Instances` | `InstanceService` (the only code that requests deploys and operations: allocates labels at request time, creates the row and its job in one flush, retries a unique violation up to 3 times; `request()`, `requestDeploy()`, `resolve(Selector)`), `Labels` / `InstanceNaming` (the id grammar), `DeployWorkflow` (clone, config, tokens, start, post-deploy, Caddy site), `DeployStep` (an implementation tags itself `fleet.deploy_step` with a priority; phases `before_start|after_start`) and `AssetsSeedStep` (seeds the checkout from the project's assets before `ddev start`, `dumps/` hard-linked), `Teardown` (destroy and its leftovers), `InstanceConfigWriter`, `DrupalSettingsWriter`, `InstanceSiteWriter` (per-instance Caddy snippet, no `apply` target), `InstanceWatcher` (`fleet:instance:watch`), `CommandLineSplitter` (post-deploy lines as argv, never a shell), `DiskHeadroom`, `VisibleInstances`, `Selector` |
+| `App\Fleet\Jobs` | `JobExecutor` (takes the instance lock before the atomic `queued` -> `running` claim; a busy lock is re-dispatched with a `DelayStamp`, 3 s, 5 s gated, and gives up after 30 minutes counted from eligibility), `JobReaper` (interrupts `running` jobs whose lock is free; fails orphaned `queued` ones), `JobLog` / `LogReader` / `LogMasker` (the log file, read in chunks of at most 64 KiB; `RegisteredSecretsMasker` is the one masker and `SecretRegistry`: code that puts a secret into a deploy calls `register()`, `JobExecutor` masks the error text and clears it after each job), `JobFeed` and `LiveFeedCookie` (Mercure wake-ups: id, status, size, never the text), `JobType` and `JobTypeRegistry` (`deploy`, `redeploy`, `start`, `stop`, `destroy`; `Dev\FakeJobType` in dev/test only), `JobService` (retry), `JobPruner` |
+| `App\Fleet\Git`, `App\Fleet\Ddev` | `GitClient` and `Ddev`: the only users of `git` and `ddev` (always through `CommandRunner`, argv only, a branch that starts with `-` refused) |
+| `App\Fleet\Projects` | `ProjectService`, `TemplateService` and `NamedPortService` (the only code that creates, changes and deletes projects, templates and catalogue ports; each collects the first error of every field and throws one `ValidationFailed` carrying a `field => message` map, or `Refused` / `NotFound`), the inputs they take (`ProjectInput`, `TemplateInput`, `NamedPortInput`) and `ProjectSnapshot` (a project as plain data in the 0.x key names) |
+| `App\Fleet\Assets` | A project's assets directory (`assets/<project>/`): `AssetPath` (the text rules for a relative path or name: allow-list, no `..`, NUL, control or format characters), `AssetStore` (the only code that lists, creates folders in, deletes from, opens and publishes into that directory; walks every path with `lstat` and **never follows or writes through a symlink**), `UploadService` (chunked resumable browser uploads staged in `uploads/<id>/`, assembled atomically with a sha256, cap = `HostSettings::assetUploadMaxBytes`, abandoned after 24 h, `gc()`), `AssetEntry`, `AssetListing`, `AssetFile`, `UploadState`, `UploadResult`, `GcResult`, `ByteSize`. Errors reuse `ValidationFailed` / `Refused` (its code is the HTTP status the JSON endpoints answer) / `NotFound` |
+| `App\Fleet\Projects\Rule` | The pure validation rules, one class per concern: `ResourceName`, `GitUrl`, `BranchName`, `IssueIdPattern`, `CommandLines`, `DrupalEnv`, `GitIdentity`, `SubmodulePath`, `PortNumbers`, `TextBlock`. They return a message or null and never echo the input |
+| `App\Setup` | The setup wizard's domain: `SetupTokenService`, `SetupCookie`, `SetupState`, `SetupGate` / `SetupAccessSubscriber` (the guard), `SetupAttemptLimiter`, `SetupProgress`, `SetupFinisher`, `ScanTargetPolicy` |
+| `App\Health` | `HealthChecker` / `HealthReport` behind `GET /health`; `HostHealth` / `HostHealthReport` (memory, disk, reboot-required) for the Home card |
+| `App\Security` | `FleetUser`, `RemoteUserAuthenticator`, `TrustedProxyChecker`, `ForbiddenHandler`, `CurrentActor` (the signed-in user's name for the audit log and `updated_by`), `ProjectVoter` (`SETTINGS`, `DEPLOY` and `DESTROY` are admin-only; `OPERATE` is admin or a member of the project: list, open, logs, start, stop, redeploy and their retries; an instance or job a user may not operate is a 404); `App\Security\StandIn` (dev/test only) |
+| `App\Controller` | Controllers (`Home`, `Health`, `Placeholder`, `AdminFallback`; `Admin\` for admin pages, among them `ProjectController`, `TemplateController`, `SecretController`, `AuditController` and `UserController`: `/admin/users`, every change through `IdentitySync::commit()`, the pages also refuse acting on yourself via `LastAdminGuard`); `App\Controller\Setup` has one controller per wizard step plus `EnterController` (token exchange) |
+| `App\Form\Setup` | The wizard's Symfony forms |
+| `App\Form\Project` | The project and template forms (`ProjectType`, `TemplateType`; plain Symfony forms, `novalidate`, errors come from the services through `ValidationErrorMapper`) |
+| `App\Form\User` | The user forms (`UserCreateType`, `UserEditType`, `UserPasswordType`, the shared `UserProjectsField`; `novalidate`; messages come from `UserService`, whose `InvalidUserInput` names the field it refused). The form theme draws a multiple expanded choice as 44 px checkbox rows |
+| `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be in `docs/installation.md` |
+| `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`, and adds `port:refresh`, which rewrites the instance Caddy sites, and `port:firewall`, which lists the public ports to open). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliDocsTest` against `docs/projects-and-templates.md`. A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
+| `App\Command\Instance`, `App\Command\Job` | `fleet:instance:deploy\|redeploy\|start\|stop\|destroy\|list\|log\|watch` and `fleet:job:list\|show\|retry\|prune`. The changing commands run **attached**: the same `JobExecutor` runs the jobs inline in the CLI process, one after another (`AttachedJobs`; `--detach` only enqueues; SIGINT marks the job `interrupted`, exit 130; trigger `cli`). Covered by `CliDocsTest` against `docs/instances-and-jobs.md` |
+| `App\Command\User` | `fleet:user:list\|create\|update\|delete\|grant\|revoke` (the same exit codes and `--format=json` as the project commands; every write goes through `IdentitySync::commit()`, a failed Authelia install after the commit is exit 0 with a `warning`; a password only from a hidden prompt or `--password-stdin`, never an option). `fleet:user:reset-password` stays flat in `App\Command` |
+| `App\Command\Asset` | `fleet:asset:list <project> [path]` and `fleet:asset:gc` (exit codes and `--format=table\|json` as the commands above). Own sub-directory, group `asset` in `install/bin/fleet`; covered by `AssetDocsTest` against `docs/assets.md` |
+| `App\Fleet\Export` | Moving a project between hosts: `ExportFormat` (the `fleet-project-export` v1 JSON, 2 MiB cap), `ExportParser` (shape check: known keys, types, list sizes, paths in the problems, never a value), `ProjectExporter` (project, its ports, templates, webhook endpoints with rules, schedules by instance label; no ids, timestamps, webhook secrets), `PassphraseSealer` (secrets sealed with `crypto_pwhash` + `secretbox`, parameters in the file), `ProjectImporter` (`preview()` builds an `ImportPlan` of create / update / unchanged / skipped items from the **services' own `validate()` rules** and `apply()` writes it in one transaction, after commit refreshes access rules and Caddy sites), `InvalidExport`. Audit actions `project.export`, `project.import`; secrets are excluded unless a passphrase seals them, and a passphrase is never an option or argument |
+| `App\Command\Export`, `App\Command\Import` | `fleet:export:project`, `fleet:import:preview`, `fleet:import:apply` (groups `export` and `import` in `install/bin/fleet`; exit codes as above; `PassphraseInput` reads the passphrase from a prompt, `FLEET_EXPORT_PASSPHRASE` or stdin). Covered by `ExportDocsTest` against `docs/moving-projects.md`. The pages are `Controller\Admin\ProjectTransferController` (`/admin/projects/{name}/export`, `/admin/import`) |
+| `App\Command\Secret` | `fleet:secret:list\|set\|unset` (`--project=`; the value comes from a hidden prompt or standard input, never argv; actor `cli`), covered by `SecretsDocsTest` against `docs/secrets.md`; `SecretOptions` is not a command |
+| `App\Command\Support` | What those commands share: `JsonOutput` (`--format=table\|json`, `--json`, exit codes 0 done / 1 refused value / 2 not allowed now / 3 not found, the `{"error", "fields"}` document), `FieldErrors` (field name to `--option` or `<argument>`), `Shapes` (JSON for templates and ports). Not commands |
+| `App\Twig` | `ByteSizeExtension` (the `bytes` filter: `1536\|bytes` is `1.5 KiB`) |
+| `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`, and `IssueIdPreview`, the one LiveComponent: admin-only through `#[IsGranted]`) |
+| `App\Ui` | UI support classes: `NavigationCatalog`, `NavItem`, `ProfilerToolbarSwitch` |
+| `App\Message`, `App\MessageHandler` | `RunJob` (carries only the job id, routed to the `jobs` transport) and its handler, which calls `JobExecutor` |
+
+New work follows these namespaces; add a new one only with a reason.
+
+## Conventions
+
+- **`CommandRunner` is the only way to run a host command.**
+  `App\Fleet\Shell\CommandRunner::run(list<string> $argv, ?string $cwd = null, array $env = [], ?callable $onOutput = null, ?float $timeout = null): CommandResult`.
+  `ProcessCommandRunner` runs argv without a shell (Symfony Process); `RecordingCommandRunner`
+  records calls and replays scripted results (`expect()`, `calls()`, `callsMatching()`). `FLEET_RUNNER=process|recording`
+  picks one: `process` in `.env`, `recording` in `.env.dev` and `.env.test`; prod refuses `recording`. Children get an allow-listed
+  environment, not the app's secrets. Nothing else may start a process (`tests/Repo/HostCommandSeamTest`).
+- **`App\Fleet\FleetPaths` owns every filesystem path** under `FLEET_HOME` (must be absolute):
+  `var/fleet.sqlite`, `var/queue.sqlite`, `keys/`, `ssh/`, `assets/<project>/`, `instances/<id>/`,
+  `logs/jobs/<job>.log`, `logs/instances/<instance>/<job>.log`, `locks/`, `keys/secret.key`,
+  `ssh/{deploy,push}_ed25519[.pub]` and `ssh/known_hosts`, `uploads/<id>/` (browser upload chunks, 0700), `staging/<target>/<file>` (rendered config waiting for the root
+  helper), `authelia/users.yml`. It also owns the Caddy snippet directory (`FLEET_CADDY_DIR`, `/etc/caddy/fleet` in
+  production) and derives `gate.conf` and `/etc/caddy/Caddyfile` from it. Never hard-code a path outside it. Ids are validated (no `..`, no `/`).
+  `ensureLayout()` creates the tree with exact modes (`keys/`, `ssh/`, `staging/` 0700; everything holding data or logs 0750).
+- **Two SQLite files**: `fleet.sqlite` (Doctrine `default`, domain data) and `queue.sqlite` (Doctrine
+  `queue`, Messenger transports `jobs` and `failed` only). Entities live under `App\Domain\<Area>\`.
+- **Locks** use Symfony Lock with a flock store in `FLEET_HOME/locks` (`LOCK_DSN`).
+- **Mercure** is a wake-up, never the log. `JobFeed` publishes `{"id","status","size"}` on the private topics `/jobs/<id>` and `/instances`; the text comes from `GET /jobs/<id>/log?from=<byte>`. Pages subscribe with the cookie `LiveFeedCookie` sets and poll (2 s log, 5 s list) when the hub is absent; a hub outage never fails a job. The installer runs a standalone hub (`fleet-mercure`, `127.0.0.1:3000`, legacy protocol mode) behind Caddy; the dev commands start none.
+- **Jobs.** A request never runs a process: it stores a job (`InstanceService`), a worker runs it. `dev` and `test` run the `jobs` transport as `sync://`, so a click runs the job in the request with the `RecordingCommandRunner`; `prod` is Doctrine (a test pins it). States: `queued` -> `running` -> `succeeded|failed|interrupted`; the executor takes the instance lock **before** the claim, so `running` implies a live holder, and a redelivered message finds a non-queued job and does nothing. Retry creates a new job (`retryOf`); a failed deploy retries as `redeploy`. With a `sync://` transport a busy instance cannot wait: after 3 nested re-queues the job fails. Only the `fleet-worker@1` unit consumes `jobs` (SQLite takes one consumer). Limits: 20 instances per deploy request, 90 days of retention (`FLEET_JOB_RETENTION_DAYS`). Instance states: `deploying`, `running`, `stopped`, `failed`, `destroying`, `unknown`; only the watcher moves `running|stopped|unknown`. Post-deploy lines run on the host as argv without a shell, with `[[token]]` substituted after splitting. Destroy never uses privilege: root-owned leftovers fail the job with the exact `sudo rm -rf` line and a retry is idempotent. A new job type implements `JobType` (names are unique, `UniqueJobTypesPass`) and adds its row to `docs/instances-and-jobs.md`.
+- **Authentication** is by header, never by password in the app. In `prod` the app trusts `Remote-User`,
+  `Remote-Groups`, `Remote-Email` and `Remote-Name` only from a request that carries the proxy secret: Caddy sets the
+  FastCGI parameter `FLEET_PROXY_AUTH` (`TrustedProxyChecker::PROXY_PARAM`) to `FLEET_PROXY_SECRET`, compared with
+  `hash_equals`; a secret shorter than 32 characters is ignored. `FLEET_TRUSTED_PROXIES` (default `127.0.0.1,::1`) is the
+  dev/test peer list; the installer sets it empty. Group `FLEET_ADMIN_GROUP` (default `fleet-admins`) gives `ROLE_ADMIN`;
+  every other authenticated user is `ROLE_MEMBER`. `/health` is public; `/setup*` is public but guarded by
+  `App\Setup\SetupGate` (token wizard, see below); `/admin/*` needs `ROLE_ADMIN`; the rest needs a login.
+- **Setup wizard.** `fleet:host:init` (installer) creates the host row, `fleet:setup:token` prints
+  `https://<domain>/setup?token=...` (sha256 stored, valid 24 hours or until Finish). The exchange sets the signed
+  `__Host-fleet_setup` cookie; every other `/setup` route needs it (`SetupState::permits`), and after completion all
+  of them answer 404. The guard decides on the decoded path **and** the matched route and each controller guards itself:
+  never decide on `getPathInfo()` alone. Finish does every side effect in a fixed order and marks completion last
+  (`SetupFinisher`; php-fpm's `request_terminate_timeout` must stay >= `SetupFinisher::REQUIRED_REQUEST_TIMEOUT`, 240 s).
+  Wizard forms carry the stateless CSRF token on top of the Strict cookie.
+- **Secrets** go through `SecretStore` (sealed with `SecretBox`, key in `keys/secret.key`, ciphertext bound to scope and
+  name), never into `.env`, logs, argv or the database in clear. Pages and commands that manage them go through `SecretService`
+  (validation and the audit entry live there, controllers and commands never write the store themselves). A value is shown
+  only by the admin-only reveal (POST, CSRF, audited before it is handed out, `Cache-Control: no-store`); every parameter that
+  carries a value is `#[\SensitiveParameter]`. Only managed secrets (`UPPER_CASE`) are ever a `[[token]]`; host secrets never are. The runner strips the app's secrets from child
+  environments. Private SSH keys are files (0600), the database holds only public keys and fingerprints.
+- **Privileged apply.** The app never runs as root. A change to `/etc/caddy` or `/etc/authelia` is rendered by
+  `SystemRenderer` into `staging/<target>/` and installed by `PrivilegedApply` (`sudo -n /usr/local/libexec/fleet/apply
+  caddy|authelia`; `ApplyTarget` is the only argument). The helper (`install/libexec/apply`) validates with the real
+  binary, installs atomically and rolls back; it is not a security boundary (the `fleet` user is in `docker`). Four
+  places must agree and a repo test pins them: `ApplyTarget`, the sudoers line (`install/etc/sudoers-fleet-apply`), the helper's
+  allowed targets and `PrivilegedApply::HELPER`. Add a target only by changing all four.
+- **Dev/test stand-in** (does not exist in `prod`): identities from `FLEET_STAND_IN_*`; the role
+  comes from the `X-Fleet-Stand-In-Role` header, else the `fleet_stand_in_role` cookie set by
+  `GET /_dev/stand-in/{admin|member|none}?next=/path`, else `FLEET_STAND_IN_ROLE`.
+- **All project data validation lives in `App\Fleet\Projects\Rule`.** The pages (forms), the `fleet project|template|port`
+  commands and later milestones (webhooks, export) go through `ProjectService`, `TemplateService` and `NamedPortService`;
+  controllers, forms and commands never validate on their own. A new limit or rule is a `Rule` class plus a unit test, then
+  the field table in `docs/projects-and-templates.md`. Entities only store. Names are immutable. Git URLs, branches, command
+  lines and issue id patterns are hostile input: the rules are allow-lists, and a consumer must still pass them as argv, never
+  through a shell. `docs/projects-and-templates.md` is checked by `CliDocsTest` (commands, options, exit codes): change a
+  command, change the guide.
+- **Console commands**: `fleet <group>:<verb>` for the groups in the `FLEET_GROUPS` array of `install/bin/fleet` (one group per
+  line, sorted; a new group is one new line, checked by `CliGroupsTest`; `fleet project list` also works). Commands that read or write the database are tested with
+  `RunsFleetCommands` against a real migrated database; stderr assertions need `capture_stderr_separately`.
+- **Components beyond the managed list below.** `<twig:Textarea>` (several lines of text; the form theme renders Symfony's
+  `TextareaType` with it, so never write a raw `<textarea>`), `<twig:Checkbox>`, `<twig:NativeSelect>` and `<twig:RadioGroup>` are
+  installed and shown in the "Forms" section of `/admin/design-system`; `<twig:IssueIdPreview>` is a LiveComponent, not a
+  design-system primitive. A new primitive needs its entry in the page's component list (`DesignSystemPageTest` fails
+  otherwise).
+- **Pages** extend `base.html.twig` (the app shell). Every page works at 390 px: no horizontal
+  scroll, tap targets of at least 44 px. Any change to a page, template or the JS it loads needs a
+  Playwright spec.
+- Code style is PHP-CS-Fixer (`@Symfony`, risky rules, `declare(strict_types=1)`), PHPStan level 8.
+- Commit messages: `<KEY> <type>: <summary>`; add `#time Nh` to the last commit of a ticket if
+  your tracker uses Smart Commits.
+
+## Commands
+
+Run everything from the repository root. Use PHP 8.4 (`php8.4` where the default `php` is older);
+Composer scripts call `@php`, so run Composer with the same binary
+(`php8.4 "$(command -v composer)" …`).
+
+```bash
+cd app
+composer install
+php bin/console importmap:install
+php bin/console tailwind:build            # add --watch while editing styles
+php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
+php bin/console messenger:setup-transports
+php -S 127.0.0.1:8000 -t public           # dev server; APP_ENV=dev, FLEET_RUNNER=recording
+
+composer run gates                        # the merge gate, see below
+composer run cs                          # also: stan, lint, test (the parts of gates)
+php vendor/bin/phpunit --testsuite Repo   # one suite: Unit | Integration | Functional | Repo
+```
+
+`composer run gates` = `assets` (importmap + Tailwind build), `cs` (php-cs-fixer check), `stan`
+(PHPStan level 8), `lint` (Twig, YAML, container, `doctrine:schema:validate --skip-sync`) and `test`
+(PHPUnit, all four suites).
+
+**Gates before every merge to `develop`**: `composer run gates` in `app/`, then in `tests/playwright/`
+`npm run typecheck` and `npx playwright test`. Never merge a red suite. Python CI tooling:
+`FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest` (as the pipeline does).
+
+### Playwright tiers
+
+`FLEET_PW_TIER=quick|full` (default `full`, so a bare `npx playwright test` and the gate above are unchanged). `quick`
+is the Fleet CI merge gate on `feature/*` and `renovate/*`: `desktop` without the `*-coverage` and the
+`projects-validation` / `templates-validation` specs, `phone` limited to `@smoke`. `release/*`, `develop` and the
+nightly run use `full`. Details: `tests/README-tests.md`.
+
+### Playwright modes
+
+`tests/playwright/` runs the same specs two ways, chosen by `FLEET_E2E_BASE_URL`:
+
+- **Unset (the local and CI gate):** Playwright starts the app itself (`support/start-app.mjs`: throw-away
+  `FLEET_HOME`, `importmap:install`, `tailwind:build`, migrations, `php -S 127.0.0.1:8000`).
+  If your shell exports `FLEET_E2E_BASE_URL`, unset it for this run:
+  `env -u FLEET_E2E_BASE_URL npx playwright test`.
+- **Set to a URL:** the suite targets an already-running server and starts nothing (for example a
+  DDEV or php-fpm setup serving `app/public`). `FLEET_E2E_IGNORE_HTTPS_ERRORS=1` accepts a local
+  certificate; `*.ddev.site` hosts are accepted automatically.
+
+`npm run test:smoke` runs only `@smoke` specs. Other knobs: `FLEET_E2E_PORT` (default 8000),
+`FLEET_PHP` (PHP binary for the launcher). Projects: `desktop` (1280 px) and `phone` (390 px).
+`start-app.mjs` also initialises the host (`fleet:host:init`) and writes a fresh setup link to
+`tests/playwright/.run/setup-url.txt`; `setup-wizard.desktop.spec.ts` walks the wizard once and so runs only in the
+first mode (it skips itself against an external server, whose `FLEET_HOME` is not fresh).
+
+### Test layout
+
+`app/tests/`: `Unit/` (plain objects), `Integration/` (kernel and container wiring, SQLite, the
+runner seam), `Functional/` (HTTP through `WebTestCase`, the wizard included), `Repo/` (repository rules: hygiene,
+pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its bash
+steps, the root helper, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
+`FLEET_MERCURE_BIN`, `ssh-keygen`, `shellcheck`) or run only as an unprivileged user, and skip otherwise. Each PHPUnit
+process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `tests/README-tests.md`. Current counts:
+`ci/test-counts.sh` (never write counts into the docs).
+
+## Production trust and the installer
+
+`install/install.sh --domain=<fqdn>` turns a Debian 13 host into a fleet (`docs/installation.md` is the user guide;
+keep it and `README.md` in step with the code, `InstallDocsTest` checks flags, commands and `fleet.env` keys).
+Facts to keep true when editing it:
+
+- **Two stages.** `install.sh` (self-contained, wrapped in `main`) clones the ref into `/opt/ddev-fleet` as `fleet`
+  (git never runs as root there), exports a root-owned copy of `install/` and execs its `run.sh`; privileged files
+  (`apply`, sudoers, wrapper) are always installed from that copy, never from the fleet-writable checkout. Steps are
+  `install/steps/NN-*.sh`, each defines `step_main`, each is idempotent; `run.sh` prints `==> <step>` lines only for
+  steps. `--dry-run` prints the whole plan and changes nothing.
+- **Never touched:** `sshd`, ufw / iptables / nftables, fail2ban, unattended-upgrades (a lockout risk; hardening is the
+  operator's). `/opt/ddev-fleet` stays `fleet:fleet`. Authelia's `/etc/tmpfiles.d/authelia.conf` mask is installed
+  before the package. Caddy snippet directories are `fleet:caddy` 2750 (setgid).
+- **Env files:** `/etc/ddev-fleet/fleet.env` (`root:fleet` 0640; app, workers, CLI, php-fpm via a unit drop-in),
+  `mercure.env` (0600), `/etc/caddy/fleet.env` (written by `apply caddy`). Only missing keys are added and secrets are
+  generated once. The pool pins `APP_ENV=prod`; `ProductionGuard` refuses an unsafe production environment (empty
+  `APP_SECRET`, `FLEET_RUNNER=recording`, `FLEET_HOME` inside the project, trusted proxies together with a proxy
+  secret).
+- **Caddy** gets its config from the app: the main `Caddyfile` through `apply caddy`, the sign-in gate (`gate.conf`, mode
+  `setup` or `authelia`) written by `GateWriter` and loaded with `caddy reload`. It strips every `Remote-*` / `Remote_*`
+  request header on all routes before the gate. Setup mode lets through only `/setup`, `/assets/*` and `/health`.
+  Instance sites are snippets `instances/<id>.conf` in the Caddy directory, imported by the main Caddyfile, written by the worker and loaded through the admin API (`CaddyReloader`); each passes Authelia's `forward_auth` (which lets any signed-in user through its one `*.<domain>` rule) and then answers 403 unless `Remote-Groups` holds the admin group or `fleet-project-<project>` (the per-project check lives here, not in Authelia's configuration: access changes must never restart Authelia). Named ports and Typesense arrive in M0.07.
+- **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
+  workers when the code or env changed.
+- Not shipped yet (do not assume it exists): `fleet-tmux`, named ports and Typesense exposure, the branch picker and
+  live-branch indicator, host hardening. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/installation.md`; recovery: `fleet user:reset-password`).
+- Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
+  install/bin/fleet` before committing a script.
+
+## The 0.x host layout (Ansible, legacy)
+
+`ansible/` still describes the 0.x host: it installs the Python package and units, which no longer
+exist on `develop`, and the 1.x installer does not use it (`ansible/LEGACY-0x.md`). Do not run it against a live
+host from `develop`, and never run the full
+`site.yml` against a live host at all (the `fleet_service` role rewrites the checkout's git
+remote). Apply individual roles through the scoped playbooks beside it (`caddy-only.yml`,
+`hardening.yml`, `fleet-units.yml`, `security-probe.yml`, `authelia.yml`, `claude-onboarding.yml`),
+`--check --diff` first. The roles are not reshaped for 1.x. Roles, in `site.yml` order:
 
 | Role | Responsibility |
 |---|---|
@@ -78,204 +295,49 @@ set stays fully inert for both.
 | `caddy` | Caddy apt repo + package, fleet-owned Caddy snippet dirs, seeded admin-auth default credentials, the rendered Caddyfile, the `50-fleet-sandbox.conf` systemd sandbox drop-in (FLE-1) |
 | `fleet_service` | Clones/updates the product repo into `{{ fleet_opt_dir }}`, installs the editable venv, deploys `fleet.service` + `fleet-boot.service` (both sandboxed via the shared `fleet-sandbox.inc.j2`, FLE-1; toggle `fleet_systemd_sandbox_enabled`) + `fleet-tmux.service` (owns the `fleet` tmux session in its own cgroup, deliberately unsandboxed; tag `fleet_tmux`) + the `fleet` CLI wrapper |
 | `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443 allows, plus the registry's named ports staged via `fleet-ufw-sync` before `ufw enable`), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
-| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/operations.md`) |
+| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/v0/operations.md`) |
 
-## Testing
-
-Dev tooling is set up (unlike the companion shell, which has none yet —
-don't assume they're the same). From `/opt/ddev-fleet` on the server, or
-this repo's checkout locally:
-
-```bash
-.venv/bin/pytest -q          # 1767 passed, 4 skipped as of 2026-10-09
-.venv/bin/ruff check .
-.venv/bin/black --check .
-node --test tests/node/*.test.mjs   # browser-crypto tests (OpenPGP.js, FLE-22); needs Node
-(cd tests/playwright && npx playwright test)   # browser E2E (FLE-24): TypeScript @playwright/test, real daemons + headless Chromium
-```
-
-### Test layout
-
-`tests/` is organised per framework (full guide: `tests/README-tests.md`):
-
-- `tests/pytest/<area>/` — unit and `TestClient` tests, one folder per area (each has an
-  `__init__.py`): `cli/`, `web/` (daemon, UI, CSP, Secrets page, jobs), `instances/`
-  (deploy/lifecycle/paths/locks/naming/ddev/bulk), `secrets/` (OpenPGP store, pgp, tokens,
-  vendored OpenPGP.js), `integrations/` (webhooks, gitops, Typesense, Authelia, Caddy),
-  `core/` (registry, fleetconfig, runner, shell, assets, tmux, reboot, ...), `ansible/`
-  (role/template tests) and `repo/` (CI config, Renovate merge, systemd security, hygiene).
-  `pytest/fakegpg.py` is the scripted gpg stand-in.
-- `tests/playwright/` — browser E2E: TypeScript `@playwright/test`, a self-contained npm package
-  (`package.json`, `playwright.config.ts`, `support/`, `*.spec.ts`); not collected by pytest.
-- `tests/node/` — Node's built-in runner (`node --test`) for the browser ES modules.
-- `tests/conftest.py` (shared fixtures) and `tests/fixtures/` (shared data, e.g. `pgp/`)
-  stay at the root, shared by all three.
-
-Run: `.venv/bin/pytest -q` (pytest only), `.venv/bin/pytest tests/pytest/cli` (one area),
-`node --test tests/node/*.test.mjs`, and `cd tests/playwright && npx playwright test` (browser
-E2E; add `-g "<title>"` for one test, `--headed`/`--ui`/`--debug` to watch). Put a new test in
-the area that matches the source module under test.
-
-`tests/playwright` is its own npm package, outside `pytest -q`. One-time setup:
-`cd tests/playwright && npm ci && npx playwright install --with-deps chromium` (the browser
-build follows the exact `@playwright/test` pin in its `package.json`; reinstall after a bump).
-`playwright test` starts the two daemons itself (`webServer` + `support/start-daemon.mjs`, using
-`FLEET_PYTHON` or `.venv/bin/python`, else `python3`) and fails outright when a browser, `gpg` or
-Python is missing: there is no skip mode. **Any change to a UI page, template, or the JS it
-loads needs an E2E test** in `tests/playwright/`: unit tests with a fake htmx or the ASGI test
-client cannot see htmx form validation, the CSP or module loading (FLE-24 shipped broken for
-exactly that reason). The `page` fixture in `support/fixtures.ts` fails the test on any console
-error, page error or CSP violation.
-
-`pyproject.toml` declares `dev` extras (`pytest`, `ruff`, `black`, `httpx`)
-and `infra` extras (`ansible-core`, `ansible-lint`, `yamllint`) as optional
-dependency groups. `ruff` selects `E,F,I`, line length 100 (`black` matches).
-`pytest` filters a known `httpx`/`starlette.testclient` deprecation warning
-(see `[tool.pytest.ini_options]`).
-
-CI is Bitbucket Pipelines only (`bitbucket-pipelines.yml`, Debian 13 image;
-there is no GitHub Actions workflow, GitHub is a read-only mirror). Besides these
-gates it scores the rendered systemd units with `systemd-analyze
-security` and fails when an exposure score rises against
-`ci/systemd-security-baseline.json` (FLE-8). If you change a sandboxed unit on
-purpose, re-record the baseline: `docs/README-ci.md`. The weekly live run on
-`develop` commits `SYSTEMD-SECURITY-REPORT.md` (bot commit
-`chore(security): …`, linked from the README) and posts a Jira @mention alert
-on a regression (FLE-16, `JIRA_ALERT_*` variables).
-
-## Deploy model — shipping a code change to the live host
-
-Full details: `docs/operations.md`. Summary:
-
-- **Option B (preferred, enabled 2026-07-16).** `/opt/ddev-fleet` is a
-  `fleet`-owned git checkout tracking `origin/main`, with a read-only
-  deploy key. Update:
-
-  ```bash
-  sudo -u fleet git -C /opt/ddev-fleet pull --ff-only && \
-  sudo -u fleet git -C /srv/fleet/config pull --ff-only && \
-  sudo systemctl restart fleet
-  ```
-
-  The package is installed **editable** (`pip install -e`), so the restart
-  alone picks up new source — no reinstall needed for a pure Python change.
-
-- **Option A (fallback).** `git archive HEAD | tar` over ssh into
-  `/opt/ddev-fleet`, then the same config-pull + restart. Used when Option
-  B isn't available or as a documented rollback path (keep
-  `/opt/ddev-fleet.src.bak` around).
-
-- Run the **full** `sudo bash bootstrap.sh` / `ansible-playbook site.yml`
-  only when system packages, the venv/dependencies, systemd units, or the
-  Caddyfile actually change — not for a plain code change.
-
-- **CAVEAT — do NOT run the full `ansible-playbook site.yml` against a
-  live host casually.** The `fleet_service` role's git task rewrites
-  `/opt/ddev-fleet`'s git remote to the `https://` `fleet_repo_url` in
-  `ansible/group_vars/all.yml`, which breaks the `fleet`-user SSH-key-based
-  `git pull` that Option B depends on. When only the Caddy config needs
-  reapplying (e.g. after touching `Caddyfile.j2` or
-  `fleet_typesense_public_port`), apply the `caddy` role alone via a scoped
-  playbook (`ansible/caddy-only.yml`), not the full `site.yml`. The other
-  scoped playbooks beside it: `ansible/hardening.yml` (`network_hardening` +
-  `security_hardening` + `security_probe`, for hardening a live server),
-  `ansible/fleet-units.yml` (only the systemd units + CLI wrapper of
-  `fleet_service`, i.e. `roles/fleet_service/tasks/units.yml`, no clone/pip),
-  `ansible/security-probe.yml` and `ansible/authelia.yml`. They must live beside
-  `site.yml` (`group_vars/` resolves relative to the playbook); procedures in
-  `docs/operations.md`. **Rotating the dashboard admin
-  password is NOT one of these cases** — `fleet rotate-admin-password` /
-  `fleet set-admin-password` (`core/caddyauth.py`) never touches Ansible at
-  all; see README.md "Default credentials".
-
-## Per-project secrets model
-
-- Fleet-wide secrets (`CLAUDE_CODE_OAUTH_TOKEN`, …) live in `/srv/fleet/.secrets`.
-- Per-project secrets live in `/srv/fleet/secrets/<project>.env` — write them
-  with `fleet secret set <project> KEY VALUE` (`core/secrets.py:write_secret`,
-  0600, upserts).
-- At deploy time (`core/instances.py:deploy`), `secret_tokens()` maps each
-  `KEY` to a `[[key-with-dashes]]` token (e.g. `SLACK_BOT_TOKEN` →
-  `[[slack-bot-token]]`), merged into the token-substitution context
-  alongside `[[project]]`, `[[branch]]`, `[[instance-fqdn]]`, etc.
-  `core/assets.py:inject` then rsyncs the project's asset tree into the
-  instance and rewrites `[[token]]` placeholders in every copied text file
-  (`core/tokens.py:substitute_file`, skips binaries/oversized files, raises
-  `TokenError` naming the file if a token is left unresolved).
-- Never print secret values in logs/output when working on this code —
-  `core/secrets.py` and `core/typesense.py` are the two modules that handle
-  raw key material; treat both carefully in tests and debugging.
-
-## Typesense port/key coupling
-
-Full human-readable design: `docs/README-typesense.md`; the generic
-mechanism it now rides on: `docs/networking.md` + `core/caddyports.py`.
-Typesense's public/router ports are no longer Python constants hand-synced
-against Ansible vars — that footgun was eliminated 2026-07-24
-(`2026-07-24-fleet-port-exposure-design.md`). They are now
-`Registry.port_profile("typesense")` (`core/registry.py`): an explicit
-`fleet.ports.typesense: { public, router }` entry in `fleet.yml`, or — if
-absent — a built-in legacy default of `public=9108`/`router=8108` (so an
-existing `fleet.yml` with only `typesense: true` needs zero edits). Any
-project opted in (via `typesense: true` or `ports: [typesense, ...]`) gets
-its Caddy exposure reconciled by `core/caddyports.py`'s `sync()`, called
-from `deploy()`/`destroy()`, `fleet refresh-ports`, and daemon startup —
-not by Ansible past the one-time `ports/` directory seed.
-
-Two keys are generated per opted-in project (`core/typesense.py`): a strong
-admin key (`TYPESENSE_API_KEY`, written to the instance's `.ddev/.env` for
-the container boot and to `web_environment` for the Drupal backend — never
-sent to the browser) and a search-only key (`FLEET_TYPESENSE_SEARCH_KEY`,
-the only key injected for the browser to use), registered into the
-instance's running Typesense via `register_search_key()` after `ddev start`.
-
-This is a **port-based** design (`*.<domain>:9108` → Caddy → `127.0.0.1:8108`
-ddev-router, Host-routed) that **superseded** an earlier path-based
-(`/_typesense`) design — the `fern_facets` widget's built JS has no `path`
-support, so path-prefixing didn't work end-to-end. If you find references to
-`/_typesense` or a `FLEET_TYPESENSE_PATH` env var anywhere (old specs,
-`fleet.yml.dist` comments), they're stale — the port-based scheme is the one
-actually implemented and deployed.
-
-## Optional hardening roles (`network_hardening`, `security_hardening`)
-
-Two Ansible roles, opt-in at install time (`docs/installation.md`'s
-`FLEET_NETWORK_HARDENING`/`FLEET_SECURITY_HARDENING` prompts, Yes by
-default): `ansible/roles/network_hardening/` renders a UFW ruleset plus a
-`DOCKER-USER` iptables guard (defends the assumption in "Typesense
-port/key coupling" above — that only Caddy, never a container port bound
-to all interfaces, is reachable from outside) and installs
-`/usr/local/sbin/fleet-ufw-sync`, the sudo helper `fleet refresh-ports`
-(`cli.py:_cmd_refresh_ports`) calls to keep UFW's allowed ports in sync
-with `Registry.public_ports_in_use()` — silently skipped when the helper
-isn't installed, so hardening is genuinely optional. `ansible/roles/
-security_hardening/` covers OS-level hardening unrelated to fleet's own
-code (unattended-upgrades, SSH config, fail2ban, auditd, a conservative
-sysctl profile, `/tmp` mount options) — nothing in `src/fleet/` depends on
-it. Neither role has a `core/` Python module of its own.
+`network_hardening` and `security_hardening` are independently optional: every task in both gates
+on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays inert for both.
 
 ## Cross-references
 
-- `docs/srv-fleet-CLAUDE.md` — the registry schema + CLI reference, copied
-  onto the server at `/srv/fleet/CLAUDE.md` so a `claude -p "..."` session
-  run there (as the `fleet` user) has grounded context without reading the
-  full spec. Keep it in sync with this file's CLI-shape facts and re-copy it
-  after any change (`docs/operations.md`'s Claude-context-refresh section).
-- `docs/installation.md` — full first-rollout checklist (DNS, delivery,
-  admin password, deploy keys, Claude token mint, live-verification items).
-- `docs/operations.md` — the ongoing code-update procedure, rollback, and
-  admin-password rotation.
-- `docs/runbook-server-rollout.md` — the routine rollout precondition
-  (`/opt/ddev-fleet` must be a clean checkout) and the domain-change
-  procedure for existing instances (`refresh-instance-config` per
-  instance, and its `settings.local.php` gap/workaround).
-- `docs/RELEASING.md` — versioning, CHANGELOG conventions, release/hotfix procedure and push order.
-- `docs/README-ci.md` — the Bitbucket pipelines, the systemd security check
-  (offline + live), the baseline and how to update it, live-check setup.
-- `docs/README-typesense.md` — the Typesense browser-search exposure design
-  in full (topology, keys, env vars, reindexing, reachability caveat).
-- `/var/www/html/.claude/rules/` — the companion dev-shell's rules governing
-  *how* Claude works on this repo (subagent model tiers, git branch/push
-  policy, session logging, memory routing). This repo receives only product
-  code; session logs/specs/plans for work done here live under the
-  companion's `.claude/user/docs/` and `.claude/user/logs/`, not in this repo.
+- `docs/README.md` — documentation index with the status of each document.
+- `docs/installation.md` — installing 1.x on a host: installer, setup wizard, recovery, security model, uninstalling.
+- `docs/assets.md` — a project's assets: the Assets tab, chunked browser upload and its cap, copying over SSH, path rules, `fleet asset:list|gc`.
+- `docs/instances-and-jobs.md` — instances and jobs: states, deploy, redeploy, start, stop, destroy, bulk work, the live log, `fleet instance:*` and `fleet job:*`, retention, troubleshooting.
+- `docs/projects-and-templates.md` — projects, templates and named ports: fields and limits, the pages, the `fleet project|template|port` commands, differences from 0.x.
+- `docs/secrets.md` — secrets: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, the `fleet secret:*` commands, the security model.
+- `docs/moving-projects.md` — moving a project between hosts: export file, sealed secrets, import preview, rsync of assets, `fleet export:project`, `fleet import:preview|apply`, `fleet backup:verify`.
+- `docs/development.md` — setup, environment variables, stand-in, adding a component.
+- `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
+- `changelog.d/` — **changelog fragments**: a change adds `changelog.d/<KEY>.md` (a `### Added|Changed|...` heading and bullets), never a line in `CHANGELOG.md`; `ci/changelog-assemble.php` builds the release section (`ChangelogAssembleTest`).
+- `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.
+- `docs/v0/` — the 0.x (Python) reference, re-implemented milestone by milestone.
+- `tests/README-tests.md` — suites and how to run them (counts: `ci/test-counts.sh`).
+
+If a tool wrapper condenses command output (RTK), treat the condensed output as complete; re-run
+a command as `rtk bypass <cmd>` only when its result is unusable (empty when output was clearly
+expected, contradicting its exit code, or garbled).
+
+<!-- symfony-design-system:start -->
+## Design system
+
+The UI has a design system documented at [`/admin/design-system`](/admin/design-system) (route `admin_design_system`, admins only). The page previews every primitive - colours, typography, structure, base styles and elements - and shows the exact Twig to use.
+
+When implementing UI:
+
+1. **Check the design system first.** Before writing markup or styles, read `/admin/design-system` and the components in `templates/components/`. Use the tokens (`bg-page`, `bg-surface`, `text-ink-body`, `text-ink-display`, `text-ink-muted`, `border-hairline`, `bg-brand`, `text-brand-darker dark:text-brand`) and the components (`<twig:Button>`, `<twig:Input>`, `<twig:Label>`, `<twig:Badge>`, `<twig:Card>`, `<twig:Alert>`, `<twig:Dialog>`, `<twig:Sheet>`, `<twig:DropdownMenu>`, `<twig:Table>`, `<twig:ThemeToggle>`, `<twig:PageHeader>`).
+
+2. **Do not invent ad-hoc styles.** No raw hex values, no default palette colours (`bg-gray-50`, `text-blue-600`), no raw font sizes or one-off utilities when a token or component exists, no new variant systems beside the kit's.
+
+3. **Use bare semantic HTML for text elements.** `<h1>` to `<h6>`, `<p>`, `<a>`, `<strong>`, `<blockquote>`, `<ul>`, `<ol>`, `<hr>`, `<label>` and `<legend>` get their size, colour, weight and spacing from the base styles. Do not put `text-xl`, `font-semibold`, `text-ink-display` or `tracking-tight` on them: write `<h1>Projects</h1>`, not `<h1 class="text-2xl font-semibold">Projects</h1>`. A page's title is one `<h1>` (use `<twig:PageHeader>`). Layout utilities (`mt-4`, `max-w-md`, `flex`) are fine. A label wrapping a checkbox or radio takes `font-normal text-ink-body`.
+
+4. **Meet the contrast pairings.** Text on a `*-faded` background is `text-*-darker dark:text-*` (for example `bg-brand-faded text-brand-darker dark:text-brand`). Details are in the Colors section of the page.
+
+5. **Every page works at 390 px.** No horizontal scroll, tap targets at least 44 px (`h-11 md:h-8`).
+
+6. **If a needed element is missing, propose it as a design-system addition** before building a one-off, for example: "There is no component for X. Add it to the design system (a component plus a section on `/admin/design-system`) or do a one-off?" Default to the addition.
+
+7. **Re-run the `symfony-design-system` skill** to add sections, refresh tokens or re-scan for UI that bypasses the system; it merges without touching anything outside its markers.
+<!-- symfony-design-system:end -->

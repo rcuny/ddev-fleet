@@ -21,29 +21,138 @@
   "commitMessagePrefix": "FLE-10",
   "packageRules": [
     {
-      "description": "Python runtime dependencies: one grouped PR for minor/patch (pyproject.toml is extracted by the poetry and/or pep621 manager, so match on datasource + depType)",
-      "matchDatasources": [
-        "pypi"
-      ],
-      "matchDepTypes": [
-        "project.dependencies"
-      ],
+      "description": "Owner 2026-10-21: Renovate merges its own green patch/minor PRs (fleet-gates SUCCESSFUL), at most one per run (the runner is hourly). Later rules switch it off for Symfony groups; majors are never automerged.",
       "matchUpdateTypes": [
         "minor",
-        "patch"
+        "patch",
+        "pin",
+        "digest"
       ],
-      "groupName": "python runtime"
+      "automerge": true,
+      "automergeType": "pr",
+      "automergeStrategy": "merge-commit",
+      "platformAutomerge": false
     },
     {
-      "description": "Dev/infra extras and build backend: one grouped PR",
-      "matchDatasources": [
-        "pypi"
+      "description": "npm keeps its constraints and moves only package-lock.json when the new version is in range (package-lock.json has no content-hash tied to package.json, so a lock-only change stays consistent). Composer must NOT use update-lockfile: composer.lock carries a content-hash of composer.json, and a lock-only PR leaves it stale (FLE-130)",
+      "matchManagers": [
+        "npm"
       ],
-      "matchDepTypes": [
-        "project.optional-dependencies",
-        "build-system.requires"
+      "rangeStrategy": "update-lockfile"
+    },
+    {
+      "description": "Symfony components (app/composer.json pins 8.1.*): one grouped PR for patch bumps, never merged by Renovate itself",
+      "matchManagers": [
+        "composer"
       ],
-      "groupName": "python tooling"
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "groupName": "symfony",
+      "automerge": false
+    },
+    {
+      "description": "Symfony constraints are wildcard series (8.1.*): replace them (8.1.* becomes 8.2.*, never an exact pin). Update-type rules cannot carry a rangeStrategy, so it sits here; patches are disabled below, only minor and major reach this",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "rangeStrategy": "replace"
+    },
+    {
+      "description": "Symfony patch releases are not separate PRs (app/composer.json pins 8.1.*, so a patch needs no constraint change and a lock-only update would leave composer.lock content-hash stale, FLE-130): they arrive through the weekly lockFileMaintenance PR",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "Symfony minor bumps (8.1 -> 8.2) get their own PR: they change the pinned series and need a changelog read",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "matchUpdateTypes": [
+        "minor"
+      ],
+      "groupName": "symfony minor",
+      "automerge": false
+    },
+    {
+      "description": "Symfony major bumps get their own PR and are always a deliberate migration",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/**"
+      ],
+      "matchUpdateTypes": [
+        "major"
+      ],
+      "groupName": "symfony major",
+      "automerge": false
+    },
+    {
+      "description": "Symfony UX (Twig components, Live components, Turbo, Icons, Stimulus bundle) release together: one grouped PR (rule order matters, this overrides the symfony groups above)",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "symfony/ux-*",
+        "symfony/stimulus-bundle"
+      ],
+      "groupName": "symfony ux",
+      "automerge": false
+    },
+    {
+      "description": "Doctrine ORM, DBAL, bundle and migrations: one grouped PR",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "doctrine/**"
+      ],
+      "groupName": "doctrine"
+    },
+    {
+      "description": "PHP dev tooling (tests and static analysis): one grouped PR",
+      "matchManagers": [
+        "composer"
+      ],
+      "matchPackageNames": [
+        "phpunit/phpunit",
+        "phpstan/**",
+        "friendsofphp/php-cs-fixer"
+      ],
+      "groupName": "php dev tooling"
+    },
+    {
+      "description": "Playwright and its axe-core integration (tests/playwright) move together; the companion's DDEV image pins the same Playwright version, so a bump here needs the matching companion change",
+      "matchManagers": [
+        "npm"
+      ],
+      "matchPackageNames": [
+        "@playwright/test",
+        "@axe-core/playwright"
+      ],
+      "groupName": "playwright"
+    },
+    {
+      "description": "Python CI tooling (ci/requirements-*.txt: pytest, jinja2, PyYAML, ansible-lint, ...): one grouped PR",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "groupName": "python ci tooling"
     },
     {
       "description": "Ansible Galaxy collections: one grouped PR",
@@ -53,48 +162,45 @@
       "groupName": "ansible collections"
     },
     {
-      "description": "The Python interpreter version is a deliberate decision: never auto-bump the python docker image (pipelines)",
+      "description": "The OS image of the gates (debian:trixie) is a deliberate decision, in step with the servers: never auto-bump it",
+      "matchManagers": [
+        "bitbucket-pipelines"
+      ],
+      "matchDepNames": [
+        "debian"
+      ],
+      "enabled": false
+    },
+    {
+      "description": "The Python interpreter version of the infra steps is a deliberate decision: never auto-bump the python docker image",
+      "matchManagers": [
+        "bitbucket-pipelines"
+      ],
       "matchDepNames": [
         "python"
       ],
       "enabled": false
     },
     {
-      "description": "Same for the requires-python floor in pyproject.toml",
+      "description": "The PHP platform constraint in app/composer.json is a deliberate decision: never auto-bump it",
       "matchManagers": [
-        "pep621",
-        "poetry"
+        "composer"
       ],
-      "matchDepTypes": [
-        "requires-python"
+      "matchDepNames": [
+        "php"
       ],
       "enabled": false
     }
   ],
-  "customManagers": [
-    {
-      "customType": "regex",
-      "description": "Vendored htmx: Renovate bumps the version in docs/vendored-assets.md, a human re-downloads the file",
-      "managerFilePatterns": [
-        "/^docs/vendored-assets\\.md$/"
-      ],
-      "matchStrings": [
-        "\\|\\s*htmx\\.min\\.js\\s*\\|\\s*htmx\\.org\\s*\\|\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*\\|"
-      ],
-      "depNameTemplate": "htmx.org",
-      "datasourceTemplate": "npm"
-    },
-    {
-      "customType": "regex",
-      "description": "Vendored OpenPGP.js: Renovate bumps the version in docs/vendored-assets.md, a human re-vendors the file (see that doc)",
-      "managerFilePatterns": [
-        "/^docs/vendored-assets\\.md$/"
-      ],
-      "matchStrings": [
-        "\\|\\s*openpgp\\.min\\.mjs\\s*\\|\\s*openpgp\\s*\\|\\s*(?<currentValue>\\d+\\.\\d+\\.\\d+)\\s*\\|"
-      ],
-      "depNameTemplate": "openpgp",
-      "datasourceTemplate": "npm"
-    }
-  ]
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": [
+      "before 5am on monday"
+    ],
+    "timezone": "Europe/Paris",
+    "commitMessageAction": "Refresh lock files",
+    "automerge": true,
+    "automergeType": "pr",
+    "automergeStrategy": "merge-commit"
+  }
 }

@@ -170,9 +170,8 @@ def test_hooks_body_cap_is_scoped_and_precedes_reverse_proxy(render):
 def test_caddyfile_authelia_mode_validates_against_real_caddy():
     """End-to-end check that the authelia-mode render is not just
     string-plausible but actually valid Caddyfile syntax, using the real
-    `caddy` binary pinned by the local e2e verification
-    (.claude/user/tmp/authelia-e2e/findings.md in the companion repo, v2.11.4
-    there) when `FLEET_TEST_CADDY_BIN` points at one. Skipped entirely
+    `caddy` binary (the local e2e verification used v2.11.4)
+    when `FLEET_TEST_CADDY_BIN` points at one. Skipped entirely
     otherwise — this is not part of the default gate."""
     caddy_bin = os.environ["FLEET_TEST_CADDY_BIN"]
     out = _render_authelia()

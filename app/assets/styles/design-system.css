@@ -1,0 +1,210 @@
+/* symfony-design-system:start */
+/*
+ * Design tokens, shadcn bridge and base styles. Managed by the symfony-design-system
+ * skill: edit tokens through the skill, put app-specific CSS in app.css.
+ * Fonts are system stacks only (no third-party requests).
+ */
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+    --breakpoint-xs: 400px;
+
+    --font-display: ui-sans-serif, system-ui, sans-serif;
+    --font-sans: ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    /* Light values; the .dark block below overrides them. */
+    --color-page: #ffffff;
+    --color-surface: #f8fafc;
+    --color-hairline: #e2e8f0;
+    --color-ink-body: #334155;
+    --color-ink-display: #0f172a;
+    --color-ink-muted: #64748b;
+    --color-brand: #0891b2;
+    --color-brand-faded: #e1f2f6;
+    --color-brand-darker: #0e7490;
+    --color-signal: #fcd34d;
+    --color-signal-faded: #fffaea;
+    --color-signal-darker: #b45309;
+    --color-danger: #dc2626;
+    --color-danger-faded: #fbe5e5;
+    --color-danger-darker: #b91c1c;
+}
+
+.dark {
+    --color-page: #020617;
+    --color-surface: #0f172a;
+    --color-hairline: #1e293b;
+    --color-ink-body: #e2e8f0;
+    --color-ink-display: #f8fafc;
+    --color-ink-muted: #94a3b8;
+    --color-brand: #0891b2;
+    --color-brand-faded: #031f33;
+    --color-brand-darker: #0e7490;
+    --color-signal: #fcd34d;
+    --color-signal-faded: #2f2b21;
+    --color-signal-darker: #b45309;
+    --color-danger: #f87171;
+    --color-danger-faded: #2e1927;
+    --color-danger-darker: #b91c1c;
+}
+
+/*
+ * shadcn bridge: the UX Toolkit kit reads these variables (the @theme inline block in
+ * app.css maps them to utilities); every one resolves to a token above, so the kit
+ * components follow the design system in both modes.
+ */
+:root,
+.dark {
+    --background: var(--color-page);
+    --foreground: var(--color-ink-display);
+    --card: var(--color-surface);
+    --card-foreground: var(--color-ink-body);
+    --popover: var(--color-surface);
+    --popover-foreground: var(--color-ink-body);
+    --secondary: var(--color-surface);
+    --secondary-foreground: var(--color-ink-body);
+    --muted: var(--color-surface);
+    --muted-foreground: var(--color-ink-muted);
+    --accent: var(--color-brand-faded);
+    --accent-foreground: var(--color-ink-display);
+    --border: var(--color-hairline);
+    --input: var(--color-hairline);
+    --ring: var(--color-brand);
+    --chart-1: var(--color-brand);
+    --chart-2: var(--color-brand-darker);
+    --chart-3: var(--color-signal);
+    --chart-4: var(--color-ink-muted);
+    --chart-5: var(--color-danger);
+    --radius: 0.625rem;
+    --sidebar: var(--color-surface);
+    --sidebar-foreground: var(--color-ink-body);
+    --sidebar-accent: var(--color-brand-faded);
+    --sidebar-accent-foreground: var(--color-ink-display);
+    --sidebar-border: var(--color-hairline);
+    --sidebar-ring: var(--color-brand);
+}
+
+/*
+ * Variables whose value differs per mode so that every kit use reaches 4.5:1:
+ * - destructive (text on its own tint, borders): danger-darker in light, danger in dark;
+ * - primary (filled button with white text in light; link text and fills in dark): brand-darker with
+ *   white text in light, brand with page-coloured text in dark.
+ */
+:root {
+    --primary: var(--color-brand-darker);
+    --primary-foreground: #ffffff;
+    --destructive: var(--color-danger-darker);
+    --sidebar-primary: var(--color-brand-darker);
+    --sidebar-primary-foreground: #ffffff;
+}
+
+.dark {
+    --primary: var(--color-brand);
+    --primary-foreground: var(--color-page);
+    --destructive: var(--color-danger);
+    --sidebar-primary: var(--color-brand);
+    --sidebar-primary-foreground: var(--color-page);
+}
+
+@layer base {
+    html {
+        background-color: var(--color-page);
+        color: var(--color-ink-body);
+        font-family: var(--font-sans);
+        font-size: 106.25%; /* 17px base: scales every rem-based size */
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* "html body" outranks the kit's `body { text-foreground }` regardless of import order. */
+    html body {
+        background-color: var(--color-page);
+        color: var(--color-ink-body);
+        font-size: 1rem;
+        line-height: 1.6;
+    }
+
+    h1, h2, h3, h4, h5, h6 {
+        color: var(--color-ink-display);
+        font-family: var(--font-display);
+        font-weight: 600;
+        letter-spacing: -0.01em;
+        line-height: 1.2;
+    }
+
+    h1 { font-size: 1.75rem; font-weight: 700; letter-spacing: -0.03em; }
+    @media (min-width: 400px) {
+        h1 { font-size: 2.25rem; }
+    }
+    h2 { font-size: 1.7rem; letter-spacing: -0.03em; }
+    h3 { font-size: 1.3rem; }
+    h4 { font-size: 1.1rem; }
+    h5 { font-size: 1rem; }
+    h6 { font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--color-ink-muted); }
+
+    /* Link text needs 4.5:1: brand-darker on light surfaces, brand on dark ones. */
+    a {
+        color: var(--color-brand-darker);
+        text-decoration: none;
+        transition: color 120ms ease;
+    }
+    .dark a { color: var(--color-brand); }
+    a:hover { text-decoration: underline; text-underline-offset: 3px; }
+
+    p { color: var(--color-ink-body); }
+
+    strong { color: var(--color-ink-display); font-weight: 600; }
+
+    label, legend {
+        display: block;
+        font-size: 0.875rem;
+        font-weight: 500;
+        color: var(--color-ink-display);
+    }
+
+    ul, ol {
+        color: var(--color-ink-body);
+        list-style: none;
+        padding-left: 0;
+    }
+
+    blockquote {
+        border-left: 3px solid var(--color-brand);
+        padding-left: 1rem;
+        color: var(--color-ink-muted);
+        font-style: italic;
+    }
+
+    hr {
+        border: 0;
+        border-top: 1px solid var(--color-hairline);
+        margin: 2rem 0;
+    }
+
+    code, pre, kbd, samp {
+        font-family: var(--font-mono);
+    }
+
+    [id] { scroll-margin-top: 5rem; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+}
+
+/* Long-form prose: vertical rhythm, markers and indents come back for lists. */
+@layer components {
+    .body-content > * + * { margin-top: 1.5rem; }
+    .body-content > h2:not(:first-child),
+    .body-content > h3:not(:first-child),
+    .body-content > h4:not(:first-child) { padding-top: 1rem; }
+    .body-content ul,
+    .body-content ol { padding-left: 1.5rem; }
+    .body-content ul { list-style: disc; }
+    .body-content ol { list-style: decimal; }
+    .body-content li { padding-left: 0.25rem; }
+    .body-content li + li { margin-top: 0.25rem; }
+}
+/* symfony-design-system:end */

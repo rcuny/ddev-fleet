@@ -7,18 +7,422 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.20.2] - 2026-10-21
+## [1.1.0] - 2026-11-03
+
+### Added
+- **FLE-120: one gates script, `ci/run-gates.sh [--quick|--full] [--report-dir DIR]`.** Agents, the orchestrator and Fleet CI run the same gates (composer gates, prod-check, Playwright, infra tests, non-blocking Ansible lint). It clears the Symfony test/dev caches, writes per-gate logs, `summary.json` and `summary.txt` (counts parsed by `ci/gates_summary.py`) into `var/ci-report/` and exits 0 only if every blocking gate passed. See `docs/README-ci.md`.
 
 ### Changed
-- **Marker release, no code change.** Marks the config change deployed to ddev4 with it: the osce template
-  `jira-work-orchestrated` (config `0946489`, PWD8-1720), used by the PWS orchestrator to dispatch `/jira work
-  <KEY> --create-branch --orchestrated` agents (milestone comments, no Jira status changes, out-of-scope findings on the
-  orchestrator ticket).
+- **FLE-117: review follow-ups.** `fleet:host:render` now requires the access-model upgrade step (a wiring slip can no
+  longer skip it before Authelia is relaxed). Every native select is 44 px tall on a phone (one shared class in the
+  `NativeSelect` component). `fleet tmux` checks the instance id before the session is ensured, refuses extra arguments
+  with a usage line and prints a hint instead of nesting when run inside tmux.
 
-## [0.20.1] - 2026-10-20
+
+- **FLE-122: Renovate merges its own green patch and minor PRs.** Patch, minor, pin and digest updates, and the weekly lock-file
+  maintenance PR, are merged by Renovate itself once their Fleet CI status (`fleet-gates`) is green, one per run; the
+  Renovate runner is scheduled hourly. Symfony minor/major groups, Symfony UX and every major update still need a manual merge.
+
+- **FLE-126: Playwright tiers.** `FLEET_PW_TIER=quick|full` (default `full`, so a bare `npx playwright test` is
+  unchanged) lets Fleet CI run a quick merge gate on feature and Renovate branches (desktop without the coverage and
+  validation matrices, phone limited to `@smoke`) and the full suite on release, develop and nightly. No test removed.
+
+- **FLE-127: the form-validation matrices of projects and templates run as PHPUnit Functional tests.** The per-rule cases
+  (refused and accepted names, Git URLs, branches, hostnames, git identities, issue id patterns, submodule paths, template
+  fields and command lines) moved from two Playwright specs to `ProjectValidationTest` and `TemplateValidationTest`, which
+  run in seconds. The Playwright specs keep what a browser adds (errors on screen, accessibility, overflow). No product change.
+
+- **FLE-128: `ci/run-gates.sh` serves Fleet CI.** New opt-in `FLEET_CI_INSTALL_DEPS=1` installs the Chromium system
+  libraries (`sudo playwright install-deps`) before the browser install; `FLEET_PW_TIER` is documented as passing through.
+  Fleet CI now runs its gates through this script, so a gate added here needs no CI config change.
+
+- **FLE-130: Renovate composer updates bump `composer.json` and `composer.lock` together again.** `update-lockfile` left the lock content-hash out of step with `composer.json` (the Fleet CI lock guard failed such PRs), so composer is back on `rangeStrategy: bump`; npm keeps `update-lockfile` (no content-hash). Symfony patch releases are no longer separate PRs; they arrive through a weekly `lockFileMaintenance` PR (Monday before 05:00 Europe/Paris) that refreshes the whole lock with a correct hash. Symfony minor and major PRs use `replace`, so `8.1.*` becomes `8.2.*` and never an exact pin. This amends FLE-140.
+
+- **FLE-131: tests pin the job lock-wait give-up window and the nightly-redeploy and schedule-ticker rules** (`JobExecutorTest`, `NightlyRedeployTest`, `ScheduleTickerTest`), and the CI Python dev requirements were adjusted. No runtime behaviour change.
+
+- **FLE-136: `fleet:host:render --apply` is pinned as re-runnable after a failure midway.** When the Caddy apply fails
+  after Authelia went in, Authelia stays applied (no rollback), nothing stays staged and no gate is written; a second
+  `--apply` once the cause is fixed ends in the same state as a clean run.
+
+- **FLE-140: Renovate keeps Symfony on `8.1.*` ranges.** Composer and npm updates inside the current range now change only the lock file (`rangeStrategy: update-lockfile`) instead of bumping `app/composer.json` to exact pins; Symfony minor and major updates still arrive as separate PRs, which fall back to widening the range.
+
+- **FLE-142: `main` is now the 1.x (Symfony) line.** `main` holds the 1.x releases, `develop` stays the integration branch, and the installer's default `--ref` is `main`. The Python 0.x line lives on the new `legacy` branch (tags `v0.1.0` to `v0.20.2` and later 0.20.x hotfixes), which takes hotfixes only. Ansible's `fleet_repo_version` now defaults to `legacy`, since it provisions the 0.x host only.
+- **The tag guard follows the new model** (`ci/tag-guard.sh`): a `v1.*` tag must be on `origin/main` (the tip also moves GitHub's `main`, an older commit publishes only the tag), a `v0.*` tag must be the tip of `origin/legacy`, and a commit that is only on `develop` is refused.
 
 ### Fixed
-- **tmux reconcile no longer opens a window for an instance that is still deploying.** `fleet tmux` (and the `fleet-tmux.service` boot reconcile) used to create a plain-shell window for every instance directory, including one in the middle of a deploy. When the deploy finished, `ensure_instance_window()` found that window and did not type the template's `tty1`/`tty2` commands, so a CI runner started from `tty1` silently never ran (only a `tty commands not typed` warning in the deploy log). New `locks.is_instance_locked()` probes the per-instance lock without holding it; reconcile neither creates nor prunes the window of a locked instance, and the deploy then creates it and types the commands as usual. Port to 1.x: FLE-119.
+- **FLE-117: a stale "Remove token" submit** (token already removed in another tab) now says "The pipeline token was
+  already removed." instead of reporting a removal.
+
+- **FLE-119: a window opened by `fleet tmux ensure` during a deploy no longer costs the deploy its tty commands.** The
+  v0.20.1 hotfix made the 0.x reconcile skip instances whose lock is held. 1.x does not have the race: the deploy step
+  closes a window that already exists and builds a fresh one before typing `tty1`/`tty2`, and `fleet tmux ensure` skips
+  instances being destroyed. A new test pins the deploy-with-existing-window case so it stays that way.
+
+- **FLE-129: the phone E2E "a second Finish while one is running is told to wait" no longer polls `flock` with the
+  default 5 s timeout.** The lock holder reports on stdout once it has the lock and the test waits for its pipe to
+  close to know the lock is released. Test-only change.
+- **FLE-129: the E2E helper `navigate` (used by `follow` and `submitAndWait`) no longer leaves its pending marker set
+  when a visit ends without a Turbo render.** The marker (`data-nav-pending`, set and cleared by the test helper only,
+  never by the app) was cleared on `turbo:render` / `turbo:frame-render` alone, so a phone visit that ended another way
+  (`users-coverage` "New user form refuses ...") waited out the 20 s expect timeout. It is now also cleared on
+  `turbo:load`, `turbo:fetch-request-error` and a 204/205 response, and a visit that still never renders fails with the
+  Turbo events it saw (`turbo:click`, `turbo:visit`, request, response, error, render, load). Test-only change.
+
+- **FLE-133: UTC date type fallback.** `UtcDateTimeImmutableType` parsed a value not in the stored format in PHP's default zone; it now uses UTC (an explicit offset still wins). Entities and the type are no longer registered as services, `ext-posix` is declared in `composer.json`, and tests cover the type, a full migration rollback and a ban on the stock date types.
+
+- **FLE-143: the instance list no longer resets filter fields being edited.** A 5-second poll answer that arrived while the filters were being changed replaced the typed values; it is now dropped until the form is submitted.
+- **FLE-143: Fleet CI sizes Playwright workers to the container's CPU quota** (`ci/run-gates.sh`: two thirds of the cgroup CPUs, at least 1, unless `FLEET_CI_WORKERS` is set). Five workers on a 3-CPU CI container starved the full suite into timeouts. The 51-jobs pagination test is marked slow, and the secrets form test submits with `requestSubmit` instead of a click.
+
+- **FLE-144: an instance id is now limited to 59 characters, not 63.** DDEV names the web container's host name
+  `<id>-web` and Docker refuses a host name over 63 characters, so an id of 60 to 63 characters passed validation and then
+  failed at `ddev start`. Validation, the label fitting of webhook deploys and the docs use the new limit, and the
+  message says why. Alias host names (`<hostname>-<id>`) keep their own 63-character DNS label limit.
+
+### Security
+- **FLE-133: Secret entity guards.** A `Secret` now refuses an unknown scope, a fleet secret with a scope id, a project secret without one and a nonce that is not a libsodium secretbox nonce; its timestamps always come from the caller's clock, and so do those of `HostSettings` (no entity reads the wall clock for that any more; callers pass Symfony's clock).
+
+
+- **FLE-136: the Caddy log no longer records the query string of the `Referer` header.** The error log keeps the request
+  headers, and a Referer can carry a setup token; everything from the first `?` is cut.
+- **FLE-136: the gate writer checks the group of the gate file, not only the setgid bit of its directory.** Outside
+  `FLEET_HOME` a file that does not belong to the `caddy` group is refused (the previous gate is put back) with the
+  `chgrp` command to run, instead of failing at the next Caddy restart.
+
+
+- **FLE-138: installer and root helper hardening.** The installer pins the primary-key fingerprint of every apt signing key (Docker, DDEV, Caddy, Authelia) and refuses a key that does not match; it installs `gnupg` for the check.
+- DDEV's router is bound explicitly to loopback (`--router-bind-all-interfaces=false`).
+- The installer refuses to run for real from a directory that is not root-owned or that others can write to.
+- The root helper `apply` opens staged files read-only, no longer passes its lock and staging descriptors to the validator, accepts a symlinked `/srv` (the path below it must still be real), and waits at most 5 s for the lock so lock plus work fits the app's 60 s budget.
+- The DNS pre-check no longer takes the first public resolver's answer: the public resolvers must agree, otherwise the check is inconclusive.
+
+### Dependencies
+- **Symfony and lock-file maintenance:** the weekly lock-file updates (#136, #144) move the Symfony components from 8.1.x to v8.1.10 and bump the `symfony/*` helpers (for example `v2.11.0` to `v2.12.0`, a `v1.43.0` to `v1.43.3` group) and several transitive packages (#144).
+- **Doctrine:** `doctrine/orm` ^3.7.6 (#142), `doctrine/doctrine-bundle` ^3.3.4 (#135, #141), `doctrine/doctrine-migrations-bundle` ^4.0.1 (#131).
+- **PHPStan:** `phpstan/phpstan` ^2.3.4 (#132, #134, #137, #140), `phpstan/phpstan-doctrine` ^2.1.0 (#132, #143), `phpstan/phpstan-symfony` ^2.1.1 (#137).
+- **PHP dev tooling:** `phpunit/phpunit` ^13.4.6 (#138, #145), `friendsofphp/php-cs-fixer` ^3.95.27 (FLE-122).
+- **`dragonmantank/cron-expression`:** ^3.6.1 (#130).
+- **Python CI tooling:** `pytest>=9.2.0` (#139), `PyYAML>=6.0.3` (FLE-122).
+- **Ansible:** `community.crypto` >=3.5.1 (#122).
+- **PHPStan:** `phpstan/phpstan` ^2.3.5 (#153).
+
+## [1.0.6] - 2026-10-20
+
+### Added
+- **FLE-101: site-only users.** A user kind "Site access only" (checkbox on the Users create and edit forms,
+  `--site-only` / `--no-site-only` on `fleet user:create|update`) for people who should only open the instance sites of
+  chosen projects, such as a client behind a shared `shield` / `shield` login that keeps crawlers out. No email is needed,
+  a password of 4 characters or more is accepted (regular users keep the 12-character rule), and the account is never
+  an administrator. Fleet itself answers 403 "This account only opens project sites" for them; the users list shows a
+  badge. `users.yml` marks them with the reserved group `fleet-site-only` and a placeholder `@site-only.invalid` email.
+
+- **FLE-103: Playwright coverage for projects, templates and project ports.** New specs for every project and template field, each validation message, edit, delete and cancel paths, the Ports tab and the `fleet:port:*` commands, on desktop and phone with axe in both themes.
+
+
+- Playwright coverage of the users and access area (`users-coverage.spec.ts`): every validation message, the list badges, memberships, the site-only kind, password rules, disable/enable/delete, the last-administrator and own-account protections, a member's refusals, long values at 390 px and axe in both themes.
+- **FLE-107: Playwright coverage for assets, instances and jobs, project export/import and the setup wizard**, on desktop and phone, with axe in both themes.
+
+### Changed
+- **FLE-114: a project can have up to 50 additional hostnames (was 10).** A real project needs 23. The form, the
+  `fleet project:*` commands and project import all use the same limit; hostname validation is unchanged. Every
+  hostname is written to the instance's DDEV `additional_fqdns` and to its single Caddy site block. In `http01` mode
+  each name gets its own Let's Encrypt certificate, so a project with many hostnames deployed many times can hit the
+  rate limits; `ovh_dns` mode uses one wildcard certificate.
+
+- **FLE-115: one rule for a schedule whose target instance does not exist yet.** The CLI and the pages now accept it,
+  as project import already did, with a warning ("Instance X does not exist yet; runs are skipped until it does"; the
+  `warning` key with `--json`) and a **Target missing** badge in the schedule list. A run against a missing instance
+  (timed or **Run now**) is recorded as `skipped` with that reason and queues no job, instead of `failed`. An empty
+  instance id is still refused. `docs/schedules.md` describes the rule.
+
+### Fixed
+- **FLE-103: the New project form preselects the "inherit" git identity mode**, instead of showing no choice selected.
+
+- **FLE-104: New user form: ticking Administrator and then Site access only no longer submits a hidden administrator tick.** The refusal ("A site-only user cannot be an administrator.") used to appear under a row that was hidden, so the form came back with an error nobody could see. Hiding the row now unticks it.
+
+- Instance list: the row menu used the wrong instance id (row Redeploy and Destroy returned 404), the row Redeploy item was always disabled and never submitted, the bulk Redeploy and Destroy dialogs listed no instances, and two links loaded into the Turbo frame ("Content missing").
+- Assets, Import and the setup wizard SSH step no longer overflow horizontally at 390 px with long names or symlink badges.
+
+- **FLE-116: deploy asset seeding verifies the opened file's real path.** The seed step now reads the path of the open
+  descriptor (`/proc/self/fd`) and refuses a file that is not inside the project's assets, which closes the case of a
+  folder swapped for a link to an outside folder while a deploy runs. The file is opened without blocking, so a
+  named pipe swapped in no longer hangs the deploy. `docs/assets.md` states that a deploy cannot be made to read outside
+  the assets again, and documents hard links (copied like any regular file). New tests cover the inode swap after the
+  open, the folder swap, the fifo and the hard link.
+
+- **FLE-125: stable Playwright phone runs under load.** A Turbo prefetch (a hover or a touch on a link) no longer
+  consumes the flash message the redirect after a save is about to show, and a request that Turbo cancels (the instance
+  list refreshing itself, a navigation) no longer ends as an unhandled "The user aborted a request." page error. The
+  instance list does not start a refresh while the previous one is still loading.
+
+## [1.0.5] - 2026-10-20
+
+### Added
+- **FLE-102: Named ports reach the instance as `FLEET_PORT_<NAME>`.** Each instance's `web_environment` gets
+  `FLEET_PORT_PLAYWRIGHT=9325`-style variables for the named ports its project uses (0.x parity), and
+  `docs/networking.md` documents the `playwright` (9325 to 8323) and `ts-dashboard` (9111 to 8110) catalogue examples.
+- **FLE-105: Playwright coverage of the secrets, the audit log and the host settings.** New specs `secrets-coverage`, `audit` and `host-settings-coverage` check every message the services return, the reveal throttle, the "No placeholder" warning, the audit entries and every host settings tab, in both themes and at 390 px. In `dev` and `test` the cookie `fleet_stand_in_user` renames the stand-in user, so a test owns its reveal throttle and its audit actor.
+
+
+- **FLE-106: Playwright coverage of the Webhooks and Schedules pages.** New specs `webhooks-coverage.spec.ts` and `schedules-coverage.spec.ts` (desktop and phone, axe in both themes) walk every field, every refusal message, the secret create / rotate flow, the delivery log outcomes, filters and paging, the pipeline token, the schedule lifecycle and history, stale tabs, CSRF and the member role. `support/fleetData.ts` gives specs the console and the data directory of the app under test.
+
+
+- **FLE-108: `fleet tmux` attaches to the agent workspace again (0.x parity).** `sudo fleet tmux` (also `fleet tmux:attach`)
+  makes sure the `fleet` session exists and attaches the caller's terminal to it; `fleet tmux <instance-id>` selects that
+  instance's window first. Without a terminal (`ssh host fleet tmux`) it stops with "needs a terminal: use ssh -t" and
+  exit status 2. `fleet tmux list|ensure|reset|sidebar` are unchanged.
+
+- `fleet host:ovh-credentials`: replace the OVH application key, secret and consumer key after setup without `fleet setup:reset` (hidden prompts or standard input; `--endpoint=` to change the endpoint), then install them and reload Caddy. The installation guide lists the OVH token rights and the IP restriction note.
+
+### Changed
+- The reveal throttle is now the same in `dev` as in production (10 reveals a minute per user); the `dev` limit of 1000 is gone.
+
+### Fixed
+- **FLE-100: creating or deleting a project or a user no longer restarts Authelia and signs everyone out.** Per-project
+  access moved out of Authelia's configuration: Authelia keeps one static rule for the instance hosts (any signed-in
+  user) and a member's projects are the groups `fleet-project-<name>` in `users.yml`, which Authelia reloads live.
+  Each instance's Caddy site checks the `Remote-Groups` header (admin group or the project's group) and answers 403
+  otherwise, aliases and named-port blocks included. Authelia is restarted only by host-level edits (domain, outgoing mail).
+  The upgrade (re-run the installer, or `fleet host:render --apply`) first writes the project groups and rewrites every
+  existing instance site with the group check, and only then installs the new Authelia configuration; if a site cannot be
+  rewritten it stops and leaves Authelia as it is (fail closed). Groups starting with `fleet-project-` are reserved.
+- Storing or removing the notification SMTP password on the host settings page is now recorded in the audit log (`secret.put`, `secret.delete`, subject `fleet/smtp_password`), as the Claude token already was. No value is recorded.
+- The audit log's action filter is a 44 px target on a phone, and long actors, actions and subjects wrap in the table instead of scrolling it sideways.
+
+- **FLE-106:** Creating a webhook secret from a tab that still offered "Create secret" after another tab had made one now answers with a message and keeps the secret, instead of an error page.
+- **FLE-106:** The action select of the schedule form and the Source and Outcome filters of the delivery log are 44 px tall on a phone (the height class sat on the wrapper, not on the select).
+- **FLE-106:** The "job #N" link under a schedule is underlined: colour alone did not distinguish it from the text around it (WCAG link-in-text-block).
+- **FLE-106:** The schedule form no longer says aliases such as `@daily` are accepted; the validator has always refused them.
+
+- DNS mode no longer depends on an `/etc/caddy/ovh/endpoint` file that was not always written (a host on `ovh-ca` or `ovh-us` would have talked to the EU API). The endpoint is a public API name, so the Caddyfile now carries it (`endpoint ovh-eu`), validated against the three known endpoints, and DNS mode refuses to render without a stored one. The root helper installs the three credential files, checks that each exists, refuses a partial set, and removes the `endpoint` file an older apply left.
+
+
+- **FLE-111: deploy asset seeding honours symbolic links that stay inside the project's assets.** A `dumps/default.sql`
+  pointing at `dump-prod-….sql` was skipped, so the instance had no seed DB. A link is now resolved without being
+  followed (relative or absolute target below `assets/<project>/`, folders on the way real, at most 4 hops, ends at a
+  regular file): in `dumps/` it becomes a hard link to the target's inode, elsewhere a relative symbolic link to the
+  seeded target. A link outside the assets, dangling, to a folder, in a loop or behind a folder link is still skipped,
+  now with the reason in the deploy log. The Assets tab and `fleet asset:list` show each link's target and whether it
+  is seeded.
+
+- **FLE-113: deploy asset seeding re-checks the source right before it copies it.** The check that a symbolic link
+  stays inside the project's assets and the later hard link or copy were separate steps, so a link swapped in
+  between could be followed by the copy fallback. The source is now opened, and the opened file must be the regular
+  file that was checked (device and inode compared before and after); otherwise the deploy fails with "changed while
+  it was being seeded". The seed step also no longer keeps the assets directory as state on the shared service, and
+  `docs/assets.md` states the remaining limit (write access to the assets during a deploy) and that
+  `../<project>/x` back into the same project is refused.
+
+## [1.0.4] - 2026-10-20
+
+### Added
+- **FLE-98: Typesense keys and environment for instances.** An instance of a project with the Typesense flag gets what
+  0.x gave it: a generated admin key and search-only key (sealed project secrets, created once, never rotated),
+  `TYPESENSE_API_KEY` in `.ddev/.env`, the `FLEET_TYPESENSE_*` variables in `web_environment`, and the search-only key
+  registered in the instance's Typesense after `ddev start` (a failure is a warning in the job log). See
+  `docs/networking.md`.
+
+### Changed
+- **FLE-99: the Typesense search key waits for a cold container.** After `ddev start` the deploy retries registering
+  the search-only key with a growing delay for up to 60 seconds instead of 3 x 3 seconds. Giving up is still only a
+  warning in the job log. `docs/projects-and-templates.md` now lists the Typesense variables an instance gets, where
+  each lands and the operator steps.
+
+## [1.0.3] - 2026-10-20
+
+### Added
+- **FLE-96: `fleet backup:restore <file> [--yes] [--json]` restores a database backup into the live databases.** It verifies the backup first (integrity, not from a newer release), refuses while a job is queued or running or a `fleet-worker@*` or `fleet-scheduler` unit is active, swaps the file in atomically, keeps the previous database as `fleet.sqlite.pre-restore-<stamp>` (never pruned), then migrates and validates the schema; a failure puts the previous database back. The queue backup with the same stamp is restored with it. The restore section of `docs/installation.md` is rewritten around it, including how to undo a restore.
+
+### Changed
+- **FLE-97: `fleet backup:restore` is safer.** A fleet backup now records a fingerprint of the secret key that sealed it (never the key), `fleet backup:verify` shows it (`secret key: match`, `mismatch` or `not recorded`), and the restore refuses a backup sealed by another key unless you pass `--accept-key-mismatch` (every secret must then be set again); a backup without a fingerprint is restored with a warning. The restore also refuses while `fleet-status` or php-fpm is active (besides the worker and the scheduler; the printed stop and start lines list all four), and when it runs as another user than the owner of `FLEET_HOME`. A leftover `-wal` or `-shm` next to the live database is covered by a test. `docs/installation.md` describes all of it.
+
+## [1.0.2] - 2026-10-20
+
+### Added
+- **FLE-92: In-network port mirror and `:443` site mirror (M0.07b).** `ddev-router` now also listens on the catalogue's
+  public ports inside the Docker network (two generated files in `~/.ddev/traefik/`), and the `:443` site mirror lets
+  `https://<host>/` work inside the network. The router restarts only when the live entrypoints differ from the wanted
+  ones; a failure removes the files and writes the marker `.fleet-port-mirror-failed`. `fleet port:refresh` syncs and
+  prints `router mirror: live|pending`. The first deploy after the upgrade restarts `ddev-router` once.
+- A port-mirror switch in the host settings (default on); off removes the mirror files at the next sync.
+- A catalogue port `typesense` (9108 / 8108); a project's Typesense flag and the assignment of that port stay in step.
+- The project Ports tab is editable: assign and unassign catalogue ports in the browser.
+- `fleet port:firewall [--json]` lists the public ports to open (80, 443 and the ports in use) with a `ufw allow` line
+  each. The installer still does not change the firewall.
+- `docs/networking.md`: every port, named-port sites and certificates (`http01` and `ovh_dns`), the port mirror, the
+  firewall list and the checks that need a live host.
+
+
+- **FLE-43: the nightly redeploy schedule, end to end** (milestone M0.09b). Integration tests drive a `redeploy` schedule from its cron time to the finished job (no fake action): the job and the run history, a busy instance (`skipped`), a destroyed instance (`failed`), a paused schedule and two schedules on two instances. A test matrix covers the catch-up window (10, 59 and 61 minutes of downtime, one fire only, `missed` after 60 minutes).
+- A reaper: each tick finishes a run left `claimed` without a job for over 5 minutes (the ticker died between the claim and the launch) as `failed`, "The ticker stopped before the job was queued.". It is never fired again.
+- The schedule form and `fleet:schedule:create` / `update --help` list the registered actions; the run history and the schedule list link to the job. `docs/schedules.md` has a "nightly redeploy" recipe.
+
+
+- **FLE-91: the installer installs the fleet shell profile.** A new step 35 writes `/etc/profile.d/10-fleet-shell.sh` (coloured prompt that names the host, `ls` colours, `l` alias, `EDITOR=nano`; interactive shells only) and appends one guarded hook block to `/etc/bash.bashrc` and to the `~/.bashrc` of root, `fleet` and the invoking `sudo` user, only when missing. A file copied by hand from the 0.x host is replaced. `--no-shell-profile` skips the step; the uninstaller removes the file and exactly that block.
+
+- **FLE-94: move a project between hosts.** `fleet export:project <project>` and the **Export** card on a project's General tab write one versioned JSON file (`fleet-project-export`, version 1) with the project settings, its templates and ports, webhook rules and the schedules that target its instances. `fleet import:preview <file>` and **Projects → Import** show a create / update / unchanged / skipped diff with every validation error, and `fleet import:apply <file>` (or the confirm button) writes it all in one transaction or not at all. Secrets are left out unless a passphrase seals them (libsodium Argon2id + secretbox); the passphrase comes from a prompt, `FLEET_EXPORT_PASSPHRASE` or stdin, never argv. Webhook secrets are issued afresh on the new host; assets are copied with rsync. Guide: `docs/moving-projects.md`.
+- **FLE-94: `fleet backup:verify <file>`** runs SQLite's integrity check and a schema-version comparison on a backup file, read-only, before a restore.
+
+### Changed
+- Port values and names rendered in the instance Caddy site go through `ConfigValue`, and the no-ports site test
+  compares the whole file byte for byte (FLE-79 review minors).
+
+### Fixed
+- **FLE-72 follow-up:** a tick more than 90 seconds late is a `catch-up` only when the ticker was down. The ticker now records the end of every tick (`scheduler_heartbeat`, migration `Version20261022100000`).
+
+## [1.0.1] - 2026-10-20
+
+### Added
+- **FLE-79: Named ports are served by Caddy (M0.07a).** Every instance's Caddy site now also carries one block per
+  named port of its project (`<instance host>:<public port>`, aliases included), behind the same Authelia gate and
+  proxied to the port on ddev's router. Assigning or unassigning a port rewrites the sites of that project's
+  instances; a site Caddy refuses is rolled back and reported as a warning. New command `fleet port:refresh
+  [--project=<name>] [--json]` rewrites them on demand.
+
+
+- **FLE-45: the agent workspace deploy step** (milestone M0.11b). A deploy now creates the instance's tmux window and types the template's `tty1` and `tty2` commands into it, with `[[tokens]]` substituted (`TmuxWindowStep`). A command with an unresolved token is skipped with a `WARNING` in the job log, and a tmux problem never fails the deploy. Destroy and redeploy close the window. Tests cover the v0 line `ddev exec claude --model sonnet "/jira work FLE-9"` and prove the Claude token is only written to `config.fleet.yaml`, never to tmux keys, process arguments, the job log or the audit log.
+- `fleet claude:token:apply [--instance=<id>|--all] [--json]` and `fleet claude:token:set --apply` restart running instances (a new `restart` job per instance, one sequential batch) so they pick up a rotated token. Never automatic. Audit action `claude.token.apply`. See `docs/agent-workspace.md`.
+- `fleet workspace:check` also reports whether the tmux server is alive.
+
+
+- **FLE-84: a deploy seeds the new instance from the project's assets.** `AssetsSeedStep` copies the assets into the
+  checkout before `ddev start`, substitutes `[[token]]` in text files up to 1 MiB, hard-links `dumps/` and keeps
+  everything out of `git status`, as 0.x did. The database import stays the project's `post_deploy` command.
+
+### Changed
+- **FLE-70: A truncated audit field ends in an ellipsis.** Actor, action and subject are still cut on a character boundary, now with `…` so the cut shows.
+
+- The DDEV router's own ports (8080, 8443) are now refused as a public port too.
+
+- `fleet-tmux.service` documents why it has no `Restart=` (a oneshot cannot supervise the tmux server); the systemd security baseline records the measured scores of `fleet-tmux.service` and `fleet-mercure.service` (`install_units`).
+- Integration test with a real tmux (skipped when it is not installed) checks that the sidebar command receives its arguments unchanged.
+
+- **FLE-81:** Playwright: axe checks in both themes (shared `expectNoBlockingViolations` helper) on the jobs specs, the phone instance specs and the phone navigation pages.
+
+- **FLE-85: webhooks cleanup.** `RuleMatcher::label` now delegates to the new `Labels::slugOrNull`, so there is one slug
+  implementation. `docs/webhooks.md` states that two Jira deliveries with different bodies give `fle-3` then `fle-3-1`, and
+  that a failed or refused action consumes the delivery id and body hash (the sender's retry is a `duplicate`).
+
+
+- **FLE-87: deploy-time `[[token]]` substitution resolves managed secrets.** The post-deploy commands and the seeded asset files now go through `Secrets\TokenRenderer` (built-in tokens first, then the project secret over the fleet-wide one), and every inserted value is registered with the job log masker before the first log line that could hold it. The second renderer (`Instances\TokenRenderer`) is gone. An unresolved token in a post-deploy line still fails the deploy before anything is changed; in an asset file it stays as written, with a log line naming it. `tty1`/`tty2` commands still take only the built-in tokens: a secret is never typed into a tmux pane, whose scrollback would keep it, and the command is skipped with a `WARNING`. See `docs/secrets.md`.
+
+- **FLE-90: `fleet claude:token:apply --all` asks for confirmation** (or `--yes`/`-y`); non-interactive and `--json` runs refuse without `--yes`, like the other destructive commands.
+
+### Fixed
+- **FLE-78: A long secret name no longer widens the phone layout.** The flash message after saving a secret with a 64-character name did not wrap, so the page overflowed sideways on a phone and zoomed out. Flash messages now break long words.
+
+- **FLE-81: M0.04 follow-ups.** Authelia: a project's alias prefix no longer swallows another project's own hosts (project `blog` with the hostname `x` no longer matches the instances of project `x-blog`; the colliding alias is left out of the rule). Mercure: instance changes go to the per-project topic `/instances/<project>` and the page's cookie authorises only the projects the user may operate, so a member no longer receives events about other projects' instances. The instance page's job link is underlined (axe `link-in-text-block`).
+
+
+- **FLE-83: Playwright schedules spec no longer flakes on a slow machine.** The dark-theme axe check now runs through a shared `expectNoBlockingViolations` helper that switches transitions off before measuring, and the empty-state test no longer depends on test order.
+
+- **FLE-85: a fixed-label webhook redeploy follows the rule's branch.** When the rule's branch differs from the
+  instance's, the redeploy job carries it (optional `branch` param, so queued jobs still run) and the instance switches.
+
+- **FLE-88: Playwright specs wait for the Turbo render after a form submit.** A new `submitAndWait` helper
+  (next to `navigate()`) clicks and waits for the response to render; the webhook, schedule and user specs use it,
+  which removes the stale-flash flake of the phone webhook-actions spec.
+
+- **FLE-89: a password reset no longer looks broken when Authelia has banned the user.** Authelia's regulation
+  (`max_retries`, `find_time`, `ban_time`) is now rendered explicitly (3 failures in 2 minutes, 5 minute ban) and
+  documented in `docs/installation.md` (Troubleshooting). `fleet user:reset-password` and the Users page "set a new
+  password" now say that Authelia may keep blocking the user for up to 5 minutes and that retrying extends the ban.
+
+- **FLE-90: the agent workspace works on an installed host.** The installer now installs the `tmux` package and installs, enables and starts `fleet-tmux.service` (idempotently, never restarting it); the uninstaller removes the unit. The pipeline image installs `tmux` so `TmuxRealTest` runs instead of skipping.
+
+
+- **FLE-93: the job log no longer fails the axe `aria-prohibited-attr` check.** The log `<pre>` carried an `aria-label` without a role that allows a name. It now has `role="log"` and `aria-live="off"` (the live tail appends often, so screen readers are not flooded; the status line above it still announces). No other `aria-label` in `app/templates` sits on an element without a permitting role.
+
+### Security
+- **FLE-70: Secrets used by a deploy are masked in the job log.** The Claude token written to the instance configuration and every secret `TokenRenderer` inserts are registered with the job log masker, so they never reach the job log, the live tail or a job's error text. Only `[masked]` is written.
+- **FLE-70: Secret reveals are throttled.** A user may reveal 10 values per minute. A refused reveal answers 429 with `Retry-After` and is audited as `secret.reveal-refused`.
+
+## [1.0.0] - 2026-10-19
+
+### Added
+- **FLE-38: instances, jobs and live logs** (milestone M0.04). A project can now be deployed. An instance is `<project>--<label>` (at most 63 characters), a checkout of one branch started as its own DDEV project and served at `https://<id>.<domain>` behind the Authelia gate; the database is the source of truth. The web request only stores a **job** (deploy, redeploy, start, stop, destroy); the worker unit `fleet-worker@1` runs it under a per-instance lock (`queued`, `running`, `succeeded`, `failed`, `interrupted`), so a killed worker or a restart leaves an `interrupted` job that **Retry** repeats as a new job. Labels are allocated when the request is made (a numeric suffix for a clash or a leftover checkout, at most 20 instances per request, a disk-space check for batches), deploys of a batch run one after another unless asked to run together, and a failed member never stops its batch. Post-deploy lines run on the host as an argument list without a shell, with `[[token]]` placeholders substituted afterwards. Destroy never uses privilege: root-owned leftovers fail the job with the exact `sudo rm -rf` line and a retry is safe.
+- **Instances and Jobs pages** (usable at 390 px): the instance list with filters, bulk actions and a deploy form, the instance page with start, stop, redeploy and destroy, the job page with the **live log** and Retry, and `/admin/jobs` with the history. Mercure only wakes the page (job id, status and size); the masked log text is read from `/jobs/<id>/log` in chunks, and the pages poll when the hub is not reachable. Administrators deploy and destroy; project members start, stop, redeploy and read the logs of their projects' instances, and anything else answers 404.
+- **`fleet instance:*` and `fleet job:*`** (`deploy`, `redeploy`, `start`, `stop`, `destroy`, `list`, `log`, `watch`; `job:list`, `show`, `retry`, `prune`): `--format=table|json` (`--json`), exit codes `0` done, `1` refused value or every job failed, `2` not allowed now or some jobs failed, `3` not found. The changing commands run the jobs attached in the CLI process (`--detach` only queues them; Ctrl-C marks the job `interrupted`, exit 130). The `fleet` wrapper maps the groups `instance` and `job`. Guide: `docs/instances-and-jobs.md`.
+- **Installer and units:** `fleet-worker@1` (one consumer, the SQLite queue takes a single one), `fleet-status` (keeps instance states and memory true to `ddev list` and `docker stats`, interrupts dead jobs, prunes once a day), `fleet-boot` (starts the instances one at a time after a reboot), per-instance Caddy snippets in `<caddy dir>/instances/` imported by the main Caddyfile, and `FLEET_JOB_RETENTION_DAYS` (default 90) in `fleet.env`.
+
+
+- **FLE-66: webhooks, receiving side** (milestone M0.08a; the deploy itself waits for M0.04). `POST /hooks/jira/<project>` and `POST /hooks/bitbucket/<project>` verify the HMAC-SHA256 `X-Hub-Signature` of the raw body (constant time), cap the body at 1 MiB (413), and answer 404 for a project without a receiver and 401 for a bad or missing signature (a log warning with the source, project and cut delivery id, never a delivery row, never the body). Retries are deduplicated by `X-Atlassian-Webhook-Identifier` / `X-Request-UUID` (matched deliveries only, freed after 7 days). Rules (`on_status` for Jira; event, repository, branch glob, state and comment for Bitbucket) are evaluated into a **recorded decision** such as "would deploy fle-66 (template jira-work)"; the action behind them is the `WebhookAction` interface, whose only implementation records "deploy action not available until M0.04". New tables `webhook_endpoint`, `webhook_rule`, `webhook_delivery` (migration `Version20261020120000`); the HMAC secret is sealed with `SecretBox` and removed with its project.
+- **FLE-66: the Webhooks page and a project Webhooks tab** (administrators only, usable at 390 px). `/admin/webhooks` (the former placeholder) shows every project's Jira and Bitbucket address with a copy button, whether a secret exists, its rules and the latest deliveries; the project tab adds the paged delivery log with "Hide ignored". **Create secret / Rotate secret** show the new secret once, in the answer to the POST (`Cache-Control: no-store`), and never again; rotation kills the old secret at once.
+- **FLE-66: `fleet webhook:*` commands:** `secret <project> [--source] [--rotate]` (labelled `url:` and `secret:` lines, `--json`), `list`, `log`, `rule:add` and `rule:remove`; the `fleet` wrapper maps the group `webhook`. `docs/webhooks.md`. `/hooks/*` is now `PUBLIC_ACCESS` in `security.yaml`; Caddy already exempted it from the login gate and capped the body. Playwright: `webhooks.spec.ts` at both widths.
+
+- **FLE-71: snapshot a running instance's database into a project dump** (milestone M0.06b, part of FLE-40). The project's Assets tab has a **Snapshot a running instance** card (running instances of the project only, 44 px targets at 390 px, an empty state when none runs; POST with CSRF, administrators only). It queues a `snapshot` job (`SnapshotJob`) that runs `ddev export-db` in the instance's checkout and publishes `dumps/default-<instance-id>-<UTC time>.sql.gz` atomically (never a partial file, never overwriting, 512 MiB free-space check, output in the job log). `SnapshotService` refuses a stopped, unknown, other-project or busy instance and records an `asset.snapshot` audit entry. `fleet asset:snapshot <instance-id> [--json]` uses the same service. New dev/test-only `fleet:dev:fake-instance` (absent in prod) for the browser spec, and the recording runner answers `ddev export-db --file=` with a tiny gzip. Tests: job, service, command and page tests, and `snapshot.spec.ts` (desktop and phone, axe in both themes). See `docs/assets.md`.
+
+- **FLE-72: schedules** (milestone M0.09a). Recurring jobs with the 0.x semantics: a 5-field cron expression read in an IANA timezone, pause and resume (no catch-up on resume), a 60-minute catch-up window after downtime (after downtime only the most recent missed occurrence fires, and only when it is at most 60 minutes old; an older one is recorded as `missed`), a run history (`schedule`, `catch-up` or `manual` trigger; results claimed, started, succeeded, failed, skipped, missed) and run now. New `Schedule` and `ScheduleRun` entities (migration `Version20261021090000`; a unique key on schedule and occurrence makes two racing ticks fire one job), `ScheduleService`, `ScheduleTicker` and a small action registry (`ScheduleAction`, `redeploy` registered through `InstanceService::request`). Cron maths use `dragonmantank/cron-expression` (the library `symfony/scheduler` itself uses; its `CronExpressionTrigger` has no per-schedule timezone), with fall-back handling for expressions that name their hours; `symfony/scheduler` supplies the 30-second tick (`scheduler_default`, consumed by the new `install/etc/fleet-scheduler.service`, not yet placed by the installer: see `docs/schedules.md`). `fleet:schedule:list|create|update|delete|run|pause|resume|history` (`--json`), and the `/admin/schedules` pages (administrators only, usable at 390 px) replace the placeholder. The real nightly redeploy end to end is verified with fakes only here; it follows once FLE-56 merges.
+
+- **FLE-77: webhooks act** (milestone M0.08b). A matched rule now does something. A Jira issue moving into a rule's status queues a **deploy job** (trigger `webhook`, requester `webhook:jira`) for the template and the label `<project>--<issue key>`; a Bitbucket `repo:push` queues a deploy for every created or updated branch (deletions and tags are skipped): a fixed `label` redeploys the existing instance, `label_prefix` and `strip_suffix` never overwrite and allocate `-1`, `-2`, long labels are fitted to 63 characters with a SHA-1 suffix (additional hostname aliases included) and a derived label that collides with a fixed-label rule is skipped. A `run-pipeline` rule calls the Bitbucket Pipelines API with a per-project `pipeline:write` token, sealed like the HMAC secret (migration `Version20261022090000`), set on the project's Webhooks tab or with `fleet webhook:token` and shown nowhere afterwards. The delivery row and the answer name the job and the instance; a refusal is a recorded `failed` delivery answered 200, an unresolvable target is 422, and nothing returns a 500 or a stack trace to the sender.
+- **FLE-77: the Webhooks pages show the outcome** of each delivery (the job and the note) and filter by source and outcome. `fleet webhook:rule:add` takes `--label-prefix` and `--strip-suffix`; `fleet webhook:list` shows whether a token is set. `symfony/http-client` is now a direct dependency.
+
+- **FLE-73: the agent workspace, host side** (milestone M0.11a). `App\Fleet\Workspace\Tmux` owns the persistent `fleet` tmux session (`tmux -L fleet`, argv arrays only): `ensureSession`, `listWindows`, `ensureWindow` (one window per instance with the sidebar, tty1 and tty2 panes, idempotent), `closeWindow`, `sendKeys` (literal text then Enter into tty1 or tty2; a control character or an over-long line is refused) and `reset`. Commands: `fleet tmux:ensure`, `fleet tmux:reset [window]`, `fleet tmux:list [--json]` and `fleet tmux:sidebar --window <id> [--once]` (the sidebar pane: state and URL from the database, live local branches of the checkout). `install/etc/fleet-tmux.service` (Type=oneshot, RemainAfterExit) runs `fleet:tmux:ensure` and keeps the tmux server in its own cgroup, so restarting php-fpm or the workers leaves the panes alone. The deploy step that creates windows and types the tty commands, and the installer step that installs the unit and the `tmux` package, come with FLE-56 and the installer work; nothing calls the service yet.
+- **FLE-73: Claude token rotation.** `fleet claude:token:set` reads the token from a hidden prompt or standard input (never an argument), applies the same shape rule as the host settings form (`ClaudeTokenRule`), stores it as before (fleet-wide secret), records a `claude.token.rotate` audit entry and lists the running instances that will pick it up. The host settings form now goes through the same service (so it is audited too). The Claude tab says "Last rotated" and names the command.
+- **FLE-73: workspace checks.** `fleet workspace:check [--json]` (read-only, exit 1 when something is missing) reports whether the push key, the git identity and the Claude token are set, as booleans only; the same three checks are a card on the Git identity and Claude token tabs of `/admin/host`. The `fleet` wrapper gained the groups `tmux`, `claude` and `workspace`.
+- **FLE-44: users and project access, backend** (milestone M0.10, in progress). A `ProjectAccess` entity (user and project, unique pair, rows removed with the user or the project) and a real project membership: a member passes `ProjectVoter::OPERATE` for their projects only, `SETTINGS` stays administrator-only. **Authelia hash read-back:** before every `users.yml` render Fleet adopts a password hash that Authelia changed (self-service reset), so a later user change does not undo it. Authelia's **self-service password reset is enabled only when an SMTP server is configured** (`FLEET_AUTHELIA_SMTP_ADDRESS`, `FLEET_AUTHELIA_SMTP_SENDER`, optional `FLEET_AUTHELIA_SMTP_USERNAME`); otherwise it stays off. The Authelia configuration now carries one access rule per project (`<project>--*.<domain>`: administrators and the project's members), installed through `apply authelia` only when it changed. See `docs/installation.md`.
+- **FLE-44: the Users pages** (milestone M0.10). `/admin/users` (administrators only, usable at 390 px) lists the people who can sign in and lets an administrator create a user (username, display name, email, initial password checked by the password policy, administrator yes or no, projects), edit one (profile, role, project memberships as tap-sized checkboxes), set a new password, disable or enable the account and delete it. Every change goes through `IdentitySync::commit()`: the database change is saved first (a user that cannot be rendered refuses it), then `users.yml` is written and the Authelia access rules follow. Nobody can delete, disable or demote themselves, and the last enabled administrator cannot be deleted, disabled or demoted. New: `UserController`, `App\Form\User`, `InvalidUserInput` (a refused field names its form field); the form theme draws a multiple choice as checkbox rows. Playwright: `users.spec.ts` (an administrator adds a user to a project at 390 px, with axe in both themes).
+- **FLE-44: `fleet user:*` commands.** `fleet user:list|create|update|delete|grant|revoke` manage users and project memberships from the host through the same services as the pages (`--format=table|json`, exit codes `0` done, `1` refused value, `2` not allowed now: the last enabled administrator or an unconfirmed delete, `3` not found). A password is never an argument: `create` asks for it on the terminal without echo, or reads one line from `--password-stdin`. Creating or deleting a project now refreshes the Authelia access rules; when installing them fails the change stands and a warning is shown.
+- **FLE-44: user changes no longer fail with "database is locked".** `UserRepository::transactional()` takes the SQLite write lock when the transaction starts, so two administrators (or parallel test workers) saving users at the same time wait for each other instead of one getting a 500. `IdentitySync::commit()` now only checks that the users render inside the transaction and writes `users.yml` after the commit; when that write or the access install fails the change stays saved and a warning is shown.
+- **FLE-51 (part 2): the host settings page and the reboot notice.** `/admin/host` (administrators; the former Settings placeholder) with tabs for General (domain and TLS mode read-only with the documented commands, ACME contact editable and validated with `ConfigValue`), Git identity (`GitIdentityRule`), Claude token (the wizard's `claude_oauth_token` secret; write-only, "Set / Not set" and the update time only), Notifications (SMTP host, port, user, sender, recipient; the SMTP password is a write-only `smtp_password` secret that can be removed; no test mail) and Backups (list, streamed attachment download with `Cache-Control: no-store`, "Back up now", retention 1 to 3650 days). Every change is a POST with the stateless CSRF token. Administrators also get a banner on every shell page while `/run/reboot-required` exists (`RebootSignal`, packages from `reboot-required.pkgs`, capped at 50); the fleet never reboots by itself. `SecretStore::fleetWideUpdatedAt()` reports when a secret was written without opening it. The page works at 390 px (`host-settings.spec.ts`).
+- **FLE-51 (part 1): database backups.** `fleet:backup:create` writes consistent snapshots of `fleet.sqlite` and `queue.sqlite` (SQLite `VACUUM INTO`, integrity-checked, atomic, files 0600) to `FLEET_HOME/backups/` and prunes backups older than the retention (`HostSettings::backupRetentionDays`, default 14; the newest of each kind is always kept). The installer adds `fleet-backup.service` and a daily `fleet-backup.timer`; `docs/installation.md` has the restore procedure. `HostSettings` gains the retention, git bot identity and notification e-mail fields for the host page (migration `Version20261019100000`); `FleetPaths::backupsDir()`.
+- **FLE-52: assets in the browser** (milestone M0.06a). A project's **Assets** tab (`/admin/projects/<project>/assets`, administrators only) browses the project's assets directory (`/srv/fleet/assets/<project>/`): nested folders, name, size and modified time (readable at 390 px), **Download** (streamed as an attachment), **Delete** (confirmation dialog, POST with CSRF; a folder only when empty), **Create folder** and **Rescan**. The list is read from the disk on every visit, so files copied in with `scp` or `rsync` show up after a rescan (documented in `docs/assets.md` and `docs/installation.md`).
+- **Chunked, resumable browser upload** (a small Stimulus controller, no Node build): files are cut into chunks of up to 8 MiB, so php-fpm and Caddy body limits do not matter; chunks are staged in `/srv/fleet/uploads/<id>/` (mode 0700), assembled atomically and the file's sha256 is shown. Choosing the same file again resumes. The default cap is **2 GiB per file** (new `host_settings.asset_upload_max_bytes`, migration included; no screen to change it yet); a bigger file gets a message naming the limit and the directory to copy it into. Abandoned uploads (24 hours) are removed by the next upload and by `fleet asset:gc`.
+- **Path safety:** every path is checked by `AssetPath` (no `..`, absolute paths, NUL, control or direction-changing characters; an allow-listed character set; length and depth limits) and walked by `AssetStore` with `lstat`: a symbolic link is never followed and nothing is written through one.
+- **`fleet asset:list <project> [path]` and `fleet asset:gc`** on the host: `--format=table|json` (`--json`), exit codes `0` done, `1` refused value, `2` a symbolic link in the way, `3` not found. The `fleet` wrapper maps the group `asset`.
+- New code: `App\Fleet\Assets`, `App\Controller\Admin\AssetController`, `App\Command\Asset`, the `bytes` Twig filter, `FleetPaths::uploadsDir()`. Tests: path-confinement unit tests (traversal, symlinks, NUL, unicode), upload assembly tests (out-of-order and duplicate chunks, size mismatch, cap, resume, concurrent uploads, abandoned uploads, a folder swapped for a symlink), functional tests for every route (admin 200, member 403, anonymous 401, CSRF), command tests, `AssetDocsTest`, and `assets.spec.ts` in Playwright at both widths.
+- **FLE-39: secrets** (milestone M0.05). Credentials and tokens are entered once in the browser and stored encrypted: **Secrets** (`/admin/secrets`) manages the fleet-wide secrets and lists the host's own (set by the setup wizard) read-only, and a project's new **Secrets** tab manages that project's secrets. A secret is write-only: lists show names, the placeholder (`JIRA_CLAUDE_TOKEN` is `[[jira-claude-token]]`) and who set it when, the form is never pre-filled, and an error never repeats the value. An administrator can **reveal** a value (POST with CSRF, shown once in a dialog, `Cache-Control: no-store`, recorded before it is handed out); every put, delete and reveal is an entry in the new **audit log** (`/admin/audit`, latest 200, filter by action; values are never recorded). The project's tab flags a secret that no asset file mentions (the 0.x trap of a silently inert secret) and says "No asset files yet" until some exist. Deleting a project deletes its secrets. Names are `[A-Z][A-Z0-9_]{0,63}` (not the built-in `[[project]]`, `[[branch]]`, ... placeholders), values are text of 1 byte to 64 KiB, a value wrapped in quotes is refused (it would double up inside a quoted placeholder) and CRLF and trailing newlines are normalised. See `docs/secrets.md`.
+- **`fleet secret:list`, `secret:set` and `secret:unset`** on the host (`--project=<name>` for a project's secrets, `--format=table|json`, `--json`; `unset` needs `--yes` unless a person confirms): the value is read from a hidden prompt or standard input, never from an argument; exit codes as the project commands (`0` done, `1` refused value, `2` not allowed now, `3` not found). The wrapper maps the group `secret`.
+- **`[[token]]` substitution** (`App\Fleet\Secrets\TokenRenderer`, used by the deploy from M0.04): a project secret wins over a fleet-wide one, built-in values win over both, values are inserted verbatim, an inserted value is never expanded again, and unresolved placeholders are reported or refused by name. Host secrets are never substituted.
+- New domain code: entity `AuditEntry` with a migration (project secrets reuse the `secret` table), `App\Fleet\Audit\AuditLog`, the managed-secret methods of `SecretStore`, `App\Fleet\Secrets\SecretService` (the one path for pages and commands), `SecretName`, `SecretValue`, `PlaceholderScanner`, `App\Command\Secret`, `App\Security\CurrentActor` and the secrets and audit controllers and templates.
+- Tests: unit tests for names, values and the renderer, integration tests for the store, service, scanner, audit log and commands, functional tests for every route (member 403, anonymous 401, CSRF, `no-store`, no value in any page except the reveal response, no value in any log record), `app/tests/Repo/SecretsDocsTest.php` (the guide documents every command and option) and `secrets.spec.ts` in Playwright at both widths.
+
+- **FLE-37: projects and templates** (milestone M0.03). An administrator describes what the fleet can deploy in the browser, without YAML or a config repository: **Projects** (`/admin/projects`) lists, creates, edits and deletes projects (git URL, default branch and template, extra hostnames, git identity, issue id pattern, submodule branch, Typesense) and, on the project's Templates tab, their templates (Drupal environment, post-deploy, terminal 1 and terminal 2 commands); the Ports tab shows the named-port catalogue read-only. A live tester on the General tab shows the issue id a pattern extracts from a sample label or branch. Everything is administrator-only (a `ProjectVoter` backs the `/admin` rule) and works at 390 px. See `docs/projects-and-templates.md`.
+- **`fleet project:*`, `fleet template:*` and `fleet port:*`** on the host (`list`, `show`, `create`, `update`, `delete`; `port:list|create|delete`; `fleet project list` is accepted as well): `--format=table|json` (`--json`), exit codes `0` done, `1` refused value, `2` not allowed now (instances exist, default template, port in use, unconfirmed delete), `3` not found, and a JSON error `{"error": ..., "fields": {...}}` keyed by the option spelling. A hand-edited, unquoted value with shell syntax in `/etc/ddev-fleet/fleet.env` is executed by the wrapper as `fleet`: keep plain `KEY=value` lines.
+- **Validation in one place** (`App\Fleet\Projects\Rule`, used by the pages and the commands alike): names of 1 to 40 characters, an allow-list of three git URL shapes (no credentials, `ext::`, `file://` or `http://`), single-line command lists (50 lines of 2000 characters), `drupal_env` of 1 to 64 safe characters, at most 10 hostnames, 50 templates and 50 ports per project, a hostname text box 10 000 characters and a command list text 100 100 (the same bound in the browser and on the command line), and an issue id pattern that cannot hang the server (static scan, trial run, backtrack limit). Names are immutable.
+- New domain code: entities `Project`, `Template` and `NamedPort` with a migration (the installer re-run applies it), `App\Fleet\Projects` (services, inputs, `ProjectSnapshot`, `ValidationFailed`), `ProjectInstanceGuard` (instances arrive in M0.04, deletion is refused while a project has any), `App\Form\Project`, `ProjectVoter`, the `IssueIdPreview` live component and a `Textarea` design-system component.
+- Tests: unit tests for every rule (hostile git URLs, issue id patterns and command lines), integration tests for the services, repositories and commands, functional tests for the pages, the voter and the live component, `app/tests/Repo/CliDocsTest.php` (the guide documents every command and option and names nothing else), and `projects.spec.ts` in Playwright at both widths.
+
+- **FLE-36: installer and setup wizard.** `install/install.sh --domain=<fqdn>` turns a fresh Debian 13 host (amd64 or arm64) into a working 1.x fleet with real HTTPS from the first minute. It is a pure bash, two-stage installer (`curl ... | sudo bash -s -- --domain=fleet.example.com`; flags `--acme-email`, `--ref`, `--repo-url`, `--skip-dns-check`, `--dry-run`, `--help`; no prompts) that installs PHP 8.4 from Debian, Docker CE, DDEV, a custom Caddy with the OVH DNS module, Authelia and a standalone Mercure hub, creates the `fleet` user, `/srv/fleet` and `/etc/ddev-fleet/fleet.env`, and starts Caddy, Authelia, a dedicated php-fpm pool (`/run/php/fleet.sock`), `fleet-worker@1` and `fleet-mercure`. Every step is idempotent and re-running the same command is the upgrade (secrets, users, keys and the wizard's choices are kept; Caddy and Authelia are restarted, so signed-in users sign in again). It checks DNS for `<domain>` and `auth.<domain>` (A and AAAA), never touches `sshd`, the firewall, fail2ban or unattended-upgrades, and keeps the setup URL (a credential for 24 hours) out of its log. `install/uninstall.sh --yes [--keep-data] [--purge-packages] [--dry-run]` removes it again (never run automatically). See `docs/installation.md`.
+- **The setup wizard** at `/setup`, opened by the setup URL the installer prints (a credential: a SHA-256-stored token, valid 24 hours or until Finish, exchanged for a `__Host-` Strict cookie; wrong attempts are rate limited): administrator (argon2id), certificates (`http01`, or `ovh_dns` with OVH credentials stored encrypted), the deploy and push SSH keys (generated in PHP, or imported) and a fingerprint-confirmed `known_hosts` (GitHub, GitLab and Bitbucket pre-trusted), an optional Claude token, and Finish, which writes the Authelia users file, restarts Authelia, switches the Caddy gate from "setup only" to the Authelia sign-in and marks setup complete last. A failed Finish leaves setup open; afterwards every wizard URL answers 404, whatever the spelling of the path. Signed out, every `/setup` URL after Finish leads to the sign-in page (the gate is in front of it). Until Finish only `/setup`, `/assets/*` and `/health` are reachable. The wizard works at 390 px.
+- **Recovery commands**, run on the host as `fleet <group>:<verb>` (the `/usr/local/bin/fleet` wrapper loads `fleet.env` and switches to the `fleet` user): `fleet setup:token` (a new setup URL), `fleet setup:reset` (reopen the wizard and put the setup gate back), `fleet user:reset-password <username>` (hidden prompt, needs a terminal: over SSH use `ssh -t`; `--no-apply` skips the Authelia restart), plus `fleet:host:init` and `fleet:host:render` for the installer.
+- A root helper, `/usr/local/libexec/fleet/apply <caddy|authelia>`, behind a single sudoers line: the app renders Caddy and Authelia configuration into `/srv/fleet/staging/`, the helper validates it with the real binary, installs it atomically and rolls back when the reload fails. It is a guard against half-applied configuration, not a security boundary (`fleet` is in the `docker` group).
+- New domain code: entities `HostSettings`, `User`, `SshKey` and `Secret` with a migration; `App\Fleet\Secrets` (`SecretBox`, libsodium XChaCha20-Poly1305 with the scope and name as associated data, `SecretStore`, key in `keys/secret.key`); `App\Fleet\Ssh`; `App\Fleet\Auth`; `App\Fleet\System` (Caddyfile, Caddy environment, Authelia configuration and gate renderers, `PrivilegedApply`); `App\Setup`; and a host-health card on Home (memory, disk, reboot required).
+- Tests: the wizard walk-through in Playwright at both widths (`setup-wizard.desktop.spec.ts`, runs when Playwright starts the app itself), a live-install spec for a real host (`live-install.desktop.spec.ts`, skipped unless `FLEET_LIVE_SETUP_URL` is set), functional wizard and guard tests (every spelling of a `/setup` path is refused after completion), installer, helper, unit-file, sudoers, uninstall and documentation tests (`app/tests/Repo/`), shellcheck over the scripts, and `openssh-client`, `shellcheck` and `sudo` in the CI gates image.
+- **FLE-35: the Symfony 8.1 app skeleton in `app/`** (PHP 8.4, Doctrine ORM over SQLite, Twig, Symfony UX, AssetMapper, Tailwind v4 without a Node build) with the seams every later milestone uses: `App\Fleet\Shell\CommandRunner` (real `ProcessCommandRunner`, scripted `RecordingCommandRunner`, chosen by `FLEET_RUNNER`), `App\Fleet\FleetPaths` (every path under `FLEET_HOME`, ids validated), two SQLite databases (`fleet.sqlite` and the Messenger `queue.sqlite`, WAL, `busy_timeout`, foreign keys on every connection), Symfony Lock and Mercure wiring.
+- Authentication by proxy header: `Remote-User`, `Remote-Groups`, `Remote-Email` and `Remote-Name` are trusted only from `FLEET_TRUSTED_PROXIES`; the group `FLEET_ADMIN_GROUP` gives `ROLE_ADMIN`, everyone else is a member. A dev/test-only stand-in login (role switch, cookie and header) replaces the proxy during development. Until the installer (FLE-36) the proxy trust boundary was the loopback peer only.
+- Production safety for the Symfony app: a `prod` kernel refuses to boot with an empty `APP_SECRET` or `FLEET_RUNNER=recording`; the committed `.env` stand-in role is `none`; host commands run with an allow-listed environment (no `APP_SECRET`, `DATABASE_URL`, ...); a repo test keeps process execution inside `ProcessCommandRunner`; `composer run prod-check` (also a CI step) builds and probes the production path in a throw-away copy.
+- A public `GET /health` endpoint (fleet database, queue database, writable `FLEET_HOME`).
+- The design system and responsive app shell: design tokens with dark mode, the UX Toolkit shadcn kit, reusable Twig components, sidebar and phone bottom navigation, and a reference page at `/admin/design-system`.
+- A Playwright suite (38 specs at 1280 px and 390 px: app shell, navigation, dark mode, accessibility with axe in both themes, design-system page) and the PHPUnit suites (`Unit`, `Integration`, `Functional`, `Repo`).
+- **Known limits of this installer (FLE-36):**
+  - `ovh_dns` is implemented but **not yet verified live**: only `http01` has run on a real host (see `docs/installation.md`, section "Domain and certificates", for what to check). It accepts the OVH endpoints `ovh-eu`, `ovh-ca` and `ovh-us` only (the budget brands' separate endpoints are not supported); it changes how the two certificates (`<domain>` and `auth.<domain>`) are obtained, a wildcard certificate arrives with instance networking. `http01` needs a DNS record for `auth.<domain>` as well as `<domain>`.
+  - Only `<domain>` and `auth.<domain>` are served: subdomains (instances) are denied by default until instance networking (M0.04 and M0.07).
+  - An installer re-run and a password reset restart Authelia and drop every session. Authelia's self-service password reset is disabled until M0.10 (use `fleet user:reset-password`).
+  - The Mercure hub is the standalone release (1.1.2, sha256-pinned) rather than a module in Caddy, because the Caddy download service does not offer the Mercure module. The domain cannot be changed after setup yet.
+  - Finish runs in one HTTP request (up to four minutes; php-fpm's `request_terminate_timeout` is 240 s); there is no Job entity before M0.04.
+
+### Changed
+- **Post-deploy lines run on the host, not in the web container.** The M0.03 guide said they ran through `ddev exec`; they run as written (`ddev composer install`, `ddev drush deploy`), and a command that needs the container's shell is written `ddev exec '...'`. Deleting a project is refused while it has instances.
+- **Upgrade notes:** DNS needs a wildcard record `*.<domain>` for the instance sites; each instance site gets its own certificate, so Let's Encrypt's weekly limit applies; members cannot open instance sites until per-project Authelia rules arrive (M0.10); re-running the installer while a job runs interrupts it (Retry); the live-components endpoint has no request rate limit. See `docs/installation.md`, "Instances on the host".
+
+- **FLE-49: Caddy reads the OVH DNS-01 credentials from files, not from its environment.** The Caddyfile uses `{file./etc/caddy/ovh/<name>}` placeholders; `apply caddy` writes the four values to `/etc/caddy/ovh/` (`root:caddy` 0750, files 0640, atomic, restored on a failed reload) and keeps only `FLEET_PROXY_SECRET` in `/etc/caddy/fleet.env` (any `OVH_*` line left there is dropped, idempotently). A rotation of the credentials is a reload, not a restart; `caddy validate` runs against the staged files before anything is installed. The uninstaller removes `/etc/caddy/ovh`. The Ansible `caddy` role (v0.x) is unchanged: it serves the Python fleet on live hosts and keeps `{env.OVH_*}` in its `tls.conf` until that fleet is retired.
+- **FLE-75: every SQLite write transaction takes the write lock when it starts.** A new DBAL middleware (`SqliteImmediateTransactionMiddleware`, on the fleet and the queue connection) issues `BEGIN IMMEDIATE` instead of a deferred `BEGIN`, so every Doctrine flush and explicit transaction (secrets save, unset and reveal audit, host settings, projects, assets, jobs, instances, ports, templates, SSH keys, audit log, messenger) waits for a concurrent writer up to the busy timeout instead of failing with "database is locked" (seen as a 500 on `POST /admin/secrets` in a CI Playwright run). `UserRepository::transactional()` loses its `DELETE ... WHERE 0` workaround. Tests: a two-process secrets writer (`ConcurrentSecretWritesTest`, flag-file hand-over) and `SqliteImmediateTransactionTest`.
+
+- **FLE-77: webhook hardening** (the FLE-66 review notes). A signed body seen again within an hour is a `duplicate` even with a fresh delivery id; an oversized `Content-Length` is a 413 before the body is read; a stored secret that cannot be opened (a lost key) is logged as its own error, apart from a bad signature; the 200 `ignored` for a receiver with no rules (0.x answered 404) is documented. The rule decision text reads "deploy fle-66 (template jira-work)" instead of "would deploy ...".
+- **FLE-63: follow-ups of FLE-59 and FLE-62.** **Upgrade note:** the host git identity is validated as strictly as a project override (FLE-59): `bot@localhost` (no dot in the domain) and names with control or invisible formatting characters are refused, so an identity saved earlier can fail on its next save. The Git identity tab now warns when the stored value no longer passes; nothing is rewritten silently. "Back up now" counts the `-wal` and `-shm` files in the 256 MiB bound; `ComponentsAccessTest` requires the admin-only components to declare `ROLE_ADMIN`; the 1500-id chunk test asserts a match in several chunks whatever the SQLite variable limit; the Playwright "serves nothing" check asserts an empty or forbidden body.
+- **FLE-61: follow-ups of the assets upload (FLE-52).** The upload cap is editable on a new **Uploads** tab of the host settings page (MiB, 1 to 1 048 576; the server still enforces it per upload). A folder holding only stale hidden upload temporaries (older than an hour, left by a killed assembly) can be deleted. A name clash with a folder no longer offers "Replace it?" (the 409 carries `reason: file-exists` only for a replaceable file). The free-space check looks at the filesystem of `uploads/` and of the target assets directory. `assets.spec.ts` gains a Rescan spec (desktop and phone). Kept as documented gaps: no `Range` downloads, no empty-file upload.
+- **FLE-59 (follow-up of FLE-51).** "Back up now" on the host page refuses databases above 256 MiB (`BackupService::INTERACTIVE_MAX_BYTES`, `BackupTooLarge`) with a message that names `fleet fleet:backup:create` and the daily timer, because it runs inside the php-fpm request and a large copy could hit `max_execution_time` (the smaller option; a Messenger message waits for the M0.04 job core). The timer and the command have no limit. `fleet-backup.service` documents that its `ReadWritePaths` is the installer's `FLEET_HOME` (systemd does not expand variables there) and a repo test keeps the two equal. The host git identity (`GitIdentityRule`) now uses the project rules of FLE-37 (`Projects\Rule\GitIdentity`), so both are held to one standard (host values additionally allow "both empty"). The dev environment reads the reboot flag from `FLEET_HOME/test-reboot-required` like the test one, and `reboot-banner.spec.ts` covers the banner at 1280 and 390 px.
+- **Secrets** in the sidebar is a real page instead of a placeholder (FLE-39); deleting a project (browser or `fleet project:delete`) also deletes its secrets, and the `fleet` wrapper maps the group `secret`.
+- **Projects** in the sidebar is a real page instead of a placeholder (FLE-37), and the `fleet` wrapper maps the groups `project`, `template` and `port` besides `host`, `setup` and `user`. `docs/v0/configuration.md` (the `fleet.yml` reference) is superseded by `docs/projects-and-templates.md`.
+- **The proxy trust boundary is closed (FLE-36).** In production the app trusts `Remote-*` identity headers only from a request carrying the shared secret as the FastCGI parameter `FLEET_PROXY_AUTH` (Caddy sets it from `FLEET_PROXY_SECRET`; clients cannot set a FastCGI parameter; compared with `hash_equals`; a secret shorter than 32 characters is ignored). Caddy strips every `Remote-*` and `Remote_*` request header on all routes first. The installer sets `FLEET_TRUSTED_PROXIES` empty, `::ffff:` peers are normalised, and `ProductionGuard` refuses a `FLEET_HOME` inside the project and trusted proxies together with a proxy secret. New environment variables `FLEET_PROXY_SECRET` and `FLEET_CADDY_DIR`.
+- The Ansible roles under `ansible/` are the 0.x host layout and are not used by the 1.x installer (`ansible/LEGACY-0x.md`). Host hardening (UFW, sshd, fail2ban) is not part of the installer; it stays an operator decision.
+- Documentation: new `docs/installation.md` (installer, wizard, files and units, recovery, upgrades, security model, uninstalling, troubleshooting); `README.md`, `CLAUDE.md`, `docs/README.md`, `docs/development.md` and `tests/README-tests.md` updated.
+- **FLE-35: `develop` is now the Symfony 1.x line.** The Python app (`src/fleet/`, the `fleet` CLI, the FastAPI daemon), `pyproject.toml`, `fleet.yml` and its example, the OpenPGP/htmx vendoring (`bootstrap.sh`, `docs/client-side-encryption.md`, `docs/vendored-assets.md`) and the Python/Node/pytest suites for them are removed from `develop`. The 0.x line continues on `main` (tags `v0.*`) and is not affected.
+- The documentation is reworked for the 1.x workflow: `CLAUDE.md`, `README.md`, `CONTRIBUTING.md`, `docs/README.md` (index with a status per document), `docs/development.md`, `tests/README-tests.md`, and `docs/RELEASING.md` (new section "1.x during the port": `v1.*` tags are cut from `release/1.x.y` and merged into `develop` only). The 0.x reference documentation moved to `docs/v0/` with a banner naming the milestone that re-implements each document, and its server, client and workspace specifics were replaced with neutral examples.
+- CI is now PHP: gates (php-cs-fixer, PHPStan level 8, Twig/YAML/container lint, Doctrine schema validation, PHPUnit) and the Playwright suite run on pull requests, `develop`, `feature/**`, `release/**` and tags; Python only remains for the infra tests and the systemd security check. A `v1.*` tag publishes to the GitHub mirror only when its commit is on `origin/develop` and pushes the tag alone (`ci/tag-guard.sh`); `v0.*` tags keep the old rule. Renovate now covers Composer and npm.
+
+### Upgrade notes
+- **Existing hosts: re-run the installer** (`curl ... | sudo bash -s -- --domain=<fqdn>`, the same command as the first install) **to get the database backup timer.** Steps 95 (writes `fleet-backup.service` and `fleet-backup.timer`) and 98 (enables the timer) are the ones that matter; a fresh install already has them. Until then no backup is made. The migration `Version20261019100000` (host settings: backup retention, git bot identity, notification e-mail) runs on deploy, in the same installer run.
 
 ## [0.20.0] - 2026-10-18
 
@@ -463,8 +867,15 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.20.1...HEAD
-[0.20.1]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...v0.20.1
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/rcuny/ddev-fleet/compare/v1.0.6...v1.1.0
+[1.0.6]: https://github.com/rcuny/ddev-fleet/compare/v1.0.5...v1.0.6
+[1.0.5]: https://github.com/rcuny/ddev-fleet/compare/v1.0.4...v1.0.5
+[1.0.4]: https://github.com/rcuny/ddev-fleet/compare/v1.0.3...v1.0.4
+[1.0.3]: https://github.com/rcuny/ddev-fleet/compare/v1.0.2...v1.0.3
+[1.0.2]: https://github.com/rcuny/ddev-fleet/compare/v1.0.1...v1.0.2
+[1.0.1]: https://github.com/rcuny/ddev-fleet/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...v1.0.0
 [0.20.0]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/rcuny/ddev-fleet/compare/v0.17.0...v0.18.0

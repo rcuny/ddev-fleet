@@ -1,0 +1,26 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Instances · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Instances" description="The running copies of your projects.">
+        <twig:block name="actions">
+            {% if canDeploy %}
+                <twig:Button as="a" href="{{ path('instance_new') }}" class="h-11 md:h-8" data-testid="deploy-link">
+                    <twig:ux:icon name="lucide:plus" />
+                    Deploy
+                </twig:Button>
+            {% endif %}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6"
+         data-controller="instance-list"
+         data-instance-list-url-value="{{ path('instances') }}"
+         data-instance-list-mercure-value="{{ topics is empty ? '' : mercure() }}"
+         data-instance-list-topics-value="{{ topics|json_encode }}">
+        <turbo-frame id="instances" data-testid="instances-frame">
+            {{ include('instances/_table.html.twig') }}
+        </turbo-frame>
+    </div>
+{% endblock %}

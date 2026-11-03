@@ -1,7 +1,7 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-07
+Last updated: 2026-10-18
 Type: documentation
 ---
 
@@ -68,10 +68,11 @@ authored by the same account.
 - **Automatically:** a Bitbucket webhook (events on approval, comment and build
   status of the PR) is relayed by the fleet daemon's
   `/hooks/bitbucket/{project}` route, which starts this pipeline. See
-  [`README-webhooks.md`](README-webhooks.md).
+  [`README-webhooks.md`](v0/README-webhooks.md).
+  This route belongs to the 0.x daemon; on the 1.x line it returns in milestone M0.08, so
+  until then start the pipeline by hand.
 - **By hand:** Pipelines -> Run pipeline -> branch `develop`, pipeline
-  `custom: renovate-merge`; or, from the companion repo,
-  `ddev bitbucket run renovate-merge --branch develop`.
+  `custom: renovate-merge`, or the same through Bitbucket's pipelines API.
 - **Dry run:** `python3 scripts/renovate_merge.py --dry-run --repo <ws>/<slug>`
   prints each decision and never merges, comments or writes the flag (needs the
   two variables below in your environment). `--renovate-flag <file>` is the

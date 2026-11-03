@@ -119,7 +119,9 @@ fleet_ovh_env_file: /etc/caddy/ovh.env
 
 # --- Product repo (spec §3.1, §17) -------------------------------------------
 fleet_repo_url: https://github.com/rcuny/ddev-fleet.git
-fleet_repo_version: main
+# Ansible provisions the v0.x Python host only (ansible/LEGACY-0x.md): the checkout follows the
+# `legacy` branch. 1.x hosts use install/install.sh (default --ref main).
+fleet_repo_version: legacy
 # When true, the code is delivered out-of-band (e.g. rsync/tar of a clean
 # checkout to fleet_opt_dir) and BOTH fetch points — bootstrap.sh and the
 # fleet_service git task — are skipped, so no server-side git auth is needed

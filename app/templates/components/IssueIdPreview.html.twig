@@ -1,0 +1,43 @@
+{# Live issue-id pattern tester (App\Twig\Components\IssueIdPreview). Inputs re-render it 300 ms after typing stops. #}
+{#
+ # The fields are plain <input>s drawn with the Input component's classes: <twig:Input data-model="..."> inside a live
+ # component is read as a child component bound to its parent (DataModelPropsSubscriber), not as an attribute.
+ #}
+{% set outcome = this.result %}
+{% set field_class = 'h-11 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 font-mono text-base transition-colors outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:h-8 md:text-sm dark:bg-input/30'|tailwind_classes %}
+<div {{ attributes.defaults({'data-testid': 'issue-id-preview'}) }}>
+    <twig:Card>
+        <twig:Card:Header>
+            <twig:Card:Title>Test the saved pattern</twig:Card:Title>
+            <twig:Card:Description>Starts from the saved pattern. Change it to try another one: nothing typed here is saved.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            <div class="grid gap-4">
+                <div class="grid gap-2">
+                    <twig:Label for="issue-id-preview-pattern">Pattern</twig:Label>
+                    <input type="text" id="issue-id-preview-pattern" class="{{ field_class }}" data-model="debounce(300)|pattern" value="{{ pattern }}" maxlength="{{ constant('App\\Fleet\\Projects\\Rule\\IssueIdPattern::MAX') }}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="OAKS-[0-9]+">
+                </div>
+                <div class="grid gap-4 md:grid-cols-2">
+                    <div class="grid gap-2">
+                        <twig:Label for="issue-id-preview-label">Sample instance label</twig:Label>
+                        <input type="text" id="issue-id-preview-label" class="{{ field_class }}" data-model="debounce(300)|label" value="{{ label }}" maxlength="{{ constant('App\\Fleet\\Projects\\Rule\\IssueIdPattern::LABEL_MAX') }}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="oaks-1781">
+                    </div>
+                    <div class="grid gap-2">
+                        <twig:Label for="issue-id-preview-branch">Sample branch</twig:Label>
+                        <input type="text" id="issue-id-preview-branch" class="{{ field_class }}" data-model="debounce(300)|branch" value="{{ branch }}" maxlength="{{ constant('App\\Fleet\\Projects\\Rule\\BranchName::MAX') }}" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="feature/oaks-1781-search">
+                    </div>
+                </div>
+                <div role="status" aria-live="polite" data-testid="issue-id-result" data-state="{{ outcome.state }}" class="min-h-11 break-words rounded-lg border border-hairline p-3 text-sm">
+                    {% if outcome.state == 'match' %}
+                        <span class="text-ink-muted">Issue id</span>
+                        <strong class="ms-2 font-mono break-all" data-testid="issue-id-extracted">{{ outcome.issueId }}</strong>
+                    {% elseif outcome.state == 'error' %}
+                        <span class="text-destructive" data-testid="issue-id-message">{{ outcome.message }}</span>
+                    {% else %}
+                        <span class="text-ink-muted" data-testid="issue-id-message">{{ outcome.message }}</span>
+                    {% endif %}
+                </div>
+            </div>
+        </twig:Card:Content>
+    </twig:Card>
+</div>

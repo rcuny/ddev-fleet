@@ -1,0 +1,12 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-backup.timer and enabled by step 98.
+# Daily database backup; Persistent runs a missed one at the next boot.
+[Unit]
+Description=Daily ddev-fleet database backup
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=1h
+Persistent=true
+
+[Install]
+WantedBy=timers.target

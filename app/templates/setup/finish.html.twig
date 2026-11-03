@@ -1,0 +1,62 @@
+{% extends 'setup/base.html.twig' %}
+
+{% block setup_content %}
+    {% if error and running %}
+        <twig:Alert data-testid="setup-finish-running">
+            <twig:ux:icon name="lucide:info" />
+            <twig:Alert:Title>Finish is already running</twig:Alert:Title>
+            <twig:Alert:Description>
+                <p>Another request is finishing the setup, and it may be done by now. Wait a minute, then open the site and sign in. If the sign-in page does not appear, come back to this page and press Finish again.</p>
+            </twig:Alert:Description>
+        </twig:Alert>
+    {% elseif error %}
+        <twig:Alert variant="destructive" data-testid="setup-finish-error">
+            <twig:ux:icon name="lucide:circle-alert" />
+            <twig:Alert:Title>Setup did not finish</twig:Alert:Title>
+            <twig:Alert:Description class="text-destructive">
+                <p>{{ error }}</p>
+                <p>Nothing was marked complete and this link still works. Fix the problem, then press Finish again.</p>
+            </twig:Alert:Description>
+        </twig:Alert>
+    {% endif %}
+
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>Review and finish</h1>
+            <p>Finishing switches on the sign-in gate. From then on Fleet is only reachable after signing in, and this wizard disappears.</p>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            <dl class="grid gap-4" data-testid="setup-summary">
+                <div>
+                    <dt class="text-xs text-ink-muted">Domain</dt>
+                    <dd data-testid="summary-domain">{{ domain }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs text-ink-muted">Certificates</dt>
+                    <dd data-testid="summary-tls">{{ tls_label }}</dd>
+                </div>
+                <div>
+                    <dt class="text-xs text-ink-muted">Administrator</dt>
+                    <dd data-testid="summary-admin">{{ admin.username }} ({{ admin.email }})</dd>
+                </div>
+                {% for role, fingerprint in fingerprints %}
+                    <div>
+                        <dt class="text-xs text-ink-muted">{{ role|capitalize }} key fingerprint</dt>
+                        <dd><code class="break-all text-xs" data-testid="summary-key-{{ role }}">{{ fingerprint }}</code></dd>
+                    </div>
+                {% endfor %}
+                <div>
+                    <dt class="text-xs text-ink-muted">Claude token</dt>
+                    <dd data-testid="summary-claude">{{ claude_set ? 'Stored' : 'Not set (optional)' }}</dd>
+                </div>
+            </dl>
+        </twig:Card:Content>
+        <twig:Card:Footer class="flex-col items-stretch gap-3 md:items-start">
+            <form method="post" action="{{ path('setup_finish') }}" class="grid w-full gap-3" data-controller="busy" data-action="submit->busy#start" data-testid="setup-finish-form">
+                {{ include('setup/_csrf.html.twig') }}
+                <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-busy-target="button" data-testid="setup-finish">Finish setup</twig:Button>
+                <p class="text-xs text-ink-muted" data-busy-target="note" hidden role="status">Applying the configuration. This can take a minute or two; keep this page open.</p>
+            </form>
+        </twig:Card:Footer>
+    </twig:Card>
+{% endblock %}

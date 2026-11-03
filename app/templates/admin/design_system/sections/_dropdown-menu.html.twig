@@ -1,0 +1,67 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<div class="flex flex-wrap items-start gap-10">
+    <div class="flex flex-col items-center gap-2">
+        <twig:DropdownMenu id="ds-menu-account" align="end">
+            <twig:DropdownMenu:Trigger>
+                <twig:Button variant="outline" {{ ...dropdown_menu_trigger_attrs }}>
+                    Account
+                    <twig:ux:icon name="lucide:chevron-down" data-icon="inline-end" />
+                </twig:Button>
+            </twig:DropdownMenu:Trigger>
+            <twig:DropdownMenu:Content class="w-48">
+                <twig:DropdownMenu:Item><twig:ux:icon name="lucide:user" />Profile</twig:DropdownMenu:Item>
+                <twig:DropdownMenu:Item><twig:ux:icon name="lucide:settings" />Settings</twig:DropdownMenu:Item>
+                <twig:DropdownMenu:Separator />
+                <twig:DropdownMenu:Item><twig:ux:icon name="lucide:log-out" />Sign out</twig:DropdownMenu:Item>
+            </twig:DropdownMenu:Content>
+        </twig:DropdownMenu>
+        <span class="text-xs text-ink-muted">Button trigger</span>
+    </div>
+
+    <div class="flex flex-col items-center gap-2">
+        <twig:DropdownMenu id="ds-menu-item" align="end">
+            <twig:DropdownMenu:Trigger>
+                <twig:Button variant="ghost" size="icon" class="size-11 md:size-8" aria-label="Settings" {{ ...dropdown_menu_trigger_attrs }}>
+                    <twig:ux:icon name="lucide:ellipsis" />
+                </twig:Button>
+            </twig:DropdownMenu:Trigger>
+            <twig:DropdownMenu:Content>
+                <twig:DropdownMenu:Item>Deactivate</twig:DropdownMenu:Item>
+                <twig:DropdownMenu:Item variant="destructive"><twig:ux:icon name="lucide:trash-2" />Delete</twig:DropdownMenu:Item>
+            </twig:DropdownMenu:Content>
+        </twig:DropdownMenu>
+        <span class="text-xs text-ink-muted">Item settings menu</span>
+    </div>
+</div>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="dropdown-menu" title="Dropdown menu" :sample="sample|trim" :components="['DropdownMenu', 'Button']">
+    <twig:block name="description">
+        <p>
+            A floating menu attached to a trigger. Items take a leading icon, a separator groups related items, and a destructive item uses the danger colour.
+            Arrow keys, Home, End and Escape work through the kit's Stimulus <code>dropdown-menu</code> controller.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Account menus in the shell.</li>
+            <li>Row-level "more actions" on listings; the settings menu in a page header.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>Choosing a form value: use <code>NativeSelect</code>.</li>
+            <li>Navigating between top-level destinations: use the main navigation.</li>
+            <li>Long scrollable lists: use a dialog.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li><code>DropdownMenu</code>: <code>id</code> (unique, required), <code>side</code> top | right | bottom | left, <code>align</code> start | center | end.</li>
+            <li><code>DropdownMenu:Item</code>: <code>variant</code> default | destructive, <code>as</code> button | a | div, <code>disabled</code>, <code>closeOnSelect</code>.</li>
+            <li><strong>Item settings menu</strong>: the standard row/page overflow trigger is a ghost icon <code>Button</code> with <code>lucide:ellipsis</code> and an <code>aria-label</code>.</li>
+            <li>Also available: <code>Label</code>, <code>Group</code>, <code>CheckboxItem</code>, <code>RadioGroup</code>/<code>RadioItem</code>, <code>Sub</code>.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

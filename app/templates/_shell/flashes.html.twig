@@ -1,0 +1,23 @@
+{#- Flash messages of the previous request. Read only when a session already exists: a plain GET must not start one. A Turbo prefetch (a hover or a touch on a link) is not the visit: reading the flashes there would consume the message the redirect is about to show. -#}
+{% if app.request and app.request.hasPreviousSession and app.request.headers.get('X-Sec-Purpose') != 'prefetch' %}
+    {% set flashes = app.flashes %}
+    {% if flashes|length > 0 %}
+        <div class="mb-6 grid gap-2" data-testid="flashes" data-turbo-temporary>
+            {% for type, messages in flashes %}
+                {% for message in messages %}
+                    {% if type == 'warning' or type == 'danger' or type == 'error' %}
+                        <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">
+                            <twig:ux:icon name="lucide:triangle-alert" />
+                            <twig:Alert:Description class="text-ink-body [overflow-wrap:anywhere]">{{ message }}</twig:Alert:Description>
+                        </twig:Alert>
+                    {% else %}
+                        <twig:Alert class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">
+                            <twig:ux:icon name="lucide:check" />
+                            <twig:Alert:Description class="text-ink-body [overflow-wrap:anywhere]">{{ message }}</twig:Alert:Description>
+                        </twig:Alert>
+                    {% endif %}
+                {% endfor %}
+            {% endfor %}
+        </div>
+    {% endif %}
+{% endif %}

@@ -1,169 +1,116 @@
-/** The Webhooks screen in a real browser (FLE-30): real htmx, real CSP, seeded delivery logs. */
-import { appendFileSync, mkdirSync, rmSync } from 'node:fs';
-import { join } from 'node:path';
-import type { Daemon } from './support/fixtures';
-import { expect, test } from './support/fixtures';
+import { createHmac } from 'node:crypto';
+import { expect, test, type Page } from '@playwright/test';
+import { blockingViolations } from './support/axe';
+import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
+import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
-const INSTANCE = 'demo--fle-30';
+const isPhone = (testInfo: { project: { name: string } }) => testInfo.project.name === 'phone';
 
-function logDir(daemon: Daemon): string {
-  return join(daemon.home, 'logs', 'webhooks');
+const sign = (body: string, secret: string): string => `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
+
+async function createSecret(page: Page, project: string): Promise<string> {
+  await page.goto(`/admin/projects/${project}/webhooks`);
+  await submitAndWait(page, page.locator('[data-testid=webhook-endpoint][data-source=jira]').getByTestId('webhook-create'));
+  await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
+  const secret = await page.getByTestId('webhook-secret-value').inputValue();
+  expect(secret).toMatch(/^[0-9a-f]{64}$/);
+  return secret;
 }
 
-function seed(daemon: Daemon, file: string, entries: object[]) {
-  mkdirSync(logDir(daemon), { recursive: true });
-  appendFileSync(join(logDir(daemon), file), entries.map((e) => JSON.stringify(e) + '\n').join(''));
-}
+test.describe('webhooks', () => {
+  test('the page lists every project with its addresses and works without overflow', async ({ page }, testInfo) => {
+    const project = uniqueName('wh');
+    const errors = collectBrowserErrors(page);
+    await createProjectViaUi(page, project);
+    try {
+      await page.goto('/admin/webhooks');
+      await page.waitForLoadState('networkidle');
 
-test.beforeEach(async ({ daemon }) => {
-  // The daemon (and its home) is shared by all tests: start from empty logs and no instance.
-  rmSync(logDir(daemon), { recursive: true, force: true });
-  rmSync(join(daemon.home, 'instances', INSTANCE), { recursive: true, force: true });
-  mkdirSync(join(daemon.home, 'instances', INSTANCE), { recursive: true });
-  seed(daemon, 'jira.jsonl', [
-    {
-      ts: '2026-10-18T09:00:00+00:00',
-      project: 'demo',
-      delivery_id: 'jira-delivery-e2e',
-      event: 'jira:issue_updated',
-      issue: 'FLE-30',
-      from: 'To Do',
-      to: 'Dispatched',
-      result: 'accepted',
-      reason: null,
-      instance: INSTANCE,
-      job: 'abc123def456',
-      action: 'deploy',
-      template: 'jira-work',
-      label: 'FLE-30',
-      rule: 'on_status=Dispatched',
-    },
-  ]);
-  seed(daemon, 'bitbucket.jsonl', [
-    {
-      ts: '2026-10-18T10:00:00+00:00',
-      project: 'demo',
-      delivery_id: 'bb-delivery-e2e',
-      event: 'repo:push',
-      branch: 'feature/x--pw-run',
-      result: 'ignored',
-      reason: 'no matching rule',
-      action: 'deploy',
-      template: 'ci-pw',
-      rule: 'on_event=repo:push branch=*--pw-run',
-    },
-  ]);
-});
+      await expect(page).toHaveTitle(/Webhooks/);
+      await expect(page.locator('h1')).toHaveCount(1);
+      const mine = page.locator(`[data-testid=webhook-endpoint][data-project=${project}]`);
+      await expect(mine).toHaveCount(2);
+      await expect(page.locator(`[data-testid=webhook-endpoint][data-project=${project}][data-source=jira]`).getByTestId('webhook-url')).toHaveValue(new RegExp(`/hooks/jira/${project}$`));
+      await expect(page.locator(`[data-testid=webhook-endpoint][data-project=${project}][data-source=bitbucket]`).getByTestId('webhook-url')).toHaveValue(new RegExp(`/hooks/bitbucket/${project}$`));
+      await expect(mine.first().getByTestId('webhook-copy')).toBeVisible();
 
-test.afterEach(async ({ daemon }) => {
-  rmSync(logDir(daemon), { recursive: true, force: true });
-  rmSync(join(daemon.home, 'instances', INSTANCE), { recursive: true, force: true });
-});
+      expect(await hasHorizontalOverflow(page)).toBe(false);
+      expect(await blockingViolations(page)).toEqual([]);
+      if (isPhone(testInfo)) {
+        for (const control of await mine.locator('button[type=submit], input:not([type=hidden]), button, summary').all()) {
+          const box = await control.boundingBox();
+          expect(box, 'a control is visible').not.toBeNull();
+          expect(box!.height).toBeGreaterThanOrEqual(43.5);
+        }
+      }
+      expect(errors).toEqual([]);
+    } finally {
+      await deleteProjectViaUi(page, project);
+    }
+  });
 
-test('the page loads under the CSP with the nav link and both sources, newest first', async ({
-  page,
-  daemon,
-}) => {
-  const response = await page.goto(daemon.url + '/webhooks');
-  expect(response?.headers()['content-security-policy']).toContain("script-src 'self'");
+  test('a secret is shown once, a bad signature is refused and the old secret dies on rotation', async ({ page }) => {
+    const project = uniqueName('wh');
+    const errors = collectBrowserErrors(page);
+    await createProjectViaUi(page, project);
+    try {
+      const first = await createSecret(page, project);
+      expect(await hasHorizontalOverflow(page)).toBe(false);
+      expect(await blockingViolations(page)).toEqual([]);
 
-  const nav = page.locator('nav.main-nav a');
-  await expect(nav).toHaveText(['Instances', 'Secrets', 'Webhooks', 'Scheduled jobs']);
-  await expect(page.getByRole('heading', { name: 'Webhooks' })).toBeVisible();
+      await page.getByTestId('webhook-secret-done').click();
+      await expect(page.getByTestId('webhook-rotated')).toBeVisible();
+      expect(await page.content()).not.toContain(first);
 
-  const rows = page.locator('tr.webhook-row');
-  await expect(rows).toHaveCount(2);
-  await expect(rows.nth(0)).toContainText('repo:push');
-  await expect(rows.nth(0)).toContainText('bitbucket');
-  await expect(rows.nth(0)).toContainText('bb-delivery-e2e');
-  await expect(rows.nth(1)).toContainText('FLE-30');
-  await expect(rows.nth(1)).toContainText('To Do → Dispatched');
-  await expect(rows.nth(1)).toContainText('on_status=Dispatched');
-  await expect(rows.nth(1)).toContainText('deploy jira-work');
-  await expect(rows.nth(0)).toContainText('on_event=repo:push branch=*--pw-run');
-  // The deployed instance exists, so it is a link to its URL.
-  await expect(rows.nth(1).getByRole('link', { name: INSTANCE })).toHaveAttribute(
-    'href',
-    `https://${INSTANCE}.fleet.example.test`,
-  );
-});
+      const body = JSON.stringify({ webhookEvent: 'jira:issue_updated', issue: { key: 'PW-1' }, changelog: { items: [{ field: 'status', fromString: 'To Do', toString: 'Dispatched' }] } });
+      const url = `/hooks/jira/${project}`;
+      const headers = (secret: string) => ({ 'Content-Type': 'application/json', 'X-Hub-Signature': sign(body, secret), 'X-Atlassian-Webhook-Identifier': `pw-${Date.now()}` });
 
-test('the nav link opens the page from the dashboard', async ({ page, daemon }) => {
-  await page.goto(daemon.url + '/');
-  await page.getByRole('link', { name: 'Webhooks' }).click();
-  await expect(page).toHaveURL(/\/webhooks$/);
-  await expect(page.locator('tr.webhook-row')).toHaveCount(2);
-});
+      const bad = await page.request.post(url, { data: body, headers: headers('wrong-secret') });
+      expect(bad.status()).toBe(401);
+      const good = await page.request.post(url, { data: body, headers: headers(first) });
+      expect(good.status()).toBe(200);
+      expect((await good.json()).result).toBe('ignored');
 
-test('a filter narrows the rows and refresh keeps it', async ({ page, daemon }) => {
-  await page.goto(daemon.url + '/webhooks');
-  const rows = page.locator('tr.webhook-row');
-  await expect(rows).toHaveCount(2);
+      // The delivery log shows the accepted request and not the rejected one.
+      await page.goto(`/admin/projects/${project}/webhooks`);
+      await expect(page.getByTestId('delivery-row')).toHaveCount(1);
+      await expect(page.getByTestId('delivery-row')).toContainText('PW-1');
+      expect(await hasHorizontalOverflow(page)).toBe(false);
+      expect(await blockingViolations(page)).toEqual([]);
 
-  const partial = page.waitForResponse((r) => r.url().includes('/ui/webhooks/table'));
-  await page.locator('select[name=source]').selectOption('jira');
-  expect((await partial).url()).toContain('source=jira');
-  await expect(rows).toHaveCount(1);
-  await expect(rows.first()).toContainText('FLE-30');
-  await expect(page.locator('select[name=source]')).toHaveValue('jira'); // the form is not re-rendered
+      // The overview, with deliveries in it, must not need a sideways scroll on a phone either.
+      await page.goto('/admin/webhooks');
+      await expect(page.getByTestId('delivery-row').first()).toBeVisible();
+      expect(await hasHorizontalOverflow(page)).toBe(false);
+      expect(await blockingViolations(page)).toEqual([]);
 
-  // A new delivery arrives; Refresh re-fetches the table with the current filter.
-  seed(daemon, 'jira.jsonl', [
-    { ts: '2026-10-18T12:00:00+00:00', project: 'demo', event: 'jira:issue_updated', issue: 'FLE-31', result: 'ignored' },
-  ]);
-  seed(daemon, 'bitbucket.jsonl', [
-    { ts: '2026-10-18T13:00:00+00:00', project: 'demo', event: 'repo:push', branch: 'late', result: 'ignored' },
-  ]);
-  await page.getByRole('button', { name: 'Refresh' }).click();
-  await expect(rows).toHaveCount(2);
-  await expect(rows.first()).toContainText('FLE-31');
-  await expect(page.locator('tr.webhook-row', { hasText: 'late' })).toHaveCount(0);
+      // Rotation: confirm inside the details, then the old secret stops working.
+      const jira = page.locator(`[data-testid=webhook-endpoint][data-source=jira][data-project=${project}]`);
+      await jira.getByText('Rotate secret').click();
+      await submitAndWait(page, jira.getByTestId('webhook-rotate'));
+      await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
+      const second = await page.getByTestId('webhook-secret-value').inputValue();
+      expect(second).not.toBe(first);
 
-  await page.locator('select[name=source]').selectOption('');
-  await expect(rows).toHaveCount(4);
-});
+      expect((await page.request.post(url, { data: body, headers: headers(first) })).status()).toBe(401);
+      expect((await page.request.post(url, { data: body, headers: headers(second) })).status()).toBe(200);
+      expect(errors).toEqual([]);
+    } finally {
+      await deleteProjectViaUi(page, project);
+    }
+  });
 
-test('Hide ignored hooks is unchecked by default, hides ignored rows and survives Refresh', async ({
-  page,
-  daemon,
-}) => {
-  await page.goto(daemon.url + '/webhooks');
-  const rows = page.locator('tr.webhook-row');
-  const hide = page.getByLabel('Hide ignored hooks');
-  await expect(hide).not.toBeChecked();
-  await expect(rows).toHaveCount(2);
-  await expect(page.locator('tr.webhook-row', { hasText: 'bb-delivery-e2e' })).toHaveCount(1);
-
-  const partial = page.waitForResponse((r) => r.url().includes('/ui/webhooks/table'));
-  await hide.check();
-  expect((await partial).url()).toContain('hide_ignored=1');
-  await expect(rows).toHaveCount(1);
-  await expect(rows.first()).toContainText('FLE-30');
-  await expect(page.locator('tr.webhook-row', { hasText: 'bb-delivery-e2e' })).toHaveCount(0);
-  await expect(hide).toBeChecked();
-
-  // Refresh keeps the box: a new ignored delivery stays hidden, a new accepted one shows.
-  seed(daemon, 'bitbucket.jsonl', [
-    { ts: '2026-10-18T13:00:00+00:00', project: 'demo', event: 'repo:push', branch: 'late', result: 'ignored' },
-    { ts: '2026-10-18T14:00:00+00:00', project: 'demo', event: 'repo:push', branch: 'ontime', result: 'triggered' },
-  ]);
-  await page.getByRole('button', { name: 'Refresh' }).click();
-  await expect(rows).toHaveCount(2);
-  await expect(page.locator('tr.webhook-row', { hasText: 'late' })).toHaveCount(0);
-  await expect(page.locator('tr.webhook-row', { hasText: 'ontime' })).toHaveCount(1);
-
-  await hide.uncheck();
-  await expect(rows).toHaveCount(4);
-});
-
-test('a filter with no match shows the empty state, not an error', async ({ page, daemon }) => {
-  await page.goto(daemon.url + '/webhooks?project=ghost');
-  await expect(page.locator('tr.webhook-row')).toHaveCount(0);
-  await expect(page.locator('.webhook-empty')).toContainText('No delivery matches');
-});
-
-test('missing logs show the empty state', async ({ page, daemon }) => {
-  rmSync(logDir(daemon), { recursive: true, force: true });
-  await page.goto(daemon.url + '/webhooks');
-  await expect(page.locator('.webhook-empty')).toContainText('No webhook delivery has been logged');
+  test('the Webhooks tab is part of the project sections', async ({ page }) => {
+    const project = uniqueName('wh');
+    await createProjectViaUi(page, project);
+    try {
+      await page.goto(`/admin/projects/${project}`);
+      await page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Webhooks' }).click();
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/webhooks$`));
+      await expect(page.getByTestId('deliveries-empty')).toBeVisible();
+    } finally {
+      await deleteProjectViaUi(page, project);
+    }
+  });
 });

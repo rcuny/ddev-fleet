@@ -1,0 +1,78 @@
+{# symfony-design-system:start #}
+{%- props
+    ## string Anchor id and the sidebar slug.
+    id,
+    ## string Section heading.
+    title,
+    ## string|null Twig source of the example. Shown verbatim in the Sample block and, unless a preview block is given, rendered as the Preview.
+    sample = null,
+    ## array<int, string> Kit and own components the section documents; each is marked data-component.
+    components = []
+-%}
+<section id="{{ id }}" data-ds-section="{{ id }}" class="border-b border-hairline pt-8 pb-16 first:pt-0">
+    <h2 class="mb-6">{{ title }}</h2>
+
+    {## 1. Preview: the live element(s). -#}
+    <div data-ds-block="preview" class="rounded-lg border border-hairline p-4 sm:p-6">
+        {%- block preview -%}
+            {#- Only committed, static sample strings may reach template_from_string: it has no sandbox. A repo test enforces that this is its only use. -#}
+            {%- if sample is not null -%}
+                {{- include(template_from_string(sample)) -}}
+            {%- endif -%}
+        {%- endblock -%}
+    </div>
+
+    {## 2. Description. -#}
+    {%- set description_html -%}{%- block description %}{% endblock -%}{%- endset -%}
+    {%- if description_html|trim is not empty %}
+        <div data-ds-block="description" class="mt-6 max-w-2xl space-y-3 text-ink-body">{{ description_html }}</div>
+    {%- endif %}
+
+    {## 3. Use cases. -#}
+    {%- set when_to_use_html -%}{%- block when_to_use %}{% endblock -%}{%- endset -%}
+    {%- set when_not_to_use_html -%}{%- block when_not_to_use %}{% endblock -%}{%- endset -%}
+    {%- if when_to_use_html|trim is not empty or when_not_to_use_html|trim is not empty %}
+        <div data-ds-block="use-cases" class="mt-6 grid gap-4 sm:grid-cols-2">
+            {%- if when_to_use_html|trim is not empty %}
+                <div class="rounded-md border border-hairline p-4">
+                    <p class="text-sm font-semibold text-ink-display">When to use</p>
+                    <div class="mt-2 text-sm [&_li]:mt-0.5 [&_ul]:list-disc [&_ul]:pl-5">{{ when_to_use_html }}</div>
+                </div>
+            {%- endif %}
+            {%- if when_not_to_use_html|trim is not empty %}
+                <div class="rounded-md border border-hairline p-4">
+                    <p class="text-sm font-semibold text-ink-display">When not to use</p>
+                    <div class="mt-2 text-sm [&_li]:mt-0.5 [&_ul]:list-disc [&_ul]:pl-5">{{ when_not_to_use_html }}</div>
+                </div>
+            {%- endif %}
+        </div>
+    {%- endif %}
+
+    {## 4. Sample: the Twig source, verbatim. -#}
+    {%- if sample is not null %}
+        <div data-ds-block="sample" class="mt-6">
+            <p class="mb-2 text-sm font-semibold text-ink-display">Sample</p>
+            <twig:Ds:CodeBlock :code="sample" />
+        </div>
+    {%- endif %}
+
+    {## 5. Options and variations (omitted for primitives) and the components the section documents. -#}
+    {%- set options_html -%}{%- block options %}{% endblock -%}{%- endset -%}
+    {%- if options_html|trim is not empty or components is not empty %}
+        <div data-ds-block="options" class="mt-6">
+            <p class="mb-2 text-sm font-semibold text-ink-display">Options &amp; variations</p>
+            {%- if options_html|trim is not empty %}
+                <div class="text-sm [&_li]:mt-1 [&_ul]:list-disc [&_ul]:pl-5">{{ options_html }}</div>
+            {%- endif %}
+            {%- if components is not empty %}
+                <p class="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                    <span class="text-ink-muted">Components:</span>
+                    {%- for component in components %}
+                        <code data-component="{{ component }}" class="rounded border border-hairline bg-surface px-1.5 py-0.5 text-xs">&lt;twig:{{ component }}&gt;</code>
+                    {%- endfor %}
+                </p>
+            {%- endif %}
+        </div>
+    {%- endif %}
+</section>
+{# symfony-design-system:end #}

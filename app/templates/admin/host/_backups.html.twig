@@ -1,0 +1,46 @@
+{% set form = forms.backups %}
+<twig:Card data-testid="host-tab-backups">
+    <twig:Card:Header>
+        <twig:Card:Title>Database backups</twig:Card:Title>
+        <twig:Card:Description>A snapshot of the fleet database is written every day. Download one to keep it off this host.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        <form method="post" action="{{ path('settings_backup_create') }}" data-testid="backup-now-form">
+            <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+            <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto">Back up now</twig:Button>
+        </form>
+
+        {% if backups is empty %}
+            <p class="text-sm text-ink-muted" data-testid="backups-empty">No backup has been made yet.</p>
+        {% else %}
+            <twig:Table data-testid="backups-table">
+                <twig:Table:Header>
+                    <twig:Table:Row>
+                        <twig:Table:Head>Date (UTC)</twig:Table:Head>
+                        <twig:Table:Head>Size</twig:Table:Head>
+                        <twig:Table:Head><span class="sr-only">Download</span></twig:Table:Head>
+                    </twig:Table:Row>
+                </twig:Table:Header>
+                <twig:Table:Body>
+                    {% for backup in backups %}
+                        <twig:Table:Row data-testid="backup-row">
+                            <twig:Table:Cell>{{ backup.modifiedAt|date('Y-m-d H:i', 'UTC') }}</twig:Table:Cell>
+                            <twig:Table:Cell>{{ backup.size }}</twig:Table:Cell>
+                            <twig:Table:Cell class="text-end">
+                                <twig:Button as="a" variant="outline" class="h-11 md:h-8" href="{{ path('settings_backup_download', {name: backup.name}) }}" download aria-label="Download {{ backup.name }}">Download</twig:Button>
+                            </twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% endfor %}
+                </twig:Table:Body>
+            </twig:Table>
+        {% endif %}
+
+        {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-retention-form'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.days) }}
+            {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+        {{ form_end(form) }}
+
+        <p class="text-xs text-ink-muted">The encryption key for the stored secrets (<code>keys/secret.key</code>) is not part of a backup: copy it somewhere safe once. How to restore a backup: "Backup and restore" in the installation guide.</p>
+    </twig:Card:Content>
+</twig:Card>

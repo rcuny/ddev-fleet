@@ -1,0 +1,68 @@
+security:
+    # Identities are never stored: the authenticating reverse proxy asserts them per request.
+    # The provider exists only because a firewall needs one; the authenticators build FleetUser themselves.
+    providers:
+        users_in_memory: { memory: null }
+
+    role_hierarchy:
+        ROLE_ADMIN: [ROLE_MEMBER]
+
+    firewalls:
+        dev:
+            # Dev tools and static assets are never authenticated.
+            pattern: ^/(_profiler|_wdt|assets)/
+            security: false
+        main:
+            stateless: true
+            provider: users_in_memory
+            entry_point: App\Security\RemoteUserAuthenticator
+            # A signed-in user without the role sees the 403 inside the app shell.
+            access_denied_handler: App\Security\ForbiddenHandler
+            # custom_authenticators is set per environment below (lists would otherwise concatenate).
+
+    # Note: Only the *first* matching rule is applied
+    access_control:
+        - { path: ^/health$, roles: PUBLIC_ACCESS }
+        # Signed webhooks: Caddy exempts /hooks/* from the Authelia gate (Jira and Bitbucket cannot log in), so the
+        # app authenticates them itself, by the HMAC of the body (App\Fleet\Webhooks\WebhookReceiver).
+        - { path: ^/hooks/, roles: PUBLIC_ACCESS }
+        # The dev role switch must stay reachable while the stand-in role is "none" (the route
+        # does not exist in prod, where this rule is inert).
+        - { path: ^/_dev/stand-in/(admin|member|none)$, roles: PUBLIC_ACCESS }
+        # The setup wizard has its own gate (App\Setup\SetupAccessSubscriber: one-time token session, 404 once complete).
+        - { path: ^/setup(/|$), roles: PUBLIC_ACCESS }
+        - { path: ^/admin, roles: ROLE_ADMIN }
+        # The live component endpoint serves any registered component by name. It only requires a signed-in user:
+        # every #[AsLiveComponent] class declares its own #[IsGranted] (ComponentsAccessTest fails a component
+        # without one), so a member-facing component never inherits an admin blanket and an admin one is not open.
+        # Two rules, one decision: the route name survives any spelling of the path, the path also covers a
+        # route that is renamed or re-mounted under the same prefix.
+        # ROLE_MEMBER, not IS_AUTHENTICATED_FULLY: a site-only account (FLE-101; ROLE_USER and ROLE_SITE_ONLY, see
+        # FleetUser::getRoles) only opens the instance sites and gets the 403 page everywhere in the app.
+        - { route: ux_live_component, roles: ROLE_MEMBER }
+        - { path: ^/_components, roles: ROLE_MEMBER }
+        - { path: ^/, roles: ROLE_MEMBER }
+
+when@prod:
+    security:
+        firewalls:
+            main:
+                custom_authenticators:
+                    - App\Security\RemoteUserAuthenticator
+
+# The dev/test stand-in authenticator exists in these environments only.
+when@dev:
+    security:
+        firewalls:
+            main:
+                custom_authenticators:
+                    - App\Security\RemoteUserAuthenticator
+                    - App\Security\StandIn\StandInAuthenticator
+
+when@test:
+    security:
+        firewalls:
+            main:
+                custom_authenticators:
+                    - App\Security\RemoteUserAuthenticator
+                    - App\Security\StandIn\StandInAuthenticator

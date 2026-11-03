@@ -1,0 +1,49 @@
+{# symfony-design-system:start #}
+{% extends 'base.html.twig' %}
+
+{% block title %}Design system · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <div class="mx-auto flex w-full max-w-7xl gap-10">
+        <aside class="hidden w-56 shrink-0 lg:block">
+            <div class="sticky top-20 max-h-[calc(100dvh-6rem)] overflow-y-auto pb-6">
+                <twig:Ds:SidebarNav :groups="groups" />
+            </div>
+        </aside>
+
+        <div class="min-w-0 flex-1">
+            <twig:PageHeader
+                title="Design system"
+                description="Single source of truth for every visual primitive in this app. Reuse what is here; propose additions before building one-offs."
+                class="mb-10 max-w-3xl"
+            >
+                <twig:block name="actions">
+                    <twig:Sheet id="ds-nav" side="left">
+                        <twig:Sheet:Trigger>
+                            <twig:Button variant="outline" class="h-11 px-4 lg:hidden" {{ ...sheet_trigger_attrs }}>
+                                <twig:ux:icon name="lucide:menu" data-icon="inline-start" />
+                                Sections
+                            </twig:Button>
+                        </twig:Sheet:Trigger>
+                        <twig:Sheet:Content>
+                            <twig:Sheet:Header>
+                                <twig:Sheet:Title>Sections</twig:Sheet:Title>
+                                <twig:Sheet:Description class="sr-only">Jump to a section of the design system.</twig:Sheet:Description>
+                            </twig:Sheet:Header>
+                            <div class="overflow-y-auto px-4 pb-6">
+                                <twig:Ds:SidebarNav :groups="groups" label="Design system sections (menu)" :closing="true" />
+                            </div>
+                        </twig:Sheet:Content>
+                    </twig:Sheet>
+                </twig:block>
+            </twig:PageHeader>
+
+            {% for group in groups %}
+                {% for partial in group.sections %}
+                    {{ include('admin/design_system/sections/_' ~ partial ~ '.html.twig') }}
+                {% endfor %}
+            {% endfor %}
+        </div>
+    </div>
+{% endblock %}
+{# symfony-design-system:end #}

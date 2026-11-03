@@ -1,0 +1,29 @@
+{% set form = forms.general %}
+<twig:Card data-testid="host-tab-general">
+    <twig:Card:Header>
+        <twig:Card:Title>General</twig:Card:Title>
+        <twig:Card:Description>The address the fleet is served on and how its certificates are obtained.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        <dl class="grid gap-4 sm:grid-cols-2">
+            <div data-testid="host-domain">
+                <dt class="text-sm text-ink-muted">Domain</dt>
+                <dd><strong class="break-all">{{ host.domain }}</strong></dd>
+            </div>
+            <div data-testid="host-tls-mode">
+                <dt class="text-sm text-ink-muted">Certificates (TLS mode)</dt>
+                <dd><strong>{{ host.tlsMode.value }}</strong></dd>
+            </div>
+        </dl>
+        <div class="grid gap-2 text-sm" data-testid="host-general-cli">
+            <p><strong>Domain.</strong> Set by the installer. Changing it after setup is not supported yet: it involves DNS records, certificates and the sign-in cookie domain.</p>
+            <p><strong>TLS mode.</strong> Run <code class="break-all">sudo fleet setup:reset</code> on the host, change the mode in the setup wizard's second step and finish again. If Caddy does not come back after a change, go back to HTTP-01 from a shell: <code class="break-all">sudo fleet host:init --tls-mode=http01 --force &amp;&amp; sudo fleet host:render --apply &amp;&amp; sudo systemctl restart caddy</code>.</p>
+        </div>
+        {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-general-form'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.acmeEmail) }}
+            <p class="text-xs text-ink-muted">After saving, apply the new address to Caddy with <code class="break-all">sudo fleet host:render --apply</code> on the host.</p>
+            {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+        {{ form_end(form) }}
+    </twig:Card:Content>
+</twig:Card>

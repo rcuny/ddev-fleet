@@ -1,8 +1,8 @@
 """Regression tests for the `authelia` Ansible role's rendered artefacts.
 
 Covers two real bugs found by a live integration run against the actual
-Caddy/Authelia binaries (.claude/user/tmp/authelia-integration/results.md
-in the companion repo, not shipped here):
+Caddy/Authelia binaries (the integration notes are kept outside this
+repository):
 
 1. `configuration.yml.j2` had a plain YAML `#` comment containing a
    literal, unescaped `{{ secret "path" }}` — Jinja (and, confirmed
@@ -144,7 +144,7 @@ def test_secrets_conf_env_vars_use_authelia_prefix_not_x_authelia():
 
     # Each line's value is a Jinja reference into vars/main.yml's
     # authelia_secret_env (see test_drop_in_and_validate_share_the_same_secret_env_mapping),
-    # not a hardcoded literal path — that's the DRY fix for the ddev2 rollout's
+    # not a hardcoded literal path — that's the DRY fix for the first live rollout's
     # `authelia config validate` failure below.
     referenced_keys = {
         re.match(
@@ -250,7 +250,7 @@ def test_acl_package_and_setfacl_are_guarded_to_non_root_service_user():
 
 
 def test_tmpfiles_mask_keeps_only_the_e_rule_and_precedes_secret_generation():
-    """Reboot regression (ddev4.fleet.example.com, 2026-10-01): the Debian authelia
+    """Reboot regression (a live server, 2026-10-01): the Debian authelia
     package's /usr/lib/tmpfiles.d/authelia.conf has `Z /etc/authelia/* 0640
     authelia authelia`, which at every boot turned /etc/authelia/secrets
     into 0640 (no execute bit) so Authelia couldn't open its secrets and

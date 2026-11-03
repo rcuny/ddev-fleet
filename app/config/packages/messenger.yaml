@@ -1,0 +1,28 @@
+framework:
+    messenger:
+        failure_transport: failed
+
+        transports:
+            # Both live in queue.sqlite (the `queue` Doctrine connection); created by messenger:setup-transports.
+            jobs:
+                dsn: 'doctrine://queue?queue_name=jobs&auto_setup=false'
+                retry_strategy:
+                    max_retries: 0
+            failed:
+                dsn: 'doctrine://queue?queue_name=failed&auto_setup=false'
+
+        routing:
+            App\Message\RunJob: jobs
+
+# In dev and test a click runs the job inside the request (with the recording command runner); prod uses the queue.
+when@dev:
+    framework:
+        messenger:
+            transports:
+                jobs: 'sync://'
+
+when@test:
+    framework:
+        messenger:
+            transports:
+                jobs: 'sync://'

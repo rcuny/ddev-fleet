@@ -1,0 +1,9 @@
+{#- The project memberships field; says so when there is no project to choose from. Needs: field (the `projects` form view). -#}
+{% if field|length == 0 %}
+    <div class="grid gap-2" data-slot="form-row" data-testid="projects-none">
+        <span class="text-sm font-medium leading-none text-ink-display">{{ field.vars.label }}</span>
+        <p class="text-sm text-ink-muted">There are no projects yet. <a href="{{ path('project_new') }}">Create one</a>, then add people to it here.</p>
+    </div>
+{% else %}
+    {{ form_row(field) }}
+{% endif %}

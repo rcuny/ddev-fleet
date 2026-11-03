@@ -1,332 +1,197 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-28
+Last updated: 2026-10-19
 Type: documentation
 ---
 
-# Fleet networking — topology, ports, and how to add one
+# Networking (1.x)
 
-How traffic reaches a deployed instance, every port the fleet manages, and
-the exact steps to expose a new one. Generalizes `docs/README-typesense.md`'s
-topology (kept as the worked example) to any named port, per
-`2026-07-24-fleet-port-exposure-design.md`.
+How traffic reaches a deployed instance, every port the host uses, how named ports are served, what the in-network
+port mirror is for, and which ports to open in the firewall. The catalogue itself is documented in
+[`projects-and-templates.md`](projects-and-templates.md#named-ports); installing the host in
+[`installation.md`](installation.md). The 0.x document is [`v0/networking.md`](v0/networking.md).
 
-## 1. Overview
+**The installer does not change the firewall.** It never runs `ufw`, `nft` or `iptables`. Open the ports of this page
+yourself (and in your provider's firewall, if it has one); `fleet port:firewall` prints the list.
 
-```
-Browser
-  │  HTTPS (:443, or a named port — see §3)
-  ▼
-Caddy                    — the ONLY Internet-facing process; terminates TLS
-  │  reverse_proxy 127.0.0.1:<router-port>   (plaintext, loopback-only)
-  ▼
-ddev-router (Traefik)     — shared HTTP entrypoint, Host-header routed,
-  │                         bound to 127.0.0.1 only (never reachable
-  │                         directly from outside the host)
-  ▼
-The right instance's container(s)
-```
-
-## 2. The four layers, and what each owns
-
-| Layer | Owns |
-|---|---|
-| **Caddy** (systemd) | The only externally reachable process. Terminates every TLS connection (on-demand certs via `/api/tls-authorize`). Proxies `fleet.<domain>` (dashboard, behind `basic_auth`) and `*.<domain>[:port]` (every instance) to loopback. Its own admin API (`127.0.0.1:2019`) is never proxied — used only by `caddy reload`/`validate` on the host itself. |
-| **Docker** | Runs every instance's containers plus the shared `ddev-router`. |
-| **ddev-router / Traefik** | The one shared HTTP entrypoint every instance's containers sit behind, Host-routed to the right instance. Bound to `127.0.0.1` only (`router_bind_all_interfaces: false`, DDEV's global default) — nothing but Caddy should ever reach it directly; a container port bound to all interfaces would bypass this boundary entirely (see the sibling security-hardening spec §3 for the `DOCKER-USER` firewall guard that defends this assumption). |
-| **fleet daemon** | Orchestration (deploy/destroy/start/stop, the web UI). Itself just another thing Caddy proxies (`fleet.<domain>` → `127.0.0.1:8765`) — never directly exposed. |
-
-## 3. Every port, in one table
-
-The registry (`fleet.yml`'s `fleet.ports` + `Registry.all_port_profiles()`)
-is the actual source of truth — this table is illustrative, current as of
-this document's `Last updated` date.
+## Every port
 
 | Port | Owner | Purpose |
 |---|---|---|
-| `22` | sshd | Operator SSH access |
-| `80`, `443` | Caddy | HTTP→HTTPS redirect / TLS termination for `fleet.<domain>` and every `*.<domain>` instance |
-| `2019` | Caddy admin API | Loopback-only, never proxied — `caddy reload`/`validate` talk to it locally |
-| `8080` | ddev-router HTTP | Shared entrypoint every instance's main site sits behind (loopback-only) |
-| `8443` | ddev-router HTTPS | Not used by Caddy's proxy path — proxying to the HTTPS entrypoint 404s (Traefik's HTTPS router matching doesn't engage for a proxied request; see `docs/README-typesense.md`) |
-| `8765` | fleet daemon | FastAPI/uvicorn, loopback-only, proxied by Caddy at `fleet.<domain>` |
-| `9108` / `8108` | `fleet.ports.typesense` (public/router) | Typesense browser search — legacy built-in default when `fleet.ports.typesense` is undefined (`typesense: true` back-compat, `core/registry.py`) |
-| *(any name)* | `fleet.ports.<name>` (public/router) | Any other opt-in named port — e.g. `playwright` (`9324`/`8323`), `ts-dashboard` (`9111`/`8110`) |
+| `22` | sshd | Operator SSH access. |
+| `80`, `443` | Caddy | Public. TLS termination for `<domain>`, `auth.<domain>` and every instance site; port 80 redirects to https and carries the HTTP-01 challenge. |
+| `2019` | Caddy admin API | Loopback only. The app reloads Caddy through it. |
+| `3000` | Mercure hub | Loopback only. |
+| `8765` | reserved | Loopback only. Reserved so that a catalogue entry cannot take it. |
+| `9091` | Authelia | Loopback only. Served publicly as `https://auth.<domain>` by Caddy. |
+| `8080`, `8443` | DDEV router (Traefik) | Loopback only. Host-header routing to the instances; `8443` is the router's https entrypoint. |
+| catalogue ports | Caddy (public) and the DDEV router (router) | One pair per [named port](projects-and-templates.md#named-ports): Caddy listens on the *public* port, the traffic goes to the *router* port. |
 
-## 4. TLS termination points
+A migration seeds one entry, `typesense` (public `9108`, router `8108`), unless the host already has a port with that
+name or those numbers. It is the entry of the Typesense search server: assigning the catalogue entry `typesense` to a project is the same as switching on the
+project's Typesense flag (the two stay in step). How the instance gets its keys is described in [Typesense keys and environment](#typesense-keys-and-environment).
 
-Exactly one: **Caddy**, for every hostname:port combination it fronts.
-Nothing downstream ever terminates TLS — the loopback hop from Caddy to
-`ddev-router` (and from there to a container) is plaintext, which is safe
-only because it never leaves the host (`127.0.0.1`). Caddy sets
-`X-Forwarded-Proto=https` so Drupal still sees the request as secure.
+## Example catalogue entries
 
-### Certificate mode (`fleet_tls_mode`)
+Only `typesense` is seeded. These two come from the 0.x registry; add them with `fleet port:create` when a project needs them:
 
-How Caddy actually *gets* those certificates is chosen at install time
-(`docs/installation.md` "Choosing a TLS mode") and persisted as the
-`fleet_tls_mode` Ansible var:
+| Name | Public | Router | What |
+|---|---|---|---|
+| `playwright` | `9325` | `8323` | The Playwright report of the DDEV add-on (`pw-report`). |
+| `ts-dashboard` | `9111` | `8110` | A Typesense dashboard. |
 
-- **`on_demand`** (default) — one cert per exact hostname, issued the
-  first time it's requested, via the HTTP-01 challenge authorized by
-  `/api/tls-authorize`. Subject to Let's Encrypt's ~50-new-certs-per-
-  registered-domain-per-7-days limit (see §7 below).
-- **`ovh_dns`** — one wildcard cert for `*.{{ fleet_domain }}`, via the
-  DNS-01 challenge (`caddy-dns/ovh` plugin writing the `_acme-challenge`
-  TXT record through the OVH API). No per-hostname limit; needs an OVH API
-  key. OVH is currently the only supported DNS provider — a future
-  provider would be a new mode named `<provider>_dns`.
+```bash
+fleet port:create playwright --public=9325 --router=8323
+fleet project:update <project> --port=playwright
+```
 
-Both modes render the same shape of Caddy config: the full `tls { ... }`
-directive lives in ONE file, `{{ fleet_caddy_snippet_dir }}/tls.conf`
-(rendered by the `caddy` Ansible role from `tls.conf.j2`, per
-`fleet_tls_mode` — never by `fleet.core`), imported by a **literal** path
-from both the `*.{{ fleet_domain }}` site (`Caddyfile.j2`) and every
-fleet-owned named-port site (`fleet.core.caddyports.render_port_snippet()`)
-— so `core/caddyports.py` carries zero knowledge of TLS mode, and in
-`ovh_dns` mode every one of those sites shares the exact same wildcard
-certificate (same cert name in Caddy's storage, since they all import the
-identical `tls.conf`). The dashboard site (`fleet.{{ fleet_domain }}`
-itself) keeps Caddy's own default automatic HTTPS (HTTP-01) in **both**
-modes — it isn't a wildcard-eligible hostname.
+**Why `9325` and not the add-on's `9324`.** The add-on's own `https_port` is `9324`, and the instance's DDEV router already
+binds `127.0.0.1:9324` for it, so Caddy cannot listen there. The public port is therefore a distinct one. `8323` is the add-on's
+`http_port`: Caddy terminates TLS and proxies to the router's HTTP entrypoint. Each instance gets
+`FLEET_PORT_PLAYWRIGHT=9325` in its `web_environment` (see
+[`FLEET_PORT_<NAME>`](projects-and-templates.md#named-port-variables-fleet_port_name)), which `pw-report` prints. The report is
+then at `https://<instance host>:9325`, behind the Authelia gate, and `fleet port:firewall` lists `9325` for the
+projects that use it.
 
-Switching an existing server's mode: `ansible/caddy-only.yml` (a scoped
-playbook, mirroring `ddev-only.yml`) reapplies just the `caddy` role — see
-`docs/installation.md` "Switching TLS mode on an existing server", which
-also covers the OVH token gotchas learned rolling this out to two live
-servers: tokens can be **IP-restricted** (one token per server, or list
-every server's IP on a shared token), the required rights are
-`GET`/`POST`/`PUT`/`DELETE` on `/domain/zone/<zone>/*`, test a token with
-a throwaway TXT record before pointing a live domain at it, and any
-hand-edit of `/etc/caddy/ovh.env` needs its own `systemctl restart caddy`
-(a `reload` does not re-read the `EnvironmentFile=`).
+## Typesense keys and environment
 
-**`auth.<domain>` (Authelia mode only).** When `host.yml`'s `auth_mode` is
-`authelia` (`docs/README-authelia.md`), Caddy also serves Authelia's login
-portal at `auth.{{ fleet_domain }}` — a single-label subdomain like any
-instance hostname, so it is covered by the exact same certificate handling
-as every other `*.{{ fleet_domain }}` host: an individual on-demand cert in
-`on_demand` mode, or the shared wildcard cert in `ovh_dns` mode. It exists
-only when this Caddyfile block is rendered (basic mode omits it entirely)
-and is otherwise unauthenticated — Authelia is what authenticates
-everything else.
+The fleet installs and manages no Typesense server. Each instance of a project with the Typesense flag runs its own
+container from the project's committed `.ddev/docker-compose.typesense.yaml`; the fleet supplies the keys, as 0.x did
+([`v0/README-typesense.md`](v0/README-typesense.md)).
 
-## 5. Host-header routing
+**Keys.** Per project, on its first deploy, the fleet generates two keys of 48 hex characters and stores them sealed as
+project secrets (see [secrets](secrets.md)): `TYPESENSE_API_KEY` (admin) and `FLEET_TYPESENSE_SEARCH_KEY` (search only).
+They are never rotated, and a value an administrator set by hand under those names is kept. Every instance of the
+project shares them. A project without the flag gets nothing.
 
-Every named port's Caddy site block (`*.{{ fleet_domain }}:<port> {
-reverse_proxy 127.0.0.1:<router-port> }`) proxies to the **same shared**
-loopback router port regardless of which instance the browser asked for —
-`ddev-router` is what actually re-routes by `Host` header to the specific
-instance's container. This generalizes what was already true for
-Typesense alone: the *router*-side port in a `PortProfile` is shared
-across every subscribing instance; only the *public*-side port is unique
-per named service, not per instance.
+**What a deploy injects:**
 
-## 6. Runbook: adding a new exposed port
+| Where | What |
+|---|---|
+| `.ddev/.env` (mode 0640, kept out of the project's git status) | `TYPESENSE_API_KEY=<admin key>`. The project's compose file must read it as `${TYPESENSE_API_KEY}` to boot Typesense. Other lines of the file stay as they are. |
+| `.ddev/config.fleet.yaml`, `web_environment` | `FLEET_TYPESENSE_HOST=<instance host>`, `FLEET_TYPESENSE_PORT` (the public port of the catalogue entry `typesense`, 9108), `TYPESENSE_API_KEY` (admin, for indexing) and `FLEET_TYPESENSE_SEARCH_KEY`. The protocol is https. |
+| The instance's Typesense, after `ddev start` | The search-only key, created through the admin API (`POST /keys`, action `documents:search`, all collections, description `fleet-search-only`) by a request to the router on `127.0.0.1:<router port>` with the instance host in the `Host` header. A key with that description is left alone, so a redeploy adds nothing. |
 
-1. Add the port to `fleet.yml`'s `fleet.ports:` catalogue (pick public +
-   router numbers outside the reserved set — see `core/registry.py`'s
-   `_validate_fleet_ports()` for the exact rules: no `22`/`80`/`443`/`8765`,
-   router must not collide with `8080`/`8443`, no duplicate public or
-   router numbers across entries):
-   ```yaml
-   fleet:
-     ports:
-       my-new-port: { public: 9400, router: 8400 }
-   ```
-   Fix the project's own `.ddev/*.yml`/`docker-compose.*.yaml` so its
-   container actually publishes `8400` — fleet does not do this for you
-   (no automatic check that the two sides agree; see the port-exposure
-   design spec's assumptions section).
-2. Add the name to the project's `ports:` list:
-   ```yaml
-   projects:
-     my-project:
-       ports: [my-new-port]
-   ```
-3. Apply it: `fleet refresh-ports` — reconciles the Caddy snippet (and
-   UFW, if the `network_hardening` role is installed) immediately; no
-   Ansible re-run, no redeploy.
-4. **Confirm real external reachability.** Some hosting providers filter
-   non-standard ports at the network edge independently of the host's own
-   firewall — verify with your provider. Test from a real external client, never
-   `WebFetch` (it runs from Anthropic's network, not the operator's, and
-   gave a false positive for `:9324` once):
-   ```bash
-   curl -s -o /dev/null -w '%{http_code}\n' https://<instance>.fleet.<domain>:9400/
-   ```
+If the registration fails (Typesense not up yet), the job log gets a `WARNING: typesense: ...` line and the deploy
+goes on; a redeploy tries again. Neither key is ever written to a log (the job log masks both) or put on a command line.
 
-## 7. Domain-Access alias hostnames (`additional_hostnames`)
+**Checks on the host:** `ss -tlnp | grep 8108` (the router listens on the router port), `curl https://<instance host>:9108/health`
+(through Caddy) and `fleet port:firewall` for the public ports to open.
 
-A project's `additional_hostnames: [news, odihr, ...]` (`fleet.yml`) gives
-each instance extra hostnames for Drupal Domain Access-style multi-domain
-sites, alongside its normal `<instance-id>.<domain>`. Full field reference:
-`docs/configuration.md`'s `additional_hostnames` row.
+Only Caddy listens on the Internet. Everything else is on loopback or inside the Docker network.
 
-- **Flattened, single-label form.** An alias for hostname `h` on instance
-  `<instance-id>` is `<h>-<instance-id>.<domain>` — e.g.
-  `news-oak--translations-test.fleet.example.com` — never a nested/
-  multi-label form (`news.oak--translations-test...`). Caddy's site block
-  for this fleet is a single-label wildcard, `*.{{ fleet_domain }}` (§5
-  above), which can only ever match one label; a nested alias would be
-  unreachable and `/api/tls-authorize` rejects any dotted label anyway.
-  `core/instances.py`'s `alias_fqdns()` is the one place that composes this
-  string — nothing else should format one by hand.
-- **63-character DNS label limit.** `<h>-<instance-id>` must itself be a
-  valid DNS label (RFC 1035). `alias_fqdns()` raises `DeployError` at
-  deploy time (naming the hostname and the resulting length) if it doesn't
-  fit — a long project/label/hostname combination can hit this even though
-  the bare instance id was already within the limit on its own.
-- **Auth covers alias hosts too, in either mode.** The per-instance Caddy
-  snippet's `@auth-<instance-id>` matcher (`core/caddyauth.py`) lists the
-  instance FQDN *and* every alias FQDN in the same `host` clause, whether
-  it's a basic-auth snippet or an Authelia `forward_auth` one
-  (`docs/README-authelia.md`), so an alias can never bypass auth.
-- **`FLEET_INSTANCE_HOST`** — injected into every instance's
-  `web_environment` (`core/fleetconfig.py`) as `<instance-id>.<domain>` (no
-  scheme). A project's Domain Access config builds its own alias-matching
-  patterns from it: `"<h>-" . getenv('FLEET_INSTANCE_HOST')` in PHP,
-  guaranteed to compose the exact same string `alias_fqdns()` does
-  fleet-side.
-- **Certificates.** In the default `on_demand` mode, each alias host is a
-  distinct hostname to Caddy's on-demand TLS, so it gets its **own** Let's
-  Encrypt certificate the first time it's requested — it is not covered by
-  the instance's own cert. A registered domain gets roughly 50
-  new-certificate issuances per week from Let's Encrypt; a project with
-  many aliases across many instances can run into that limit. Switching
-  to `fleet_tls_mode: ovh_dns` (§4 above) removes this limit entirely — a
-  single wildcard cert for `*.<domain>` already covers every alias host
-  (they're all single-label subdomains of the same domain), with no
-  `/api/tls-authorize` round trip and no per-hostname issuance at all.
+## Named-port sites
 
-## 8. In-network mirror of named ports (FLE-29)
+For every instance of a project that has a named port, Caddy serves one more site per host: `<host>:<public port>`
+(the primary host and every alias). It is the instance's own site again: identity headers stripped, Authelia's
+`forward_auth` first, then `reverse_proxy 127.0.0.1:<router port>`. A named port is never reachable without a session
+that may open the instance.
 
-**Why.** The public named ports (`fleet.ports` entries and the built-in
-Typesense `9108`) exist only on the host's Caddy (`*.<domain>:<public>`
--> `127.0.0.1:<router>`). Inside an instance's containers the instance FQDN
-resolves to `ddev-router` on the Docker network, which does not listen on those
-public ports, so an in-container browser (Playwright) could not reach
-`https://<fqdn>:9108`, the URL the site hands to the client.
+**Host header.** The browser sends `Host: <host>:<public port>`. Caddy forwards the request as it is to the router
+port, and the router (Traefik) picks the instance from the `Host` rules DDEV wrote for it. Check that a request with
+the `:port` in the header reaches the instance, see the live checks below.
 
-**What.** `ddev-router` (Traefik) is made to listen on the same public ports
-inside the Docker network only (these ports are not published on the host, so
-there is no clash with Caddy). `core/routermirror.py` writes two generic files
-(no per-instance content) into the fleet user's DDEV global Traefik directory,
-`~/.ddev/traefik/`:
+**Certificates.** The certificate belongs to the name, not to the port: `<host>:9108` uses the same certificate as
+`<host>`, and Caddy manages it automatically. Each instance host gets its own certificate (the host settings never ask
+for a wildcard certificate).
 
-- `static_config.fleet-port-mirror.yaml` - one entrypoint `fleet-mirror-<public>`
-  per port. DDEV merges every `static_config.*.yaml` into its generated static
-  config during `ddev start`.
-- `custom-global-config/fleet-port-mirror.yaml` - one TCP router + service per
-  entrypoint (`HostSNI(*)`, TLS terminated with the certificates DDEV already
-  loads) forwarding the plaintext to the router's OWN http entrypoint
-  `127.0.0.1:<router>`, whose existing Host rules pick the instance. DDEV copies
-  this directory into the router's config volume on `ddev start`.
+| Mode | What it means for `<host>:<port>` |
+|---|---|
+| `http01` | The name still has to pass the HTTP-01 challenge on **port 80**, as for the plain host. Keep port 80 open and a DNS record for each name (the aliases too). Nothing to open for the challenge on the named port itself. |
+| `ovh_dns` | DNS-01 through the OVH API: no inbound port is needed for the challenge. The name is still a per-name certificate. |
 
-Both files start with a `# Managed by ddev-fleet (FLE-29): do not edit.` comment.
-A port is skipped (never raised, with a reason printed by `fleet refresh-ports`)
-when its public number is one of the router's own entrypoints
-(`80/443/8080/8443/8025/8026/10999`), equals the `router` port of any catalogue
-entry, duplicates another entry's `public`, or is already declared as an entrypoint
-by another `static_config.*.yaml` in `~/.ddev/traefik/` (the reason names the
-file): a colliding entrypoint would stop
-the shared router from starting and take every instance down.
+Caddy must be reachable on the public port, so each public port in use has to be open in the firewall.
 
-**Apply model.**
+## In-network port mirror
 
-1. `deploy`, `destroy`, `fleet refresh-ports` and the daemon at startup call
-   `routermirror.sync()`, which only (re)writes the files, atomically and only
-   when their content changed (and deletes them when there is nothing to
-   mirror). It never touches the router.
-2. DDEV merges/copies the files during the instance's `ddev start`. The router
-   only reads its static config when it starts, so right after a successful
-   `ddev start`, `deploy` calls `routermirror.converge()`: it compares the live
-   entrypoints (`GET http://127.0.0.1:10999/api/entrypoints`) with the wanted
-   `fleet-mirror-*` set and restarts `ddev-router` (`docker restart`, then waits
-   for `healthy`) only when they differ. Otherwise nothing happens.
-3. **Self-repair and marker.** If the router does not come back healthy with the
-   wanted entrypoints, fleet removes both files, writes the marker
-   `~/.ddev/traefik/.fleet-port-mirror-failed` (the wanted public ports, e.g.
-   `9108,9111`), runs `ddev start` in the instance again (DDEV re-merges its
-   config without ours), restarts the router again and reports
-   `RouterMirrorError`. The deploy itself still succeeds; the deploy log gets a
-   `WARNING: port mirror: ...` line. While the marker matches the wanted ports,
-   `sync()` writes nothing and `converge()` never restarts the router, so a
-   broken mirror cannot restart the shared router on every deploy. A different
-   wanted set deletes the marker; `fleet refresh-ports` deletes it
-   unconditionally (the explicit retry).
-   A transient failure (a docker hiccup, a health timeout) also writes the marker
-   and disables the mirror until `fleet refresh-ports` is run: by design, to
-   protect the shared router.
-   `fleet-mirror-*` entrypoints declared by another `static_config.*.yaml` (for
-   example a leftover spike file) are not ours and are ignored when comparing
-   with the live router.
-   `converge()` also refuses to restart when the two files are missing or differ
-   from what would be written now (e.g. `~/.ddev/traefik` absent).
-   Every `ddev-router` step (`converge()`, and the `sync()` of deploy, destroy
-   and `refresh-ports`) runs under a `flock` on `<fleet home>/locks/_routermirror.lock`
-   (waits up to 300 s, then skips with a message, never restarting).
-4. `fleet refresh-ports` prints `router mirror: live` or `router mirror:
-   pending - applied at the next instance deploy (ddev start + router restart)`;
-   it never restarts the router.
+**Why.** The named ports exist on the host's Caddy only. Inside an instance's containers the instance host name
+resolves to `ddev-router` on the Docker network, which does not listen on `9108` and the like, so a browser inside the
+network (Playwright) cannot open `https://<host>:9108`, the URL the site hands to its clients.
 
-**Rollout note.** The first deploy after upgrading restarts `ddev-router` once,
-a brief blip for every instance on that host.
+**What.** `ddev-router` is made to listen on the same public ports inside the Docker network only (they are not
+published on the host, so they do not clash with Caddy). Fleet writes two generic files into the fleet user's DDEV
+global Traefik directory, `~/.ddev/traefik/`:
 
-**Opt-out.** `fleet.port_mirror: false` in `fleet.yml` (default `true`) removes
-the files; the next deploy restarts the router once to drop the entrypoints.
+- `static_config.fleet-port-mirror.yaml`: one entrypoint `fleet-mirror-<public>` per port. DDEV merges every
+  `static_config.*.yaml` into its static config at `ddev start`.
+- `custom-global-config/fleet-port-mirror.yaml`: one TCP router and service per entrypoint (`HostSNI(*)`, TLS
+  terminated), forwarding to the router's own http entrypoint `127.0.0.1:<router port>`, whose `Host` rules pick the
+  instance.
 
-**TLS.** In-container the certificate is DDEV's own mkcert one, not the public
-Caddy certificate: clients such as Playwright need `ignoreHTTPSErrors`.
+Both start with a "managed by ddev-fleet, do not edit" comment.
 
-### Site mirror on :443 (FLE-32)
+**Skipped ports.** A port is skipped, with a reason, when its public number is one of the router's own entrypoints
+(`80`, `443`, `8080`, `8443`, `8025`, `8026`, `10999`), equals the router port of another catalogue entry, or is
+already declared as an entrypoint by another `static_config.*.yaml` in `~/.ddev/traefik/` (the reason names the file).
+A colliding entrypoint would stop the shared router and take every instance down.
 
-**Why.** On fleet hosts DDEV's `router_https_port` is `8443` (Caddy owns the
-host's 443). Inside the Docker network every fleet hostname resolves to
-`ddev-router`, so `https://<fleet host>/` (port 443) is refused and only
-`https://<fleet host>:8443/` works. That puts `:8443` in the `Host` header,
-which breaks exact-hostname matching in multi-domain apps: a real case was
-Drupal Domain Access redirecting to the PRODUCTION host.
+**How it is applied.**
 
-**How.** The site mirror is one extra entry in the same two files: an
-entrypoint `fleet-mirror-443` on `:443` (not published on the host) and a TCP
-router with TLS **passthrough** (not termination, unlike the port mirrors above)
-that forwards the raw TLS stream to the router's own https entrypoint on
-`127.0.0.1:<router_https_port>`. That entrypoint terminates TLS with DDEV's
-certificates, routes by `Host` (now without a port) and sets
-`X-Forwarded-Proto: https`. `router_https_port` is read from
-`~/.ddev/global_config.yaml`.
+1. Syncing (after a deploy or destroy, and `fleet port:refresh`) only writes the files, atomically and only when the
+   content changed, and deletes them when nothing is left to mirror. It never touches the router.
+2. DDEV reads the files at `ddev start`; the router reads its static config only when it starts. After a successful
+   `ddev start`, the converge step compares the live entrypoints (`http://127.0.0.1:10999/api/entrypoints`) with the
+   wanted `fleet-mirror-*` set and restarts `ddev-router` **only on a difference**, under a lock. Nothing else restarts
+   the router.
+3. If the router does not come back healthy with the wanted entrypoints, fleet removes both files, writes the marker
+   `~/.ddev/traefik/.fleet-port-mirror-failed` (the wanted ports), restarts the router again and logs a warning. The
+   deploy still succeeds. While the marker matches the wanted ports nothing is written and the router is not restarted,
+   so a broken mirror cannot restart the shared router on every deploy. `fleet port:refresh` is the explicit retry: it
+   clears the marker.
+4. `fleet port:refresh` prints `router mirror: live` or `router mirror: pending` (applied at the next instance deploy).
 
-**When it is skipped.** When `router_https_port` is already `443` (or the key
-or file is absent: DDEV's default), since the router then serves https on 443
-itself. When another `static_config.*.yaml` already declares `:443` or the
-entrypoint name `fleet-mirror-443`: `fleet refresh-ports` prints the reason
-(delete that file to mirror the site). When `global_config.yaml` exists but
-cannot be read or has a non-numeric `router_https_port`: the reason is printed
-and no site mirror is written. Port profiles with public port `443` stay
-rejected; the site mirror is the only thing that binds `:443`.
+**Opt-out.** The host settings have a port-mirror switch (default on). Off, the next sync removes the files (and the
+`:443` entry), and the next deploy restarts the router once to drop the entrypoints.
 
-**Switch.** The same `fleet.port_mirror` setting (default `true`) covers it;
-`false` removes the site entry together with the port mirrors. Rollout is the
-same: the first deploy after an upgrade restarts `ddev-router` once.
+**Site mirror on `:443`.** DDEV's `router_https_port` is `8443` on a fleet host, because Caddy owns `443`. Inside the
+network `https://<host>/` would be refused and only `https://<host>:8443/` would work, which puts `:8443` in the `Host`
+header and breaks apps that compare the host name exactly (Drupal Domain Access, for one). The same files therefore
+carry one more entrypoint `fleet-mirror-443` with TLS **passthrough** to `127.0.0.1:<router https port>` (read from
+`~/.ddev/global_config.yaml`). It is skipped when the router https port already is `443`, is absent or unreadable, or
+when another `static_config.*.yaml` declares `:443` or the name `fleet-mirror-443`. `443` stays refused as a catalogue
+public port. The port-mirror switch covers it too.
 
-**Tip.** Inside an instance container use `https://$FLEET_INSTANCE_HOST` (already
-injected by fleet) as the base URL, not `DDEV_PRIMARY_URL`, which carries
-`:8443`. The certificate is DDEV's self-signed mkcert one as before
-(`ignoreHTTPSErrors` for Playwright, `curl -k`).
+**TLS.** Inside the network the certificate is DDEV's own mkcert one, not Caddy's: clients such as Playwright need
+`ignoreHTTPSErrors`. Use `https://$FLEET_INSTANCE_HOST` as the base URL, not `DDEV_PRIMARY_URL`, which carries `:8443`.
 
-## 9. Cross-references
+**Rollout.** The first deploy after an upgrade restarts `ddev-router` once: a brief blip for every instance on the host.
 
-- `docs/README-typesense.md` — the worked example this document
-  generalizes (topology, admin vs. search-only keys, env injection).
-- `.claude/user/docs/specs/2026-07-24-fleet-port-exposure-design.md`
-  (companion repo) — the full design this document summarizes.
-- `.claude/user/docs/specs/2026-07-24-fleet-security-hardening-design.md`
-  (companion repo) — the UFW/`fleet-ufw-sync` side of `fleet refresh-ports`,
-  and the `DOCKER-USER` firewall guard referenced in §2 above.
-- `core/caddyauth.py` — the sibling fleet-owned-snippet mechanism (per-
-  instance/dashboard `basic_auth`, or `forward_auth` in Authelia mode),
-  same write/validate/reload shape as `core/caddyports.py`.
-- `docs/README-authelia.md` — the Authelia auth mode design (server-level
-  `auth_mode`, `auth.<domain>` portal, per-project `users:`).
+## Firewall: `fleet port:firewall`
+
+```
+fleet port:firewall [--json]
+```
+
+Lists the public ports to open: `80` and `443` always, plus the public port of every catalogue entry that at least one
+project uses. Ports nobody uses are not listed.
+
+```
+$ fleet port:firewall
+ ------ ------------------------------------------------ ---------- --------------------
+  PORT   PURPOSE                                          PROJECTS   COMMAND
+ ------ ------------------------------------------------ ---------- --------------------
+  80     http (certificate challenge and redirect ...)    -          ufw allow 80/tcp
+  443    https                                            -          ufw allow 443/tcp
+  9108   typesense                                        blog       ufw allow 9108/tcp
+ ------ ------------------------------------------------ ---------- --------------------
+Note: the installer does not change the firewall. Run these commands yourself (or add the ports to your provider firewall).
+```
+
+`--json` prints `{"ports": [{"port": 80, "purpose": "...", "projects": [], "ufw": "ufw allow 80/tcp"}, ...]}`, sorted
+by port. Run it again after assigning a port to a project. Port `22` is not listed; keep it open for SSH.
+
+## Checks that need a live host
+
+These have only been reviewed in code. Verify them on a server before relying on them:
+
+- [ ] Caddy obtains a certificate for `<host>:9108` (`http01`: validation on port 80, same certificate as the plain
+  host; `ovh_dns`: DNS-01).
+- [ ] The host firewall (hardening, nftables or ufw) lets the public ports through.
+- [ ] A request with `Host: <host>:<port>` reaches the ddev router and is routed to the instance.
+- [ ] After the first deploy, `fleet port:refresh` prints `router mirror: live`; `ddev-router` listens on
+  `fleet-mirror-<public>` (and `fleet-mirror-443`) and no instance went down at the one restart.
+- [ ] From inside an instance container, `https://<host>:<public>` and `https://<host>/` open the instance (with
+  `curl -k`).
+- [ ] A forced failure (a colliding entrypoint) leaves the marker `.fleet-port-mirror-failed`, no mirror files, a healthy
+  router, and `fleet port:refresh` clears it once fixed.

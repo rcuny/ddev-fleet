@@ -94,6 +94,9 @@ STANDALONE_UNITS = (
     ("fleet-boot.service", "fleet_service", "fleet-boot.service.j2"),
     ("fleet-reboot-notify.service", "security_hardening", "fleet-reboot-notify.service.j2"),
 )
+# fleet-tmux.service and fleet-mercure.service (plain files under install/etc) are deliberately NOT here: the offline sets
+# must score <= 2.5 and they do not (tmux owns operator shells, so it is unsandboxed on purpose). Their measured scores are
+# recorded under "install_units" in systemd-security-baseline.json and checked by tests/pytest/repo/test_systemd_security_ci.py.
 CADDY_DROPIN = ("caddy", "caddy-sandbox.conf.j2")
 CADDY_DROPIN_PATH = Path("caddy.service.d") / "50-fleet-sandbox.conf"
 
@@ -814,7 +817,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("compare", help="compare a report with the baseline (exit 1 on regression)")
     p.add_argument("--baseline", default=str(DEFAULT_BASELINE))
-    p.add_argument("--env", required=True, help="baseline environment: offline, ddev3, ...")
+    p.add_argument("--env", required=True, help="baseline environment: offline, or a SECURITY_PROBE_TARGETS name")
     p.add_argument("--current", required=True, help="report JSON to check")
     p.add_argument("--tolerance", type=float, help="override the baseline file's tolerance")
     p.add_argument("--report-md")

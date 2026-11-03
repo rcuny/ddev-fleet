@@ -1,0 +1,80 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Fleet\Audit;
+
+use App\Domain\Audit\AuditEntry;
+use App\Domain\Audit\AuditEntryRepository;
+use Psr\Clock\ClockInterface;
+
+/**
+ * Records who did what. The subject is a label, never a value: callers pass names of things, not their contents.
+ */
+final readonly class AuditLog
+{
+    public const string SECRET_PUT = 'secret.put';
+    public const string SECRET_DELETE = 'secret.delete';
+    public const string SECRET_REVEAL = 'secret.reveal';
+    public const string SECRET_REVEAL_REFUSED = 'secret.reveal-refused';
+    public const string ASSET_SNAPSHOT = 'asset.snapshot';
+    public const string CLAUDE_TOKEN_ROTATE = 'claude.token.rotate';
+    public const string CLAUDE_TOKEN_APPLY = 'claude.token.apply';
+
+    public const string SCHEDULE_CREATE = 'schedule.create';
+    public const string SCHEDULE_UPDATE = 'schedule.update';
+    public const string SCHEDULE_DELETE = 'schedule.delete';
+    public const string SCHEDULE_PAUSE = 'schedule.pause';
+    public const string SCHEDULE_RESUME = 'schedule.resume';
+    public const string SCHEDULE_RUN = 'schedule.run';
+
+    public const string PROJECT_EXPORT = 'project.export';
+    public const string PROJECT_IMPORT = 'project.import';
+
+    private const string ELLIPSIS = '…';
+
+    /** The actor of changes made on the command line. */
+    public const string CLI_ACTOR = 'cli';
+
+    public function __construct(private AuditEntryRepository $entries, private ClockInterface $clock)
+    {
+    }
+
+    public function record(string $actor, string $action, string $subject): void
+    {
+        $this->entries->save(new AuditEntry(
+            self::fit($actor, AuditEntry::ACTOR_MAX),
+            self::fit($action, AuditEntry::ACTION_MAX),
+            self::fit($subject, AuditEntry::SUBJECT_MAX),
+            $this->clock->now(),
+        ));
+    }
+
+    /**
+     * @return list<AuditEntry>
+     */
+    public function latest(int $limit = 200, ?string $action = null): array
+    {
+        return $this->entries->latest($limit, $action);
+    }
+
+    /**
+     * @return list<string>
+     */
+    public function actions(): array
+    {
+        return $this->entries->actions();
+    }
+
+    /**
+     * Cuts $text to $max bytes on a character boundary and ends a cut text with an ellipsis, so a truncation shows.
+     */
+    private static function fit(string $text, int $max): string
+    {
+        if (\strlen($text) <= $max) {
+            return $text;
+        }
+
+        return mb_strcut($text, 0, $max - \strlen(self::ELLIPSIS)).self::ELLIPSIS;
+    }
+}

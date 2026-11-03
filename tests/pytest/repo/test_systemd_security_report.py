@@ -467,7 +467,7 @@ def live(live_env, tmp_path):  # noqa: F811
     env = {
         **env,
         "FAKE_GIT_LOG": str(tmp_path / "git.log"),
-        "SECURITY_PROBE_TARGETS": "ddev3=fleet-probe@ddev3.example",
+        "SECURITY_PROBE_TARGETS": "server1=fleet-probe@server1.example",
     }
     for name in ("FAKE_GIT_PUSH_FAILS", "FAKE_GIT_UNCHANGED", "FAKE_GIT_REBASE_FAILS"):
         env.pop(name, None)
@@ -536,7 +536,7 @@ def test_live_develop_commits_with_the_bot_identity_and_pushes(live):
         "-c",
         "user.name=ddev-fleet security check",
         "-c",
-        "user.email=security-check@noreply.fleet.pm",
+        "user.email=security-check@noreply.example.com",
     ]
     assert commit[4:6] == ["commit", "-m"]
     assert re.fullmatch(r"chore\(security\): systemd security report \d{4}-\d\d-\d\d", commit[6])
@@ -576,10 +576,10 @@ def test_live_publishing_without_a_branch_is_refused(live):
 
 def test_live_regression_still_commits_then_fails(live, tmp_path):
     work, env, log = live
-    worse = _baseline(tmp_path, ddev3=_report({"fleet.service": _unit(1.0)}))
+    worse = _baseline(tmp_path, server1=_report({"fleet.service": _unit(1.0)}))
     done = _run_live(work, env, BITBUCKET_BRANCH="develop", SYSTEMD_SECURITY_BASELINE=str(worse))
     assert done.returncode == 1
-    assert "REGRESSION fleet.service (ddev3)" in done.stderr
+    assert "REGRESSION fleet.service (server1)" in done.stderr
     assert _subcommands(log) == ["add", "diff", "commit", "push"]
     assert "**1 regression(s)**" in (work / "SYSTEMD-SECURITY-REPORT.md").read_text()
     assert "Jira alert not configured, skipping" in done.stdout  # the alert step ran
@@ -587,7 +587,7 @@ def test_live_regression_still_commits_then_fails(live, tmp_path):
 
 def test_live_regression_on_another_branch_does_not_commit(live, tmp_path):
     work, env, log = live
-    worse = _baseline(tmp_path, ddev3=_report({"fleet.service": _unit(1.0)}))
+    worse = _baseline(tmp_path, server1=_report({"fleet.service": _unit(1.0)}))
     done = _run_live(work, env, BITBUCKET_BRANCH="acceptance", SYSTEMD_SECURITY_BASELINE=str(worse))
     assert done.returncode == 1
     assert _git_calls(log) == []
@@ -633,13 +633,13 @@ def test_live_a_host_that_cannot_be_fetched_still_publishes_the_others(live):
         work,
         env,
         BITBUCKET_BRANCH="develop",
-        SECURITY_PROBE_TARGETS="down=fleet-probe@broken.example ddev3=fleet-probe@ddev3.example",
+        SECURITY_PROBE_TARGETS="down=fleet-probe@broken.example server1=fleet-probe@server1.example",
     )
     assert done.returncode == 1
     assert _subcommands(log) == ["add", "diff", "commit", "push"]
     page = (work / "SYSTEMD-SECURITY-REPORT.md").read_text()
     assert "| [down](#down) | - | **could not be fetched** |" in page
-    assert "| [ddev3](#ddev3) | 257 | OK |" in page
+    assert "| [server1](#server1) | 257 | OK |" in page
     assert "Jira alert not configured, skipping" in done.stdout
 
 

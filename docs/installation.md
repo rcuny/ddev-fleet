@@ -1,369 +1,601 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-09-29
+Last updated: 2026-10-19
 Type: documentation
 ---
 
-# Installing ddev-fleet
+# Installing ddev-fleet (1.x)
 
-This is the first-run checklist: DNS, the installer, adding the deploy
-key, minting the Claude Code token, and the first deploy. For ongoing
-operations (updates, rollback, password rotation) see `docs/operations.md`.
+One command turns a fresh Debian 13 host into a working Fleet, and a short setup wizard in the browser
+finishes the job. The host serves real HTTPS from the first minute. This guide covers the installer, the
+wizard, what ends up on the host, recovery, upgrades and uninstalling.
 
-## 1. Choosing a TLS mode
+The 1.x line is developed milestone by milestone and does not yet cover every 0.x feature: this installer
+gives you the sign-in, the app shell and the host plumbing (Caddy, Authelia, PHP-FPM, the job worker, the
+Mercure hub, DDEV and Docker), and instances can be deployed from projects
+([`instances-and-jobs.md`](instances-and-jobs.md)). Later milestones add networking, webhook triggers and the agent
+workspace (see [`README.md`](README.md)). The 0.x installation guide is kept in [`v0/installation.md`](v0/installation.md).
 
-The installer asks how Caddy should get Let's Encrypt certificates for
-`*.<domain>` (every deployed instance) and any named-port site
-(`docs/networking.md`). This is the `fleet_tls_mode` Ansible var
-(`ansible/group_vars/all.yml`), persisted per host in
-`/etc/ddev-fleet/local-vars.yml`:
+## 1. Before you start
 
-| Mode | How it works | Tradeoff |
+| You need | Detail |
+|---|---|
+| A host | **Debian 13**, amd64 or arm64, reachable on the Internet. The installer refuses another system (`FLEET_FORCE_OS=1` in the environment tries anyway, unsupported). |
+| Root | Run the installer as root (`sudo`). `--dry-run` works without root. |
+| DNS | A record (and AAAA, if you have IPv6) for **both** `<domain>` and `auth.<domain>` pointing at this host. One wildcard record `*.<domain>` covers `auth.<domain>`. The installer compares them with the host's own addresses and stops (exit 2) on a mismatch. |
+| Ports | 80 and 443 free and reachable from the Internet (Let's Encrypt uses port 80 for the HTTP-01 challenge, even if you later switch to DNS-01). |
+| Time | A fresh install takes about five minutes, a re-run under half a minute. Run it inside `screen`, `tmux` or `systemd-run`: a dropped SSH session would interrupt it. If it is interrupted anyway, run the same command again. Some bare-metal servers take about **three minutes** to answer SSH again after a reboot: do not give up after 90 seconds. |
+
+`<domain>` is the public host name of this fleet, for example `fleet.example.com`: the fleet is served on
+`https://fleet.example.com/` and the sign-in portal on `https://auth.fleet.example.com/`. Both get their own
+certificate, so **`auth.<domain>` needs DNS in every TLS mode**.
+
+## 2. Install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/install.sh \
+  | sudo bash -s -- --domain=fleet.example.com --acme-email=you@example.com
+```
+
+At the end the installer prints a **setup URL** on the terminal (it is never written to the install log). The URL
+is a credential for 24 hours (or until Finish): whoever opens it can create the administrator, so treat it like a
+password, open it yourself, and do not paste it into a chat, a ticket or a shared terminal log. Open it in a
+browser and follow section 4.
+
+To inspect before you run: save the script, read it, and call it with `--dry-run`, which prints the complete
+plan and changes nothing.
+
+### Flags
+
+| Flag | Meaning |
+|---|---|
+| `--domain=<fqdn>` | **Required.** The public host name, lower case, fully qualified (no wildcard, port or IP address). |
+| `--acme-email=<email>` | Contact address for Let's Encrypt (expiry notices). Optional, recommended. |
+| `--ref=<ref>` | Branch, tag or commit to install. Default `main`, the 1.x releases; pin a release with `--ref=vX.Y.Z`. |
+| `--repo-url=<url\|path>` | Git remote (or a bundle or path readable by the `fleet` user) to install from. Default: the public GitHub mirror. |
+| `--skip-dns-check` | Do not compare the DNS records with this host's addresses (for example behind NAT or a CDN). |
+| `--no-shell-profile` | Do not install the shell profile (step 35). Default: installed. |
+| `--dry-run` | Print the plan, change nothing. Works without root. |
+| `--help` | Print the usage text. |
+
+There are no prompts. Exit codes: `0` ok, `1` a step failed (the message names the step), `2` DNS mismatch,
+`64` usage error, `75` another installer run is in progress, `77` not root, `78` unsupported host.
+
+### What the installer does
+
+It runs in two stages. `install.sh` (stage 1) validates the flags, installs three packages, creates the
+`fleet` user and clones the requested ref into `/opt/ddev-fleet` **as `fleet`, never as root**, then copies
+that checkout's `install/` directory to a root-owned location and hands over to its `run.sh` (stage 2). Stage 2
+runs the steps in `install/steps/` in numeric order; every step is idempotent:
+
+| Step | Does |
+|---|---|
+| 10 packages | PHP 8.4 from Debian (php-fpm, cli and extensions, no third-party PHP repository), Composer, `openssh-client`, `acl`, `sudo` and a few tools. |
+| 20 docker | Docker CE from Docker's repository; the daemon is enabled and started. |
+| 30 fleet user | The `fleet` system user (member of `docker`), `/srv/fleet`, `/etc/ddev-fleet`, `/opt/ddev-fleet`. |
+| 35 shell | The interactive shell profile `/etc/profile.d/10-fleet-shell.sh` (coloured prompt that names the host, `ls` colours, `l` alias, `EDITOR=nano`; interactive shells only) and one guarded hook block at the end of `/etc/bash.bashrc` and of the `~/.bashrc` of root, `fleet` and the user that ran `sudo` (added once, only to files that exist). Skipped with `--no-shell-profile`. |
+| 40 ddev | DDEV from its repository, configured for `fleet` (router on ports 8080 and 8443), mkcert's CA for the NSS store only. |
+| 50 caddy | Caddy from its repository plus a **custom build with the OVH DNS module**; the package binary is diverted so `apt` never replaces the custom one. A re-run refreshes the custom build when it is older than the packaged Caddy. The sandbox drop-in is installed. |
+| 60 authelia | Authelia from its repository, its three secrets (generated once), the tmpfiles mask (see Troubleshooting), and a `users.yml` with one disabled placeholder user (Authelia 4.39 refuses an empty user list; the placeholder can never sign in and disappears when the first real user exists). |
+| 70 env | `/etc/ddev-fleet/fleet.env` and `mercure.env`: only missing keys are added, secrets are generated once. |
+| 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. |
+| 85 app init | Migrations, the queue transport, `fleet:host:init` (domain, ACME email). |
+| 90 privileged | The root helper, its single sudoers line and the `fleet` command. |
+| 95 units | The `fleet` php-fpm pool, the job worker `fleet-worker@.service`, the status watcher `fleet-status.service`, `fleet-boot.service`, the standalone Mercure hub (pinned release, sha256-checked) and its unit. |
+| 98 render and start | Renders the Caddy and Authelia configuration, installs it through the helper, starts everything, waits until `https://<domain>/health` and the hub answer, and prints the setup URL. |
+
+The installer logs to `/var/log/ddev-fleet-install.log` (mode 0600).
+
+The uninstaller removes the profile file and exactly the hook block step 35 added (a block you edited stays).
+
+## 3. What is installed where
+
+### Users, directories and file modes
+
+| Path | Owner and mode | Holds |
 |---|---|---|
-| **`on_demand`** (default) | Caddy requests a fresh Let's Encrypt cert the first time each exact hostname is seen, via the HTTP-01 challenge, authorized by `/api/tls-authorize`. | No setup. But Let's Encrypt caps **new** certificate issuance at roughly **50 per registered domain per rolling 7 days** (refilling ~1 every 3.4 hours) — renewals don't count against this, but a project with many instances/aliases can hit it. |
-| **`ovh_dns`** | Caddy issues **one wildcard certificate** for `*.<domain>`, shared by every instance and named port, via the DNS-01 challenge — it writes the `_acme-challenge` TXT record straight into your DNS zone through the OVH API (the `caddy-dns/ovh` plugin, requires a custom Caddy build — the installer/role handles this). | No per-hostname limit (a wildcard is **one** certificate, covering exactly one label — `*.<domain>` covers `foo.<domain>` but not `foo.bar.<domain>`). Needs an OVH API key scoped to your DNS zone. OVH is currently the only supported DNS provider. |
+| user `fleet` | home `/home/fleet`, group `docker` | Runs php-fpm, the workers, DDEV and the CLI. |
+| `/opt/ddev-fleet` | `fleet:fleet` 0755 | The git checkout of the product. Stays `fleet`-owned. |
+| `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/` (0750; `fleet.sqlite` and `queue.sqlite`, 0644 inside it), `locks/`, `logs/`, `assets/`, `instances/` (0750). |
+| `/srv/fleet/backups` | `fleet:fleet` 0700 | Database backups written by `fleet-backup.timer` (files 0600; see "Backup and restore" in section 5). |
+| `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
+| `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
+| `/srv/fleet/staging` | `fleet:fleet` 0700 | Rendered configuration waiting for the root helper (`caddy/`, `authelia/`). Empty at rest: it is filled only for the moment before an `apply`, and emptied after every apply, every failed install step and every plain `fleet:host:render`, because the staged Caddy environment file holds the OVH credentials in clear text. Leave it out of backups. |
+| `/srv/fleet/assets/<project>` | `fleet:fleet` 0750 | A project's seed files (database dumps, files archives, env templates), shown on the project's Assets tab; created by the first upload or by `mkdir`. Copy large files in here over SSH, see [`assets.md`](assets.md). Back it up with the databases. |
+| `/srv/fleet/uploads` | `fleet:fleet` 0700 | Chunks of browser uploads on their way to `assets/`, one directory per upload; emptied when an upload completes and by `fleet asset:gc` (after 24 hours). Leave it out of backups. |
+| `/srv/fleet/authelia` | `fleet:authelia` 2750 | `users.yml` (0640, `fleet:authelia`), the sign-in portal's user file with the argon2id hashes, written by the app. |
+| `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640 `root:fleet`, see below), `mercure.env` (`root:root` 0600), `installed-revision` (0644). |
+| `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
+| `/etc/caddy/fleet/` | `fleet:caddy` 2750 | `gate.conf` (0640), the sign-in gate, written by the app; `instances/` and `ports/` for later milestones. |
+| `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret (Caddy reads it from its environment, so it only takes effect at the next start). It holds no OVH credential: an `OVH_*` line left by an older apply is dropped at the next `apply caddy`. |
+| `/etc/caddy/ovh/` | `root:caddy` 0750 | DNS mode only: three files (`application_key`, `application_secret`, `consumer_key`), `root:caddy` 0640, one **clear-text** value each (the endpoint is no secret: it is written into the Caddyfile; an `endpoint` file of an older apply is removed), which the Caddyfile reads through `{file./etc/caddy/ovh/…}` placeholders each time Caddy loads its configuration. Nothing sits in Caddy's process environment. Anyone who is root or in group `caddy` can read them; the copy in the app's database is encrypted. Removed when the host leaves DNS mode. |
+| `/etc/authelia/` | `authelia:authelia` | `configuration.yml` (0640, written by the helper); `secrets/` (`root:authelia` 0750, three secret files 0640, generated once). |
+| `/etc/fleet-mercure/Caddyfile` | `root:root` 0644 | The Mercure hub configuration (it lives apart from `/etc/ddev-fleet` because the hub runs as a dynamic user). |
+| `/run/php/fleet.sock` | `fleet:caddy` 0660 | The only way into the app. |
+| `/usr/local/libexec/fleet/apply` | `root:root` 0755 | The root helper. |
+| `/etc/sudoers.d/fleet-apply` | `root:root` 0440 | The one sudoers line (section 7). |
+| `/usr/local/bin/fleet` | `root:root` 0755 | The `fleet` command (section 5). |
+| `/usr/local/bin/mercure` | `root:root` 0755 | The Mercure hub binary. |
+| `/usr/local/lib/ddev-fleet-installer/` | `root:root` | A root-owned copy of `install/`, from which the privileged files are installed and the uninstaller runs. |
+| `/var/log/ddev-fleet-install.log` | `root:root` 0600 | The installer's log (never contains the setup URL or a secret). |
 
-**DNS records needed:**
+### Units and ports
 
-```
-<domain>       A     <server-ip>      # both modes — the dashboard, fleet.<domain>
-*.<domain>     A     <server-ip>      # on_demand mode only
-```
-
-In `ovh_dns` mode, `*.<domain>` does **not** need its own DNS A/AAAA
-record — Caddy proves domain ownership via the DNS-01 TXT record instead,
-so the wildcard cert is issued without any wildcard DNS entry pointing at
-the server. (You'll usually still want one if you expect any client to
-resolve an instance hostname without the fleet's own DNS setup — but it is
-not required for the certificate itself.)
-
-**If you choose `ovh_dns`,** create an OVH API token before or during the
-prompt:
-
-1. Go to `https://eu.api.ovh.com/createToken/` (or your regional
-   equivalent — `ca.api.ovh.com`/`api.ovh.com` for other OVH regions; the
-   installer's `OVH_ENDPOINT` default is `ovh-eu`).
-2. Grant these rights, scoped to your registered zone (e.g. `example.com`):
-   - `GET /domain/zone/<zone>/*`
-   - `POST /domain/zone/<zone>/*`
-   - `PUT /domain/zone/<zone>/*`
-   - `DELETE /domain/zone/<zone>/*`
-3. **If you restrict the token to an IP address, it is a hard restriction,
-   not a hint**: a token scoped to server A's IP fails on server B with
-   `403 "This call has not been granted"` on every DNS-01 call, even
-   though the token itself is otherwise valid. Running more than one
-   fleet host with `ovh_dns`? Either create **one token per server**, or
-   list **all** their IPs on a single token — there is no way to widen an
-   existing single-IP token after the fact from the UI, only recreate it.
-4. **Test the token before switching a live domain to `ovh_dns`.** A
-   throwaway DNS-01 exchange (or a manual signed `POST` + `DELETE` of a
-   temporary `_acme-challenge` TXT record via the OVH API) confirms the
-   token/rights/IP restriction all actually work. Don't find this out by
-   switching the domain and watching the wildcard cert fail — the old
-   `on_demand` certs and DNS records are gone the moment `caddy-only.yml`
-   applies, so a bad token means every instance is unreachable until you
-   roll back.
-5. Note the **Application Key**, **Application Secret**, and **Consumer
-   Key** it gives you — the installer prompts for these (application
-   secret and consumer key are read silently, never echoed) and writes
-   them to `/etc/caddy/ovh.env` (`0600 root:root`, then re-owned
-   `0640 root:caddy` once the `caddy` role has run). **Ansible never
-   writes or reads back this file's contents** — only checks that all
-   four required keys are present.
-6. **After hand-editing `/etc/caddy/ovh.env`** (e.g. swapping in a
-   corrected token), `systemctl restart caddy` — a `reload` does **not**
-   re-read the `EnvironmentFile=` a systemd drop-in supplies, so a plain
-   reload keeps running with the old (or missing) credentials.
-
-## 2. Choosing an auth mode
-
-The installer also asks how each deployed instance should authenticate
-visitors — the `FLEET_AUTH_MODE` prompt, persisted per host in
-`/etc/ddev-fleet/local-vars.yml` as `fleet_auth_mode`:
-
-| Mode | How it works | Choose it when |
+| Unit | Listens on | Notes |
 |---|---|---|
-| **`basic`** (default) | Per-instance HTTP basic auth, credential symmetric (`--auth-password`), on by default on every deploy. | The default — no extra moving parts, works everywhere HTTP basic auth itself works. |
-| **`authelia`** | A cookie-based login portal (Authelia, systemd service on `127.0.0.1:9091`); Caddy authorizes each instance against it per project, using users defined in `fleet.yml`'s `users:` key. | A network's own policy blocks HTTP basic auth outright (it looks like a server error to the client, not a login prompt), or you want named per-user logins instead of one shared instance credential. |
+| `caddy` | 80, 443 | The only Internet-facing process; sandboxed by a drop-in. Reads `/etc/caddy/fleet.env`. |
+| `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
+| `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
+| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Jobs of different instances therefore run one after another. |
+| `fleet-scheduler` | | The schedule ticker (`messenger:consume scheduler_default`, one tick every 30 seconds): fires the due schedules and queues their jobs for `fleet-worker@1`. See `docs/schedules.md`. |
+| `fleet-status` | | The status watcher (`fleet:instance:watch --interval=10`): keeps instance states and memory true to `ddev list` and `docker stats`, reaps dead jobs and prunes old ones. Restarted by an upgrade. |
+| `fleet-boot` | | A oneshot, enabled but never started by the installer: after a reboot it runs `fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict`, which starts every instance, stopped ones too (as 0.x did). |
+| `fleet-tmux.service` | | Owns the `fleet` tmux session (the agent workspace, see `agent-workspace.md`) in its own cgroup, so restarting php-fpm or the workers never kills the panes. A oneshot with `RemainAfterExit`; installed, enabled and started by the installer, never restarted by a re-run. Needs the `tmux` package, which the installer installs. The uninstaller removes the unit, not the package. |
+| `fleet-backup.timer` | | Starts `fleet-backup.service` (a oneshot running `fleet:backup:create`) once a day, at a random time within an hour of midnight. `Persistent`: a backup missed while the host was off runs at the next boot. See "Backup and restore" in section 5. |
+| `fleet-mercure` | `127.0.0.1:3000` | A standalone Mercure hub (version 1.1.2, legacy protocol mode as `symfony/mercure-bundle` mints). Caddy proxies `/.well-known/mercure` to it. Subscribers need a JWT: an anonymous request to the hub answers 401. |
+| `docker`, DDEV | router on 8080 and 8443 (once an instance runs) | The installer configures the router ports but starts no project, so nothing listens on 8080/8443 until the first instance exists (a later milestone). It does not set `router_bind_all_interfaces`, so DDEV keeps its default (loopback only). |
 
-Full design, `fleet.yml` schema, and how to switch an already-provisioned
-server's mode later: `docs/README-authelia.md`.
+### `/etc/ddev-fleet/fleet.env`
 
-## 3. DNS
+The app, the workers and the CLI all read this file. Existing keys are never changed by a re-run.
 
-Create the DNS record(s) from the table above before running the
-installer.
+| Key | Value |
+|---|---|
+| `APP_ENV`, `APP_DEBUG` | `prod`, `0`. The pool also pins `APP_ENV=prod`, so a forgotten value can never give the dev kernel. |
+| `APP_SECRET` | Generated once (64 hex characters). |
+| `MERCURE_JWT_SECRET` | Generated once; the hub's keys in `mercure.env` are derived from it. |
+| `FLEET_PROXY_SECRET` | Generated once. Caddy passes it to PHP as the FastCGI parameter `FLEET_PROXY_AUTH`; only a request carrying it is trusted to assert an identity. |
+| `FLEET_HOME` | `/srv/fleet`. |
+| `FLEET_RUNNER` | `process` (commands really run). |
+| `FLEET_TRUSTED_PROXIES` | Empty on purpose: trust comes from the proxy secret, not from the peer address. |
+| `FLEET_ADMIN_GROUP` | `fleet-admins`. The one group that makes an administrator: the wizard puts its administrator in it (and so into Authelia's `users.yml`), and the app grants `ROLE_ADMIN` to it. Set it (in `fleet.env`, then restart php-fpm and the workers) **before** the wizard creates the administrator; later changes do not regroup existing users. Letters, digits, `.`, `_`, `-`. |
+| `FLEET_CADDY_DIR` | `/etc/caddy/fleet`. |
+| `FLEET_JOB_RETENTION_DAYS` | `90`. Finished jobs and their logs older than this are pruned daily by the status watcher (`fleet job:prune --days=N` does it by hand). |
+| `DEFAULT_URI` | `https://<domain>`. |
 
-## 4. Run the installer
+## 4. The setup wizard
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo bash
-```
+The setup URL looks like `https://<domain>/setup?token=...`. Until the wizard is finished, Caddy lets **only**
+`/setup`, `/assets/*` and `/health` through; everything else redirects to `/setup`, and nobody can sign in yet.
 
-Version-pinned (recommended for anything beyond a first try):
+The first visit exchanges the token for a session cookie (`__Host-fleet_setup`, 2 hours, Secure, HttpOnly,
+SameSite=Strict) and redirects to the first unfinished step with a clean address. If the cookie expires, open
+the link again. The token itself stays valid for **24 hours** or until Finish, whichever comes first, so you
+can open it on a phone and a laptop; ten token attempts per address in fifteen minutes are allowed. Every
+step is saved as you go, and the wizard works at phone width.
 
-```bash
-curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/bootstrap.sh | sudo FLEET_REPO_VERSION=v1.0.0 bash
-```
+1. **Administrator.** Username, display name, email and a password of 12 to 128 characters. The username is
+   fixed once an administrator exists (saving again updates that account; the password must be entered again).
+   The account is created in the administrator group (`FLEET_ADMIN_GROUP`, default `fleet-admins`).
+2. **Domain and certificates.** The domain was set by the installer. Choose how certificates are obtained:
+   - `http01` (default): Let's Encrypt HTTP-01 on port 80, for `<domain>` and `auth.<domain>`.
+   - `ovh_dns`: DNS-01 through the OVH API. Enter the API endpoint (`ovh-eu`, `ovh-ca` or `ovh-us`), the
+     application key, the application secret and the consumer key. **Create them exactly as described in
+     [Creating the OVH API token](#creating-the-ovh-api-token) below.** They are stored encrypted (libsodium, key in
+     `/srv/fleet/keys/secret.key`) and never shown again. The endpoints of OVH's budget brands are not
+     supported: create the credentials at one of the three endpoints above. Today this mode only changes how
+     the certificates are obtained (the two host names and one per instance, see "Instances on the host" in section 6).
 
-The installer will:
+     **Checked on a real host:** Caddy reads the credential files and authenticates against the OVH API; a token
+     created with the wrong rights fails with `This call has not been granted` (see the token section). Finish installs the new Caddyfile
+     (the endpoint is written into it; it is a public API name, not a secret) and the three credential files in
+     `/etc/caddy/ovh/` and **reloads** Caddy (the files are read at every load, so a
+     rotation of the credentials needs a reload only, never a restart). What to check after choosing it:
+     `systemctl is-active caddy` a minute after Finish, `journalctl -u caddy -n 100 --no-pager` free of `ovh` or
+     `dns` errors, and `sudo -u caddy env -i bash -c 'set -a; . /etc/caddy/fleet.env; caddy validate --config
+     /etc/caddy/Caddyfile --adapter caddyfile'` succeeding (it reads `/etc/caddy/ovh/*` as `caddy`). Caddy keeps the certificates it already has, so the first
+     DNS-01 issuance happens at the next renewal (about 30 days before expiry): to prove the credentials earlier,
+     move the certificate storage aside and restart Caddy while watching the journal.
 
-1. Confirm it's running as root.
-2. Detect the OS (Debian 13 / Ubuntu 26.04 are verified; anything else
-   warns and asks to continue, or set `FLEET_FORCE_OS=1` for an
-   unattended run).
-3. Collect: `FLEET_DOMAIN` (the fleet wildcard domain, required),
-   `FLEET_ACME_EMAIL` (Let's Encrypt contact, required), `FLEET_ADMIN_PASSWORD`
-   (optional — a strong one is generated and printed once if you don't
-   supply it), a **TLS certificate mode** choice (`FLEET_TLS_MODE`,
-   `on_demand` or `ovh_dns` — see "Choosing a TLS mode" below), an
-   **auth mode** choice (`FLEET_AUTH_MODE`, `basic` (default) or
-   `authelia` — see "Choosing an auth mode" below), `FLEET_REPO_VERSION`
-   (optional, defaults to `main`), and two Yes-by-default hardening prompts
-   (`FLEET_NETWORK_HARDENING`, `FLEET_SECURITY_HARDENING` — see the sibling
-   hardening documentation once that work lands). Every value can be
-   supplied as an env var to skip its prompt entirely (useful for
-   unattended installs):
+     **Rotating the credentials later** (a leaked or expired consumer key, a new token): no `fleet setup:reset`. Run
+     `sudo fleet host:ovh-credentials` (hidden prompts for the application key, the secret and the consumer key; add
+     `--endpoint=ovh-ca` to change the endpoint too; or pipe the three values, one per line, on standard input). It
+     stores them and installs the Caddyfile and the credential files through the root helper, and Caddy **reloads**.
+     A `403 This call has not been granted` in the Caddy journal means the token lacks one of the rights in the token section (or is
+     restricted to another IP address: if you limited the credentials to an address, it must be this host's), not that
+     the files are missing. Create the consumer key with exactly those rights, then rotate.
 
-   ```bash
-   sudo env FLEET_DOMAIN=fleet.example.com FLEET_ACME_EMAIL=you@example.com bash bootstrap.sh
-   ```
+     If Caddy does not come back
+     (the web UI is behind it, so the wizard cannot help), go back to HTTP-01 from the shell:
+     `sudo fleet host:init --tls-mode=http01 --force && sudo fleet host:render --apply && sudo systemctl restart caddy`.
+3. **SSH keys.** Fleet clones and pushes with two ed25519 keys, **deploy** (read) and **push** (write). Copy each
+   public key and register it at your Git server (the push key with write access) before you finish. You can
+   generate a new key or import an existing unencrypted private key; the old key then stops working wherever it
+   was registered. *Trusted Git servers*: GitHub, GitLab and Bitbucket are pre-trusted. For another server enter
+   its host (or `[host]:port`); Fleet reads the server's host keys and shows their fingerprints, and nothing
+   is trusted until you compare them with the ones your server's administrator published and confirm. Loopback
+   and link-local targets are refused.
+4. **Claude token** (optional). The OAuth token that `claude setup-token` prints, so Claude Code can run
+   inside instances. Stored encrypted, never shown again. *Skip for now* is fine.
+5. **Finish.** A summary (domain, certificates, administrator, both key fingerprints, whether a Claude token is
+   stored). Pressing *Finish setup* writes the administrator into the sign-in service, restarts Authelia,
+   switches the Caddy gate from the setup gate to the sign-in gate, applies the certificate settings (DNS mode
+   only) and marks setup complete, **in that order and last**. It usually takes a few seconds (up to a few minutes when the host is slow; the request may run for 240 s); keep the page open.
+   If a step fails, the page shows why, nothing is marked complete and the link still works: fix the cause and
+   press Finish again.
 
-   Also configurable: `FLEET_SSH_ALLOW_USERS` — space- or comma-separated
-   usernames for `security_hardening`'s sshd `AllowUsers` (only takes
-   effect when `FLEET_SECURITY_HARDENING` is on). If unset, the installer
-   auto-computes a safe default and persists it — see the warning below.
+After Finish the setup token is gone. Signed out you are sent to the sign-in page whatever you open (the sign-in
+gate is in front of `/setup` too); signed in, every `/setup` URL answers 404 "Setup is complete". Open
+`https://<domain>/`: you are sent to `https://auth.<domain>/` to sign in with the administrator you created.
+Authelia's own self-service password reset ("Forgot password?" on the sign-in page) is **switched off** until an SMTP
+server is configured, because without one its link could not be delivered; the recovery path is section 5. To switch it
+on, add to `/etc/ddev-fleet/fleet.env` (the installer keeps lines it did not write) `FLEET_AUTHELIA_SMTP_ADDRESS`
+(`smtp://host`, `submission://host:587` or `submissions://host:465`), `FLEET_AUTHELIA_SMTP_SENDER` (the From address) and,
+if the server wants a login, `FLEET_AUTHELIA_SMTP_USERNAME`. The SMTP password is never written by Fleet: give Authelia
+the path of a file holding it with `Environment=AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE=/etc/authelia/secrets/smtp_password`
+in a `systemd` drop-in of `authelia.service` (the file `root:authelia` 0640). Then run `sudo fleet host:render --apply`.
+With a server configured, Fleet keeps what Authelia changes: before every rewrite of the users file it adopts a password
+hash that Authelia changed (the user's self-service reset), unless an administrator set that user's password in Fleet
+in the meantime (Fleet then wins), so the next user change does not undo a reset. `users.yml` is then group-writable
+(0660) so Authelia can write it.
 
-   > **SSH-lockout warning.** Running the installer **detached as root
-   > with no controlling `sudo` session** (e.g. wrapped in `systemd-run`,
-   > or any invocation where `$SUDO_USER` is unset) can lock your SSH
-   > login user out of the server. `security_hardening`'s `AllowUsers`
-   > normally defaults to whoever invoked `sudo` (`$SUDO_USER`) — with no
-   > `SUDO_USER`, that default falls back to `root`, so sshd ends up with
-   > `AllowUsers root` and the real login account (e.g. `debian`) can no
-   > longer SSH in. This actually happened and bricked SSH access to a
-   > server. `bootstrap.sh` now guards against it (falling back to a scan
-   > of every account with a non-empty `~/.ssh/authorized_keys`, plus
-   > `root`), but the simplest fix is still to **run it via `sudo` from
-   > your actual login shell** (preserves `$SUDO_USER`), or set
-   > `FLEET_SSH_ALLOW_USERS` explicitly:
-   > ```bash
-   > sudo env FLEET_SSH_ALLOW_USERS="debian root" bash bootstrap.sh
-   > ```
-   > See `ansible/roles/security_hardening/defaults/main.yml`.
-4. Install git + Ansible, clone (or pull) the code, install the required
-   Ansible Galaxy collections, persist your answers to
-   `/etc/ddev-fleet/local-vars.yml`, and run the provisioning playbook
-   (Docker, DDEV, Caddy, the `fleet` system user, the `fleet.service`
-   systemd unit — enabled but not started yet).
-5. Print the fleet deploy public key, the generated admin password (if
-   one was generated), and a "next steps" list.
-6. If `FLEET_NETWORK_HARDENING` is enabled, arm a **UFW dead-man's
-   switch**: once the firewall comes up, you have
-   `fleet_ufw_deadman_grace_minutes` (default 10) to confirm you still
-   have SSH access. From a **second** SSH session (don't close the first
-   one — if it turns out you're locked out, you want it as a fallback):
-   ```bash
-   sudo /usr/local/sbin/fleet-firewall-confirm
-   ```
-   If the grace window elapses with no confirmation, UFW is disabled
-   automatically (fail-open) rather than leaving you locked out.
+### Creating the OVH API token
 
-**Re-running the installer** (e.g. to pick up a new `FLEET_REPO_VERSION`)
-is safe: any key already present in `/etc/ddev-fleet/local-vars.yml` is
-never re-prompted or overwritten, and no fresh admin password is printed
-on a re-run.
+Only for the `ovh_dns` certificate mode. Caddy uses the token to add and remove a temporary TXT record
+(`_acme-challenge…`) in your DNS zone each time it obtains a certificate. The example uses the zone `example.com`
+and the host address `203.0.113.10`: use your own zone (the domain you manage at OVH, not the fleet's host name)
+and your server's public IPv4 address.
 
-### Delivering to a private fork
+1. Open the token page of your OVH endpoint and sign in:
+   - `ovh-eu`: <https://eu.api.ovh.com/createToken/>
+   - `ovh-ca`: <https://ca.api.ovh.com/createToken/>
+   - `ovh-us`: <https://api.us.ovhcloud.com/createToken/>
+2. Fill in the form:
 
-If you're running your own private fork rather than the public repo, the
-bare `curl | bash` one-liner is auth-gated. Two options:
+   | Field | Value |
+   |---|---|
+   | Application name | anything, e.g. `fleet-caddy-<host>` |
+   | Application description | anything, e.g. `Caddy DNS-01 certificates for <domain>` |
+   | Validity | `Unlimited` |
+   | Rights | **four lines**, one per method, all with the same path ending in `/*`: |
+   | | `GET` `/domain/zone/example.com/*` |
+   | | `POST` `/domain/zone/example.com/*` |
+   | | `PUT` `/domain/zone/example.com/*` |
+   | | `DELETE` `/domain/zone/example.com/*` |
+   | Restricted IPs | your server's address, e.g. `203.0.113.10/32` (recommended) |
 
-- **(a) Tar-over-ssh** (no server-side git auth needed at all):
+   Two mistakes make every certificate fail with `This call has not been granted` (HTTP 403) in the Caddy journal:
+   - **the method**: the form starts each new line on `GET`; change the second, third and fourth lines to `POST`,
+     `PUT` and `DELETE`;
+   - **the path**: it must end in `/*`. A path like `/domain/zone/example.com/record` grants that exact path only, while
+     Caddy also calls `/domain/zone/example.com/record/<id>` and `/domain/zone/example.com/refresh`.
 
-  ```bash
-  # on a machine that has the checkout:
-  SRV=you@<server>
-  TMP="$(mktemp -d)"
-  git archive --format=tar HEAD | tar -x -C "$TMP"
-  ssh "$SRV" 'sudo mkdir -p /opt/ddev-fleet'
-  tar -C "$TMP" -cf - . | ssh "$SRV" 'sudo tar -C /opt/ddev-fleet -xf - && sudo chown -R root:root /opt/ddev-fleet'
-  rm -rf "$TMP"
-  ssh "$SRV" 'sudo env FLEET_SKIP_FETCH=1 bash /opt/ddev-fleet/bootstrap.sh'
-  ```
+   These four lines cover every call of the DNS library behind Caddy's OVH module,
+   [libdns/ovh](https://github.com/libdns/ovh#authenticating) (records, record ids, the zone's SOA and the refresh).
+3. Click **Create keys**. OVH shows the **Application Key**, the **Application Secret** and the **Consumer Key**
+   once: copy them into the wizard's certificate step (with the matching endpoint) before you leave the page.
+4. To replace the token later (rotation, expiry, a leaked key), create a new one the same way and run
+   `sudo fleet host:ovh-credentials`: it prompts (hidden) for the three new values, rewrites `/etc/caddy/ovh/` and
+   reloads Caddy. No `setup:reset`, and your users, projects and instances are untouched. Delete the old token in your
+   OVH account afterwards.
 
-  `FLEET_SKIP_FETCH=1` skips both git fetch points (bootstrap.sh's own
-  clone/pull and the `fleet_service` Ansible role's clone), so a private
-  repo needs no server-side auth at all.
-
-- **(b) An https URL with embedded credentials** (e.g. a GitHub personal
-  access token): `export FLEET_REPO_URL=https://<user>:<token>@github.com/<you>/ddev-fleet.git`
-  then run `bootstrap.sh` normally.
-
-`bootstrap.sh` is long (apt + Docker/DDEV/Caddy + the playbook) — run it
-detached (`nohup … &` to a logfile, then poll) rather than holding an SSH
-session open.
-
-## 5. Add the deploy key to each forge
-
-```bash
-cat /srv/fleet/fleet-deploy-key.pub
-```
-
-Add it as a **read-only** deploy key on every forge hosting a project
-you'll register in `/srv/fleet/config/fleet.yml`.
-
-## 6. `fleet init` — create the registry and mint the Claude Code token
-
-```bash
-sudo -u fleet -i
-cd /opt/ddev-fleet
-venv/bin/fleet init
-```
-
-Prompts for the fleet domain (if not already passed `--domain`) and runs
-`claude setup-token` to write `CLAUDE_CODE_OAUTH_TOKEN` into
-`/srv/fleet/.secrets` (`600`) — skip with `--skip-claude`.
-
-By default this creates `/srv/fleet/config/fleet.yml` from the bundled
-`fleet.yml.dist` template (see `fleet.yml.dist` in the repo root for the
-schema). If you're using the private-config-repo pattern instead
-(recommended for teams/multi-machine setups — a private git repo holding
-your real registry plus per-project assets), set
-`FLEET_CONFIG_REPO=<git-url>` before running `fleet init` and it clones
-your real registry + assets instead. `fleet init` never overwrites an
-existing `fleet.yml` or re-clones an existing `config/` checkout — safe
-to re-run.
-
-**Minting vs. copying the Claude token.** `claude setup-token` (the
-interactive OAuth flow, run as the `fleet` user) is only for *minting* a
-brand-new `CLAUDE_CODE_OAUTH_TOKEN` — you need it exactly once, the first
-time no fleet server anywhere has a valid token yet. If you're adding
-another server to a fleet that already has one, do **not** re-mint —
-copy the existing token instead: `fleet set-claude-token <existing-token>`,
-or replicate `/srv/fleet/.secrets` wholesale (see
-`docs/runbook-server-rollout.md` §3). This is also the more common
-source of deploy-blocking token errors than people expect: a
-`fleet deploy` failing with `unresolved token(s): [[…]]` is almost always
-a missing **per-project** secret (`/srv/fleet/secrets/<project>.env`), not
-this fleet-wide Claude token — the Claude token's absence only produces a
-non-fatal warning. See `docs/runbook-server-rollout.md` §3 for the full
-picture of secrets on a newly provisioned server.
-
-### Multi-server: one config repo, per-host domain
-
-The private-config-repo pattern above extends naturally to running
-`fleet.yml` on **several servers at once** (e.g. staging + production, each
-with its own domain) — point `FLEET_CONFIG_REPO` at the SAME repo on every
-host. The one thing that can't be shared is the domain, so each host keeps
-its own in `/srv/fleet/host.yml`, rendered automatically by the installer's
-`caddy` Ansible role from the `fleet_domain` you answered/configured for
-THAT host — you don't create or edit it by hand. `host.yml`'s domain always
-wins over whatever `fleet.yml`'s own (shared) `fleet.domain` says, so
-`fleet.domain` becomes optional in `fleet.yml` once every host in the
-fleet has been provisioned (and thus has its own `host.yml`). See
-`docs/configuration.md`'s "Per-host domain" section for the full precedence
-rules and schema.
-
-## 7. Start the fleet daemon
+Check the result once Caddy has had a minute to try:
 
 ```bash
-sudo systemctl start fleet.service
-sudo systemctl status fleet.service
+sudo journalctl -u caddy -n 200 --no-pager | grep -E 'certificate obtained|not been granted'
 ```
 
-## 8. First deploy
+`certificate obtained successfully` for the instance host names means it works; `not been granted` means a right is
+missing (see the two mistakes above).
 
-The installer seeds a bundled **`demo`** project (a generic `type: php` DDEV
-app with no database, built into a local repo at `/srv/fleet/_demo.git`), so
-you can prove the fleet end-to-end before registering anything of your own:
+### Users and project access
+
+Open **Users** (`https://<domain>/admin/users`, administrators only; it works on a phone). Fleet owns the people who may
+sign in, so there is no other place to add them:
+
+- **New user:** username (lowercase letters, digits, dot, underscore or dash; fixed afterwards), display name, email and
+  an initial password (the same rules as everywhere: 12 to 128 characters), whether the person is an administrator, and
+  the projects they work on (one tap-sized checkbox per project).
+- **Edit** (tap a user in the list): display name, email, the administrator role and the project checkboxes. A member can
+  operate the instances of the projects they are in (start, stop, redeploy, read logs; deploy and destroy stay with administrators), and cannot create or delete projects, change
+  settings or open another project's instance sites. An administrator needs no memberships: every project is theirs.
+- **Site access only:** a checkbox on the create and edit forms (`--site-only` on `fleet user:create` and
+  `fleet user:update`, which also takes the negated form to undo it). A site-only user only opens the instance sites of the projects they
+  are in, for example to share a staging site with a client while keeping crawlers and strangers out (the 0.x
+  `users: [{name: shield, password: shield}]` setting). They need no email, may have a trivially short password (4
+  characters or more, and it may equal the username; the form warns that it only protects instance sites), and are never
+  administrators. They have **no access to Fleet itself**: every Fleet page, API and live component answers 403
+  "This account only opens project sites", and the list marks them with a badge. They have no email, so the sign-in page's
+  password reset cannot reach them; an administrator sets a new password. Switching a user back to a regular one needs
+  an email and keeps the stored password, so set a new one.
+- **Set a new password** for the user (the person can also reset it from the sign-in page once outgoing mail is
+  configured, see above), **Disable** or **Enable** the account (a disabled user cannot sign in; nothing is deleted)
+  and **Delete** it (with its project access).
+
+Every change is checked against the Authelia users file before it is saved and written to it right after. Project
+access is part of that file: a member carries the group `fleet-project-<project>`. Authelia reloads the file by
+itself, so creating a user or a project, changing a membership or deleting either **never restarts Authelia and nobody is
+signed out**; the change applies at once (Authelia re-reads the user's groups on every request). If writing the file
+fails the page says so: the change is saved and the next user or project change tries again.
+
+Safeguards: nobody can delete, disable or demote **themselves**, and the **last enabled administrator** can never be
+deleted, disabled or demoted (create or enable another one first), so the fleet cannot lock itself out. Everything on
+these pages is checked on the server and protected against cross-site requests; passwords are stored as argon2id
+hashes and are never shown or logged.
+
+Next, describe what the fleet can deploy: add your first project and its templates in the browser or on the host, see
+[`projects-and-templates.md`](projects-and-templates.md), and give them their seed data (database dumps, files) on the project's Assets tab or by copying over SSH, see [`assets.md`](assets.md). Then deploy an instance: [`instances-and-jobs.md`](instances-and-jobs.md).
+
+## 5. Recovery
+
+All commands run on the host. `fleet` is the wrapper the installer puts in `/usr/local/bin`: it switches to the
+`fleet` user and loads `/etc/ddev-fleet/fleet.env`. `fleet setup:token` is short for `fleet fleet:setup:token`.
+
+| Situation | Command |
+|---|---|
+| Lost the setup URL (setup not complete) | `sudo fleet setup:token` prints a new setup URL; the old one stops working. It refuses once setup is complete. |
+| Nobody can sign in, or a password is forgotten | `ssh -t admin@fleet.example.com sudo fleet user:reset-password alice` |
+| Start the wizard over (change certificates, replace the administrator, ...) | `sudo fleet setup:reset` |
+| Get into the agent workspace (the `fleet` tmux session) | `ssh -t admin@fleet.example.com sudo fleet tmux`, or `sudo fleet tmux <instance-id>` for one instance's window. Needs a terminal: without `ssh -t` it exits with status 2. See [`agent-workspace.md`](agent-workspace.md). |
+
+**`fleet:user:reset-password <username>`** asks for the new password twice **without echo** and stores its
+argon2id hash, rewrites the Authelia users file and restarts Authelia. It needs a real terminal: over SSH use
+`ssh -t`, because without one (a pipe, cron, plain `ssh host command`) the command refuses to run rather than
+read the password from an argument or the environment, and it never falls back to a visible prompt.
+`--no-apply` writes the users file but skips the Authelia restart (and the sudo). **Restarting Authelia drops
+every signed-in session**: all users must sign in again.
+
+**`fleet:setup:reset`** marks setup as not complete, mints a new token, prints the URL and puts the setup gate
+back, so until the wizard finishes again only the wizard, its assets and `/health` are reachable and nobody can
+sign in. Existing users, keys and secrets are kept and the wizard updates them: the reopened wizard remembers its earlier
+answers, so the new link lands on Finish (the stepper links go back to any step, and the administrator's username
+stays fixed). It asks for confirmation on a
+real terminal; `--yes` skips the question (required without a terminal). It is logged. Finishing the wizard again
+restarts Authelia, so sessions are dropped here as well.
+
+The remaining commands exist mostly for the installer:
+
+| Command | Purpose |
+|---|---|
+| `fleet:host:init --domain=<fqdn> [--acme-email=] [--tls-mode=http01\|ovh_dns] [--force]` | Create the state directories, the secret key and the host settings. Idempotent. Changing the domain or the TLS mode after setup needs `--force`. |
+| `fleet:host:ovh-credentials [--endpoint=ovh-eu\|ovh-ca\|ovh-us]` | DNS mode only: replace the OVH application key, secret and consumer key (hidden prompts, or three lines on standard input), then install them through the root helper and reload Caddy. Nothing is stored unless all three are valid. |
+| `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
+| `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
+| `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity, schema version and whether it was sealed by this host's secret key, read-only (see below). |
+| `fleet:backup:restore <file> [--yes] [--accept-key-mismatch] [--json]` | Restore a backup into the live databases: verified first, swapped atomically, the previous database kept as `*.pre-restore-*`, then migrated; refuses while jobs run, while a unit that writes the databases is active, on a secret key mismatch, or as the wrong user (see below). |
+| `fleet:setup:token` | Mint a setup token and print the URL. |
+| `fleet:setup:reset [--yes]` | See above. |
+| `fleet:user:reset-password <username> [--no-apply]` | See above. |
+
+### Host settings page
+
+Administrators find the host's own settings under **Settings** (`/admin/host`), in five tabs (a select with a Go button on a phone):
+
+| Tab | What you can do |
+|---|---|
+| General | See the domain and TLS mode (read-only; the page names the commands that change them) and edit the ACME contact e-mail. After saving, apply it to Caddy with `sudo fleet host:render --apply`. |
+| Git identity | The default author name and e-mail of the commits the fleet makes in instances. Both or neither; the name has no control characters, `<` or `>` and at most 100 characters. |
+| Claude token | Store or replace the Claude Code token (the same secret the setup wizard writes). It is write-only: the page shows only "Set" or "Not set" and when it was last written. |
+| Notifications | The SMTP relay (host, port, user, password), sender and recipient for the host's e-mails. The password is stored encrypted, write-only, and can be removed with a checkbox. Nothing sends mail yet, and there is no test-mail button. |
+| Backups | The database backups (see below): list and download them, "Back up now", and the retention in days (1 to 3650). |
+
+A **reboot notice** appears at the top of every page for administrators when Debian has left `/run/reboot-required`
+(the packages that asked for it, from `/run/reboot-required.pkgs`, are listed). The fleet never reboots the host by itself.
+
+### Backup and restore
+
+**What is backed up.** `fleet-backup.timer` runs `fleet:backup:create` once a day. It writes a consistent snapshot
+(SQLite `VACUUM INTO`, taken while the app keeps running, checked with `PRAGMA quick_check` and renamed into place
+atomically) of the two databases into `/srv/fleet/backups/` (directory 0700, files 0600, owned by `fleet`):
+
+| File | Holds |
+|---|---|
+| `fleet-YYYYmmdd-HHMMSS.sqlite` | The fleet database: host settings, users (argon2id hashes), SSH key metadata and the encrypted secrets. The one you restore. |
+| `queue-YYYYmmdd-HHMMSS.sqlite` | The Messenger queue (pending and failed jobs). Only transient work; you rarely want it back. |
+
+The timestamp is UTC. **`/srv/fleet/keys/secret.key` is not part of a backup**, and the encrypted secrets cannot be
+read without it: copy it somewhere safe once (and again if it ever changes), apart from the backups. A fleet backup
+records a **fingerprint** of the key that sealed it (32 hex characters of a keyed hash, never the key) in its
+`fleet_backup_meta` table, so a restore can tell when the key on the host is another one. Instances,
+assets and the SSH keys under `/srv/fleet/ssh` are not backed up either.
+
+**Retention.** Backups older than the retention (14 days by default; `backupRetentionDays` in the host settings)
+are deleted after every run, except that the newest backup of each kind is always kept. The backups live on the
+same disk as the databases: copy `/srv/fleet/backups` to another machine (`rsync`, `restic`, ...) for a real
+disaster recovery.
+
+**Back up now.** The Backups tab of the host settings page (`/admin/host?tab=backups`) lists the fleet database backups,
+downloads one (an attachment, never cached) and has a "Back up now" button. On the host, `sudo fleet backup:create` prints the name of the new file (it is short for
+`fleet fleet:backup:create`); a failure exits non-zero. `systemctl list-timers fleet-backup.timer` shows the next
+run and `journalctl -u fleet-backup.service` the last ones.
+
+**Check before you restore.** `sudo fleet backup:verify /srv/fleet/backups/fleet-20261019-083015.sqlite` opens the file read-only and runs SQLite's integrity check and a schema comparison. It exits 0 when the file is sound (`schema: behind` says how many migrations the restore will run), 1 when it is not, and it refuses the live database. It also prints `secret key: match`, `mismatch` (sealed by another key than `keys/secret.key`; the restore refuses it) or `not recorded` (a backup made before the fingerprint existed; the restore warns). See [`moving-projects.md`](moving-projects.md) for moving a single project between hosts.
+
+**Restore.** `fleet backup:restore <file>` puts a backup back as the live database, and keeps what it replaced. Replace
+`fleet-20261019-083015.sqlite` with the backup you chose:
 
 ```bash
-sudo -u fleet fleet deploy demo          # -> https://demo--main.<domain>/
+sudo systemctl stop fleet-scheduler fleet-worker@1 fleet-status php8.4-fpm
+sudo fleet backup:restore /srv/fleet/backups/fleet-20261019-083015.sqlite
+sudo systemctl start fleet-worker@1 fleet-scheduler fleet-status php8.4-fpm
 ```
 
-Browse to the printed URL — you should see the "ddev-fleet demo is running"
-page. Tear it down with `sudo -u fleet fleet destroy demo--main` once you've
-confirmed it.
+Four units write the databases, so all four are stopped: the worker, the scheduler, the status watcher (`fleet-status`)
+and php-fpm (web requests; the web UI is down until you start it again). The command stops nothing itself (it has no
+root rights); it checks, read-only with `systemctl list-units`, that they are stopped and prints the exact `systemctl`
+line when they are not. Before it touches anything it refuses, with exit 1 and a reason, when:
 
-Then register your own projects in `/srv/fleet/config/fleet.yml` (see
-`fleet.yml.dist` for the schema — projects, `default_branch`/`default_template`,
-and per-template `post_deploy` commands) and deploy:
+- the file fails `fleet backup:verify` (integrity) or comes from a newer release than this one;
+- the backup was sealed by another secret key than the host's `keys/secret.key` (see below);
+- a job is queued or running (`fleet job:list`; let it finish first);
+- a `fleet-worker@*`, `fleet-scheduler`, `fleet-status` or `php*-fpm` unit is active;
+- it runs as another user than the one that owns `/srv/fleet` (`fleet`): `sudo fleet backup:restore ...` is right, a root shell
+  running `console fleet:backup:restore` directly would leave root-owned databases the services cannot open;
+- the live database cannot be read (a damaged file: move it aside with `mv`, then restore into the empty place).
+
+**Secret key mismatch.** When the backup records a fingerprint that differs from the host's key (a rebuilt host, a key
+that was replaced), the restore refuses: the sealed secrets (OVH credentials, Claude token, project secrets) would be
+unreadable. Put the matching `keys/secret.key` back and run it again; if the key is really gone, add
+`--accept-key-mismatch`, accept the warning it prints and set every secret again afterwards. A backup that records no
+fingerprint (made before this check existed) is restored with a warning, since nothing can be compared.
+
+Then it asks for confirmation (`--yes` skips the question and is required without a terminal; `--json` prints the
+result as JSON). The file is a fleet backup (`fleet-<stamp>.sqlite`); the queue backup with the same stamp is restored
+with it when it exists, otherwise the current queue stays. The steps:
+
+1. The backup is copied next to the live file (same filesystem), compared and flushed to disk.
+2. The current database is kept as `/srv/fleet/backups/fleet.sqlite.pre-restore-<UTC stamp>` (and `queue.sqlite.pre-restore-<stamp>`).
+   These files are never deleted by the retention and are not listed on the Backups tab.
+3. The copy is renamed over the live file (atomic; a leftover `-wal` or `-shm` next to the live file is removed first, so it is never replayed onto the restored database; the kept copy in step 2 already holds those writes).
+4. `doctrine:migrations:migrate` upgrades a backup from an older release, then the schema is validated.
+
+Until the rename the live database is untouched. If the rename, the migration or the schema check fails, the previous
+databases are put back and the command says so (exit 1); if even that fails it prints the files to copy back by hand.
+On success it prints `previous kept: <path>`.
+
+**Undo a restore.** The kept file is a normal backup: stop the units and run the same command on it,
 
 ```bash
-fleet deploy <project> <template> --branch <ref>
+sudo systemctl stop fleet-scheduler fleet-worker@1 fleet-status php8.4-fpm
+sudo fleet backup:restore /srv/fleet/backups/fleet.sqlite.pre-restore-20261020-101500
+sudo systemctl start fleet-worker@1 fleet-scheduler fleet-status php8.4-fpm
 ```
 
-Browse to the printed instance URL.
+which in turn keeps the database you are leaving. Delete the `*.pre-restore-*` files by hand once you no longer need them.
 
-## 9. Web UI first-run check
+Check `https://<domain>/health` afterwards. If `keys/secret.key` was lost, the restored secrets cannot be decrypted: set the
+OVH credentials and the Claude token again. Instances, assets and SSH keys are not part of a backup and are not touched.
+
+## 6. Upgrading and re-running
+
+**Re-running the same command is the upgrade** (add `--ref=vX.Y.Z` to move to a specific release; the default `main` follows the latest release). The installer updates the checkout (a branch is reset to
+`origin/<ref>`; local edits in `/opt/ddev-fleet` are discarded), runs `composer install`, applies migrations and
+repeats every step. It keeps the secrets, the users, the SSH keys and the wizard's choices, prints **no new setup
+token once setup is complete** (while setup is still open it prints a fresh URL and the old one stops working), and reloads php-fpm and the workers when the code changed. It always restarts
+Caddy (a refreshed custom build only takes effect in a new process) and Authelia, so expect a short blip and
+**every signed-in user is signed out**. A step that failed halfway is simply run again.
+
+The packages (Docker, DDEV, PHP) are upgraded by the operating system's own `apt upgrade`; only the custom
+Caddy and the Mercure hub are refreshed by the installer.
+
+`--domain` cannot change once setup is complete (`fleet:host:init` refuses without `--force`), and a domain
+change involves the DNS records, the certificates and the sign-in cookie domain, so it is not a supported
+operation yet. `DEFAULT_URI` in `fleet.env` is not rewritten by a re-run either.
+
+Switching TLS mode after setup: run `sudo fleet setup:reset`, change the mode in the wizard's second step and
+finish again.
+
+### Instances on the host
+
+Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a few things from the host:
+
+- **Wildcard DNS.** Add one record `*.<domain>` (A, and AAAA if you use IPv6) pointing at this host. Every instance is
+  served at `https://<id>.<domain>`; without the record the deploy works and the site does not open.
+- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one), `fleet-status` keeps the
+  instance states true, and `fleet-boot` starts the instances one at a time after a reboot. `systemctl list-units` should show none of them as failed.
+- **Certificates.** Each instance site gets **its own certificate** from Caddy (HTTP-01, or DNS-01 in `ovh_dns` mode). Let's
+  Encrypt limits how many certificates one registered domain may obtain per week, so deploying dozens of new instances in
+  a week can hit the limit: the site then stays without a certificate until the limit passes. Reusing a label (redeploy)
+  reuses the certificate.
+- **Who can open a site.** Authelia has one rule for `*.<domain>`: any signed-in user. The per-project check is made by
+  the Caddy site of each instance (`instances/<id>.conf`, aliases and named-port blocks included): it reads the
+  `Remote-Groups` header that Authelia returns and answers **403** unless it holds the administrators' group
+  (`FLEET_ADMIN_GROUP`) or the instance's project group `fleet-project-<project>`. Administrators open every site,
+  members only their projects' sites, and no project name matches another (the group is compared as a whole list entry).
+  Access therefore changes through `users.yml` and a graceful Caddy reload, never through a restart. **Upgrading from
+  an earlier 1.0.x** is safe in one step: re-run the installer (or `sudo fleet host:render --apply`). Before it installs the
+  new Authelia configuration (one restart, everyone signs in once) it writes the project groups into `users.yml` and
+  rewrites every existing instance site with the group check, in that order. If a site cannot be rewritten the command
+  stops with the reason and leaves Authelia as it is, so the old per-project rules keep protecting the sites; fix the
+  cause and run it again. Never install the new Authelia configuration by other means before the sites are rewritten:
+  `fleet port:refresh` rewrites the sites on demand. A user group starting with `fleet-project-` is reserved for this and
+  refused.
+- **Upgrading while a job runs.** Re-running the installer restarts the workers when the code changed. A job running at that
+  moment is marked `interrupted` (its worker is gone) and can be retried; wait for running deploys before upgrading when you can.
+- **Root-owned leftovers.** A container can leave files owned by root in an instance checkout. Destroy then fails with the
+  exact `sudo rm -rf <directory>` line; run it and retry the job.
+- **No rate limit on `/_components`.** The live components endpoint is open to every signed-in user, each component checks
+  the user's role itself, and no request rate limit is applied; Caddy and the sign-in gate are the only front line.
+
+## 7. Security model
+
+- **Caddy is the only Internet-facing process.** It strips every `Remote-*` and `Remote_*` request header on every
+  route, including `/health`, `/setup` and in setup mode, then runs the Authelia `forward_auth` gate, which
+  copies the verified identity back. The app trusts an identity only from a request that carries the shared
+  secret as the FastCGI parameter `FLEET_PROXY_AUTH` (a client cannot set a FastCGI parameter) and refuses a secret
+  shorter than 32 characters.
+- **What needs no sign-in.** Only `/health` (a minimal status document) and `/hooks/*` (reserved for signed
+  webhooks, which will authenticate themselves; no such route exists yet and the path answers 404) bypass the
+  `forward_auth` gate. Caddy matches those paths case-insensitively, so `/HOOKS/x` is treated as `/hooks/x`;
+  Symfony's routing is case-sensitive, and the identity headers are stripped on these paths too, so nothing there
+  can act as a signed-in user. Everything else, `/setup` included, needs an Authelia session.
+- **Authelia** uses the `one_factor` policy (password only) for `<domain>`, bypasses its own portal and denies every
+  other host by default. It has one static rule for `*.<domain>` (any signed-in user); who may open which project is
+  decided by the instance's Caddy site from the user's `fleet-project-<name>` groups (see "Who can open a site"). The
+  configuration changes only with host-level settings (domain, outgoing mail); installing it restarts Authelia and
+  signs everyone out, so such a change is announced as that.
+- **The root helper.** The app never runs as root. To install a rendered Caddy or Authelia configuration it writes
+  the files into `/srv/fleet/staging/<target>/` and runs `sudo -n /usr/local/libexec/fleet/apply <target>`. The
+  sudoers file contains exactly one line, allowing `apply caddy` and `apply authelia` for `fleet`, with the
+  arguments matched exactly. The helper pins the staging directory, rejects symlinks, hard links and oversized or
+  foreign files, validates the files with the real Caddy or Authelia binary running as their own users, installs
+  atomically, rolls back if the reload fails, and deletes the staged files afterwards.
+- **Be honest about what that buys.** `fleet` is a member of the `docker` group, which is root-equivalent on the
+  host. The helper prevents accidents and half-applied configurations; it is **not a security boundary** against
+  a compromised `fleet` account or a compromised app. This is why php-fpm's unit sets `NoNewPrivileges=no`
+  (a setuid `sudo` needs it), and the Finish request runs the helper from php-fpm for now.
+- **Secrets.** Generated once, kept in files with narrow modes (see section 3); the OVH credentials and the Claude
+  token are stored encrypted in the database with a key that is only readable by `fleet` (the OVH credentials
+  also sit in clear text in `/etc/caddy/ovh/`, one file per value, `root:caddy` 0640 in a 0750 directory, because Caddy
+  needs them; they are not in Caddy's environment); the setup URL is not in the install log, and Caddy's
+  log filter removes the `token` query parameter from every log line (there is no access log);
+  secrets do not appear in command-line arguments.
+- **The Mercure hub** listens on loopback only and is reachable only through Caddy.
+
+## 8. What the installer deliberately does not touch
+
+The installer **never changes `sshd`, the firewall (`ufw`, `iptables`, `nftables`), `fail2ban` or unattended-upgrades
+settings**: a mistake there locks you out of a remote host, so host hardening is the operator's decision. Do it
+yourself, and do it carefully (keep a second SSH session open while you test). At the least, allow SSH, 80 and 443
+and deny the rest, and remember that Docker publishes container ports by editing the firewall itself. A
+hardening guide for 1.x is planned with the host operations milestone. The Ansible roles in `ansible/` describe the
+0.x layout and are not used by this installer (see [`../ansible/LEGACY-0x.md`](../ansible/LEGACY-0x.md)).
+
+## 9. Uninstalling
+
+Nothing in the installer calls the uninstaller. Run it deliberately, **from the root-owned copy** the installer
+keeps (the checkout in `/opt/ddev-fleet` belongs to the `fleet` user and is removed by the uninstaller itself; do
+not run root code from a directory another account can write; the uninstaller refuses to start as root from a file or
+directory that is not owned by root or is writable by anyone else):
 
 ```bash
-curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:8765/api/jobs/nonexistent
+sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes --dry-run     # review the plan first
+sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh --yes [--keep-data] [--purge-packages]
 ```
 
-Expected: `404`. Then browse to `https://fleet.<domain>`, confirm the
-basic-auth prompt (the password printed by the installer, or one you
-supplied), log in, and confirm the instance deployed in step 7 is
-listed. Trigger a fresh deploy from the UI's deploy form and confirm the
-live log pane updates over WebSocket while `post_deploy` runs.
+**Back up first.** Without `--keep-data` the uninstaller deletes `/srv/fleet` (databases, the secret key, the SSH
+keys, every instance) and `/etc/ddev-fleet` (the generated secrets), and `/etc/authelia/secrets`: none of it can
+be recreated. Copy at least `/srv/fleet` and `/etc/ddev-fleet` somewhere safe (as root, with `tar -C / -czpf
+backup.tgz --exclude=srv/fleet/staging srv/fleet etc/ddev-fleet etc/authelia/secrets`).
 
-## Switching TLS mode on an existing server
+| Flag | Effect |
+|---|---|
+| `--yes` | Required. Without it nothing is removed. |
+| `--keep-data` | Keep `/srv/fleet` (databases, secret key, SSH keys, instances), Authelia's secrets, its database and the tmpfiles mask, and the `fleet` user that owns them. Everything else is removed, including `/etc/ddev-fleet` (so `fleet.env` and its generated secrets are gone: a later install generates new ones; copy `/etc/ddev-fleet` beforehand if you want them back). |
+| `--purge-packages` | Also purge Caddy, Authelia, DDEV and Docker CE and remove their repositories. Without it the packages stay installed. |
+| `--dry-run` | Print what would be removed. Works without root, but still needs `--yes`. |
 
-No need to re-run the full installer. From the server:
+It stops DDEV (`ddev poweroff`), disables and removes the units and configuration, restores the stock php-fpm pool
+and the packaged Caddy, removes the helper, the sudoers line, the `fleet` command, `/opt/ddev-fleet` and (unless
+`--keep-data`) `/srv/fleet` and the `fleet` user. It never touches `sshd` or the firewall, so your SSH access is
+unaffected. It leaves `/var/log/ddev-fleet-install.log` and the apt packages (unless asked) in place.
 
-1. Edit `/etc/ddev-fleet/local-vars.yml`, set `fleet_tls_mode: "ovh_dns"`
-   (or back to `"on_demand"`).
-2. If switching **to** `ovh_dns`, create `/etc/caddy/ovh.env` (`0600
-   root:root`) with `OVH_ENDPOINT`, `OVH_APPLICATION_KEY`,
-   `OVH_APPLICATION_SECRET`, `OVH_CONSUMER_KEY` — see "Choosing a TLS
-   mode" above for the token-creation steps, **including testing the
-   token first** — a token that works fine on one OVH-scoped server can
-   be IP-restricted to a different one and fail with `403 "This call has
-   not been granted"` only once you're mid-switch. Skip this step if
-   switching back to `on_demand`. If you hand-edit an already-deployed
-   `/etc/caddy/ovh.env` outside of step 3 below (e.g. swapping in a
-   corrected token), `systemctl restart caddy` yourself — nothing else
-   will pick it up.
-3. Re-apply just the `caddy` role:
-   ```bash
-   cd /opt/ddev-fleet/ansible
-   sudo ansible-playbook caddy-only.yml
-   ```
-   This is the same scoped-playbook pattern as `ddev-only.yml` — never run
-   the full `site.yml` against a live host (see `CLAUDE.md` /
-   `docs/operations.md`).
+A failed or half-finished install needs no uninstall: run the install command again.
 
-**Upgrade order matters — read this if the server is already running an
-older `fleet.core.caddyports`.** Named-port snippets (Typesense, etc.) only
-`import` the shared `tls.conf` file when it's already on disk; if it isn't
-yet (e.g. right after a plain code-only rollout — `push-product`'s git-pull
-+ `systemctl restart fleet`, which reconciles port snippets on daemon
-startup with no Ansible involved), they fall back to inlining the legacy
-`tls { on_demand }` block instead, so an un-migrated server never ends up
-importing a file that doesn't exist (which would otherwise fail `caddy
-validate` and take every instance down on Caddy's next restart). So:
+## 10. Troubleshooting
 
-1. Run step 3 above (`caddy-only.yml`) **first** — this creates
-   `/etc/caddy/fleet/tls.conf`.
-2. Then run `sudo -u fleet fleet refresh-ports` (or just let the next
-   `fleet.service` restart do it) to rewrite existing named-port snippets
-   from the inline fallback over to the `import`.
-
-Doing it in the other order is harmless (the fallback keeps Caddy healthy
-either way) but leaves snippets on the inline block until the next
-`refresh-ports`/restart.
-
-## See also
-
-- `docs/operations.md` — ongoing code updates, rollback, password
-  rotation, the verification checklist as a repeatable template.
-- `docs/networking.md` — TLS termination points and every port in one
-  table, including the `fleet_tls_mode` mechanics.
-- `docs/README-authelia.md` — full design, `fleet.yml` `users:` schema, and
-  how to switch an existing server's `auth_mode` later.
-- `fleet.yml.dist` — the `fleet.yml` registry schema, with the full set
-  of optional keys (named ports, Typesense, additional hostnames)
-  commented out as examples.
-- `README.md` — the full CLI command reference.
+| Symptom | Cause and fix |
+|---|---|
+| The installer stops with `... has the A record ..., which is not an address of this host` (exit 2) | An A record for `<domain>` or `auth.<domain>` points elsewhere, or an AAAA record is not this host's (Let's Encrypt prefers IPv6; fix it or remove the AAAA record). Fix DNS, or `--skip-dns-check` if you know better. "DNS check inconclusive" means the lookup itself failed (timeout, SERVFAIL). The check asks the system resolver first; when that answers a loopback address (Debian's `/etc/hosts` line for the host name, served by systemd-resolved) it asks 1.1.1.1 and 9.9.9.9 instead (`FLEET_DNS_FALLBACK_RESOLVERS` changes the list). |
+| A step failed | The message names the step, the script line and the log. Fix the cause and run the same command again. |
+| No certificate, the browser warns | Port 80 or 443 is closed, or DNS is wrong. `journalctl -u caddy -n 100 --no-pager`. In `ovh_dns` mode check the OVH credentials' rights and, if you restricted them to an IP address, that it is this host's. |
+| After a reboot the sign-in portal answers 502 and nobody can sign in | Authelia could not read its secrets. The Authelia package ships a tmpfiles rule that strips the execute bit of `/etc/authelia/secrets` at every boot; the installer masks it with `/etc/tmpfiles.d/authelia.conf`. Check that file exists and `stat -c %a /etc/authelia/secrets` prints `750`; re-run the installer to repair it. |
+| Finish fails with "The Caddy snippet directory ... lost its setgid bit" | A directory under `/etc/caddy/fleet` lost its group or setgid bit, so Caddy could not read what the app writes. As root: `chgrp -R caddy /etc/caddy/fleet; find /etc/caddy/fleet -type d -exec chmod 2750 {} +; find /etc/caddy/fleet -type f -exec chmod 0640 {} +; systemctl restart caddy`. A re-run of the installer repairs it too. |
+| `https://<domain>/health` does not answer after the install | `journalctl -u caddy -u authelia -u php8.4-fpm -u fleet-mercure -u fleet-worker@1 -u fleet-status -n 50 --no-pager`. |
+| An instance deploys but its site does not open | The wildcard record `*.<domain>` is missing, you are not an administrator (members cannot open instance sites yet), or Let's Encrypt refused the certificate: `journalctl -u caddy -n 100`. |
+| A deploy or destroy job is `interrupted` or fails | See the troubleshooting table in [`instances-and-jobs.md`](instances-and-jobs.md). |
+| The wizard answers 403 | No valid session cookie: open the setup URL again (it is valid for 24 hours), or mint a new one with `sudo fleet setup:token`. 429 means too many attempts from this address; wait 15 minutes. |
+| The wizard answers 404 "Setup is complete" | It is complete. Sign in at `https://<domain>/`; to start over use `sudo fleet setup:reset`. |
+| Sign-in refused after a reset ("... they are banned" in `journalctl -u authelia`) | Authelia's regulation, rendered in its configuration (`regulation:`: `max_retries: 3`, `find_time: 2m`, `ban_time: 5m`), bans a user after 3 failed sign-ins within 2 minutes, for 5 minutes, and every attempt made while banned extends the ban. A password reset does not lift it (`authelia storage bans user revoke` covers manual bans only), so the reset commands and the Users page tell you to wait. Wait 5 minutes without trying again, then sign in with the new password. |
+| `fleet user:reset-password` says it needs a terminal | Use `ssh -t` (section 5). |

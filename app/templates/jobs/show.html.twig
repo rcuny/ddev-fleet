@@ -1,0 +1,39 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Job #{{ job.id }} · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="'Job #' ~ job.id" :description="job.type ~ (job.instanceId ? ' · ' ~ job.instanceId : '')">
+        <twig:block name="actions">
+            {% if canRetry %}
+                <form method="post" action="{{ path('job_retry', {id: job.id}) }}">
+                    {{ include('setup/_csrf.html.twig') }}
+                    <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="job-retry">
+                        <twig:ux:icon name="lucide:rotate-ccw" />
+                        Retry
+                    </twig:Button>
+                </form>
+            {% endif %}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-3xl gap-6">
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Details</twig:Card:Title>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                {{ include('jobs/_meta.html.twig', {job: job}) }}
+            </twig:Card:Content>
+        </twig:Card>
+
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Log</twig:Card:Title>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                {{ include('jobs/_log.html.twig', {job: job}) }}
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

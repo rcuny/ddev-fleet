@@ -1,0 +1,42 @@
+{# symfony-design-system:start #}
+{% set sample %}{% verbatim %}
+<article class="body-content">
+    <h3>Section heading</h3>
+    <p>Lead paragraph introducing the section. Type comes from the base styles.</p>
+    <p>A second paragraph shows the vertical rhythm given by <code>.body-content &gt; * + *</code>.</p>
+    <h4>Sub-section</h4>
+    <p>Each h2, h3 or h4 inside <code>.body-content</code> gets top padding unless it is the first child.</p>
+    <ul>
+        <li>Lists get their markers back inside the wrapper.</li>
+        <li>No extra utility classes are needed.</li>
+    </ul>
+    <blockquote>And blockquotes look the same wherever they appear.</blockquote>
+</article>
+{% endverbatim %}{% endset %}
+<twig:Ds:Section id="body-content" title="Body content" :sample="sample|trim">
+    <twig:block name="description">
+        <p>
+            Wrap long-form prose (help pages, release notes, documentation) in <code>.body-content</code> for consistent vertical rhythm,
+            breathing room above sub-headings, and list markers. The class sets spacing only; type and colour come from the base styles.
+            The typography plugin is not used.
+        </p>
+    </twig:block>
+    <twig:block name="when_to_use">
+        <ul>
+            <li>Articles, help text, anything that is a sequence of paragraphs and headings.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="when_not_to_use">
+        <ul>
+            <li>UI chrome: buttons, forms, navigation, cards.</li>
+            <li>Tight layouts where you control every gap.</li>
+        </ul>
+    </twig:block>
+    <twig:block name="options">
+        <ul>
+            <li>Combine with <code>max-w-prose</code> or your own width constraint.</li>
+            <li>Markdown rendered to HTML belongs inside this wrapper.</li>
+        </ul>
+    </twig:block>
+</twig:Ds:Section>
+{# symfony-design-system:end #}

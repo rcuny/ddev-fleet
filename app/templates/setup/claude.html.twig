@@ -1,0 +1,20 @@
+{% extends 'setup/base.html.twig' %}
+
+{% block setup_content %}
+    <twig:Card>
+        <twig:Card:Header>
+            <h1>Claude token</h1>
+            <p>Optional. Lets Claude Code run inside the instances. {% if stored %}<strong data-testid="setup-claude-stored">A token is stored.</strong>{% else %}<span data-testid="setup-claude-stored">No token is stored.</span>{% endif %}</p>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'setup-claude-form'}}) }}
+                {{ form_errors(form) }}
+                {{ form_row(form.token) }}
+                <div class="flex flex-col gap-2 md:flex-row">
+                    {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                    {{ form_widget(form.skip, {attr: {class: 'w-full md:w-auto', 'data-variant': 'outline', formnovalidate: 'formnovalidate'}}) }}
+                </div>
+            {{ form_end(form) }}
+        </twig:Card:Content>
+    </twig:Card>
+{% endblock %}

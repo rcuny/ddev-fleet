@@ -3,7 +3,7 @@
 # pipeline (bitbucket-pipelines.yml) on a weekly Bitbucket schedule.
 #
 # SECURITY_PROBE_TARGETS: space-separated `name=user@host` entries, e.g.
-#   ddev3=fleet-probe@ddev3.fleet.pm
+#   server1=fleet-probe@fleet.example.com
 # Each host's `fleet-probe` user has a forced command (security_probe Ansible
 # role): whatever we ask over SSH, it prints the JSON report and nothing else.
 # Every target is checked before the script fails, so one broken host cannot
@@ -56,7 +56,8 @@ if [ -n "${SYSTEMD_SECURITY_BASELINE:-}" ]; then
 fi
 
 report=SYSTEMD-SECURITY-REPORT.md
-bot=(git -c user.name="ddev-fleet security check" -c user.email="security-check@noreply.fleet.pm")
+# The report commit identity; set SECURITY_CHECK_GIT_EMAIL (repository variable) to use a real no-reply address.
+bot=(git -c user.name="ddev-fleet security check" -c user.email="${SECURITY_CHECK_GIT_EMAIL:-security-check@noreply.example.com}")
 report_url=""
 
 # Commit $report and push it to the pipeline's branch. Explicit checks, no `set -e`:

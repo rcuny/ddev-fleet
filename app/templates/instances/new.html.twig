@@ -1,0 +1,37 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Deploy · Instances · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader title="Deploy" description="Create one or more instances of a project." />
+
+    <div class="mt-6 max-w-2xl">
+        {% if not hasProjects %}
+            <twig:Card data-testid="deploy-no-projects">
+                <twig:Card:Header>
+                    <twig:Card:Title>No projects yet</twig:Card:Title>
+                    <twig:Card:Description>Create a project first: an instance is always a copy of one.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content>
+                    <twig:Button as="a" href="{{ path('project_new') }}" class="h-11 md:h-8">New project</twig:Button>
+                </twig:Card:Content>
+            </twig:Card>
+        {% else %}
+            {{ form_start(form, {attr: {class: 'grid gap-6'}}) }}
+                {{ form_errors(form) }}
+                {{ form_row(form.project) }}
+                {{ form_row(form.template) }}
+                {{ form_row(form.branch) }}
+                <div class="grid gap-6 md:grid-cols-2">
+                    {{ form_row(form.label) }}
+                    {{ form_row(form.count) }}
+                </div>
+                {{ form_row(form.parallel) }}
+                <div class="flex flex-col gap-2 md:flex-row">
+                    {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                    <twig:Button as="a" href="{{ path('instances') }}" variant="outline" class="h-11 w-full md:h-8 md:w-auto">Cancel</twig:Button>
+                </div>
+            {{ form_end(form) }}
+        {% endif %}
+    </div>
+{% endblock %}
