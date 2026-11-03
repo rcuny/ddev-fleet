@@ -44,7 +44,7 @@ final readonly class SidebarRenderer
      */
     public function render(string $window, ?SidebarGitCache $cache = null, ?int $now = null): string
     {
-        if (Tmux::HOME_WINDOW !== $window && 1 !== preg_match(FleetPaths::INSTANCE_ID_PATTERN, $window)) {
+        if (Tmux::HOME_WINDOW !== $window && 1 !== preg_match(FleetPaths::EXISTING_INSTANCE_ID_PATTERN, $window)) {
             throw new WorkspaceException('That is not an instance id.');
         }
         $cache ??= new SidebarGitCache();

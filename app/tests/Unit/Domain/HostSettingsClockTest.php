@@ -14,9 +14,23 @@ use Symfony\Component\Clock\MockClock;
  */
 final class HostSettingsClockTest extends TestCase
 {
+    private string $defaultZone;
+
+    protected function setUp(): void
+    {
+        // Run under a non-UTC default zone so a fixture built in the machine zone is caught on UTC CI too.
+        $this->defaultZone = date_default_timezone_get();
+        date_default_timezone_set('Asia/Tokyo');
+    }
+
+    protected function tearDown(): void
+    {
+        date_default_timezone_set($this->defaultZone);
+    }
+
     public function testEveryMutatorStampsTheGivenTime(): void
     {
-        $clock = new MockClock('2026-03-01 08:00:00');
+        $clock = new MockClock(new \DateTimeImmutable('2026-03-01 08:00:00', new \DateTimeZone('UTC')));
         $host = new HostSettings('fleet.example.com', $clock->now());
         self::assertEquals($clock->now(), $host->createdAt());
         self::assertEquals($clock->now(), $host->updatedAt());
@@ -40,6 +54,6 @@ final class HostSettingsClockTest extends TestCase
             $mutate($host, $clock->now());
             self::assertEquals($clock->now(), $host->updatedAt(), 'mutator #'.$i);
         }
-        self::assertEquals(new \DateTimeImmutable('2026-03-01 08:00:00'), $host->createdAt());
+        self::assertEquals(new \DateTimeImmutable('2026-03-01 08:00:00', new \DateTimeZone('UTC')), $host->createdAt());
     }
 }

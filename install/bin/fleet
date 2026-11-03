@@ -115,6 +115,7 @@ FLEET_GROUPS=(
   setup
   template
   tmux
+  upgrade
   user
   webhook
   workspace

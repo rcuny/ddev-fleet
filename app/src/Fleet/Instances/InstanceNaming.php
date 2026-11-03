@@ -96,6 +96,14 @@ final class InstanceNaming
         return $labels;
     }
 
+    /**
+     * True for an id that may already exist: the creation rule plus the 60 to 63 characters older versions allowed.
+     */
+    public static function isExistingInstanceId(string $text): bool
+    {
+        return 1 === preg_match(FleetPaths::EXISTING_INSTANCE_ID_PATTERN, $text);
+    }
+
     public static function isInstanceId(string $text): bool
     {
         return 1 === preg_match(FleetPaths::INSTANCE_ID_PATTERN, $text);
