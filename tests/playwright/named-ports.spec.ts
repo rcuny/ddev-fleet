@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { canRunConsole, consoleRun, randomPorts } from './support/templates';
@@ -56,7 +55,6 @@ test.describe('named-port catalogue', () => {
       await expect(row).toContainText(String(router));
       await expect(row.getByRole('checkbox', { name: `Use port ${name}` })).not.toBeChecked();
       expect(await hasHorizontalOverflow(page), 'overflow on the Ports tab').toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab with a catalogue entry');
 
       await row.getByRole('checkbox').check();
       await submitAndWait(page, page.getByRole('button', { name: 'Save ports' }));
@@ -116,7 +114,6 @@ test.describe('named-port catalogue', () => {
       await openPorts(page, project);
       await expect(page.getByTestId('port-row').filter({ has: page.getByText(name, { exact: true }) })).toHaveCount(1);
       expect(await hasHorizontalOverflow(page), 'overflow with a 40 character port name').toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab with a long port name');
     } finally {
       await deleteProjectViaUi(page, project);
       remove(name);
@@ -191,7 +188,6 @@ test.describe('named-port catalogue', () => {
       await expect(page.getByTestId('flashes')).toHaveCount(0);
       await expect(page.getByTestId('port-checkbox').first()).toHaveAttribute('aria-invalid', 'true');
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab with an error');
       // The stored assignment is unchanged.
       await openPorts(page, project);
       await expect(page.getByTestId('ports-errors')).toHaveCount(0);

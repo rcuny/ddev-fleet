@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -28,7 +27,6 @@ test.describe('project ports tab', () => {
       const checkbox = row.getByRole('checkbox', { name: `Use port ${PORT}` });
       await expect(checkbox).not.toBeChecked();
       expect(await hasHorizontalOverflow(page), 'horizontal overflow on the Ports tab').toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab');
 
       const save = page.getByRole('button', { name: 'Save ports' });
       if ('phone' === testInfo.project.name) {

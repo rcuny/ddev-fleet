@@ -1,6 +1,5 @@
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow, unexpectedErrors } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -230,7 +229,6 @@ test.describe('users: the New user form refuses', () => {
       await expect(page.getByRole('checkbox', { name: 'Administrator' })).toBeHidden();
       await expect(page.getByTestId('site-only-warning')).toBeVisible();
       await expect(page.getByRole('checkbox', { name: project })).toBeChecked();
-      await expectNoBlockingViolations(page, 'axe, new site-only user refused');
 
       // The display name is still required.
       await page.getByLabel('Display name').fill('');
@@ -342,7 +340,6 @@ test.describe('users: the list', () => {
         await expectNoOverflow(page, 'the user list');
         await expectTall(row(page, two).getByRole('link'));
       }
-      await expectNoBlockingViolations(page, 'axe, user list');
 
       await follow(page, row(page, two).getByRole('link'));
       await expect(page).toHaveURL(new RegExp(`/admin/users/${two}/edit$`));
@@ -378,7 +375,6 @@ test.describe('users: the list', () => {
       await setValue(page.getByLabel('Initial password'), 'p'.repeat(128));
       expect(await create(page)).toBe(422);
       await expectNoOverflow(page, 'the refused new user form');
-      await expectNoBlockingViolations(page, 'axe, refused new user form with long values');
     } finally {
       await deleteUserViaUi(page, username);
     }
@@ -500,7 +496,6 @@ test.describe('users: edit', () => {
       await expect(page.getByTestId('user-status').getByTestId('user-site-only')).toBeVisible();
       await expect(page.getByText(`${username} · site access only`)).toBeVisible();
       await expect(page.getByTestId('password-card')).toContainText('at least 4 characters');
-      await expectNoBlockingViolations(page, 'axe, site-only edit page');
 
       // Back to a regular user without an email: refused under the email, and the user stays site-only.
       await tick(page, 'user_edit', 'siteOnly');
@@ -575,7 +570,6 @@ test.describe('users: set a new password', () => {
         await expect(page.getByLabel('Display name')).toHaveValue('Spec Person');
         await expect(page.locator('#user_edit_displayName_errors')).toHaveCount(0);
       }
-      await expectNoBlockingViolations(page, 'axe, refused password');
 
       // 12 characters (one script, many bytes) and 128 characters are the inclusive limits.
       for (const good of ['é'.repeat(12), 'p'.repeat(128), PASSWORD]) {
@@ -649,7 +643,6 @@ test.describe('users: disable, enable and delete', () => {
       await expect(page.getByTestId('user-status')).toContainText('Disabled');
       await expect(page.getByTestId('user-status')).toContainText('This user cannot sign in. Enable the account to give the access back.');
       await expect(page.getByRole('button', { name: 'Disable user' })).toHaveCount(0);
-      await expectNoBlockingViolations(page, 'axe, disabled user edit page');
 
       // Editing a disabled user keeps it disabled.
       await setValue(page.getByLabel('Display name'), 'Still Off');
@@ -684,7 +677,6 @@ test.describe('users: disable, enable and delete', () => {
       let dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this user' }));
       await expect(dialog).toContainText(`Delete ${username}?`);
       await expect(dialog).toContainText('This removes the account and its access to every project. It cannot be undone.');
-      await expectNoBlockingViolations(page, 'axe, delete user dialog');
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(dialog).toBeHidden();
 
@@ -797,7 +789,6 @@ test.describe('users: administrators', () => {
       await expect(page.getByRole('checkbox', { name: 'Administrator' })).toBeChecked();
 
       await page.goto(`/admin/users/${username}/edit`);
-      await expectNoBlockingViolations(page, 'axe, administrator edit page');
       expect(unexpectedErrors(errors)).toEqual([]);
     } finally {
       await deleteUserViaUi(page, username);
@@ -834,7 +825,6 @@ test.describe('users: administrators', () => {
       };
 
       await guarded();
-      await expectNoBlockingViolations(page, 'axe, refused last-admin change');
 
       // A second enabled administrator: the keeper may go in principle, so the guard protects whoever is left.
       await createUserViaUi(page, { username: second, admin: true });
@@ -876,7 +866,6 @@ test.describe('users: administrators', () => {
       await expect(admin).toBeChecked();
       await expect(admin).toBeDisabled();
       await expect(page.getByText('You cannot change your own role. Ask another administrator.')).toBeVisible();
-      await expectNoBlockingViolations(page, 'axe, own edit page');
       if (isPhone()) {
         await expectNoOverflow(page, 'the own edit page');
       }
@@ -919,7 +908,7 @@ test.describe('users: administrators', () => {
 });
 
 test.describe('users: layout and accessibility of every state', () => {
-  test('refused and filled forms, the dialog and the lists pass axe in both themes and fit 390 px', async ({ page }) => {
+  test('refused and filled forms, the dialog and the lists fit 390 px', async ({ page }) => {
     const project = uniqueName('prj');
     const username = uniqueName('usr');
 
@@ -928,11 +917,8 @@ test.describe('users: layout and accessibility of every state', () => {
       await createUserViaUi(page, { username, projects: [project] });
 
       await page.goto('/admin/users/new');
-      await expectNoBlockingViolations(page, 'axe, empty new user form');
       expect(await create(page)).toBe(422);
-      await expectNoBlockingViolations(page, 'axe, new user form with a username error');
       await tick(page, 'user_create', 'siteOnly');
-      await expectNoBlockingViolations(page, 'axe, new site-only user form');
       if (isPhone()) {
         await expectNoOverflow(page, 'the refused new user form');
         await expectTall(page.getByRole('button', { name: 'Create user' }));
@@ -941,10 +927,8 @@ test.describe('users: layout and accessibility of every state', () => {
       await page.goto(`/admin/users/${username}/edit`);
       await setValue(page.getByLabel('Email'), 'nope');
       expect(await save(page, username)).toBe(422);
-      await expectNoBlockingViolations(page, 'axe, edit form with an email error');
       await setValue(page.getByLabel('New password'), 'tiny');
       expect(await setPassword(page, username)).toBe(422);
-      await expectNoBlockingViolations(page, 'axe, edit page with a password error');
       if (isPhone()) {
         await expectNoOverflow(page, 'the refused edit page');
         for (const name of ['Set password', 'Disable user', 'Delete this user']) {
@@ -953,7 +937,6 @@ test.describe('users: layout and accessibility of every state', () => {
         await expectTall(page.getByLabel('New password'));
       }
       await follow(page, page.getByRole('link', { name: 'Back to users' }));
-      await expectNoBlockingViolations(page, 'axe, user list');
     } finally {
       await deleteUserViaUi(page, username);
       await deleteProjectViaUi(page, project);

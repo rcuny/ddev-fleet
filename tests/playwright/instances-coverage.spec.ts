@@ -1,5 +1,4 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { ADMIN_PROJECT, MEMBER_PROJECT, createDeployableProject, deployOne, postForm, rowOf, runConsole, runFakeJob, submitDeploy, submitTampered, uniqueLabel } from './support/instances';
 import { follow, navigate, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
@@ -92,7 +91,6 @@ test.describe('deploy form: admin', () => {
     await expect(form).toContainText('1 to 20 instances; more than one get numbered suffixes.');
     await expect(form.getByLabel('Deploy at the same time')).not.toBeChecked();
     await expect(form).toContainText('By default several instances are deployed one after the other.');
-    await expectNoBlockingViolations(page, 'the deploy form');
 
     await follow(page, page.getByRole('link', { name: 'Cancel' }));
     await expect(page).toHaveURL(/\/instances$/);
@@ -136,7 +134,6 @@ test.describe('deploy form: admin', () => {
     await expect(detail).toContainText('alt');
     await expect(detail).toContainText(`release/1.0-${suffix}`);
     await expect(page.getByRole('heading', { level: 1, name: id })).toBeVisible();
-    await expectNoBlockingViolations(page, 'the detail page of a deployed instance');
   });
 
   test('a blank label is derived from the branch, a blank branch from the project default', async ({ page }) => {
@@ -198,7 +195,6 @@ test.describe('deploy form: admin', () => {
     await expect(label).toHaveValue('!!!');
     await expect(branch).toHaveValue('dev');
     await expect(form.getByLabel('Project', { exact: true })).toHaveValue(ADMIN_PROJECT);
-    await expectNoBlockingViolations(page, 'the deploy form with an error');
 
     // The field stops typing at 40 characters; an id longer than 59 ("acme--" and 60 more) needs the limit lifted.
     await label.fill('l'.repeat(60));
@@ -367,7 +363,6 @@ test.describe('instance list: admin', () => {
     const empty = page.getByTestId('instances-empty');
     await expect(empty).toContainText('No instance matches');
     await expect(empty).toContainText('Change or clear the filters.');
-    await expectNoBlockingViolations(page, 'the list with no match');
   });
 
   test('the filter form submits, keeps its values and lists the choices', async ({ page }) => {
@@ -397,7 +392,6 @@ test.describe('instance list: admin', () => {
     await follow(page, page.getByTestId('filter-submit'));
     await expect(rowOf(page, b)).toBeVisible();
     await expect(page.getByTestId('instance-row')).toHaveCount(2);
-    await expectNoBlockingViolations(page, 'the filtered list');
   });
 
   test('the state badge shows a running job and a failed one, the row buttons wait for it', async ({ page }) => {
@@ -412,7 +406,6 @@ test.describe('instance list: admin', () => {
       await row.getByLabel(`More actions for ${id}`).click();
       await expect(page.getByRole('menuitem', { name: 'Redeploy' })).toBeDisabled();
       await page.keyboard.press('Escape');
-      await expectNoBlockingViolations(page, 'the list with a busy instance');
     } finally {
       release();
     }
@@ -451,7 +444,6 @@ test.describe('instance list: admin', () => {
     const dialog = await openDialog(page, page.getByRole('menuitem', { name: 'Destroy…' }));
     await expect(dialog).toContainText(`Destroy ${id}?`);
     await expect(dialog).toContainText('This deletes the instance, its database and its files. It cannot be undone.');
-    await expectNoBlockingViolations(page, 'the destroy dialog of a row');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(rowOf(page, id)).toBeVisible();
@@ -501,7 +493,6 @@ test.describe('bulk actions: admin', () => {
       await all.uncheck();
       await expect(bar).toBeHidden();
     }
-    await expectNoBlockingViolations(page, 'the list with the bulk bar');
   });
 
   test('stop and start act on the selection and say how many jobs were queued', async ({ page }) => {
@@ -544,7 +535,6 @@ test.describe('bulk actions: admin', () => {
     await expect(dialog).toContainText('Redeploy the selected instances?');
     await expect(dialog).toContainText('Each one is rebuilt from its template, one after the other.');
     await expect(dialog.getByRole('listitem')).toHaveText(ids);
-    await expectNoBlockingViolations(page, 'the bulk redeploy dialog');
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByTestId('flashes')).toHaveCount(0);
@@ -655,7 +645,6 @@ test.describe('bulk actions: admin', () => {
     const dialog = await openDialog(page, bulkButton(page, 'Redeploy…'));
     await expect(dialog).toContainText(id);
     await expectNoOverflow(page, 'the bulk dialog');
-    await expectNoBlockingViolations(page, 'phone, the bulk dialog with a long id');
   });
 });
 
@@ -684,7 +673,6 @@ test.describe('instance page: admin', () => {
     await expect(page.getByTestId('active-job')).toHaveCount(0);
     await expect(page.getByTestId('timeline-job')).toHaveCount(1);
     await expect(page.getByTestId('timeline-job')).toContainText('deploy');
-    await expectNoBlockingViolations(page, 'the instance page');
   });
 
   test('stop, then start (the buttons follow the state), redeploy', async ({ page }) => {
@@ -697,7 +685,6 @@ test.describe('instance page: admin', () => {
     await expect(page.getByTestId('instance-detail')).toContainText('Stopped');
     await expect(page.getByTestId('open-site')).toHaveCount(0);
     await expect(page.getByTestId('instance-actions').getByRole('button', { name: 'Stop', exact: true })).toHaveCount(0);
-    await expectNoBlockingViolations(page, 'the page of a stopped instance');
     await follow(page, page.getByTestId('instance-actions').getByRole('button', { name: 'Start', exact: true }));
     await page.goto(`/instances/${id}`);
     await expect(page.getByTestId('instance-detail')).toContainText('Running');
@@ -714,7 +701,6 @@ test.describe('instance page: admin', () => {
     const dialog = await openDialog(page, page.getByRole('button', { name: 'Destroy…' }));
     await expect(dialog).toContainText(`Destroy ${id}?`);
     await expect(dialog).toContainText('This deletes the instance, its database and its files. It cannot be undone.');
-    await expectNoBlockingViolations(page, 'the destroy dialog');
     await page.keyboard.press('Escape');
     await expect(page.getByRole('dialog')).toHaveCount(0);
     await expect(page.getByTestId('timeline-job')).toHaveCount(1);
@@ -747,7 +733,6 @@ test.describe('instance page: admin', () => {
       const dialog = await openDialog(page, page.getByRole('button', { name: 'Destroy…' }));
       await follow(page, dialog.getByRole('button', { name: 'Destroy instance' }));
       await expect(page.getByTestId('flashes')).toContainText(`Busy: ${id} has a job queued or running.`);
-      await expectNoBlockingViolations(page, 'the page of a busy instance');
     } finally {
       release();
     }
@@ -807,7 +792,6 @@ test.describe('instances: member', () => {
     await selectRows(page, [own]);
     await expect(bulkButton(page, 'Redeploy…')).toBeVisible();
     await expect(bulkButton(page, 'Destroy…')).toHaveCount(0);
-    await expectNoBlockingViolations(page, 'a member, the list with the bulk bar');
 
     // The requests no button sends, made by editing the page: the token is the member's own, so the answer is the role's.
     await page.goto(`/instances?q=${own}`);

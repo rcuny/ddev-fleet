@@ -1,5 +1,4 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { follow, submitAndWait } from './support/projects';
 import { openHostTab, setValue, skipBrowserValidation, TAB_LABELS, test } from './support/host';
 import { uniqueValue } from './support/secrets';
@@ -7,8 +6,8 @@ import { collectBrowserErrors, hasHorizontalOverflow, unexpectedErrors } from '.
 import { setStandInRole } from './support/standIn';
 
 // Host settings, full coverage: every tab, every field, every message the rules return, the saved state re-read from
-// the page, the write-only secrets, the 404s of the backup download, the member's 403, and axe in both themes on the
-// states with errors. The host settings are one shared row: a test that saves takes `hostLock` (support/host.ts) and
+// the page, the write-only secrets, the 404s of the backup download, the member's 403, and the
+// states with errors (axe lives in a11y-host.desktop.spec.ts). The host settings are one shared row: a test that saves takes `hostLock` (support/host.ts) and
 // the existing host-settings.spec.ts takes it too. The forms are not `novalidate`, so a browser stops a bad e-mail or
 // an out-of-range number itself; the server messages are reached by skipping that validation, like a client would.
 
@@ -90,7 +89,6 @@ test.describe('host settings: General', () => {
       await expect(page.getByTestId('host-tab-general'), bad).toContainText('That is not a valid e-mail address.');
       await expect(page.getByTestId('flashes')).toHaveCount(0);
     }
-    await expectNoBlockingViolations(page, 'General tab with an error');
 
     await tab.getByLabel('ACME contact e-mail').fill('certs@example.com');
     await save(page, tab);
@@ -140,7 +138,6 @@ test.describe('host settings: Git identity', () => {
       await expect(row(field), `${field}: ${emailValue}`).toContainText(message);
       await expect(page.getByTestId('flashes')).toHaveCount(0);
     }
-    await expectNoBlockingViolations(page, 'Git identity tab with an error');
 
     // Surrounding blanks are trimmed; a name with accents and CJK is fine.
     await page.getByLabel('Name').fill('  Flëet Bøt 日本  ');
@@ -184,7 +181,6 @@ test.describe('host settings: Claude token', () => {
       expect(await page.content()).not.toContain(secret);
       await expect(page.getByLabel(/Claude OAuth token/)).toHaveValue('');
     }
-    await expectNoBlockingViolations(page, 'Claude tab with an error');
 
     // A token in the longest allowed size is stored.
     const longest = `sk-${'a'.repeat(509)}`;
@@ -208,7 +204,6 @@ test.describe('host settings: Claude token', () => {
     await expect(page.getByTestId('flashes')).toContainText('Claude token stored.');
     expect(await page.content()).not.toContain(secret);
     await expectNoOverflow(page, 'the Claude token tab');
-    await expectNoBlockingViolations(page, 'Claude tab with a stored token');
 
     await page.goto('/admin/audit?action=claude.token.rotate');
     const mine = page.getByTestId('audit-row').filter({ hasText: actor });
@@ -252,7 +247,6 @@ test.describe('host settings: Notifications', () => {
       await expect(row(field), JSON.stringify(values).slice(0, 80)).toContainText(message);
       await expect(page.getByTestId('flashes')).toHaveCount(0);
     }
-    await expectNoBlockingViolations(page, 'Notifications tab with an error');
     await expectNoOverflow(page, 'the Notifications tab with an error');
   });
 
@@ -285,7 +279,6 @@ test.describe('host settings: Notifications', () => {
     // With a stored password the label says "New", the field is empty and a checkbox offers to remove it.
     await expect(tab.getByLabel('New SMTP password')).toHaveValue('');
     await expect(tab).toContainText('A password is stored. Leave blank to keep it, or type a new one to replace it.');
-    await expectNoBlockingViolations(page, 'Notifications tab with a stored password');
 
     // A new password and "remove" together are refused, and nothing changes.
     await tab.getByLabel('New SMTP password').fill(replacement);
@@ -364,7 +357,6 @@ test.describe('host settings: Uploads', () => {
       await expect(page.getByTestId('host-tab-uploads'), `value "${bad}"`).toContainText(`Enter a number of MiB from 1 to ${MAX_UPLOAD_MIB}.`);
       await expect(page.getByTestId('flashes')).toHaveCount(0);
     }
-    await expectNoBlockingViolations(page, 'Uploads tab with an error');
 
     try {
       await page.goto('/admin/host?tab=uploads');
@@ -407,7 +399,6 @@ test.describe('host settings: Backups', () => {
       await expect(page.getByTestId('host-tab-backups'), `value "${bad}"`).toContainText('Enter a number of days from 1 to 3650.');
       await expect(page.getByTestId('flashes')).toHaveCount(0);
     }
-    await expectNoBlockingViolations(page, 'Backups tab with an error');
 
     try {
       // A fresh page for the valid saves: the error page was rendered by a refused POST and then flipped by axe.
@@ -451,7 +442,6 @@ test.describe('host settings: Backups', () => {
       expect(missing.status(), name).toBe(404);
     }
     await expectNoOverflow(page, 'the Backups tab');
-    await expectNoBlockingViolations(page, 'Backups tab');
   });
 });
 
@@ -464,7 +454,6 @@ test.describe('host settings: Networking and access', () => {
     await expect(page.getByTestId('host-mirror-ports')).toContainText(/The mirror is off|No port is mirrored now|Mirrored public ports/);
     await expect(page.getByText('fleet port:refresh')).toBeVisible();
     await expectNoOverflow(page, 'the Networking tab');
-    await expectNoBlockingViolations(page, 'Networking tab');
   });
 
   test('a member gets 403 on the page and on every save endpoint; a post without the CSRF token changes nothing', async ({ page, context, baseURL }) => {

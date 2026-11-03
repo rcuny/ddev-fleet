@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, openSection, submitAndWait, uniqueName } from './support/projects';
 import { createPort, deletePort, runConsole } from './support/ports';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -28,7 +27,6 @@ test.describe('project ports tab, in full', () => {
       await expect(box(page, port.name)).not.toBeChecked();
       await expect(page.getByTestId('ports-errors')).toHaveCount(0);
       await expect(page.getByRole('table', { name: 'Named ports' })).toBeVisible();
-      await expectNoBlockingViolations(page, 'Ports tab');
       expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -51,7 +49,6 @@ test.describe('project ports tab, in full', () => {
       await expect(box(page, a.name)).toBeChecked();
       await expect(box(page, b.name)).not.toBeChecked();
       await expect(box(page, c.name)).toBeChecked();
-      await expectNoBlockingViolations(page, 'Ports tab, saved');
 
       // Unassign one, add another.
       await box(page, a.name).uncheck();
@@ -167,7 +164,6 @@ test.describe('project ports tab, in full', () => {
       await expect(box(page, keep.name)).toBeChecked();
       await expect(box(page, keep.name)).toHaveAttribute('aria-invalid', 'true');
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab, error');
 
       // Nothing was stored: the same tab, reloaded, has nothing assigned and no error.
       await openSection(page, 'General');
@@ -329,7 +325,6 @@ test.describe('project ports tab, in full', () => {
       await expect(row(page, port.name)).toContainText(port.name);
       await expect(row(page, port.name)).toContainText(String(port.publicPort));
       expect(await hasHorizontalOverflow(page), 'long port name, unchecked').toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab, long name');
 
       await box(page, port.name).check();
       await submitAndWait(page, save(page));

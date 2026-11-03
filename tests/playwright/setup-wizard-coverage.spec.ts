@@ -2,7 +2,6 @@ import { type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawn, spawnSync } from 'node:child_process';
 import { readdirSync } from 'node:fs';
 import { join } from 'node:path';
-import { expectNoBlockingViolations } from './support/axe';
 import { submitAndWait } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 import { expect, opensshEd25519Key, test, type WizardHost } from './support/setup-host';
@@ -28,11 +27,10 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
 }
 
-/** Fits the viewport and has no blocking axe violation in either theme. */
+/** Settles the page and checks that it fits the viewport (axe lives in a11y-setup.desktop.spec.ts). */
 async function expectSound(page: Page, where: string): Promise<void> {
   await page.waitForLoadState('networkidle');
   await expectNoOverflow(page, where);
-  await expectNoBlockingViolations(page, where);
 }
 
 /** Opens the wizard with the host's one-time link: lands on the first step. */
@@ -557,7 +555,6 @@ test.describe('step 1: administrator', () => {
     await expect(page.getByTestId('summary-admin')).toContainText(username);
     await expect(page.getByTestId('summary-admin')).toContainText(email);
     await expectNoOverflow(page, 'the finish step with a long administrator');
-    await expectNoBlockingViolations(page, 'the finish step with a long administrator');
   });
 });
 
@@ -891,7 +888,6 @@ test.describe('step 3: SSH keys', () => {
     expect(await submit(page, page.getByRole('button', { name: 'Read host keys' }))).toBe(422);
     await expect(page.getByTestId('setup-ssh-errors')).toContainText(/Enter a host name such as git\.example\.com/);
     await expectNoOverflow(page, 'the SSH step with an absurd server name');
-    await expectNoBlockingViolations(page, 'the SSH step with a long server name');
   });
 
   test('an unknown action is refused', async ({ page, host }) => {

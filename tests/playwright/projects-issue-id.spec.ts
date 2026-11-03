@@ -1,5 +1,4 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { fillProject, readProject, submitSave } from './support/projectForm';
 import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -62,7 +61,6 @@ test.describe('issue id tester', () => {
       await t.label.fill('oaks-1781');
       await expect(t.result).toHaveAttribute('data-state', 'match');
       await expect(t.box.getByTestId('issue-id-extracted')).toHaveText('OAKS-1781');
-      await expectNoBlockingViolations(page, 'the tester with a match');
 
       // A label that holds no id, then the branch sample that does.
       await t.label.fill('nothing-here');
@@ -125,7 +123,6 @@ test.describe('issue id tester', () => {
       await t.pattern.fill('a'.repeat(201));
       await setRaw(t.pattern, 'a'.repeat(201));
       await expect(t.box.getByTestId('issue-id-message')).toHaveText('The pattern must be at most 200 characters.');
-      await expectNoBlockingViolations(page, 'the tester with an error');
       // The form's own pattern field was never touched.
       await expect(page.getByLabel('Issue id pattern')).toHaveValue('');
     } finally {

@@ -60,10 +60,10 @@ tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
   support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts,
                          projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
-  *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
+  *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (the axe sweep, see below),
                          setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
-                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe),
-                         import-export (a project's Export download, then Projects → Import: upload, preview table, confirm, axe),
+                         assets (the Assets tab: chunked upload, resume, download, delete, folders),
+                         import-export (a project's Export download, then Projects → Import: upload, preview table, confirm),
                          secrets (fleet-wide and project secrets, reveal, audit log)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
@@ -111,16 +111,22 @@ written to `.run/setup-url.txt`, `php -S 127.0.0.1:8000`) and stops it afterward
 (`FLEET_E2E_IGNORE_HTTPS_ERRORS=1` accepts a local certificate; `*.ddev.site` hosts are accepted
 automatically). Other variables: `FLEET_E2E_PORT` (default 8000) and `FLEET_PHP` (the PHP binary of the
 launcher). `setup-wizard.desktop.spec.ts` walks the token-gated setup wizard once, in order, in one browser session (refusal without
-a cookie, token exchange and its Strict cookie, every step at 1280 px with axe in both themes, the real walk-through at 390 px
+a cookie, token exchange and its Strict cookie, every step at 1280 px, the real walk-through at 390 px
 ending in Finish, then what every wizard URL answers). It needs a host that is installed but not set up, which only the
 self-started app provides, so it skips itself against an external server (the companion's served app keeps a persistent
 `FLEET_HOME`). `support/wizard.ts` (`completeWizard`, `readSetupUrl`) is shared with a live-server spec; `FLEET_LIVE_SETUP_URL`
 overrides the link file. Each run re-creates the setup link and clears the token-attempt throttle (`cache.rate_limiter`).
+**Axe sweep (FLE-158).** Feature specs carry no axe call. `support/axe.ts` (`expectNoBlockingViolations`: WCAG 2 A/AA,
+serious and critical, light then dark) is called only from the `a11y*.spec.ts` family, one test per page state, including
+the 422 error states, dialogs and warning states: `a11y.spec.ts` (four base pages), `a11y-projects`, `a11y-admin`
+(users, secrets, schedules, webhooks), `a11y-instances` (instances, jobs, assets, audit), `a11y-host` (host settings
+tabs, reboot banner), `a11y-setup` (setup wizard, own host per test), all `.desktop.spec.ts`, and `a11y-phone.phone.spec.ts`
+(the shell destinations and the instance and job pages at 390 px). A new page or error state gets a sweep test, not an
+inline axe call. Text-length variants are not swept (axe does not depend on text length); overflow stays in the feature specs.
 `projects.spec.ts` creates its own data: every test owns a project with a unique name (`uniqueName()`) and deletes it
 in `finally`, so it passes repeatedly against the shared dev database of the companion and in parallel. It covers the
 list, create, edit, templates, ports and delete dialog at both widths, the member 403, the issue id tester, and (phone
-project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets and axe in both
-themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
+project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
 the controller answers, because a busy host loads them after the HTML is interactive.
 `assets.spec.ts` (FLE-52, written without a browser to run it in: first run it on the pipeline) uploads files through the page
 with `setInputFiles` after lowering the chunk size to 64 KiB (the controller reads `data-asset-upload-chunk-size-value` when an

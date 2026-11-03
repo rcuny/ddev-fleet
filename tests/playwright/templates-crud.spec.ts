@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { createTemplateViaUi, editTemplate, fillTemplate, templateRow } from './support/templates';
@@ -25,7 +24,6 @@ test.describe('templates', () => {
       await expect(page.getByTestId('templates-empty')).toContainText('No templates yet');
       await expect(page.getByTestId('template-row')).toHaveCount(0);
       await expectNoOverflow(page, 'empty template list');
-      await expectNoBlockingViolations(page, 'empty template list');
 
       await follow(page, page.getByRole('link', { name: 'New template' }));
       await expect(page.getByTestId('template-heading')).toHaveText('New template');
@@ -36,7 +34,6 @@ test.describe('templates', () => {
       await expect(page.getByLabel('Terminal 2 commands')).toHaveValue('');
       await expect(page.getByRole('button', { name: 'Create template' })).toBeVisible();
       await expectNoOverflow(page, 'new template form');
-      await expectNoBlockingViolations(page, 'new template form');
       expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -71,7 +68,6 @@ test.describe('templates', () => {
       await expect(row.getByTestId('template-tty2')).toHaveText('2');
       await expect(row.getByTestId('template-default')).toHaveCount(0);
       await expectNoOverflow(page, 'template list');
-      await expectNoBlockingViolations(page, 'template list');
 
       await editTemplate(page, project, 'web');
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/templates/web$`));
@@ -83,7 +79,6 @@ test.describe('templates', () => {
       await expect(page.getByLabel('Terminal 2 commands')).toHaveValue('tail -f var/log/dev.log\ndrush uli');
       await expect(page.getByTestId('danger-zone')).toBeVisible();
       await expectNoOverflow(page, 'edit template form');
-      await expectNoBlockingViolations(page, 'edit template form');
       expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -202,7 +197,6 @@ test.describe('templates', () => {
       let dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
       await expect(dialog).toContainText('Delete web?');
       await expect(dialog).toContainText(`This removes the template from ${project}. It cannot be undone.`);
-      await expectNoBlockingViolations(page, 'delete template dialog');
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(page.getByRole('dialog')).toBeHidden();
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/templates/web$`));
@@ -248,7 +242,6 @@ test.describe('templates', () => {
       await expect(page.getByTestId('flashes')).toContainText('The template was not deleted. This is the default template of the project: choose another default template first.');
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/templates$`));
       await expect(templateRow(page, 'alpha')).toHaveCount(1);
-      await expectNoBlockingViolations(page, 'default template refusal');
     } finally {
       await deleteProjectViaUi(page, project);
     }
@@ -288,13 +281,11 @@ test.describe('templates', () => {
       await expect(row).toHaveCount(1);
       await expect(row.getByTestId('template-env')).toHaveText(longEnv);
       await expectNoOverflow(page, 'template list with long values');
-      await expectNoBlockingViolations(page, 'template list with long values');
 
       await editTemplate(page, project, longName);
       await expect(page.getByTestId('template-heading')).toContainText(longName);
       await expect(page.getByLabel('Post-deploy commands')).toHaveValue(longLine);
       await expectNoOverflow(page, 'edit template form with long values');
-      await expectNoBlockingViolations(page, 'edit template form with long values');
       if (isPhone()) {
         const box = await page.getByRole('button', { name: 'Save', exact: true }).boundingBox();
         expect(box!.height).toBeGreaterThanOrEqual(43.5);

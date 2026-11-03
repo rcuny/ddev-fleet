@@ -1,5 +1,4 @@
 import { expect, type Page } from '@playwright/test';
-import { blockingViolations } from './support/axe';
 import { test } from './support/host';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -75,23 +74,6 @@ test.describe('host settings', () => {
           expect(box, `${label}: ${await control.evaluate((el) => el.outerHTML.slice(0, 80))}`).not.toBeNull();
           expect(box!.height).toBeGreaterThanOrEqual(43.5);
         }
-      }
-    });
-  }
-
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(`axe, ${scheme} theme`, () => {
-      test.use({ colorScheme: scheme });
-
-      for (const { key, label } of TABS) {
-        test(`no serious or critical violations on the ${label} tab`, async ({ page }) => {
-          await openTab(page, key);
-          if (scheme === 'dark') {
-            await expect(page.locator('html')).toHaveClass(/\bdark\b/);
-          }
-
-          expect(await blockingViolations(page)).toEqual([]);
-        });
       }
     });
   }

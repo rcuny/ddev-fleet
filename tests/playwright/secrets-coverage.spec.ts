@@ -1,5 +1,4 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, navigate, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { placeholderOf, removeSecret, revealSecret, saveSecret, secretRow, submitSecret, test, uniqueSecret, uniqueValue } from './support/secrets';
 import { collectBrowserErrors, hasHorizontalOverflow, unexpectedErrors } from './support/shell';
@@ -62,7 +61,6 @@ test.describe('secrets: what the form refuses', () => {
     await expect(form.getByLabel('Name')).toHaveAttribute('aria-describedby', 'secret-name-error');
     await expect(form.getByLabel('Value')).toHaveAttribute('aria-describedby', 'secret-value-error');
     await expectNoOverflow(page, 'the form with two errors');
-    await expectNoBlockingViolations(page, 'secrets form with errors');
     expect(unexpectedErrors(errors)).toEqual([]);
   });
 
@@ -147,7 +145,6 @@ test.describe('secrets: what the form refuses', () => {
       await expect(page.getByTestId('error-value')).toHaveText(QUOTES);
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/secrets$`));
       await expect(page.getByTestId('secrets-empty')).toBeVisible();
-      await expectNoBlockingViolations(page, 'project secrets with errors');
     } finally {
       await deleteProjectViaUi(page, project);
     }
@@ -219,7 +216,6 @@ test.describe('secrets: values and the Replace form', () => {
       // The fleet-wide list does not scan assets: no warning, no badge.
       await expect(row.getByTestId('secret-no-placeholder')).toHaveCount(0);
       expect(await page.content()).not.toContain(value);
-      await expectNoBlockingViolations(page, 'secrets list');
     } finally {
       await removeSecret(page, '/admin/secrets', name);
     }
@@ -239,7 +235,6 @@ test.describe('secrets: delete', () => {
       let dialog = await openDialog(page, row.getByTestId('secret-delete'));
       await expect(dialog).toContainText(`Delete ${name}?`);
       await expect(dialog).toContainText('Instances deployed later no longer receive this value. It cannot be recovered.');
-      await expectNoBlockingViolations(page, 'delete dialog');
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(dialog).toBeHidden();
       await expect(row).toBeVisible();
@@ -307,7 +302,7 @@ test.describe('secrets: delete', () => {
 });
 
 test.describe('secrets: reveal', () => {
-  test('the dialog shows the value once, is axe clean and fits the screen; the response is not cached', async ({ page, actor }) => {
+  test('the dialog shows the value once, fits the screen; the response is not cached', async ({ page, actor }) => {
     test.setTimeout(120_000);
     const name = uniqueSecret('SHOW');
     const value = `${uniqueValue()}-${'long-'.repeat(60)}`;
@@ -330,7 +325,6 @@ test.describe('secrets: reveal', () => {
       expect(box.x).toBeGreaterThanOrEqual(-0.5);
       expect(box.x + box.width).toBeLessThanOrEqual(page.viewportSize()!.width + 0.5);
       await expectNoOverflow(page, 'the reveal dialog');
-      await expectNoBlockingViolations(page, 'reveal dialog');
       await closeReveal(page);
 
       // Reload (GET): the value is gone and the audit log holds the reveal by this user.
@@ -376,7 +370,6 @@ test.describe('secrets: reveal', () => {
       await expect(secretRow(page, name)).toBeVisible();
       await expect(page.getByTestId('secret-form')).toBeVisible();
       await expectNoOverflow(page, 'the throttled page');
-      await expectNoBlockingViolations(page, 'throttled page');
 
       // Saving is not throttled, only reveals are.
       await saveSecret(page, name, uniqueValue());
@@ -458,7 +451,6 @@ test.describe('secrets: in a project', () => {
       await expect(warned.getByTestId('secret-warning')).toContainText(`No file in this project's assets mentions ${placeholderOf(unused)}, so instances never receive this value.`);
       await expect(page.getByTestId('secret-no-placeholder')).toHaveCount(1);
       await expectNoOverflow(page, 'the project secrets tab with a warning');
-      await expectNoBlockingViolations(page, 'project secrets with a warning');
 
       // Replacing a value does not change the verdict; deleting the unused secret removes the warning.
       await saveSecret(page, unused, uniqueValue());
@@ -532,7 +524,6 @@ test.describe('secrets: host secrets', () => {
     // The managed list never mixes with the host's own.
     await expect(page.getByTestId('secret-row').filter({ hasText: 'claude_oauth_token' })).toHaveCount(0);
     await expectNoOverflow(page, 'the host secrets list');
-    await expectNoBlockingViolations(page, 'host secrets list');
   });
 });
 

@@ -1,11 +1,10 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { createTemplateViaUi, editTemplate, fillTemplate, submitNewTemplate, templateRow } from './support/templates';
 
 // What a browser adds to the template form's validation, on desktop and phone: the refused forms on screen (errors next to their
-// fields, accessible, no overflow, no stray console error). The per-rule matrices of the create and edit forms, the length limits,
+// fields, no overflow, no stray console error). The per-rule matrices of the create and edit forms, the length limits,
 // the boundary values, the duplicate name, the rename attempt and the CSRF check are PHPUnit Functional tests in
 // app/tests/Functional/Admin/TemplateValidationTest.php (FLE-127). A refused form answers 422, which the browser logs as a
 // console error: the one expected console error of these tests.
@@ -21,7 +20,7 @@ function row(page: Page, label: string): Locator {
 
 const unexpected = (errors: string[]): string[] => errors.filter((error) => !error.includes('status of 422'));
 
-test('all refusals show at once and the create form stays accessible without overflow', async ({ page }) => {
+test('all refusals show at once and the create form has no overflow', async ({ page }) => {
   const errors = collectBrowserErrors(page);
   const project = uniqueName();
   try {
@@ -33,7 +32,6 @@ test('all refusals show at once and the create form stays accessible without ove
     await expect(row(page, 'Terminal 1 commands')).toContainText(`Command line 1 ${TAB_RULE}`);
     await expect(row(page, 'Terminal 2 commands')).toContainText(`Command line 1 ${TAB_RULE}`);
     expect(await hasHorizontalOverflow(page)).toBe(false);
-    await expectNoBlockingViolations(page, 'refused template form');
 
     // Fixing the fields one by one: the form then goes through.
     await fillTemplate(page, { name: 'fixed', env: 'dev', postDeploy: 'a b', tty1: 'c d', tty2: 'e f' });
@@ -46,7 +44,7 @@ test('all refusals show at once and the create form stays accessible without ove
   }
 });
 
-test('a refused edit shows its error, stays accessible and keeps the stored template', async ({ page }) => {
+test('a refused edit shows its error and keeps the stored template', async ({ page }) => {
   const errors = collectBrowserErrors(page);
   const project = uniqueName();
   try {
@@ -59,7 +57,6 @@ test('a refused edit shows its error, stays accessible and keeps the stored temp
     await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/templates/web$`));
     await expect(page.getByTestId('flashes')).toHaveCount(0);
     expect(await hasHorizontalOverflow(page)).toBe(false);
-    await expectNoBlockingViolations(page, 'refused edit form');
     await page.goto(`/admin/projects/${project}/templates`);
     const stored = templateRow(page, 'web');
     await expect(stored.getByTestId('template-env')).toHaveText('dev');

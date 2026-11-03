@@ -1,6 +1,5 @@
 import { createHmac } from 'node:crypto';
 import { expect, test, type APIResponse, type Locator, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { consoleJson, consoleOk, instanceRow, runConsole } from './support/fleetData';
 import { createProjectViaUi, deleteProjectViaUi, follow, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -25,7 +24,6 @@ const endpoint = (page: Page, source: 'jira' | 'bitbucket', project?: string): L
 
 async function expectClean(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
-  await expectNoBlockingViolations(page, where);
 }
 
 async function expectTall(target: Locator, what: string): Promise<void> {

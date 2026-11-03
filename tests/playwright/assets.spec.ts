@@ -3,7 +3,6 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -326,32 +325,6 @@ test.describe('assets', () => {
     const begin = await context.request.post('/admin/projects/anything/assets/uploads', { data: { path: '', name: 'a.sql', size: 1 }, headers: { 'X-CSRF-Token': 'csrf-token' } });
     expect(begin.status()).toBe(403);
   });
-
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(`axe, ${scheme} theme`, () => {
-      test.use({ colorScheme: scheme });
-
-      test('no serious or critical violations on the Assets tab', async ({ page }) => {
-        test.setTimeout(150_000);
-        const name = uniqueName();
-        try {
-          await createProjectViaUi(page, name);
-          await openAssets(page);
-          await useSmallChunks(page);
-          await upload(page, 'a11y.sql', sample(CHUNK + 1));
-          await expect(page.getByTestId('asset-upload-item')).toHaveAttribute('data-state', 'done', { timeout: 60_000 });
-          await expect(page.getByTestId('asset-row')).toHaveCount(1);
-          if (scheme === 'dark') {
-            await expect(page.locator('html')).toHaveClass(/\bdark\b/);
-          }
-          expect(await blockingViolations(page)).toEqual([]);
-          await deleteRow(page, page.getByTestId('asset-row').first());
-        } finally {
-          await deleteProjectViaUi(page, name);
-        }
-      });
-    });
-  }
 });
 
 /** Deleting a folder that still holds a file ends with a warning, and the folder stays. */
