@@ -18,6 +18,13 @@ final readonly class FleetPaths
     /** An instance id is `{project}--{label}`: lowercase words joined by single dashes, at most 59 characters (DDEV adds `-web` to the container host name, limited to 63). */
     public const string INSTANCE_ID_PATTERN = '/^(?=.{3,59}$)[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$/D';
 
+    /**
+     * What an instance that already exists may look like. Before v1.1.0 (FLE-144) an id could be 60 to 63 characters, and
+     * such an instance must still be listed, shown and destroyed (and its Caddy site removed), so the lookups use this
+     * pattern; creating one uses INSTANCE_ID_PATTERN.
+     */
+    public const string EXISTING_INSTANCE_ID_PATTERN = '/^(?=.{3,63}$)[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$/D';
+
     private string $home;
     private string $caddyDir;
 
@@ -191,7 +198,7 @@ final readonly class FleetPaths
 
     public function instanceSiteFile(string $id): string
     {
-        if (1 !== preg_match(self::INSTANCE_ID_PATTERN, $id)) {
+        if (1 !== preg_match(self::EXISTING_INSTANCE_ID_PATTERN, $id)) {
             throw new \InvalidArgumentException(\sprintf('Invalid instance id "%s".', addcslashes($id, "\0..\37")));
         }
 

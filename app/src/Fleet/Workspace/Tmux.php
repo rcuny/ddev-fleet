@@ -173,7 +173,7 @@ final readonly class Tmux
 
     private static function assertId(string $instanceId): void
     {
-        if (1 !== preg_match(FleetPaths::INSTANCE_ID_PATTERN, $instanceId)) {
+        if (1 !== preg_match(FleetPaths::EXISTING_INSTANCE_ID_PATTERN, $instanceId)) {
             throw new WorkspaceException('That is not an instance id.');
         }
     }
