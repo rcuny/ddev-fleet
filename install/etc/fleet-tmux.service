@@ -1,7 +1,7 @@
 # ddev-fleet: the agent workspace. Installed as /etc/systemd/system/fleet-tmux.service.
 # This unit OWNS the tmux server of the `fleet` session (tmux -L fleet), in its own cgroup, so that restarting php-fpm or the
 # job workers (whose cgroups are torn down on every restart) can never kill the operators' panes. After a reboot it
-# recreates the session with one window per instance (sidebar, tty1, tty2) as plain shells: tty commands are a deploy
+# recreates the session with a general window and one window per instance (sidebar, tty1, tty2 side by side) as plain shells: tty commands are a deploy
 # action and are never typed here.
 [Unit]
 Description=ddev-fleet tmux workspace (the fleet session)
