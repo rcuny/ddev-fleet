@@ -314,9 +314,9 @@ final class FleetPathsTest extends TestCase
     public function testInstanceSiteFileAcceptsTheLongestId(): void
     {
         $paths = new FleetPaths('/srv/fleet', '/etc/caddy/fleet');
-        $id = str_repeat('a', 30).'--'.str_repeat('b', 31); // 63 characters
+        $id = str_repeat('a', 30).'--'.str_repeat('b', 27); // 59 characters
 
-        self::assertSame(63, \strlen($id));
+        self::assertSame(59, \strlen($id));
         self::assertSame('/etc/caddy/fleet/instances/'.$id.'.conf', $paths->instanceSiteFile($id));
         $this->expectException(\InvalidArgumentException::class);
         $paths->instanceSiteFile($id.'c'); // 64

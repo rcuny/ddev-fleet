@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Unit\Fleet\Instances;
 
 use App\Fleet\Instances\InstanceNaming;
+use App\Fleet\Instances\Labels;
 use App\Fleet\Projects\ValidationFailed;
 use PHPUnit\Framework\TestCase;
 
@@ -41,17 +42,17 @@ final class InstanceNamingTest extends TestCase
         );
     }
 
-    public function testComposeRejectsOver63(): void
+    public function testComposeRejectsOver59(): void
     {
-        self::assertSame(63, \strlen(InstanceNaming::compose('acme', str_repeat('a', 57))));
+        self::assertSame(59, \strlen(InstanceNaming::compose('acme', str_repeat('a', 53))));
 
         $this->expectException(ValidationFailed::class);
-        InstanceNaming::compose('acme', str_repeat('a', 58));
+        InstanceNaming::compose('acme', str_repeat('a', 54));
     }
 
     public function testASuffixThatOverflowsIsRefused(): void
     {
-        $label = str_repeat('a', 56); // 'acme--' + 56 = 62 characters: the bare label fits, '-1' does not... 62 + 2 = 64
+        $label = str_repeat('a', 52); // 'acme--' + 52 = 58 characters: the bare label fits, '-1' does not (60)
         self::assertSame($label, InstanceNaming::allocateFree([], 'acme', $label));
 
         $this->expectException(ValidationFailed::class);
@@ -80,11 +81,28 @@ final class InstanceNamingTest extends TestCase
         self::assertSame(substr($label, -7), substr(InstanceNaming::fitLabel('blog', str_repeat('b', 90), 'feature/x'), -7), 'only the seed decides the hash');
     }
 
+    public function testTheLongestBranchLabelFitsIn59AndKeepsItsHash(): void
+    {
+        $branch = 'renovate/major-ansible-collections';
+        $label = InstanceNaming::fitLabel('ddev-fleet-renovate-ci', 'ci-'.Labels::slug($branch).'-and-more-words-here', $branch);
+
+        self::assertSame(59, \strlen('ddev-fleet-renovate-ci--'.$label));
+        self::assertMatchesRegularExpression('/-'.substr(sha1($branch), 0, 6).'$/', $label);
+        self::assertSame('ddev-fleet-renovate-ci--'.$label, InstanceNaming::compose('ddev-fleet-renovate-ci', $label));
+    }
+
+    public function testAnAliasThatWouldPassTheDnsLabelShortensTheLabelFurther(): void
+    {
+        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 's', aliasPrefix: 10);
+
+        self::assertSame(63 - 10, \strlen('blog--'.$label));
+    }
+
     public function testTheAliasPrefixAndTheReservedSuffixTakeFromTheBudget(): void
     {
         $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 's', aliasPrefix: 10, reserve: 4);
 
-        self::assertSame(InstanceNaming::MAX - 10 - 4, \strlen('blog--'.$label));
+        self::assertSame(63 - 10 - 4, \strlen('blog--'.$label));
     }
 
     public function testAProjectNameWithNoRoomLeftIsRefused(): void

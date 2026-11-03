@@ -201,8 +201,8 @@ test.describe('job page: admin', () => {
   test('a very long log line and the longest id stay inside the page', async ({ page }) => {
     const project = uniqueName('jl').padEnd(40, 'x').slice(0, 40);
     await createDeployableProject(project);
-    const id = await deployOne(page, project, 'l'.repeat(21));
-    expect(id).toHaveLength(63);
+    const id = await deployOne(page, project, 'l'.repeat(17));
+    expect(id).toHaveLength(59);
     await runFakeJob(id, { lines: 2, delay: 0, width: 1800, fail: true });
     const number = await newestJob(page, id, 'fake');
     await page.goto(`/jobs/${number}`);
@@ -416,7 +416,7 @@ test.describe('job history: admin', () => {
     test.skip(test.info().project.name !== 'phone', 'phone width only');
     const project = uniqueName('jw').padEnd(40, 'x').slice(0, 40);
     await createDeployableProject(project);
-    const id = await deployOne(page, project, 'l'.repeat(21));
+    const id = await deployOne(page, project, 'l'.repeat(17));
     await page.goto(`/admin/jobs?project=${project}`);
     await expect(page.getByTestId('job-row')).toHaveCount(1);
     await expectNoOverflow(page, 'the job history');

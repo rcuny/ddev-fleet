@@ -19,6 +19,7 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\Index(name: 'idx_instance_state', columns: ['state'])]
 class Instance
 {
+    /** Column length; the id limit itself is InstanceNaming::MAX (59). Left at 63: a shorter limit needs no migration. */
     public const int ID_MAX = 63;
 
     #[ORM\Id]

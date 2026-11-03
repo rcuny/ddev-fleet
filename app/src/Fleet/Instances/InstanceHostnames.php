@@ -48,8 +48,8 @@ final readonly class InstanceHostnames
         $aliases = [];
         foreach ($project->additionalHostnames() as $hostname) {
             $label = $hostname.'-'.$id;
-            if (\strlen($label) > InstanceNaming::MAX) {
-                throw new ValidationFailed(['label' => \sprintf('The host name label "<hostname>-<id>" would be %d characters; the limit is %d. Use a shorter label.', \strlen($label), InstanceNaming::MAX)]);
+            if (\strlen($label) > InstanceNaming::DNS_LABEL_MAX) {
+                throw new ValidationFailed(['label' => \sprintf('The host name label "<hostname>-<id>" would be %d characters; the limit is %d. Use a shorter label.', \strlen($label), InstanceNaming::DNS_LABEL_MAX)]);
             }
             $aliases[] = $label.'.'.$this->domain();
         }

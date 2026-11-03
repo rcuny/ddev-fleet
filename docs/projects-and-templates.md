@@ -330,7 +330,7 @@ operations milestone).
 |---|---|
 | A YAML file, edited by hand and kept in a config repository. | The database, edited in the browser or with `fleet project\|template\|port`. No config repository, no `fleet.yml`, no `host.yml`. |
 | Names could be renamed by editing the file. | Names are immutable; rename means create and delete. |
-| Names of any length that passed the shape check. | At most 40 characters (so `<project>--<label>` fits a 63-character DNS label); `new` is reserved. |
+| Names of any length that passed the shape check. | At most 40 characters (so `<project>--<label>`, at most 59 characters, leaves room for a label); `new` is reserved. |
 | A git URL was any string. | Only `https://`, `ssh://` and scp-like URLs, with no credentials in them (see the field table). Use the deploy key. |
 | `drupal_env` was a single word. | Stricter: 1 to 64 letters, digits, `.`, `_`, `-`, written verbatim into `.env`. |
 | A command could hold anything the YAML did. | One line per command, no control characters (tabs included), at most 2000 characters and 50 lines per list. |

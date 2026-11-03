@@ -51,12 +51,12 @@ final class InstanceHostnamesTest extends KernelTestCase
         self::assertSame([], $hostnames->aliases($this->project(), 'acme--dev'));
     }
 
-    public function testALabelOver63IsRefused(): void
+    public function testAnAliasLabelOver63IsRefused(): void
     {
         $this->host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
 
         $this->expectException(ValidationFailed::class);
-        new InstanceHostnames($this->host)->aliases($this->project('edge'), 'acme--'.str_repeat('a', 56));
+        new InstanceHostnames($this->host)->aliases($this->project('edge'), 'acme--'.str_repeat('a', 53));
     }
 
     public function testBeforeTheHostIsSetUpThereIsNoDomain(): void

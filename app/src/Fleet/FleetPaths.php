@@ -15,8 +15,8 @@ final readonly class FleetPaths
 {
     private const string ID_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/D';
     private const string UPLOAD_ID_PATTERN = '/^[0-9a-f]{32}$/D';
-    /** An instance id is `{project}--{label}`: lowercase words joined by single dashes, at most 63 characters (a DNS label). */
-    public const string INSTANCE_ID_PATTERN = '/^(?=.{3,63}$)[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$/D';
+    /** An instance id is `{project}--{label}`: lowercase words joined by single dashes, at most 59 characters (DDEV adds `-web` to the container host name, limited to 63). */
+    public const string INSTANCE_ID_PATTERN = '/^(?=.{3,59}$)[a-z0-9]+(?:-[a-z0-9]+)*--[a-z0-9]+(?:-[a-z0-9]+)*$/D';
 
     private string $home;
     private string $caddyDir;

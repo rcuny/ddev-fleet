@@ -8,21 +8,26 @@ use App\Fleet\FleetPaths;
 use App\Fleet\Projects\ValidationFailed;
 
 /**
- * The instance id is `{project}--{label}`, at most 63 characters (a DNS label). Labels are allocated against the ids
+ * The instance id is `{project}--{label}`, at most 59 characters: DDEV names the web container's host name `<id>-web`, and a host name has at most 63
+ * characters, so Docker refuses a longer one at `ddev start`. Labels are allocated against the ids
  * that are taken: the bare label while it is free, then `-1`, `-2`, ... A batch never uses the bare label.
  */
 final class InstanceNaming
 {
-    public const int MAX = 63;
+    /** 63 (host name limit) minus the 4 characters of DDEV's `-web` suffix. */
+    public const int MAX = 59;
+
+    /** A single DNS label (the `<hostname>-<id>` alias of an instance). */
+    public const int DNS_LABEL_MAX = 63;
 
     /**
-     * @throws ValidationFailed when the id would be longer than 63 characters
+     * @throws ValidationFailed when the id would be longer than 59 characters
      */
     public static function compose(string $project, string $label): string
     {
         $id = $project.'--'.$label;
         if (\strlen($id) > self::MAX) {
-            throw new ValidationFailed(['label' => \sprintf('The instance id would be %d characters; the limit is %d. Use a shorter label.', \strlen($id), self::MAX)]);
+            throw new ValidationFailed(['label' => \sprintf('The instance id would be %d characters; the limit is %d (DDEV adds -web to the container host name, and a host name has at most 63 characters). Use a shorter label.', \strlen($id), self::MAX)]);
         }
 
         return $id;
@@ -30,7 +35,7 @@ final class InstanceNaming
 
     /**
      * Cuts a label so the instance id (and, for a project with additional hostnames, the `<hostname>-<id>` alias) fits
-     * in 63 characters. A label that is cut ends in `-` and the first 6 hex of the SHA-1 of `$seed`, so the same seed
+     * in 59 characters. A label that is cut ends in `-` and the first 6 hex of the SHA-1 of `$seed`, so the same seed
      * always lands on the same id.
      *
      * @param int $aliasPrefix characters an alias adds in front of the id (`InstanceHostnames::longestPrefix()`)
@@ -40,7 +45,7 @@ final class InstanceNaming
      */
     public static function fitLabel(string $project, string $label, string $seed, int $aliasPrefix = 0, int $reserve = 0): string
     {
-        $budget = self::MAX - \strlen($project) - 2 - $aliasPrefix - $reserve;
+        $budget = min(self::MAX, self::DNS_LABEL_MAX - $aliasPrefix) - \strlen($project) - 2 - $reserve;
         if (\strlen($label) <= $budget) {
             return $label;
         }

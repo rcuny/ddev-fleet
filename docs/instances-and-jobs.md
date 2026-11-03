@@ -18,7 +18,7 @@ The web request never runs `ddev`, `git` or `docker`. A click or a command store
 ## Concepts
 
 - **Instance id**: `<project>--<label>`, for example `acme--main` or `blog--fix-login`. It is the DDEV project name, the
-  directory name, the primary key and the first part of the site name. At most 63 characters; lower case letters, digits and
+  directory name, the primary key and the first part of the site name. At most 59 characters (DDEV adds `-web` to the container host name, which Docker limits to 63); lower case letters, digits and
   single dashes inside each half, and exactly one `--`.
 - **Label**: the part after `--`. It defaults to the branch name, cleaned to the grammar above. `--label` sets it.
 - **Template**: the project's template used for the deploy (its Drupal environment, post-deploy commands and so on).

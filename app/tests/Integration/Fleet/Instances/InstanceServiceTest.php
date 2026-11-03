@@ -157,7 +157,7 @@ final class InstanceServiceTest extends JobTestCase
     public function testALabelThatMakesTheIdTooLongIsAFieldError(): void
     {
         try {
-            $this->deploy(new DeployInput('acme', label: str_repeat('a', 58)));
+            $this->deploy(new DeployInput('acme', label: str_repeat('a', 54)));
             self::fail('expected ValidationFailed');
         } catch (ValidationFailed $e) {
             self::assertSame(['label'], array_keys($e->errors));
@@ -171,7 +171,7 @@ final class InstanceServiceTest extends JobTestCase
         new ProjectRepository($this->em)->save($this->project);
 
         $this->expectException(ValidationFailed::class);
-        $this->deploy(new DeployInput('acme', label: str_repeat('a', 56)));
+        $this->deploy(new DeployInput('acme', label: str_repeat('a', 53)));
     }
 
     public function testExistingLabelGetsSuffixNeverOverwrites(): void
