@@ -5,7 +5,7 @@ import { createDeployableProject, deployOne, rowOf, runFakeJob } from './support
 import { hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
 
-// 390 px: no horizontal scroll on the instance and job pages with the longest id (63 characters) and a 200-character
+// 390 px: no horizontal scroll on the instance and job pages with the longest id (59 characters) and a 200-character
 // log line, and every control is at least 44 px high.
 async function expectNoOverflow(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
@@ -26,11 +26,11 @@ test.describe('instances on a phone', () => {
 
   test('list, deploy form, detail and job page fit and have touch targets @smoke', async ({ page, context, baseURL }) => {
     await setStandInRole(context, 'admin', baseURL!);
-    // A 40-character project name and a 21-character label make the longest id, 63 characters.
+    // A 40-character project name and a 17-character label make the longest id, 59 characters.
     const project = `ph${randomBytes(19).toString('hex')}`.slice(0, 40);
     await createDeployableProject(project);
-    const id = await deployOne(page, project, 'l'.repeat(21));
-    expect(id).toHaveLength(63);
+    const id = await deployOne(page, project, 'l'.repeat(17));
+    expect(id).toHaveLength(59);
     await runFakeJob(id, { lines: 3, delay: 0, width: 200 });
 
     await page.goto('/instances');

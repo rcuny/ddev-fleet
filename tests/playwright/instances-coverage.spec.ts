@@ -200,11 +200,11 @@ test.describe('deploy form: admin', () => {
     await expect(form.getByLabel('Project', { exact: true })).toHaveValue(ADMIN_PROJECT);
     await expectNoBlockingViolations(page, 'the deploy form with an error');
 
-    // The field stops typing at 40 characters; an id longer than 63 ("acme--" and 60 more) needs the limit lifted.
+    // The field stops typing at 40 characters; an id longer than 59 ("acme--" and 60 more) needs the limit lifted.
     await label.fill('l'.repeat(60));
     await expect(label).toHaveValue('l'.repeat(40));
     await submitWith({ label: 'l'.repeat(60) });
-    await expect(form).toContainText('The instance id would be 66 characters; the limit is 63. Use a shorter label.');
+    await expect(form).toContainText('The instance id would be 66 characters; the limit is 59 (DDEV adds -web to the container host name, and a host name has at most 63 characters). Use a shorter label.');
 
     // The count is a whole number from 1 to 20.
     for (const bad of ['0', '21', '-3']) {
@@ -315,7 +315,7 @@ test.describe('deploy form: admin', () => {
     await form.getByLabel('Label', { exact: true }).evaluate((input: HTMLInputElement) => input.removeAttribute('maxlength'));
     await form.getByLabel('Label', { exact: true }).fill('l'.repeat(60));
     await submitAndWait(page, form.getByRole('button', { name: 'Deploy' }));
-    await expect(form).toContainText('The instance id would be 66 characters; the limit is 63. Use a shorter label.');
+    await expect(form).toContainText('The instance id would be 66 characters; the limit is 59 (DDEV adds -web to the container host name, and a host name has at most 63 characters). Use a shorter label.');
     await expectNoOverflow(page, 'the deploy form with an error');
   });
 });
@@ -647,8 +647,8 @@ test.describe('bulk actions: admin', () => {
     test.skip(!isPhone(), 'phone width only');
     const project = uniqueName('lg').padEnd(40, 'x').slice(0, 40);
     await createDeployableProject(project);
-    const id = await deployOne(page, project, 'l'.repeat(21));
-    expect(id).toHaveLength(63);
+    const id = await deployOne(page, project, 'l'.repeat(17));
+    expect(id).toHaveLength(59);
     await page.goto(`/instances?project=${project}`);
     await selectRows(page, [id]);
     await expectNoOverflow(page, 'the list with the bulk bar');

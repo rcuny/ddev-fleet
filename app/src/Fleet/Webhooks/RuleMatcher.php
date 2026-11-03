@@ -194,7 +194,7 @@ final class RuleMatcher
 
     /**
      * The instance a deploy rule makes of a branch: a fixed `label`, or `label_prefix` + the branch minus
-     * `strip_suffix`, slugified, then fitted to 63 characters (the project's additional hostname aliases included; a
+     * `strip_suffix`, slugified, then fitted to 59 characters (the project's additional hostname aliases included; a
      * derived label keeps room for a `-999` suffix).
      *
      * @throws TargetUnresolvable

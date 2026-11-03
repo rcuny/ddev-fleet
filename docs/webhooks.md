@@ -101,7 +101,7 @@ row name the job and the instance: `deploy queued: blog--fle-66 (job 12)`.
   - A rule with `--label-prefix` (and optionally `--strip-suffix`, which the branch glob must end with) forms the label as
     prefix + branch minus suffix, slugified: `feature/ABC-1898-x--pw-run` gives `pw-feature-abc-1898-x`. It **never
     overwrites**: a taken label allocates `-1`, `-2`, ... A rule with neither derives the label from the branch alone.
-  - **Fitting.** When `<project>--<label>` would be longer than 63 characters the label is cut and ends in `-` plus the first
+  - **Fitting.** When `<project>--<label>` would be longer than 59 characters the label is cut and ends in `-` plus the first
     6 hex of the SHA-1 of the branch name, so the same branch always lands on the same id. The fitting counts the project's
     additional hostnames (`<hostname>-<id>` must fit too) and, for a derived label, keeps room for a `-999` suffix.
   - **Collision guard.** A derived label that equals the label of a fixed-label deploy rule is skipped with the reason

@@ -7,7 +7,7 @@ namespace App\Fleet\Webhooks;
 use App\Domain\Webhook\WebhookRule;
 
 /**
- * One instance a matched rule would deploy: the rule, the branch and the label (already fitted to the 63 characters of
+ * One instance a matched rule would deploy: the rule, the branch and the label (already fitted to the 59 characters of
  * an instance id). `replace` is a rule with a fixed label: it keeps ONE instance, rebuilt on every push; every other
  * deploy allocates a free label (`-1`, `-2`, ...) and never overwrites.
  */
