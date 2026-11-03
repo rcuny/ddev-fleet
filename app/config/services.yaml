@@ -27,6 +27,7 @@ parameters:
     # FLEET_UPGRADE_REPO_URL at a local repository; empty means the public GitHub mirror, App\Fleet\Upgrade\RepoUrl).
     env(FLEET_UPGRADE_REPO_URL): ''
     fleet.installed_version_file: '/etc/ddev-fleet/installed-version'
+    fleet.installed_revision_file: '/etc/ddev-fleet/installed-revision'
 
 services:
     # symfony-design-system:start
@@ -93,6 +94,24 @@ services:
         arguments:
             $versionFile: '%fleet.installed_version_file%'
             $checkoutDir: '%kernel.project_dir%/..'
+
+    # The pre-flight checks that look at the install checkout, and the one that hands the installer a hostname.
+    App\Fleet\Upgrade\Check\CheckoutCleanCheck:
+        arguments:
+            $checkoutDir: '%kernel.project_dir%/..'
+            $revisionFile: '%fleet.installed_revision_file%'
+
+    App\Fleet\Upgrade\Check\TargetTagCheck:
+        arguments:
+            $checkoutDir: '%kernel.project_dir%/..'
+
+    App\Fleet\Upgrade\Check\GitTargetMigrations:
+        arguments:
+            $checkoutDir: '%kernel.project_dir%/..'
+
+    App\Fleet\Upgrade\Check\InstallerPreflightCheck:
+        arguments:
+            $defaultUri: '%env(DEFAULT_URI)%'
 
     App\Fleet\Upgrade\RepoUrl:
         arguments:
@@ -172,6 +191,11 @@ when@test:
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
     services:
+        # No consumer yet (the upgrade commands arrive later); the registry wiring test reads it from the container.
+        App\Fleet\Upgrade\Check\CheckRunner:
+            autowire: true
+            public: true
+
         # Never the real ~/.ddev: the port mirror writes under the test's own FLEET_HOME.
         App\Fleet\PortMirror\TraefikDirectory:
             arguments:
