@@ -386,6 +386,34 @@ final class InstallerAssetsStepsTest extends TestCase
         self::assertFileDoesNotExist($etc.'/installed-revision', 'a failed install is retried as a code change');
     }
 
+    public function testRenderStartRecordsTheInstalledVersionOnlyWhenHealthy(): void
+    {
+        $etc = $this->scratch().'/etc';
+        [$status, , $err] = $this->runRenderStart([], extra: 'REF=develop; CODE_REVISION=abc1234567890;', etc: $etc);
+        self::assertSame(0, $status, $err);
+        self::assertSame("develop@abc1234\n", file_get_contents($etc.'/installed-version'));
+
+        // A failed run keeps the old value.
+        [$status] = $this->runRenderStart([], extra: 'REF=v9.9.9; CODE_REVISION=fff1234567890;', etc: $etc, curlExit: 22, timeout: '0');
+        self::assertSame(1, $status);
+        self::assertSame("develop@abc1234\n", file_get_contents($etc.'/installed-version'));
+    }
+
+    public function testTheInstalledVersionIsTheTagWhenTheRefIsOne(): void
+    {
+        $etc = $this->scratch().'/etc';
+        $repo = $this->scratch().'/src';
+        mkdir($repo);
+        $git = 'git -c user.name=t -c user.email=t@example.com -C '.escapeshellarg($repo);
+        shell_exec('git init -q '.escapeshellarg($repo).' && '.$git.' commit -q --allow-empty -m x && '.$git.' tag -a v1.2.3 -m v1.2.3');
+
+        $extra = 'REF=v1.2.3; CODE_REVISION=; FLEET_SRC_DIR='.escapeshellarg($repo).'; run_as_fleet() { if [ "$1" = git ]; then "$@"; else runuser "$@"; fi; };';
+        [$status, , $err] = $this->runRenderStart([], extra: $extra, etc: $etc);
+
+        self::assertSame(0, $status, $err);
+        self::assertSame("v1.2.3\n", file_get_contents($etc.'/installed-version'));
+    }
+
     public function testAnUnhealthyInstallFailsWithAJournalHint(): void
     {
         [$status, , $err] = $this->runRenderStart([], curlExit: 22, timeout: '0');
