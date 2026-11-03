@@ -10,6 +10,7 @@ use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\FakeLiveEntrypoints;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RunsFleetCommands;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 
 final class PortCommandsTest extends KernelTestCase
@@ -69,6 +70,63 @@ final class PortCommandsTest extends KernelTestCase
         self::assertSame(['--public', '--router'], array_keys($this->json($missing)['fields']));
     }
 
+    /**
+     * @return iterable<string, array{array<string, string>, string}>
+     */
+    public static function refusedOnTheCommandLine(): iterable
+    {
+        yield 'bad name' => [['name' => 'Bad', '--public' => '9001', '--router' => '8001'], '<name>: Use lowercase letters'];
+        yield 'public out of range' => [['name' => 'a', '--public' => '65536', '--router' => '8001'], '--public: Enter a port number between 1 and 65535.'];
+        yield 'router not a number' => [['name' => 'a', '--public' => '9001', '--router' => 'x1'], '--router: Enter a port number between 1 and 65535.'];
+        yield 'reserved router' => [['name' => 'a', '--public' => '9001', '--router' => '8443'], '--router: This port is reserved for the host.'];
+        yield 'router equals public' => [['name' => 'a', '--public' => '9001', '--router' => '9001'], '--router: The router port must differ from the public port.'];
+    }
+
+    /**
+     * @param array<string, string> $arguments
+     */
+    #[DataProvider('refusedOnTheCommandLine')]
+    public function testRefusalNamesTheArgumentOrOptionWithTheMessage(array $arguments, string $line): void
+    {
+        $refused = $this->cli('fleet:port:create', $arguments);
+
+        self::assertSame(1, $refused->getStatusCode());
+        self::assertStringContainsString($line, $refused->getErrorOutput());
+        self::assertSame([], self::getContainer()->get(NamedPortRepository::class)->all());
+    }
+
+    public function testCollisionsNameTheOptionWithTheMessage(): void
+    {
+        $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9108', '--router' => '8108']);
+        $taken = 'This port number is already used by another entry.';
+
+        $public = $this->cli('fleet:port:create', ['name' => 'other', '--public' => '8108', '--router' => '8999']);
+        $router = $this->cli('fleet:port:create', ['name' => 'other', '--public' => '9999', '--router' => '9108']);
+        $name = $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9999', '--router' => '8999']);
+
+        self::assertStringContainsString('--public: '.$taken, $public->getErrorOutput());
+        self::assertStringContainsString('--router: '.$taken, $router->getErrorOutput());
+        self::assertStringContainsString('<name>: A port with this name already exists.', $name->getErrorOutput());
+        self::assertCount(1, self::getContainer()->get(NamedPortRepository::class)->all());
+    }
+
+    public function testDeletingAnUnknownPortSaysSo(): void
+    {
+        $absent = $this->cli('fleet:port:delete', ['name' => 'no-such-port', '--yes' => true]);
+
+        self::assertSame(3, $absent->getStatusCode());
+        self::assertStringContainsString('Named port "no-such-port" does not exist.', $absent->getErrorOutput());
+    }
+
+    public function testTheBoundaryPortsAreAccepted(): void
+    {
+        $low = $this->cli('fleet:port:create', ['name' => 'low', '--public' => '1', '--router' => '65535', '--json' => true]);
+        $high = $this->cli('fleet:port:create', ['name' => 'high', '--public' => '65534', '--router' => '2', '--json' => true]);
+
+        self::assertSame(0, $low->getStatusCode(), $low->getErrorOutput());
+        self::assertSame(0, $high->getStatusCode(), $high->getErrorOutput());
+    }
+
     public function testDuplicateIsAFieldError(): void
     {
         $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9108', '--router' => '8108']);
@@ -94,6 +152,17 @@ final class PortCommandsTest extends KernelTestCase
         $asked = $this->cli('fleet:port:delete', ['name' => 'typesense'], [], interactive: true);
         self::assertSame(2, $asked->getStatusCode());
         self::assertStringContainsString('Used by project(s): blog', $asked->getErrorOutput());
+    }
+
+    public function testDeletingAProjectReleasesItsPorts(): void
+    {
+        $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9108', '--router' => '8108']);
+        $this->cli('fleet:project:create', ['name' => 'blog', '--git' => 'https://git.example.com/acme/blog.git', '--port' => ['typesense']]);
+        self::assertSame(2, $this->cli('fleet:port:delete', ['name' => 'typesense', '--yes' => true])->getStatusCode());
+
+        self::assertSame(0, $this->cli('fleet:project:delete', ['name' => 'blog', '--yes' => true])->getStatusCode());
+
+        self::assertSame(0, $this->cli('fleet:port:delete', ['name' => 'typesense', '--yes' => true])->getStatusCode());
     }
 
     public function testDeleteNeedsYes(): void
