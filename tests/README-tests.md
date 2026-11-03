@@ -118,7 +118,7 @@ self-started app provides, so it skips itself against an external server (the co
 overrides the link file. Each run re-creates the setup link and clears the token-attempt throttle (`cache.rate_limiter`).
 **Axe sweep (FLE-158).** Feature specs carry no axe call. `support/axe.ts` (`expectNoBlockingViolations`: WCAG 2 A/AA,
 serious and critical, light then dark) is called only from the `a11y*.spec.ts` family, one test per page state, including
-the 422 error states, dialogs and warning states: `a11y.spec.ts` (four base pages), `a11y-projects`, `a11y-admin`
+the 422 error states, dialogs and warning states: `a11y.spec.ts` (four base pages), `a11y-projects`, `users-a11y`
 (users, secrets, schedules, webhooks), `a11y-instances` (instances, jobs, assets, audit), `a11y-host` (host settings
 tabs, reboot banner), `a11y-setup` (setup wizard, own host per test), all `.desktop.spec.ts`, and `a11y-phone.phone.spec.ts`
 (the shell destinations and the instance and job pages at 390 px). A new page or error state gets a sweep test, not an

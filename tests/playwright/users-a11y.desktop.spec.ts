@@ -16,6 +16,8 @@ import {
 } from './support/users';
 
 // Axe sweep of the admin pages: users, secrets, schedules and webhooks. The feature specs of these pages no longer run
+// NAMING: this file sorts after setup-wizard.desktop.spec.ts on purpose. Some states below create an enabled administrator in the
+// shared app, and the wizard spec needs a host with none (SetupProgress::firstIncomplete): a name before it lets both run at once.
 // axe; every page state they used to check (refused forms, dialogs, stored and warning states) is set up here, once,
 // and checked in the light and the dark theme. Desktop only (`.desktop.spec.ts`): axe does not depend on the viewport
 // and the phone project checked the same pages. Long-text variants of a state are not repeated: axe is text-length
