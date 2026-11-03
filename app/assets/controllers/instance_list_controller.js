@@ -117,7 +117,12 @@ export default class extends Controller {
             if (!field) {
                 return false;
             }
-            return field.options ? [...field.options].some((option) => option.selected !== option.defaultSelected) : field.value !== field.defaultValue;
+            if (!field.options) {
+                return field.value !== field.defaultValue;
+            }
+            // A select without a `selected` option shows its first option: that is its default, not an edit.
+            const marked = [...field.options].findIndex((option) => option.defaultSelected);
+            return field.selectedIndex !== (marked < 0 ? 0 : marked);
         });
         if (edited) {
             event.preventDefault();
