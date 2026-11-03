@@ -577,11 +577,13 @@ test.describe('schedules, full coverage', () => {
     test.setTimeout(180_000);
     const fx = await fixture(page);
     const longName = uniqueName('l').padEnd(40, 'x');
-    const longLabel = 'y'.repeat(40);
+    // As long as the instance id allows: 59 characters (FLE-144), so the label takes what the project name leaves.
+    const longLabel = 'y'.repeat(59 - fx.project.length - 2);
     try {
       expect(longName.length).toBe(40);
       instanceRow('insert', fx.project, longLabel);
       const longInstance = `${fx.project}--${longLabel}`;
+      expect(longInstance.length).toBe(59);
       const longCron = `${Array.from({ length: 28 }, (_, i) => i).join(',')} * * * *`;
       expect(longCron.length).toBeLessThanOrEqual(100);
       makeSchedule(fx, longName, longCron, 'America/Argentina/Buenos_Aires', longInstance);
@@ -625,7 +627,7 @@ test.describe('schedules, full coverage', () => {
       expect(await hasHorizontalOverflow(page), 'overflow with the dialog open').toBe(false);
       await page.keyboard.press('Escape');
     } finally {
-      instanceRow('delete', fx.project, 'y'.repeat(40));
+      instanceRow('delete', fx.project, longLabel);
       await cleanup(page, fx);
     }
   });
