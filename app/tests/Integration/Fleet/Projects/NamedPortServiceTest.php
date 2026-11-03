@@ -96,6 +96,71 @@ final class NamedPortServiceTest extends KernelTestCase
         self::assertSame([], $this->service->list());
     }
 
+    private const string NAME_RULE = 'Use lowercase letters, digits and single dashes only, starting and ending with a letter or digit.';
+    private const string RANGE = 'Enter a port number between 1 and 65535.';
+    private const string RESERVED = 'This port is reserved for the host.';
+
+    /**
+     * @return iterable<string, array{NamedPortInput, array<string, string>}>
+     */
+    public static function messages(): iterable
+    {
+        yield 'an uppercase name' => [new NamedPortInput('Bad', 9001, 8001), ['name' => self::NAME_RULE]];
+        yield 'a name with an underscore' => [new NamedPortInput('a_b', 9001, 8001), ['name' => self::NAME_RULE]];
+        yield 'a name with two dashes' => [new NamedPortInput('a--b', 9001, 8001), ['name' => 'The name must not contain two dashes in a row ("--" separates the project from the instance label).']];
+        yield 'a name of 41 characters' => [new NamedPortInput(str_repeat('a', 41), 9001, 8001), ['name' => 'The name must be at most 40 characters.']];
+        yield 'an empty name' => [new NamedPortInput('', 9001, 8001), ['name' => 'Enter a name.']];
+        yield 'public 0' => [new NamedPortInput('a', '0', 8001), ['public' => self::RANGE]];
+        yield 'public 65536' => [new NamedPortInput('a', '65536', 8001), ['public' => self::RANGE]];
+        yield 'public not a number' => [new NamedPortInput('a', 'abc', 8001), ['public' => self::RANGE]];
+        yield 'public negative' => [new NamedPortInput('a', '-5', 8001), ['public' => self::RANGE]];
+        yield 'public decimal' => [new NamedPortInput('a', '12.5', 8001), ['public' => self::RANGE]];
+        yield 'router 0' => [new NamedPortInput('a', 9001, '0'), ['router' => self::RANGE]];
+        yield 'router 70000' => [new NamedPortInput('a', 9001, '70000'), ['router' => self::RANGE]];
+        yield 'router not a number' => [new NamedPortInput('a', 9001, 'x1'), ['router' => self::RANGE]];
+        foreach ([22, 80, 443, 8765, 2019, 3000, 9091, 8080, 8443] as $port) {
+            yield 'reserved public '.$port => [new NamedPortInput('a', $port, 8001), ['public' => self::RESERVED]];
+            yield 'reserved router '.$port => [new NamedPortInput('a', 9001, $port), ['router' => self::RESERVED]];
+        }
+        yield 'router equal to public' => [new NamedPortInput('a', 9001, 9001), ['router' => 'The router port must differ from the public port.']];
+        yield 'all three at once' => [new NamedPortInput('Bad Name', 0, 0), ['name' => self::NAME_RULE, 'public' => self::RANGE, 'router' => self::RANGE]];
+        yield 'the boundaries 1 and 65535 are valid' => [new NamedPortInput('a', 1, 65535), []];
+        yield 'the boundaries 65534 and 2 are valid' => [new NamedPortInput('a', 65534, 2), []];
+    }
+
+    /**
+     * @param array<string, string> $expected
+     */
+    #[DataProvider('messages')]
+    public function testValidateReturnsTheMessageOfEveryField(NamedPortInput $input, array $expected): void
+    {
+        self::assertSame($expected, $this->service->validate($input));
+    }
+
+    /**
+     * @return iterable<string, array{NamedPortInput, array<string, string>}>
+     */
+    public static function collisionMessages(): iterable
+    {
+        $taken = 'This port number is already used by another entry.';
+        yield 'same name' => [new NamedPortInput('typesense', 9999, 8999), ['name' => 'A port with this name already exists.']];
+        yield 'same public port' => [new NamedPortInput('other', 9108, 8999), ['public' => $taken]];
+        yield 'same router port' => [new NamedPortInput('other', 9999, 8108), ['router' => $taken]];
+        yield 'public is the router port of another entry' => [new NamedPortInput('other', 8108, 8999), ['public' => $taken]];
+        yield 'router is the public port of another entry' => [new NamedPortInput('other', 9999, 9108), ['router' => $taken]];
+    }
+
+    /**
+     * @param array<string, string> $expected
+     */
+    #[DataProvider('collisionMessages')]
+    public function testValidateReturnsTheMessageOfEveryCollision(NamedPortInput $input, array $expected): void
+    {
+        $this->service->create(new NamedPortInput('typesense', 9108, 8108));
+
+        self::assertSame($expected, $this->service->validate($input));
+    }
+
     /**
      * @return iterable<string, array{NamedPortInput, string}>
      */

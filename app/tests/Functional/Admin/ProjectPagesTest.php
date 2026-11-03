@@ -597,6 +597,69 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertSame([], $this->assignedPorts());
     }
 
+    public function testPortsTabListsAtMostFiveUnknownNamesAndNeverEchoesAMalformedOne(): void
+    {
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+
+        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['<b>x</b>', 'UPPER']]);
+        self::assertResponseStatusCodeSame(422);
+        $text = $crawler->filter('[data-testid=ports-errors]')->text();
+        self::assertStringContainsString('Unknown port(s): (invalid name), (invalid name).', $text);
+        self::assertStringNotContainsString('<b>', $text);
+
+        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7']]);
+        $text = $crawler->filter('[data-testid=ports-errors]')->text();
+        self::assertStringContainsString('Unknown port(s): u1, u2, u3, u4, u5.', $text);
+        self::assertStringNotContainsString('u6', $text);
+        self::assertSame([], $this->assignedPorts());
+    }
+
+    public function testPortsTabRefusesMoreThanFiftyPorts(): void
+    {
+        $this->makeProject();
+
+        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => array_map(static fn (int $i): string => 'p'.$i, range(0, 50))]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('At most 50 ports can be assigned.', $crawler->filter('[data-testid=ports-errors]')->text());
+        self::assertSame([], $this->assignedPorts());
+    }
+
+    public function testPortsTabMarksTheCheckboxesInvalidAfterARefusalAndOnlyThen(): void
+    {
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+
+        self::assertSame('false', $this->open('/admin/projects/blog/ports')->filter('input[value=mail]')->attr('aria-invalid'));
+
+        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['mail', 'ghost']]);
+        self::assertSame('true', $crawler->filter('input[value=mail]')->attr('aria-invalid'));
+        self::assertCount(0, $crawler->filter('input[value=ghost]'), 'a name the catalogue does not know is not offered as a checkbox');
+    }
+
+    public function testPortsTabAssignmentIsPerProject(): void
+    {
+        $this->makePort('mail', 8025, 18025);
+        $this->makeProject();
+        $this->makeProject('shop');
+
+        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
+        self::assertSame(['mail'], $this->assignedPorts('blog'));
+        self::assertSame([], $this->assignedPorts('shop'));
+        self::assertNull($this->open('/admin/projects/shop/ports')->filter('input[value=mail]')->attr('checked'));
+
+        $this->post('/admin/projects/shop/ports', ['ports' => ['mail']]);
+        self::assertSame(['mail'], $this->assignedPorts('shop'), 'two projects may share a port');
+    }
+
+    public function testPortsTabGetForAnUnknownProjectIs404(): void
+    {
+        $this->open('/admin/projects/nope/ports');
+
+        self::assertResponseStatusCodeSame(404);
+    }
+
     public function testPortsTabPostToAnUnknownProjectIs404(): void
     {
         $this->post('/admin/projects/nope/ports', []);
