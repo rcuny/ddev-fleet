@@ -23,6 +23,32 @@ final readonly class InstanceConfigWriter
 {
     public const string RELATIVE_PATH = '.ddev/config.fleet.yaml';
 
+    /**
+     * Seeds `~/.claude.json` past Claude Code's first-run onboarding (theme picker, trust dialog), as 0.x did.
+     * `CLAUDE_CODE_OAUTH_TOKEN` authenticates but does not mark onboarding complete. It MERGES (Claude writes runtime
+     * keys to that file) and runs as a `post-start` hook, not baked into the image: DDEV creates the container user at
+     * runtime and re-copies homeadditions on every start.
+     *
+     * ORDERING: DDEV merges `hooks` from config.yaml and every config.*.yaml additively, in filename order, so this
+     * never clobbers a project's own hooks. `config.fleet.yaml` sorts after `config.claude-code.yaml`, which may relink
+     * `~/.claude.json` into the project tree; the seed must run after that relink (writing through the symlink is
+     * intended). No single quotes in the JS: it is wrapped in a single-quoted `node -e '...'`.
+     */
+    public const string CLAUDE_ONBOARDING_SEED = <<<'JS'
+        const fs = require("fs");
+        const path = (process.env.HOME || "/home/fleet") + "/.claude.json";
+        let data = {};
+        try { data = JSON.parse(fs.readFileSync(path, "utf8")); } catch (e) {}
+        data.hasCompletedOnboarding = true;
+        if (data.theme === undefined) { data.theme = "dark"; }
+        data.projects = data.projects || {};
+        const root = process.env.DDEV_APPROOT || process.cwd();
+        const proj = data.projects[root] || {};
+        proj.hasTrustDialogAccepted = true;
+        data.projects[root] = proj;
+        fs.writeFileSync(path, JSON.stringify(data, null, 2));
+        JS;
+
     public function __construct(
         private InstanceHostnames $hostnames,
         private GitIdentityResolver $identities,
@@ -62,6 +88,8 @@ final readonly class InstanceConfigWriter
             'project_tld' => $this->hostnames->domain(),
             'performance_mode' => 'none',
             'web_environment' => $environment,
+            // Unconditional, as in 0.x: Claude Code is baked into every instance's web image.
+            'hooks' => ['post-start' => [['exec' => "node -e '\n".self::CLAUDE_ONBOARDING_SEED."\n'\n"]]],
         ];
         $aliases = $this->hostnames->aliases($project, $instance->id());
         if ([] !== $aliases) {
