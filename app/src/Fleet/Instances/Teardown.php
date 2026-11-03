@@ -106,6 +106,8 @@ final readonly class Teardown
             return;
         }
 
+        self::makeDirectoriesWritable($path);
+
         $items = new \RecursiveIteratorIterator(
             new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
             \RecursiveIteratorIterator::CHILD_FIRST,
@@ -118,5 +120,33 @@ final readonly class Teardown
             }
         }
         @rmdir($path);
+    }
+
+    /**
+     * Gives the owner read, write and search rights on every real directory of the tree (Drupal sets
+     * `sites/default` to 0555, which stops the owner unlinking inside it). Symlinks are never followed, so nothing
+     * outside the tree is touched. Directories are visited before their children are opened.
+     */
+    private static function makeDirectoriesWritable(string $path): void
+    {
+        $dirs = new \RecursiveIteratorIterator(
+            new \RecursiveDirectoryIterator($path, \FilesystemIterator::SKIP_DOTS),
+            \RecursiveIteratorIterator::SELF_FIRST,
+            \RecursiveIteratorIterator::CATCH_GET_CHILD,
+        );
+        self::chmodOwner($path);
+        foreach ($dirs as $item) {
+            if ($item->isDir() && !$item->isLink()) {
+                self::chmodOwner($item->getPathname());
+            }
+        }
+    }
+
+    private static function chmodOwner(string $dir): void
+    {
+        $perms = @fileperms($dir);
+        if (false !== $perms && 0o700 !== ($perms & 0o700)) {
+            @chmod($dir, ($perms & 0o7777) | 0o700);
+        }
     }
 }
