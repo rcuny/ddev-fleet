@@ -55,18 +55,20 @@ Alerts are Bitbucket's built-in "pipeline failed" email and, for the live check,
 ## Tag guard (`ci/tag-guard.sh`)
 
 `ci/tag-guard.sh <tag> <commit>` decides what a release tag may publish. It runs in the
-tag pipeline's last step, after the step fetched `origin/main`, `origin/develop` and the tag,
+tag pipeline's last step, after the step fetched `origin/main`, `origin/develop`, `origin/legacy` and the tag,
 and prints the refspecs for one non-forced `git push` to the mirror:
 
 | Tag | Required | Pushed to GitHub |
 |---|---|---|
-| `v1.X.Y`, `v1.X.Y-<prerelease>` | the commit is on `origin/develop` (its tip or an ancestor) | the tag only; GitHub's `main` never moves |
-| `v0.X.Y` (the Python 0.x line) | the commit is the tip of `origin/main` | `<commit>:refs/heads/main` and the tag |
+| `v1.X.Y`, `v1.X.Y-<prerelease>` | the commit is the tip of `origin/main` | `<commit>:refs/heads/main` (fast-forward) and the tag |
+| same | the commit is an older ancestor of `origin/main` (the `v1.0.x` tags cut on `develop`) | the tag only |
+| same | the commit is only on `develop` | rejected: merge the release into `main` first |
+| `v0.X.Y` (the Python 0.x line) | the commit is the tip of `origin/legacy` | `<commit>:refs/heads/legacy` and the tag |
 | anything else | - | rejected (`ERROR: ...` on stderr, exit 1) |
 
-A tag pipeline runs the `bitbucket-pipelines.yml` of the tagged commit, and `main` still
+A tag pipeline runs the `bitbucket-pipelines.yml` of the tagged commit, and `legacy` still
 carries the Python pipeline, so the `v0.*` branch is a documented safety net, not a path
-this pipeline reaches. `app/tests/Repo/TagGuardTest.php` runs the script against throw-away
+this pipeline reaches. The CI host's publish script (`publish-github.sh`) calls the same guard. `app/tests/Repo/TagGuardTest.php` runs the script against throw-away
 repositories.
 
 ## The systemd security check (FLE-8)

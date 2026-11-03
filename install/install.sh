@@ -27,7 +27,7 @@ main() {
     self_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   fi
 
-  local domain='' acme_email='' ref=develop dry_run=0 arg
+  local domain='' acme_email='' ref=main dry_run=0 arg
   local repo_url='https://github.com/rcuny/ddev-fleet.git'
   local opt_dir=/opt/ddev-fleet stage_dir=/usr/local/lib/ddev-fleet-installer fleet_home=/home/fleet
 
@@ -53,7 +53,7 @@ Required:
 
 Options:
   --acme-email=<email>  contact address for Let's Encrypt
-  --ref=<ref>           branch, tag or commit to install (default: develop)
+  --ref=<ref>           branch, tag or commit to install (default: main)
   --repo-url=<url|path> git remote or bundle to install from (default: the public GitHub mirror)
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)

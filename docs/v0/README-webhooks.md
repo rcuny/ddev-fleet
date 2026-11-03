@@ -7,7 +7,7 @@ Type: documentation
 
 # Jira webhooks
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.08; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x line re-implements this in milestone M0.08; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `legacy` branch and in the `v0.*` tags, not on `main` or `develop`.
 
 A Jira admin webhook can start a fleet deploy by itself: when an issue moves
 into a configured status (for example **Dispatched**), the fleet server

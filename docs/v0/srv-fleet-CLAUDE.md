@@ -7,7 +7,7 @@ Type: documentation
 
 # ddev-fleet server context
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.11; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x line re-implements this in milestone M0.11; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `legacy` branch and in the `v0.*` tags, not on `main` or `develop`.
 
 This file is the server-side Claude Code context document. The canonical
 copy lives in the product repo at `docs/v0/srv-fleet-CLAUDE.md`;

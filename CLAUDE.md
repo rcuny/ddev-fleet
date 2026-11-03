@@ -13,19 +13,22 @@ source of truth, GitHub is a read-only mirror), so keep it free of owner
 hostnames, client or project names, workspace paths and Jira site names; examples
 use `fleet.example.com`, `demo` and `blog`.
 
-## Two lines of development
+## Branches and release lines
 
 | Branch | Line | Contents |
 |---|---|---|
-| `main` | **0.x** (Python) | Releases `v0.*` only: FastAPI daemon, `fleet` CLI, `fleet.yml`, `bootstrap.sh`. Live servers follow it. Not touched by the port. |
-| `develop` | **1.x** (Symfony 8) | The rewrite in `app/` and its installer in `install/`. No Python app, no `fleet.yml`, no `bootstrap.sh`. Installable on a test host (`install/install.sh`, `docs/installation.md`), not released or production-ready yet. |
+| `main` | **1.x** (Symfony 8) | The releases (`v1.*` annotated tags), the GitHub default branch and what `install/install.sh` installs. The rewrite in `app/` and its installer in `install/`. No Python app, no `fleet.yml`, no `bootstrap.sh`. |
+| `develop` | **1.x** | The integration branch: `feature/*` branches are cut off it, pull requests and Renovate target it, Fleet CI gates it. |
+| `legacy` | **0.x** (Python) | Frozen: FastAPI daemon, `fleet` CLI, `fleet.yml`, `bootstrap.sh`, tags `v0.1.0` to `v0.20.2` and later 0.20.x. Python hotfixes only. |
 
-Gitflow on `develop`: features are `feature/<KEY>-<slug>` cut off `develop` and merged
-back with `git merge --no-ff`; 1.x releases are `v1.*` annotated tags cut from
-`release/1.x.y` and merged into `develop` only (`main` stays 0.x until the cut-over). The
-tag pipeline publishes a `v1.*` tag only when its commit is on `origin/develop`
-(`ci/tag-guard.sh`). Procedure: `docs/RELEASING.md` ("1.x during the port"). Never
-push to GitHub by hand and never rewrite `main`, `develop` or a tag.
+Gitflow: features are `feature/<KEY>-<slug>` cut off `develop` and merged back with `git merge --no-ff`;
+releases are `release/1.x.y` cut off `develop`, merged `--no-ff` into `main` with the annotated tag `v1.x.y` on the
+merge commit, then merged back into `develop`; one push sends `main`, `develop` and the tag. A 1.x hotfix is
+`hotfix/<slug>` off `main`, merged into `main` (+ tag) and `develop`. A 0.x hotfix is `hotfix/<slug>` off `legacy`,
+merged into `legacy` with a `v0.20.N` tag, and never merged into `develop` or `main`. `ci/tag-guard.sh` decides what a
+tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `v0.*` tag the tip of
+`origin/legacy`). Procedure: `docs/RELEASING.md`. Never push to GitHub by hand and never rewrite `main`, `develop`,
+`legacy` or a tag. The `v1.0.0` to `v1.0.6` tags were cut on `develop` before the cut-over (release `v1.1.0`).
 
 ## Hard facts
 
@@ -39,7 +42,7 @@ push to GitHub by hand and never rewrite `main`, `develop` or a tag.
   pool; identity headers are trusted only from a request carrying the proxy secret (see "Production trust and the
   installer"). Never expose `app/public` any other way (`php -S`, a DDEV project): outside the installed host there
   is no proxy, and `dev` has the stand-in login.
-- The Python code and docs of the 0.x line are gone from `develop`; their
+- The Python code of the 0.x line is gone from `main` and `develop`; it lives on the `legacy` branch, and its
   documentation is kept under `docs/v0/` as history.
 
 ## Repository map

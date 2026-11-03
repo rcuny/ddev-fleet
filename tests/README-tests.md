@@ -163,7 +163,7 @@ with it, a missing binary is a failure so the suite cannot silently shrink (CI s
 use optional binaries: `FLEET_TEST_CADDY_BIN` (validates a rendered Caddyfile) and
 `FLEET_TEST_AUTHELIA_BIN` (validates the Authelia configuration, falls back to `authelia` on `PATH`);
 without them those tests skip. The Python code of the 0.x app and its pytest, Node and gpg tests are
-not on `develop`; they are on `main`.
+not on `main` or `develop`; they are on `legacy`.
 
 ## Conventions
 

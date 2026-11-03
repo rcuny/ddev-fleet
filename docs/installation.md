@@ -11,7 +11,7 @@ One command turns a fresh Debian 13 host into a working Fleet, and a short setup
 finishes the job. The host serves real HTTPS from the first minute. This guide covers the installer, the
 wizard, what ends up on the host, recovery, upgrades and uninstalling.
 
-The 1.x line is developed milestone by milestone and is **not a finished product yet**: this installer
+The 1.x line is developed milestone by milestone and does not yet cover every 0.x feature: this installer
 gives you the sign-in, the app shell and the host plumbing (Caddy, Authelia, PHP-FPM, the job worker, the
 Mercure hub, DDEV and Docker), and instances can be deployed from projects
 ([`instances-and-jobs.md`](instances-and-jobs.md)). Later milestones add networking, webhook triggers and the agent
@@ -34,7 +34,7 @@ certificate, so **`auth.<domain>` needs DNS in every TLS mode**.
 ## 2. Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/develop/install/install.sh \
+curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/install.sh \
   | sudo bash -s -- --domain=fleet.example.com --acme-email=you@example.com
 ```
 
@@ -42,12 +42,6 @@ At the end the installer prints a **setup URL** on the terminal (it is never wri
 is a credential for 24 hours (or until Finish): whoever opens it can create the administrator, so treat it like a
 password, open it yourself, and do not paste it into a chat, a ticket or a shared terminal log. Open it in a
 browser and follow section 4.
-
-> **Interim note.** The one-liner above downloads `install.sh` from the public GitHub mirror, which is
-> published from `develop` by the next green `develop` pipeline after this installer is merged. Until the
-> mirror carries `install/install.sh`, the command answers 404: copy the repository to the host (a clone, or a
-> `git bundle`) and run `sudo bash install/install.sh --domain=... --repo-url=<path or url> --ref=<branch>`
-> instead (the `fleet` user must be able to read the path).
 
 To inspect before you run: save the script, read it, and call it with `--dry-run`, which prints the complete
 plan and changes nothing.
@@ -58,7 +52,7 @@ plan and changes nothing.
 |---|---|
 | `--domain=<fqdn>` | **Required.** The public host name, lower case, fully qualified (no wildcard, port or IP address). |
 | `--acme-email=<email>` | Contact address for Let's Encrypt (expiry notices). Optional, recommended. |
-| `--ref=<ref>` | Branch, tag or commit to install. Default `develop`, the unreleased 1.x line; pin a `v1.*` tag once one exists. |
+| `--ref=<ref>` | Branch, tag or commit to install. Default `main`, the 1.x releases; pin a release with `--ref=vX.Y.Z`. |
 | `--repo-url=<url\|path>` | Git remote (or a bundle or path readable by the `fleet` user) to install from. Default: the public GitHub mirror. |
 | `--skip-dns-check` | Do not compare the DNS records with this host's addresses (for example behind NAT or a CDN). |
 | `--no-shell-profile` | Do not install the shell profile (step 35). Default: installed. |
@@ -465,7 +459,7 @@ OVH credentials and the Claude token again. Instances, assets and SSH keys are n
 
 ## 6. Upgrading and re-running
 
-**Re-running the same command is the upgrade.** The installer updates the checkout (a branch is reset to
+**Re-running the same command is the upgrade** (add `--ref=vX.Y.Z` to move to a specific release; the default `main` follows the latest release). The installer updates the checkout (a branch is reset to
 `origin/<ref>`; local edits in `/opt/ddev-fleet` are discarded), runs `composer install`, applies migrations and
 repeats every step. It keeps the secrets, the users, the SSH keys and the wizard's choices, prints **no new setup
 token once setup is complete** (while setup is still open it prints a fresh URL and the old one stops working), and reloads php-fpm and the workers when the code changed. It always restarts
