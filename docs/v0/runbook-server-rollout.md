@@ -7,7 +7,7 @@ Type: documentation
 
 # Runbook: rolling code/config out to a live server, and changing its domain
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.12; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x line re-implements this in milestone M0.12; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `legacy` branch and in the `v0.*` tags, not on `main` or `develop`.
 
 Two related but distinct procedures for an already-provisioned host:
 **§1** is the routine "ship a change" loop referenced from several other

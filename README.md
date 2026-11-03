@@ -15,12 +15,12 @@ exclusively) in parallel on one bare-metal host, with minimal human interaction:
 clones, configures, starts and tears down instances, keeps per-project secrets and assets
 in one place, and puts every instance under one wildcard domain with TLS and a login.
 
-## Status: two lines
+## Status: two lines (since v1.1.0, `main` is 1.x)
 
 | Line | Branch | State |
 |---|---|---|
-| **0.x** (Python: FastAPI daemon, `fleet` CLI, `fleet.yml`) | `main` (tags `v0.*`) | Production line. Install and operate it from `main`; its documentation is kept in [`docs/v0/`](docs/v0/). |
-| **1.x** (Symfony 8, PHP 8.4, SQLite) | `develop` (tags `v1.*` from v1.0.0) | A rewrite in progress, developed milestone by milestone. This branch ships the foundation (app skeleton, command seam, the design system and app shell, tests and CI), the **installer and setup wizard** (one command turns a fresh Debian 13 host into a fleet with HTTPS, a sign-in portal and a setup wizard) and **projects and templates** (what the fleet can deploy, in the browser or with `fleet project\|template\|port`, see [`docs/projects-and-templates.md`](docs/projects-and-templates.md)) and **secrets** (credentials entered once and stored encrypted, delivered through `[[token]]` placeholders, see [`docs/secrets.md`](docs/secrets.md)). It cannot manage instances yet and is **not ready for production use**; install it on a test host. |
+| **0.x** (Python: FastAPI daemon, `fleet` CLI, `fleet.yml`) | `legacy` (tags `v0.1.0` to `v0.20.2`, later 0.20.x) | Frozen: hotfixes only. Install and operate it from the `legacy` branch or a `v0.*` tag; its documentation is kept in [`docs/v0/`](docs/v0/). |
+| **1.x** (Symfony 8, PHP 8.4, SQLite) | `main` (releases, tags `v1.*`); `develop` is the integration branch | The current line. It ships the foundation (app skeleton, command seam, the design system and app shell, tests and CI), the **installer and setup wizard** (one command turns a fresh Debian 13 host into a fleet with HTTPS, a sign-in portal and a setup wizard) and **projects and templates** (what the fleet can deploy, in the browser or with `fleet project\|template\|port`, see [`docs/projects-and-templates.md`](docs/projects-and-templates.md)) and **secrets** (credentials entered once and stored encrypted, delivered through `[[token]]` placeholders, see [`docs/secrets.md`](docs/secrets.md)). Later milestones bring back the rest of 0.x. |
 
 What each milestone brings back from 0.x (projects, instances and
 jobs, secrets, assets, networking, webhooks, schedules, users and access) is listed in the
@@ -58,13 +58,13 @@ On a fresh **Debian 13** host, as root, with DNS records for the domain and for 
 pointing at it and ports 80 and 443 open:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/develop/install/install.sh \
+curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/install.sh \
   | sudo bash -s -- --domain=fleet.example.com --acme-email=you@example.com
 ```
 
 It installs PHP 8.4, Docker, DDEV, Caddy, Authelia and a Mercure hub, creates the `fleet` user and `/srv/fleet`,
 starts the services and prints a setup URL (a credential for 24 hours) for the browser wizard (administrator, certificates, SSH
-keys, optional Claude token). Re-running the same command upgrades. Flags (`--ref`, `--repo-url`,
+keys, optional Claude token). The default `--ref` is `main`; pin a release with `--ref=vX.Y.Z`. Re-running the command upgrades. Flags (`--ref`, `--repo-url`,
 `--skip-dns-check`, `--dry-run`), recovery (`fleet setup:reset`, `fleet user:reset-password`), the security
 model and uninstalling: [`docs/installation.md`](docs/installation.md).
 
@@ -115,7 +115,7 @@ executed. The merge gate is `composer run gates` in `app/`, plus the Playwright 
 | [`docs/projects-and-templates.md`](docs/projects-and-templates.md) | Projects and templates: the pages, every field and limit, the `fleet project\|template\|port` commands, exit codes and JSON, differences from 0.x |
 | [`docs/development.md`](docs/development.md) | Prerequisites, first run, environment variables, recording runner, stand-in, gates, adding a component |
 | [`CONTRIBUTING.md`](CONTRIBUTING.md) | Workflow, code style, pull requests, CI and mirror |
-| [`docs/RELEASING.md`](docs/RELEASING.md) | Versioning, CHANGELOG conventions, release and hotfix procedure (0.x flow and 1.x during the port) |
+| [`docs/RELEASING.md`](docs/RELEASING.md) | Versioning, CHANGELOG conventions, release and hotfix procedure (1.x releases from `main`, 1.x and 0.x hotfixes) |
 | [`docs/README-ci.md`](docs/README-ci.md) | Bitbucket Pipelines, the tag guard, the systemd security check |
 | [`docs/v0/`](docs/v0/) | The 0.x (Python) installation, operations, CLI, configuration and feature documentation |
 | [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md) | The weekly systemd security report |

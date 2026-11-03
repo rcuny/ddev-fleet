@@ -99,6 +99,7 @@ final class PipelineConfigTest extends TestCase
         self::assertStringContainsString('"$BITBUCKET_TAG" "$BITBUCKET_COMMIT"', $script);
         self::assertStringContainsString('origin/develop', $script);
         self::assertStringContainsString('origin/main', $script);
+        self::assertStringContainsString('origin/legacy', $script);
         self::assertLessThan(
             strpos($script, 'git push'),
             strpos($script, 'ci/tag-guard.sh'),

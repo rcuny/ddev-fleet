@@ -7,7 +7,7 @@ Type: documentation
 
 # Typesense browser-search exposure
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.07; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x line re-implements this in milestone M0.07; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `legacy` branch and in the `v0.*` tags, not on `main` or `develop`.
 
 How the fleet makes a project's Typesense reachable **from the browser**
 (for widgets like `fern_facets` that query Typesense client-side), without

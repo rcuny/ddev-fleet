@@ -385,7 +385,7 @@ final class InstallerStepsTest extends TestCase
 
         self::assertSame(2, substr_count($out, "--force-confold --configure -a\n"), 'stage 1 and stage 2 each repair first');
         self::assertLessThan(strpos($out, ' update'), strpos($out, '--configure -a'));
-        self::assertStringContainsString('git -C /opt/ddev-fleet checkout --quiet --force -B develop origin/develop', $out);
+        self::assertStringContainsString('git -C /opt/ddev-fleet checkout --quiet --force -B main origin/main', $out);
         self::assertStringContainsString('git -C /opt/ddev-fleet cat-file -e HEAD:install/run.sh', $out);
         self::assertStringNotContainsString('--ff-only', $out, 'a rewritten branch must converge, not wedge on a fast-forward');
     }

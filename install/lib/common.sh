@@ -63,7 +63,7 @@ CADDY_MIN_VERSION=2.11.7
 # Parsed flags (parse_args).
 DOMAIN=
 ACME_EMAIL=
-REF=develop
+REF=main
 REPO_URL=https://github.com/rcuny/ddev-fleet.git
 SKIP_DNS_CHECK=0
 SHELL_PROFILE=1
@@ -231,7 +231,7 @@ Required:
 
 Options:
   --acme-email=<email>  contact address for Let's Encrypt
-  --ref=<ref>           branch, tag or commit to install (default: develop)
+  --ref=<ref>           branch, tag or commit to install (default: main)
   --repo-url=<url|path> git remote or bundle to install from (default: the public GitHub mirror)
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)

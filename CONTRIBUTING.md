@@ -7,8 +7,9 @@ Type: documentation
 
 # Contributing to ddev-fleet
 
-`develop` is the 1.x line (Symfony 8, PHP 8.4); `main` is the 0.x line (Python) and only receives
-fixes for it. Contribute against `develop` unless you are fixing 0.x. The full setup, the
+`main` holds the 1.x releases (Symfony 8, PHP 8.4) and `develop` is the integration branch: cut your
+`feature/<KEY>-<slug>` branch off `develop` and open the pull request against it. The Python 0.x line is frozen on the
+`legacy` branch and only takes hotfixes (`hotfix/<slug>` off `legacy`). The full setup, the
 environment variables and the stand-in login are in [`docs/development.md`](docs/development.md).
 
 ## Dev setup
@@ -73,8 +74,8 @@ request with a red suite. Suites and how to run them: [`tests/README-tests.md`](
   an intended change means re-recording the baseline ([`docs/README-ci.md`](docs/README-ci.md)).
   There is no GitHub Actions workflow.
 - **GitHub is a read-only mirror**, published by the pipeline: `develop` after each green push,
-  and a `v1.*` tag only when its commit is on `origin/develop` (`ci/tag-guard.sh`; `v0.*` tags
-  still publish `main`). Nothing is force-pushed. Never push or merge on GitHub directly: pull
+  and a release tag only through `ci/tag-guard.sh` (a `v1.*` tag must be on `origin/main`, a `v0.*` tag the tip of
+  `origin/legacy`). Nothing is force-pushed. Never push or merge on GitHub directly: pull
   requests there are welcome, but the maintainer applies them on Bitbucket. The mirror steps skip
   unless `GITHUB_MIRROR_URL` is set, so forks are unaffected.
 - **Renovate** (`renovate-config.json`, the scheduled `custom: renovate` pipeline) opens daily
@@ -84,8 +85,8 @@ request with a red suite. Suites and how to run them: [`tests/README-tests.md`](
   the Debian and Python pipeline images are never auto-bumped.
 - Required repository variables and the GitHub deploy key are listed in the header of
   `bitbucket-pipelines.yml`.
-- **Releases** follow Gitflow; 1.x tags are cut from `release/1.x.y` and merged into `develop`
-  while the port is under way. See [`docs/RELEASING.md`](docs/RELEASING.md).
+- **Releases** follow Gitflow; 1.x tags are cut from `release/1.x.y` off `develop` and merged into `main`, then back
+  into `develop`. See [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## See also
 

@@ -7,7 +7,7 @@ Type: documentation
 
 # Scheduled jobs
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.09; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x line re-implements this in milestone M0.09; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `legacy` branch and in the `v0.*` tags, not on `main` or `develop`.
 
 A fleet server can run periodic tasks by itself. A schedule is declared in
 `fleet.yml`, fired by a scheduler that lives inside the fleet daemon, and shown

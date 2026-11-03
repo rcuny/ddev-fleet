@@ -7,7 +7,7 @@ Type: documentation
 
 # Fleet networking — topology, ports, and how to add one
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.07; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x line re-implements this in milestone M0.07; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `legacy` branch and in the `v0.*` tags, not on `main` or `develop`.
 
 How traffic reaches a deployed instance, every port the fleet manages, and
 the exact steps to expose a new one. Generalizes `docs/v0/README-typesense.md`'s

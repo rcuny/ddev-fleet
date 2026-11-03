@@ -10,7 +10,7 @@ use Symfony\Component\Process\Process;
 
 /**
  * ci/tag-guard.sh decides what a release tag may publish to the GitHub mirror (Bitbucket tag pipeline).
- * Each scenario builds a throw-away repository with local origin/main and origin/develop refs.
+ * Each scenario builds a throw-away repository with local origin/main, origin/develop and origin/legacy refs.
  */
 final class TagGuardTest extends TestCase
 {
@@ -38,55 +38,72 @@ final class TagGuardTest extends TestCase
         self::assertSame(0, new Process(['bash', '-n', $script])->run());
     }
 
-    public function testV0TagMustEqualOriginMain(): void
+    public function testV0TagMustBeTheTipOfOriginLegacy(): void
     {
-        $main = $this->commit('release');
-        $this->setRemote('main', $main);
-        $this->setRemote('develop', $main);
+        $legacy = $this->commit('release');
+        $this->setRemotes(main: $legacy, develop: $legacy, legacy: $legacy);
 
-        [$status, $out] = $this->guard('v0.7.0', $main);
+        [$status, $out] = $this->guard('v0.20.3', $legacy);
 
         self::assertSame(0, $status);
-        self::assertSame($main.':refs/heads/main refs/tags/v0.7.0', $out);
+        self::assertSame($legacy.':refs/heads/legacy refs/tags/v0.20.3', $out);
     }
 
-    public function testV0TagOnAnotherCommitIsRejected(): void
+    public function testV0TagThatIsNotTheLegacyTipIsRejected(): void
     {
-        $main = $this->commit('release');
-        $other = $this->commit('later');
-        $this->setRemote('main', $main);
-        $this->setRemote('develop', $other);
+        $old = $this->commit('old release');
+        $tip = $this->commit('later');
+        $this->setRemotes(main: $tip, develop: $tip, legacy: $tip);
 
-        [$status, $out, $err] = $this->guard('v0.7.0', $other);
+        [$status, $out, $err] = $this->guard('v0.20.2', $old);
 
         self::assertSame(1, $status);
         self::assertSame('', $out);
-        self::assertStringStartsWith('ERROR:', $err);
+        self::assertStringContainsString('origin/legacy', $err);
     }
 
-    public function testV1TagOnDevelopPrintsOnlyTheTagRef(): void
+    public function testV1TagOnTheTipOfMainMovesMainAndPushesTheTag(): void
     {
         $base = $this->commit('base');
-        $tagged = $this->commit('tagged');
-        $tip = $this->commit('tip');
-        $this->setRemote('main', $base);
-        $this->setRemote('develop', $tip);
+        $tip = $this->commit('release');
+        $this->setRemotes(main: $tip, develop: $tip, legacy: $base);
 
-        [$status, $out] = $this->guard('v1.0.0', $tagged);
-        self::assertSame(0, $status);
-        self::assertSame('refs/tags/v1.0.0', $out);
+        [$status, $out] = $this->guard('v1.1.0', $tip);
 
-        // The tip of develop itself is accepted too.
-        [$status, $out] = $this->guard('v1.2.3', $tip);
         self::assertSame(0, $status);
-        self::assertSame('refs/tags/v1.2.3', $out);
+        self::assertSame($tip.':refs/heads/main refs/tags/v1.1.0', $out);
     }
 
-    public function testV1TagNotReachableFromDevelopIsRejected(): void
+    public function testV1TagThatIsAnAncestorOfMainPushesOnlyTheTag(): void
     {
         $base = $this->commit('base');
-        $this->setRemote('main', $base);
-        $this->setRemote('develop', $this->commit('develop work'));
+        $tagged = $this->commit('tagged on develop before the cut-over');
+        $tip = $this->commit('release');
+        $this->setRemotes(main: $tip, develop: $tip, legacy: $base);
+
+        [$status, $out] = $this->guard('v1.0.6', $tagged);
+
+        self::assertSame(0, $status);
+        self::assertSame('refs/tags/v1.0.6', $out);
+    }
+
+    public function testV1TagOnlyOnDevelopIsRejected(): void
+    {
+        $base = $this->commit('base');
+        $ahead = $this->commit('develop work');
+        $this->setRemotes(main: $base, develop: $ahead, legacy: $base);
+
+        [$status, $out, $err] = $this->guard('v1.1.0', $ahead);
+
+        self::assertSame(1, $status);
+        self::assertSame('', $out);
+        self::assertStringContainsString('origin/main', $err);
+    }
+
+    public function testV1TagNotReachableFromMainIsRejected(): void
+    {
+        $base = $this->commit('base');
+        $this->setRemotes(main: $this->commit('main work'), develop: $base, legacy: $base);
         $this->git('checkout', '-q', '-b', 'stray', $base);
         $stray = $this->commit('stray');
 
@@ -100,13 +117,12 @@ final class TagGuardTest extends TestCase
     public function testV1PrereleaseTagAccepted(): void
     {
         $base = $this->commit('base');
-        $this->setRemote('main', $base);
-        $this->setRemote('develop', $base);
+        $this->setRemotes(main: $base, develop: $base, legacy: $base);
 
-        [$status, $out] = $this->guard('v1.0.0-rc1', $base);
+        [$status, $out] = $this->guard('v1.2.0-rc1', $base);
 
         self::assertSame(0, $status);
-        self::assertSame('refs/tags/v1.0.0-rc1', $out);
+        self::assertSame($base.':refs/heads/main refs/tags/v1.2.0-rc1', $out);
     }
 
     /**
@@ -121,7 +137,8 @@ final class TagGuardTest extends TestCase
         yield 'prerelease ending in .lock' => ['v1.0.0-x.lock'];
         yield 'shell metacharacter' => ['v1.0.0;id'];
         yield 'space' => ['v1.0.0 x'];
-        yield 'v2 is unknown' => ['v2.0.0'];
+        yield 'v0 without patch' => ['v0.20'];
+        yield 'v0 prerelease dash only' => ['v0.20.3-'];
         yield 'no prefix' => ['foo'];
         yield 'empty' => [''];
         yield 'bare v0' => ['v0'];
@@ -132,8 +149,7 @@ final class TagGuardTest extends TestCase
     public function testMalformedOrUnknownTagIsRejected(string $tag): void
     {
         $base = $this->commit('base');
-        $this->setRemote('main', $base);
-        $this->setRemote('develop', $base);
+        $this->setRemotes(main: $base, develop: $base, legacy: $base);
 
         [$status, $out, $err] = $this->guard($tag, $base);
 
@@ -159,17 +175,15 @@ final class TagGuardTest extends TestCase
     {
         $base = $this->commit('base');
         $moved = $this->commit('moved to');
-        $this->setRemote('main', $base);
-        $this->setRemote('develop', $moved);
+        $this->setRemotes(main: $moved, develop: $moved, legacy: $base);
 
-        // v1: the pipeline was triggered for $base, but the fetched tag now points at $moved (both are on develop).
+        // v1: the pipeline was triggered for $base, but the fetched tag now points at $moved (both are on main).
         [$status, $out, $err] = $this->guard('v1.0.0', $base, $moved);
         self::assertSame(1, $status);
         self::assertSame('', $out);
         self::assertStringContainsString('moved after the trigger', $err);
 
-        // v0: same with main.
-        $this->setRemote('main', $base);
+        // v0: same with legacy.
         [$status, $out, $err] = $this->guard('v0.7.0', $base, $moved);
         self::assertSame(1, $status);
         self::assertSame('', $out);
@@ -179,8 +193,7 @@ final class TagGuardTest extends TestCase
     public function testTagThatWasNotFetchedIsRefused(): void
     {
         $base = $this->commit('base');
-        $this->setRemote('main', $base);
-        $this->setRemote('develop', $base);
+        $this->setRemotes(main: $base, develop: $base, legacy: $base);
 
         $process = new Process(['bash', self::script(), 'v1.0.0', $base], $this->repo);
         $process->run();
@@ -193,8 +206,7 @@ final class TagGuardTest extends TestCase
     public function testUnknownCommitAndWrongArgumentCountAreRejected(): void
     {
         $base = $this->commit('base');
-        $this->setRemote('main', $base);
-        $this->setRemote('develop', $base);
+        $this->setRemotes(main: $base, develop: $base, legacy: $base);
 
         [$status, , $err] = $this->guard('v1.0.0', str_repeat('0', 40));
         self::assertSame(1, $status);
@@ -246,8 +258,10 @@ final class TagGuardTest extends TestCase
         return $this->git('rev-parse', 'HEAD');
     }
 
-    private function setRemote(string $branch, string $sha): void
+    private function setRemotes(string $main, string $develop, string $legacy): void
     {
-        $this->git('update-ref', 'refs/remotes/origin/'.$branch, $sha);
+        foreach (['main' => $main, 'develop' => $develop, 'legacy' => $legacy] as $branch => $sha) {
+            $this->git('update-ref', 'refs/remotes/origin/'.$branch, $sha);
+        }
     }
 }

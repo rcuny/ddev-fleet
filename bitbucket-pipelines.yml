@@ -15,9 +15,10 @@
 #   push to feature/** release/** -> gates + infra tests (no mirror)
 #   tag v*  (release)          -> gates + infra tests, then publish to the
 #                                 GitHub mirror through ci/tag-guard.sh:
-#                                 v1.X.Y must be on develop and pushes only the
-#                                 tag; v0.X.Y must be the tip of main and also
-#                                 fast-forwards GitHub's main. Anything else is
+#                                 v1.X.Y must be on main (its tip also
+#                                 fast-forwards GitHub's main); v0.X.Y must be
+#                                 the tip of legacy and fast-forwards GitHub's
+#                                 legacy. Anything else is
 #                                 rejected.
 #   custom: renovate           -> dependency-update PRs against develop
 #                                 (composer, npm, pip requirements, Ansible
@@ -255,10 +256,11 @@ pipelines:
                 echo "GITHUB_MIRROR_URL not set, skipping mirror"
                 exit 0
               fi
-              git fetch origin "+refs/heads/main:refs/remotes/origin/main" "+refs/heads/develop:refs/remotes/origin/develop" "+refs/tags/$BITBUCKET_TAG:refs/tags/$BITBUCKET_TAG"
+              git fetch origin "+refs/heads/main:refs/remotes/origin/main" "+refs/heads/develop:refs/remotes/origin/develop" "+refs/heads/legacy:refs/remotes/origin/legacy" "+refs/tags/$BITBUCKET_TAG:refs/tags/$BITBUCKET_TAG"
               # ci/tag-guard.sh prints the refspecs this tag may publish, or fails:
-              #   v1.X.Y must be on origin/develop and pushes only the tag;
-              #   v0.X.Y must be the tip of origin/main and also fast-forwards GitHub's main.
+              #   v1.X.Y must be on origin/main (the tip also fast-forwards GitHub's main, an older
+              #   commit pushes only the tag);
+              #   v0.X.Y must be the tip of origin/legacy and also fast-forwards GitHub's legacy.
               refspecs=$(ci/tag-guard.sh "$BITBUCKET_TAG" "$BITBUCKET_COMMIT") || exit 1
               if [ -z "$refspecs" ]; then
                 echo "ERROR: the tag guard printed no refspec; refusing to push" >&2

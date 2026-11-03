@@ -7,10 +7,10 @@ Type: documentation
 
 # Documentation index
 
-`develop` is the **1.x** line (Symfony 8), rewritten milestone by milestone from the **0.x**
-(Python) product on `main`. Every document below carries a status:
+`main` is the **1.x** line (Symfony 8; `develop` is its integration branch), rewritten milestone by milestone from the **0.x**
+(Python) product, which is frozen on the `legacy` branch. Every document below carries a status:
 
-- **Current** - describes what `develop` does today.
+- **Current** - describes what `main` does today.
 - **0.x, valid** - describes tooling or process that applies unchanged to both lines.
 - **0.x reference** - describes the 0.x product. It is kept as history and as the specification the
   port re-implements; each one is rewritten in the milestone named in its banner.
@@ -28,8 +28,8 @@ Type: documentation
 | [`networking.md`](networking.md) | Current | Every port the host uses, the named-port sites and their certificates, the in-network port mirror and the `:443` site mirror, `fleet port:firewall` (the installer does not change the firewall), the checks that need a live host |
 | [`moving-projects.md`](moving-projects.md) | Current | Moving a project between hosts: the versioned export file, the passphrase-sealed secrets, the import preview and confirm, copying assets with rsync, `fleet export:project`, `fleet import:preview\|apply`, and checking a backup with `fleet backup:verify` before a restore |
 | [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
-| [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the `v1.*` tag guard, the systemd security check and baseline |
-| [`RELEASING.md`](RELEASING.md) | 0.x flow valid; 1.x section added | Versioning, CHANGELOG conventions, release and hotfix procedure. The section "1.x during the port" covers `v1.*` tags on `develop`; the document is rewritten at v1.0.0 (milestone M0.04) |
+| [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the tag guard, the systemd security check and baseline |
+| [`RELEASING.md`](RELEASING.md) | Current | Branch model, versioning, CHANGELOG conventions, the 1.x release procedure, the tag guard, 1.x and 0.x hotfixes |
 | [`../tests/README-tests.md`](../tests/README-tests.md) | Current | Test suites and how to run them (counts: `ci/test-counts.sh`) |
 | [`../CLAUDE.md`](../CLAUDE.md) | Current | Agent-facing guide: branches, namespaces, seams, commands |
 | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Current | Contribution workflow, CI, mirror, dependency updates |
@@ -38,13 +38,13 @@ Type: documentation
 
 | Document | Status | Covers |
 |---|---|---|
-| [`README-renovate.md`](README-renovate.md) | 0.x, valid | Hands-off merge of approved Renovate PRs (the pipeline is unchanged by the port; the automatic webhook trigger returns in M0.08) |
+| [`README-renovate.md`](README-renovate.md) | 0.x, valid | Hands-off merge of approved Renovate PRs (the pipeline is unchanged by the 1.x line; the automatic webhook trigger returns in M0.08) |
 
 ## 0.x reference (`v0/`)
 
 Each file starts with a banner naming the milestone that re-implements it. The files, commands and
 configuration they describe (`src/fleet/`, the `fleet` CLI, `fleet.yml`, `bootstrap.sh`) exist on
-`main`, not on `develop`.
+`legacy` (and the `v0.*` tags), not on `main` or `develop`.
 
 | Document | Covers | Rewritten in |
 |---|---|---|

@@ -7,14 +7,14 @@ Type: documentation
 
 # Operating ddev-fleet
 
-> **v0.x (Python) documentation** — the 1.x port re-implements this in milestone M0.12; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `main` branch, not on `develop`.
+> **v0.x (Python) documentation** — the 1.x line re-implements this in milestone M0.12; the files and commands it names (`src/fleet/`, `fleet`, `bootstrap.sh`) live on the `legacy` branch and in the `v0.*` tags, not on `main` or `develop`.
 
 Ongoing procedures for an already-provisioned host. For first-time setup
 see `docs/v0/installation.md`.
 
 ## Updating the code
 
-`/opt/ddev-fleet` is a `fleet`-owned git checkout tracking `origin/main`
+`/opt/ddev-fleet` is a `fleet`-owned git checkout tracking `origin/legacy`
 (or whatever `fleet_repo_url`/`fleet_repo_version` point at), holding the
 read-only deploy key. The package is installed **editable**
 (`pip install -e`), so a restart alone picks up new source — no reinstall
