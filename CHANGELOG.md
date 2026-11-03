@@ -7,6 +7,104 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-03
+
+### Added
+- **FLE-120: one gates script, `ci/run-gates.sh [--quick|--full] [--report-dir DIR]`.** Agents, the orchestrator and Fleet CI run the same gates (composer gates, prod-check, Playwright, infra tests, non-blocking Ansible lint). It clears the Symfony test/dev caches, writes per-gate logs, `summary.json` and `summary.txt` (counts parsed by `ci/gates_summary.py`) into `var/ci-report/` and exits 0 only if every blocking gate passed. See `docs/README-ci.md`.
+
+### Changed
+- **FLE-117: review follow-ups.** `fleet:host:render` now requires the access-model upgrade step (a wiring slip can no
+  longer skip it before Authelia is relaxed). Every native select is 44 px tall on a phone (one shared class in the
+  `NativeSelect` component). `fleet tmux` checks the instance id before the session is ensured, refuses extra arguments
+  with a usage line and prints a hint instead of nesting when run inside tmux.
+
+
+- **FLE-122: Renovate merges its own green patch and minor PRs.** Patch, minor, pin and digest updates, and the weekly lock-file
+  maintenance PR, are merged by Renovate itself once their Fleet CI status (`fleet-gates`) is green, one per run; the
+  Renovate runner is scheduled hourly. Symfony minor/major groups, Symfony UX and every major update still need a manual merge.
+
+- **FLE-126: Playwright tiers.** `FLEET_PW_TIER=quick|full` (default `full`, so a bare `npx playwright test` is
+  unchanged) lets Fleet CI run a quick merge gate on feature and Renovate branches (desktop without the coverage and
+  validation matrices, phone limited to `@smoke`) and the full suite on release, develop and nightly. No test removed.
+
+- **FLE-127: the form-validation matrices of projects and templates run as PHPUnit Functional tests.** The per-rule cases
+  (refused and accepted names, Git URLs, branches, hostnames, git identities, issue id patterns, submodule paths, template
+  fields and command lines) moved from two Playwright specs to `ProjectValidationTest` and `TemplateValidationTest`, which
+  run in seconds. The Playwright specs keep what a browser adds (errors on screen, accessibility, overflow). No product change.
+
+- **FLE-128: `ci/run-gates.sh` serves Fleet CI.** New opt-in `FLEET_CI_INSTALL_DEPS=1` installs the Chromium system
+  libraries (`sudo playwright install-deps`) before the browser install; `FLEET_PW_TIER` is documented as passing through.
+  Fleet CI now runs its gates through this script, so a gate added here needs no CI config change.
+
+- **FLE-130: Renovate composer updates bump `composer.json` and `composer.lock` together again.** `update-lockfile` left the lock content-hash out of step with `composer.json` (the Fleet CI lock guard failed such PRs), so composer is back on `rangeStrategy: bump`; npm keeps `update-lockfile` (no content-hash). Symfony patch releases are no longer separate PRs; they arrive through a weekly `lockFileMaintenance` PR (Monday before 05:00 Europe/Paris) that refreshes the whole lock with a correct hash. Symfony minor and major PRs use `replace`, so `8.1.*` becomes `8.2.*` and never an exact pin. This amends FLE-140.
+
+- **FLE-131: tests pin the job lock-wait give-up window and the nightly-redeploy and schedule-ticker rules** (`JobExecutorTest`, `NightlyRedeployTest`, `ScheduleTickerTest`), and the CI Python dev requirements were adjusted. No runtime behaviour change.
+
+- **FLE-136: `fleet:host:render --apply` is pinned as re-runnable after a failure midway.** When the Caddy apply fails
+  after Authelia went in, Authelia stays applied (no rollback), nothing stays staged and no gate is written; a second
+  `--apply` once the cause is fixed ends in the same state as a clean run.
+
+- **FLE-140: Renovate keeps Symfony on `8.1.*` ranges.** Composer and npm updates inside the current range now change only the lock file (`rangeStrategy: update-lockfile`) instead of bumping `app/composer.json` to exact pins; Symfony minor and major updates still arrive as separate PRs, which fall back to widening the range.
+
+- **FLE-142: `main` is now the 1.x (Symfony) line.** `main` holds the 1.x releases, `develop` stays the integration branch, and the installer's default `--ref` is `main`. The Python 0.x line lives on the new `legacy` branch (tags `v0.1.0` to `v0.20.2` and later 0.20.x hotfixes), which takes hotfixes only. Ansible's `fleet_repo_version` now defaults to `legacy`, since it provisions the 0.x host only.
+- **The tag guard follows the new model** (`ci/tag-guard.sh`): a `v1.*` tag must be on `origin/main` (the tip also moves GitHub's `main`, an older commit publishes only the tag), a `v0.*` tag must be the tip of `origin/legacy`, and a commit that is only on `develop` is refused.
+
+### Fixed
+- **FLE-117: a stale "Remove token" submit** (token already removed in another tab) now says "The pipeline token was
+  already removed." instead of reporting a removal.
+
+- **FLE-119: a window opened by `fleet tmux ensure` during a deploy no longer costs the deploy its tty commands.** The
+  v0.20.1 hotfix made the 0.x reconcile skip instances whose lock is held. 1.x does not have the race: the deploy step
+  closes a window that already exists and builds a fresh one before typing `tty1`/`tty2`, and `fleet tmux ensure` skips
+  instances being destroyed. A new test pins the deploy-with-existing-window case so it stays that way.
+
+- **FLE-129: the phone E2E "a second Finish while one is running is told to wait" no longer polls `flock` with the
+  default 5 s timeout.** The lock holder reports on stdout once it has the lock and the test waits for its pipe to
+  close to know the lock is released. Test-only change.
+- **FLE-129: the E2E helper `navigate` (used by `follow` and `submitAndWait`) no longer leaves its pending marker set
+  when a visit ends without a Turbo render.** The marker (`data-nav-pending`, set and cleared by the test helper only,
+  never by the app) was cleared on `turbo:render` / `turbo:frame-render` alone, so a phone visit that ended another way
+  (`users-coverage` "New user form refuses ...") waited out the 20 s expect timeout. It is now also cleared on
+  `turbo:load`, `turbo:fetch-request-error` and a 204/205 response, and a visit that still never renders fails with the
+  Turbo events it saw (`turbo:click`, `turbo:visit`, request, response, error, render, load). Test-only change.
+
+- **FLE-133: UTC date type fallback.** `UtcDateTimeImmutableType` parsed a value not in the stored format in PHP's default zone; it now uses UTC (an explicit offset still wins). Entities and the type are no longer registered as services, `ext-posix` is declared in `composer.json`, and tests cover the type, a full migration rollback and a ban on the stock date types.
+
+- **FLE-143: the instance list no longer resets filter fields being edited.** A 5-second poll answer that arrived while the filters were being changed replaced the typed values; it is now dropped until the form is submitted.
+- **FLE-143: Fleet CI sizes Playwright workers to the container's CPU quota** (`ci/run-gates.sh`: two thirds of the cgroup CPUs, at least 1, unless `FLEET_CI_WORKERS` is set). Five workers on a 3-CPU CI container starved the full suite into timeouts. The 51-jobs pagination test is marked slow, and the secrets form test submits with `requestSubmit` instead of a click.
+
+- **FLE-144: an instance id is now limited to 59 characters, not 63.** DDEV names the web container's host name
+  `<id>-web` and Docker refuses a host name over 63 characters, so an id of 60 to 63 characters passed validation and then
+  failed at `ddev start`. Validation, the label fitting of webhook deploys and the docs use the new limit, and the
+  message says why. Alias host names (`<hostname>-<id>`) keep their own 63-character DNS label limit.
+
+### Security
+- **FLE-133: Secret entity guards.** A `Secret` now refuses an unknown scope, a fleet secret with a scope id, a project secret without one and a nonce that is not a libsodium secretbox nonce; its timestamps always come from the caller's clock, and so do those of `HostSettings` (no entity reads the wall clock for that any more; callers pass Symfony's clock).
+
+
+- **FLE-136: the Caddy log no longer records the query string of the `Referer` header.** The error log keeps the request
+  headers, and a Referer can carry a setup token; everything from the first `?` is cut.
+- **FLE-136: the gate writer checks the group of the gate file, not only the setgid bit of its directory.** Outside
+  `FLEET_HOME` a file that does not belong to the `caddy` group is refused (the previous gate is put back) with the
+  `chgrp` command to run, instead of failing at the next Caddy restart.
+
+
+- **FLE-138: installer and root helper hardening.** The installer pins the primary-key fingerprint of every apt signing key (Docker, DDEV, Caddy, Authelia) and refuses a key that does not match; it installs `gnupg` for the check.
+- DDEV's router is bound explicitly to loopback (`--router-bind-all-interfaces=false`).
+- The installer refuses to run for real from a directory that is not root-owned or that others can write to.
+- The root helper `apply` opens staged files read-only, no longer passes its lock and staging descriptors to the validator, accepts a symlinked `/srv` (the path below it must still be real), and waits at most 5 s for the lock so lock plus work fits the app's 60 s budget.
+- The DNS pre-check no longer takes the first public resolver's answer: the public resolvers must agree, otherwise the check is inconclusive.
+
+### Dependencies
+- **Symfony and lock-file maintenance:** the weekly lock-file updates (#136, #144) move the Symfony components from 8.1.x to v8.1.10 and bump the `symfony/*` helpers (for example `v2.11.0` to `v2.12.0`, a `v1.43.0` to `v1.43.3` group) and several transitive packages (#144).
+- **Doctrine:** `doctrine/orm` ^3.7.6 (#142), `doctrine/doctrine-bundle` ^3.3.4 (#135, #141), `doctrine/doctrine-migrations-bundle` ^4.0.1 (#131).
+- **PHPStan:** `phpstan/phpstan` ^2.3.4 (#132, #134, #137, #140), `phpstan/phpstan-doctrine` ^2.1.0 (#132, #143), `phpstan/phpstan-symfony` ^2.1.1 (#137).
+- **PHP dev tooling:** `phpunit/phpunit` ^13.4.6 (#138, #145), `friendsofphp/php-cs-fixer` ^3.95.27 (FLE-122).
+- **`dragonmantank/cron-expression`:** ^3.6.1 (#130).
+- **Python CI tooling:** `pytest>=9.2.0` (#139), `PyYAML>=6.0.3` (FLE-122).
+- **Ansible:** `community.crypto` >=3.5.1 (#122).
+- **PHPStan:** `phpstan/phpstan` ^2.3.5 (#153).
+
 ## [1.0.6] - 2026-10-20
 
 ### Added
@@ -769,7 +867,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.0.6...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/rcuny/ddev-fleet/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/rcuny/ddev-fleet/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/rcuny/ddev-fleet/compare/v1.0.4...v1.0.5
 [1.0.4]: https://github.com/rcuny/ddev-fleet/compare/v1.0.3...v1.0.4
