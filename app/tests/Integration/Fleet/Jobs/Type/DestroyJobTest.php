@@ -59,10 +59,10 @@ final class DestroyJobTest extends InstanceJobTestCase
         }
         $instance = $this->instance('main', 'develop', InstanceState::Destroying);
         $dir = $this->checkout($instance);
-        mkdir($dir.'/locked');
-        file_put_contents($dir.'/locked/file', 'x');
-        chmod($dir.'/locked', 0o555);
+        file_put_contents($dir.'/file', 'x');
+        $parent = \dirname($dir);
         $job = $this->job('destroy', $instance);
+        chmod($parent, 0o555);
 
         try {
             $this->destroy($job);
@@ -70,7 +70,7 @@ final class DestroyJobTest extends InstanceJobTestCase
         } catch (JobFailed $e) {
             self::assertStringContainsString('sudo rm -rf '.escapeshellarg($dir), $e->getMessage());
         } finally {
-            chmod($dir.'/locked', 0o755);
+            chmod($parent, 0o755);
         }
 
         self::assertSame(InstanceState::Failed, $instance->state());
