@@ -19,9 +19,11 @@ export default class extends Controller {
     #source = null;
     #wake = null;
     #holdUntil = 0;
+    #refreshing = false;
 
     connect() {
         this.element.addEventListener('turbo:frame-load', this.#restore);
+        this.element.addEventListener('turbo:before-frame-render', this.#keepEdits);
         this.#schedule();
         this.#subscribe();
         this.#restore();
@@ -29,6 +31,7 @@ export default class extends Controller {
 
     disconnect() {
         this.element.removeEventListener('turbo:frame-load', this.#restore);
+        this.element.removeEventListener('turbo:before-frame-render', this.#keepEdits);
         clearInterval(this.#timer);
         clearTimeout(this.#wake);
         this.#source?.close();
@@ -60,6 +63,7 @@ export default class extends Controller {
             }
         }
         const query = params.toString();
+        this.#refreshing = false;
         this.#frame().src = this.urlValue + (query === '' ? '' : '?' + query);
     }
 
@@ -99,6 +103,33 @@ export default class extends Controller {
         return !!active && this.element.contains(active) && ['INPUT', 'SELECT', 'TEXTAREA'].includes(active.tagName) && active.type !== 'checkbox';
     }
 
+    // An answer to a refresh that arrives after the person started editing the filters must not render: it would put
+    // the old values back into the fields (and a submit then sends the unchanged address, so nothing happens). The
+    // refresh is dropped; the next one runs once the filters are submitted or put back.
+    #keepEdits = (event) => {
+        const refreshing = this.#refreshing;
+        this.#refreshing = false;
+        if (!refreshing || !this.hasFormTarget) {
+            return;
+        }
+        const edited = ['q', 'project', 'state'].some((name) => {
+            const field = this.formTarget.elements[name];
+            if (!field) {
+                return false;
+            }
+            if (!field.options) {
+                return field.value !== field.defaultValue;
+            }
+            // A select without a `selected` option shows its first option: that is its default, not an edit.
+            const marked = [...field.options].findIndex((option) => option.defaultSelected);
+            return field.selectedIndex !== (marked < 0 ? 0 : marked);
+        });
+        if (edited) {
+            event.preventDefault();
+            this.#holdUntil = 0;
+        }
+    };
+
     refresh = () => {
         const frame = this.#frame();
         // A frame that is still loading is left alone: reloading it cancels the request in flight, and Turbo lets the
@@ -108,6 +139,7 @@ export default class extends Controller {
             return;
         }
         this.#holdUntil = Date.now() + 15000;
+        this.#refreshing = true;
         const url = frame.src || this.urlValue + window.location.search;
         if (frame.src === url) {
             frame.reload();
