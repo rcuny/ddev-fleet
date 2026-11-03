@@ -120,6 +120,8 @@ step_main() {
   run systemctl restart caddy
   # The daily backup timer (the units are written by step 95). enable --now is a no-op when it already runs.
   run systemctl enable --now fleet-backup.timer
+  # The daily release check (fleet-upgrade-check.service, written by step 95).
+  run systemctl enable --now fleet-upgrade-check.timer
   # The agent workspace. enable --now is a no-op while the unit is active and is never followed by a restart: a restart
   # would end the operators' panes. A changed unit file takes effect at the next `systemctl restart fleet-tmux`.
   run systemctl enable --now fleet-tmux.service

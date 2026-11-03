@@ -23,6 +23,10 @@ parameters:
     # Where Debian leaves the "reboot required" flag and the packages that asked for it (App\Fleet\Host\RebootSignal).
     fleet.reboot_flag_file: '/run/reboot-required'
     fleet.reboot_packages_file: '/run/reboot-required.pkgs'
+    # The tag the installer wrote (install/steps/98-render-start.sh) and the release source (tests and rehearsals point
+    # FLEET_UPGRADE_REPO_URL at a local repository; empty means the public GitHub mirror, App\Fleet\Upgrade\RepoUrl).
+    env(FLEET_UPGRADE_REPO_URL): ''
+    fleet.installed_version_file: '/etc/ddev-fleet/installed-version'
 
 services:
     # symfony-design-system:start
@@ -84,6 +88,15 @@ services:
     App\Fleet\PortMirror\TraefikDirectory:
         arguments:
             $home: '%env(default::FLEET_USER_HOME)%'
+
+    App\Fleet\Upgrade\InstalledVersion:
+        arguments:
+            $versionFile: '%fleet.installed_version_file%'
+            $checkoutDir: '%kernel.project_dir%/..'
+
+    App\Fleet\Upgrade\RepoUrl:
+        arguments:
+            $override: '%env(FLEET_UPGRADE_REPO_URL)%'
 
     App\Fleet\Host\RebootSignal:
         arguments:

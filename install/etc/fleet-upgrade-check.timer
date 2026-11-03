@@ -1,0 +1,13 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-upgrade-check.timer and enabled by step 98.
+# Daily look at the published releases; the delay spreads the hosts over the day, and Persistent runs a missed check at
+# the next boot.
+[Unit]
+Description=Daily ddev-fleet release check
+
+[Timer]
+OnCalendar=daily
+RandomizedDelaySec=6h
+Persistent=true
+
+[Install]
+WantedBy=timers.target
