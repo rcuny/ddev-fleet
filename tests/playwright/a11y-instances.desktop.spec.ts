@@ -221,7 +221,8 @@ test.describe('axe sweep: jobs', () => {
 
   test('the instance page with a finished job', async ({ page }) => {
     const id = await deployOne(page, ADMIN_PROJECT);
-    const running = runFakeJob(id, { lines: 4, delay: 300 });
+    // 4 lines x 2 s: the job outlives page load and the 1 s visibility poll even on a loaded CI box (it was 300 ms, ~1.2 s).
+    const running = runFakeJob(id, { lines: 4, delay: 2000 });
     await expect(async () => {
       await page.goto(`/instances/${id}`);
       await expect(page.getByTestId('active-job')).toBeVisible({ timeout: 1_000 });
