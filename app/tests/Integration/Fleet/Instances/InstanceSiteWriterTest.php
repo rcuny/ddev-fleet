@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Fleet\Instances;
 
+use App\Domain\Host\HostSettings;
 use App\Domain\Host\HostSettingsRepository;
+use App\Domain\Host\TlsMode;
 use App\Domain\Instance\Instance;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
@@ -32,6 +34,7 @@ final class InstanceSiteWriterTest extends KernelTestCase
     private FleetPaths $paths;
     private RecordingCommandRunner $runner;
     private InstanceSiteWriter $writer;
+    private HostSettings $settings;
 
     protected function setUp(): void
     {
@@ -40,7 +43,7 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertInstanceOf(FleetPaths::class, $paths);
         $this->paths = $paths;
         $host = new HostSettingsRepository($em);
-        $host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
+        $this->settings = $host->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $this->runner = new RecordingCommandRunner();
         $this->writer = new InstanceSiteWriter(
             SystemTemplates::twig(),
@@ -91,6 +94,90 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertStringContainsString('-Server', $site);
         self::assertSame(0o640, fileperms($this->paths->instanceSiteFile('acme--main')) & 0o777);
         self::assertCount(1, $this->runner->callsMatching(['caddy', 'reload']));
+    }
+
+    public function testOvhDnsWritesAMatcherAndAHandleNotASiteBlock(): void
+    {
+        $this->settings->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
+        $project = $this->project('edge');
+        $this->writer->write($this->instance($project), $project);
+        $site = $this->site();
+
+        self::assertStringContainsString("\n@i_acme--main host acme--main.fleet.example.com edge-acme--main.fleet.example.com\nhandle @i_acme--main {\n", $site);
+        self::assertSame(0, preg_match_all('/^\S.*\.fleet\.example\.com.* \{$/m', $site), 'no site block of its own (no certificate per name)');
+        self::assertStringContainsString('forward_auth '.CaddyfileRenderer::AUTHELIA.' {', $site);
+        self::assertStringContainsString('@forbidden_acme--main not header_regexp Remote-Groups `'.self::GROUPS.'`', $site);
+        self::assertStringContainsString('respond @forbidden_acme--main "Forbidden" 403', $site);
+        self::assertStringContainsString('reverse_proxy '.CaddyfileRenderer::DDEV_ROUTER, $site);
+        self::assertLessThan(strpos($site, 'reverse_proxy'), strpos($site, 'forward_auth'));
+        self::assertStringContainsString('request_header -Remote-User', $site);
+        self::assertFileDoesNotExist($this->paths->instanceSitesFile('acme--main'));
+    }
+
+    public function testOvhDnsNamedPortsGoToTheirOwnFileOutsideTheWildcardSite(): void
+    {
+        $this->settings->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
+        $project = $this->portedProject([new NamedPort('typesense', 9108, 8108)]);
+        $this->writer->write($this->instance($project), $project);
+        $ports = (string) file_get_contents($this->paths->instanceSitesFile('acme--main'));
+
+        self::assertStringNotContainsString(':9108', $this->site());
+        self::assertStringContainsString("\nacme--main.fleet.example.com:9108 {\n", $ports);
+        self::assertStringContainsString('reverse_proxy 127.0.0.1:8108', $ports);
+        self::assertStringContainsString('forward_auth', $ports);
+
+        // Leaving the ports file behind would break the next reload when the project loses its port.
+        $plain = $this->portedProject([]);
+        $this->writer->write($this->instance($plain), $plain);
+        self::assertFileDoesNotExist($this->paths->instanceSitesFile('acme--main'));
+
+        $this->writer->write($this->instance($project), $project);
+        $this->writer->remove('acme--main');
+        self::assertFileDoesNotExist($this->paths->instanceSitesFile('acme--main'));
+        self::assertFileDoesNotExist($this->paths->instanceSiteFile('acme--main'));
+    }
+
+    public function testAnUnchangedSiteIsNeitherRewrittenNorReloaded(): void
+    {
+        $this->settings->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
+        $project = $this->project();
+        $this->writer->write($this->instance($project), $project);
+        $this->runner->reset();
+
+        $this->writer->write($this->instance($project), $project);
+
+        self::assertSame([], $this->runner->calls(), 'no validate, no reload: a reload interrupts the certificate challenges in flight');
+    }
+
+    public function testANameWithAStoredCertificateKeepsItsOwnSiteAndTheRestGoUnderTheWildcard(): void
+    {
+        $this->settings->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
+        @mkdir(\dirname($this->paths->storedCertificatesFile()), 0o750, true);
+        file_put_contents($this->paths->storedCertificatesFile(), "acme--main.fleet.example.com\nother.fleet.example.com\n");
+        $project = $this->project('edge');
+        $this->writer->write($this->instance($project), $project);
+
+        $site = $this->site();
+        self::assertStringContainsString("@i_acme--main host edge-acme--main.fleet.example.com\n", $site);
+        self::assertStringNotContainsString('host acme--main.fleet.example.com', $site);
+        $sites = (string) file_get_contents($this->paths->instanceSitesFile('acme--main'));
+        self::assertStringContainsString("\nacme--main.fleet.example.com {\n", $sites);
+        self::assertStringNotContainsString('edge-acme--main.fleet.example.com {', $sites);
+        self::assertStringContainsString('forward_auth', $sites);
+
+        // Once the certificate leaves the list (near expiry) the exact site goes and the name moves under the wildcard.
+        file_put_contents($this->paths->storedCertificatesFile(), '');
+        $this->writer->write($this->instance($project), $project);
+        self::assertFileDoesNotExist($this->paths->instanceSitesFile('acme--main'));
+        self::assertStringContainsString('host acme--main.fleet.example.com edge-acme--main.fleet.example.com', $this->site());
+    }
+
+    public function testHttp01KeepsTheNamedPortsInTheOneFile(): void
+    {
+        $project = $this->portedProject([new NamedPort('typesense', 9108, 8108)]);
+        $this->writer->write($this->instance($project), $project);
+
+        self::assertFileDoesNotExist($this->paths->instanceSitesFile('acme--main'));
     }
 
     public function testTwentyThreeAliasesShareOneBlock(): void

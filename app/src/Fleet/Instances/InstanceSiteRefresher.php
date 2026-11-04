@@ -36,8 +36,9 @@ final class InstanceSiteRefresher
 
     /**
      * @param Project|null $project only the instances of this project; null for every instance
+     * @param bool         $reload  false writes the files only (see InstanceSiteWriter::write())
      */
-    public function refresh(?Project $project = null): SiteRefresh
+    public function refresh(?Project $project = null, bool $reload = true): SiteRefresh
     {
         $rewritten = 0;
         $failed = [];
@@ -55,7 +56,7 @@ final class InstanceSiteRefresher
                 continue;
             }
             try {
-                $this->sites->write($instance, $instance->project());
+                $this->sites->write($instance, $instance->project(), $reload);
                 ++$rewritten;
             } catch (\RuntimeException|\InvalidArgumentException $e) {
                 $failed[$instance->id()] = $e->getMessage();

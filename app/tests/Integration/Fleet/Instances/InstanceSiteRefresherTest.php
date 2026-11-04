@@ -157,6 +157,7 @@ final class InstanceSiteRefresherTest extends KernelTestCase
     public function testRefreshOfOneProjectReportsTheFailures(): void
     {
         $this->deploy();
+        file_put_contents($this->paths->instanceSiteFile('acme--i1'), '# stale site');
         $this->runner->expect(['caddy', 'validate'], new CommandResult(1, '', 'Error: bad config'));
 
         $result = $this->refresher->refresh($this->projectNamed('acme'));
