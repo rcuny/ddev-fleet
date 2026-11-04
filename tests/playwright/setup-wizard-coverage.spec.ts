@@ -1,7 +1,8 @@
 import { type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawn, spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { submitAndWait } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 import { expect, opensshEd25519Key, test, type WizardHost } from './support/setup-host';
@@ -21,6 +22,17 @@ const ADMIN = {
 };
 const CLAUDE_TOKEN = 'sk-ant-oat01-coverage-token-0123456789';
 const OVH = { key: 'ovh-app-key-0001', secret: 'ovh-app-secret-0002', consumer: 'ovh-consumer-0003' };
+
+// The host names the app seeds into "Trusted Git servers", read from the seed itself so a provider added to
+// app/resources/ssh/known_hosts.seed (ssh.bitbucket.org, FLE-145) cannot make this spec stale.
+const SEEDED_HOSTS: string[] = [
+  ...new Set(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../app/resources/ssh/known_hosts.seed'), 'utf8')
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/)[0])
+      .filter((host) => host !== '' && !host.startsWith('#') && !host.startsWith('@')),
+  ),
+];
 const WIZARD_PATHS = ['/setup', '/setup/admin', '/setup/tls', '/setup/ssh', '/setup/claude', '/setup/finish'];
 
 async function expectNoOverflow(page: Page, where: string): Promise<void> {
@@ -346,8 +358,8 @@ test.describe('step 3: SSH keys', () => {
     await page.goto('/setup/ssh');
     await expect(page.getByRole('heading', { level: 2, name: 'Trusted Git servers' })).toBeVisible();
     const rows = page.getByTestId('setup-known-hosts').locator('tbody tr');
-    await expect(rows).toHaveCount(3);
-    for (const name of ['github.com', 'gitlab.com', 'bitbucket.org']) {
+    await expect(rows).toHaveCount(SEEDED_HOSTS.length);
+    for (const name of SEEDED_HOSTS) {
       await expect(page.getByTestId('setup-known-hosts')).toContainText(name);
     }
     await expect(page.getByTestId('setup-known-hosts')).toContainText('ed25519');
@@ -393,7 +405,7 @@ test.describe('step 3: SSH keys', () => {
         expect(await submit(page, page.getByRole('button', { name: 'Read host keys' })), what).toBe(422);
         await expect(page.getByTestId('setup-ssh-errors'), what).toContainText(expected);
         await expect(page.getByTestId('setup-ssh-scan'), what).toHaveCount(0);
-        await expect(page.getByTestId('setup-known-hosts').locator('tbody tr'), what).toHaveCount(3);
+        await expect(page.getByTestId('setup-known-hosts').locator('tbody tr'), what).toHaveCount(SEEDED_HOSTS.length);
       }
       await expectSound(page, 'the SSH step with a refused server');
     });
