@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.3] - 2026-11-04
+
+### Fixed
+- **FLE-166: instance ids are capped at 59 characters, with room for the `-N` suffix.** DDEV names the web container hostname `<instance id>-web`, a DNS label of at most 63 characters, so a 63-character id (the old cap) made `ddev start` fail ("Failed to start"). Fleet CI on ddev4 hit it when a long feature branch was pushed again: the numbered re-push instance `<id>-1`, `-2` was 65+ characters and no `fleet-gates` status was ever posted (PRs #172, #173). `core/naming.py` now caps ids at `63 - len("-web")` = 59 (as 1.x, FLE-144), and `allocate_free_label` / `allocate_multi_deploy_labels` cut the base label (ending in a 6-hex hash, like `derive_label`) so base plus `-N` fits. Ids that already fit keep their names. Existing instances with ids of 60 to 63 characters stay listable and destroyable (the limit is checked at creation only).
+- **FLE-166: a failed `ddev start` is no longer shown as `deployed`.** The deploy leaves a `.fleet/failed` marker, `fleet list` and the web UI report the instance as `failed` (new `--state=failed` filter value), and the next successful deploy clears it. The webhook job already ends as failed with the `ddev start` error in its `deploy.log`; Fleet 0.x itself posts no commit status (the `fleet-gates` status is posted by the CI scripts in the config repo), so a failed start is visible in the job and in `fleet list` only.
+
 ## [0.20.2] - 2026-10-21
 
 ### Changed
@@ -463,7 +469,9 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v0.20.3...HEAD
+[0.20.3]: https://github.com/rcuny/ddev-fleet/compare/v0.20.2...v0.20.3
+[0.20.2]: https://github.com/rcuny/ddev-fleet/compare/v0.20.1...v0.20.2
 [0.20.1]: https://github.com/rcuny/ddev-fleet/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/rcuny/ddev-fleet/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/rcuny/ddev-fleet/compare/v0.18.0...v0.19.0
