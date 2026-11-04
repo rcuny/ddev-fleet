@@ -84,14 +84,57 @@ final class FleetWrapperTest extends TestCase
         self::assertSame('php8.4 /app/'.$expected, explode('|', $out)[0], $out);
     }
 
-    public function testUpgradeWithoutAVerbPrintsUsageAndRunsNothing(): void
+    public function testUpgradeAsANonRootUserIsRefusedWithTheExactSudoLine(): void
     {
-        foreach ([['upgrade'], ['upgrade', '--yes']] as $args) {
-            [$status, $out, $err] = $this->asFleet($args, null, 'echo "php must not run" >&2; exit 9');
+        $log = $this->scratch().'/helper.log';
+        foreach ([[['upgrade'], 'sudo fleet upgrade'], [['upgrade', '--yes', '--to', 'v1.2.1'], 'sudo fleet upgrade --yes --to v1.2.1']] as [$args, $line]) {
+            // The fleet user is not root either: `sudo -u fleet fleet upgrade` must not reach the helper.
+            foreach (['fleet', 'alice'] as $user) {
+                [$status, $out, $err] = $this->upgradeWrapper($args, $user, $log);
 
-            self::assertSame(2, $status, implode(' ', $args));
-            self::assertSame('', $out);
-            self::assertStringContainsString('usage: fleet upgrade --check', $err);
+                self::assertSame(3, $status, $err);
+                self::assertSame('', $out);
+                self::assertStringContainsString('must run as root. Run: '.$line, $err);
+            }
+        }
+        self::assertFileDoesNotExist($log, 'neither the helper nor the console may run for a non-root caller');
+    }
+
+    public function testUpgradeAsRootHandsOverToTheHelperWithTheArguments(): void
+    {
+        $log = $this->scratch().'/helper.log';
+
+        foreach ([[], ['--yes'], ['--to', 'v1.2.1', '--force=disk.space', '--yes']] as $args) {
+            @unlink($log);
+            [$status, , $err] = $this->upgradeWrapper(['upgrade', ...$args], 'root', $log);
+
+            self::assertSame(0, $status, $err);
+            self::assertSame('helper '.implode(' ', $args)."\n", file_get_contents($log));
+        }
+    }
+
+    public function testUpgradeHelperExitCodeIsPassedThrough(): void
+    {
+        [$status] = $this->upgradeWrapper(['upgrade', '--yes'], 'root', $this->scratch().'/helper.log', exit: 5);
+
+        self::assertSame(5, $status);
+    }
+
+    public function testUpgradeCheckHistoryAndVerifyAreConsoleCommandsRunAsFleet(): void
+    {
+        $expected = [
+            [['upgrade', '--check'], 'bin/console fleet:upgrade:check'],
+            [['upgrade', '--to', 'v1.2.1', '--check', '--json'], 'bin/console fleet:upgrade:check --to v1.2.1 --json'],
+            [['upgrade', '--check', '--to=v1.2.1'], 'bin/console fleet:upgrade:check --to=v1.2.1'],
+            [['upgrade', 'history'], 'bin/console fleet:upgrade:history'],
+            [['upgrade', 'verify', '--to', 'v1.2.1'], 'bin/console fleet:upgrade:verify --to v1.2.1'],
+            [['upgrade:history', '--json'], 'bin/console fleet:upgrade:history --json'],
+        ];
+        foreach ($expected as [$args, $console]) {
+            [$status, $out, $err] = $this->asFleet($args);
+
+            self::assertSame(0, $status, $err);
+            self::assertSame('php8.4 /app/'.$console, explode('|', $out)[0], implode(' ', $args));
         }
     }
 
@@ -359,5 +402,28 @@ final class FleetWrapperTest extends TestCase
             'FLEET_WRAPPER_ENV_FILE' => $envFile,
             'FLEET_WRAPPER_CONSOLE' => '/app/bin/console',
         ]);
+    }
+
+    /**
+     * Runs the wrapper as $user (the id stub) with a stub helper that logs its arguments and exits with $exit; sudo and php
+     * must never run (the root path hands over without them).
+     *
+     * @param list<string> $args
+     *
+     * @return array{int, string, string}
+     */
+    private function upgradeWrapper(array $args, string $user, string $log, int $exit = 0): array
+    {
+        $helper = $this->scratch().'/upgrade-helper';
+        file_put_contents($helper, "#!/bin/bash\necho \"helper \$*\" >> ".escapeshellarg($log)."\nexit {$exit}\n");
+        chmod($helper, 0o755);
+        $uid = 'root' === $user ? '0' : '1000';
+        $stubs = $this->stubs([
+            'id' => 'case "$1" in -u) echo '.$uid.';; *) echo '.$user.';; esac',
+            'sudo' => 'echo "sudo must not run" >&2; exit 9',
+            'php8.4' => 'echo "php must not run" >&2; exit 9',
+        ]);
+
+        return $this->wrapper($args, $stubs, ['FLEET_WRAPPER_UPGRADE_HELPER' => $helper]);
     }
 }

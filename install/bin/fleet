@@ -7,6 +7,7 @@
 #   fleet fleet:host:render        ->  an already prefixed name is accepted as it is
 #   fleet doctrine:migrations:status -> ... doctrine:migrations:status, with the application environment loaded
 #   fleet tmux [<instance-id>]     ->  attaches this terminal to the agent workspace (also: fleet tmux:attach, fleet tmux attach)
+#   sudo fleet upgrade [--to] [--yes] ->  the root helper /usr/local/libexec/fleet/upgrade (runs the installer; see docs/upgrading.md)
 #   fleet                          ->  lists the fleet:* commands
 #   fleet list | help <cmd> | ...  ->  anything that does not start with one of our groups goes to the console unchanged
 #
@@ -53,6 +54,33 @@ if [ "$attach" -eq 1 ]; then
   if [ -n "${TMUX:-}" ]; then
     printf 'fleet: already inside tmux: attaching would nest it. Detach first (Ctrl-b d) or use the tmux prefix to switch sessions\n' >&2
     exit 2
+  fi
+fi
+
+# `fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]...` is the one command that runs as root, not as `fleet`: the
+# installer re-run needs root, and it replaces this very script, so the root flow is handed over (exec) to the root helper
+# /usr/local/libexec/fleet/upgrade, which drives the fleet-user steps through this wrapper again. `fleet upgrade --check`
+# (read-only), `upgrade history` and `upgrade verify` are ordinary console commands further down.
+if [ "${1:-}" = upgrade ]; then
+  check=0
+  for word in "${@:2}"; do
+    [ "$word" = --check ] && check=1
+  done
+  if [ "$check" -eq 0 ] && { [ "$#" -eq 1 ] || [[ ${2:-} == -* ]]; }; then
+    if [ "$(id -u)" != 0 ]; then
+      quoted=''
+      for word in "${@:2}"; do
+        quoted+=$(printf ' %q' "$word")
+      done
+      printf 'fleet: upgrade changes the host and must run as root. Run: sudo fleet upgrade%s\n' "$quoted" >&2
+      exit 3
+    fi
+    helper=/usr/local/libexec/fleet/upgrade
+    # The test seam is honoured only by a process that is not really root (EUID), so it cannot redirect a privileged run.
+    if [ "$EUID" -ne 0 ] && [ -n "${FLEET_WRAPPER_UPGRADE_HELPER:-}" ]; then
+      helper=$FLEET_WRAPPER_UPGRADE_HELPER
+    fi
+    exec "$helper" "${@:2}"
   fi
 fi
 
@@ -125,13 +153,14 @@ if [[ $command =~ ^fleet:[a-z][a-z0-9:-]*$ ]]; then
   :
 elif [[ $command =~ ^($groups):[a-z][a-z0-9:-]*$ ]]; then
   command="fleet:$command"
-elif [[ $command == upgrade && ${1:-} == --check ]]; then
+elif [[ $command == upgrade && $* == *--check* ]]; then
   # `fleet upgrade --check [--to vX.Y.Z] [--json]` is the read-only check (no root needed).
   command=fleet:upgrade:check
-  shift
-elif [[ $command == upgrade && ( $# -eq 0 || ${1:-} == -* ) ]]; then
-  printf 'usage: fleet upgrade --check [--to vX.Y.Z] [--json] [--no-cache]\n' >&2
-  exit 2
+  args=()
+  for word in "$@"; do
+    [ "$word" = --check ] || args+=("$word")
+  done
+  set -- "${args[@]+"${args[@]}"}"
 elif [[ $command =~ ^($groups)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
   command="fleet:$command:$1"
   shift
