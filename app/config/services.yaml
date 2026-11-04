@@ -27,6 +27,7 @@ parameters:
     # FLEET_UPGRADE_REPO_URL at a local repository; empty means the public GitHub mirror, App\Fleet\Upgrade\RepoUrl).
     env(FLEET_UPGRADE_REPO_URL): ''
     fleet.installed_version_file: '/etc/ddev-fleet/installed-version'
+    fleet.upgrade_history_file: '/var/log/ddev-fleet/upgrade-history.jsonl'
     fleet.installed_revision_file: '/etc/ddev-fleet/installed-revision'
 
 services:
@@ -113,6 +114,10 @@ services:
         arguments:
             $defaultUri: '%env(DEFAULT_URI)%'
 
+    App\Fleet\Upgrade\UpgradeHistory:
+        arguments:
+            $file: '%fleet.upgrade_history_file%'
+
     App\Fleet\Upgrade\RepoUrl:
         arguments:
             $override: '%env(FLEET_UPGRADE_REPO_URL)%'
@@ -178,6 +183,7 @@ when@dev:
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
         # Not the container's /etc: the Playwright upgrade spec writes this file to pose as a host one release behind.
         fleet.installed_version_file: '%env(resolve:FLEET_HOME)%/test-installed-version'
+        fleet.upgrade_history_file: '%env(resolve:FLEET_HOME)%/test-upgrade-history.jsonl'
 
     services:
         # Never the developer's real ~/.ddev: a dev app that wrote router files there would change their DDEV router.
@@ -193,6 +199,7 @@ when@test:
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
         # Never the real /etc file: a test writes this one (under its own FLEET_HOME) to pose as an installed host.
         fleet.installed_version_file: '%env(resolve:FLEET_HOME)%/test-installed-version'
+        fleet.upgrade_history_file: '%env(resolve:FLEET_HOME)%/test-upgrade-history.jsonl'
 
     services:
         # Public so the registry wiring test can read it from the container (the upgrade commands inject it).
