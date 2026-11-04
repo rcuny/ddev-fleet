@@ -102,7 +102,7 @@ npx playwright show-report                         # the HTML report of the last
 **Tiers (`FLEET_PW_TIER`, FLE-126).** `full` (the default, also when the variable is unset) runs every spec: the
 documented gate and what Fleet CI runs on `release/*`, `develop` and nightly. `quick` is the Fleet CI merge gate on
 `feature/*` and `renovate/*`: project `desktop` without `*-coverage.spec.ts`, `projects-validation.spec.ts` and
-`templates-validation.spec.ts`, project `phone` limited to `@smoke` tests (about 250 tests instead of 1300). Any other
+`templates-validation.spec.ts` and the axe sweep (`a11y*.spec.ts`, `users-a11y.desktop.spec.ts`: full tier only), project `phone` limited to `@smoke` tests (about 170 tests instead of 1000). Any other
 value is an error. No test is removed; `npx playwright test --list` shows what a tier runs.
 
 With `FLEET_E2E_BASE_URL` unset, Playwright starts the app itself (`support/start-app.mjs`: a throw-away
@@ -122,7 +122,7 @@ the 422 error states, dialogs and warning states: `a11y.spec.ts` (four base page
 (users, secrets, schedules, webhooks), `a11y-instances` (instances, jobs, assets, audit), `a11y-host` (host settings
 tabs, reboot banner), `a11y-setup` (setup wizard, own host per test), all `.desktop.spec.ts`, and `a11y-phone.phone.spec.ts`
 (the shell destinations and the instance and job pages at 390 px). A new page or error state gets a sweep test, not an
-inline axe call. Text-length variants are not swept (axe does not depend on text length); overflow stays in the feature specs.
+inline axe call. At phone width axe now runs only on the ten shell destinations and the instance and job pages (`a11y-phone.phone.spec.ts`); the other phone checks are layout (overflow, 44 px targets) only. Text-length variants are not swept (axe does not depend on text length); overflow stays in the feature specs.
 `projects.spec.ts` creates its own data: every test owns a project with a unique name (`uniqueName()`) and deletes it
 in `finally`, so it passes repeatedly against the shared dev database of the companion and in parallel. It covers the
 list, create, edit, templates, ports and delete dialog at both widths, the member 403, the issue id tester, and (phone
