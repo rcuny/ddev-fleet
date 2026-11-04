@@ -460,7 +460,15 @@ OVH credentials and the Claude token again. Instances, assets and SSH keys are n
 
 ## 6. Upgrading and re-running
 
-**Re-running the same command is the upgrade** (add `--ref=vX.Y.Z` to move to a specific release; the default `main` follows the latest release). The installer updates the checkout (a branch is reset to
+**The upgrade command is `sudo fleet upgrade`** ([`upgrading.md`](upgrading.md)). `fleet upgrade --check` (no root) shows the
+installed and the latest release, the changelog between them, the rollout notes and the pre-flight results;
+`sudo fleet upgrade [--to vX.Y.Z]` takes a database backup, runs the installer of that release, verifies the host and
+writes a history line; `sudo fleet upgrade --to <older release>` rolls back and restores the database from the backup
+taken before the upgrade being undone (data written since is lost). It changes nothing when a pre-flight check blocks.
+Hosts installed before v1.2.0 do not have the command yet: move them to the first release that has it with the fallback
+below, and use `fleet upgrade` from then on.
+
+**Fallback: re-running the installer is the upgrade** (add `--ref=vX.Y.Z` to move to a specific release; the default `main` follows the latest release). `fleet upgrade` runs exactly this, so what follows holds for both. The installer updates the checkout (a branch is reset to
 `origin/<ref>`; local edits in `/opt/ddev-fleet` are discarded), runs `composer install`, applies migrations and
 repeats every step. It keeps the secrets, the users, the SSH keys and the wizard's choices, prints **no new setup
 token once setup is complete** (while setup is still open it prints a fresh URL and the old one stops working), and reloads php-fpm and the workers when the code changed. It always restarts
