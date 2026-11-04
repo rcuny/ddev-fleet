@@ -15,6 +15,7 @@ use App\Fleet\Jobs\JobLog;
 use App\Fleet\Jobs\JobType;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunnerException;
+use App\Fleet\Ssh\InstanceSshAgent;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -30,6 +31,7 @@ final readonly class StartJob implements JobType
         private FleetPaths $paths,
         private JobFeed $feed,
         private ClockInterface $clock,
+        private InstanceSshAgent $agent,
     ) {
     }
 
@@ -51,6 +53,25 @@ final readonly class StartJob implements JobType
 
         $params = $job->params();
         $timeout = \is_int($params['timeout'] ?? null) || \is_float($params['timeout'] ?? null) ? (float) $params['timeout'] : null;
+
+        // A project that opted in to git over SSH in the container gets its own agent back (FLE-145): it does not survive
+        // a reboot. Ruling: a failure is only logged here so a stopped instance can still start; deploy is the strict place.
+        if (!$instance->project()->containerSsh()) {
+            // Opted out (FLE-167): no agent, and no override that would mount its socket directory.
+            if ($this->agent->cleanUp($instance->id(), $dir)) {
+                $log->line('removed the ssh-agent and its compose override: this project no longer uses container_ssh');
+            }
+        } else {
+            if (!$this->agent->hasKey()) {
+                $log->line('warning: the host has no push key; no ssh-agent for this instance');
+            } else {
+                try {
+                    $this->agent->start($instance->id());
+                } catch (\RuntimeException $e) {
+                    $log->line('warning: '.$e->getMessage().' Git over SSH in the container will fail.');
+                }
+            }
+        }
 
         try {
             $result = $this->ddev->start($dir, $log->output(...), $timeout);

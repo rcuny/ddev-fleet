@@ -20,6 +20,7 @@ Type: documentation
 | Document | Status | Covers |
 |---|---|---|
 | [`installation.md`](installation.md) | Current | Installing 1.x on a Debian 13 host: prerequisites, `install.sh` and its flags, the setup wizard, what is installed where, recovery (`fleet setup:reset`, `fleet user:reset-password`), upgrades, the security model, uninstalling, troubleshooting |
+| [`upgrading.md`](upgrading.md) | Current | `fleet upgrade`: check what the next release changes, the pre-flight checks, `sudo fleet upgrade` and its rollback, history, rollout notes, offline hosts, the rehearsal script, FAQ |
 | [`schedules.md`](schedules.md) | Current | Schedules (1.x): cron and timezone rules, the 60-minute catch-up, run history, `fleet schedule:*`, running the ticker unit |
 | [`projects-and-templates.md`](projects-and-templates.md) | Current | Projects and templates in the browser and with `fleet project\|template\|port`: concepts, every field and limit, the screens, CLI reference (exit codes, `--json`), permissions, deleting, named ports, differences from 0.x |
 | [`instances-and-jobs.md`](instances-and-jobs.md) | Current | Instances and jobs: states, deploy (auto-suffix, count, disk check), redeploy, start, stop, destroy and root-owned leftovers, bulk work, roles, the pages and the live log, `fleet instance:*` and `fleet job:*` (exit codes, `--json`), retention, differences from 0.x, troubleshooting |

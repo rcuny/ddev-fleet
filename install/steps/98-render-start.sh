@@ -76,6 +76,7 @@ announce_setup() {
 }
 
 step_main() {
+  local version
   if is_dry; then
     # The plan lists every action, whether or not this host needs it.
     CODE_CHANGED=1 ENV_CHANGED=1 FPM_CHANGED=1 WORKER_UNIT_CHANGED=1 MERCURE_CHANGED=1
@@ -120,6 +121,8 @@ step_main() {
   run systemctl restart caddy
   # The daily backup timer (the units are written by step 95). enable --now is a no-op when it already runs.
   run systemctl enable --now fleet-backup.timer
+  # The daily release check (fleet-upgrade-check.service, written by step 95).
+  run systemctl enable --now fleet-upgrade-check.timer
   # The agent workspace. enable --now is a no-op while the unit is active and is never followed by a restart: a restart
   # would end the operators' panes. A changed unit file takes effect at the next `systemctl restart fleet-tmux`.
   run systemctl enable --now fleet-tmux.service
@@ -128,6 +131,15 @@ step_main() {
 
   if ! is_dry && [ -n "$CODE_REVISION" ]; then
     write_file "$FLEET_ETC_DIR/installed-revision" 0644 root:root <<<"$CODE_REVISION"
+  fi
+  # After the health check, so a failed run keeps the previous value. The tag, or <ref>@<sha7> when --ref is not a tag.
+  if is_dry; then
+    write_file "$FLEET_ETC_DIR/installed-version" 0644 root:root <<<"<tag or ref@sha7>"
+  else
+    version=$(installed_version_label)
+    if [ -n "$version" ]; then
+      write_file "$FLEET_ETC_DIR/installed-version" 0644 root:root <<<"$version"
+    fi
   fi
   announce_setup
 }

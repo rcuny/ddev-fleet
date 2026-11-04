@@ -91,7 +91,47 @@ final class InstanceConfigWriterTest extends KernelTestCase
         self::assertSame('fleet.example.com', $config['project_tld']);
         self::assertSame('none', $config['performance_mode']);
         self::assertArrayNotHasKey('additional_fqdns', $config);
-        self::assertArrayNotHasKey('hooks', $config);
+    }
+
+    public function testPostStartHookSeedsClaudeOnboardingByMergingAndIsIdempotent(): void
+    {
+        $config = $this->written($this->project());
+
+        self::assertIsArray($config['hooks']);
+        self::assertCount(1, $config['hooks']['post-start']);
+        $exec = $config['hooks']['post-start'][0]['exec'];
+        self::assertIsString($exec);
+        self::assertStringStartsWith("node -e '", $exec);
+        self::assertSame(1, substr_count($exec, "'") - 1, 'the JS holds no single quote of its own');
+
+        $home = $this->tempHome.'/claude-home';
+        mkdir($home, 0o750, true);
+        file_put_contents($home.'/.claude.json', json_encode([
+            'userID' => 'u1',
+            'theme' => 'light',
+            'projects' => ['/srv/app' => ['history' => [1]], '/other' => ['x' => true]],
+        ]));
+
+        $run = static function () use ($exec, $home): array {
+            exec('HOME='.escapeshellarg($home).' DDEV_APPROOT=/srv/app sh -c '.escapeshellarg($exec).' 2>&1', $out, $code);
+            self::assertSame(0, $code, implode("\n", $out));
+
+            return json_decode((string) file_get_contents($home.'/.claude.json'), true, 512, \JSON_THROW_ON_ERROR);
+        };
+        $first = $run();
+        self::assertTrue($first['hasCompletedOnboarding']);
+        self::assertSame('light', $first['theme'], 'an existing theme is kept');
+        self::assertSame('u1', $first['userID']);
+        self::assertTrue($first['projects']['/srv/app']['hasTrustDialogAccepted']);
+        self::assertSame([1], $first['projects']['/srv/app']['history']);
+        self::assertSame(['x' => true], $first['projects']['/other']);
+        self::assertSame($first, $run());
+
+        unlink($home.'/.claude.json');
+        $fresh = $run();
+        self::assertSame('dark', $fresh['theme']);
+        self::assertTrue($fresh['hasCompletedOnboarding']);
+        self::assertTrue($fresh['projects']['/srv/app']['hasTrustDialogAccepted']);
     }
 
     public function testWebEnvironmentOrderAndValues(): void
@@ -101,6 +141,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
         self::assertSame([
             'DRUSH_OPTIONS_URI=https://acme--main.fleet.example.com',
             'FLEET_INSTANCE_HOST=acme--main.fleet.example.com',
+            'GIT_SSH_COMMAND='.\App\Fleet\Git\GitClient::CONTAINER_SSH_COMMAND,
             'GIT_AUTHOR_NAME=ddev-fleet bot',
             'GIT_AUTHOR_EMAIL=bot@fleet.example.com',
             'GIT_COMMITTER_NAME=ddev-fleet bot',
@@ -116,7 +157,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
         $this->secrets->putFleetWide(HostSecrets::CLAUDE_TOKEN, 'tok-1', 'admin');
         $environment = $this->written($this->project())['web_environment'];
 
-        self::assertSame('CLAUDE_CODE_OAUTH_TOKEN=tok-1', $environment[2]);
+        self::assertSame('CLAUDE_CODE_OAUTH_TOKEN=tok-1', $environment[3]);
     }
 
     public function testTheClaudeTokenIsRegisteredWithTheLogMasker(): void
@@ -132,8 +173,8 @@ final class InstanceConfigWriterTest extends KernelTestCase
     {
         $environment = $this->written($this->project(GitBotMode::Disabled))['web_environment'];
 
-        self::assertSame(2, \count($environment));
-        self::assertSame([], array_filter($environment, static fn (string $e): bool => str_starts_with($e, 'GIT_')));
+        self::assertSame(3, \count($environment));
+        self::assertSame([], array_filter($environment, static fn (string $e): bool => str_starts_with($e, 'GIT_A') || str_starts_with($e, 'GIT_C')));
     }
 
     public function testHostileValuesCannotBreakTheYaml(): void
@@ -143,9 +184,9 @@ final class InstanceConfigWriterTest extends KernelTestCase
 
         $config = $this->written($project);
 
-        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][2]);
-        self::assertCount(6, $config['web_environment']);
-        self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment'], array_keys($config));
+        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][3]);
+        self::assertCount(7, $config['web_environment']);
+        self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment', 'hooks'], array_keys($config));
     }
 
     public function testEveryNamedPortOfTheProjectGetsAFleetPortVariable(): void
@@ -158,6 +199,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
         self::assertSame([
             'DRUSH_OPTIONS_URI=https://acme--main.fleet.example.com',
             'FLEET_INSTANCE_HOST=acme--main.fleet.example.com',
+            'GIT_SSH_COMMAND='.\App\Fleet\Git\GitClient::CONTAINER_SSH_COMMAND,
             'FLEET_PORT_TS_DASHBOARD=9111',
             'FLEET_PORT_PLAYWRIGHT=9325',
         ], $environment);

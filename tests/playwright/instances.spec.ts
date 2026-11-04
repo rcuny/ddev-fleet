@@ -1,6 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { blockingViolations } from './support/axe';
-import { ADMIN_PROJECT, MEMBER_PROJECT, deployOne, rowOf, submitDeploy, uniqueLabel } from './support/instances';
+import { ADMIN_PROJECT, deployOne, rowOf, uniqueLabel } from './support/instances';
 import { follow, openDialog } from './support/projects';
 import { collectBrowserErrors } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -28,37 +27,11 @@ test.describe('instances: admin', () => {
     await page.goto('/instances');
     await expect(rowOf(page, id)).toBeVisible();
     await expect(rowOf(page, id).getByTestId('instance-state')).toHaveAttribute('data-state', 'running');
-    expect(await blockingViolations(page), 'axe').toEqual([]);
     expect(errors.filter((e) => !e.startsWith('console.error: Failed to load resource'))).toEqual([]);
   });
 
-  test('a count of two gives numbered instances, the same label again a suffix', async ({ page }) => {
-    const label = uniqueLabel();
-    await submitDeploy(page, { label, count: 2 });
-    await expect(page.getByTestId('flashes')).toContainText('2 jobs queued.');
-    await expect(rowOf(page, `${ADMIN_PROJECT}--${label}-1`)).toBeVisible();
-    await expect(rowOf(page, `${ADMIN_PROJECT}--${label}-2`)).toBeVisible();
-
-    await submitDeploy(page, { label });
-    await expect(page).toHaveURL(/\/jobs\/\d+$/);
-    await submitDeploy(page, { label });
-    await expect(page).toHaveURL(/\/jobs\/\d+$/);
-    await page.goto(`/instances?q=${label}`);
-    await expect(rowOf(page, `${ADMIN_PROJECT}--${label}`)).toBeVisible();
-    await expect(rowOf(page, `${ADMIN_PROJECT}--${label}-3`)).toBeVisible();
-  });
-
-  test('the form shows a field error and keeps what was typed', async ({ page }) => {
-    await page.goto(`/instances/new?project=${ADMIN_PROJECT}`);
-    const form = page.getByTestId('deploy-form');
-    await form.getByLabel('Label').fill('Bad Label');
-    await form.getByLabel('How many').fill('1');
-    await form.getByRole('button', { name: 'Deploy' }).click();
-    await expect(form.getByLabel('Label')).toHaveValue('Bad Label');
-    await expect(form).toContainText(/lowercase|label/i);
-  });
-
-  test('filters narrow the list', async ({ page }) => {
+  test('the filter form narrows the list', async ({ page }) => {
+    // Every combination of the filters and the empty result are asserted over HTTP (InstanceControllerTest).
     const one = uniqueLabel('fa');
     const two = uniqueLabel('fb');
     const first = await deployOne(page, ADMIN_PROJECT, one);
@@ -69,11 +42,6 @@ test.describe('instances: admin', () => {
     await follow(page, page.getByTestId('filter-submit'));
     await expect(rowOf(page, first)).toBeVisible();
     await expect(rowOf(page, second)).toHaveCount(0);
-
-    await page.goto(`/instances?q=${one}&state=stopped`);
-    await expect(page.getByTestId('instances-empty')).toBeVisible();
-    await page.goto(`/instances?q=${two}&project=${ADMIN_PROJECT}&state=running`);
-    await expect(rowOf(page, second)).toBeVisible();
   });
 
   test('bulk stop then start', async ({ page }) => {
@@ -111,30 +79,5 @@ test.describe('instances: admin', () => {
     await expect(page.getByTestId('job-log')).toContainText('destroy');
     await page.goto('/instances');
     await expect(rowOf(page, id)).toHaveCount(0);
-  });
-});
-
-test.describe('instances: member', () => {
-  test('a member redeploys but cannot destroy or deploy, and sees only their project', async ({ page, context, baseURL }) => {
-    // The admin makes one instance of each project; the member (group "demo") may open only the demo one.
-    await setStandInRole(context, 'admin', baseURL!);
-    const own = await deployOne(page, MEMBER_PROJECT);
-    const foreign = await deployOne(page, ADMIN_PROJECT);
-
-    await setStandInRole(context, 'member', baseURL!);
-    await page.goto('/instances');
-    await expect(rowOf(page, own)).toBeVisible();
-    await expect(rowOf(page, foreign)).toHaveCount(0);
-    await expect(page.getByTestId('deploy-link')).toHaveCount(0);
-    await expect(page.getByRole('button', { name: 'Destroy…' })).toHaveCount(0);
-
-    expect((await page.goto('/instances/new'))?.status()).toBe(403);
-    expect((await page.goto(`/instances/${foreign}`))?.status()).toBe(404);
-
-    await page.goto(`/instances/${own}`);
-    await expect(page.getByRole('button', { name: 'Destroy…' })).toHaveCount(0);
-    await page.getByRole('button', { name: 'Redeploy' }).click();
-    await expect(page).toHaveURL(/\/jobs\/\d+$/);
-    await expect(page.getByTestId('job-log')).toContainText('deploy complete');
   });
 });

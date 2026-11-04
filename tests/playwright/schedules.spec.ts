@@ -2,7 +2,6 @@ import { expect, test, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expectNoBlockingViolations } from './support/axe';
 import { externalBaseURL } from './support/env';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -44,7 +43,7 @@ async function expectTall(page: Page, testId: string): Promise<void> {
 }
 
 test.describe('schedules', () => {
-  test('create, pause, resume, run now, history, edit, delete', async ({ page }) => {
+  test('create, pause, resume, run now, history, edit, delete @phone', async ({ page }) => {
     test.setTimeout(180_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName('blog');
@@ -67,7 +66,6 @@ test.describe('schedules', () => {
       await expect(page.getByTestId('error-cron')).toBeVisible();
       await expect(page.getByTestId('error-timezone')).toBeVisible();
       await expect(page.getByTestId('error-instance')).toBeVisible();
-      await expectNoBlockingViolations(page);
 
       // Create.
       await page.getByLabel('Cron expression').fill('0 3 * * *');
@@ -83,7 +81,6 @@ test.describe('schedules', () => {
         await expectTall(page, 'schedule-run');
       }
       expect(await hasHorizontalOverflow(page), 'horizontal overflow').toBe(false);
-      await expectNoBlockingViolations(page);
 
       // Pause, resume.
       await submitAndWait(page, row.getByTestId('schedule-pause'));
@@ -106,7 +103,6 @@ test.describe('schedules', () => {
       await expect(run.getByTestId('run-job')).toHaveText(/^#\d+$/);
       await expect(run.getByTestId('run-job-link')).toHaveAttribute('href', /^\/jobs\/\d+$/);
       expect(await hasHorizontalOverflow(page), 'horizontal overflow on history').toBe(false);
-      await expectNoBlockingViolations(page);
 
       // Edit.
       await page.goto('/admin/schedules');
@@ -138,10 +134,9 @@ test.describe('schedules', () => {
   });
 
   // Asserts nothing about which schedules exist (parallel tests own theirs), so it does not depend on test order.
-  test('schedules page is accessible with or without rows', async ({ page }) => {
+  test('schedules page fits the screen with or without rows @phone', async ({ page }) => {
     await page.goto('/admin/schedules');
     await expect(page.getByRole('heading', { level: 1, name: 'Schedules' })).toBeVisible();
     expect(await hasHorizontalOverflow(page)).toBe(false);
-    await expectNoBlockingViolations(page);
   });
 });

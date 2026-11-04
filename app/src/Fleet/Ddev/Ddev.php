@@ -68,7 +68,7 @@ final readonly class Ddev
      */
     public function delete(string $dir, string $project, callable $onOutput): CommandResult
     {
-        if (1 !== preg_match(FleetPaths::INSTANCE_ID_PATTERN, $project)) {
+        if (1 !== preg_match(FleetPaths::EXISTING_INSTANCE_ID_PATTERN, $project)) {
             throw new \InvalidArgumentException('The project name is not a valid instance id.');
         }
         $base = ['ddev', 'delete', '--omit-snapshot', '--yes'];
@@ -150,7 +150,7 @@ final readonly class Ddev
             if (!\is_array($row) || !\is_string($row['Name'] ?? null) || !\is_string($row['MemUsage'] ?? null)) {
                 continue;
             }
-            if (1 !== preg_match('/^ddev-(.+)-[a-z0-9]+$/', $row['Name'], $name) || 1 !== preg_match(FleetPaths::INSTANCE_ID_PATTERN, $name[1])) {
+            if (1 !== preg_match('/^ddev-(.+)-[a-z0-9]+$/', $row['Name'], $name) || 1 !== preg_match(FleetPaths::EXISTING_INSTANCE_ID_PATTERN, $name[1])) {
                 continue;
             }
             $bytes = self::bytes(explode(' / ', $row['MemUsage'])[0]);

@@ -44,7 +44,7 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         $job = $this->deploy();
         $instance = $this->instances->find('acme--main');
 
-        self::assertSame(['git clone', 'caddy validate', 'caddy reload', 'ddev start', 'ddev init', 'ddev drush', 'git rev-parse'], $this->commandNames());
+        self::assertSame(['git clone', 'git config', 'caddy validate', 'caddy reload', 'ddev start', 'ddev init', 'ddev drush', 'git rev-parse'], $this->commandNames());
         self::assertNotNull($instance);
         self::assertSame(InstanceState::Running, $instance->state());
         self::assertSame('abc1234', $instance->headSha());
@@ -59,6 +59,121 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString(".ddev/config.fleet.yaml\n", $exclude);
         self::assertStringContainsString(".env\n", $exclude);
         self::assertFileExists($this->paths->instanceSiteFile('acme--main'));
+    }
+
+    public function testTheContainerGetsAPinnedKnownHostsAndAnAgentOnlySshCommand(): void
+    {
+        mkdir($this->paths->sshDir(), 0o700, true);
+        file_put_contents($this->paths->knownHostsFile(), "git.example.com ssh-ed25519 AAAApinned\n");
+
+        $this->deploy();
+
+        $dir = $this->paths->instanceDir('acme--main');
+        self::assertSame("git.example.com ssh-ed25519 AAAApinned\n", file_get_contents($dir.'/.ddev/fleet_known_hosts'));
+        self::assertStringContainsString(".ddev/fleet_known_hosts\n", (string) file_get_contents($dir.'/.git/info/exclude'));
+        $config = (string) file_get_contents($dir.'/.ddev/config.fleet.yaml');
+        self::assertStringContainsString('GIT_SSH_COMMAND=', $config);
+        self::assertStringContainsString('-o StrictHostKeyChecking=yes', $config);
+        self::assertStringContainsString('-o BatchMode=yes', $config);
+        self::assertStringContainsString('UserKnownHostsFile="$DDEV_APPROOT/.ddev/fleet_known_hosts"', $config);
+        self::assertStringNotContainsString('IdentitiesOnly', $config, 'it would ignore the agent keys');
+        self::assertStringNotContainsString($this->paths->sshDir(), $config, 'no host path, no key file in the container');
+    }
+
+    private function withPushKey(): void
+    {
+        if (!is_dir($this->paths->sshDir())) {
+            mkdir($this->paths->sshDir(), 0o700, true);
+        }
+        touch($this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push));
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private function agentCalls(): array
+    {
+        return array_values(array_filter($this->argvs(), static fn (array $argv): bool => \in_array($argv[0], ['ssh-agent', 'ssh-add'], true)));
+    }
+
+    public function testAnOptedInProjectGetsItsOwnAgentAndASocketMountForThisInstanceOnly(): void
+    {
+        $this->withPushKey();
+        $this->project->changeContainerSsh(true);
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AGENT_PID=4242; export SSH_AGENT_PID;\n"));
+
+        $this->deploy();
+
+        $names = array_column($this->agentCalls(), 0);
+        self::assertSame(['ssh-agent', 'ssh-add'], $names, 'the agent, then the key; nothing else');
+        $dir = $this->paths->instanceDir('acme--main');
+        $override = (string) file_get_contents($dir.'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertStringContainsString($this->paths->agentSocketDir('acme--main').':/run/fleet-ssh-agent', $override);
+        self::assertStringContainsString('SSH_AUTH_SOCK=/run/fleet-ssh-agent/agent.sock', $override);
+        self::assertStringContainsString(".ddev/docker-compose.fleet-ssh.yaml\n", (string) file_get_contents($dir.'/.git/info/exclude'));
+        $started = array_search('ddev start', $this->commandNames(), true);
+        self::assertNotFalse($started);
+        self::assertEmpty(array_filter($this->argvs(), static fn (array $argv): bool => 'ddev' === $argv[0] && 'auth' === ($argv[1] ?? '')), 'nothing goes into the global DDEV agent');
+    }
+
+    public function testAnOptOutProjectGetsNoAgentNoSocketAndNoOverride(): void
+    {
+        $this->withPushKey();
+
+        $this->deploy();
+
+        self::assertSame([], $this->agentCalls());
+        self::assertFileDoesNotExist($this->paths->instanceDir('acme--main').'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir('acme--main'));
+        $config = (string) file_get_contents($this->paths->instanceDir('acme--main').'/.ddev/config.fleet.yaml');
+        self::assertStringNotContainsString('SSH_AUTH_SOCK', $config);
+    }
+
+    public function testARedeployOfAProjectThatOptedOutDropsTheOldOverrideAndAgent(): void
+    {
+        $this->withPushKey();
+        mkdir($this->paths->agentSocketDir('acme--main'), 0o700, true);
+        touch($this->paths->agentSocket('acme--main'));
+        file_put_contents($this->paths->agentPidFile('acme--main'), "77\n");
+
+        $job = $this->deploy();
+
+        self::assertFileDoesNotExist($this->paths->instanceDir('acme--main').'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir('acme--main'));
+        self::assertStringContainsString('no longer uses container_ssh', $this->logText($job));
+    }
+
+    public function testAnOptedInProjectOnAHostWithoutAPushKeyOnlyLogsAWarning(): void
+    {
+        $this->project->changeContainerSsh(true);
+
+        $job = $this->deploy();
+
+        self::assertSame([], $this->agentCalls());
+        self::assertFileDoesNotExist($this->paths->instanceDir('acme--main').'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertStringContainsString('the host has no push key', $this->logText($job));
+    }
+
+    public function testAnAgentThatCannotBeStartedFailsTheDeployBeforeDdevStart(): void
+    {
+        $this->withPushKey();
+        $this->project->changeContainerSsh(true);
+        $this->runner->expect(['ssh-agent'], new CommandResult(1, '', 'cannot bind'));
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('ssh-agent setup failed', $e->getMessage());
+        self::assertNotContains('ddev start', $this->commandNames());
+    }
+
+    public function testAFailingGitSshSetupFailsTheDeploy(): void
+    {
+        $this->runner->expect(['git', 'config'], new CommandResult(1, '', "error: could not lock config file\n"));
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('git ssh setup failed with exit code 1', $e->getMessage());
+        self::assertNotContains('ddev start', $this->commandNames());
     }
 
     public function testASecretTheDeployUsesNeverReachesTheJobLog(): void

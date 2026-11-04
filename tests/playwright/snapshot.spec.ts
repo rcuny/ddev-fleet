@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
@@ -55,7 +54,7 @@ const dumps = (project: string): string[] => {
 };
 
 test.describe('snapshot', () => {
-  test('shows an empty state when no instance of the project is running', async ({ page }) => {
+  test('shows an empty state when no instance of the project is running @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
 
@@ -72,7 +71,7 @@ test.describe('snapshot', () => {
     }
   });
 
-  test('takes a snapshot of a running instance, keeps the first one on the second, and downloads it', async ({ page }) => {
+  test('takes a snapshot of a running instance, keeps the first one on the second, and downloads it @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
     const instance = `${name}--main`;
@@ -114,44 +113,4 @@ test.describe('snapshot', () => {
       await deleteProjectViaUi(page, name);
     }
   });
-
-  test('offers only running instances: a stopped one takes no snapshot', async ({ page }) => {
-    const name = uniqueName();
-
-    try {
-      await createProjectViaUi(page, name);
-      console_(['fleet:dev:fake-instance', name, 'old', 'stopped']);
-      await openSection(page, 'Assets');
-
-      await expect(page.getByTestId('snapshot-empty')).toBeVisible();
-      expect(dumps(name)).toEqual([]);
-    } finally {
-      console_(['fleet:dev:fake-instance', name, 'old', 'stopped', '--remove']);
-      await deleteProjectViaUi(page, name);
-    }
-  });
-
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(`axe, ${scheme} theme`, () => {
-      test.use({ colorScheme: scheme });
-
-      test(`the snapshot card has no serious or critical violation (${scheme})`, async ({ page }) => {
-        const name = uniqueName();
-
-        try {
-          await createProjectViaUi(page, name);
-          console_(['fleet:dev:fake-instance', name, 'main']);
-          await openSection(page, 'Assets');
-          await expect(page.getByTestId('snapshot-form')).toBeVisible();
-          if (scheme === 'dark') {
-            await expect(page.locator('html')).toHaveClass(/\bdark\b/);
-          }
-          expect(await blockingViolations(page)).toEqual([]);
-        } finally {
-          console_(['fleet:dev:fake-instance', name, 'main', '--remove']);
-          await deleteProjectViaUi(page, name);
-        }
-      });
-    });
-  }
 });

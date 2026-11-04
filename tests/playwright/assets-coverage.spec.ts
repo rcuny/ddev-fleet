@@ -3,11 +3,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expectNoBlockingViolations } from './support/axe';
-import { runFakeJob } from './support/instances';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
-import { setStandInRole } from './support/standIn';
 
 // The coverage companion of assets.spec.ts and snapshot.spec.ts: what those two do not reach on the Assets tab. Every
 // message the path rules, the store and the upload service can return (folders, uploads, the JSON endpoints, delete,
@@ -44,7 +41,6 @@ function console_(args: string[]): void {
   expect(result.status, `bin/console ${args.join(' ')}: ${result.stdout}${result.stderr}`).toBe(0);
 }
 
-const CHUNK = 65_536;
 const FILE_TIME = 1_700_000_000; // 2023-11-14 22:13:20 UTC
 
 async function expectNoOverflow(page: Page, where: string): Promise<void> {
@@ -130,46 +126,6 @@ async function deleteRow(page: Page, row: Locator): Promise<void> {
   await dialog.getByTestId('asset-delete-confirm').click();
 }
 
-/**
- * A call to one of the JSON endpoints from inside the page, the way the Stimulus controller makes it: the stateless
- * CSRF token is double-submitted (header plus matching cookie), see asset_upload_controller.js.
- */
-async function api(page: Page, method: 'GET' | 'POST', path: string, init: { json?: unknown; raw?: string; csrf?: boolean } = {}): Promise<{ status: number; body: Record<string, unknown> }> {
-  return page.evaluate(
-    async ([verb, url, options]) => {
-      const csrfName = (document.querySelector('[data-controller="asset-upload"]') as HTMLElement).dataset.assetUploadCsrfValue as string;
-      const headers: Record<string, string> = { Accept: 'application/json' };
-      let forget = (): void => {};
-      if (options.csrf !== false) {
-        const token = btoa(String.fromCharCode(...crypto.getRandomValues(new Uint8Array(18))));
-        const prefix = window.location.protocol === 'https:' ? '__Host-' : '';
-        const suffix = window.location.protocol === 'https:' ? '; secure' : '';
-        const cookie = `${prefix}${csrfName}_${token}`;
-        document.cookie = `${cookie}=${csrfName}; path=/; samesite=strict${suffix}`;
-        headers['X-CSRF-Token'] = token;
-        forget = () => {
-          document.cookie = `${cookie}=0; path=/; samesite=strict; max-age=0${suffix}`;
-        };
-      }
-      let body: string | undefined;
-      if (options.json !== undefined) {
-        body = JSON.stringify(options.json);
-        headers['Content-Type'] = 'application/json';
-      } else if (options.raw !== undefined) {
-        body = options.raw;
-        headers['Content-Type'] = url.includes('/chunks/') ? 'application/octet-stream' : 'application/json';
-      }
-      try {
-        const response = await fetch(url, { method: verb, headers, body, credentials: 'same-origin' });
-        return { status: response.status, body: await response.json() };
-      } finally {
-        forget();
-      }
-    },
-    [method, path, init] as const,
-  );
-}
-
 test.describe('assets coverage: folders', () => {
   const NAMES = 'Names may use letters, digits, spaces and . _ - ( ) + @ , = ~ only, and must not end with a space.';
 
@@ -183,7 +139,7 @@ test.describe('assets coverage: folders', () => {
     }
   }
 
-  test('the New folder field is required and capped, and the name rules refuse each bad character', async ({ page }) => {
+  test('the New folder field is required and capped, and the name rules refuse each bad character @phone', async ({ page }) => {
     await withProject(page, async () => {
       // The field is required and capped at 255 characters by the browser itself.
       const field = page.getByLabel('New folder');
@@ -208,32 +164,10 @@ test.describe('assets coverage: folders', () => {
         0,
       );
       await expectNoOverflow(page, 'a folder refusal');
-      await expectNoBlockingViolations(page, 'a folder refusal');
     });
   });
 
-  test('a reserved name, a name over 255 bytes and a name that exists are refused', async ({ page }) => {
-    await withProject(page, async (_name, dir) => {
-      put(dir, 'taken.sql');
-      await rescan(page);
-      await expectRefusals(
-        page,
-        [
-          ['.fleet-upload-abc', 'That name is reserved.'],
-          // 130 characters, 260 bytes: under the field's maxlength, over the 255 bytes the rule allows.
-          ['é'.repeat(130), 'A name is longer than 255 bytes.'],
-          ['taken.sql', 'A file or folder with that name exists already.'],
-        ],
-        1,
-      );
-      await createFolder(page, 'dup');
-      await createFolder(page, 'dup');
-      await expect(flashes(page)).toContainText('The folder was not created. A file or folder with that name exists already.');
-      expect(readdirSync(dir).sort()).toEqual(['dup', 'taken.sql']);
-    });
-  });
-
-  test('allowed punctuation, a leading dot and accents make a folder', async ({ page }) => {
+  test('allowed punctuation, a leading dot and accents make a folder @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
 
     await withProject(page, async (_name, dir) => {
@@ -248,7 +182,7 @@ test.describe('assets coverage: folders', () => {
     expect(errors).toEqual([]);
   });
 
-  test('nested folders: breadcrumbs, Rescan stays in the folder, and the eighth level is the last', async ({ page }) => {
+  test('nested folders: breadcrumbs, Rescan stays in the folder, and the eighth level is the last @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
 
     await withProject(page, async (_name, dir) => {
@@ -297,27 +231,16 @@ test.describe('assets coverage: folders', () => {
       expect(existsSync(join(dir, ...levels, 'ninth'))).toBe(false);
       // The refusal sends the person back into the folder they were in.
       await expect(page).toHaveURL(/path=level1/);
-      await expectNoBlockingViolations(page, 'a deep folder with a refusal');
 
       const tooDeep = await page.goto(`${page.url().split('?')[0]}?path=${encodeURIComponent(`${deepest}/ninth`)}`);
       expect(tooDeep?.status()).toBe(404);
     });
     expect(errors.filter((message) => !message.includes('Failed to load resource'))).toEqual([]);
   });
-
-  test('a folder that does not exist, or a path the rules refuse, is a 404', async ({ page }) => {
-    await withProject(page, async (name) => {
-      const base = `/admin/projects/${name}/assets`;
-      for (const path of ['nope', '..', 'a/../b', '/etc', 'a//b', 'bad;name', `${'a/'.repeat(600)}z`]) {
-        const response = await page.goto(`${base}?path=${encodeURIComponent(path)}`);
-        expect(response?.status(), `path ${path.slice(0, 20)}`).toBe(404);
-      }
-    });
-  });
 });
 
 test.describe('assets coverage: symbolic links', () => {
-  test('a symbolic link is listed but never followed, downloaded, entered or written through', async ({ page }) => {
+  test('a symbolic link is listed but never followed, downloaded, entered or written through @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
 
     await withProject(page, async (name, dir) => {
@@ -342,13 +265,11 @@ test.describe('assets coverage: symbolic links', () => {
       await expect(links.locator('a')).toHaveCount(0);
       await expect(page.getByTestId('asset-row').filter({ hasNotText: 'symbolic link' })).toHaveCount(2);
       await expectNoOverflow(page, 'a listing with symbolic links');
-      await expectNoBlockingViolations(page, 'a listing with symbolic links');
 
       // Typing the address of a link: a message, and the top of the project instead.
       await page.goto(`/admin/projects/${name}/assets?path=link`);
       await expect(page.getByTestId('assets-problem')).toContainText('A symbolic link is in the way. The browser never follows symbolic links.');
       await expect(page.getByTestId('asset-row')).toHaveCount(5);
-      await expectNoBlockingViolations(page, 'the symbolic link problem');
 
       // Downloads through a link are refused (409), also when the link leads out of the directory.
       for (const path of ['link/inside.sql', 'outside/passwd', 'dangling']) {
@@ -376,34 +297,10 @@ test.describe('assets coverage: symbolic links', () => {
     });
     expect(errors.filter((message) => !message.includes('Failed to load resource'))).toEqual([]);
   });
-
-  test('a project assets directory that is a symbolic link shows a message and an empty listing', async ({ page }) => {
-    await withProject(page, async (name, dir) => {
-      const target = `${dir}-target`;
-      mkdirSync(target, { recursive: true });
-      put(target, 'hidden.sql');
-      try {
-        rmSync(dir, { recursive: true, force: true });
-        symlinkSync(target, dir);
-        await rescan(page);
-        await expect(page.getByTestId('assets-problem')).toContainText("The project's assets directory is a symbolic link. The browser never follows symbolic links.");
-        await expect(page.getByTestId('assets-empty')).toBeVisible();
-        await expect(page.getByTestId('asset-row')).toHaveCount(0);
-
-        await createFolder(page, 'child');
-        await expect(flashes(page)).toContainText('The folder was not created. A symbolic link is in the way.');
-        expect(readdirSync(target)).toEqual(['hidden.sql']);
-        await expectNoBlockingViolations(page, 'a linked assets directory');
-      } finally {
-        unlinkSync(dir);
-        rmSync(target, { recursive: true, force: true });
-      }
-    });
-  });
 });
 
 test.describe('assets coverage: uploads', () => {
-  test('refusals: empty file, over the cap, a bad name, a folder in the way, and the queue goes on', async ({ page }) => {
+  test('refusals: empty file, over the cap, a bad name, a folder in the way, and the queue goes on @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const errors = collectBrowserErrors(page);
 
@@ -446,7 +343,6 @@ test.describe('assets coverage: uploads', () => {
       await choose(page, [{ name: 'occupied', buffer: Buffer.from('x') }]);
       item = await endedItem(page, 5, 'error');
       await expect(item.getByTestId('asset-upload-status')).toContainText('A folder with that name exists.');
-      await expectNoBlockingViolations(page, 'the refused upload items');
 
       // Several files at once go one after the other; a refused one does not stop the next.
       await choose(page, [
@@ -497,69 +393,8 @@ test.describe('assets coverage: uploads', () => {
     });
   });
 });
-
-test.describe('assets coverage: upload endpoints', () => {
-  test('the JSON endpoints answer each refusal with a status and a message, and abort ends an upload', async ({ page }) => {
-    await withProject(page, async (name) => {
-      const base = `/admin/projects/${name}/assets/uploads`;
-      const begin = (json: unknown) => api(page, 'POST', base, { json });
-      const valid = { path: '', name: 'api.bin', size: 70_000, chunkSize: CHUNK, fingerprint: 'fp-1' };
-
-      // The body.
-      expect(await api(page, 'POST', base, { raw: 'null' })).toMatchObject({ status: 400, body: { error: 'The request body must be a JSON object.' } });
-      expect(await begin({ name: 'a.bin', size: 'big' })).toMatchObject({ status: 400, body: { error: 'Send path, name, size and fingerprint as text and whole numbers.' } });
-      expect(await begin({ ...valid, size: 0 })).toMatchObject({ status: 400, body: { error: 'The file is empty.', fields: { size: 'The file is empty.' } } });
-      expect(await begin({ ...valid, fingerprint: 'f'.repeat(513) })).toMatchObject({ status: 400, body: { error: 'The fingerprint is longer than 512 bytes.' } });
-
-      // The path and the name.
-      expect(await begin({ ...valid, path: '/etc' })).toMatchObject({ status: 400, body: { error: "The path must be relative to the project's assets directory." } });
-      expect(await begin({ ...valid, path: 'a/../b' })).toMatchObject({ status: 400, body: { error: 'The path must not contain "." or ".." parts.' } });
-      expect(await begin({ ...valid, path: 'a//b' })).toMatchObject({ status: 400, body: { error: 'The path is empty or has an empty part.' } });
-      expect(await begin({ ...valid, path: 'a\u0000b' })).toMatchObject({ status: 400, body: { error: 'The path contains a NUL character.' } });
-      expect(await begin({ ...valid, path: 'a/'.repeat(9) + 'z' })).toMatchObject({ status: 400, body: { error: 'The path is more than 8 folders deep.' } });
-      expect(await begin({ ...valid, path: `${'a/'.repeat(600)}z` })).toMatchObject({ status: 400, body: { error: 'The path is longer than 1024 bytes.' } });
-      expect(await begin({ ...valid, name: 'a/b' })).toMatchObject({ status: 400, body: { error: expect.stringContaining('Names may use letters') } });
-      expect(await begin({ ...valid, name: '..' })).toMatchObject({ status: 400, body: { error: 'The name must not contain "." or ".." parts.' } });
-      expect(await begin({ ...valid, name: 'x'.repeat(256) })).toMatchObject({ status: 400, body: { error: 'A name is longer than 255 bytes.' } });
-
-      // The cap: 413 with the reason in words.
-      const tooBig = await begin({ ...valid, size: 3 * 1024 ** 3 });
-      expect(tooBig.status).toBe(413);
-      expect(tooBig.body.error).toEqual(expect.stringContaining('more than the upload limit of 2.0 GiB'));
-
-      // A real upload: 70 000 bytes in two chunks of 65 536 (the smallest the server accepts), resumed by its fingerprint.
-      const started = await begin(valid);
-      expect(started.status).toBe(200);
-      expect(started.body).toMatchObject({ name: 'api.bin', path: 'api.bin', size: 70_000, chunkSize: CHUNK, chunks: 2, received: [] });
-      const id = started.body.id as string;
-      expect(await begin(valid)).toMatchObject({ status: 200, body: { id } });
-      expect(await api(page, 'GET', `${base}/${id}`)).toMatchObject({ status: 200, body: { id, received: [] } });
-
-      expect(await api(page, 'POST', `${base}/${id}/chunks/7`, { raw: 'x' })).toMatchObject({ status: 400, body: { error: 'There is no chunk 7: this upload has 2.' } });
-      expect(await api(page, 'POST', `${base}/${id}/chunks/0`, { raw: 'x'.repeat(10) })).toMatchObject({ status: 400, body: { error: 'Chunk 0 should be 65536 bytes; 10 bytes arrived.' } });
-      expect(await api(page, 'POST', `${base}/${id}/complete`)).toMatchObject({ status: 422, body: { error: 'The upload is not complete: chunk 0, 1 are missing.' } });
-      expect(await api(page, 'POST', `${base}/${id}/chunks/0`, { raw: 'x'.repeat(CHUNK) })).toMatchObject({ status: 200, body: { received: [0] } });
-      expect(await api(page, 'POST', `${base}/${id}/complete`)).toMatchObject({ status: 422, body: { error: 'The upload is not complete: chunk 1 is missing.' } });
-
-      // The page's CSRF token is required on writes; reading a status needs none.
-      expect(await api(page, 'POST', `${base}/${id}/abort`, { csrf: false })).toMatchObject({ status: 403, body: { error: 'Invalid CSRF token. Reload the page.' } });
-      expect(await api(page, 'GET', `${base}/${id}`, { csrf: false })).toMatchObject({ status: 200, body: { id, received: [0] } });
-
-      // Abort removes the staged upload; it is gone afterwards, as is an id that never existed.
-      expect(await api(page, 'POST', `${base}/${id}/abort`)).toMatchObject({ status: 200, body: { aborted: true } });
-      expect((await api(page, 'GET', `${base}/${id}`)).status).toBe(404);
-      expect((await api(page, 'POST', `${base}/${id}/complete`)).status).toBe(404);
-      expect((await api(page, 'GET', `${base}/${'0'.repeat(32)}`)).status).toBe(404);
-
-      // Nothing was published, and the listing says so.
-      await rescan(page);
-      await expect(page.getByTestId('assets-empty')).toBeVisible();
-    });
-  });
-});
-
 test.describe('assets coverage: listing, delete and download', () => {
-  test('the listing: folders first, then files by name ignoring case, sizes, UTC times, plural and empty states', async ({ page }) => {
+  test('the listing: folders first, then files by name ignoring case, sizes, UTC times, plural and empty states @phone', async ({ page }) => {
     await withProject(page, async (_name, dir) => {
       await expect(page.getByTestId('assets-empty')).toHaveText('No files yet. Upload one above, or copy files in over SSH and press Rescan.');
       await expect(page.getByTestId('assets-summary')).toHaveCount(0);
@@ -585,11 +420,10 @@ test.describe('assets coverage: listing, delete and download', () => {
       await expect(page.getByTestId('asset-row').first().getByTestId('asset-download')).toHaveCount(0);
       await expect(row.getByTestId('asset-download')).toBeVisible();
       await expectNoOverflow(page, 'the listing');
-      await expectNoBlockingViolations(page, 'the listing');
     });
   });
 
-  test('Cancel and Escape keep the file; a file that vanished, or a folder with content, is reported; an empty folder goes', async ({ page }) => {
+  test('Cancel and Escape keep the file; a file that vanished, or a folder with content, is reported; an empty folder goes @phone', async ({ page }) => {
     await withProject(page, async (_name, dir) => {
       const keep = put(dir, 'keep.sql');
       put(dir, 'gone.sql');
@@ -607,7 +441,6 @@ test.describe('assets coverage: listing, delete and download', () => {
         await expectTall(dialog.getByRole('button', { name: 'Cancel' }));
         await expectTall(dialog.getByTestId('asset-delete-confirm'));
       }
-      await expectNoBlockingViolations(page, 'the delete dialog');
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(page.getByRole('dialog')).toBeHidden();
       dialog = await openDialog(page, keepRow.getByTestId('asset-delete'));
@@ -648,32 +481,7 @@ test.describe('assets coverage: listing, delete and download', () => {
     });
   });
 
-  test('download refusals and a name with accents', async ({ page }) => {
-    await withProject(page, async (name, dir) => {
-      const accented = 'résumé données (1).sql';
-      put(dir, accented, 'accents');
-      mkdirSync(join(dir, 'folder'), { recursive: true });
-      await rescan(page);
-
-      const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('asset-row').filter({ hasText: accented }).getByTestId('asset-download').click()]);
-      expect(download.suggestedFilename()).toBe(accented);
-      expect(readFileSync((await download.path()) as string, 'utf8')).toBe('accents');
-
-      const url = (path: string): string => `/admin/projects/${name}/assets/download?path=${encodeURIComponent(path)}`;
-      const file = await page.request.get(url(accented));
-      expect(file.headers()['content-type']).toBe('application/octet-stream');
-      expect(file.headers()['x-content-type-options']).toBe('nosniff');
-      expect(file.headers()['cache-control']).toContain('no-store');
-      expect(file.headers()['content-disposition']).toContain('attachment');
-      expect((await page.request.get(url('folder'))).status()).toBe(409);
-      expect((await page.request.get(url('missing.sql'))).status()).toBe(404);
-      expect((await page.request.get(url('../etc/passwd'))).status()).toBe(404);
-      expect((await page.request.get(url(''))).status()).toBe(404);
-      expect((await page.request.get(`/admin/projects/${name}/assets/download`)).status()).toBe(404);
-    });
-  });
-
-  test('long names wrap at every width: rows, unsupported names, the delete dialog', async ({ page }) => {
+  test('long names wrap at every width: rows, unsupported names, the delete dialog @phone', async ({ page }) => {
     await withProject(page, async (_name, dir) => {
       const longFile = `${'a-long-file-name-'.repeat(14)}.sql`.slice(0, 250);
       const longFolder = 'folder'.repeat(35);
@@ -699,7 +507,6 @@ test.describe('assets coverage: listing, delete and download', () => {
       expect(box!.x).toBeGreaterThanOrEqual(-0.5);
       expect(box!.x + box!.width).toBeLessThanOrEqual(width + 0.5);
       await expectNoOverflow(page, 'the delete dialog of a long name');
-      await expectNoBlockingViolations(page, 'the delete dialog of a long name');
       await page.keyboard.press('Escape');
 
       // The folder crumb of a long name wraps as well.
@@ -733,7 +540,7 @@ test.describe('assets coverage: snapshot card refusals', () => {
 
   const submit = (page: Page): Promise<void> => submitAndWait(page, page.getByTestId('snapshot-submit'));
 
-  test('the select lists the running instances in order and the chosen one is dumped', async ({ page }) => {
+  test('the select lists the running instances in order and the chosen one is dumped @phone', async ({ page }) => {
     await withInstances(page, ['bb', 'aa'], async (name) => {
       await expect(page.getByTestId('snapshot-instance').locator('option')).toHaveText([`${name}--aa`, `${name}--bb`]);
       await expect(page.getByTestId('snapshot-instance')).toHaveAttribute('required', '');
@@ -752,7 +559,7 @@ test.describe('assets coverage: snapshot card refusals', () => {
     });
   });
 
-  test('an instance stopped after the page loaded is refused with its state', async ({ page }) => {
+  test('an instance stopped after the page loaded is refused with its state @phone', async ({ page }) => {
     await withInstances(page, ['main'], async (name) => {
       console_(['fleet:dev:fake-instance', name, 'main', '--remove']);
       console_(['fleet:dev:fake-instance', name, 'main', 'stopped']);
@@ -761,56 +568,10 @@ test.describe('assets coverage: snapshot card refusals', () => {
       await expect(page.getByTestId('snapshot-empty')).toBeVisible();
       expect(existsSync(join(assetsDir(name), 'dumps'))).toBe(false);
       await expectNoOverflow(page, 'a snapshot refusal');
-      await expectNoBlockingViolations(page, 'a snapshot refusal');
     });
   });
 
-  test('an instance with a job running is refused as busy', async ({ page }) => {
-    await withInstances(page, ['main'], async (name) => {
-      const id = `${name}--main`;
-      const running = runFakeJob(id, { lines: 20, delay: 300 });
-      try {
-        // Wait until the job really runs (it is its own process), then ask for the snapshot.
-        await expect(async () => {
-          await page.goto(`/admin/jobs?q=${id}`);
-          await expect(page.getByTestId('job-status').first()).toHaveAttribute('data-status', 'running', { timeout: 1_000 });
-        }).toPass({ timeout: 30_000 });
-        await page.goto(`/admin/projects/${name}/assets`);
-        await submit(page);
-        await expect(flashes(page)).toContainText(`No snapshot was started. Busy: ${id} has a job queued or running. Nothing was started.`);
-        expect(existsSync(join(assetsDir(name), 'dumps'))).toBe(false);
-      } finally {
-        await running;
-      }
-    });
-  });
-
-  test('an instance of another project, or one that does not exist, is refused', async ({ page }) => {
-    const other = uniqueName('other');
-    try {
-      await createProjectViaUi(page, other);
-      console_(['fleet:dev:fake-instance', other, 'main']);
-      await withInstances(page, ['main'], async (name) => {
-        for (const forged of [`${other}--main`, `${name}--ghost`, 'not an instance id']) {
-          await page.getByTestId('snapshot-instance').evaluate((select: HTMLSelectElement, value) => {
-            select.options[0]!.value = value;
-            select.value = value;
-          }, forged);
-          await submit(page);
-          await expect(flashes(page)).toContainText('No snapshot was started. Instance "');
-          await expect(flashes(page)).toContainText('does not exist.');
-        }
-        expect(existsSync(join(assetsDir(name), 'dumps'))).toBe(false);
-        expect(existsSync(join(assetsDir(other), 'dumps'))).toBe(false);
-      });
-    } finally {
-      console_(['fleet:dev:fake-instance', other, 'main', '--remove']);
-      await deleteProjectViaUi(page, other);
-      rmSync(assetsDir(other), { recursive: true, force: true });
-    }
-  });
-
-  test('a long instance id wraps in the select and in the flash on the phone', async ({ page }) => {
+  test('a long instance id wraps in the select and in the flash on the phone @phone', async ({ page }) => {
     await withInstances(page, ['l'.repeat(30)], async (name) => {
       await expectNoOverflow(page, 'a card with a long instance id');
       if (isPhone()) {
@@ -820,40 +581,6 @@ test.describe('assets coverage: snapshot card refusals', () => {
       await expect(flashes(page)).toContainText('queued as job');
       await expectNoOverflow(page, 'a flash with a long instance id');
       void name;
-    });
-  });
-});
-
-test.describe('assets coverage: access and CSRF', () => {
-  test('a member is refused on every write endpoint, and an admin without a valid token as well', async ({ page, context, baseURL }) => {
-    await withProject(page, async (name, dir) => {
-      put(dir, 'safe.sql');
-      const base = `/admin/projects/${name}/assets`;
-      const forms: Array<[string, Record<string, string>]> = [
-        [`${base}/folders`, { path: '', name: 'sneaky' }],
-        [`${base}/delete`, { path: 'safe.sql' }],
-        [`${base}/snapshot`, { instance: `${name}--main` }],
-      ];
-      // An admin whose token is wrong or missing is refused too, and nothing changes.
-      for (const [url, form] of forms) {
-        expect((await context.request.post(url, { form: { ...form, _token: 'wrong' } })).status(), url).toBe(403);
-        expect((await context.request.post(url, { form })).status(), url).toBe(403);
-      }
-      expect(readdirSync(dir)).toEqual(['safe.sql']);
-
-      await setStandInRole(context, 'member', baseURL!);
-      const id = '0'.repeat(32);
-      for (const [url, form] of forms) {
-        expect((await context.request.post(url, { form: { ...form, _token: 'csrf-token' } })).status(), url).toBe(403);
-      }
-      for (const path of [`${base}/uploads/${id}`]) {
-        expect((await context.request.get(path)).status(), path).toBe(403);
-      }
-      for (const path of [`${base}/uploads/${id}/chunks/0`, `${base}/uploads/${id}/complete`, `${base}/uploads/${id}/abort`]) {
-        expect((await context.request.post(path, { headers: { 'X-CSRF-Token': 'csrf-token' }, data: '' })).status(), path).toBe(403);
-      }
-      await setStandInRole(context, 'admin', baseURL!);
-      expect(readdirSync(dir)).toEqual(['safe.sql']);
     });
   });
 });

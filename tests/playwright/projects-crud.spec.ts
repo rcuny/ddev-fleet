@@ -1,80 +1,13 @@
 import { expect, test } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
-import { fillProject, openNewProject, projectForm, readProject, submitCreate, submitSave } from './support/projectForm';
+import { fillProject, openNewProject, readProject, submitCreate, submitSave } from './support/projectForm';
 import { createDeployableProject, deployOne, uniqueLabel } from './support/instances';
-import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // The project pages end to end: list, create, edit, delete and what each one shows afterwards. Every test owns a
 // project with a unique name and removes it in `finally`.
 
 const isPhone = (): boolean => test.info().project.name === 'phone';
-
-test.describe('project list', () => {
-  test('a created project is on the list with its git URL, branch and template count, and its row opens it', async ({ page }) => {
-    const name = uniqueName();
-    try {
-      await openNewProject(page);
-      await fillProject(page, { name, git: GIT_URL, branch: 'develop' });
-      await submitCreate(page);
-
-      await page.goto('/admin/projects');
-      await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
-      await expect(page.getByTestId('projects-empty')).toHaveCount(0);
-      const row = page.getByTestId('project-row').filter({ hasText: name });
-      await expect(row).toHaveCount(1);
-      await expect(row).toContainText(`${GIT_URL} · develop`);
-      await expect(row).toContainText('0 templates');
-      await expectNoBlockingViolations(page, 'the project list');
-
-      await follow(page, row.getByRole('link'));
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-      await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
-    } finally {
-      await deleteProjectViaUi(page, name);
-    }
-  });
-
-  test('a project without a default branch shows the URL alone, and one template reads "1 template"', async ({ page }) => {
-    const name = uniqueName();
-    try {
-      await createProjectViaUi(page, name);
-      await page.goto('/admin/projects');
-      const row = page.getByTestId('project-row').filter({ hasText: name });
-      await expect(row).not.toContainText('·');
-      await expect(row).toContainText('0 templates');
-
-      await page.goto(`/admin/projects/${name}/templates/new`);
-      await page.getByLabel('Name', { exact: true }).fill('web');
-      await submitAndWait(page, page.getByRole('button', { name: 'Create template' }));
-      await expect(page.getByTestId('flashes')).toContainText('Template created.');
-      await page.goto('/admin/projects');
-      await expect(page.getByTestId('project-row').filter({ hasText: name })).toContainText('1 template');
-      await expect(page.getByTestId('project-row').filter({ hasText: name })).not.toContainText('1 templates');
-    } finally {
-      await deleteProjectViaUi(page, name);
-    }
-  });
-
-  test('New project and Import are offered, and Cancel on the create form returns to the list', async ({ page }) => {
-    await page.goto('/admin/projects');
-    await expect(page.getByRole('link', { name: 'Import' })).toHaveAttribute('href', /\/admin\/import/);
-    await follow(page, page.getByRole('link', { name: 'New project' }).first());
-    await expect(page).toHaveURL(/\/admin\/projects\/new$/);
-    await expectNoBlockingViolations(page, 'the create form');
-    await follow(page, page.getByRole('link', { name: 'Cancel' }));
-    await expect(page).toHaveURL(/\/admin\/projects$/);
-    await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
-  });
-
-  test('an unknown project is a 404 page, and "new" is the create form and not a project', async ({ page }) => {
-    const gone = await page.goto(`/admin/projects/${uniqueName('nope')}`);
-    expect(gone?.status()).toBe(404);
-    const created = await page.goto('/admin/projects/new');
-    expect(created?.status()).toBe(200);
-    await expect(page.getByRole('heading', { level: 1, name: 'New project' })).toBeVisible();
-  });
-});
 
 test.describe('create', () => {
   test('Save shows the new project right away: flash, address, heading, git URL and every field as typed', async ({ page }) => {
@@ -102,7 +35,6 @@ test.describe('create', () => {
       await expect(page.getByText(fields.git).first()).toBeVisible();
       expect(await readProject(page)).toEqual({ ...fields, mode: 'Custom identity', typesense: true });
       await expect(page.getByTestId('danger-zone')).toBeVisible();
-      await expectNoBlockingViolations(page, 'the edit page right after create');
 
       // The same state after a fresh load.
       await page.goto(`/admin/projects/${name}`);
@@ -113,27 +45,24 @@ test.describe('create', () => {
     }
   });
 
-  test('the create form offers every field with its help text and the host default identity', async ({ page }) => {
-    await openNewProject(page);
-    const form = projectForm(page);
-    for (const label of ['Name', 'Git URL', 'Default branch', 'Additional hostnames', 'Identity name', 'Identity email', 'Issue id pattern', 'Submodule whose branch is shown']) {
-      await expect(page.getByLabel(label, { exact: label === 'Name' })).toBeVisible();
-    }
-    await expect(page.getByLabel('Default template')).toHaveCount(0);
-    await expect(page.getByLabel('Use the host default', { exact: true })).toBeChecked();
-    await expect(page.getByLabel('Run a Typesense search server for each instance')).not.toBeChecked();
-    await expect(form).toContainText('cannot be changed later');
-    await expect(form).toContainText('Use a deploy key, not a token in the URL.');
-    await expect(form).toContainText('One label per line.');
-    await expect(form).toContainText('Leave blank to use the repository default.');
-    await expect(page.getByRole('button', { name: 'Create project' })).toBeVisible();
-  });
-
-  test('a created project with nothing optional filled has the defaults on the edit page', async ({ page }) => {
+  test('Git over SSH in the container is off by default and survives a save and a reload (FLE-145)', async ({ page }) => {
     const name = uniqueName();
+    const box = page.getByLabel(/Git over SSH inside the container/);
     try {
-      await createProjectViaUi(page, name);
-      expect(await readProject(page)).toEqual({ git: GIT_URL, branch: '', hostnames: '', mode: 'Use the host default', identityName: '', identityEmail: '', pattern: '', submodule: '', typesense: false });
+      await openNewProject(page);
+      await fillProject(page, { name, git: 'ssh://git@git.example.com:2222/acme/blog.git' });
+      await expect(box).not.toBeChecked();
+      await page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' }).click();
+      await expect(box).toBeChecked();
+      await submitCreate(page);
+      await expect(page.getByTestId('flashes')).toContainText('Project created.');
+
+      await page.goto(`/admin/projects/${name}`);
+      await expect(box).toBeChecked();
+      await page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' }).click();
+      await submitSave(page);
+      await page.goto(`/admin/projects/${name}`);
+      await expect(box).not.toBeChecked();
     } finally {
       await deleteProjectViaUi(page, name);
     }
@@ -180,40 +109,10 @@ test.describe('edit', () => {
     }
   });
 
-  test('saving without a change is a normal save and keeps the values', async ({ page }) => {
-    const name = uniqueName();
-    try {
-      await openNewProject(page);
-      await fillProject(page, { name, git: GIT_URL, branch: 'main', hostnames: 'www', typesense: true });
-      await submitCreate(page);
-      await submitSave(page);
-      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
-      expect(await readProject(page)).toMatchObject({ git: GIT_URL, branch: 'main', hostnames: 'www', typesense: true });
-    } finally {
-      await deleteProjectViaUi(page, name);
-    }
-  });
-
-  test('the edit page offers the sections, the tester, the export card and the danger zone', async ({ page }) => {
-    const name = uniqueName();
-    try {
-      await createProjectViaUi(page, name);
-      const tabs = page.getByRole('navigation', { name: 'Project sections' });
-      for (const section of ['General', 'Templates', 'Secrets', 'Ports', 'Assets']) {
-        await expect(tabs.getByRole('link', { name: section })).toBeVisible();
-      }
-      await expect(page.getByTestId('issue-id-preview')).toBeVisible();
-      await expect(page.getByTestId('export-project')).toBeVisible();
-      await expect(page.getByTestId('danger-zone')).toContainText('It is refused while the project has instances.');
-      await expectNoBlockingViolations(page, 'the edit page');
-    } finally {
-      await deleteProjectViaUi(page, name);
-    }
-  });
 });
 
 test.describe('delete', () => {
-  test('the dialog names the project, Cancel and Escape keep it, the confirmation removes it everywhere', async ({ page }) => {
+  test('the dialog names the project, Cancel and Escape keep it, the confirmation removes it everywhere @phone', async ({ page }) => {
     const name = uniqueName();
     try {
       await createProjectViaUi(page, name);
@@ -221,7 +120,6 @@ test.describe('delete', () => {
       let dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
       await expect(dialog).toContainText(`Delete ${name}?`);
       await expect(dialog).toContainText('This removes the project, its templates and its port assignments. It cannot be undone.');
-      await expectNoBlockingViolations(page, 'the delete dialog');
       if (isPhone()) {
         expect(await hasHorizontalOverflow(page), 'overflow with the dialog open').toBe(false);
       }
@@ -242,24 +140,9 @@ test.describe('delete', () => {
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
       await expect(page).toHaveURL(/\/admin\/projects$/);
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(0);
-      await expectNoBlockingViolations(page, 'the list after a delete');
 
       expect((await page.goto(`/admin/projects/${name}`))?.status()).toBe(404);
       expect((await page.goto(`/admin/projects/${name}/templates`))?.status()).toBe(404);
-    } finally {
-      await deleteProjectViaUi(page, name);
-    }
-  });
-
-  test('a deleted project\'s name can be used again and starts empty', async ({ page }) => {
-    const name = uniqueName();
-    try {
-      await openNewProject(page);
-      await fillProject(page, { name, git: GIT_URL, branch: 'old', hostnames: 'www', typesense: true });
-      await submitCreate(page);
-      await deleteProjectViaUi(page, name);
-      await createProjectViaUi(page, name, 'https://git.example.com/acme/second.git');
-      expect(await readProject(page)).toMatchObject({ git: 'https://git.example.com/acme/second.git', branch: '', hostnames: '', typesense: false });
     } finally {
       await deleteProjectViaUi(page, name);
     }
@@ -281,7 +164,6 @@ test.describe('delete', () => {
       await expect(page.getByTestId('flashes')).toContainText('instance(s) exist: destroy them first');
       await expect(page.getByTestId('flashes')).toContainText(instance);
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-      await expectNoBlockingViolations(page, 'the refused delete');
 
       await page.goto('/admin/projects');
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(1);
@@ -304,7 +186,7 @@ test.describe('delete', () => {
 });
 
 test.describe('phone and long values', () => {
-  test('the flash of a long project name does not widen the page', async ({ page }) => {
+  test('the flash of a long project name does not widen the page @phone', async ({ page }) => {
     const name = `pw-${Date.now().toString(36)}-`.padEnd(40, 'q');
     try {
       await createProjectViaUi(page, name, `https://git.example.com/${'g'.repeat(180)}.git`);

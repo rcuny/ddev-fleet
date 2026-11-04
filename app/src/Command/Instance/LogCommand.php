@@ -42,7 +42,7 @@ final class LogCommand extends Command
     {
         try {
             $id = (string) $input->getArgument('id');
-            $instance = (InstanceNaming::isInstanceId($id) ? $this->instances->find($id) : null) ?? throw NotFound::instance($id);
+            $instance = (InstanceNaming::isExistingInstanceId($id) ? $this->instances->find($id) : null) ?? throw NotFound::instance($id);
 
             $number = $input->getOption('job');
             if (null !== $number) {

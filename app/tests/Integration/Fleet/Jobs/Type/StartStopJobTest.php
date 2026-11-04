@@ -19,7 +19,7 @@ final class StartStopJobTest extends InstanceJobTestCase
     private function start(\App\Domain\Instance\Instance $instance, array $params = []): void
     {
         $job = $this->job('start', $instance, $params);
-        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock)->execute($job, $this->logFor($job));
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
     }
 
     public function testStartsAndMarksRunning(): void
@@ -32,6 +32,71 @@ final class StartStopJobTest extends InstanceJobTestCase
         self::assertSame(['ddev start'], $this->commandNames());
         self::assertSame($dir, $this->runner->calls()[0]->cwd);
         self::assertSame(InstanceState::Running, $instance->state());
+    }
+
+    public function testStartRestartsTheAgentOfAnOptedInProjectAndOnlyWarnsWhenItCannot(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Stopped);
+        $this->checkout($instance);
+        mkdir($this->paths->sshDir(), 0o700, true);
+        touch($this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push));
+        $this->project->changeContainerSsh(true);
+        $this->runner->expect(['ssh-agent'], new CommandResult(1, '', 'cannot bind'));
+
+        $job = $this->job('start', $instance);
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+
+        self::assertSame(InstanceState::Running, $instance->state());
+        self::assertStringContainsString('warning: ssh-agent did not start', $this->logText($job));
+        self::assertDirectoryExists($this->paths->agentSocketDir($instance->id()), 'present before ddev start, so Docker never creates it');
+    }
+
+    public function testStartRemovesTheOverrideAndAgentOfAProjectThatOptedOut(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Stopped);
+        $this->checkout($instance);
+        $override = $this->paths->instanceDir($instance->id()).'/'.\App\Fleet\Ssh\InstanceSshAgent::OVERRIDE_FILE;
+        @mkdir(\dirname($override), 0o755, true);
+        file_put_contents($override, 'old');
+        mkdir($this->paths->agentSocketDir($instance->id()), 0o700, true);
+        touch($this->paths->agentSocket($instance->id()));
+        file_put_contents($this->paths->agentPidFile($instance->id()), "99\n");
+
+        $job = $this->job('start', $instance);
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+
+        self::assertFileDoesNotExist($override);
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir($instance->id()));
+        self::assertCount(1, $this->runner->callsMatching(['ssh-agent', '-k']));
+        self::assertStringContainsString('no longer uses container_ssh', $this->logText($job));
+    }
+
+    public function testStartLeavesAnOptOutProjectAlone(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Stopped);
+        $this->checkout($instance);
+        mkdir($this->paths->sshDir(), 0o700, true);
+        touch($this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push));
+
+        $this->start($instance);
+
+        self::assertSame(['ddev start'], $this->commandNames());
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir($instance->id()));
+    }
+
+    public function testStopStopsTheInstancesAgent(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $this->checkout($instance);
+        mkdir($this->paths->agentSocketDir($instance->id()), 0o700, true);
+        touch($this->paths->agentSocket($instance->id()));
+        file_put_contents($this->paths->agentPidFile($instance->id()), "99\n");
+
+        $job = $this->job('stop', $instance);
+        new StopJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+
+        self::assertCount(1, $this->runner->callsMatching(['ssh-agent', '-k']));
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir($instance->id()));
     }
 
     public function testMissingDirectoryFails(): void
@@ -55,7 +120,7 @@ final class StartStopJobTest extends InstanceJobTestCase
         $this->runner->expect(['ddev', 'start'], new CommandResult(1, '', "Error: Bind for 127.0.0.1:8080 failed: port is already allocated\n"));
 
         $job = $this->job('start', $instance, ['retryPortConflict' => true]);
-        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock)->execute($job, $this->logFor($job));
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
 
         self::assertSame(['ddev start', 'ddev stop', 'ddev start'], $this->commandNames());
         self::assertStringContainsString('port conflict on start - retrying with stop+start', $this->logText($job));
@@ -124,7 +189,7 @@ final class StartStopJobTest extends InstanceJobTestCase
         $this->checkout($instance);
         $job = $this->job('stop', $instance, ['timeout' => 30]);
 
-        new StopJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock)->execute($job, $this->logFor($job));
+        new StopJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
 
         self::assertSame(['ddev stop'], $this->commandNames());
         self::assertSame(30.0, $this->runner->calls()[0]->timeout);
@@ -139,7 +204,7 @@ final class StartStopJobTest extends InstanceJobTestCase
         $this->runner->expect(['ddev', 'stop'], new CommandResult(1));
 
         try {
-            new StopJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock)->execute($job, $this->logFor($job));
+            new StopJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
             self::fail('expected a failure');
         } catch (JobFailed $e) {
             self::assertSame('ddev stop failed with exit code 1', $e->getMessage());

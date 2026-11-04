@@ -123,6 +123,8 @@ final class InstallerAssetsStepsTest extends TestCase
             '+ write /etc/systemd/system/fleet-worker@.service 0644 root:root',
             '+ write /etc/systemd/system/fleet-backup.service 0644 root:root',
             '+ write /etc/systemd/system/fleet-backup.timer 0644 root:root',
+            '+ write /etc/systemd/system/fleet-upgrade-check.service 0644 root:root',
+            '+ write /etc/systemd/system/fleet-upgrade-check.timer 0644 root:root',
             '+ write /etc/systemd/system/fleet-tmux.service 0644 root:root',
             '+ write /etc/fleet-mercure/Caddyfile 0644 root:root',
             '+ write /etc/systemd/system/fleet-mercure.service 0644 root:root',
@@ -266,6 +268,7 @@ final class InstallerAssetsStepsTest extends TestCase
             '+ systemctl restart fleet-scheduler',
             '+ systemctl restart caddy',
             '+ systemctl enable --now fleet-backup.timer',
+            '+ systemctl enable --now fleet-upgrade-check.timer',
             '+ systemctl enable --now fleet-tmux.service',
             '+ wait up to 120 s: curl -fsS https://fleet.example.com/health, curl -fsS http://127.0.0.1:3000/healthz, systemctl is-active docker caddy authelia php8.4-fpm fleet-mercure fleet-worker@1 fleet-status',
             'fleet:setup:token',
@@ -381,6 +384,34 @@ final class InstallerAssetsStepsTest extends TestCase
         [$status] = $this->runRenderStart([], extra: 'CODE_REVISION=abc123;', etc: $etc, curlExit: 22, timeout: '0');
         self::assertSame(1, $status);
         self::assertFileDoesNotExist($etc.'/installed-revision', 'a failed install is retried as a code change');
+    }
+
+    public function testRenderStartRecordsTheInstalledVersionOnlyWhenHealthy(): void
+    {
+        $etc = $this->scratch().'/etc';
+        [$status, , $err] = $this->runRenderStart([], extra: 'REF=develop; CODE_REVISION=abc1234567890;', etc: $etc);
+        self::assertSame(0, $status, $err);
+        self::assertSame("develop@abc1234\n", file_get_contents($etc.'/installed-version'));
+
+        // A failed run keeps the old value.
+        [$status] = $this->runRenderStart([], extra: 'REF=v9.9.9; CODE_REVISION=fff1234567890;', etc: $etc, curlExit: 22, timeout: '0');
+        self::assertSame(1, $status);
+        self::assertSame("develop@abc1234\n", file_get_contents($etc.'/installed-version'));
+    }
+
+    public function testTheInstalledVersionIsTheTagWhenTheRefIsOne(): void
+    {
+        $etc = $this->scratch().'/etc';
+        $repo = $this->scratch().'/src';
+        mkdir($repo);
+        $git = 'git -c user.name=t -c user.email=t@example.com -C '.escapeshellarg($repo);
+        shell_exec('git init -q '.escapeshellarg($repo).' && '.$git.' commit -q --allow-empty -m x && '.$git.' tag -a v1.2.3 -m v1.2.3');
+
+        $extra = 'REF=v1.2.3; CODE_REVISION=; FLEET_SRC_DIR='.escapeshellarg($repo).'; run_as_fleet() { if [ "$1" = git ]; then "$@"; else runuser "$@"; fi; };';
+        [$status, , $err] = $this->runRenderStart([], extra: $extra, etc: $etc);
+
+        self::assertSame(0, $status, $err);
+        self::assertSame("v1.2.3\n", file_get_contents($etc.'/installed-version'));
     }
 
     public function testAnUnhealthyInstallFailsWithAJournalHint(): void

@@ -77,6 +77,8 @@ main() {
   local mercure_bin=/usr/local/bin/mercure
   local sudoers_file=/etc/sudoers.d/fleet-apply
   local tmpfiles_mask=/etc/tmpfiles.d/authelia.conf
+  local tmpfiles_fleet=/etc/tmpfiles.d/ddev-fleet.conf
+  local history_dir=/var/log/ddev-fleet
   local var_lib=/var/lib
   local apt_sources=/etc/apt/sources.list.d
   local apt_keyrings=/etc/apt/keyrings
@@ -171,6 +173,7 @@ main() {
   do_cmd systemctl disable fleet-boot.service
   do_cmd systemctl disable --now fleet-scheduler.service
   do_cmd systemctl disable --now fleet-backup.timer
+  do_cmd systemctl disable --now fleet-upgrade-check.timer
   do_cmd systemctl disable --now fleet-tmux.service
   do_cmd systemctl disable --now fleet-mercure.service
   do_cmd systemctl disable --now caddy.service
@@ -184,6 +187,8 @@ main() {
   remove_file "${systemd_dir:?}/fleet-scheduler.service"
   remove_file "${systemd_dir:?}/fleet-backup.service"
   remove_file "${systemd_dir:?}/fleet-backup.timer"
+  remove_file "${systemd_dir:?}/fleet-upgrade-check.service"
+  remove_file "${systemd_dir:?}/fleet-upgrade-check.timer"
   remove_file "${systemd_dir:?}/fleet-tmux.service"
   remove_file "${systemd_dir:?}/fleet-mercure.service"
   remove_file "${systemd_dir:?}/php8.4-fpm.service.d/fleet-env.conf"
@@ -239,6 +244,7 @@ main() {
   remove_file "${sudoers_file:?}"
   remove_path "${helper_dir:?}"
   remove_file "${wrapper:?}"
+  remove_file "${tmpfiles_fleet:?}"
   remove_file "${mercure_bin:?}"
   remove_path "${local_lib:?}"
   remove_path "${stage_dir:?}"
@@ -250,6 +256,7 @@ main() {
     say "kept: ${srv_dir:?}, Authelia's secrets and database, and the ${fleet_user:?} user that owns them (--keep-data)"
   else
     remove_path "${srv_dir:?}"
+    remove_path "${history_dir:?}"
     # The tmpfiles mask goes with the secrets it protects; with --keep-data both stay.
     remove_file "${tmpfiles_mask:?}"
     remove_path "${authelia_etc:?}/secrets"

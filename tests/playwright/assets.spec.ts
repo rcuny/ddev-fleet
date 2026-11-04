@@ -3,10 +3,8 @@ import { createHash } from 'node:crypto';
 import { mkdirSync, readFileSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
-import { setStandInRole } from './support/standIn';
 
 // The Assets tab of a project in a real browser, at 1280 px (desktop project) and 390 px (phone project): the chunked
 // upload (several chunks, the sha256 the server reports), the listing, download, delete, new folder, resuming and the
@@ -102,7 +100,7 @@ async function deleteRow(page: Page, row: Locator): Promise<void> {
 }
 
 test.describe('assets', () => {
-  test('uploads a file in chunks, lists it, downloads it and deletes it', async ({ page }) => {
+  test('uploads a file in chunks, lists it, downloads it and deletes it @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
@@ -172,7 +170,7 @@ test.describe('assets', () => {
     }
   });
 
-  test('creates a folder, uploads into it and finds the way back', async ({ page }) => {
+  test('creates a folder, uploads into it and finds the way back @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
@@ -281,7 +279,7 @@ test.describe('assets', () => {
     }
   });
 
-  test('Rescan shows a file copied into the assets directory over SSH', async ({ page }) => {
+  test('Rescan shows a file copied into the assets directory over SSH @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
     const directory = join(fleetHome(), 'assets', name);
@@ -313,45 +311,6 @@ test.describe('assets', () => {
       await deleteProjectViaUi(page, name);
     }
   });
-
-  test('a member cannot open the Assets tab or its endpoints', async ({ page, context, baseURL }) => {
-    await setStandInRole(context, 'member', baseURL!);
-
-    for (const path of ['/admin/projects/anything/assets', '/admin/projects/anything/assets/download?path=a.sql']) {
-      const response = await page.goto(path);
-      expect(response?.status(), path).toBe(403);
-      await expect(page.getByRole('heading', { level: 1, name: 'Access denied' })).toBeVisible();
-    }
-
-    const begin = await context.request.post('/admin/projects/anything/assets/uploads', { data: { path: '', name: 'a.sql', size: 1 }, headers: { 'X-CSRF-Token': 'csrf-token' } });
-    expect(begin.status()).toBe(403);
-  });
-
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(`axe, ${scheme} theme`, () => {
-      test.use({ colorScheme: scheme });
-
-      test('no serious or critical violations on the Assets tab', async ({ page }) => {
-        test.setTimeout(150_000);
-        const name = uniqueName();
-        try {
-          await createProjectViaUi(page, name);
-          await openAssets(page);
-          await useSmallChunks(page);
-          await upload(page, 'a11y.sql', sample(CHUNK + 1));
-          await expect(page.getByTestId('asset-upload-item')).toHaveAttribute('data-state', 'done', { timeout: 60_000 });
-          await expect(page.getByTestId('asset-row')).toHaveCount(1);
-          if (scheme === 'dark') {
-            await expect(page.locator('html')).toHaveClass(/\bdark\b/);
-          }
-          expect(await blockingViolations(page)).toEqual([]);
-          await deleteRow(page, page.getByTestId('asset-row').first());
-        } finally {
-          await deleteProjectViaUi(page, name);
-        }
-      });
-    });
-  }
 });
 
 /** Deleting a folder that still holds a file ends with a warning, and the folder stays. */

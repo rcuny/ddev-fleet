@@ -13,6 +13,8 @@ Environment=HOME=/home/fleet
 WorkingDirectory=/opt/ddev-fleet/app
 ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:instance:watch --interval=10
 Restart=always
+# FLE-167: it revives per-instance ssh-agents (container_ssh); a restart of the watcher must not take them down.
+KillMode=process
 RestartSec=5
 # Same sandbox as the worker (see fleet-worker@.service for what is deliberately not set).
 ProtectSystem=full

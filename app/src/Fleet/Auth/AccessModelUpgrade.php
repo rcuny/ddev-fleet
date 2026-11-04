@@ -30,6 +30,14 @@ final readonly class AccessModelUpgrade
     }
 
     /**
+     * The warning of the last prepare() (over-long instance ids it skipped), once.
+     */
+    public function takeWarning(): ?string
+    {
+        return $this->sites->takeWarning();
+    }
+
+    /**
      * @return int the number of instance sites rewritten
      *
      * @throws \RuntimeException when users.yml cannot be written or a site cannot be rewritten: do not install Authelia

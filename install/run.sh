@@ -22,8 +22,16 @@ main() {
   # shellcheck source=lib/common.sh
   . "$INSTALL_DIR/lib/common.sh"
 
+  # shellcheck source=lib/preflight.sh
+  . "$INSTALL_DIR/lib/preflight.sh"
+
   parse_args "$@"
   check_root
+  if [ "$PREFLIGHT_ONLY" = 1 ]; then
+    # Reads only; the OS and every other finding are reported as lines, never die().
+    preflight_run || exit "$?"
+    exit 0
+  fi
   check_os
   check_install_dir
 
@@ -48,6 +56,12 @@ main() {
 
   STEP_NAME=preflight
   printf '[preflight] domain %s, ref %s\n' "$DOMAIN" "$REF"
+  # A BLOCK stops the run here, before anything is installed (step 10 is the first change).
+  if is_dry; then
+    printf 'dry-run: pre-flight checks not run (bash install/run.sh --preflight ... runs them)\n'
+  else
+    preflight_run || die "$EX_PREFLIGHT" "the pre-flight checks blocked the run (BLOCK lines above); nothing was changed"
+  fi
   check_dns "$DOMAIN"
 
   local step name

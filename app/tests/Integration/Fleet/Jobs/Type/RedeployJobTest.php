@@ -34,7 +34,7 @@ final class RedeployJobTest extends InstanceJobTestCase
         $this->redeploy(['template' => 'full', 'force' => false]);
 
         self::assertFileDoesNotExist($dir.'/index.php');
-        self::assertSame(['caddy validate', 'ddev delete', 'git clone', 'caddy validate', 'caddy reload', 'ddev start', 'ddev init', 'git rev-parse'], $this->commandNames());
+        self::assertSame(['caddy validate', 'ddev delete', 'git clone', 'git config', 'caddy validate', 'caddy reload', 'ddev start', 'ddev init', 'git rev-parse'], $this->commandNames());
         $clone = $this->runner->callsMatching(['git'])[0]->argv;
         self::assertContains('feature/x', $clone);
         self::assertSame(InstanceState::Running, $instance->state());

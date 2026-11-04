@@ -318,7 +318,9 @@ final class FleetPathsTest extends TestCase
 
         self::assertSame(59, \strlen($id));
         self::assertSame('/etc/caddy/fleet/instances/'.$id.'.conf', $paths->instanceSiteFile($id));
+        // FLE-146: an existing id from before the cap (up to 63 characters) still has a site file to remove.
+        self::assertSame('/etc/caddy/fleet/instances/'.$id.'cccc.conf', $paths->instanceSiteFile($id.'cccc')); // 63
         $this->expectException(\InvalidArgumentException::class);
-        $paths->instanceSiteFile($id.'c'); // 64
+        $paths->instanceSiteFile($id.'ccccc'); // 64
     }
 }

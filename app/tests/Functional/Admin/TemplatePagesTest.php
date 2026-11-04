@@ -173,6 +173,44 @@ final class TemplatePagesTest extends AdminTestCase
         self::assertNotNull($crawler->filter('main form[data-testid=template-form]')->attr('novalidate'));
     }
 
+    public function testWhitespaceOnlyFieldsAreEmptyAndTheListIsOrderedByName(): void
+    {
+        $crawler = $this->open(self::LIST.'/new');
+        $this->submit($crawler, 'Create template', [
+            'template[name]' => 'blank',
+            'template[drupalEnv]' => '   ',
+            'template[postDeploy]' => " \n\t\n  ",
+            'template[tty1]' => "\n\n",
+            'template[tty2]' => '  ',
+        ]);
+        self::assertResponseRedirects(self::LIST, 303);
+        $template = $this->stored('blank') ?? self::fail('the template is stored');
+        self::assertNull($template->drupalEnv());
+        self::assertSame([], $template->postDeploy());
+        self::assertSame([], $template->tty1());
+        self::assertSame([], $template->tty2());
+
+        $this->makeTemplate('bare');
+        $rows = $this->open(self::LIST)->filter('[data-testid=template-row]');
+        self::assertSame(['bare', 'blank'], $rows->each(static fn (Crawler $row): string => trim($row->filter('[data-testid=template-name]')->text())));
+        foreach (['template-env' => '-', 'template-post-deploy' => '0', 'template-tty1' => '0', 'template-tty2' => '0'] as $cell => $text) {
+            self::assertSame($text, trim($rows->eq(1)->filter('[data-testid='.$cell.']')->text()), $cell);
+        }
+    }
+
+    public function testCancelAndTheBackLinkLeaveForTheListWithoutSaving(): void
+    {
+        $this->makeTemplate('full', new TemplateInput('full', 'dev'));
+
+        foreach ([self::LIST.'/new', self::LIST.'/full'] as $path) {
+            $crawler = $this->open($path);
+            self::assertSame(self::LIST, $crawler->filter('main a:contains("Cancel")')->attr('href'), $path);
+            self::assertSame(self::LIST, $crawler->filter('main a:contains("Templates")')->first()->attr('href'), $path);
+        }
+        self::assertSame(1, $this->templateCount());
+        self::assertSame('dev', ($this->stored('full') ?? self::fail())->drupalEnv());
+    }
+
     // --- edit
 
     public function testEditShowsTheStoredLinesAndSaves(): void
@@ -203,6 +241,26 @@ final class TemplatePagesTest extends AdminTestCase
         self::assertSame([], $template->tty1());
         self::assertSame(['htop'], $template->tty2());
         self::assertStringContainsString('Template saved.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+    }
+
+    public function testSavingEmptyFieldsClearsEveryOptionalValue(): void
+    {
+        $this->makeTemplate('full', new TemplateInput('full', 'dev', ['composer install'], ['one'], ['two']));
+
+        $crawler = $this->open(self::LIST.'/full');
+        $this->submit($crawler, 'Save', ['template[drupalEnv]' => '', 'template[postDeploy]' => '', 'template[tty1]' => '', 'template[tty2]' => '']);
+
+        self::assertResponseRedirects(self::LIST, 303);
+        $template = $this->stored('full') ?? self::fail();
+        self::assertNull($template->drupalEnv());
+        self::assertSame([], $template->postDeploy());
+        self::assertSame([], $template->tty1());
+        self::assertSame([], $template->tty2());
+        $crawler = $this->client->followRedirect();
+        self::assertStringContainsString('Template saved.', $crawler->filter('[data-testid=flashes]')->text());
+        $row = $crawler->filter('[data-testid=template-row]')->first();
+        self::assertSame('-', trim($row->filter('[data-testid=template-env]')->text()));
+        self::assertSame('0', trim($row->filter('[data-testid=template-post-deploy]')->text()));
     }
 
     public function testTheNameCannotBeChangedByACraftedRequest(): void
@@ -394,7 +452,7 @@ final class TemplatePagesTest extends AdminTestCase
         self::assertResponseRedirects(self::LIST, 303);
         self::assertNotNull($this->stored('full'));
         $crawler = $this->client->followRedirect();
-        self::assertStringContainsString('default template', $crawler->filter('[data-testid=flashes]')->text());
+        self::assertStringContainsString('The template was not deleted. This is the default template of the project: choose another default template first.', $crawler->filter('[data-testid=flashes]')->text());
         self::assertSame('full', trim($crawler->filter('[data-testid=template-default]')->ancestors()->filter('[data-testid=template-name]')->text()));
         self::assertSame('full', $this->project()->defaultTemplate());
 

@@ -97,6 +97,10 @@ final class HostRenderCommand extends Command
                 // Before Authelia gets the relaxed rule: the sites of running instances must check the project group
                 // first. A failure stops here, so the old per-project rules stay installed (fail closed).
                 $rewritten = $this->upgrade->prepare($host);
+                $notice = $this->upgrade->takeWarning();
+                if (null !== $notice) {
+                    $errors->warning($notice);
+                }
                 if ($rewritten > 0) {
                     $io->writeln(\sprintf('Project access check written to %d instance site(s).', $rewritten));
                 }

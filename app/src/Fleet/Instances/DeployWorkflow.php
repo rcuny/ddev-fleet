@@ -23,6 +23,8 @@ use App\Fleet\Secrets\TokenRenderer;
 use App\Fleet\Secrets\UnresolvedTokens;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunnerException;
+use App\Fleet\Ssh\AtomicFile;
+use App\Fleet\Ssh\InstanceSshAgent;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 
@@ -52,6 +54,7 @@ final class DeployWorkflow
         private readonly InstanceSiteWriter $sites,
         private readonly Teardown $teardown,
         private readonly FleetPaths $paths,
+        private readonly InstanceSshAgent $agent,
         private readonly JobFeed $feed,
         private readonly ClockInterface $clock,
         #[AutowireIterator('fleet.deploy_step')]
@@ -138,6 +141,16 @@ final class DeployWorkflow
             throw new JobFailed('git clone did not finish: '.$e->getMessage());
         }
         $this->requireSuccess('git clone', $cloned);
+        try {
+            $this->requireSuccess('git ssh setup', $this->git->configureSsh($dir));
+        } catch (CommandRunnerException $e) {
+            throw new JobFailed('git ssh setup did not finish: '.$e->getMessage());
+        }
+        try {
+            $sshKnownHosts = $this->git->writeContainerKnownHosts($dir);
+        } catch (\RuntimeException $e) {
+            throw new JobFailed($e->getMessage());
+        }
 
         // 4. What fleet adds to the checkout, kept out of the project's git status.
         $written = [$this->config->write($instance, $project, $dir)];
@@ -146,6 +159,8 @@ final class DeployWorkflow
             EnvFile::setVar($dir.'/.env', 'DRUPAL_ENV', $template->drupalEnv());
             $written[] = '.env';
         }
+        $written[] = $sshKnownHosts;
+        array_push($written, ...$this->setUpContainerAgent($instance, $project, $dir, $log));
         GitExclude::add($dir, $written);
 
         $context = new DeployContext($instance, $project, $dir, $tokens, $log, $this->secrets);
@@ -242,5 +257,38 @@ final class DeployWorkflow
         if (!$result->isSuccess()) {
             throw new JobFailed(\sprintf('%s failed with exit code %d', $what, $result->exitCode), $result->exitCode);
         }
+    }
+
+    /**
+     * Ruling (FLE-145): only a project that opted in (`containerSsh`) gets an agent, and only that instance's container
+     * mounts its socket; nothing is ever loaded into DDEV's host-wide agent. An agent that cannot be started fails the
+     * deploy (an agent instance that cannot push would only find out after its work); a host without a push key only logs.
+     *
+     * @return list<string> files added to the checkout, relative to $dir
+     */
+    private function setUpContainerAgent(Instance $instance, Project $project, string $dir, JobLog $log): array
+    {
+        if (!$project->containerSsh()) {
+            // Opted out (FLE-167): a redeploy drops what an earlier opted-in deploy left behind.
+            if ($this->agent->cleanUp($instance->id(), $dir)) {
+                $log->line('removed the ssh-agent and its compose override: this project no longer uses container_ssh');
+            }
+
+            return [];
+        }
+        if (!$this->agent->hasKey()) {
+            $log->line('warning: the project asks for git over SSH in the container, but the host has no push key; no ssh-agent was started');
+
+            return [];
+        }
+        try {
+            $this->agent->start($instance->id());
+            AtomicFile::write($dir.'/'.InstanceSshAgent::OVERRIDE_FILE, $this->agent->composeOverride($instance->id()), 0o640);
+        } catch (\RuntimeException $e) {
+            throw new JobFailed('ssh-agent setup failed: '.$e->getMessage());
+        }
+        $log->line('started a dedicated ssh-agent for this instance (push key, '.InstanceSshAgent::KEY_LIFETIME.' s)');
+
+        return [InstanceSshAgent::OVERRIDE_FILE];
     }
 }

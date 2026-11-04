@@ -12,7 +12,7 @@ final class AppShellTest extends WebTestCase
 {
     private KernelBrowser $client;
 
-    private const array ADMIN_LABELS = ['Home', 'Instances', 'Projects', 'Jobs', 'Webhooks', 'Schedules', 'Secrets', 'Users', 'Settings', 'Design system'];
+    private const array ADMIN_LABELS = ['Home', 'Instances', 'Projects', 'Jobs', 'Webhooks', 'Schedules', 'Secrets', 'Users', 'Settings', 'Upgrade', 'Design system'];
 
     public function testAdminShellLandmarks(): void
     {
@@ -132,7 +132,7 @@ final class AppShellTest extends WebTestCase
         $more = $crawler->filter('#more-sheet');
         self::assertCount(1, $more);
         self::assertSame(
-            ['Projects', 'Webhooks', 'Schedules', 'Secrets', 'Users', 'Settings', 'Design system'],
+            ['Projects', 'Webhooks', 'Schedules', 'Secrets', 'Users', 'Settings', 'Upgrade', 'Design system'],
             $this->texts($crawler, '#more-sheet [data-more-item]'),
         );
         self::assertStringContainsString('Dev Admin', $more->filter('[data-testid=more-identity]')->text());

@@ -11,7 +11,7 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 final class NavigationCatalogTest extends TestCase
 {
-    private const array KEYS = ['home', 'instances', 'projects', 'jobs', 'webhooks', 'schedules', 'secrets', 'users', 'settings', 'design-system'];
+    private const array KEYS = ['home', 'instances', 'projects', 'jobs', 'webhooks', 'schedules', 'secrets', 'users', 'settings', 'upgrade', 'design-system'];
 
     public function testKeysAreInTheDocumentedOrder(): void
     {
@@ -90,8 +90,21 @@ final class NavigationCatalogTest extends TestCase
             'secrets' => null,
             'users' => null,
             'settings' => null,
+            'upgrade' => null,
             'design-system' => null,
         ], $milestones);
+    }
+
+    public function testTheMostSpecificDestinationIsTheCurrentOne(): void
+    {
+        $catalog = $this->catalog(['ROLE_USER', 'ROLE_ADMIN']);
+        $byKey = $this->byKey();
+
+        self::assertTrue($catalog->isCurrent($byKey['settings'], '/admin/host'));
+        self::assertFalse($catalog->isCurrent($byKey['upgrade'], '/admin/host'));
+        self::assertTrue($catalog->isCurrent($byKey['upgrade'], '/admin/host/upgrade'));
+        self::assertFalse($catalog->isCurrent($byKey['settings'], '/admin/host/upgrade'));
+        self::assertTrue($catalog->isCurrent($byKey['instances'], '/instances/abc'));
     }
 
     public function testForCurrentUserFiltersByGrantedRole(): void

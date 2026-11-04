@@ -313,5 +313,6 @@ final readonly class ProjectService
         $project->changeIssueIdRegexp($input->issueIdRegexp, $now);
         $project->changeDisplaySubmoduleBranch($input->displaySubmoduleBranch, $now);
         $project->changeTypesense($input->typesense, $now);
+        $project->changeContainerSsh($input->containerSsh, $now);
     }
 }

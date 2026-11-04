@@ -30,7 +30,7 @@ What the numbers include:
 | Suite | Where | Notes |
 |---|---|---|
 | PHPUnit `Unit`, `Integration`, `Functional`, `Repo` | `app/tests/<Suite>/` | `Repo` tests skip without their tool: `FLEET_CADDY_BIN`, `FLEET_MERCURE_BIN`, or when not run as root (one test only runs as root) |
-| Playwright | `tests/playwright/` | each spec runs on the `desktop` and the `phone` project where it applies (`projects.spec.ts` has phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-instances.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL`, `FLEET_LIVE_ADMIN_PASSWORD` and `FLEET_LIVE_GIT_URL`, a public DDEV repository; it deploys and destroys real instances) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| Playwright | `tests/playwright/` | every spec runs on the `desktop` project; the `phone` project is **opt-in** (FLE-159) and runs only the tests tagged `@phone` (layout at 390 px, tap targets, phone-only behaviour; every test of a `*.phone.spec.ts` file carries the tag on its describe). To give a test a phone run, put `@phone` in its title; a new phone-only spec is named `<topic>.phone.spec.ts` with `@phone` on its describe. Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-instances.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL`, `FLEET_LIVE_ADMIN_PASSWORD` and `FLEET_LIVE_GIT_URL`, a public DDEV repository; it deploys and destroys real instances) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | a test skips when an optional binary is missing |
 
 ## Layout
@@ -60,10 +60,13 @@ tests/playwright/    TypeScript @playwright/test, its own npm package
   playwright.config.ts   projects "desktop" (1280 px) and "phone" (390 px); starts the app unless FLEET_E2E_BASE_URL is set
   support/               env.ts, start-app.mjs (the self-started app), shell.ts, standIn.ts, axe.ts, wizard.ts,
                          projects.ts (unique names, create/delete a project through the UI, Turbo-safe navigation)
-  *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (axe, both themes),
+  *.spec.ts              shell, design-system, nav.desktop, nav.phone, dark-mode, a11y (the axe sweep, see below),
                          setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
-                         assets (the Assets tab: chunked upload, resume, download, delete, folders, axe),
-                         import-export (a project's Export download, then Projects → Import: upload, preview table, confirm, axe),
+                         assets (the Assets tab: chunked upload, resume, download, delete, folders),
+                         import-export (a project's Export download, then Projects → Import: upload, preview table, confirm),
+                         (the import/export and setup-wizard refusal matrices run as PHPUnit Functional:
+                         ProjectTransferMatrixTest, Setup/SetupFieldMatrixTest, Setup/SetupLinkRefusalTest; the browser keeps
+                         download, upload, confirm, layout at 390 px and the wizard walk),
                          secrets (fleet-wide and project secrets, reveal, audit log)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
@@ -102,7 +105,7 @@ npx playwright show-report                         # the HTML report of the last
 **Tiers (`FLEET_PW_TIER`, FLE-126).** `full` (the default, also when the variable is unset) runs every spec: the
 documented gate and what Fleet CI runs on `release/*`, `develop` and nightly. `quick` is the Fleet CI merge gate on
 `feature/*` and `renovate/*`: project `desktop` without `*-coverage.spec.ts`, `projects-validation.spec.ts` and
-`templates-validation.spec.ts`, project `phone` limited to `@smoke` tests (about 250 tests instead of 1300). Any other
+`templates-validation.spec.ts` and the axe sweep (`a11y*.spec.ts`, `users-a11y.desktop.spec.ts`: full tier only), project `phone` limited to tests tagged both `@phone` and `@smoke` (about 160 tests instead of 1000; counts: `npx playwright test --list`). Any other
 value is an error. No test is removed; `npx playwright test --list` shows what a tier runs.
 
 With `FLEET_E2E_BASE_URL` unset, Playwright starts the app itself (`support/start-app.mjs`: a throw-away
@@ -111,17 +114,24 @@ written to `.run/setup-url.txt`, `php -S 127.0.0.1:8000`) and stops it afterward
 (`FLEET_E2E_IGNORE_HTTPS_ERRORS=1` accepts a local certificate; `*.ddev.site` hosts are accepted
 automatically). Other variables: `FLEET_E2E_PORT` (default 8000) and `FLEET_PHP` (the PHP binary of the
 launcher). `setup-wizard.desktop.spec.ts` walks the token-gated setup wizard once, in order, in one browser session (refusal without
-a cookie, token exchange and its Strict cookie, every step at 1280 px with axe in both themes, the real walk-through at 390 px
+a cookie, token exchange and its Strict cookie, every step at 1280 px, the real walk-through at 390 px
 ending in Finish, then what every wizard URL answers). It needs a host that is installed but not set up, which only the
 self-started app provides, so it skips itself against an external server (the companion's served app keeps a persistent
 `FLEET_HOME`). `support/wizard.ts` (`completeWizard`, `readSetupUrl`) is shared with a live-server spec; `FLEET_LIVE_SETUP_URL`
 overrides the link file. Each run re-creates the setup link and clears the token-attempt throttle (`cache.rate_limiter`).
+**Axe sweep (FLE-158).** Feature specs carry no axe call. `support/axe.ts` (`expectNoBlockingViolations`: WCAG 2 A/AA,
+serious and critical, light then dark) is called only from the `a11y*.spec.ts` family, one test per page state, including
+the 422 error states, dialogs and warning states: `a11y.spec.ts` (four base pages), `a11y-projects`, `users-a11y`
+(users, secrets, schedules, webhooks), `a11y-instances` (instances, jobs, assets, audit), `a11y-host` (host settings
+tabs, reboot banner), `a11y-setup` (setup wizard, own host per test), all `.desktop.spec.ts`, and `a11y-phone.phone.spec.ts`
+(the shell destinations and the instance and job pages at 390 px). A new page or error state gets a sweep test, not an
+inline axe call. At phone width axe now runs only on the ten shell destinations and the instance and job pages (`a11y-phone.phone.spec.ts`); the other phone checks are layout (overflow, 44 px targets) only. Text-length variants are not swept (axe does not depend on text length); overflow stays in the feature specs.
 `projects.spec.ts` creates its own data: every test owns a project with a unique name (`uniqueName()`) and deletes it
 in `finally`, so it passes repeatedly against the shared dev database of the companion and in parallel. It covers the
 list, create, edit, templates, ports and delete dialog at both widths, the member 403, the issue id tester, and (phone
-project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets and axe in both
-themes. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
+project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
 the controller answers, because a busy host loads them after the HTML is interactive.
+`project-ports.spec.ts` is the browser side of the named-port catalogue and the Ports tab (layout at 390 px, axe, tap targets, the 422 state); the rules, every field message, the command line and the tab's HTTP behaviour (assign, forged posts, access) are PHPUnit: `NamedPortInputTest`, `NamedPortServiceTest`, `PortCommandsTest` and `ProjectPagesTest::testPortsTab*`. It replaces the former `named-ports` and `project-ports-full` specs (FLE-160).
 `assets.spec.ts` (FLE-52, written without a browser to run it in: first run it on the pipeline) uploads files through the page
 with `setInputFiles` after lowering the chunk size to 64 KiB (the controller reads `data-asset-upload-chunk-size-value` when an
 upload starts), so a 192 KiB file travels as four requests; it compares the sha256 the server shows with the one it computed,

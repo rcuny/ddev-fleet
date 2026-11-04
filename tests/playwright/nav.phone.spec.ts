@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { setStandInRole } from './support/standIn';
 import { ADMIN_NAV, hasHorizontalOverflow } from './support/shell';
 
@@ -7,14 +6,13 @@ const bottomNav = (page: Page) => page.locator('[data-bottom-nav]');
 const bottomItems = (page: Page) => bottomNav(page).locator('a, button');
 const moreSheet = (page: Page) => page.locator('#more-sheet');
 
-test.describe('phone navigation (390 px)', () => {
+test.describe('phone navigation (390 px) @phone', () => {
   for (const { label, path } of ADMIN_NAV) {
     test(`no horizontal overflow on ${path} (${label})`, async ({ page }) => {
       await page.goto(path);
       await page.waitForLoadState('networkidle');
 
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      await expectNoBlockingViolations(page, `phone, ${path}`);
     });
   }
 

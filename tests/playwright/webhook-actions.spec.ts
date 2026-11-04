@@ -2,7 +2,6 @@ import { createHmac } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { expect, test, type Page } from '@playwright/test';
 import { fileURLToPath } from 'node:url';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
@@ -48,7 +47,7 @@ async function createBitbucketSecret(page: Page, project: string): Promise<strin
 }
 
 test.describe('webhook actions', () => {
-  test('the pipeline token is set, replaced and removed, and never shown again', async ({ page }) => {
+  test('the pipeline token is set, replaced and removed, and never shown again @phone', async ({ page }) => {
     const project = uniqueName('wa');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);
@@ -66,7 +65,6 @@ test.describe('webhook actions', () => {
       const input = card.getByTestId('webhook-token-input');
       await expect(input).toHaveAttribute('type', 'password');
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      expect(await blockingViolations(page)).toEqual([]);
       if (isPhone()) {
         for (const control of [input, card.getByTestId('webhook-token-save')]) {
           const box = await control.boundingBox();
@@ -80,7 +78,6 @@ test.describe('webhook actions', () => {
       await expect(page.getByTestId('flashes')).toContainText('The pipeline token is saved');
       await expect(card.getByTestId('webhook-token-state')).toContainText('Pipeline token set');
       expect(await page.content()).not.toContain('ATCTT-playwright-token-1');
-      expect(await blockingViolations(page)).toEqual([]);
 
       await card.getByText('Replace the pipeline token').click();
       await card.getByTestId('webhook-token-input').fill('ATCTT-playwright-token-2');
@@ -98,7 +95,7 @@ test.describe('webhook actions', () => {
     }
   });
 
-  test('a delivery shows its outcome and both pages filter by source and outcome', async ({ page }) => {
+  test('a delivery shows its outcome and both pages filter by source and outcome @phone', async ({ page }) => {
     const project = uniqueName('wa');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);
@@ -132,7 +129,6 @@ test.describe('webhook actions', () => {
         await expect(failedRow.getByTestId('delivery-decision')).toContainText('run pipeline renovate-merge on develop');
       }
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      expect(await blockingViolations(page)).toEqual([]);
 
       // Filters on the project page.
       await page.getByLabel('Outcome').selectOption('failed');
@@ -152,7 +148,6 @@ test.describe('webhook actions', () => {
       await expect(page.getByLabel('Source')).toHaveValue('bitbucket');
       await expect(page.getByLabel('Outcome')).toHaveValue('ignored');
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      expect(await blockingViolations(page)).toEqual([]);
       expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);

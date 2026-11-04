@@ -24,7 +24,7 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         $tmux = new Tmux($this->tmuxRunner, $this->paths, '/opt/ddev-fleet/app/bin/console');
         $this->steps[] = $this->step = new TmuxWindowStep($tmux, $this->templates);
         // The destroy side talks to the same tmux.
-        $this->teardown = new \App\Fleet\Instances\Teardown($this->paths, $this->ddev, $this->sites, $tmux);
+        $this->teardown = new \App\Fleet\Instances\Teardown($this->paths, $this->ddev, $this->sites, $tmux, $this->agent);
     }
 
     /**
@@ -149,8 +149,9 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
 
         self::assertSame(['acme--main'], $this->tmuxRunner->windows);
         self::assertSame(['echo hi', 'echo hi'], $this->tmuxRunner->typedIn('tty2'), 'typed once per deploy');
-        $kills = array_filter($this->tmuxRunner->argvs, static fn (array $a): bool => 'kill-window' === ($a[3] ?? ''));
-        self::assertNotSame([], $kills, 'the old window was closed');
+        $verbs = array_column($this->tmuxRunner->argvs, 3);
+        self::assertContains('respawn-pane', $verbs, 'the panes were respawned in place');
+        self::assertNotContains('kill-window', $verbs, 'the window (and its tab index) stays');
     }
 
     public function testAWindowCreatedByAReconcileDuringTheDeployStillGetsItsCommandsTyped(): void
@@ -158,6 +159,7 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         $this->template(['echo one'], ['echo two']);
         // fleet:tmux:ensure ran while the deploy was in progress and opened a plain-shell window for the checkout.
         $this->tmuxRunner->windows = ['acme--main'];
+        $this->tmuxRunner->panes['acme--main'] = [['id' => '%90', 'role' => 'sidebar'], ['id' => '%91', 'role' => ''], ['id' => '%92', 'role' => '']];
 
         $job = $this->deploy();
 

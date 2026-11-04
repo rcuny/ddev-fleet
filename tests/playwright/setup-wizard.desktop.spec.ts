@@ -1,5 +1,4 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { blockingViolations } from './support/axe';
 import { baseURL, externalBaseURL, ignoreHTTPSErrors } from './support/env';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { completeWizard, readSetupUrl, type WizardStepName } from './support/wizard';
@@ -78,7 +77,6 @@ test('a wizard route without a cookie is refused', async ({ browser }) => {
     expect((await strangerPage.goto('/setup?token=not-the-token'))?.status()).toBe(403);
     await expect(strangerPage.getByRole('heading', { level: 1, name: 'Setup link needed' })).toBeVisible();
     expect(await strangerPage.content()).not.toContain('Create the administrator');
-    expect(await blockingViolations(strangerPage)).toEqual([]);
   } finally {
     await stranger.close();
   }
@@ -111,7 +109,7 @@ test('the setup link starts a session: the cookie survives the redirect and the 
 });
 
 for (const scheme of ['light', 'dark'] as const) {
-  test(`every step fits at desktop width and has no serious or critical axe violation, ${scheme} theme`, async () => {
+  test(`every step fits at desktop width, ${scheme} theme`, async () => {
     await page.setViewportSize(DESKTOP);
     await page.emulateMedia({ colorScheme: scheme });
 
@@ -122,7 +120,6 @@ for (const scheme of ['light', 'dark'] as const) {
         await expect(page.locator('html')).toHaveClass(/\bdark\b/);
       }
       await expectNoHorizontalOverflow(page, `${path} (${scheme})`);
-      expect(await blockingViolations(page), `${path} (${scheme})`).toEqual([]);
     }
 
     // Finish is not reachable before the earlier steps are done: it sends the visitor to the first open one.
@@ -147,7 +144,6 @@ test('the administrator step refuses a short password and keeps nothing', async 
   await expect(page.getByRole('alert').or(page.locator('[id$="_errors"], .text-destructive')).first()).toBeVisible();
   await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
   await expectNoHorizontalOverflow(page, 'the admin step with an error');
-  expect(await blockingViolations(page)).toEqual([]);
 
   // Chromium logs a form answered with 422 as a failed resource load; that is the refusal itself, not a page error.
   expect(errors.splice(0)).toEqual([expect.stringContaining('status of 422')]);
@@ -165,7 +161,6 @@ test('the wizard completes at phone width; public keys are visible and copyable'
       seen.push(step);
       await current.waitForLoadState('networkidle');
       await expectNoHorizontalOverflow(current, `the ${step} step at 390 px`);
-      expect(await blockingViolations(current), `axe on the ${step} step`).toEqual([]);
 
       if ('ssh' === step) {
         // Both public keys are on the page in full, and Copy puts exactly the visible text on the clipboard.
@@ -215,7 +210,6 @@ test('after finish every wizard URL says setup is complete', async ({ browser })
     await complete(page, path);
   }
   await expectNoHorizontalOverflow(page, 'the complete page at 390 px');
-  expect(await blockingViolations(page)).toEqual([]);
 
   const stranger = await newContext(browser);
   try {

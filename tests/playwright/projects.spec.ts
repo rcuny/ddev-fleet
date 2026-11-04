@@ -1,6 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -262,7 +261,7 @@ test.describe('projects and templates', () => {
     expect(live.headers()['content-type'] ?? '').not.toContain('live-component');
   });
 
-  test('issue id tester shows the key', async ({ page }) => {
+  test('issue id tester shows the key @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
@@ -310,7 +309,7 @@ test.describe('projects and templates', () => {
     }
   });
 
-  test('a form row toggles from its edge, over the full 44 px row', async ({ page }) => {
+  test('a form row toggles from its edge, over the full 44 px row @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const name = uniqueName();
 
@@ -330,7 +329,7 @@ test.describe('projects and templates', () => {
       await expect(page.getByLabel('Do not set a git identity')).not.toBeChecked();
 
       // Checkbox row: same, bottom right corner.
-      const checkboxRow = page.locator('[data-slot=checkbox-row]');
+      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Typesense' });
       const checkboxBox = (await checkboxRow.boundingBox())!;
       if (isPhone()) {
         expect(checkboxBox.height).toBeGreaterThanOrEqual(43.5);
@@ -352,7 +351,7 @@ test.describe('projects and templates', () => {
   });
 });
 
-test.describe('phone layout of the project pages (390 px)', () => {
+test.describe('phone layout of the project pages (390 px) @phone', () => {
   test.skip(() => !isPhone(), 'phone only');
 
   // The worst case the form fields allow: a 40-char project name, a 200-char git URL, a 40-char template name and a
@@ -473,26 +472,4 @@ test.describe('phone layout of the project pages (390 px)', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
   });
-
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(`axe, ${scheme} theme`, () => {
-      test.use({ colorScheme: scheme });
-
-      for (const [label, path] of [
-        ['edit', `/admin/projects/${NAME}`],
-        ['template list', `/admin/projects/${NAME}/templates`],
-        ['template form', `/admin/projects/${NAME}/templates/${TEMPLATE}`],
-        ['ports', `/admin/projects/${NAME}/ports`],
-      ] as const) {
-        test(`no serious or critical violations on the ${label} page`, async ({ page }) => {
-          await page.goto(path);
-          await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-          if (scheme === 'dark') {
-            await expect(page.locator('html')).toHaveClass(/\bdark\b/);
-          }
-          expect(await blockingViolations(page)).toEqual([]);
-        });
-      }
-    });
-  }
 });

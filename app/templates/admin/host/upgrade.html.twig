@@ -1,0 +1,149 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Upgrade · {{ parent() }}{% endblock %}
+
+{% block content %}
+    {% set latest = status.latest %}
+    {% set catalog = status.catalog %}
+    <twig:PageHeader title="Upgrade" description="Which version this host runs, what the newest release brings, and the command that upgrades it." />
+
+    <div class="mt-6 grid max-w-2xl gap-4">
+        <twig:Card data-testid="upgrade-versions">
+            <twig:Card:Header>
+                <twig:Card:Title>Versions</twig:Card:Title>
+                <twig:Card:Description>
+                    {% if status.isBehind %}
+                        A newer release is available.
+                    {% elseif latest is not null and status.installedVersion is not null %}
+                        This host is up to date.
+                    {% elseif latest is not null %}
+                        This host runs a branch build, so it cannot be compared with a release.
+                    {% else %}
+                        The releases have not been looked up yet.
+                    {% endif %}
+                </twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content class="grid gap-4">
+                <dl class="grid gap-4 sm:grid-cols-2">
+                    <div>
+                        <dt class="text-sm text-ink-muted">Installed</dt>
+                        <dd><strong data-testid="upgrade-installed" class="[overflow-wrap:anywhere]">{{ status.installed }}</strong></dd>
+                    </div>
+                    <div>
+                        <dt class="text-sm text-ink-muted">Latest release</dt>
+                        <dd>
+                            {% if latest is not null %}
+                                <strong data-testid="upgrade-latest">{{ latest.tag }}</strong>
+                                {% if status.isBehind %}<twig:Badge class="ms-1" data-testid="upgrade-behind">update available</twig:Badge>{% endif %}
+                            {% else %}
+                                <span class="text-ink-muted" data-testid="upgrade-latest">Unknown</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+                </dl>
+
+                <p class="text-sm text-ink-muted" data-testid="upgrade-checked">
+                    {% if catalog.checkedAt is null %}
+                        No release lookup has run on this host yet.
+                    {% else %}
+                        Last checked {{ catalog.checkedAt|date('Y-m-d H:i', 'UTC') }} UTC.
+                    {% endif %}
+                </p>
+
+                {% if catalog.error is not null %}
+                    <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="upgrade-offline">
+                        <twig:ux:icon name="lucide:triangle-alert" />
+                        <twig:Alert:Title>The last check failed</twig:Alert:Title>
+                        <twig:Alert:Description class="text-ink-body [overflow-wrap:anywhere]">
+                            {{ catalog.error }}.{% if latest is not null %} What is shown above comes from the last check that worked.{% endif %}
+                        </twig:Alert:Description>
+                    </twig:Alert>
+                {% endif %}
+
+                <form method="post" action="{{ path('upgrade_check') }}" data-testid="upgrade-check-form">
+                    <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+                    <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="upgrade-check-now">Check now</twig:Button>
+                </form>
+            </twig:Card:Content>
+        </twig:Card>
+
+        <twig:Card data-testid="upgrade-command">
+            <twig:Card:Header>
+                <twig:Card:Title>Upgrade command</twig:Card:Title>
+                <twig:Card:Description>The upgrade runs from a shell on the host, as root. This page never changes the host. Run the check first: it lists anything that would stop the upgrade.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content class="grid gap-4">
+                {% set commands = [{id: 'check', label: 'Check', text: 'fleet upgrade --check'}, {id: 'run', label: 'Upgrade', text: 'sudo fleet upgrade'}] %}
+                {% if latest is not null and status.isBehind %}
+                    {% set commands = commands|merge([{id: 'to', label: 'Upgrade to ' ~ latest.tag, text: 'sudo fleet upgrade --to ' ~ latest.tag}]) %}
+                {% endif %}
+                {% for command in commands %}
+                    <div class="grid gap-2" data-controller="clipboard">
+                        <twig:Label for="upgrade-cmd-{{ command.id }}">{{ command.label }}</twig:Label>
+                        <div class="flex gap-2">
+                            <twig:Input id="upgrade-cmd-{{ command.id }}" readonly value="{{ command.text }}" data-clipboard-target="source" data-testid="upgrade-cmd-{{ command.id }}" autocomplete="off" class="h-11 min-w-0 flex-1 font-mono text-xs md:h-8" />
+                            <twig:Button variant="outline" data-action="clipboard#copy" class="h-11 md:h-8" aria-label="Copy {{ command.text }}" data-testid="upgrade-copy-{{ command.id }}">Copy</twig:Button>
+                        </div>
+                        <p class="text-xs text-ink-muted"><span data-clipboard-target="status" aria-live="polite" class="text-brand-darker dark:text-brand"></span></p>
+                    </div>
+                {% endfor %}
+                <p class="text-sm text-ink-muted" data-testid="upgrade-preflight">The result of the last pre-flight check is not kept here yet: run <code>fleet upgrade --check</code> on the host to see it.</p>
+            </twig:Card:Content>
+        </twig:Card>
+
+        {% if status.isBehind %}
+            <twig:Card data-testid="upgrade-changes">
+                <twig:Card:Header>
+                    <twig:Card:Title>What changes</twig:Card:Title>
+                    <twig:Card:Description>From the changelog, up to {{ latest.tag }}.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content class="grid gap-4">
+                    {% if actions is not empty %}
+                        <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="upgrade-actions">
+                            <twig:ux:icon name="lucide:triangle-alert" />
+                            <twig:Alert:Title>Needs your action</twig:Alert:Title>
+                            <twig:Alert:Description class="text-ink-body">
+                                <ul class="mt-1 list-disc ps-5">
+                                    {% for action in actions %}
+                                        <li class="[overflow-wrap:anywhere]"><strong>{{ action.version }}:</strong> {{ action.text }}</li>
+                                    {% endfor %}
+                                </ul>
+                            </twig:Alert:Description>
+                        </twig:Alert>
+                    {% endif %}
+
+                    {% if excerpt is null %}
+                        <p class="text-sm text-ink-muted" data-testid="upgrade-changes-empty">The changelog has not been fetched yet. Use "Check now" while the host is online.</p>
+                    {% else %}
+                        {% for section in excerpt.sections %}
+                            <section data-testid="upgrade-section" aria-labelledby="upgrade-section-{{ loop.index }}">
+                                <h3 id="upgrade-section-{{ loop.index }}" class="text-base font-medium">{{ section.version }}{% if section.date %} <span class="text-sm font-normal text-ink-muted">{{ section.date }}</span>{% endif %}</h3>
+                                <div class="mt-2 text-sm whitespace-pre-wrap text-ink-body [overflow-wrap:anywhere]">{{ section.body }}</div>
+                                {% if not section.rollout.isEmpty %}
+                                    <h4 class="mt-3 text-sm font-medium">Rollout notes</h4>
+                                    <ul class="mt-1 list-disc ps-5 text-sm text-ink-body">
+                                        {% for note in section.rollout.notes %}
+                                            <li class="[overflow-wrap:anywhere]">{{ note }}</li>
+                                        {% endfor %}
+                                    </ul>
+                                {% endif %}
+                            </section>
+                        {% else %}
+                            <p class="text-sm text-ink-muted" data-testid="upgrade-changes-empty">The changelog lists nothing for these versions.</p>
+                        {% endfor %}
+                    {% endif %}
+                </twig:Card:Content>
+            </twig:Card>
+        {% endif %}
+
+        <twig:Card data-testid="upgrade-history">
+            <twig:Card:Header>
+                <twig:Card:Title>History</twig:Card:Title>
+                <twig:Card:Description>Earlier upgrades and rollbacks of this host.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <p class="text-sm text-ink-muted" data-testid="upgrade-history-empty">No history yet.</p>
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

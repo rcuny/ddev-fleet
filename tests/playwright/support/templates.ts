@@ -1,7 +1,4 @@
 import { expect, type Locator, type Page } from '@playwright/test';
-import { spawnSync } from 'node:child_process';
-import { randomInt } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { follow, submitAndWait } from './projects';
 
 export type TemplateFields = { name?: string; env?: string; postDeploy?: string; tty1?: string; tty2?: string };
@@ -47,33 +44,4 @@ export const templateRow = (page: Page, name: string): Locator =>
 
 export async function editTemplate(page: Page, project: string, name: string): Promise<void> {
   await follow(page, templateRow(page, name).getByRole('link', { name: `Edit ${name}` }));
-}
-
-/** Where the app under test keeps its data (as in snapshot.spec.ts). */
-function fleetHome(): string | undefined {
-  if (!process.env.FLEET_E2E_BASE_URL) {
-    return fileURLToPath(new URL('../.run/fleet-home', import.meta.url));
-  }
-  return process.env.FLEET_HOME;
-}
-
-export function canRunConsole(): boolean {
-  return fleetHome() !== undefined;
-}
-
-/** Runs `bin/console` of the app under test (the named-port catalogue has no web pages, only commands). */
-export function consoleRun(args: string[]): { status: number | null; output: string } {
-  const appDir = fileURLToPath(new URL('../../../app', import.meta.url));
-  const php = spawnSync('php8.4', ['-v'], { stdio: 'ignore' }).status === 0 ? 'php8.4' : 'php';
-  const result = spawnSync(php, ['bin/console', ...args, '--no-interaction'], {
-    cwd: appDir,
-    env: { ...process.env, APP_ENV: 'dev', FLEET_RUNNER: 'recording', FLEET_HOME: fleetHome() },
-    encoding: 'utf8',
-  });
-  return { status: result.status, output: `${result.stdout}${result.stderr}` };
-}
-
-/** Two free-looking port numbers for a catalogue entry of one test (random: the suite shares one catalogue). */
-export function randomPorts(): { pub: number; router: number } {
-  return { pub: randomInt(20000, 30000), router: randomInt(30001, 40000) };
 }

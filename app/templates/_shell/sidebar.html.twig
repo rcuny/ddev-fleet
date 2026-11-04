@@ -9,3 +9,7 @@
         {{ include('_shell/stand_in_switch.html.twig') }}
     </div>
 {% endif %}
+{% set upgrade_notice = include('_shell/upgrade_notice.html.twig') %}
+{% if upgrade_notice|trim is not empty %}
+    <div class="border-t border-hairline p-3">{{ upgrade_notice|raw }}</div>
+{% endif %}

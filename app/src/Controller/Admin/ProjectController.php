@@ -89,6 +89,7 @@ final class ProjectController extends AbstractController
                         issueIdRegexp: self::optionalText($data['issueIdRegexp'] ?? null),
                         displaySubmoduleBranch: self::optionalText($data['displaySubmoduleBranch'] ?? null),
                         typesense: true === ($data['typesense'] ?? false),
+                        containerSsh: true === ($data['containerSsh'] ?? false),
                     ));
                     $this->addFlash('success', 'Project created.');
                     $this->flashAccessWarning();
@@ -128,6 +129,7 @@ final class ProjectController extends AbstractController
                     'issueIdRegexp' => self::optionalText($data['issueIdRegexp'] ?? null),
                     'displaySubmoduleBranch' => self::optionalText($data['displaySubmoduleBranch'] ?? null),
                     'typesense' => true === ($data['typesense'] ?? false),
+                    'containerSsh' => true === ($data['containerSsh'] ?? false),
                 ]);
                 try {
                     $this->projects->update($name, $input);
@@ -295,6 +297,7 @@ final class ProjectController extends AbstractController
             'issueIdRegexp' => $project->issueIdRegexp(),
             'displaySubmoduleBranch' => $project->displaySubmoduleBranch(),
             'typesense' => $project->typesense(),
+            'containerSsh' => $project->containerSsh(),
         ];
     }
 

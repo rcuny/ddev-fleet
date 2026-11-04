@@ -1,0 +1,10 @@
+{# The installed version and, when a newer release is out, a badge linking to the Upgrade page. Administrators only (upgrade_status() is null for anyone else); reads the cache, never the network. #}
+{% set upgrade = upgrade_status() %}
+{% if upgrade is not null %}
+    <div class="flex flex-wrap items-center gap-2 text-sm text-ink-muted" data-testid="upgrade-notice">
+        <span data-testid="upgrade-notice-version" class="[overflow-wrap:anywhere]">{{ upgrade.installed }}</span>
+        {% if upgrade.isBehind %}
+            <twig:Badge as="a" href="{{ path('upgrade') }}" class="h-11 px-3 hover:no-underline md:h-6" data-testid="upgrade-notice-badge">{{ upgrade.latest.tag }} available</twig:Badge>
+        {% endif %}
+    </div>
+{% endif %}

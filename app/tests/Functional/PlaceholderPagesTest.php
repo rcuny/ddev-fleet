@@ -20,7 +20,7 @@ final class PlaceholderPagesTest extends WebTestCase
                 $adminPaths[] = $item->path;
             }
         }
-        self::assertCount(8, $adminPaths);
+        self::assertCount(9, $adminPaths);
 
         foreach ($adminPaths as $path) {
             $client->request('GET', $path, server: ['HTTP_X_FLEET_STAND_IN_ROLE' => 'member']);

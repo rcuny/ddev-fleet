@@ -52,7 +52,7 @@ export async function fillProject(page: Page, fields: ProjectFields): Promise<vo
   if (fields.typesense !== undefined) {
     const box = page.getByLabel('Run a Typesense search server for each instance');
     if ((await box.isChecked()) !== fields.typesense) {
-      await page.locator('[data-slot=checkbox-row]').click();
+      await page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Typesense' }).click();
     }
     await expect(box).toBeChecked({ checked: fields.typesense });
   }

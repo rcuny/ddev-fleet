@@ -59,7 +59,7 @@ final class BottomNav
         $entries = [];
         foreach ($this->catalog->forCurrentUser() as $item) {
             if ($item->primary === $primary) {
-                $entries[] = ['item' => $item, 'current' => $item->isCurrent($path)];
+                $entries[] = ['item' => $item, 'current' => $this->catalog->isCurrent($item, $path)];
             }
         }
 

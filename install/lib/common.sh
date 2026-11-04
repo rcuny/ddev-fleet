@@ -12,6 +12,7 @@
 
 # Exit codes (sysexits-style, plus 2 for DNS as documented in docs/installation.md).
 EX_DNS=2
+EX_PREFLIGHT=3
 EX_USAGE=64
 EX_TEMPFAIL=75
 EX_NOTROOT=77
@@ -67,6 +68,8 @@ REF=main
 REPO_URL=https://github.com/rcuny/ddev-fleet.git
 SKIP_DNS_CHECK=0
 SHELL_PROFILE=1
+# --preflight: run only the pre-flight checks (lib/preflight.sh), change nothing.
+PREFLIGHT_ONLY=0
 
 # Name of the step being run, for the error trap.
 STEP_NAME=startup
@@ -235,10 +238,12 @@ Options:
   --repo-url=<url|path> git remote or bundle to install from (default: the public GitHub mirror)
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
+  --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
+                        root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
   --help                this text
 
-Exit codes: 0 ok, 2 DNS mismatch, 64 usage, 77 not root, 78 unsupported host.
+Exit codes: 0 ok, 2 DNS mismatch, 3 pre-flight blocked, 64 usage, 77 not root, 78 unsupported host.
 
 The install takes several minutes. Run it inside screen (or systemd-run): a dropped SSH session would interrupt it.
 If it is interrupted anyway, run the same command again.
@@ -288,6 +293,7 @@ parse_args() {
       --repo-url=*) REPO_URL=${arg#--repo-url=} ;;
       --skip-dns-check) SKIP_DNS_CHECK=1 ;;
       --no-shell-profile) SHELL_PROFILE=0 ;;
+      --preflight) PREFLIGHT_ONLY=1 ;;
       --dry-run) FLEET_DRY_RUN=1 ;;
       *)
         usage >&2
@@ -311,6 +317,7 @@ parse_args() {
 
 check_root() {
   is_dry && return 0
+  [ "$PREFLIGHT_ONLY" = 1 ] && return 0
   [ "$(id -u)" -eq 0 ] || die "$EX_NOTROOT" "run as root (sudo bash install.sh ...), or add --dry-run to only print the plan"
 }
 
@@ -685,4 +692,17 @@ apt_repo() {
 version_lt() {
   local a=${1#v} b=${2#v}
   [ "$a" != "$b" ] && [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" = "$a" ]
+}
+
+# What /etc/ddev-fleet/installed-version holds: the tag when --ref is one (and exists), else <ref>@<sha7>. The sha is the
+# checkout's HEAD. Printed on stdout; empty when it cannot be determined.
+installed_version_label() {
+  local sha=${CODE_REVISION:-}
+  [ -n "$sha" ] || sha=$(run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse HEAD 2>/dev/null || true)
+  if [[ $REF =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
+    && run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse -q --verify "refs/tags/$REF^{commit}" >/dev/null 2>&1; then
+    printf '%s\n' "$REF"
+  elif [ -n "$sha" ]; then
+    printf '%s@%s\n' "$REF" "${sha:0:7}"
+  fi
 }

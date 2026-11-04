@@ -13,12 +13,16 @@ use App\Fleet\Ddev\DdevUnavailable;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobPruner;
 use App\Fleet\Jobs\JobReaper;
+use App\Fleet\Ssh\InstanceSshAgent;
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 
 /**
  * Keeps the instance rows true to the host. One tick does what is due: `ddev list` every 10 s (running or stopped),
  * `docker stats` every 30 s (memory), the job reaper every tick and the retention prune once a day. It only moves
  * instances that are running, stopped or unknown: deploying, destroying and failed belong to a job or to a person.
+ * Every InstanceSshAgent::REFRESH_SECONDS it also revives and re-keys the ssh-agents of opted-in instances (FLE-167).
  * When ddev does not answer, those instances become `unknown`, never `stopped`.
  */
 final class InstanceWatcher
@@ -30,6 +34,7 @@ final class InstanceWatcher
     private ?\DateTimeImmutable $listedAt = null;
     private ?\DateTimeImmutable $measuredAt = null;
     private ?\DateTimeImmutable $prunedAt = null;
+    private ?\DateTimeImmutable $agentsAt = null;
 
     /** @var array<string, int> */
     private array $ram = [];
@@ -42,6 +47,8 @@ final class InstanceWatcher
         private readonly JobFeed $feed,
         #[Autowire('%fleet.job_retention_days%')]
         private readonly int $retentionDays = 90,
+        private readonly ?InstanceSshAgent $agent = null,
+        private readonly LoggerInterface $logger = new NullLogger(),
     ) {
     }
 
@@ -68,7 +75,33 @@ final class InstanceWatcher
             $this->prunedAt = $now;
         }
 
+        if (null !== $this->agent && (null === $this->agentsAt || self::due($this->agentsAt, $now, InstanceSshAgent::REFRESH_SECONDS))) {
+            $this->superviseAgents();
+            $this->agentsAt = $now;
+        }
+
         return $changed;
+    }
+
+    /**
+     * FLE-167: for every running instance of an opted-in project, start() revives a dead agent and renews the key
+     * lifetime (`ssh-add -t`), so a long-lived instance never loses push after KEY_LIFETIME. A failure is only logged.
+     */
+    private function superviseAgents(): void
+    {
+        if (null === $this->agent || !$this->agent->hasKey()) {
+            return;
+        }
+        foreach ($this->instances->all() as $instance) {
+            if (InstanceState::Running !== $instance->state() || !$instance->project()->containerSsh()) {
+                continue;
+            }
+            try {
+                $this->agent->start($instance->id());
+            } catch (\RuntimeException $e) {
+                $this->logger->warning('The ssh-agent of an instance could not be refreshed.', ['instance' => $instance->id(), 'exception' => $e]);
+            }
+        }
     }
 
     private function observe(\DateTimeImmutable $now): int

@@ -29,7 +29,7 @@ final class MainNav
         $path = $this->requests->getMainRequest()?->getPathInfo() ?? '/';
 
         return array_map(
-            static fn (NavItem $item): array => ['item' => $item, 'current' => $item->isCurrent($path)],
+            fn (NavItem $item): array => ['item' => $item, 'current' => $this->catalog->isCurrent($item, $path)],
             $this->catalog->forCurrentUser(),
         );
     }

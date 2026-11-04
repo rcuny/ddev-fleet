@@ -48,6 +48,67 @@ final class GitClientTest extends TestCase
         );
     }
 
+    public function testConfigureSshSetsACoreSshCommandThatNeverPrompts(): void
+    {
+        $dir = $this->paths->instanceDir('acme--develop');
+
+        $this->git->configureSsh($dir);
+
+        $call = $this->runner->calls()[0];
+        self::assertSame(['git', 'config', '--local', 'core.sshCommand'], \array_slice($call->argv, 0, 4));
+        self::assertSame($dir, $call->cwd);
+        $ssh = $call->argv[4];
+        self::assertStringContainsString("-i '/srv/fleet/ssh/deploy_ed25519'", $ssh);
+        self::assertStringContainsString('-o BatchMode=yes', $ssh);
+        self::assertStringContainsString('-o StrictHostKeyChecking=yes', $ssh);
+        self::assertStringContainsString("-o UserKnownHostsFile='/srv/fleet/ssh/known_hosts'", $ssh);
+        self::assertStringNotContainsString('push_ed25519', $ssh, 'no push key on the host, none offered');
+    }
+
+    public function testConfigureSshOffersThePushKeyFirstWhenTheHostHasOne(): void
+    {
+        $home = sys_get_temp_dir().'/fle145-'.bin2hex(random_bytes(4));
+        mkdir($home.'/ssh', 0o700, true);
+        touch($home.'/ssh/push_ed25519');
+        $paths = new FleetPaths($home, '/etc/caddy/fleet');
+        $git = new GitClient($this->runner, $paths);
+
+        try {
+            $git->configureSsh($paths->instanceDir('acme--develop'));
+        } finally {
+            unlink($home.'/ssh/push_ed25519');
+            rmdir($home.'/ssh');
+            rmdir($home);
+        }
+
+        $ssh = $this->runner->calls()[0]->argv[4];
+        self::assertLessThan(strpos($ssh, 'deploy_ed25519'), strpos($ssh, 'push_ed25519'));
+        self::assertStringContainsString('-o IdentitiesOnly=yes', $ssh);
+    }
+
+    public function testConfigureSshRefusesAnythingButAnInstanceDirectory(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        try {
+            $this->git->configureSsh('/tmp/a--b');
+        } finally {
+            self::assertSame([], $this->runner->calls());
+        }
+    }
+
+    public function testContainerSshCommandIsStrictPinnedAndAgentOnly(): void
+    {
+        $ssh = GitClient::CONTAINER_SSH_COMMAND;
+
+        self::assertStringContainsString('-o StrictHostKeyChecking=yes', $ssh);
+        self::assertStringContainsString('-o BatchMode=yes', $ssh);
+        self::assertStringContainsString('UserKnownHostsFile="$DDEV_APPROOT/.ddev/fleet_known_hosts"', $ssh);
+        self::assertStringNotContainsString('IdentitiesOnly', $ssh);
+        self::assertStringNotContainsString(' -i ', $ssh);
+        self::assertStringNotContainsString('StrictHostKeyChecking=no', $ssh);
+        self::assertStringNotContainsString('accept-new', $ssh);
+    }
+
     public function testCloneStreamsOutputAndReturnsTheResult(): void
     {
         $this->runner->expect(['git'], new CommandResult(128, '', "fatal: nope\n"));

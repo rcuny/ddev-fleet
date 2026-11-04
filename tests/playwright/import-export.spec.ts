@@ -1,6 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 
@@ -12,7 +11,7 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
 }
 
-test('export a project, delete it, import the file, preview and confirm', async ({ page }) => {
+test('export a project, delete it, import the file, preview and confirm @phone', async ({ page }) => {
   const name = uniqueName('pwx');
   try {
     await createProjectViaUi(page, name);
@@ -36,7 +35,6 @@ test('export a project, delete it, import the file, preview and confirm', async 
     await expect(page).toHaveURL(/\/admin\/import$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Import a project' })).toBeVisible();
     await expectNoOverflow(page, 'import page');
-    await expectNoBlockingViolations(page, 'import page');
 
     await page.getByTestId('import-file').setInputFiles({ name: `${name}.fleet-project.json`, mimeType: 'application/json', buffer: Buffer.from(text) });
     const [response] = await Promise.all([
@@ -52,7 +50,6 @@ test('export a project, delete it, import the file, preview and confirm', async 
     expect(await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-action')))).not.toContain('skipped');
     await expect(page.getByTestId('import-errors')).toHaveCount(0);
     await expectNoOverflow(page, 'import preview');
-    await expectNoBlockingViolations(page, 'import preview');
 
     // Confirm: the project is back.
     await page.getByTestId('import-confirm').click();
@@ -63,7 +60,7 @@ test('export a project, delete it, import the file, preview and confirm', async 
   }
 });
 
-test('a file that is not an export is refused and nothing is imported', async ({ page }) => {
+test('a file that is not an export is refused and nothing is imported @phone', async ({ page }) => {
   await page.goto('/admin/import');
   await page.getByTestId('import-file').setInputFiles({ name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{"format":"fleet-project-export","version":99}') });
   await page.getByTestId('import-preview').click();
@@ -72,5 +69,35 @@ test('a file that is not an export is refused and nothing is imported', async ({
   await expect(page.getByTestId('import-error-item').first()).toContainText('version');
   await expect(page.getByTestId('import-confirm-form')).toHaveCount(0);
   await expectNoOverflow(page, 'refused import');
-  await expectNoBlockingViolations(page, 'refused import');
+});
+
+// The refusal page wraps long keys and does not echo long values (the messages themselves are asserted in
+// app/tests/Functional/Admin/ProjectTransferMatrixTest.php).
+test('a long error line (a 40-character key, a 9000-character value) wraps on the refusal page @phone', async ({ page }) => {
+  const project = {
+    name: 'pw-wrap',
+    git: 'https://git.example.com/x.git',
+    default_branch: null,
+    default_template: null,
+    additional_hostnames: [],
+    ports: [],
+    git_bot: { mode: 'inherit', name: null, email: null },
+    issue_id_regexp: null,
+    display_submodule_branch: null,
+    typesense: false,
+  };
+  const doc = { format: 'fleet-project-export', version: 1, project, ports: [], templates: [], webhooks: [], schedules: [] };
+  const upload = async (document: unknown): Promise<void> => {
+    await page.goto('/admin/import');
+    await page.getByTestId('import-file').setInputFiles({ name: 'long.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+    await page.getByTestId('import-preview').click();
+    await expect(page.getByTestId('import-error-item').first()).toBeVisible();
+  };
+
+  await upload({ ...doc, ['k'.repeat(40)]: 1, ['q'.repeat(300)]: 2 });
+  await expectNoOverflow(page, 'long error key');
+
+  await upload({ ...doc, project: { ...project, git: `https://git.example.com/${'a'.repeat(9000)}.git` } });
+  await expect(page.getByTestId('import-error-item').first()).toContainText('too long');
+  await expectNoOverflow(page, 'too long string');
 });

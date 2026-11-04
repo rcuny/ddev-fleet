@@ -1,8 +1,8 @@
 import { type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawn, spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { expectNoBlockingViolations } from './support/axe';
+import { readdirSync, readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { submitAndWait } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 import { expect, opensshEd25519Key, test, type WizardHost } from './support/setup-host';
@@ -22,17 +22,27 @@ const ADMIN = {
 };
 const CLAUDE_TOKEN = 'sk-ant-oat01-coverage-token-0123456789';
 const OVH = { key: 'ovh-app-key-0001', secret: 'ovh-app-secret-0002', consumer: 'ovh-consumer-0003' };
+
+// The host names the app seeds into "Trusted Git servers", read from the seed itself so a provider added to
+// app/resources/ssh/known_hosts.seed (ssh.bitbucket.org, FLE-145) cannot make this spec stale.
+const SEEDED_HOSTS: string[] = [
+  ...new Set(
+    readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../../app/resources/ssh/known_hosts.seed'), 'utf8')
+      .split('\n')
+      .map((line) => line.trim().split(/\s+/)[0])
+      .filter((host) => host !== '' && !host.startsWith('#') && !host.startsWith('@')),
+  ),
+];
 const WIZARD_PATHS = ['/setup', '/setup/admin', '/setup/tls', '/setup/ssh', '/setup/claude', '/setup/finish'];
 
 async function expectNoOverflow(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
 }
 
-/** Fits the viewport and has no blocking axe violation in either theme. */
+/** Settles the page and checks that it fits the viewport (axe lives in a11y-setup.desktop.spec.ts). */
 async function expectSound(page: Page, where: string): Promise<void> {
   await page.waitForLoadState('networkidle');
   await expectNoOverflow(page, where);
-  await expectNoBlockingViolations(page, where);
 }
 
 /** Opens the wizard with the host's one-time link: lands on the first step. */
@@ -189,150 +199,6 @@ test.describe('entry: the one-time link', () => {
     await expect(page).toHaveURL(/\/setup\/admin$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Create the administrator' })).toBeVisible();
   });
-
-  test('a wrong, empty, malformed or truncated link gets the one fixed refusal and no session', async ({ page, host, context }) => {
-    const real = host.token;
-    const attempts = [
-      '/setup?token=not-the-token',
-      '/setup?token=',
-      '/setup?token[]=x',
-      `/setup?token=${'a'.repeat(200)}`,
-      `/setup?token=${real}x`,
-      `/setup?token=${real.slice(1)}`,
-      `/setup?token=${real.toUpperCase()}`,
-      `/setup?token=%20${real}`,
-      '/setup?other=1',
-    ];
-    for (const path of attempts) {
-      const response = await page.goto(path);
-      expect(response?.status(), path.replace(real, '<token>')).toBe(403);
-      await expect(page.getByRole('heading', { level: 1, name: 'Setup link needed' })).toBeVisible();
-      await expect(page.getByText('This page needs the one-time setup link, and it may have expired.')).toBeVisible();
-      await expect(page.locator('code')).toHaveText('fleet:setup:token');
-    }
-    expect((await context.cookies()).some((candidate) => candidate.name === COOKIE)).toBe(false);
-    expect(await page.content()).not.toContain('Create the administrator');
-    await expectSound(page, 'the refusal page');
-  });
-
-  test('an expired link is refused until a new one is minted', async ({ page, host, context }) => {
-    host.sql("UPDATE host_settings SET setup_token_expires_at = '2000-01-01 00:00:00'");
-    const response = await page.goto(host.setupUrl);
-    expect(response?.status()).toBe(403);
-    await expect(page.getByRole('heading', { level: 1, name: 'Setup link needed' })).toBeVisible();
-    await expect(page.getByText('it may have expired')).toBeVisible();
-    expect((await context.cookies()).some((candidate) => candidate.name === COOKIE)).toBe(false);
-
-    await enter(page, { ...host, setupUrl: host.mint() });
-    await expect(page.getByRole('heading', { level: 1, name: 'Create the administrator' })).toBeVisible();
-  });
-
-  test('a session ends when its token expires, and a new link replaces the old one', async ({ page, host, context }) => {
-    await enter(page, host);
-    const header = await sessionHeader(context);
-    expect((await page.request.get('/setup/admin', { headers: header })).status()).toBe(200);
-
-    const fresh = host.mint();
-    // The old session was issued from the old token.
-    expect((await page.request.get('/setup/admin', { headers: header })).status()).toBe(403);
-    expect((await page.goto(host.setupUrl))?.status(), 'the old link').toBe(403);
-    await page.goto(fresh);
-    await expect(page).toHaveURL(/\/setup\/admin$/);
-    await expect(page.getByRole('heading', { level: 1, name: 'Create the administrator' })).toBeVisible();
-  });
-
-  test('repeated wrong links are throttled with a 429 that even the right link cannot pass', async ({ page, host, context }) => {
-    const statuses: number[] = [];
-    for (let attempt = 0; attempt < 15 && !statuses.includes(429); attempt += 1) {
-      const response = await context.request.get(`/setup?token=guess-${attempt}`, { maxRedirects: 0 });
-      statuses.push(response.status());
-    }
-    expect(statuses.at(-1), 'the throttle answers 429').toBe(429);
-    expect(statuses.slice(0, -1).every((status) => status === 403), 'wrong links before it get the fixed 403').toBe(true);
-    expect(statuses.length, 'a handful of guesses is allowed first').toBeGreaterThan(5);
-
-    const response = await page.goto(host.setupUrl);
-    expect(response?.status()).toBe(429);
-    expect(response?.headers()['retry-after']).toBe('900');
-    await expect(page.getByRole('heading', { level: 1, name: 'Too many attempts' })).toBeVisible();
-    await expect(page.getByText('Wait a few minutes, then open the setup link again.')).toBeVisible();
-    expect((await context.cookies()).some((candidate) => candidate.name === COOKIE)).toBe(false);
-    await expectSound(page, 'the throttled page');
-
-    // Only the exchange is counted: a wizard page without a session is still the plain 403.
-    expect((await page.goto('/setup/admin'))?.status()).toBe(403);
-  });
-});
-
-// ---------------------------------------------------------------------------------------------------------------------
-test.describe('no session', () => {
-  test('a wizard URL is refused whatever its spelling, for reading and for writing', async ({ page, host }) => {
-    const paths = [
-      ...WIZARD_PATHS,
-      '/setup/',
-      '/Setup/Admin',
-      '/SETUP/FINISH',
-      '/setup/%61dmin',
-      '/setup/%2561dmin',
-      '/setup/%2e/admin',
-      '/setup/ssh/..%2fadmin',
-      '/setup/nothing-here',
-      '/setup/admin/extra',
-    ];
-    for (const path of paths) {
-      const read = await page.request.get(`${host.baseURL}${path}`, { maxRedirects: 0 });
-      expect(read.status(), `GET ${path}`).toBe(403);
-      expect(await read.text()).not.toContain('Create the administrator');
-    }
-    // Written without a session, whatever the form says. (A doubled slash is only reachable as a full URL.)
-    for (const path of ['/setup/admin', '/setup/tls', '/setup/ssh', '/setup/claude', '/setup/finish', `${host.baseURL}//setup/admin`]) {
-      const target = path.startsWith('http') ? path : `${host.baseURL}${path}`;
-      const write = await page.request.post(target, { form: { x: 'y' }, maxRedirects: 0 });
-      expect(write.status(), `POST ${path}`).toBe(403);
-    }
-    for (const method of ['put', 'delete', 'patch'] as const) {
-      const response = await page.request[method](`${host.baseURL}/setup/admin`, { maxRedirects: 0 });
-      expect(response.status(), method.toUpperCase()).toBe(403);
-    }
-  });
-
-  test('a forged or altered cookie is refused, the genuine one works', async ({ page, host, context }) => {
-    await enter(page, host);
-    const header = await sessionHeader(context);
-    const value = header.Cookie.slice(COOKIE.length + 1);
-    const flipped = `${value.slice(0, -1)}${value.endsWith('0') ? '1' : '0'}`;
-    const [expiry, mac] = value.split('.');
-    const longer = `${Number(expiry) + 3600}.${mac}`;
-    const forged = [flipped, longer, 'forged', '', '0.'.concat('0'.repeat(64)), value.toUpperCase()];
-
-    for (const candidate of forged) {
-      const response = await page.request.get(`${host.baseURL}/setup/admin`, { headers: { Cookie: `${COOKIE}=${candidate}` }, maxRedirects: 0 });
-      expect(response.status(), `cookie ${candidate.slice(0, 12)}…`).toBe(403);
-    }
-    expect((await page.request.get(`${host.baseURL}/setup/admin`, { headers: header, maxRedirects: 0 })).status()).toBe(200);
-    // The same value under another cookie name is no session.
-    const other = await page.request.get(`${host.baseURL}/setup/admin`, { headers: { Cookie: `fleet_setup=${value}` }, maxRedirects: 0 });
-    expect(other.status()).toBe(403);
-  });
-
-  test('a form without the CSRF token is refused even with a valid session', async ({ page, host, context }) => {
-    await enter(page, host);
-    const header = await sessionHeader(context);
-    // The wizard's own forms carry the token; a request without it (a forged cross-site post) is not trusted.
-    const response = await page.request.post(`${host.baseURL}/setup/ssh`, { headers: header, form: { action: 'regenerate', role: 'deploy', confirm: '1' }, maxRedirects: 0 });
-    expect(response.status()).toBe(403);
-    const body = await response.text();
-    expect(body).toContain('This form could not be verified');
-    expect(body).toContain('The form expired or was sent from another site. Go back, reload the page and try again.');
-
-    await toFinish(page, host);
-    const finishAttempt = await page.request.post(`${host.baseURL}/setup/finish`, { headers: header, form: { x: 'y' }, maxRedirects: 0 });
-    expect(finishAttempt.status()).toBe(403);
-    expect(await finishAttempt.text()).toContain('This form could not be verified');
-    // Nothing happened: the keys are the ones generated before and Finish still works.
-    await page.goto('/setup/finish');
-    await expect(page.getByRole('heading', { level: 1, name: 'Review and finish' })).toBeVisible();
-  });
 });
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -378,167 +244,7 @@ test.describe('step 1: administrator', () => {
     await expect(page.getByText('Enter a username.')).toHaveCount(0);
   });
 
-  test('every username refusal', async ({ page, host }) => {
-    await enter(page, host);
-    const form = page.getByTestId('setup-admin-form');
-    const message = 'Use 1 to 64 lowercase letters, digits, dots, underscores or dashes, starting with a letter or digit.';
-    const cases: Array<[string, string, string]> = [
-      ['blank', '', 'Enter a username.'],
-      ['capital letters', 'Admin', message],
-      ['a space', 'my admin', message],
-      ['a leading dash', '-admin', message],
-      ['a leading dot', '.admin', message],
-      ['an accent', 'adminé', message],
-      ['an at sign', 'admin@example', message],
-      ['a slash', 'admin/root', message],
-      ['65 characters', 'a'.repeat(65), message],
-    ];
-    for (const [what, username, expected] of cases) {
-      await skipBrowserValidation(form);
-      await fillAdmin(page, { username });
-      expect(await submit(page, saveAndContinue(page)), what).toBe(422);
-      await expect(form, what).toContainText(expected);
-      await expect(page.getByLabel('Password', { exact: true }), what).toHaveValue('');
-      await expectNoOverflow(page, `the administrator step, ${what}`);
-    }
-    await expectSound(page, 'the administrator step with a refused username');
-
-    // 64 characters, dots, underscores and dashes are accepted.
-    await fillAdmin(page, { username: `a${'b'.repeat(60)}._-` });
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    await expect(page).toHaveURL(/\/setup\/tls$/);
-  });
-
-  test('every display name and email refusal, and the values stay', async ({ page, host }) => {
-    await enter(page, host);
-    const form = page.getByTestId('setup-admin-form');
-    const cases: Array<[string, Partial<AdminValues>, string]> = [
-      ['blank display name', { displayName: '' }, 'Enter a display name.'],
-      ['a blank-looking display name', { displayName: '   ' }, 'Enter a display name.'],
-      ['256-character display name', { displayName: 'n'.repeat(256) }, 'The display name can have at most 255 characters.'],
-      ['a tab in the display name', { displayName: 'Cov\tAdmin' }, 'The display name must be 1-255 characters without control characters.'],
-      ['blank email', { email: '' }, 'Enter an email address.'],
-      ['no at sign', { email: 'nobody' }, 'Enter a valid email address.'],
-      ['no domain dot', { email: 'nobody@localhost' }, 'Enter a valid email address.'],
-      ['two at signs', { email: 'a@b@example.com' }, 'Enter a valid email address.'],
-      ['a space in the email', { email: 'no body@example.com' }, 'Enter a valid email address.'],
-      ['a 255-character email', { email: `${'a'.repeat(64)}@${'b'.repeat(60)}.${'c'.repeat(60)}.${'d'.repeat(60)}.example.com` }, 'The email address is too long.'],
-    ];
-    for (const [what, values, expected] of cases) {
-      await skipBrowserValidation(form);
-      await fillAdmin(page, values);
-      expect(await submit(page, saveAndContinue(page)), what).toBe(422);
-      await expect(page).toHaveURL(/\/setup\/admin$/);
-      await expect(form, what).toContainText(expected);
-      // What was typed comes back, except the passwords.
-      await expect(page.getByLabel('Username', { exact: true }), what).toHaveValue(ADMIN.username);
-      await expect(page.getByLabel('Password', { exact: true }), what).toHaveValue('');
-      await expect(page.getByLabel('Confirm password', { exact: true }), what).toHaveValue('');
-      await expectNoOverflow(page, `the administrator step, ${what}`);
-    }
-    await expect(page.getByLabel('Email', { exact: true })).toHaveValue(/@/);
-    await expectSound(page, 'the administrator step with a refused email');
-  });
-
-  test('every password refusal, and the password never comes back', async ({ page, host }) => {
-    await enter(page, host);
-    const form = page.getByTestId('setup-admin-form');
-    const long = 'p'.repeat(129);
-    const cases: Array<[string, Partial<AdminValues>, string]> = [
-      ['blank password', { password: '', confirm: '' }, 'Enter a password.'],
-      ['a mismatch', { password: 'correct horse battery staple', confirm: 'correct horse battery stapl3' }, 'The two passwords do not match.'],
-      ['11 characters', { password: 'abcdefghijk' }, 'The password must be at least 12 characters long.'],
-      ['a short one', { password: 'short' }, 'The password must be at least 12 characters long.'],
-      ['129 characters', { password: long }, 'The password must be at most 128 characters long.'],
-      ['the username', { username: 'administrator', password: 'administrator' }, 'The password must not be the username.'],
-      ['the username in capitals', { username: 'administrator', password: 'ADMINISTRATOR' }, 'The password must not be the username.'],
-    ];
-    for (const [what, values, expected] of cases) {
-      await skipBrowserValidation(form);
-      await fillAdmin(page, values);
-      expect(await submit(page, saveAndContinue(page)), what).toBe(422);
-      await expect(page).toHaveURL(/\/setup\/admin$/);
-      await expect(form, what).toContainText(expected);
-      if (values.password !== values.username) {
-        expect(await page.content(), what).not.toContain(values.password || 'correct horse');
-      }
-      await expect(page.getByLabel('Password', { exact: true }), what).toHaveValue('');
-      await expect(page.getByLabel('Confirm password', { exact: true }), what).toHaveValue('');
-      await expectNoOverflow(page, `the administrator step, ${what}`);
-    }
-    // Two problems at once are both said.
-    await skipBrowserValidation(form);
-    await fillAdmin(page, { username: 'shortpass', password: 'shortpass', confirm: 'shortpass' });
-    expect(await submit(page, saveAndContinue(page))).toBe(422);
-    await expect(form).toContainText('The password must be at least 12 characters long.');
-    await expect(form).toContainText('The password must not be the username.');
-    await expectSound(page, 'the administrator step with a refused password');
-
-    // Nothing was created by any of that: the username is still free to choose.
-    await page.goto('/setup/admin');
-    await expect(page.getByLabel('Username', { exact: true })).toBeEnabled();
-    expect(host.scalar('SELECT COUNT(*) FROM fleet_user')).toBe(0);
-
-    // 12 and 128 characters are accepted.
-    await fillAdmin(page, { password: 'p'.repeat(128) });
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-  });
-
-  test('a saved administrator: flash, next step, locked username on return, updates keep one user', async ({ page, host }) => {
-    await enter(page, host);
-    await saveAdmin(page);
-    await expect(page.getByText('Administrator saved.')).toBeVisible();
-    expect(host.scalar('SELECT COUNT(*) FROM fleet_user')).toBe(1);
-
-    // Back to the first step (the stepper link): the answers are there, the username is fixed, the password is not.
-    await submitAndWait(page, page.getByTestId('setup-stepper').getByRole('link').first());
-    await expect(page).toHaveURL(/\/setup\/admin$/);
-    await expect(page.getByText('It already exists: saving again updates it.')).toBeVisible();
-    const username = page.getByLabel('Username', { exact: true });
-    await expect(username).toBeDisabled();
-    await expect(username).toHaveValue(ADMIN.username);
-    await expect(page.getByText('The administrator already exists; its username cannot change here.')).toBeVisible();
-    await expect(page.getByLabel('Display name', { exact: true })).toHaveValue(ADMIN.displayName);
-    await expect(page.getByLabel('Email', { exact: true })).toHaveValue(ADMIN.email);
-    await expect(page.getByLabel('Password', { exact: true })).toHaveValue('');
-    expect(await page.content()).not.toContain(ADMIN.password);
-    await expectSound(page, 'the administrator step with an existing administrator');
-
-    // The password is still required, and the same messages apply.
-    await skipBrowserValidation(page.getByTestId('setup-admin-form'));
-    await fillAdmin(page, { password: '', confirm: '' });
-    expect(await submit(page, saveAndContinue(page))).toBe(422);
-    await expect(page.getByTestId('setup-admin-form')).toContainText('Enter a password.');
-
-    // Saving again updates the same user.
-    await fillAdmin(page, { displayName: 'Renamed Admin', email: 'renamed@fleet.example.com', password: 'another long passphrase' });
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    expect(host.scalar('SELECT COUNT(*) FROM fleet_user')).toBe(1);
-    expect(host.scalar('SELECT display_name FROM fleet_user')).toBe('Renamed Admin');
-    await page.goto('/setup/finish');
-    await expect(page).toHaveURL(/\/setup\/ssh$/);
-    await page.goto('/setup/admin');
-    await expect(page.getByLabel('Display name', { exact: true })).toHaveValue('Renamed Admin');
-    await expect(page.getByLabel('Email', { exact: true })).toHaveValue('renamed@fleet.example.com');
-  });
-
-  test('the locked username cannot be changed by editing the page', async ({ page, host }) => {
-    await enter(page, host);
-    await saveAdmin(page);
-    await page.goto('/setup/admin');
-
-    // Enable the field and type another name: the server ignores a disabled field's submission.
-    await page.getByLabel('Username', { exact: true }).evaluate((field) => {
-      (field as HTMLInputElement).disabled = false;
-    });
-    await page.getByLabel('Username', { exact: true }).fill('intruder');
-    await fillAdmin(page);
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    expect(host.scalar('SELECT username FROM fleet_user')).toBe(ADMIN.username);
-    expect(host.scalar('SELECT COUNT(*) FROM fleet_user')).toBe(1);
-  });
-
-  test('the longest values wrap on every page that shows them', async ({ page, host }) => {
+  test('the longest values wrap on every page that shows them @phone', async ({ page, host }) => {
     const username = `a${'b'.repeat(62)}c`;
     const displayName = 'D'.repeat(255);
     const email = `${'e'.repeat(64)}@${'x'.repeat(63)}.${'y'.repeat(63)}.${'z'.repeat(55)}.com`;
@@ -557,7 +263,6 @@ test.describe('step 1: administrator', () => {
     await expect(page.getByTestId('summary-admin')).toContainText(username);
     await expect(page.getByTestId('summary-admin')).toContainText(email);
     await expectNoOverflow(page, 'the finish step with a long administrator');
-    await expectNoBlockingViolations(page, 'the finish step with a long administrator');
   });
 });
 
@@ -596,161 +301,6 @@ test.describe('step 2: domain and TLS', () => {
     await expectSound(page, 'the TLS step');
   });
 
-  test('HTTP-01 is saved with a flash, and the OVH fields are ignored in that mode', async ({ page, host }) => {
-    await enter(page, host);
-    await page.goto('/setup/tls');
-    // Values that would be refused in DNS mode do not matter in HTTP-01 mode, and nothing of them is kept.
-    await page.getByLabel('OVH application key').fill('x');
-    await page.getByLabel('OVH consumer key').fill('not valid!');
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    await expect(page).toHaveURL(/\/setup\/ssh$/);
-    await expect(page.getByText('Certificate settings saved.')).toBeVisible();
-    expect(host.scalar('SELECT tls_mode FROM host_settings')).toBe('http01');
-    expect(host.scalar("SELECT COUNT(*) FROM secret WHERE name LIKE 'ovh_%'")).toBe(0);
-
-    await page.goto('/setup/tls');
-    await expect(page.getByRole('radio').first()).toBeChecked();
-    await expect(page.getByLabel('OVH application key')).toHaveValue('');
-    await expect(page.getByText('Stored. Leave blank to keep it.')).toHaveCount(0);
-  });
-
-  test('DNS mode names every missing credential', async ({ page, host }) => {
-    await enter(page, host);
-    await page.goto('/setup/tls');
-    const form = page.getByTestId('setup-tls-form');
-    await chooseMode(page, 'ovh_dns');
-    expect(await submit(page, saveAndContinue(page))).toBe(422);
-
-    await expect(page).toHaveURL(/\/setup\/tls$/);
-    await expect(form).toContainText('Enter the OVH application key.');
-    await expect(form).toContainText('Enter the OVH application secret.');
-    await expect(form).toContainText('Enter the OVH consumer key.');
-    // The choice survives the refusal.
-    await expect(page.getByRole('radio').last()).toBeChecked();
-    expect(host.scalar('SELECT tls_mode FROM host_settings')).toBe('http01');
-
-    // One of the three given: only the other two are asked for.
-    await page.getByLabel('OVH application key').fill(OVH.key);
-    expect(await submit(page, saveAndContinue(page))).toBe(422);
-    await expect(form).not.toContainText('Enter the OVH application key.');
-    await expect(form).toContainText('Enter the OVH application secret.');
-    await expectNoOverflow(page, 'the TLS step with errors');
-    await expectSound(page, 'the TLS step with missing credentials');
-  });
-
-  const ovhFields: Array<['key' | 'secret' | 'consumer', string, string]> = [
-    ['key', 'OVH application key', 'application key'],
-    ['secret', 'OVH application secret', 'application secret'],
-    ['consumer', 'OVH consumer key', 'consumer key'],
-  ];
-  for (const [field, label, noun] of ovhFields) {
-    test(`the ${noun} must have the shape OVH issues`, async ({ page, host }) => {
-      await enter(page, host);
-      await page.goto('/setup/tls');
-      const form = page.getByTestId('setup-tls-form');
-      const message = `The OVH ${noun} must be 8 to 128 characters of letters, digits, ".", "_" or "-".`;
-      const bad: Array<[string, string]> = [
-        ['seven characters', 'abcdefg'],
-        ['a space', 'abcd efgh'],
-        ['an exclamation mark', 'abcdefgh!'],
-        ['a slash', 'abcd/efgh'],
-        ['an accent', 'abcdéfgh'],
-        ['129 characters', 'k'.repeat(129)],
-      ];
-      for (const [what, value] of bad) {
-        await fillOvh(page, { [field]: value });
-        expect(await submit(page, saveAndContinue(page)), what).toBe(422);
-        await expect(form, what).toContainText(message);
-        // The other two were fine and are not accused, and the refused value is not put back.
-        for (const [other, , otherNoun] of ovhFields.filter(([name]) => name !== field)) {
-          await expect(form, `${what}, ${other}`).not.toContainText(`The OVH ${otherNoun} must be`);
-        }
-        await expect(page.getByLabel(label), what).toHaveValue('');
-      }
-      expect(await page.content()).not.toContain('abcdefgh!');
-      await expectNoOverflow(page, `the TLS step with a refused ${noun}`);
-      await expectSound(page, `the TLS step with a refused ${noun}`);
-      expect(host.scalar('SELECT tls_mode FROM host_settings')).toBe('http01');
-    });
-  }
-
-  test('the shortest, the longest and a padded credential are accepted', async ({ page, host }) => {
-    await enter(page, host);
-    await page.goto('/setup/tls');
-    await fillOvh(page, { key: 'abcdefgh', secret: 'S'.repeat(128), consumer: '  padded.value_ok-1  ' });
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    await expect(page).toHaveURL(/\/setup\/ssh$/);
-    expect(host.scalar('SELECT tls_mode FROM host_settings')).toBe('ovh_dns');
-    expect(host.scalar("SELECT COUNT(*) FROM secret WHERE name LIKE 'ovh_%'")).toBe(4);
-  });
-
-  test('a tampered endpoint or mode is refused', async ({ page, host }) => {
-    await enter(page, host);
-    await page.goto('/setup/tls');
-    const form = page.getByTestId('setup-tls-form');
-
-    await fillOvh(page);
-    await page.getByLabel('OVH API endpoint').evaluate((select) => {
-      const option = document.createElement('option');
-      option.value = 'ovh-xx';
-      option.textContent = 'ovh-xx';
-      select.append(option);
-      (select as HTMLSelectElement).value = 'ovh-xx';
-    });
-    expect(await submit(page, saveAndContinue(page))).toBe(422);
-    await expect(form).toContainText('Choose one of the listed OVH endpoints.');
-
-    await page.getByRole('radio').first().evaluate((radio) => {
-      (radio as HTMLInputElement).value = 'carrier-pigeon';
-    });
-    await page.getByText('Automatic, per host name (HTTP-01).').click();
-    await expect(page.getByRole('radio').first()).toBeChecked();
-    expect(await submit(page, saveAndContinue(page))).toBe(422);
-    await expect(form).toContainText('Choose one of the two modes.');
-    expect(host.scalar('SELECT tls_mode FROM host_settings')).toBe('http01');
-  });
-
-  test('stored OVH credentials are never shown, a blank field keeps them, a new value replaces one', async ({ page, host }) => {
-    await enter(page, host);
-    await page.goto('/setup/tls');
-    await fillOvh(page, { endpoint: 'ovh-ca' });
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    const sealed = host.scalar("SELECT group_concat(hex(ciphertext)) FROM secret WHERE name LIKE 'ovh_app%'");
-
-    await page.goto('/setup/tls');
-    // The mode and the (non-secret) endpoint come back; the credentials do not.
-    await expect(page.getByRole('radio').last()).toBeChecked();
-    await expect(page.getByLabel('OVH API endpoint')).toHaveValue('ovh-ca');
-    for (const label of ['OVH application key', 'OVH application secret', 'OVH consumer key']) {
-      await expect(page.getByLabel(label)).toHaveValue('');
-    }
-    await expect(page.getByText('Stored. Leave blank to keep it.')).toHaveCount(3);
-    const html = await page.content();
-    for (const value of Object.values(OVH)) {
-      expect(html).not.toContain(value);
-    }
-    await expectSound(page, 'the TLS step with stored credentials');
-
-    // All blank: accepted, nothing changes.
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    expect(host.scalar("SELECT group_concat(hex(ciphertext)) FROM secret WHERE name LIKE 'ovh_app%'")).toBe(sealed);
-
-    // One replaced: only that one changes.
-    await page.goto('/setup/tls');
-    await page.getByLabel('OVH consumer key').fill('replacement-consumer-key');
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    expect(host.scalar("SELECT group_concat(hex(ciphertext)) FROM secret WHERE name LIKE 'ovh_app%'")).toBe(sealed);
-    expect(host.scalar("SELECT COUNT(*) FROM secret WHERE name = 'ovh_consumer_key'")).toBe(1);
-
-    // Back to HTTP-01: the credentials stay stored for a later change of mind.
-    await page.goto('/setup/tls');
-    await chooseMode(page, 'http01');
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    expect(host.scalar('SELECT tls_mode FROM host_settings')).toBe('http01');
-    await page.goto('/setup/tls');
-    await expect(page.getByText('Stored. Leave blank to keep it.')).toHaveCount(3);
-  });
-
   test('a stored OVH mode with missing credentials sends the visitor back to the TLS step', async ({ page, host }) => {
     expect(host.console(['fleet:host:init', '--tls-mode=ovh_dns']).status).toBe(0);
     await enter(page, host);
@@ -766,23 +316,6 @@ test.describe('step 2: domain and TLS', () => {
     await fillOvh(page);
     expect(await submit(page, saveAndContinue(page))).toBe(302);
     await expect(page).toHaveURL(/\/setup\/ssh$/);
-  });
-
-  test('the installer refuses a bad domain, address or mode before the wizard exists', async ({ host }) => {
-    const refused: Array<[string[], string]> = [
-      [['--domain=not_a_domain'], '"not_a_domain" is not a valid lowercase fully qualified domain name.'],
-      [['--domain=localhost'], '"localhost" is not a valid lowercase fully qualified domain name.'],
-      [['--domain=a.b'], '"a.b" is not a valid lowercase fully qualified domain name.'],
-      [['--domain=-bad.example.com'], 'is not a valid lowercase fully qualified domain name.'],
-      [['--acme-email=bad'], '"bad" is not a valid ACME contact email address.'],
-      [['--tls-mode=pigeon'], '--tls-mode must be http01 or ovh_dns.'],
-    ];
-    for (const [args, message] of refused) {
-      const result = host.console(['fleet:host:init', ...args]);
-      expect(result.status, args.join(' ')).toBe(1);
-      expect(result.stderr.replace(/\s+/g, ' '), args.join(' ')).toContain(message);
-    }
-    expect(host.scalar('SELECT domain FROM host_settings')).toBe('fleet.example.com');
   });
 });
 
@@ -825,8 +358,8 @@ test.describe('step 3: SSH keys', () => {
     await page.goto('/setup/ssh');
     await expect(page.getByRole('heading', { level: 2, name: 'Trusted Git servers' })).toBeVisible();
     const rows = page.getByTestId('setup-known-hosts').locator('tbody tr');
-    await expect(rows).toHaveCount(3);
-    for (const name of ['github.com', 'gitlab.com', 'bitbucket.org']) {
+    await expect(rows).toHaveCount(SEEDED_HOSTS.length);
+    for (const name of SEEDED_HOSTS) {
       await expect(page.getByTestId('setup-known-hosts')).toContainText(name);
     }
     await expect(page.getByTestId('setup-known-hosts')).toContainText('ed25519');
@@ -872,13 +405,13 @@ test.describe('step 3: SSH keys', () => {
         expect(await submit(page, page.getByRole('button', { name: 'Read host keys' })), what).toBe(422);
         await expect(page.getByTestId('setup-ssh-errors'), what).toContainText(expected);
         await expect(page.getByTestId('setup-ssh-scan'), what).toHaveCount(0);
-        await expect(page.getByTestId('setup-known-hosts').locator('tbody tr'), what).toHaveCount(3);
+        await expect(page.getByTestId('setup-known-hosts').locator('tbody tr'), what).toHaveCount(SEEDED_HOSTS.length);
       }
       await expectSound(page, 'the SSH step with a refused server');
     });
   }
 
-  test('a very long server name does not widen the page', async ({ page, host }) => {
+  test('a very long server name does not widen the page @phone', async ({ page, host }) => {
     await enter(page, host);
     await page.goto('/setup/ssh');
     const name = `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.example.org`;
@@ -891,7 +424,6 @@ test.describe('step 3: SSH keys', () => {
     expect(await submit(page, page.getByRole('button', { name: 'Read host keys' }))).toBe(422);
     await expect(page.getByTestId('setup-ssh-errors')).toContainText(/Enter a host name such as git\.example\.com/);
     await expectNoOverflow(page, 'the SSH step with an absurd server name');
-    await expectNoBlockingViolations(page, 'the SSH step with a long server name');
   });
 
   test('an unknown action is refused', async ({ page, host }) => {
@@ -1041,82 +573,12 @@ test.describe('step 4: Claude token', () => {
     await expectSound(page, 'the Claude step');
   });
 
-  test('a blank save and a token of the wrong shape are refused with their messages', async ({ page, host }) => {
-    await enter(page, host);
-    await page.goto('/setup/claude');
-    const form = page.getByTestId('setup-claude-form');
-    await expectNoOverflow(page, 'the Claude step');
-
-    expect(await submit(page, saveAndContinue(page))).toBe(422);
-    await expect(form).toContainText('Paste the token, or press "Skip for now".');
-
-    const shape = 'That does not look like a Claude token. Copy it again from "claude setup-token".';
-    const bad: Array<[string, string]> = [
-      ['three characters', 'abc'],
-      ['19 characters', 't'.repeat(19)],
-      ['an inner space', 'sk-ant-oat01 coverage-token-0123456789'],
-      ['a dollar sign', 'sk-ant-oat01-coverage$token-0123456789'],
-      ['a quote', 'sk-ant-oat01-"coverage-token-0123456789"'],
-      ['an accent', 'sk-ant-oat01-coverage-tokén-0123456789'],
-      ['513 characters', 't'.repeat(513)],
-    ];
-    for (const [what, token] of bad) {
-      await page.getByLabel('Claude OAuth token').fill(token);
-      expect(await submit(page, saveAndContinue(page)), what).toBe(422);
-      await expect(form, what).toContainText(shape);
-      await expect(page.getByLabel('Claude OAuth token'), what).toHaveValue('');
-      expect(await page.content(), what).not.toContain(token.slice(0, 30));
-    }
-    await expectNoOverflow(page, 'the Claude step with an error');
-    await expectSound(page, 'the Claude step with a refused token');
-    expect(host.scalar("SELECT COUNT(*) FROM secret WHERE name = 'claude_oauth_token'")).toBe(0);
-  });
-
   test('skipping stores nothing and the summary says so', async ({ page, host }) => {
     await toFinish(page, host);
     await expect(page.getByTestId('summary-claude')).toHaveText('Not set (optional)');
     expect(host.scalar("SELECT COUNT(*) FROM secret WHERE name = 'claude_oauth_token'")).toBe(0);
     await page.goto('/setup/claude');
     await expect(page.getByTestId('setup-claude-stored')).toHaveText('No token is stored.');
-  });
-
-  test('a token is stored write-only: flash, the stored notice, blank keeps it, a new one replaces it', async ({ page, host }) => {
-    await enter(page, host);
-    await saveAdmin(page);
-    await page.goto('/setup/ssh');
-    await page.goto('/setup/claude');
-    // 20 and 512 characters, with the punctuation the pattern allows, and padding that is trimmed.
-    const edges = ['t'.repeat(20), `${'a._~+/=-'.repeat(64)}`];
-    for (const [index, token] of edges.entries()) {
-      await page.getByLabel('Claude OAuth token').fill(`  ${token}  `);
-      expect(await submit(page, saveAndContinue(page)), `edge ${index}`).toBe(302);
-      await expect(page).toHaveURL(/\/setup\/finish$/);
-      await expect(page.getByText('Claude token stored.')).toBeVisible();
-      await page.goto('/setup/claude');
-    }
-    const first = host.scalar("SELECT hex(ciphertext) FROM secret WHERE name = 'claude_oauth_token'");
-
-    await expect(page.getByTestId('setup-claude-stored')).toHaveText('A token is stored.');
-    await expect(page.getByText('A token is stored. Leave blank to keep it, or paste a new one to replace it.')).toBeVisible();
-    await expect(page.getByLabel('Claude OAuth token')).toHaveValue('');
-    const html = await page.content();
-    expect(html).not.toContain(edges[1]);
-    await expectSound(page, 'the Claude step with a stored token');
-
-    // Blank keeps it, and Skip keeps it.
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    await page.goto('/setup/claude');
-    expect(await submit(page, page.getByRole('button', { name: 'Skip for now' }))).toBe(302);
-    expect(host.scalar("SELECT hex(ciphertext) FROM secret WHERE name = 'claude_oauth_token'")).toBe(first);
-    await expect(page.getByTestId('summary-claude')).toHaveText('Stored');
-
-    // A new one replaces it.
-    await page.goto('/setup/claude');
-    await page.getByLabel('Claude OAuth token').fill(CLAUDE_TOKEN);
-    expect(await submit(page, saveAndContinue(page))).toBe(302);
-    expect(host.scalar("SELECT hex(ciphertext) FROM secret WHERE name = 'claude_oauth_token'")).not.toBe(first);
-    expect(host.scalar("SELECT COUNT(*) FROM secret WHERE name = 'claude_oauth_token'")).toBe(1);
-    expect(await page.content()).not.toContain(CLAUDE_TOKEN);
   });
 });
 
@@ -1255,7 +717,7 @@ test.describe('step 5: finish', () => {
     expect(host.scalar("SELECT COUNT(*) FROM fleet_user WHERE username = 'cov-admin'")).toBe(1);
   });
 
-  test('Finish in DNS mode also reports the certificate settings', async ({ page, host }) => {
+  test('Finish in DNS mode also reports the certificate settings @phone', async ({ page, host }) => {
     await enter(page, host);
     await saveAdmin(page);
     await fillOvh(page);

@@ -10,6 +10,11 @@ framework:
             policy: sliding_window
             limit: 10
             interval: '1 minute'
+        # "Check now" on the Upgrade page (App\Fleet\Upgrade\CheckNowThrottle), per signed-in user: it asks GitHub.
+        upgrade_check:
+            policy: sliding_window
+            limit: 1
+            interval: '1 minute'
 
 when@test:
     services:
@@ -17,6 +22,8 @@ when@test:
             class: Symfony\Component\RateLimiter\Storage\InMemoryStorage
     framework:
         rate_limiter:
+            upgrade_check:
+                storage_service: fleet.test.reveal_storage
             secret_reveal:
                 # In memory and without a reset between requests, so a test sees its own reveals and no other test's.
                 storage_service: fleet.test.reveal_storage

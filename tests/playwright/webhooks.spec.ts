@@ -1,6 +1,5 @@
 import { createHmac } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
@@ -18,7 +17,7 @@ async function createSecret(page: Page, project: string): Promise<string> {
 }
 
 test.describe('webhooks', () => {
-  test('the page lists every project with its addresses and works without overflow', async ({ page }, testInfo) => {
+  test('the page lists every project with its addresses and works without overflow @phone', async ({ page }, testInfo) => {
     const project = uniqueName('wh');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);
@@ -35,7 +34,6 @@ test.describe('webhooks', () => {
       await expect(mine.first().getByTestId('webhook-copy')).toBeVisible();
 
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      expect(await blockingViolations(page)).toEqual([]);
       if (isPhone(testInfo)) {
         for (const control of await mine.locator('button[type=submit], input:not([type=hidden]), button, summary').all()) {
           const box = await control.boundingBox();
@@ -49,14 +47,13 @@ test.describe('webhooks', () => {
     }
   });
 
-  test('a secret is shown once, a bad signature is refused and the old secret dies on rotation', async ({ page }) => {
+  test('a secret is shown once, a bad signature is refused and the old secret dies on rotation @phone', async ({ page }) => {
     const project = uniqueName('wh');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);
     try {
       const first = await createSecret(page, project);
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      expect(await blockingViolations(page)).toEqual([]);
 
       await page.getByTestId('webhook-secret-done').click();
       await expect(page.getByTestId('webhook-rotated')).toBeVisible();
@@ -77,13 +74,11 @@ test.describe('webhooks', () => {
       await expect(page.getByTestId('delivery-row')).toHaveCount(1);
       await expect(page.getByTestId('delivery-row')).toContainText('PW-1');
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      expect(await blockingViolations(page)).toEqual([]);
 
       // The overview, with deliveries in it, must not need a sideways scroll on a phone either.
       await page.goto('/admin/webhooks');
       await expect(page.getByTestId('delivery-row').first()).toBeVisible();
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      expect(await blockingViolations(page)).toEqual([]);
 
       // Rotation: confirm inside the details, then the old secret stops working.
       const jira = page.locator(`[data-testid=webhook-endpoint][data-source=jira][data-project=${project}]`);

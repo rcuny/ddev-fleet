@@ -57,12 +57,14 @@ final class ProjectOptions
             $command
                 ->addOption('default-template', null, InputOption::VALUE_REQUIRED, 'Template deployed when none is given (one of the project\'s templates)')
                 ->addOption('typesense', null, InputOption::VALUE_NEGATABLE, 'Give the project a Typesense search service (--no-typesense removes it)')
+                ->addOption('container-ssh', null, InputOption::VALUE_NEGATABLE, 'Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it)')
                 ->addOption('unset', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Clear a value: '.implode(', ', array_keys(self::UNSET)).' (repeat for several)')
             ;
 
             return;
         }
         $command->addOption('typesense', null, InputOption::VALUE_NONE, 'Give the project a Typesense search service');
+        $command->addOption('container-ssh', null, InputOption::VALUE_NONE, 'Give each instance its own ssh-agent with the push key for git over SSH in the web container');
     }
 
     /**
@@ -112,6 +114,11 @@ final class ProjectOptions
             $changes['typesense'] = true;
         } elseif ($update && false === $input->getOption('typesense')) {
             $changes['typesense'] = false;
+        }
+        if (true === $input->getOption('container-ssh')) {
+            $changes['containerSsh'] = true;
+        } elseif ($update && false === $input->getOption('container-ssh')) {
+            $changes['containerSsh'] = false;
         }
         if ($update) {
             $given = array_keys($changes);

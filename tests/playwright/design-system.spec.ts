@@ -27,7 +27,7 @@ test.describe('design system page @smoke', () => {
     }
   });
 
-  test('section navigation is reachable and updates the URL hash', async ({ page }, testInfo) => {
+  test('section navigation is reachable and updates the URL hash @phone', async ({ page }, testInfo) => {
     await page.goto('/admin/design-system');
 
     if (testInfo.project.name === 'phone') {
@@ -42,7 +42,7 @@ test.describe('design system page @smoke', () => {
     expect(await hasHorizontalOverflow(page)).toBe(false);
   });
 
-  test('the shared select is 44 px tall on the phone and stays compact on desktop', async ({ page }, testInfo) => {
+  test('the shared select is 44 px tall on the phone and stays compact on desktop @phone', async ({ page }, testInfo) => {
     await page.goto('/admin/design-system');
 
     const select = page.locator('#ds-form-country');
