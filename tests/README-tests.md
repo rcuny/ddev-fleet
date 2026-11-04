@@ -108,6 +108,19 @@ documented gate and what Fleet CI runs on `release/*`, `develop` and nightly. `q
 `templates-validation.spec.ts` and the axe sweep (`a11y*.spec.ts`, `users-a11y.desktop.spec.ts`: full tier only), project `phone` limited to tests tagged both `@phone` and `@smoke` (about 160 tests instead of 1000; counts: `npx playwright test --list`). Any other
 value is an error. No test is removed; `npx playwright test --list` shows what a tier runs.
 
+**Optional parts from the diff (FLE-172).** In CI the quick tier is extended by `ci/pw_select.py` from the files the change
+touches (`ci/run-gates.sh` calls it; run it by hand with `python3 ci/pw_select.py --base origin/develop`):
+
+- `FLEET_PW_PHONE=on|off|auto`: the `phone` project exists only on a UI change (`app/templates/`, `app/assets/`,
+  `app/src/Twig/`, `app/src/Form/`, `*.phone.spec.ts`, `playwright.config.ts`, `support/`); `off` drops it, `auto` (default
+  in the config) keeps the tier's own behaviour. The full tier always runs it.
+- `FLEET_PW_TARGETED="a-coverage.spec.ts b-validation.spec.ts"`: quick tier only, adds back these `*-coverage` / `*-validation`
+  specs. A spec `<stem>-coverage.spec.ts` belongs to the area `<stem>` (singular, plus the parts of a hyphenated stem such as
+  `setup`, `wizard`): it runs when a changed path under `app/src/`, `app/templates/`, `app/assets/` or `app/tests/` contains
+  that name (CamelCase and kebab-case are the same), or a `tests/playwright/<stem>*` spec changed. Cross-cutting changes (layout
+  and base templates, assets, config, migrations, lock files, `Kernel`, `Security`, `Twig`, `Form`, Playwright config and
+  support) run every one of them. Unsure or no diff: everything runs.
+
 With `FLEET_E2E_BASE_URL` unset, Playwright starts the app itself (`support/start-app.mjs`: a throw-away
 `FLEET_HOME`, `importmap:install`, `tailwind:build`, migrations, an initialised host with a fresh setup link
 written to `.run/setup-url.txt`, `php -S 127.0.0.1:8000`) and stops it afterwards. With it set to a URL, the suite targets that already-running server and starts nothing
