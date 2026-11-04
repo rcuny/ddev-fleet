@@ -41,11 +41,7 @@ final readonly class GitClient
             throw new \InvalidArgumentException('The target directory is not an instance directory.');
         }
 
-        $ssh = \sprintf(
-            'ssh -i %s -o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%s',
-            escapeshellarg($this->paths->sshPrivateKey(SshKeyRole::Deploy)),
-            escapeshellarg($this->paths->knownHostsFile()),
-        );
+        $ssh = $this->sshCommand(false);
 
         return $this->runner->run(
             ['git', '-c', 'protocol.ext.allow=never', '-c', 'protocol.file.allow=never', 'clone', '--branch', $branch, '--', $url, $dir],
@@ -53,6 +49,38 @@ final readonly class GitClient
             ['GIT_TERMINAL_PROMPT' => '0', 'GIT_ALLOW_PROTOCOL' => 'https:ssh', 'GIT_SSH_COMMAND' => $ssh],
             $onOutput,
             self::CLONE_TIMEOUT,
+        );
+    }
+
+    /**
+     * Makes git over SSH work in a checkout's terminals (tty1/tty2, CI scripts): `core.sshCommand` carries the same
+     * options as the clone, so no `~/.ssh` is needed and a missing host trust fails fast (BatchMode) instead of
+     * hanging at a host-key prompt. The push key, when the host has one, is offered first so agent instances can push.
+     *
+     * @throws \InvalidArgumentException when $dir is not an instance directory
+     */
+    public function configureSsh(string $dir): CommandResult
+    {
+        $id = basename($dir);
+        if (1 !== preg_match(FleetPaths::INSTANCE_ID_PATTERN, $id) || $dir !== $this->paths->instanceDir($id)) {
+            throw new \InvalidArgumentException('The target directory is not an instance directory.');
+        }
+
+        return $this->runner->run(['git', 'config', '--local', 'core.sshCommand', $this->sshCommand(true)], $dir, [], null, self::HEAD_TIMEOUT);
+    }
+
+    private function sshCommand(bool $withPushKey): string
+    {
+        $keys = [];
+        if ($withPushKey && is_file($this->paths->sshPrivateKey(SshKeyRole::Push))) {
+            $keys[] = $this->paths->sshPrivateKey(SshKeyRole::Push);
+        }
+        $keys[] = $this->paths->sshPrivateKey(SshKeyRole::Deploy);
+
+        return \sprintf(
+            'ssh %s-o IdentitiesOnly=yes -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=%s',
+            implode('', array_map(static fn (string $k): string => '-i '.escapeshellarg($k).' ', $keys)),
+            escapeshellarg($this->paths->knownHostsFile()),
         );
     }
 

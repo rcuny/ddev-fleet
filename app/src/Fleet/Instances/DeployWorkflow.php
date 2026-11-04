@@ -138,6 +138,11 @@ final class DeployWorkflow
             throw new JobFailed('git clone did not finish: '.$e->getMessage());
         }
         $this->requireSuccess('git clone', $cloned);
+        try {
+            $this->requireSuccess('git ssh setup', $this->git->configureSsh($dir));
+        } catch (CommandRunnerException $e) {
+            throw new JobFailed('git ssh setup did not finish: '.$e->getMessage());
+        }
 
         // 4. What fleet adds to the checkout, kept out of the project's git status.
         $written = [$this->config->write($instance, $project, $dir)];

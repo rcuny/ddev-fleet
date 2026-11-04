@@ -182,11 +182,29 @@ final class KnownHostsFileTest extends TestCase
         self::assertFalse($this->file->has('git.example.com'), 'a host and the same host on another port are different identities');
     }
 
+    public function testSeedCoversBothBitbucketHostNamesWithTheSameKeys(): void
+    {
+        $this->file->seed();
+
+        self::assertTrue($this->file->has('bitbucket.org'));
+        self::assertTrue($this->file->has('ssh.bitbucket.org'));
+        $keys = ['bitbucket.org' => [], 'ssh.bitbucket.org' => []];
+        foreach ($this->file->entries() as $entry) {
+            if (isset($keys[$entry->host])) {
+                $keys[$entry->host][] = $entry->type.' '.$entry->key;
+            }
+        }
+        sort($keys['bitbucket.org']);
+        sort($keys['ssh.bitbucket.org']);
+        self::assertNotSame([], $keys['bitbucket.org']);
+        self::assertSame($keys['bitbucket.org'], $keys['ssh.bitbucket.org']);
+    }
+
     public function testAddRefusesASecondKeyForASeededHost(): void
     {
         $this->file->seed();
         $before = (string) file_get_contents($this->paths->knownHostsFile());
-        foreach (['github.com', 'GitHub.COM', 'bitbucket.org', 'gitlab.com'] as $host) {
+        foreach (['github.com', 'GitHub.COM', 'bitbucket.org', 'ssh.bitbucket.org', 'gitlab.com'] as $host) {
             // Same type with another key, and another type altogether: both would be a second identity for the host.
             foreach ([['ssh-ed25519', self::key()], ['ssh-rsa', self::rsaLikeKey()]] as [$type, $key]) {
                 try {
