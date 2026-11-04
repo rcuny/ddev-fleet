@@ -27,10 +27,10 @@ export interface ConsoleResult {
 }
 
 /** Runs a `bin/console` command of the app under test and returns its exit status and output (any status). */
-export function runConsole(args: string[]): ConsoleResult {
+export function runConsole(args: string[], extraEnv: NodeJS.ProcessEnv = {}): ConsoleResult {
   const result = spawnSync(php(), ['bin/console', ...args, '--no-interaction'], {
     cwd: appDir,
-    env: { ...process.env, APP_ENV: 'dev', FLEET_RUNNER: 'recording', FLEET_HOME: fleetHome() },
+    env: { ...process.env, APP_ENV: 'dev', FLEET_RUNNER: 'recording', FLEET_HOME: fleetHome(), ...extraEnv },
     encoding: 'utf8',
   });
   return { status: result.status, stdout: result.stdout, text: `${result.stdout}${result.stderr}` };

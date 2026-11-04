@@ -176,6 +176,8 @@ when@dev:
         # its FLEET_HOME) to simulate a pending reboot, as the PHPUnit tests do in the test environment.
         fleet.reboot_flag_file: '%env(resolve:FLEET_HOME)%/test-reboot-required'
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
+        # Not the container's /etc: the Playwright upgrade spec writes this file to pose as a host one release behind.
+        fleet.installed_version_file: '%env(resolve:FLEET_HOME)%/test-installed-version'
 
     services:
         # Never the developer's real ~/.ddev: a dev app that wrote router files there would change their DDEV router.
@@ -189,6 +191,8 @@ when@test:
         # Never the real /run files: a test writes these (under its own FLEET_HOME) to simulate a pending reboot.
         fleet.reboot_flag_file: '%env(resolve:FLEET_HOME)%/test-reboot-required'
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
+        # Never the real /etc file: a test writes this one (under its own FLEET_HOME) to pose as an installed host.
+        fleet.installed_version_file: '%env(resolve:FLEET_HOME)%/test-installed-version'
 
     services:
         # No consumer yet (the upgrade commands arrive later); the registry wiring test reads it from the container.
