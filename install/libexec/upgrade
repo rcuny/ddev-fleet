@@ -1,0 +1,233 @@
+#!/bin/bash
+# Root helper of `sudo fleet upgrade` (the wrapper /usr/local/bin/fleet execs it; nothing else calls it).
+#
+#   upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--repo-url=<url|path>]
+#
+# Installed by install/steps/90-privileged.sh as root:root 0755 from the root-owned export of install/. There is NO
+# sudoers entry for it: the application can never start an upgrade (docs/upgrading.md, "Why only the command line").
+#
+# The flow (every step before the installer changes nothing but the backup directory):
+#   1. plan + pre-flight, as the `fleet` user (`fleet upgrade:prepare`): a Block, a downgrade, an unreachable release
+#      source or a modified checkout refuses with exit 3;
+#   2. confirmation: --yes, or a terminal and "y"; a non-interactive run without --yes refuses;
+#   3. the pre-upgrade backup, as `fleet` (`fleet upgrade:backup`); a failure stops here (exit 1);
+#   4. the history line "start" (versions, shas, time, actor from SUDO_USER, backup file name);
+#   5. the target's install/ tree is fetched by the commit sha the plan resolved into a root-owned temp directory and its
+#      install.sh is run with --ref=<tag> (the tag must still point at that sha, or nothing runs);
+#   6. the history line "installer"; then `fleet upgrade:verify` (the NEW code) and the line "verify".
+# Self-replacement: the installer rewrites this file and the wrapper; the whole script is inside main(), read before it
+# runs, and the last line calls it.
+#
+# Source: always the public GitHub mirror, unless --repo-url is given on this command line (FLEET_UPGRADE_REPO_URL is
+# ignored here; it only steers the unprivileged release check). Every value written to the history is validated against
+# a character set first; no secret is read, printed or logged. Tag names are validated and passed as one argv word.
+#
+# Exit codes: 0 done and verified, 1 failed, 2 usage, 3 refused (nothing changed), 5 verification failed.
+# Tests: app/tests/Repo/UpgradeHelperTest.php (FLEET_UPGRADE_TEST_ROOT, honoured only when not really root).
+
+main() {
+  set -Eeuo pipefail
+  umask 022
+  IFS=$' \t\n'
+  unset BASH_ENV ENV CDPATH GLOBIGNORE
+  export LC_ALL=C
+  local caller_path=$PATH
+  PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+  export PATH
+
+  local root='' fleet_bin=/usr/local/bin/fleet
+  if [ "$EUID" -ne 0 ]; then
+    # Unprivileged: only the test seam is allowed, into a scratch tree, with the caller's PATH for its stubs.
+    [ -n "${FLEET_UPGRADE_TEST_ROOT:-}" ] || { printf 'upgrade: must run as root (sudo fleet upgrade)\n' >&2; return 3; }
+    [ -d "$FLEET_UPGRADE_TEST_ROOT" ] && [[ $FLEET_UPGRADE_TEST_ROOT == /* ]] || { printf 'upgrade: FLEET_UPGRADE_TEST_ROOT must be an existing absolute directory\n' >&2; return 3; }
+    root=${FLEET_UPGRADE_TEST_ROOT%/}
+    PATH=$caller_path
+    export PATH
+    fleet_bin=fleet
+  fi
+  local env_file="$root/etc/ddev-fleet/fleet.env"
+  local history_dir="$root/var/log/ddev-fleet"
+  local history_file="$history_dir/upgrade-history.jsonl"
+  local install_log="$root/var/log/ddev-fleet-install.log"
+  local lock_file="$root/run/lock/ddev-fleet-upgrade.lock"
+  local default_repo=https://github.com/rcuny/ddev-fleet.git
+
+  say() { printf '%s\n' "$*"; }
+  err() { printf 'upgrade: %s\n' "$*" >&2; }
+  # as_fleet <argv...>: the wrapper runs the console command as the fleet user with the application environment.
+  as_fleet() { "$fleet_bin" "$@"; }
+  now() { date -u +%Y-%m-%dT%H:%M:%S+00:00; }
+
+  # --- arguments -----------------------------------------------------------------------------------------------------
+  local to='' yes=0 repo_url=$default_repo arg
+  local -a force=()
+  while [ "$#" -gt 0 ]; do
+    arg=$1
+    shift
+    case $arg in
+      --to=*) to=${arg#--to=} ;;
+      --to) [ "$#" -gt 0 ] || { err 'usage: --to needs a version (vX.Y.Z)'; return 2; }; to=$1; shift ;;
+      --yes | -y) yes=1 ;;
+      --force=*) force+=("${arg#--force=}") ;;
+      --repo-url=*) repo_url=${arg#--repo-url=} ;;
+      -h | --help)
+        say 'usage: sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--repo-url=<url|path>]'
+        return 0
+        ;;
+      *) err "usage: unknown argument: ${arg:0:60}"; return 2 ;;
+    esac
+  done
+  if [ -n "$to" ] && ! [[ $to =~ ^v1\.[0-9]+\.[0-9]+$ ]]; then
+    err "usage: --to must look like v1.2.3 (got: ${to:0:40})"
+    return 2
+  fi
+  for arg in ${force[@]+"${force[@]}"}; do
+    [[ $arg =~ ^[a-z][a-z0-9._-]{0,63}$ ]] || { err "usage: --force takes a check id such as disk.space (got: ${arg:0:40})"; return 2; }
+  done
+  [[ $repo_url =~ ^[A-Za-z0-9/][A-Za-z0-9._/:@+~%=-]{0,499}$ ]] || { err 'usage: --repo-url is not a valid url or path'; return 2; }
+
+  local actor=root
+  if [ -n "${SUDO_USER:-}" ] && [[ $SUDO_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
+    actor=$SUDO_USER
+  fi
+
+  # --- one upgrade at a time ---------------------------------------------------------------------------------------------
+  mkdir -p "$(dirname "$lock_file")"
+  exec 9>"$lock_file"
+  flock -n 9 || { err 'another upgrade is in progress'; return 3; }
+
+  # --- 1. plan + pre-flight (as fleet; changes nothing) -------------------------------------------------------------
+  say "Planning the upgrade ..."
+  local -a prepare=(upgrade:prepare)
+  [ -n "$to" ] && prepare+=("--to=$to")
+  for arg in ${force[@]+"${force[@]}"}; do prepare+=("--force=$arg"); done
+  local out status=0 line key value
+  out=$(as_fleet "${prepare[@]}") || status=$?
+  local state='' from='' target='' sha='' actions=0
+  while IFS= read -r line; do
+    key=${line%%=*}
+    value=${line#*=}
+    case $key in
+      STATE) [[ $value =~ ^[a-z_]{1,20}$ ]] && state=$value ;;
+      FROM) [[ $value =~ ^[A-Za-z0-9._/@-]{1,100}$ ]] && from=$value ;;
+      TO) [[ $value =~ ^v1\.[0-9]+\.[0-9]+$ ]] && target=$value ;;
+      SHA) [[ $value =~ ^[0-9a-f]{40}$ ]] && sha=$value ;;
+      ACTIONS) [[ $value =~ ^[0-9]{1,3}$ ]] && actions=$value ;;
+    esac
+  done <<<"$out"
+  if [ "$status" -ne 0 ]; then
+    # The prepare command printed its reasons on stderr; its code is ours (1 failed, 2 usage, 3 refused).
+    err 'nothing was changed'
+    return "$status"
+  fi
+  if [ "$state" = up_to_date ]; then
+    say "Already on ${from}: nothing to upgrade."
+    return 0
+  fi
+  if [ "$state" != ready ] || [ -z "$target" ] || [ -z "$sha" ] || [ -z "$from" ]; then
+    err 'the plan did not name a release and a commit; nothing was changed'
+    return 1
+  fi
+
+  # --- 2. confirmation ------------------------------------------------------------------------------------------------
+  if [ "$yes" -ne 1 ]; then
+    if [ -t 0 ] && [ -t 1 ]; then
+      local answer=''
+      [ "$actions" -gt 0 ] && say "WARNING: $actions rollout note(s) need an action from you (see ACTION above)."
+      printf 'Upgrade %s -> %s now? A database backup is taken first. [y/N] ' "$from" "$target"
+      read -r answer || answer=''
+      [[ $answer =~ ^[yY]([eE][sS])?$ ]] || { err 'cancelled; nothing was changed'; return 3; }
+    else
+      err 'this is not an interactive run: pass --yes to confirm the upgrade. Nothing was changed.'
+      return 3
+    fi
+  fi
+
+  # --- the domain the installer re-runs with: parsed from fleet.env, never sourced ------------------------------
+  local domain=''
+  if [ -r "$env_file" ]; then
+    domain=$(sed -n 's/^DEFAULT_URI=https:\/\/\([^\/"'"'"' ]*\)\/*$/\1/p' "$env_file" | head -n 1)
+  fi
+  if ! [[ $domain =~ ^([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z][a-z0-9-]{0,61}[a-z0-9]$ ]]; then
+    err "cannot read the host name from DEFAULT_URI in $env_file; nothing was changed"
+    return 3
+  fi
+
+  # --- the tag must still point at the planned commit (a moved tag is refused before anything changes) -------------
+  local peeled
+  peeled=$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags -- "$repo_url" "refs/tags/$target^{}" 2>/dev/null | awk '{print $1}' | head -n 1) || peeled=''
+  if [ "$peeled" != "$sha" ]; then
+    err "the tag $target no longer points at the commit the plan resolved (${sha:0:7}); nothing was changed. Run the command again."
+    return 3
+  fi
+
+  # --- 3. backup ---------------------------------------------------------------------------------------------------------
+  say "Taking the pre-upgrade backup ..."
+  local backup=''
+  out=$(as_fleet upgrade:backup) || { err 'nothing was changed'; return 1; }
+  backup=$(sed -n 's/^BACKUP=//p' <<<"$out" | head -n 1)
+  if ! [[ $backup =~ ^[A-Za-z0-9._-]{1,100}$ ]]; then
+    err 'the backup did not report a file name; nothing was changed'
+    return 1
+  fi
+  say "Backup: $backup"
+
+  # --- 4. history: start ---------------------------------------------------------------------------------------------
+  history_line() { # event result [backup]
+    local extra=''
+    [ -n "${3:-}" ] && extra=$(printf ',"backup":"%s"' "$3")
+    install -d -m 0755 "$history_dir"
+    if [ ! -e "$history_file" ]; then
+      install -m 0644 /dev/null "$history_file"
+    fi
+    printf '{"ts":"%s","event":"%s","result":"%s","from":"%s","to":"%s","sha":"%s","actor":"%s"%s}\n' \
+      "$(now)" "$1" "$2" "$from" "$target" "$sha" "$actor" "$extra" >>"$history_file"
+  }
+  history_line start started "$backup"
+
+  # --- 5. the target's installer, by the planned sha -----------------------------------------------------------------
+  local work
+  work=$(mktemp -d "${TMPDIR:-/tmp}/fleet-upgrade.XXXXXX")
+  chmod 0700 "$work"
+  trap 'rm -rf -- "$work"' RETURN
+  say "Fetching the installer of $target (${sha:0:7}) ..."
+  if ! { GIT_TERMINAL_PROMPT=0 git init -q "$work/src" \
+    && GIT_TERMINAL_PROMPT=0 git -C "$work/src" fetch -q --depth 1 -- "$repo_url" "$sha" \
+    && [ "$(git -C "$work/src" rev-parse FETCH_HEAD)" = "$sha" ] \
+    && mkdir "$work/export" \
+    && git -C "$work/src" archive --format=tar FETCH_HEAD install | tar -x --no-same-owner -C "$work/export" \
+    && chmod -R go-w "$work/export" \
+    && [ -f "$work/export/install/install.sh" ]; } >/dev/null 2>&1; then
+    history_line installer failed
+    err "could not fetch the installer of $target from $repo_url. The host is unchanged except for the backup; run the command again."
+    return 1
+  fi
+
+  say "Running the installer (log: $install_log) ..."
+  local rc=0
+  bash "$work/export/install/install.sh" "--domain=$domain" "--ref=$target" "--repo-url=$repo_url" --skip-dns-check || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    history_line installer failed
+    err "the installer failed (exit $rc). Log: $install_log"
+    err "It is idempotent: run the same command again, or go back with: sudo fleet upgrade --to $from"
+    return 1
+  fi
+  history_line installer ok
+
+  # --- 6. verify (the new code answers) --------------------------------------------------------------------------------
+  say "Verifying ..."
+  rc=0
+  as_fleet upgrade:verify "--to=$target" "--from=$from" "--sha=$sha" "--actor=$actor" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    history_line verify unverified
+    err "verification failed (exit $rc). To go back: sudo fleet upgrade --to $from"
+    err "Installer log: $install_log"
+    return 5
+  fi
+  history_line verify ok
+  say "Upgraded $from -> $target and verified. Installer log: $install_log"
+  return 0
+}
+
+main "$@"
+exit "$?"

@@ -1,15 +1,16 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-11-03
+Last updated: 2026-11-04
 Type: documentation
 ---
 
 # Upgrading
 
-How to see what the next release of Fleet changes before you install it. The upgrade itself (`sudo fleet upgrade`) and
-the rollback are added by later tickets of the same milestone; until then a release is installed by re-running the
-installer (`installation.md`, section "Upgrading").
+How to see what the next release of Fleet changes (`fleet upgrade --check`) and how to install it (`sudo fleet upgrade`).
+The rollback (`sudo fleet upgrade --to <older tag>`) is added by a later ticket of the same milestone; the upgrade
+engine is the installer re-run (`installation.md`, section "Upgrading"), which `sudo fleet upgrade` wraps with a plan,
+a backup, a verification and a history.
 
 ## Check for an update
 
@@ -77,3 +78,69 @@ would do that raises `schema`. A usage or unexpected error is `{"schema": 1, "er
 
 `fleet:upgrade:plan` prints the same document (always JSON) and accepts `--force=<id>` (repeatable) to waive overridable
 blocks. It is internal: the upgrade command reads it, people use `--check`.
+
+## Upgrade the host
+
+```
+sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]...
+```
+
+Moves the host up to the latest release (or `--to`, which must be newer than the installed version). It needs root: run
+it with `sudo`. Without root it changes nothing and prints the exact `sudo` line. The steps, in order:
+
+1. **Plan and pre-flight**, as the `fleet` user (the same report as `--check`). A `BLOCK`, a modified checkout, a target
+   older than the installed version, a host that runs a branch instead of a release, or an unreachable release source
+   refuses the upgrade (exit 3) before anything changes.
+2. **Confirmation.** `--yes` confirms; a terminal asks `[y/N]`; a non-interactive run without `--yes` is refused (exit 3).
+3. **Backup.** The pre-upgrade database backup (`fleet backup`); if it cannot be taken the upgrade stops (exit 1).
+4. **Installer.** The target's `install/` tree is fetched by the **commit** the plan resolved (the tag must still point at
+   it, or the run is refused), and its `install.sh` runs with `--ref=<tag>`. The installer log path is printed. The
+   installer is idempotent: after a failure (exit 1) run the same command again.
+5. **Verification**, by the new code: `/health` answers, the Authelia portal answers, `installed-version` is the target,
+   the checkout is at the planned commit, no migration is pending, `fleet-worker@1` and `fleet-status` are active, and a
+   `host.upgrade` audit row is written (best effort: a missing row only warns). A failure exits 5 and prints the way back:
+   `sudo fleet upgrade --to <previous version>`.
+
+| Option | Meaning |
+|---|---|
+| `--to vX.Y.Z` | Upgrade to this published release instead of the latest. |
+| `--yes` | Confirm without asking. Required when there is no terminal. |
+| `--force=<check-id>` | Waive one overridable pre-flight Block (repeatable). A modified checkout and a full disk cannot be waived. |
+| `--repo-url=<url or path>` | Install from this git remote instead of the public mirror (mirrors, rehearsals). The root run ignores `FLEET_UPGRADE_REPO_URL`. |
+
+### Exit codes of `sudo fleet upgrade`
+| Code | Meaning |
+|---|---|
+| 0 | Done and verified (or already up to date). |
+| 1 | Failed: the plan, the backup or the installer. The message says whether anything changed. |
+| 2 | Usage: a bad option or an unknown `--to`. |
+| 3 | Refused, nothing changed: a pre-flight Block, no `--yes`, not root, a moved tag, another upgrade running. |
+| 5 | The installer finished but the verification failed. The rollback command is printed. |
+
+### History
+
+`fleet upgrade history [--limit=N] [--json]` lists the upgrades run on this host, newest first. The record is
+`/var/log/ddev-fleet/upgrade-history.jsonl` (root-owned, mode 0644, one JSON object per line, appended by the root
+helper only, so a restored database cannot erase it). Three lines per upgrade:
+
+| Event | Result values | When |
+|---|---|---|
+| `start` | `started` | After the backup, before the installer; carries the `backup` file name. |
+| `installer` | `ok`, `failed` | When the installer returned. |
+| `verify` | `ok`, `unverified` | When the verification returned. |
+
+Every line has `ts` (UTC), `event`, `result`, `from`, `to`, `sha` (the commit the plan resolved), `actor` (the `sudo`
+user) and, on `start`, `backup`. No secret is ever written. `fleet upgrade verify --to vX.Y.Z` runs the verification on
+its own.
+
+### Why only the command line
+
+The installer restarts php-fpm, the workers, Caddy and Authelia, so an upgrade started from the web UI would end its own
+request and sign everyone out, and letting the application user run "any installer" as root would break the rule that
+the application never runs as root. The Upgrade page therefore shows the status, the changelog, the check results and the
+history, and the command to copy. There is no sudoers entry for the upgrade helper (`/usr/local/libexec/fleet/upgrade`).
+
+### Internal commands
+
+`fleet:upgrade:prepare` (the plan, `KEY=value` lines for the helper), `fleet:upgrade:backup` and `fleet:upgrade:verify`
+are the fleet-user steps the root helper calls; they are not meant to be run by hand, apart from `verify`.
