@@ -1,11 +1,10 @@
 import { expect, test, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { fillProject, openNewProject, projectForm, readProject, submitCreate, submitSave, type ProjectFields } from './support/projectForm';
 import { deleteProjectViaUi, GIT_URL, uniqueName } from './support/projects';
 import { collectBrowserErrors } from './support/shell';
 
 // What a browser adds to the project form's validation: the refused form on screen (errors next to their fields, typed values
-// kept, accessible, no stray console error) and the controls that only exist in the page. The per-rule matrices (every name,
+// kept, no stray console error) and the controls that only exist in the page. The per-rule matrices (every name,
 // URL, branch, hostname, identity, pattern and path case, refused and accepted) are PHPUnit Functional tests in
 // app/tests/Functional/Admin/ProjectValidationTest.php (FLE-127). Desktop only: the phone has its overflow checks in
 // projects-validation.spec.ts.
@@ -54,7 +53,6 @@ test('an empty form shows the two required-field messages together and creates n
   await expect(projectForm(page)).toContainText('Enter a name.');
   await expect(projectForm(page)).toContainText('Enter the repository URL.');
   await expect(projectForm(page)).not.toContainText('Enter a branch name.');
-  await expectNoBlockingViolations(page, 'the refused create form');
   expect(errors.filter((error) => !error.includes('status of 422'))).toEqual([]);
 });
 
@@ -91,7 +89,6 @@ test('a refused Save keeps what was typed, shows no success flash and saves noth
   await expect(page.getByTestId('flashes')).toHaveCount(0);
   await expect(page.getByLabel('Git URL')).toHaveValue('http://x');
   await expect(page.getByLabel('Default branch')).toHaveValue('dev');
-  await expectNoBlockingViolations(page, 'the refused edit form');
 
   // Nothing was saved, not even the valid field.
   await page.goto(`/admin/projects/${name}`);

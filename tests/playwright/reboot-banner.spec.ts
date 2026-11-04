@@ -1,47 +1,9 @@
-import { mkdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { blockingViolations } from './support/axe';
-import { baseURL, externalBaseURL } from './support/env';
+import { baseURL } from './support/env';
+import { acquire, clearFlag, flag, fleetHome, lock, packages } from './support/rebootFlag';
 import { hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
-
-// The dev and test environments read the "reboot required" flag from FLEET_HOME/test-reboot-required (not /run), so
-// this spec can switch it: the app's own FLEET_HOME when Playwright started it (support/start-app.mjs; the environment's
-// FLEET_HOME is not that one), otherwise the FLEET_HOME of the environment (the companion's served dev app shares it).
-const here = dirname(fileURLToPath(import.meta.url));
-const fleetHome = (externalBaseURL && process.env.FLEET_HOME) || resolve(here, '.run/fleet-home');
-const flag = join(fleetHome, 'test-reboot-required');
-const packages = `${flag}.pkgs`;
-
-function clearFlag(): void {
-  rmSync(flag, { force: true });
-  rmSync(packages, { force: true });
-}
-
-// The flag is one file shared by every worker, and the desktop and phone projects run at the same time: a directory
-// is the lock (mkdir is atomic). A lock left by a crashed run is taken over after a minute.
-const lock = `${flag}.lock`;
-
-async function acquire(): Promise<void> {
-  mkdirSync(fleetHome, { recursive: true });
-  for (;;) {
-    try {
-      mkdirSync(lock);
-      return;
-    } catch {
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > 60_000) {
-          rmSync(lock, { recursive: true, force: true });
-        }
-      } catch {
-        // released between the two calls: try again
-      }
-      await new Promise((done) => setTimeout(done, 100));
-    }
-  }
-}
 
 test.describe('reboot banner', () => {
   test.beforeEach(async () => {
@@ -61,7 +23,7 @@ test.describe('reboot banner', () => {
     await expect(page.getByTestId('reboot-banner')).toHaveCount(0);
   });
 
-  test('an administrator sees the banner with the packages, without overflow or axe violations', async ({ page }) => {
+  test('an administrator sees the banner with the packages, without overflow', async ({ page }) => {
     mkdirSync(fleetHome, { recursive: true });
     writeFileSync(flag, '*** System restart required ***\n');
     writeFileSync(packages, 'linux-image-6.12.0-amd64\nlibc6\n');
@@ -80,7 +42,6 @@ test.describe('reboot banner', () => {
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     expect(await hasHorizontalOverflow(page)).toBe(false);
-    expect(await blockingViolations(page)).toEqual([]);
   });
 
   test('the banner shows on other shell pages and without a package list', async ({ page }) => {

@@ -1,6 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 
@@ -36,7 +35,6 @@ test('export a project, delete it, import the file, preview and confirm', async 
     await expect(page).toHaveURL(/\/admin\/import$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Import a project' })).toBeVisible();
     await expectNoOverflow(page, 'import page');
-    await expectNoBlockingViolations(page, 'import page');
 
     await page.getByTestId('import-file').setInputFiles({ name: `${name}.fleet-project.json`, mimeType: 'application/json', buffer: Buffer.from(text) });
     const [response] = await Promise.all([
@@ -52,7 +50,6 @@ test('export a project, delete it, import the file, preview and confirm', async 
     expect(await rows.evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-action')))).not.toContain('skipped');
     await expect(page.getByTestId('import-errors')).toHaveCount(0);
     await expectNoOverflow(page, 'import preview');
-    await expectNoBlockingViolations(page, 'import preview');
 
     // Confirm: the project is back.
     await page.getByTestId('import-confirm').click();
@@ -72,5 +69,4 @@ test('a file that is not an export is refused and nothing is imported', async ({
   await expect(page.getByTestId('import-error-item').first()).toContainText('version');
   await expect(page.getByTestId('import-confirm-form')).toHaveCount(0);
   await expectNoOverflow(page, 'refused import');
-  await expectNoBlockingViolations(page, 'refused import');
 });

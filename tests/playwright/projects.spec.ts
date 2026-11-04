@@ -1,6 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -473,26 +472,4 @@ test.describe('phone layout of the project pages (390 px)', () => {
     await dialog.getByRole('button', { name: 'Cancel' }).click();
     await expect(dialog).toBeHidden();
   });
-
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(`axe, ${scheme} theme`, () => {
-      test.use({ colorScheme: scheme });
-
-      for (const [label, path] of [
-        ['edit', `/admin/projects/${NAME}`],
-        ['template list', `/admin/projects/${NAME}/templates`],
-        ['template form', `/admin/projects/${NAME}/templates/${TEMPLATE}`],
-        ['ports', `/admin/projects/${NAME}/ports`],
-      ] as const) {
-        test(`no serious or critical violations on the ${label} page`, async ({ page }) => {
-          await page.goto(path);
-          await expect(page.getByRole('heading', { level: 1 })).toBeVisible();
-          if (scheme === 'dark') {
-            await expect(page.locator('html')).toHaveClass(/\bdark\b/);
-          }
-          expect(await blockingViolations(page)).toEqual([]);
-        });
-      }
-    });
-  }
 });

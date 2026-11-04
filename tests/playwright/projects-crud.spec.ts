@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { fillProject, openNewProject, projectForm, readProject, submitCreate, submitSave } from './support/projectForm';
 import { createDeployableProject, deployOne, uniqueLabel } from './support/instances';
 import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, submitAndWait, uniqueName } from './support/projects';
@@ -25,7 +24,6 @@ test.describe('project list', () => {
       await expect(row).toHaveCount(1);
       await expect(row).toContainText(`${GIT_URL} · develop`);
       await expect(row).toContainText('0 templates');
-      await expectNoBlockingViolations(page, 'the project list');
 
       await follow(page, row.getByRole('link'));
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
@@ -61,7 +59,6 @@ test.describe('project list', () => {
     await expect(page.getByRole('link', { name: 'Import' })).toHaveAttribute('href', /\/admin\/import/);
     await follow(page, page.getByRole('link', { name: 'New project' }).first());
     await expect(page).toHaveURL(/\/admin\/projects\/new$/);
-    await expectNoBlockingViolations(page, 'the create form');
     await follow(page, page.getByRole('link', { name: 'Cancel' }));
     await expect(page).toHaveURL(/\/admin\/projects$/);
     await expect(page.getByRole('heading', { level: 1, name: 'Projects' })).toBeVisible();
@@ -102,7 +99,6 @@ test.describe('create', () => {
       await expect(page.getByText(fields.git).first()).toBeVisible();
       expect(await readProject(page)).toEqual({ ...fields, mode: 'Custom identity', typesense: true });
       await expect(page.getByTestId('danger-zone')).toBeVisible();
-      await expectNoBlockingViolations(page, 'the edit page right after create');
 
       // The same state after a fresh load.
       await page.goto(`/admin/projects/${name}`);
@@ -205,7 +201,6 @@ test.describe('edit', () => {
       await expect(page.getByTestId('issue-id-preview')).toBeVisible();
       await expect(page.getByTestId('export-project')).toBeVisible();
       await expect(page.getByTestId('danger-zone')).toContainText('It is refused while the project has instances.');
-      await expectNoBlockingViolations(page, 'the edit page');
     } finally {
       await deleteProjectViaUi(page, name);
     }
@@ -221,7 +216,6 @@ test.describe('delete', () => {
       let dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
       await expect(dialog).toContainText(`Delete ${name}?`);
       await expect(dialog).toContainText('This removes the project, its templates and its port assignments. It cannot be undone.');
-      await expectNoBlockingViolations(page, 'the delete dialog');
       if (isPhone()) {
         expect(await hasHorizontalOverflow(page), 'overflow with the dialog open').toBe(false);
       }
@@ -242,7 +236,6 @@ test.describe('delete', () => {
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
       await expect(page).toHaveURL(/\/admin\/projects$/);
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(0);
-      await expectNoBlockingViolations(page, 'the list after a delete');
 
       expect((await page.goto(`/admin/projects/${name}`))?.status()).toBe(404);
       expect((await page.goto(`/admin/projects/${name}/templates`))?.status()).toBe(404);
@@ -281,7 +274,6 @@ test.describe('delete', () => {
       await expect(page.getByTestId('flashes')).toContainText('instance(s) exist: destroy them first');
       await expect(page.getByTestId('flashes')).toContainText(instance);
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-      await expectNoBlockingViolations(page, 'the refused delete');
 
       await page.goto('/admin/projects');
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(1);

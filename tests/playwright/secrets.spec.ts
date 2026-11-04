@@ -1,6 +1,5 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { test } from './support/secrets';
@@ -196,21 +195,6 @@ test.describe('secrets', () => {
     for (const path of ['/admin/secrets', '/admin/audit', '/admin/projects/anything/secrets']) {
       const response = await page.goto(path);
       expect(response?.status(), path).toBe(403);
-    }
-  });
-
-  test('pages have no serious accessibility violations', async ({ page }) => {
-    test.setTimeout(120_000);
-    const name = uniqueSecret('AXE');
-    try {
-      await page.goto('/admin/secrets');
-      await saveSecret(page, name, uniqueValue());
-      expect(await blockingViolations(page)).toEqual([]);
-      await page.goto('/admin/audit');
-      await expect(page.getByRole('heading', { level: 1, name: 'Audit log' })).toBeVisible();
-      expect(await blockingViolations(page)).toEqual([]);
-    } finally {
-      await deleteSecret(page, '/admin/secrets', name);
     }
   });
 });

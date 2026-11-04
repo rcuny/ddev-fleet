@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { expectNoBlockingViolations } from './support/axe';
 import { runFakeJob } from './support/instances';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -208,7 +207,6 @@ test.describe('assets coverage: folders', () => {
         0,
       );
       await expectNoOverflow(page, 'a folder refusal');
-      await expectNoBlockingViolations(page, 'a folder refusal');
     });
   });
 
@@ -297,7 +295,6 @@ test.describe('assets coverage: folders', () => {
       expect(existsSync(join(dir, ...levels, 'ninth'))).toBe(false);
       // The refusal sends the person back into the folder they were in.
       await expect(page).toHaveURL(/path=level1/);
-      await expectNoBlockingViolations(page, 'a deep folder with a refusal');
 
       const tooDeep = await page.goto(`${page.url().split('?')[0]}?path=${encodeURIComponent(`${deepest}/ninth`)}`);
       expect(tooDeep?.status()).toBe(404);
@@ -342,13 +339,11 @@ test.describe('assets coverage: symbolic links', () => {
       await expect(links.locator('a')).toHaveCount(0);
       await expect(page.getByTestId('asset-row').filter({ hasNotText: 'symbolic link' })).toHaveCount(2);
       await expectNoOverflow(page, 'a listing with symbolic links');
-      await expectNoBlockingViolations(page, 'a listing with symbolic links');
 
       // Typing the address of a link: a message, and the top of the project instead.
       await page.goto(`/admin/projects/${name}/assets?path=link`);
       await expect(page.getByTestId('assets-problem')).toContainText('A symbolic link is in the way. The browser never follows symbolic links.');
       await expect(page.getByTestId('asset-row')).toHaveCount(5);
-      await expectNoBlockingViolations(page, 'the symbolic link problem');
 
       // Downloads through a link are refused (409), also when the link leads out of the directory.
       for (const path of ['link/inside.sql', 'outside/passwd', 'dangling']) {
@@ -393,7 +388,6 @@ test.describe('assets coverage: symbolic links', () => {
         await createFolder(page, 'child');
         await expect(flashes(page)).toContainText('The folder was not created. A symbolic link is in the way.');
         expect(readdirSync(target)).toEqual(['hidden.sql']);
-        await expectNoBlockingViolations(page, 'a linked assets directory');
       } finally {
         unlinkSync(dir);
         rmSync(target, { recursive: true, force: true });
@@ -446,7 +440,6 @@ test.describe('assets coverage: uploads', () => {
       await choose(page, [{ name: 'occupied', buffer: Buffer.from('x') }]);
       item = await endedItem(page, 5, 'error');
       await expect(item.getByTestId('asset-upload-status')).toContainText('A folder with that name exists.');
-      await expectNoBlockingViolations(page, 'the refused upload items');
 
       // Several files at once go one after the other; a refused one does not stop the next.
       await choose(page, [
@@ -585,7 +578,6 @@ test.describe('assets coverage: listing, delete and download', () => {
       await expect(page.getByTestId('asset-row').first().getByTestId('asset-download')).toHaveCount(0);
       await expect(row.getByTestId('asset-download')).toBeVisible();
       await expectNoOverflow(page, 'the listing');
-      await expectNoBlockingViolations(page, 'the listing');
     });
   });
 
@@ -607,7 +599,6 @@ test.describe('assets coverage: listing, delete and download', () => {
         await expectTall(dialog.getByRole('button', { name: 'Cancel' }));
         await expectTall(dialog.getByTestId('asset-delete-confirm'));
       }
-      await expectNoBlockingViolations(page, 'the delete dialog');
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(page.getByRole('dialog')).toBeHidden();
       dialog = await openDialog(page, keepRow.getByTestId('asset-delete'));
@@ -699,7 +690,6 @@ test.describe('assets coverage: listing, delete and download', () => {
       expect(box!.x).toBeGreaterThanOrEqual(-0.5);
       expect(box!.x + box!.width).toBeLessThanOrEqual(width + 0.5);
       await expectNoOverflow(page, 'the delete dialog of a long name');
-      await expectNoBlockingViolations(page, 'the delete dialog of a long name');
       await page.keyboard.press('Escape');
 
       // The folder crumb of a long name wraps as well.
@@ -761,7 +751,6 @@ test.describe('assets coverage: snapshot card refusals', () => {
       await expect(page.getByTestId('snapshot-empty')).toBeVisible();
       expect(existsSync(join(assetsDir(name), 'dumps'))).toBe(false);
       await expectNoOverflow(page, 'a snapshot refusal');
-      await expectNoBlockingViolations(page, 'a snapshot refusal');
     });
   });
 

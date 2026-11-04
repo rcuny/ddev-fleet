@@ -1,7 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, GIT_URL, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -179,7 +178,6 @@ test.describe('export form', () => {
       await expect(field).toHaveValue('');
       await expect(page.getByTestId('export-project')).toContainText('Secrets are left out unless you give a passphrase to seal them.');
       await expectNoOverflow(page, 'export card');
-      await expectNoBlockingViolations(page, 'export card');
       if (isPhone()) {
         await expectTall(field);
         await expectTall(page.getByTestId('export-download'));
@@ -274,7 +272,6 @@ test.describe('import: upload page', () => {
     await expect(page.getByTestId('import-preview-section')).toHaveCount(0);
     await expect(page.getByTestId('import-error')).toHaveCount(0);
     await expectNoOverflow(page, 'empty import page');
-    await expectNoBlockingViolations(page, 'empty import page');
     if (isPhone()) {
       await expectTall(page.getByTestId('import-file'));
       await expectTall(page.getByTestId('import-passphrase'));
@@ -292,7 +289,6 @@ test.describe('import: upload page', () => {
     await expect(page.getByTestId('import-preview-section')).toHaveCount(0);
     await expect(page.getByTestId('import-upload')).toContainText('1. Upload the file');
     await expectNoOverflow(page, 'no-file refusal');
-    await expectNoBlockingViolations(page, 'no-file refusal');
   });
 
   const REFUSED: Array<[string, () => string | Buffer, string]> = [
@@ -328,7 +324,6 @@ test.describe('import: upload page', () => {
   test('a refusal can be followed by a good file on the same page', async ({ page }) => {
     const name = uniqueName('pwf');
     expect(await upload(page, 'nope')).toBe(422);
-    await expectNoBlockingViolations(page, 'refused upload');
     await page.getByTestId('import-file').setInputFiles({ name: 'ok.json', mimeType: 'application/json', buffer: Buffer.from(json(doc(name))) });
     await Promise.all([
       page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname === '/admin/import/preview'),
@@ -390,12 +385,11 @@ test.describe('import: what the preview refuses', () => {
     });
   }
 
-  test('the refused preview page passes axe, and a refused item is shown as skipped', async ({ page }) => {
-    expect(await upload(page, json(doc('pw-axe-refusal', { ports: [{ ...CATALOGUE_PORT, router: 8109 }], schedules: [schedule('pw-axe-bad', { cron: 'x' })] })))).toBe(422);
+  test('a refused item is shown as skipped on the refused preview', async ({ page }) => {
+    expect(await upload(page, json(doc('pw-refusal-item', { ports: [{ ...CATALOGUE_PORT, router: 8109 }], schedules: [schedule('pw-bad-cron-item', { cron: 'x' })] })))).toBe(422);
     await expect(page.getByTestId('import-row').filter({ hasText: CATALOGUE_PORT.name })).toHaveAttribute('data-action', 'skipped');
     await expect(page.getByTestId('import-counts')).toContainText('skipped.');
     await expect(problems(page)).not.toHaveCount(0);
-    await expectNoBlockingViolations(page, 'refused preview');
   });
 });
 
@@ -423,7 +417,6 @@ test.describe('import: preview, confirm, cancel', () => {
       await expect(page.getByTestId('import-upload')).toHaveCount(0);
       await expect(page.getByRole('link', { name: 'Cancel' })).toBeVisible();
       await expectNoOverflow(page, 'full preview');
-      await expectNoBlockingViolations(page, 'full preview');
       if (isPhone()) {
         await expectTall(page.getByTestId('import-confirm'));
         await expectTall(page.getByRole('link', { name: 'Cancel' }));
@@ -498,7 +491,6 @@ test.describe('import: preview, confirm, cancel', () => {
       await expect(project).toContainText('changed: git');
       await expect(page.getByTestId('import-row').filter({ has: page.getByRole('cell', { name: 'template', exact: true }) })).toHaveAttribute('data-action', 'create');
       await expect(page.getByTestId('import-counts')).toHaveText('1 create, 1 update, 0 unchanged, 0 skipped.');
-      await expectNoBlockingViolations(page, 'update preview');
 
       await confirm(page);
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
@@ -515,7 +507,6 @@ test.describe('import: preview, confirm, cancel', () => {
       }
       await expect(page.getByTestId('import-counts')).toHaveText('0 create, 0 update, 2 unchanged, 0 skipped.');
       await expectNoOverflow(page, 'nothing to import');
-      await expectNoBlockingViolations(page, 'nothing to import');
     } finally {
       await deleteProjectViaUi(page, name);
     }
@@ -617,7 +608,6 @@ test.describe('import: sealed secrets', () => {
       await expect(sealed).toContainText('no passphrase given: the secrets are not imported');
       await expect(page.getByLabel('Passphrase of the sealed secrets (empty: leave the secrets out)')).toHaveAttribute('type', 'password');
       await expectNoOverflow(page, 'sealed preview');
-      await expectNoBlockingViolations(page, 'sealed preview');
 
       // 2. Confirm without one: the project arrives, the secrets do not, and the warning is flashed.
       await confirm(page);
@@ -692,7 +682,6 @@ test.describe('import: sealed secrets', () => {
     expect(await upload(page, text, 'not the passphrase')).toBe(422);
     await expect(problems(page)).toHaveText([wrong]);
     await expectRefusedPage(page);
-    await expectNoBlockingViolations(page, 'wrong passphrase');
     await expectGone(page, name);
     await page.goto('/admin/import');
 
@@ -741,7 +730,6 @@ test.describe('import: long values', () => {
       expect(await upload(page, json(doc(name, { templates: [template(templateName)], webhooks: [jiraRule(templateName, 'A very long Jira status name '.repeat(3))], schedules: [schedule(scheduleName)] })))).toBe(200);
       await expect(page.getByRole('heading', { level: 2, name: `Preview: ${name}` })).toBeVisible();
       await expectNoOverflow(page, 'long names preview');
-      await expectNoBlockingViolations(page, 'long names preview');
       await confirm(page);
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" imported.`);
       await expectNoOverflow(page, 'long project page after import');
@@ -760,7 +748,6 @@ test.describe('import: long values', () => {
     expect(await upload(page, json({ ...doc('pw-wrap'), [long]: 1, ['q'.repeat(300)]: 2 }))).toBe(422);
     await expect(problems(page).first()).toBeVisible();
     await expectNoOverflow(page, 'long error key');
-    await expectNoBlockingViolations(page, 'long error key');
     // A 400-character string value is refused with a short message, not echoed.
     expect(await upload(page, json(doc('pw-wrap', { project: { ...doc('pw-wrap').project, git: 'https://git.example.com/' + 'a'.repeat(9000) } })))).toBe(422);
     await expect(problems(page).first()).toContainText('too long');

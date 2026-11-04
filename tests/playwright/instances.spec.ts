@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { blockingViolations } from './support/axe';
 import { ADMIN_PROJECT, MEMBER_PROJECT, deployOne, rowOf, submitDeploy, uniqueLabel } from './support/instances';
 import { follow, openDialog } from './support/projects';
 import { collectBrowserErrors } from './support/shell';
@@ -28,7 +27,6 @@ test.describe('instances: admin', () => {
     await page.goto('/instances');
     await expect(rowOf(page, id)).toBeVisible();
     await expect(rowOf(page, id).getByTestId('instance-state')).toHaveAttribute('data-state', 'running');
-    expect(await blockingViolations(page), 'axe').toEqual([]);
     expect(errors.filter((e) => !e.startsWith('console.error: Failed to load resource'))).toEqual([]);
   });
 

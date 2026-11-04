@@ -1,5 +1,4 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
@@ -207,7 +206,7 @@ test.describe('users and project access', () => {
     }
   });
 
-  test('the user pages fit the screen and pass axe in both themes', async ({ page }) => {
+  test('the user pages fit the screen', async ({ page }) => {
     test.setTimeout(240_000);
     const project = uniqueName('prj');
     const username = uniqueName('usr');
@@ -237,7 +236,6 @@ test.describe('users and project access', () => {
           if (isPhone()) {
             await expectNoOverflow(page, `the ${label} page`);
           }
-          expect(await blockingViolations(page), `axe, ${scheme} theme, ${label} page`).toEqual([]);
         }
       }
 
@@ -285,7 +283,6 @@ test.describe('users and project access', () => {
       if (isPhone()) {
         await expectNoOverflow(page, 'the new user form, site access only');
       }
-      expect(await blockingViolations(page), 'axe, new site-only user form').toEqual([]);
 
       // Unchecking brings them back.
       await siteOnlyLabel.click();

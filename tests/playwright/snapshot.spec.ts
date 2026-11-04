@@ -3,7 +3,6 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { blockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
@@ -130,28 +129,4 @@ test.describe('snapshot', () => {
       await deleteProjectViaUi(page, name);
     }
   });
-
-  for (const scheme of ['light', 'dark'] as const) {
-    test.describe(`axe, ${scheme} theme`, () => {
-      test.use({ colorScheme: scheme });
-
-      test(`the snapshot card has no serious or critical violation (${scheme})`, async ({ page }) => {
-        const name = uniqueName();
-
-        try {
-          await createProjectViaUi(page, name);
-          console_(['fleet:dev:fake-instance', name, 'main']);
-          await openSection(page, 'Assets');
-          await expect(page.getByTestId('snapshot-form')).toBeVisible();
-          if (scheme === 'dark') {
-            await expect(page.locator('html')).toHaveClass(/\bdark\b/);
-          }
-          expect(await blockingViolations(page)).toEqual([]);
-        } finally {
-          console_(['fleet:dev:fake-instance', name, 'main', '--remove']);
-          await deleteProjectViaUi(page, name);
-        }
-      });
-    });
-  }
 });

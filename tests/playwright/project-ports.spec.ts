@@ -1,5 +1,4 @@
 import { expect, test } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { createPort, deletePort, runConsole } from './support/ports';
@@ -31,7 +30,6 @@ test.describe('project ports tab', () => {
       const checkbox = row.getByRole('checkbox', { name: `Use port ${PORT}` });
       await expect(checkbox).not.toBeChecked();
       expect(await hasHorizontalOverflow(page), 'horizontal overflow on the Ports tab').toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab');
 
       const save = page.getByRole('button', { name: 'Save ports' });
       if ('phone' === testInfo.project.name) {
@@ -44,7 +42,6 @@ test.describe('project ports tab', () => {
       await submitAndWait(page, save);
       await expect(page.getByTestId('flashes')).toContainText('Ports saved.');
       await expect(page.getByTestId('port-row').filter({ hasText: PORT }).getByRole('checkbox')).toBeChecked();
-      await expectNoBlockingViolations(page, 'Ports tab, saved');
 
       // The General tab's Typesense flag follows the assignment.
       await openSection(page, 'General');
@@ -80,7 +77,6 @@ test.describe('project ports tab', () => {
       await expect(row).toContainText(port.name);
       await expect(row).toContainText(String(port.publicPort));
       expect(await hasHorizontalOverflow(page), 'long port name, unchecked').toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab, long name');
 
       await row.getByRole('checkbox').check();
       await submitAndWait(page, save);
@@ -119,7 +115,6 @@ test.describe('project ports tab', () => {
       await expect(box(keep.name)).toBeChecked();
       await expect(box(keep.name)).toHaveAttribute('aria-invalid', 'true');
       expect(await hasHorizontalOverflow(page)).toBe(false);
-      await expectNoBlockingViolations(page, 'Ports tab, error');
 
       // Nothing was stored: the tab, opened again, has nothing assigned and no error.
       await openSection(page, 'General');

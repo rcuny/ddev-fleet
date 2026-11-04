@@ -1,5 +1,4 @@
 import { expect } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { createProjectViaUi, deleteProjectViaUi, follow, openSection, submitAndWait, uniqueName } from './support/projects';
 import { removeSecret, revealSecret, saveSecret, test, uniqueSecret, uniqueValue } from './support/secrets';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -7,7 +6,7 @@ import { setStandInRole } from './support/standIn';
 
 // The audit log page: the table and its columns, the newest-first order, the action filter (options, selection,
 // reset, an unknown value), the entries each action leaves (with the actor of this test, see support/secrets.ts), long
-// subjects at 390 px, the access rules and axe in both themes. Entries are found by the secret name or the actor of
+// subjects at 390 px and the access rules (axe is in a11y-instances.desktop.spec.ts). Entries are found by the secret name or the actor of
 // the test: the log is shared by every test on the database and holds at most the latest 200 entries on the page.
 
 const TIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
@@ -99,7 +98,6 @@ test.describe('audit log', () => {
       await submitAndWait(page, page.getByRole('button', { name: 'Filter' }));
       await expect(page.getByTestId('audit-row').filter({ hasText: `fleet/${name}` })).toHaveCount(1);
       await expect(page.getByTestId('audit-row').filter({ hasText: `fleet/${name}` })).toContainText('secret.reveal');
-      await expectNoBlockingViolations(page, 'audit log filtered');
 
       await page.getByLabel('Action').selectOption('');
       await submitAndWait(page, page.getByRole('button', { name: 'Filter' }));
@@ -193,7 +191,7 @@ test.describe('audit log', () => {
     await expect(page.getByTestId('audit-row')).toHaveCount(0);
   });
 
-  test('no horizontal overflow, 44 px filter controls and no violations in both themes', async ({ page }) => {
+  test('no horizontal overflow, and 44 px filter controls on the phone', async ({ page }) => {
     test.setTimeout(120_000);
     const name = uniqueSecret('AX');
     await page.goto('/admin/secrets');
@@ -209,7 +207,6 @@ test.describe('audit log', () => {
           expect(box.height).toBeGreaterThanOrEqual(43.5);
         }
       }
-      await expectNoBlockingViolations(page, 'audit log');
     } finally {
       await removeSecret(page, '/admin/secrets', name);
     }

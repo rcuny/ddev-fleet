@@ -1,5 +1,4 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { consoleOk, instanceRow, runConsole } from './support/fleetData';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -69,7 +68,6 @@ async function expectTall(target: Locator, min = 43.5, what = 'element'): Promis
 
 async function expectClean(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
-  await expectNoBlockingViolations(page, where);
 }
 
 async function fillForm(page: Page, values: { name?: string; cron?: string; timezone?: string; instance?: string }): Promise<void> {

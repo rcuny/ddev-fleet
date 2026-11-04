@@ -2,12 +2,14 @@ import { defineConfig, devices } from '@playwright/test';
 import { baseURL, externalBaseURL, ignoreHTTPSErrors } from './support/env';
 
 // FLEET_PW_TIER (FLE-126): `full` (default, the documented gate) runs every spec; `quick` is the Fleet CI merge gate for
-// feature and Renovate branches: desktop without the coverage and validation matrices, phone limited to @smoke tests.
+// feature and Renovate branches: desktop without the coverage and validation matrices and the axe sweep, phone limited to @smoke tests.
 const tier = process.env.FLEET_PW_TIER ?? 'full';
 if (tier !== 'quick' && tier !== 'full') {
   throw new Error(`FLEET_PW_TIER must be "quick" or "full", got "${tier}"`);
 }
 const quick = tier === 'quick';
+// The axe sweep (FLE-158) runs in the full tier only: release/*, develop and nightly. Quick = smoke + JS behaviour.
+const A11Y_SWEEP = /(^|\/)(a11y|users-a11y)[^/]*\.spec\.ts$/;
 
 export default defineConfig({
   testDir: '.',
@@ -36,7 +38,7 @@ export default defineConfig({
       name: 'desktop',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
       testIgnore: quick
-        ? [/\.phone\.spec\.ts$/, /-coverage\.spec\.ts$/, /(projects|templates)-validation\.spec\.ts$/]
+        ? [/\.phone\.spec\.ts$/, /-coverage\.spec\.ts$/, /(projects|templates)-validation\.spec\.ts$/, A11Y_SWEEP]
         : /\.phone\.spec\.ts$/,
     },
     {

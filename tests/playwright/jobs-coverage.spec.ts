@@ -1,5 +1,4 @@
 import { expect, test, type Page } from '@playwright/test';
-import { expectNoBlockingViolations } from './support/axe';
 import { ADMIN_PROJECT, MEMBER_PROJECT, createDeployableProject, deployOne, postForm, runFakeJob, submitDeploy, submitTampered, uniqueLabel } from './support/instances';
 import { follow, submitAndWait, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
@@ -55,7 +54,6 @@ test.describe('job page: admin', () => {
     await expect(page.getByTestId('job-log')).toContainText('deploy complete');
     await expect(page.getByTestId('job-log-indicator')).toHaveText('Finished');
     await expect(page.getByRole('log', { name: `Log of job #${number}` })).toBeVisible();
-    await expectNoBlockingViolations(page, 'the page of a finished job');
 
     await follow(page, meta.getByRole('link', { name: id }));
     await expect(page).toHaveURL(new RegExp(`/instances/${id}$`));
@@ -72,7 +70,6 @@ test.describe('job page: admin', () => {
     await expect(page.getByTestId('job-meta')).toContainText('cli');
     await expect(page.getByTestId('job-meta')).toContainText('cli:fake-job');
     await expect(page.getByTestId('job-log')).toContainText('fake line 2 of 2');
-    await expectNoBlockingViolations(page, 'the page of a failed job');
 
     await follow(page, page.getByTestId('job-retry'));
     await expect(page).toHaveURL(/\/jobs\/\d+$/);
@@ -209,7 +206,6 @@ test.describe('job page: admin', () => {
     await expect(page.getByTestId('job-log')).toContainText('x'.repeat(1500));
     await expect(page.getByTestId('job-error')).toBeVisible();
     await expectNoOverflow(page, 'the job page');
-    await expectNoBlockingViolations(page, 'the job page with a long line');
   });
 });
 
@@ -237,7 +233,6 @@ test.describe('job page: member', () => {
     expect((await page.request.get(`/jobs/${ownFailed}/log`)).status()).toBe(200);
     await page.goto(`/jobs/${ownFailed}`);
     await expect(page.getByTestId('job-error')).toHaveText('Fake job failed on purpose.');
-    await expectNoBlockingViolations(page, 'a member, the page of a failed job');
     // Its Retry form pointed at a foreign job: the job does not exist for the member.
     expect(await submitTampered(page, page.getByTestId('job-retry'), (button, to) => (button.form!.action = new URL(to, location.href).href), `/jobs/${foreignFailed}/retry`)).toBe(404);
     await page.goto(`/jobs/${ownFailed}`);
@@ -352,7 +347,6 @@ test.describe('job history: admin', () => {
     await expect(page.getByTestId('jobs-empty')).toContainText('No jobs');
     await expect(page.getByTestId('jobs-empty')).toContainText('Nothing has run yet, or no job matches the filters.');
     await expect(page.getByTestId('job-table')).toHaveCount(0);
-    await expectNoBlockingViolations(page, 'the job history with no match');
   });
 
   test('a row links to its job and to nothing else it should not, with the facts of the job', async ({ page }) => {
@@ -365,14 +359,13 @@ test.describe('job history: admin', () => {
     await expect(row).toContainText('ui');
     await expect(row.getByTestId('job-status')).toHaveText('succeeded');
     await expect(row).toContainText(/\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
-    await expectNoBlockingViolations(page, 'the job history');
     await follow(page, row.getByRole('link', { name: `#${number} deploy` }));
     await expect(page).toHaveURL(new RegExp(`/jobs/${number}$`));
     await expect(page.getByRole('heading', { level: 1, name: `Job #${number}` })).toBeVisible();
   });
 
   test('50 jobs a page (51 jobs): Next, Previous, the filters kept, a page past the end, a bad page number', async ({ page }) => {
-    // Deploys 51 jobs through the UI, then walks ten pages with axe: about 25 s alone, more than 60 s on a CPU-capped CI box.
+    // Deploys 51 jobs through the UI, then walks the pages: slow on a CPU-capped CI box.
     test.slow();
     const project = uniqueName('pg');
     await createDeployableProject(project);
@@ -381,7 +374,6 @@ test.describe('job history: admin', () => {
     expect((await rowsOf(page, `project=${project}`)).length).toBe(50);
     await expect(page.getByTestId('jobs-previous')).toHaveCount(0);
     await expect(page.getByRole('navigation', { name: 'Pages' })).toContainText('Page 1');
-    await expectNoBlockingViolations(page, 'the first page of the job history');
 
     await follow(page, page.getByTestId('jobs-next'));
     await expect(page).toHaveURL(new RegExp(`project=${project}&.*page=2$`));
@@ -425,6 +417,5 @@ test.describe('job history: admin', () => {
       expect(box?.height ?? 0, 'a control is at least 44 px high').toBeGreaterThanOrEqual(43.5);
     }
     await expect(page.getByTestId('job-row')).toContainText(id);
-    await expectNoBlockingViolations(page, 'phone, the job history');
   });
 });
