@@ -72,6 +72,33 @@ tag is the version.
   link becomes `.../compare/vX.Y.Z...HEAD`, and a new line
   `[X.Y.Z]: .../compare/vPREV...vX.Y.Z` is added below it.
 
+### Rollout notes and ACTION lines
+
+Operators read these in `fleet upgrade --check`, on the Upgrade page and in the prompt of `sudo fleet upgrade`, so write
+them for someone who has not read the change. A change that needs something done, or known, at upgrade time adds a
+`## Rollout` heading at the end of its fragment, followed by bullets only (anything else is refused by
+`ci/changelog-assemble.php`):
+
+```markdown
+### Changed
+- **FLE-123: the worker now reads FLEET_FOO**
+
+## Rollout
+- ACTION: add FLEET_FOO=... to /etc/ddev-fleet/fleet.env before upgrading.
+- The first request after the upgrade rebuilds the cache and is slower.
+```
+
+- The release step merges the bullets of all fragments into one `#### Rollout` subsection at the end of the version
+  section.
+- Start a bullet with `ACTION:` only when the operator must do something. It becomes a warning in the check and in the
+  upgrade; use plain bullets for anything that is only good to know. An `ACTION:` line says what to do, where and
+  **when** (before or after the upgrade).
+- Every release between the installed one and the target is shown, so each note must still make sense when read with
+  its neighbours. Do not reference "the previous release".
+- A schema change needs no note: the upgrade runs the migrations, and a rollback restores the database. Say so in a note
+  only when the change is not reversible by a rollback.
+- Check the result with `php ci/changelog-assemble.php` (preview) before cutting the release.
+
 ## 4. Cutting a 1.x release
 
 Replace `1.X.Y` throughout. Run from a checkout of the Bitbucket repo. The `/release` skill of the maintainers'
@@ -196,7 +223,8 @@ git switch -c hotfix/<slug> legacy
 ## 7. Deploying
 
 Releasing is not deploying. A 1.x release makes the tag available on `main`; each host updates when its operator
-re-runs the installer (`install.sh --ref=v1.X.Y`, see [`installation.md`](installation.md)). Read the CHANGELOG for
-"Rollout" notes first. The 0.x host (if you still run one) follows `legacy`; its procedure is
+runs `sudo fleet upgrade` ([`upgrading.md`](upgrading.md); `fleet upgrade --check` shows the changelog and the rollout
+notes first). A host without that command (installed before v1.2.0) re-runs the installer once
+(`install.sh --ref=v1.X.Y`, see [`installation.md`](installation.md)). The 0.x host (if you still run one) follows `legacy`; its procedure is
 [Updating the code](v0/operations.md#updating-the-code) and the precondition in
 [runbook-server-rollout.md](v0/runbook-server-rollout.md#1-routine-rollout-code--config).
