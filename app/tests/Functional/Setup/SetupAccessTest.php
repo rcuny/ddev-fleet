@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Setup;
 
 use App\Domain\Host\HostSettingsRepository;
+use App\Domain\Ssh\SshKeyRole;
 use App\Setup\SetupCookie;
 use App\Tests\Support\WizardTestCase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\BrowserKit\Cookie as BrowserCookie;
 
 final class SetupAccessTest extends WizardTestCase
@@ -29,6 +31,68 @@ final class SetupAccessTest extends WizardTestCase
 
         self::assertCount(1, array_unique($bodies), 'every refusal has the same body');
         self::assertStringNotContainsString($this->token, implode('', $bodies));
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function spellingsAndMethods(): iterable
+    {
+        $paths = [
+            ...self::STEP_PATHS,
+            '/setup/', '/Setup/Admin', '/SETUP/FINISH', '/setup/%61dmin', '/setup/%2561dmin', '/setup/%2e/admin',
+            '/setup/ssh/..%2fadmin', '/setup/nothing-here', '/setup/admin/extra', '//setup/admin',
+        ];
+        foreach ($paths as $path) {
+            foreach (['GET', 'POST', 'PUT', 'DELETE', 'PATCH'] as $method) {
+                yield $method.' '.$path => [$method, $path];
+            }
+        }
+    }
+
+    #[DataProvider('spellingsAndMethods')]
+    public function testAWizardUrlIsRefusedWhateverItsSpellingAndMethodWithoutASession(string $method, string $path): void
+    {
+        $this->client->request('GET', self::BASE.'/setup/admin');
+        $noCookie = $this->body();
+
+        $this->client->request($method, self::BASE.$path, 'GET' === $method ? [] : ['x' => 'y'], [], $this->browserServer('none'));
+
+        self::assertResponseStatusCodeSame(403, $method.' '.$path);
+        self::assertSame($noCookie, $this->body(), 'the same body as every other refusal');
+        self::assertStringNotContainsString('Create the administrator', $this->body());
+        self::assertCount(0, $this->users()->all());
+    }
+
+    /**
+     * @return list<string>
+     */
+    private function publicKeys(): array
+    {
+        $this->em();
+
+        return array_map(fn (SshKeyRole $role): string => ($this->keys()->findByRole($role) ?? self::fail('No '.$role->value.' key.'))->publicKey(), SshKeyRole::cases());
+    }
+
+    public function testAFormWithoutTheCsrfTokenIsRefusedEvenWithAValidSession(): void
+    {
+        $this->signIn();
+        $this->createAdmin();
+        $this->open('/setup/ssh');
+        $keys = $this->publicKeys();
+        self::assertCount(2, $keys);
+
+        $this->client->request('POST', self::BASE.'/setup/ssh', ['action' => 'regenerate', 'role' => 'deploy', 'confirm' => '1'], [], $this->browserServer());
+        self::assertResponseStatusCodeSame(403);
+        $body = html_entity_decode($this->body());
+        self::assertStringContainsString('This form could not be verified', $body);
+        self::assertStringContainsString('The form expired or was sent from another site. Go back, reload the page and try again.', $body);
+        self::assertSame($keys, $this->publicKeys(), 'no key was changed');
+
+        $this->client->request('POST', self::BASE.'/setup/finish', ['x' => 'y'], [], $this->browserServer());
+        self::assertResponseStatusCodeSame(403);
+        self::assertStringContainsString('This form could not be verified', $this->body());
+        self::assertFalse($this->host()->isSetupComplete(), 'setup is still open');
     }
 
     public function testWrongTokenIs403SameBody(): void
