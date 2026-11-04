@@ -35,9 +35,15 @@ final class FakeTmuxRunner implements CommandRunner
     public ?string $failing = null;
     public bool $missing = false;
 
+    /** @var list<string> pane ids (`%12`) that run a command: display-message reports a non-shell foreground command */
+    public array $busy = [];
+
     public function run(array $argv, ?string $cwd = null, array $env = [], ?callable $onOutput = null, ?float $timeout = null): CommandResult
     {
         $this->argvs[] = $argv;
+        if ('pgrep' === $argv[0]) {
+            return new CommandResult(1);
+        }
         if ('tmux' !== $argv[0]) {
             return new CommandResult(0);
         }
@@ -91,6 +97,10 @@ final class FakeTmuxRunner implements CommandRunner
                 }
 
                 return new CommandResult(0, $out);
+            case 'display-message':
+                $pane = (string) $args[array_search('-t', $args, true) + 1];
+
+                return new CommandResult(0, (\in_array($pane, $this->busy, true) ? 'claude' : 'bash')."\t4242\n");
             case 'split-window':
                 $target = $args[array_search('-t', $args, true) + 1];
                 $id = '%'.$this->nextPane++;

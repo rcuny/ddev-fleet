@@ -15,7 +15,7 @@ use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 /**
  * Gives a deployed instance its tmux window and types the template's tty1 and tty2 commands into it (the v0 behaviour).
  * Runs after the last post-deploy line succeeded and `deploy complete` is logged (FLE-171: typing earlier raced the
- * site install), so a failed post-deploy types nothing. A redeploy starts from a fresh window. This step never fails a deploy: a tmux problem, or a
+ * site install), so a failed post-deploy types nothing. A redeploy keeps the window and any pane that is busy (FLE-175). This step never fails a deploy: a tmux problem, or a
  * command whose `[[token]]` cannot be resolved, is a WARNING line in the job log and the pane stays a plain shell.
  *
  * The commands carry context tokens only (ContextTokens), never a secret: the Claude token reaches the container as an
@@ -47,12 +47,17 @@ final readonly class TmuxWindowStep implements DeployStep
         }
 
         try {
-            if (!$this->tmux->ensureWindow($id, $context->dir)) {
-                $this->tmux->reset($id);
-            }
+            // An existing window (a redeploy) is only healed, never reset: a pane running a command (a CI suite in tty1,
+            // Claude in tty2) must survive. Idle panes get the commands typed, as on a first deploy.
+            $this->tmux->ensureWindow($id, $context->dir);
             $typed = 0;
             $panes = [];
             foreach ([[Pane::Tty1, $template->tty1()], [Pane::Tty2, $template->tty2()]] as [$pane, $commands]) {
+                if ([] !== array_filter($commands, static fn (string $c): bool => '' !== trim($c)) && $this->tmux->isBusy($id, $pane)) {
+                    $context->log->line(\sprintf('%s busy, not restarted', strtolower($pane->name)));
+
+                    continue;
+                }
                 foreach ($commands as $command) {
                     $line = $this->prepare($command, $pane, $context);
                     if (null === $line) {

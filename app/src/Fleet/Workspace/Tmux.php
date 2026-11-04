@@ -40,6 +40,9 @@ final readonly class Tmux
     public const int COMMAND_MAX = 4096;
     public const float TIMEOUT = 15.0;
 
+    /** Foreground commands that mean "a shell at its prompt". */
+    private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', '-bash', '-sh', '-zsh'];
+
     private const string PANE_FORMAT = "#{pane_id}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{window_width}\t#{@fleet_role}\t#{pane_start_command}";
 
     /** Runs the command with the env file loaded (`set -a`), the way the CLI wrapper does; the secrets stay in the file. */
@@ -232,6 +235,37 @@ final readonly class Tmux
 
         $this->must(['send-keys', '-t', $target->id, '-l', '--', $command], 'send the keys');
         $this->must(['send-keys', '-t', $target->id, 'Enter'], 'send Enter');
+    }
+
+    /**
+     * Whether tty1 or tty2 of the window is running something: the foreground command is not a shell, or the shell has
+     * child processes (a job in the background). A pane that cannot be found counts as idle.
+     *
+     * @throws WorkspaceException
+     */
+    public function isBusy(string $instanceId, Pane $pane): bool
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane) {
+            throw new WorkspaceException('Only tty1 or tty2 can be busy, not the sidebar.');
+        }
+        $target = self::shells($this->panes($instanceId))[Pane::Tty1 === $pane ? 0 : 1] ?? null;
+        if (null === $target) {
+            return false;
+        }
+        $result = $this->tmux(['display-message', '-p', '-t', $target->id, "#{pane_current_command}\t#{pane_pid}"]);
+        if (!$result->isSuccess()) {
+            return false;
+        }
+        [$command, $pid] = array_pad(explode("\t", trim($result->stdout), 2), 2, '');
+        if ('' !== $command && !\in_array($command, self::SHELLS, true)) {
+            return true;
+        }
+        if (1 !== preg_match('/^[0-9]+$/D', $pid)) {
+            return false;
+        }
+
+        return $this->runner->run(['pgrep', '-P', $pid], null, [], null, self::TIMEOUT)->isSuccess();
     }
 
     /**
