@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-11-04
+
+### Added
+- **FLE-177: the app warns when Let's Encrypt refuses certificates.** A new timer job (`fleet-tls-check.timer`, every 10 minutes) reads Caddy's journal for rate limits (`rateLimited`, HTTP 429, "retry after") and failed challenge solves, counts the certificates issued in the last 7 days, and checks the expiry of the certificate served for the host name. It writes a small status file under `FLEET_HOME`. Administrators see a red banner on every page when Let's Encrypt is rate limiting this host (with the retry time) and an amber one for failed solves or a certificate that expires in under 14 days; the new **Certificates** tab on the Host page lists the last errors, affected hostnames and the 7-day count against the 50-per-week limit.
+- `fleet host:tls-status` (`--json`) prints the same status for scripts and watchdogs: exit 0 ok, 1 warning, 2 error.
+
+### Changed
+- **FLE-174: faster Fleet CI.** `ci/run-gates.sh` runs the PHPUnit suites and the static checks as parallel lanes, installs
+  npm and Chromium beside the composer gates, runs the infra tests beside Playwright, and reuses `node_modules` and the Python
+  venvs when their lock files are unchanged. The report adds the 20 slowest PHPUnit tests (`slowest-phpunit.txt`).
+
+### Fixed
+- **FLE-175: a redeploy no longer kills a running tty1/tty2 command.** The instance's tmux window is kept (healed, not reset); a pane running a command (non-shell foreground, or a shell with child processes) is left alone and logged as "ttyN busy, not restarted", while idle panes get the template commands typed as on a deploy. 0.x parity: it typed nothing into an existing window.
+- **FLE-176: in `ovh_dns` mode Caddy no longer orders one certificate per instance host name.** The host is now one
+  wildcard site (`*.<domain>`, one certificate), each instance a `host` matcher and `handle` inside it, so a new
+  instance neither hits Let's Encrypt's 50-certificates-per-week limit nor needs a Caddy reload that interrupts a
+  DNS-01 solve. `http01` mode is unchanged. The wildcard site asks for `*.<domain>` only (the bare domain keeps its own
+  certificate), the same name set 0.x used, so Let's Encrypt treats it as a renewal. A name that already holds a valid
+  stored certificate (list written by the root helper, `/etc/caddy/fleet/stored-certs.list`) keeps its own exact-name
+  site until that certificate is within 30 days of expiry, then moves under the wildcard. Named-port sites move to
+  `instances/<id>.sites`. A rewrite that changes nothing no longer reloads Caddy.
+
+
+- A detached `fleet` tmux session keeps a usable size: `default-size 300x80` and `window-size latest` are set with the other session options (re-applied on every `fleet:tmux:ensure`), so new windows are no longer 80x24 with ~14-column shell panes; an attached client still drives the size.
+
+- **FLE-188: new deploys failed at `ddev start` on v1.2.0/v1.2.1** (`GIT_SSH_COMMAND` in the instance's `web_environment` contained double quotes and a `$DDEV_APPROOT`, so DDEV generated an invalid `.ddev-docker-compose-base.yaml`). The command now uses the literal container path of the pinned known_hosts file (the container's approot plus `.ddev/fleet_known_hosts`); a regression test checks that no `web_environment` entry holds a quote or a `$`.
+
+
+- A git identity name with a double quote, `$` or backslash is refused in the project and host settings (and by the CLI), and a stored one fails the deploy with a clear message: DDEV writes `web_environment` into its compose file unescaped, so such a value made every `ddev start` fail.
+
+#### Rollout
+- ACTION: upgrade when the weekly Let's Encrypt window has room: the host needs one new wildcard certificate (and one for the bare domain). If the account is rate limited Caddy retries with backoff and the instances are not served over HTTPS until it succeeds.
+- The old per-name certificates are no longer used; Caddy keeps them in its storage until they expire.
+- Delete the stale `_acme-challenge` TXT records left in the OVH zone by interrupted solves (one-off, by hand).
+- ACTION: after the upgrade, check that the new timer runs: `systemctl list-timers fleet-tls-check.timer` (the installer enables it); `fleet host:tls-status` reports a warning until the first check has run.
+- Instances deployed with v1.2.0/v1.2.1 have a broken `.ddev/config.fleet.yaml`. `start` does not re-render the file; only a redeploy (full deploy workflow, new checkout) or a `restart` job (queued by the Claude-token apply action) rewrites it. Redeploy each affected instance, or rewrite its `.ddev/config.fleet.yaml` by hand (`GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=<container approot>/.ddev/fleet_known_hosts`) and run `ddev restart`.
+
 ## [1.2.1] - 2026-11-04
 
 ### Changed
@@ -1016,7 +1053,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.2.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.2.2...HEAD
+[1.2.2]: https://github.com/rcuny/ddev-fleet/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/rcuny/ddev-fleet/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/rcuny/ddev-fleet/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/rcuny/ddev-fleet/compare/v1.0.6...v1.1.0
