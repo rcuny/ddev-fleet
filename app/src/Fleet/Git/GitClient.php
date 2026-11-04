@@ -19,15 +19,16 @@ final readonly class GitClient
     public const float CLONE_TIMEOUT = 1800.0;
     public const float HEAD_TIMEOUT = 10.0;
 
-    /** The pinned known_hosts the container reads, relative to the checkout (the container sees it under $DDEV_APPROOT). */
+    /** The pinned known_hosts the container reads, relative to the checkout (the container sees it under /var/www/html, DDEV's fixed approot there). */
     public const string CONTAINER_KNOWN_HOSTS = '.ddev/fleet_known_hosts';
 
     /**
      * What git runs inside the web container (`GIT_SSH_COMMAND`, set in config.fleet.yaml; the environment wins over
      * `core.sshCommand`, which holds host paths). No identity option: the keys come from DDEV's ssh-agent, and
-     * `IdentitiesOnly` would ignore them. Strict, pinned, never prompts.
+     * `IdentitiesOnly` would ignore them. Strict, pinned, never prompts. No quotes and no `$`: DDEV copies web_environment into a generated compose file and
+     * a double quote there breaks it (FLE-188).
      */
-    public const string CONTAINER_SSH_COMMAND = 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile="$DDEV_APPROOT/'.self::CONTAINER_KNOWN_HOSTS.'"';
+    public const string CONTAINER_SSH_COMMAND = 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/var/www/html/'.self::CONTAINER_KNOWN_HOSTS;
 
     public function __construct(private CommandRunner $runner, private FleetPaths $paths)
     {

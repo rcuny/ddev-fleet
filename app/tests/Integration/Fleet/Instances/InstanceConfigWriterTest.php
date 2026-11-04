@@ -211,4 +211,23 @@ final class InstanceConfigWriterTest extends KernelTestCase
 
         self::assertSame([], array_filter($environment, static fn (string $e): bool => str_starts_with($e, 'FLEET_PORT_')));
     }
+
+    public function testRenderedWebEnvironmentIsSafeForDdevCompose(): void
+    {
+        $this->secrets->putFleetWide(HostSecrets::CLAUDE_TOKEN, 'tok-1', 'admin');
+        $project = $this->project(GitBotMode::Inherit, 'edge');
+        $project->changePorts([new NamedPort('ts-dashboard', 9111, 8110)]);
+
+        $config = $this->written($project);
+
+        self::assertNotSame([], $config['web_environment']);
+        foreach ($config['web_environment'] as $entry) {
+            self::assertStringNotContainsString('"', $entry, 'FLE-188: a double quote breaks the compose file DDEV generates');
+            self::assertStringNotContainsString('$', $entry, 'DDEV would interpolate a dollar sign');
+        }
+        self::assertContains(
+            'GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/var/www/html/.ddev/fleet_known_hosts',
+            $config['web_environment'],
+        );
+    }
 }

@@ -102,7 +102,9 @@ final class GitClientTest extends TestCase
 
         self::assertStringContainsString('-o StrictHostKeyChecking=yes', $ssh);
         self::assertStringContainsString('-o BatchMode=yes', $ssh);
-        self::assertStringContainsString('UserKnownHostsFile="$DDEV_APPROOT/.ddev/fleet_known_hosts"', $ssh);
+        self::assertStringContainsString('UserKnownHostsFile=/var/www/html/.ddev/fleet_known_hosts', $ssh);
+        self::assertStringNotContainsString('"', $ssh);
+        self::assertStringNotContainsString('$', $ssh);
         self::assertStringNotContainsString('IdentitiesOnly', $ssh);
         self::assertStringNotContainsString(' -i ', $ssh);
         self::assertStringNotContainsString('StrictHostKeyChecking=no', $ssh);
