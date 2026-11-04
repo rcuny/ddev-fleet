@@ -99,11 +99,24 @@ pf_check_disk() {
   pf_check_disk_one disk.var /var "$PREFLIGHT_MIN_VAR_MIB"
 }
 
+# Runs ddev the way the fleet runs it. DDEV refuses root ("DDEV is not designed to be run with root privileges"), and the
+# install and upgrade run as root, so as root every ddev call goes through the fleet user (FLE-168). Returns 99 when
+# that user does not exist yet (a fresh install): the caller reports it as not checked, never as a BLOCK.
+# PREFLIGHT_EUID overrides the effective uid (tests).
+pf_ddev() {
+  if [ "${PREFLIGHT_EUID:-$EUID}" -ne 0 ]; then
+    timeout "$PREFLIGHT_NETWORK_TIMEOUT" ddev "$@" </dev/null
+    return
+  fi
+  getent passwd "$FLEET_USER" >/dev/null 2>&1 || return 99
+  timeout "$PREFLIGHT_NETWORK_TIMEOUT" runuser -u "$FLEET_USER" -- env "HOME=$FLEET_HOME_DIR" DDEV_NONINTERACTIVE=true ddev "$@" </dev/null
+}
+
 # The ids of the existing instances, one per line: the directories DDEV knows under $FLEET_SRV_DIR/instances. Prints
 # nothing, and returns 1, when neither `ddev` nor `fleet` can say.
 pf_instance_ids() {
   local listing=''
-  if command -v ddev >/dev/null 2>&1 && listing=$(timeout "$PREFLIGHT_NETWORK_TIMEOUT" ddev list --json-output 2>/dev/null </dev/null); then
+  if command -v ddev >/dev/null 2>&1 && listing=$(pf_ddev list --json-output 2>/dev/null); then
     printf '%s\n' "$listing" | { grep -o '"approot": *"[^"]*"' || true; } | sed 's/^"approot": *"//; s/"$//' \
       | sed -n "s#^$FLEET_SRV_DIR/instances/\\([^/]*\\)/\\{0,1\\}\$#\\1#p"
     return 0
@@ -135,13 +148,22 @@ pf_check_instances() {
 
 # docker and ddev: absent is fine on a host that is not installed yet, a problem on one that is.
 pf_check_tool() {
-  local id=$1 cmd=$2
+  local id=$1 cmd=$2 rc=0
   shift 2
   if ! command -v "$cmd" >/dev/null 2>&1; then
     if pf_installed; then
       pf_emit BLOCK "$id" "$cmd is not installed, but this host has a ddev-fleet install"
     else
       pf_emit INFO "$id" "$cmd is not installed yet (step 20/40 installs it)"
+    fi
+  elif [ "$cmd" = ddev ]; then
+    pf_ddev "$@" >/dev/null 2>&1 || rc=$?
+    if [ "$rc" -eq 0 ]; then
+      pf_emit INFO "$id" "$cmd answers"
+    elif [ "$rc" -eq 99 ]; then
+      pf_emit INFO "$id" "$cmd is installed, but the $FLEET_USER user does not exist yet (DDEV refuses root); not checked"
+    else
+      pf_emit BLOCK "$id" "$cmd is installed but does not answer ($cmd $*). Fix it before installing or upgrading"
     fi
   elif timeout "$PREFLIGHT_NETWORK_TIMEOUT" "$cmd" "$@" >/dev/null 2>&1 </dev/null; then
     pf_emit INFO "$id" "$cmd answers"
