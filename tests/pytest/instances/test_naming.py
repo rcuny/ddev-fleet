@@ -42,18 +42,18 @@ def test_instance_id_rejects_invalid_instance():
         instance_id("oak", "Bad Instance")
 
 
-def test_instance_id_at_exactly_63_chars_is_accepted():
+def test_instance_id_at_exactly_59_chars_is_accepted():
     project = "a" * 30
-    instance = "b" * 31
+    instance = "b" * 27
     composed = f"{project}--{instance}"
-    assert len(composed) == 63
+    assert len(composed) == 59
     assert instance_id(project, instance) == composed
 
 
-def test_instance_id_at_64_chars_is_rejected():
+def test_instance_id_at_60_chars_is_rejected():
     project = "a" * 30
-    instance = "b" * 32
-    assert len(f"{project}--{instance}") == 64
+    instance = "b" * 28
+    assert len(f"{project}--{instance}") == 60
     with pytest.raises(ValidationError):
         instance_id(project, instance)
 
@@ -79,11 +79,11 @@ def test_allocate_multi_deploy_labels_count_zero_returns_empty_list():
     assert allocate_multi_deploy_labels(set(), "oak", "generic", 0) == []
 
 
-def test_allocate_multi_deploy_labels_raises_before_returning_when_over_63_chars():
+def test_allocate_multi_deploy_labels_cuts_the_base_to_fit_the_suffix():
     project = "a" * 30
-    base_label = "b" * 30  # composed for n=1: 30 + 2 + 30 + 2 = 64 chars
-    with pytest.raises(ValidationError):
-        allocate_multi_deploy_labels(set(), project, base_label, 1)
+    base_label = "b" * 30  # uncut: 30 + 2 + 30 + 2 = 64 chars
+    labels = allocate_multi_deploy_labels(set(), project, base_label, 1)
+    assert len(instance_id(project, labels[0])) <= 59
 
 
 def test_allocate_free_label_returns_bare_base_when_free():
@@ -105,28 +105,24 @@ def test_allocate_free_label_reuses_gap_when_base_and_2_taken_but_not_1():
     assert allocate_free_label(existing, "oak", "generic") == "generic-1"
 
 
-def test_allocate_free_label_raises_when_suffixed_result_exceeds_63_chars():
-    # Bare base fits (30 + 2 + 30 = 62), so only the SUFFIXED candidate
-    # (once the bare one is taken) tips over the 63-char DNS label limit —
-    # proving the raise happens on the chosen (suffixed) candidate, not
-    # merely on the bare base.
+def test_allocate_free_label_fits_suffixed_result_in_limit():
+    # FLE-166: the bare base fits (30 + 2 + 27 = 59) but base + "-1" would not;
+    # the base is cut (hash-suffixed) so the suffixed id stays within 59.
     project = "a" * 30
-    base_label = "b" * 30
+    base_label = "b" * 27
     existing = {f"{project}--{base_label}"}
-    with pytest.raises(ValidationError):
-        allocate_free_label(existing, project, base_label)
+    label = allocate_free_label(existing, project, base_label)
+    assert label.endswith("-1")
+    assert len(instance_id(project, label)) <= 59
 
 
 def test_allocate_multi_deploy_labels_validates_whole_batch_before_returning():
-    # n=1..9 (single-digit suffix) compose to exactly 63 chars (at the
-    # limit, allowed); n=10 (double-digit suffix) tips to 64 (over limit).
-    # A count=20 batch must raise due to n=10, even though n=1..9 are valid —
-    # proving validation happens for the WHOLE batch before any label
-    # (or downstream deploy) is dispatched.
+    # A batch past -99 (3-digit suffix) overflows the "-NN" reserve and must
+    # raise for the WHOLE batch before any label is dispatched.
     project = "a" * 30
     base_label = "b" * 29
     with pytest.raises(ValidationError):
-        allocate_multi_deploy_labels(set(), project, base_label, 20)
+        allocate_multi_deploy_labels(set(), project, base_label, 100)
 
 
 # --- derive_label (repo:push deploy rules) ---------------------------------
@@ -167,19 +163,19 @@ def test_derive_label_suffix_without_prefix():
     assert derive_label("website", "feat/x--bare", strip_suffix="--bare") == "feat-x"
 
 
-def test_derive_label_exactly_63_chars_is_not_shortened():
-    # "website--" is 9 chars, so a 54-char label makes a 63-char id.
-    branch = "a" * 51 + "--pw-run"
+def test_derive_label_exactly_59_chars_is_not_shortened():
+    # "website--" is 9 chars, so a 50-char label makes a 59-char id.
+    branch = "a" * 47 + "--pw-run"
     label = derive_label("website", branch, label_prefix="pw-", strip_suffix="--pw-run")
-    assert label == "pw-" + "a" * 51
-    assert len(instance_id("website", label)) == 63
+    assert label == "pw-" + "a" * 47
+    assert len(instance_id("website", label)) == 59
 
 
 def test_derive_label_overflow_is_cut_and_hashed_to_fit():
-    branch = "a" * 52 + "--pw-run"  # one char over: 55-char label
+    branch = "a" * 48 + "--pw-run"  # one char over: 51-char label
     label = derive_label("website", branch, label_prefix="pw-", strip_suffix="--pw-run")
-    assert label == ("pw-" + "a" * 52)[:47] + "-" + _sha6(branch)
-    assert len(instance_id("website", label)) == 63
+    assert label == ("pw-" + "a" * 48)[:43] + "-" + _sha6(branch)
+    assert len(instance_id("website", label)) == 59
 
 
 def test_derive_label_hash_is_over_the_whole_pushed_branch():
@@ -198,30 +194,30 @@ def test_derive_label_is_deterministic():
 
 
 def test_derive_label_cut_on_a_dash_does_not_leave_a_double_dash():
-    # The 47-char cut lands right after the dash following the a's.
-    branch = "a" * 43 + "-" + "b" * 20 + "--pw-run"
+    # The 43-char cut lands right after the dash following the a's.
+    branch = "a" * 39 + "-" + "b" * 20 + "--pw-run"
     label = derive_label("website", branch, label_prefix="pw-", strip_suffix="--pw-run")
-    assert label == "pw-" + "a" * 43 + "-" + _sha6(branch)
+    assert label == "pw-" + "a" * 39 + "-" + _sha6(branch)
     assert "--" not in label
     instance_id("website", label)  # must not raise
 
 
 def test_derive_label_reserve_leaves_room_for_an_alias_prefix():
-    # reserve=6 (`odihr-`): "website--" + label must be <= 63 - 6 = 57, so the
-    # label may be 48 chars. Exactly 48 is not shortened ...
-    branch = "a" * 45 + "--pw-run"
+    # reserve=6 (`odihr-`): "website--" + label must be <= 59 - 6 = 53, so the
+    # label may be 44 chars. Exactly 44 is not shortened ...
+    branch = "a" * 41 + "--pw-run"
     kw = dict(label_prefix="pw-", strip_suffix="--pw-run", reserve=6)
     label = derive_label("website", branch, **kw)
-    assert label == "pw-" + "a" * 45
-    assert len(f"odihr-{instance_id('website', label)}") == 63
+    assert label == "pw-" + "a" * 41
+    assert len(f"odihr-{instance_id('website', label)}") == 59
 
 
 def test_derive_label_reserve_overflow_is_cut_and_hashed_to_fit():
-    branch = "a" * 46 + "--pw-run"  # one char over the reserved room
+    branch = "a" * 42 + "--pw-run"  # one char over the reserved room
     kw = dict(label_prefix="pw-", strip_suffix="--pw-run", reserve=6)
     label = derive_label("website", branch, **kw)
-    assert label == ("pw-" + "a" * 46)[:41] + "-" + _sha6(branch)
-    assert len(f"odihr-{instance_id('website', label)}") == 63
+    assert label == ("pw-" + "a" * 42)[:37] + "-" + _sha6(branch)
+    assert len(f"odihr-{instance_id('website', label)}") == 59
     assert derive_label("website", branch, **kw) == label  # deterministic
 
 
@@ -233,12 +229,12 @@ def test_derive_label_reserve_zero_is_the_default():
 
 def test_derive_label_reserve_applies_to_a_fixed_label_too():
     label = derive_label("website", "develop", label="a" * 60, reserve=6)
-    assert len(f"odihr-website--{label}") == 63
+    assert len(f"odihr-website--{label}") == 59
 
 
 def test_derive_label_reserve_can_make_the_project_too_long():
     with pytest.raises(ValidationError, match="too long"):
-        derive_label("p" * 50, "x" * 80, label_prefix="pw-", reserve=10)
+        derive_label("p" * 46, "x" * 80, label_prefix="pw-", reserve=10)
 
 
 def test_derive_label_empty_slug_raises():
@@ -252,9 +248,9 @@ def test_derive_label_overflow_with_a_huge_project_name_raises():
 
 
 def test_derive_label_short_label_with_a_long_project_still_works():
-    label = derive_label("p" * 56, "x", label_prefix="a-")
+    label = derive_label("p" * 52, "x", label_prefix="a-")
     assert label == "a-x"
-    assert len(instance_id("p" * 56, label)) == 61
+    assert len(instance_id("p" * 52, label)) == 57
 
 
 def test_derive_label_user_prefixed_and_uppercase_branch():
@@ -266,3 +262,41 @@ def test_derive_label_user_prefixed_and_uppercase_branch():
     )
     assert label == "pw-jdoe-hotfix-abc-1896-font-patch"
     assert instance_id("website", label) == "website--pw-jdoe-hotfix-abc-1896-font-patch"
+
+
+# --- FLE-166: 59-char cap (DDEV appends "-web" to the 63-char hostname) -------
+
+
+def test_instance_id_cap_is_59_so_web_hostname_fits_63():
+    project = "ddev-fleet-ci"
+    ok = "x" * (59 - len(project) - 2)
+    assert len(instance_id(project, ok)) == 59
+    with pytest.raises(ValidationError):
+        instance_id(project, ok + "x")
+
+
+def test_63_char_base_plus_collision_suffix_stays_within_59():
+    project = "ddev-fleet-ci"
+    branch = "ci-feature/fle-153-rollback-upgrade-test-for-the-legacy-line-xxxxxxxx"
+    base = derive_label(project, branch, reserve=len("-NN"))
+    assert len(f"{project}--{base}") <= 56
+    taken = {f"{project}--{base}"}
+    for expected in (1, 2):
+        lbl = allocate_free_label(taken, project, base)
+        assert lbl == f"{base}-{expected}"
+        full = f"{project}--{lbl}"
+        assert len(full) <= 59 and len(f"{full}-web") <= 63
+        taken.add(full)
+
+
+def test_63_char_base_label_with_multi_deploy_suffix_stays_within_59():
+    project = "ddev-fleet-ci"
+    base = "z" * (63 - len(project) - 2)  # a 63-char id, the pre-fix maximum
+    for lbl in allocate_multi_deploy_labels(set(), project, base, 12):
+        assert len(f"{project}--{lbl}-web") <= 63
+
+
+def test_short_ids_are_not_renamed():
+    assert derive_label("oak", "feature/abc") == "feature-abc"
+    assert allocate_free_label({"oak--abc"}, "oak", "abc") == "abc-1"
+    assert allocate_multi_deploy_labels(set(), "oak", "abc", 2) == ["abc-1", "abc-2"]

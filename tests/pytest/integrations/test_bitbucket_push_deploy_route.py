@@ -196,8 +196,8 @@ def test_long_branch_name_is_fitted_leaving_room_for_the_suffix(hook_env):
     branch = "feature/" + "very-long-name-" * 6 + "--pw-run"
     resp = _post(client, _push(_change(branch)), secret)
     instance = resp.json()["instance"]
-    # 63 minus the 4 characters kept free for an allocated `-999` suffix.
-    assert len(instance) == 59 and instance.startswith("p--pw-feature-very-long-name")
+    # 59 minus the 4 characters kept free for an allocated `-999` suffix.
+    assert len(instance) == 55 and instance.startswith("p--pw-feature-very-long-name")
     _wait_job(client, resp.json()["job"])
     assert calls[0][1]["label"] == instance.removeprefix("p--")
     assert calls[0][1]["branch"] == branch  # the real branch is still what is cloned
@@ -277,7 +277,7 @@ def test_long_branch_leaves_room_for_the_additional_hostname_alias(hook_env):
     instance = resp.json()["instance"]
     assert _wait_job(client, resp.json()["job"]) == "succeeded"
     assert len(f"odihr-{instance}") <= 63
-    assert len(instance) > 50  # fitted to the reserved room, not collapsed
+    assert len(instance) > 40  # fitted to the reserved room, not collapsed
     ((_, kwargs),) = calls
     assert f"aliased--{kwargs['label']}" == instance
 
@@ -546,7 +546,7 @@ def test_two_branches_of_one_push_never_allocate_the_same_id(hook_env, fleet_hom
         _wait_job(client, deploy["job"])
 
 
-def test_long_branch_with_an_existing_base_id_still_allocates_within_63_chars(hook_env, fleet_home):
+def test_long_branch_with_an_existing_base_id_still_allocates_within_59_chars(hook_env, fleet_home):
     client, _, secret, calls, _, _ = hook_env
     branch = "feature/" + "very-long-name-" * 6 + "--pw-run"
     first = _post(client, _push(_change(branch)), secret, delivery_id="a").json()
@@ -557,7 +557,7 @@ def test_long_branch_with_an_existing_base_id_still_allocates_within_63_chars(ho
     assert second.status_code == 200
     instance = second.json()["instance"]
     assert instance == first["instance"] + "-2"
-    assert len(instance) <= 63
+    assert len(instance) <= 59 and len(instance + "-web") <= 63
     _wait_job(client, second.json()["job"])
     assert calls[-1][1]["label"] == instance.removeprefix("p--")
     assert calls[-1][1]["branch"] == branch

@@ -25,8 +25,14 @@ from fleet.core.instances import (
 )
 from fleet.core.reboot import RebootStatus, format_duration_since, read_reboot_status
 
-STATUS_GLYPH = {"running": "●", "stopped": "○", "deployed": "•", "error": "!"}
-STATUS_STYLE = {"running": "green", "stopped": "grey50", "deployed": "cyan", "error": "red"}
+STATUS_GLYPH = {"running": "●", "stopped": "○", "deployed": "•", "failed": "!", "error": "!"}
+STATUS_STYLE = {
+    "running": "green",
+    "stopped": "grey50",
+    "deployed": "cyan",
+    "failed": "red",
+    "error": "red",
+}
 
 # Operator cheat-sheet shown at the bottom of every sidebar. "^b" is the tmux
 # prefix (Ctrl-b). `detach` returns you to your normal shell WITHOUT stopping

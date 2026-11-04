@@ -96,7 +96,7 @@ def _add_bulk_target_args(subparser: argparse.ArgumentParser) -> None:
     subparser.add_argument("instance_id", nargs="*", default=[])
     subparser.add_argument("--all", action="store_true")
     subparser.add_argument("--project", default=None)
-    subparser.add_argument("--state", default=None, choices=["running", "deployed"])
+    subparser.add_argument("--state", default=None, choices=["running", "deployed", "failed"])
 
 
 def _build_parser() -> argparse.ArgumentParser:
