@@ -70,3 +70,34 @@ test('a file that is not an export is refused and nothing is imported @phone', a
   await expect(page.getByTestId('import-confirm-form')).toHaveCount(0);
   await expectNoOverflow(page, 'refused import');
 });
+
+// The refusal page wraps long keys and does not echo long values (the messages themselves are asserted in
+// app/tests/Functional/Admin/ProjectTransferMatrixTest.php).
+test('a long error line (a 40-character key, a 9000-character value) wraps on the refusal page @phone', async ({ page }) => {
+  const project = {
+    name: 'pw-wrap',
+    git: 'https://git.example.com/x.git',
+    default_branch: null,
+    default_template: null,
+    additional_hostnames: [],
+    ports: [],
+    git_bot: { mode: 'inherit', name: null, email: null },
+    issue_id_regexp: null,
+    display_submodule_branch: null,
+    typesense: false,
+  };
+  const doc = { format: 'fleet-project-export', version: 1, project, ports: [], templates: [], webhooks: [], schedules: [] };
+  const upload = async (document: unknown): Promise<void> => {
+    await page.goto('/admin/import');
+    await page.getByTestId('import-file').setInputFiles({ name: 'long.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(document)) });
+    await page.getByTestId('import-preview').click();
+    await expect(page.getByTestId('import-error-item').first()).toBeVisible();
+  };
+
+  await upload({ ...doc, ['k'.repeat(40)]: 1, ['q'.repeat(300)]: 2 });
+  await expectNoOverflow(page, 'long error key');
+
+  await upload({ ...doc, project: { ...project, git: `https://git.example.com/${'a'.repeat(9000)}.git` } });
+  await expect(page.getByTestId('import-error-item').first()).toContainText('too long');
+  await expectNoOverflow(page, 'too long string');
+});

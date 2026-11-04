@@ -64,6 +64,9 @@ tests/playwright/    TypeScript @playwright/test, its own npm package
                          setup-wizard.desktop (the setup wizard end to end), projects (project and template pages),
                          assets (the Assets tab: chunked upload, resume, download, delete, folders),
                          import-export (a project's Export download, then Projects → Import: upload, preview table, confirm),
+                         (the import/export and setup-wizard refusal matrices run as PHPUnit Functional:
+                         ProjectTransferMatrixTest, Setup/SetupFieldMatrixTest, Setup/SetupLinkRefusalTest; the browser keeps
+                         download, upload, confirm, layout at 390 px and the wizard walk),
                          secrets (fleet-wide and project secrets, reveal, audit log)
 tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
                      scorer and report, the Renovate merge helper)
