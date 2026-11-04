@@ -6,11 +6,13 @@ namespace App\Tests\Functional\Upgrade;
 
 use App\Command\Upgrade\UpgradeBackupCommand;
 use App\Command\Upgrade\UpgradePrepareCommand;
+use App\Command\Upgrade\UpgradeRestoreCommand;
 use App\Command\Upgrade\UpgradeVerifyCommand;
 use App\Fleet\Shell\ProcessCommandRunner;
 use App\Fleet\Upgrade\ChangelogReader;
 use App\Fleet\Upgrade\Check\CheckResult;
 use App\Fleet\Upgrade\Check\CheckRunner;
+use App\Fleet\Upgrade\Check\SchemaAheadCheck;
 use App\Fleet\Upgrade\Check\UpgradeCheck;
 use App\Fleet\Upgrade\GitRemoteTags;
 use App\Fleet\Upgrade\InstalledVersion;
@@ -20,7 +22,9 @@ use App\Fleet\Upgrade\RepoUrl;
 use App\Fleet\Upgrade\RunState;
 use App\Fleet\Upgrade\UpgradeAssessor;
 use App\Fleet\Upgrade\UpgradeBackup;
+use App\Fleet\Upgrade\UpgradeHistory;
 use App\Fleet\Upgrade\UpgradePlanner;
+use App\Fleet\Upgrade\UpgradeRestore;
 use App\Fleet\Upgrade\UpgradeRunner;
 use App\Fleet\Upgrade\UpgradeVerification;
 use App\Fleet\Upgrade\VerifyReport;
@@ -47,6 +51,11 @@ final class UpgradeRunnerTest extends TestCase
     private array $findings = [];
     private bool $backupFails = false;
     private int $backups = 0;
+    /** @var list<string> read by the fake restore seam */
+    public array $existingBackups = [];
+    /** @var list<string> */
+    public array $restored = [];
+    public bool $restoreFails = false;
     /** @var list<VerifyResult> */
     private array $verifyResults = [];
 
@@ -142,7 +151,37 @@ final class UpgradeRunnerTest extends TestCase
             }
         };
 
-        return new UpgradeRunner($assessor, $backup, $verification);
+        $restorer = new class($self) implements UpgradeRestore {
+            public function __construct(private UpgradeRunnerTest $test)
+            {
+            }
+
+            public function backupNames(): array
+            {
+                return $this->test->existingBackups;
+            }
+
+            public function restore(string $name): void
+            {
+                $this->test->restored[] = $name;
+                if ($this->test->restoreFails) {
+                    throw new \RuntimeException('workers still running');
+                }
+            }
+        };
+
+        return new UpgradeRunner($assessor, $backup, $verification, $restorer, new UpgradeHistory($this->dir.'/history.jsonl'));
+    }
+
+    /** @param list<string> $lines */
+    private function history(array $lines): void
+    {
+        file_put_contents($this->dir.'/history.jsonl', implode("\n", $lines)."\n");
+    }
+
+    private static function startLine(string $from, string $to, string $backup, string $ts = '2026-11-01T10:00:00+00:00'): string
+    {
+        return json_encode(['ts' => $ts, 'event' => 'start', 'result' => 'started', 'from' => $from, 'to' => $to, 'sha' => str_repeat('a', 40), 'actor' => 'alice', 'backup' => $backup], \JSON_THROW_ON_ERROR);
     }
 
     /** @internal for the fake seams above */
@@ -230,12 +269,94 @@ final class UpgradeRunnerTest extends TestCase
         self::assertSame(0, $prep->exitCode());
     }
 
-    public function testADowngradeIsRefused(): void
+    public function testADowngradeWithoutABackupIsRefusedWithTheOptions(): void
     {
         $prep = $this->runner('v1.2.1')->prepare('v1.1.0');
 
         self::assertSame(RunState::Refused, $prep->state);
-        self::assertStringContainsString('rollback', $prep->reasons[0]);
+        self::assertStringContainsString('No pre-upgrade backup of v1.1.0', $prep->reasons[0]);
+        self::assertStringContainsString('--no-db-restore', $prep->reasons[0]);
+    }
+
+    public function testARollbackWithTheBackupInTheHistoryIsReadyAndNamesIt(): void
+    {
+        $this->history([self::startLine('v1.1.0', 'v1.2.1', 'fleet-20261101-100000.sqlite')]);
+        $this->existingBackups = ['fleet-20261101-100000.sqlite'];
+
+        $prep = $this->runner('v1.2.1')->prepare('v1.1.0');
+
+        self::assertSame(RunState::Ready, $prep->state);
+        self::assertNotNull($prep->rollback);
+        self::assertTrue($prep->rollback->restoreDb);
+        self::assertSame('fleet-20261101-100000.sqlite', $prep->rollback->backup);
+    }
+
+    public function testThePrepareCommandPrintsTheRollbackLines(): void
+    {
+        $this->history([self::startLine('v1.1.0', 'v1.2.1', 'fleet-20261101-100000.sqlite')]);
+        $this->existingBackups = ['fleet-20261101-100000.sqlite'];
+
+        $tester = new CommandTester(new UpgradePrepareCommand($this->runner('v1.2.1')));
+        $tester->execute(['--to' => 'v1.1.0'], ['capture_stderr_separately' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getErrorOutput());
+        $sha = trim(new Process(['git', '-C', $this->remote, 'rev-parse', 'v1.1.0^{commit}'])->mustRun()->getOutput());
+        self::assertSame("STATE=ready\nFROM=v1.2.1\nTO=v1.1.0\nSHA={$sha}\nACTIONS=0\nDIRECTION=down\nRESTORE=1\nROLLBACK_BACKUP=fleet-20261101-100000.sqlite\nSINCE=2026-11-01T10:00:00Z\n", $tester->getDisplay());
+    }
+
+    public function testNoDbRestoreIsRefusedWhenTheSchemaIsAhead(): void
+    {
+        $this->findings = [CheckResult::warn(SchemaAheadCheck::AHEAD, 'The database has 1 migration v1.1.0 does not have: Version1.', 'rollback path', false)];
+
+        $prep = $this->runner('v1.2.1')->prepare('v1.1.0', [], true);
+
+        self::assertSame(RunState::Refused, $prep->state);
+        self::assertStringContainsString('--no-db-restore is refused', $prep->reasons[0]);
+    }
+
+    public function testNoDbRestoreIsAllowedWithoutAnUnknownMigration(): void
+    {
+        $prep = $this->runner('v1.2.1')->prepare('v1.1.0', [], true);
+
+        self::assertSame(RunState::Ready, $prep->state);
+        self::assertNotNull($prep->rollback);
+        self::assertFalse($prep->rollback->restoreDb);
+    }
+
+    public function testARollbackToTheV0SeriesIsRefused(): void
+    {
+        $prep = $this->runner('v1.2.1')->prepare('v0.20.2');
+
+        self::assertSame(RunState::Refused, $prep->state);
+        self::assertStringContainsString('v0.* series', $prep->reasons[0]);
+    }
+
+    public function testRestoreDelegatesToTheSeamAndItsFailureThrows(): void
+    {
+        $runner = $this->runner('v1.2.1');
+        $runner->restore('fleet-20261101-100000.sqlite');
+        self::assertSame(['fleet-20261101-100000.sqlite'], $this->restored);
+
+        $this->restoreFails = true;
+        $this->expectException(\RuntimeException::class);
+        $runner->restore('fleet-20261101-100000.sqlite');
+    }
+
+    public function testTheRestoreCommandChecksTheNameAndReportsAFailure(): void
+    {
+        $tester = new CommandTester(new UpgradeRestoreCommand($this->runner('v1.2.1')));
+        $tester->execute(['--backup' => '../etc/passwd'], ['capture_stderr_separately' => true]);
+        self::assertSame(2, $tester->getStatusCode());
+        self::assertSame([], $this->restored);
+
+        $tester->execute(['--backup' => 'fleet-20261101-100000.sqlite'], ['capture_stderr_separately' => true]);
+        self::assertSame(0, $tester->getStatusCode());
+        self::assertSame("RESTORED=fleet-20261101-100000.sqlite\n", $tester->getDisplay());
+
+        $this->restoreFails = true;
+        $tester->execute(['--backup' => 'fleet-20261101-100000.sqlite'], ['capture_stderr_separately' => true]);
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString('previous database is in place', $tester->getErrorOutput());
     }
 
     public function testAHostThatRunsABranchIsRefused(): void

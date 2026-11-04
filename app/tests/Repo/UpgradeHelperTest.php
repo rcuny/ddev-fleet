@@ -210,6 +210,82 @@ final class UpgradeHelperTest extends TestCase
         self::assertStringContainsString('PATH=$caller_path', $source);
     }
 
+    public function testARollbackNeedsYesAndChangesNothingWithout(): void
+    {
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1'], ['FAKE_DOWN' => '1']);
+
+        self::assertSame(3, $status, $out.$err);
+        self::assertStringContainsString('ALL DATA WRITTEN SINCE 2026-11-01T10:00:00Z IS LOST', $out);
+        self::assertStringContainsString('fleet-20261101-100000.sqlite', $out);
+        self::assertStringContainsString('a rollback needs --yes', $err);
+        self::assertSame(['fleet upgrade:prepare --to=v1.2.1'], $this->calls());
+        self::assertSame([], $this->history());
+    }
+
+    public function testARollbackStopsTheServicesRestoresInstallsTheOlderReleaseAndVerifies(): void
+    {
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes'], ['FAKE_DOWN' => '1', 'SUDO_USER' => 'alice']);
+
+        self::assertSame(0, $status, $out.$err);
+        $calls = $this->calls();
+        self::assertSame('fleet upgrade:prepare --to=v1.2.1', $calls[0]);
+        self::assertStringStartsWith('systemctl list-units', $calls[1]);
+        self::assertStringStartsWith('systemctl stop fleet-scheduler fleet-worker@1 fleet-status', $calls[2]);
+        self::assertSame('fleet upgrade:restore --backup=fleet-20261101-100000.sqlite', $calls[3]);
+        self::assertStringStartsWith('installer --domain=fleet.example.com --ref=v1.2.1', $calls[4]);
+        self::assertStringStartsWith('systemctl start fleet-scheduler fleet-worker@1 fleet-status', $calls[5]);
+        self::assertStringStartsWith('fleet upgrade:verify --to=v1.2.1 --from=v1.2.2', $calls[6]);
+        self::assertNotContains('fleet upgrade:backup', $calls, 'the restore keeps the current database itself');
+
+        $history = $this->history();
+        self::assertSame(['start', 'restore', 'installer', 'verify'], array_column($history, 'event'));
+        self::assertSame('fleet-20261101-100000.sqlite', $history[0]['backup']);
+        self::assertSame('v1.2.2', $history[0]['from']);
+        self::assertSame('v1.2.1', $history[0]['to']);
+    }
+
+    public function testAFailedRestoreStartsTheServicesAgainAndStopsBeforeTheInstaller(): void
+    {
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes'], ['FAKE_DOWN' => '1', 'FAKE_RESTORE_EXIT' => '1']);
+
+        self::assertSame(1, $status, $out.$err);
+        self::assertStringContainsString('previous database is in place', $err);
+        $calls = $this->calls();
+        self::assertStringStartsWith('systemctl start fleet-scheduler', $calls[\count($calls) - 1]);
+        self::assertSame([], array_values(array_filter($calls, static fn (string $c): bool => str_starts_with($c, 'installer'))));
+        self::assertSame(['start', 'restore'], array_column($this->history(), 'event'));
+        self::assertSame('failed', $this->history()[1]['result']);
+    }
+
+    public function testNoDbRestoreRollbackTakesABackupAndTouchesNoService(): void
+    {
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes', '--no-db-restore'], ['FAKE_DOWN' => '0']);
+
+        self::assertSame(0, $status, $out.$err);
+        self::assertStringContainsString('only the code goes back', $out);
+        $calls = $this->calls();
+        self::assertSame('fleet upgrade:prepare --to=v1.2.1 --no-db-restore', $calls[0]);
+        self::assertContains('fleet upgrade:backup', $calls);
+        self::assertSame([], array_values(array_filter($calls, static fn (string $c): bool => str_starts_with($c, 'systemctl') || str_contains($c, 'upgrade:restore'))));
+    }
+
+    public function testTheHelperLeavesNoTemporaryDirectoryEvenWhenTheHistoryCannotBeWritten(): void
+    {
+        mkdir($this->root.'/var/log', 0o755, true);
+        file_put_contents($this->root.'/var/log/ddev-fleet', 'a file where the history directory should be');
+
+        [$status, $out, $err] = $this->upgrade(['--yes']);
+
+        self::assertSame(0, $status, $out.$err);
+        self::assertStringContainsString('could not write', $err);
+        self::assertSame([], glob($this->scratch().'/tmp/fleet-upgrade.*') ?: []);
+    }
+
+    public function testGitIsRestrictedToSafeTransports(): void
+    {
+        self::assertStringContainsString('GIT_ALLOW_PROTOCOL=file:https:ssh', (string) file_get_contents(self::installDir().'/libexec/upgrade'));
+    }
+
     // --- fixtures ----------------------------------------------------------------------------------------------------
 
     /** A local repository with one annotated tag v1.2.1 whose install/install.sh is a fake installer. */
@@ -242,17 +318,23 @@ final class UpgradeHelperTest extends TestCase
             echo "fleet $*" >> "$FAKE_LOG"
             case "$1" in
               upgrade:prepare)
-                printf 'STATE=%s\nFROM=v1.1.0\nTO=v1.2.1\nSHA=%s\nACTIONS=0\n' "${FAKE_PREPARE_STATE:-ready}" "${FAKE_SHA}"
+                if [ -n "${FAKE_DOWN:-}" ]; then
+                  printf 'STATE=ready\nFROM=v1.2.2\nTO=v1.2.1\nSHA=%s\nACTIONS=0\nDIRECTION=down\nRESTORE=%s\n' "${FAKE_SHA}" "${FAKE_DOWN}"
+                  [ "${FAKE_DOWN}" = 1 ] && printf 'ROLLBACK_BACKUP=fleet-20261101-100000.sqlite\nSINCE=2026-11-01T10:00:00Z\n'
+                else
+                  printf 'STATE=%s\nFROM=v1.1.0\nTO=v1.2.1\nSHA=%s\nACTIONS=0\n' "${FAKE_PREPARE_STATE:-ready}" "${FAKE_SHA}"
+                fi
                 echo "plan report" >&2
                 exit "${FAKE_PREPARE_EXIT:-0}" ;;
               upgrade:backup) [ "${FAKE_BACKUP_EXIT:-0}" = 0 ] || { echo "backup failed" >&2; exit 1; }; echo "BACKUP=fleet-20261104-100000.sqlite" ;;
+              upgrade:restore) [ "${FAKE_RESTORE_EXIT:-0}" = 0 ] || { echo "restore failed" >&2; exit 1; }; echo "RESTORED=ok" ;;
               upgrade:verify) exit "${FAKE_VERIFY_EXIT:-0}" ;;
             esac
             SH;
         if (!is_dir($this->scratch().'/tmp')) {
             mkdir($this->scratch().'/tmp', 0o700, true);
         }
-        $stubs = $this->stubs(['fleet' => $fleet]);
+        $stubs = $this->stubs(['fleet' => $fleet, 'systemctl' => 'echo "systemctl $*" >> "$FAKE_LOG"']);
         $process = new Process(
             ['bash', self::installDir().'/libexec/upgrade', ...$args, '--repo-url='.$this->repo],
             null,

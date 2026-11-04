@@ -34,6 +34,7 @@ final class UpgradePrepareCommand extends Command
     {
         $this
             ->addOption('to', null, InputOption::VALUE_REQUIRED, 'Upgrade to this release (vX.Y.Z) instead of the latest')
+            ->addOption('no-db-restore', null, InputOption::VALUE_NONE, 'Rollback only: keep the current database (allowed only when it has no migration the target lacks)')
             ->addOption('force', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Check id to waive (overridable Blocks only)')
         ;
     }
@@ -42,7 +43,7 @@ final class UpgradePrepareCommand extends Command
     {
         $to = $input->getOption('to');
         $force = array_values(array_filter((array) $input->getOption('force'), 'is_string'));
-        $prep = $this->runner->prepare(\is_string($to) && '' !== $to ? $to : null, $force);
+        $prep = $this->runner->prepare(\is_string($to) && '' !== $to ? $to : null, $force, true === $input->getOption('no-db-restore'));
         $err = $output instanceof ConsoleOutputInterface ? $output->getErrorOutput() : $output;
 
         if (null !== $prep->assessment) {
@@ -58,6 +59,16 @@ final class UpgradePrepareCommand extends Command
             $output->writeln('TO='.$prep->target->tag(), OutputInterface::OUTPUT_RAW);
             $output->writeln('SHA='.$prep->target->sha, OutputInterface::OUTPUT_RAW);
             $output->writeln('ACTIONS='.\count($prep->actions), OutputInterface::OUTPUT_RAW);
+            if (null !== $prep->rollback) {
+                $output->writeln('DIRECTION=down', OutputInterface::OUTPUT_RAW);
+                $output->writeln('RESTORE='.($prep->rollback->restoreDb ? '1' : '0'), OutputInterface::OUTPUT_RAW);
+                if (null !== $prep->rollback->backup) {
+                    $output->writeln('ROLLBACK_BACKUP='.$prep->rollback->backup, OutputInterface::OUTPUT_RAW);
+                }
+                if (null !== $prep->rollback->since) {
+                    $output->writeln('SINCE='.$prep->rollback->since->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d\TH:i:s\Z'), OutputInterface::OUTPUT_RAW);
+                }
+            }
         }
 
         return $prep->exitCode();

@@ -1,7 +1,7 @@
 #!/bin/bash
 # Root helper of `sudo fleet upgrade` (the wrapper /usr/local/bin/fleet execs it; nothing else calls it).
 #
-#   upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--repo-url=<url|path>]
+#   upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restore] [--repo-url=<url|path>]
 #
 # Installed by install/steps/90-privileged.sh as root:root 0755 from the root-owned export of install/. There is NO
 # sudoers entry for it: the application can never start an upgrade (docs/upgrading.md, "Why only the command line").
@@ -15,6 +15,10 @@
 #   5. the target's install/ tree is fetched by the commit sha the plan resolved into a root-owned temp directory and its
 #      install.sh is run with --ref=<tag> (the tag must still point at that sha, or nothing runs);
 #   6. the history line "installer"; then `fleet upgrade:verify` (the NEW code) and the line "verify".
+# Rollback (`--to` an older release): same shape, but step 3 is replaced by stopping the fleet services and restoring the
+# pre-upgrade backup the history names (`fleet upgrade:restore`, no migration: the installer of the older release runs the
+# migrations with the older code), then the older installer, then verify. It always needs --yes (the text names the data
+# written since the upgrade that will be lost) and refuses without a usable backup unless --no-db-restore is allowed.
 # Self-replacement: the installer rewrites this file and the wrapper; the whole script is inside main(), read before it
 # runs, and the last line calls it.
 #
@@ -31,6 +35,8 @@ main() {
   IFS=$' \t\n'
   unset BASH_ENV ENV CDPATH GLOBIGNORE
   export LC_ALL=C
+  # The release source is git over https, ssh or a local path (--repo-url); no ext:: or other exotic transport.
+  export GIT_ALLOW_PROTOCOL=file:https:ssh
   local caller_path=$PATH
   PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
   export PATH
@@ -59,7 +65,7 @@ main() {
   now() { date -u +%Y-%m-%dT%H:%M:%S+00:00; }
 
   # --- arguments -----------------------------------------------------------------------------------------------------
-  local to='' yes=0 repo_url=$default_repo arg
+  local to='' yes=0 no_db=0 repo_url=$default_repo arg
   local -a force=()
   while [ "$#" -gt 0 ]; do
     arg=$1
@@ -68,10 +74,11 @@ main() {
       --to=*) to=${arg#--to=} ;;
       --to) [ "$#" -gt 0 ] || { err 'usage: --to needs a version (vX.Y.Z)'; return 2; }; to=$1; shift ;;
       --yes | -y) yes=1 ;;
+      --no-db-restore) no_db=1 ;;
       --force=*) force+=("${arg#--force=}") ;;
       --repo-url=*) repo_url=${arg#--repo-url=} ;;
       -h | --help)
-        say 'usage: sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--repo-url=<url|path>]'
+        say 'usage: sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restore] [--repo-url=<url|path>]'
         return 0
         ;;
       *) err "usage: unknown argument: ${arg:0:60}"; return 2 ;;
@@ -100,10 +107,11 @@ main() {
   say "Planning the upgrade ..."
   local -a prepare=(upgrade:prepare)
   [ -n "$to" ] && prepare+=("--to=$to")
+  [ "$no_db" -eq 1 ] && prepare+=(--no-db-restore)
   for arg in ${force[@]+"${force[@]}"}; do prepare+=("--force=$arg"); done
   local out status=0 line key value
   out=$(as_fleet "${prepare[@]}") || status=$?
-  local state='' from='' target='' sha='' actions=0
+  local state='' from='' target='' sha='' actions=0 direction=up restore=0 rb_backup='' since=''
   while IFS= read -r line; do
     key=${line%%=*}
     value=${line#*=}
@@ -113,6 +121,10 @@ main() {
       TO) [[ $value =~ ^v1\.[0-9]+\.[0-9]+$ ]] && target=$value ;;
       SHA) [[ $value =~ ^[0-9a-f]{40}$ ]] && sha=$value ;;
       ACTIONS) [[ $value =~ ^[0-9]{1,3}$ ]] && actions=$value ;;
+      DIRECTION) [ "$value" = down ] && direction=down ;;
+      RESTORE) [ "$value" = 1 ] && restore=1 ;;
+      ROLLBACK_BACKUP) [[ $value =~ ^fleet-[0-9]{8}-[0-9]{6}\.sqlite$ ]] && rb_backup=$value ;;
+      SINCE) [[ $value =~ ^[0-9T:Z-]{1,25}$ ]] && since=$value ;;
     esac
   done <<<"$out"
   if [ "$status" -ne 0 ]; then
@@ -127,6 +139,26 @@ main() {
   if [ "$state" != ready ] || [ -z "$target" ] || [ -z "$sha" ] || [ -z "$from" ]; then
     err 'the plan did not name a release and a commit; nothing was changed'
     return 1
+  fi
+
+  if [ "$direction" = down ]; then
+    if [ "$restore" -eq 1 ] && [ -z "$rb_backup" ]; then
+      err 'the plan did not name the backup to restore; nothing was changed'
+      return 1
+    fi
+    # The strong confirmation: a rollback loses data, so a terminal "y" is not enough; --yes must be on the line.
+    say "ROLLBACK $from -> $target"
+    if [ "$restore" -eq 1 ]; then
+      say "The database will be restored from the backup taken before the upgrade ($rb_backup)."
+      say "ALL DATA WRITTEN SINCE ${since:-that upgrade} IS LOST: instances, jobs, users, projects, secrets and audit entries created or changed after it."
+      say 'The current database is kept next to the backups as *.pre-restore-*. The fleet services are stopped during the restore.'
+    else
+      say 'The database is kept as it is (--no-db-restore); only the code goes back.'
+    fi
+    if [ "$yes" -ne 1 ]; then
+      err 'a rollback needs --yes to confirm (it can lose data). Nothing was changed.'
+      return 3
+    fi
   fi
 
   # --- 2. confirmation ------------------------------------------------------------------------------------------------
@@ -162,34 +194,61 @@ main() {
   fi
 
   # --- 3. backup ---------------------------------------------------------------------------------------------------------
-  say "Taking the pre-upgrade backup ..."
   local backup=''
-  out=$(as_fleet upgrade:backup) || { err 'nothing was changed'; return 1; }
-  backup=$(sed -n 's/^BACKUP=//p' <<<"$out" | head -n 1)
-  if ! [[ $backup =~ ^[A-Za-z0-9._-]{1,100}$ ]]; then
-    err 'the backup did not report a file name; nothing was changed'
-    return 1
+  if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
+    # The restore itself keeps the current database as *.pre-restore-*; the backup being restored is the one named.
+    backup=$rb_backup
+  else
+    say "Taking the pre-upgrade backup ..."
+    out=$(as_fleet upgrade:backup) || { err 'nothing was changed'; return 1; }
+    backup=$(sed -n 's/^BACKUP=//p' <<<"$out" | head -n 1)
+    if ! [[ $backup =~ ^[A-Za-z0-9._-]{1,100}$ ]]; then
+      err 'the backup did not report a file name; nothing was changed'
+      return 1
+    fi
+    say "Backup: $backup"
   fi
-  say "Backup: $backup"
 
   # --- 4. history: start ---------------------------------------------------------------------------------------------
   history_line() { # event result [backup]
     local extra=''
     [ -n "${3:-}" ] && extra=$(printf ',"backup":"%s"' "$3")
-    install -d -m 0755 "$history_dir"
-    if [ ! -e "$history_file" ]; then
-      install -m 0644 /dev/null "$history_file"
-    fi
-    printf '{"ts":"%s","event":"%s","result":"%s","from":"%s","to":"%s","sha":"%s","actor":"%s"%s}\n' \
-      "$(now)" "$1" "$2" "$from" "$target" "$sha" "$actor" "$extra" >>"$history_file"
+    # A history that cannot be written (full disk) must not abort the upgrade half way through: say so and go on.
+    {
+      install -d -m 0755 "$history_dir" \
+        && { [ -e "$history_file" ] || install -m 0644 /dev/null "$history_file"; } \
+        && printf '{"ts":"%s","event":"%s","result":"%s","from":"%s","to":"%s","sha":"%s","actor":"%s"%s}\n' \
+          "$(now)" "$1" "$2" "$from" "$target" "$sha" "$actor" "$extra" >>"$history_file"
+    } || err "could not write $history_file"
+    return 0
   }
   history_line start started "$backup"
 
   # --- 5. the target's installer, by the planned sha -----------------------------------------------------------------
-  local work
+  # Cleanup is unconditional: an EXIT trap (not RETURN) so a failing command under set -e cannot leak the directory.
   work=$(mktemp -d "${TMPDIR:-/tmp}/fleet-upgrade.XXXXXX")
   chmod 0700 "$work"
-  trap 'rm -rf -- "$work"' RETURN
+  trap 'rm -rf -- "${work:-}"' EXIT
+  if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
+    # Stop everything that writes the databases, restore (as fleet, no migration), and bring the services back on any
+    # failure. The older installer below starts them again after it ran its migrations.
+    say 'Stopping the fleet services ...'
+    local -a units=(fleet-scheduler fleet-worker@1 fleet-status)
+    local fpm
+    fpm=$(systemctl list-units --plain --no-legend --state=active 'php*-fpm.service' 2>/dev/null | awk '{print $1}' | grep -E '^php[0-9.]+-fpm\.service$' || true)
+    # shellcheck disable=SC2206
+    units+=($fpm)
+    systemctl stop "${units[@]}" || true
+    say "Restoring the database from $rb_backup ..."
+    if ! as_fleet upgrade:restore "--backup=$rb_backup"; then
+      history_line restore failed "$rb_backup"
+      systemctl start "${units[@]}" || true
+      err 'the database restore failed and the previous database is in place; the services were started again. Nothing else changed.'
+      return 1
+    fi
+    history_line restore ok "$rb_backup"
+  fi
+
   say "Fetching the installer of $target (${sha:0:7}) ..."
   if ! { GIT_TERMINAL_PROMPT=0 git init -q "$work/src" \
     && GIT_TERMINAL_PROMPT=0 git -C "$work/src" fetch -q --depth 1 -- "$repo_url" "$sha" \
@@ -206,10 +265,14 @@ main() {
   say "Running the installer (log: $install_log) ..."
   local rc=0
   bash "$work/export/install/install.sh" "--domain=$domain" "--ref=$target" "--repo-url=$repo_url" --skip-dns-check || rc=$?
+  if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
+    # Whatever the installer did, the services stopped for the restore must not stay down.
+    systemctl start "${units[@]}" || true
+  fi
   if [ "$rc" -ne 0 ]; then
     history_line installer failed
     err "the installer failed (exit $rc). Log: $install_log"
-    err "It is idempotent: run the same command again, or go back with: sudo fleet upgrade --to $from"
+    err "It is idempotent: run the same command again, or go back with: sudo fleet upgrade --to $from --yes (a rollback: it restores the pre-upgrade backup, see docs/upgrading.md)"
     return 1
   fi
   history_line installer ok
@@ -220,7 +283,7 @@ main() {
   as_fleet upgrade:verify "--to=$target" "--from=$from" "--sha=$sha" "--actor=$actor" || rc=$?
   if [ "$rc" -ne 0 ]; then
     history_line verify unverified
-    err "verification failed (exit $rc). To go back: sudo fleet upgrade --to $from"
+    err "verification failed (exit $rc). To go back: sudo fleet upgrade --to $from --yes (restores the pre-upgrade database backup; data written since is lost)"
     err "Installer log: $install_log"
     return 5
   fi
