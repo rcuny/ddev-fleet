@@ -11,6 +11,7 @@ use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Secret\SecretRepository;
+use App\Fleet\Ddev\DdevPaths;
 use App\Fleet\FleetPaths;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Instances\DomainGitIdentity;
@@ -226,7 +227,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
             self::assertStringNotContainsString('$', $entry, 'DDEV would interpolate a dollar sign');
         }
         self::assertContains(
-            'GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/var/www/html/.ddev/fleet_known_hosts',
+            'GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='.DdevPaths::CONTAINER_APPROOT.'/.ddev/fleet_known_hosts',
             $config['web_environment'],
         );
     }

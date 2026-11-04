@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Fleet\Instances;
 
 use App\Domain\Instance\InstanceState;
+use App\Fleet\Ddev\DdevPaths;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Instances\DeployContext;
 use App\Fleet\Instances\DeployStep;
@@ -75,7 +76,7 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString('GIT_SSH_COMMAND=', $config);
         self::assertStringContainsString('-o StrictHostKeyChecking=yes', $config);
         self::assertStringContainsString('-o BatchMode=yes', $config);
-        self::assertStringContainsString('UserKnownHostsFile=/var/www/html/.ddev/fleet_known_hosts', $config);
+        self::assertStringContainsString('UserKnownHostsFile='.DdevPaths::CONTAINER_APPROOT.'/.ddev/fleet_known_hosts', $config);
         self::assertStringNotContainsString('IdentitiesOnly', $config, 'it would ignore the agent keys');
         self::assertStringNotContainsString($this->paths->sshDir(), $config, 'no host path, no key file in the container');
     }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Git;
 
 use App\Domain\Ssh\SshKeyRole;
+use App\Fleet\Ddev\DdevPaths;
 use App\Fleet\FleetPaths;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunner;
@@ -19,7 +20,7 @@ final readonly class GitClient
     public const float CLONE_TIMEOUT = 1800.0;
     public const float HEAD_TIMEOUT = 10.0;
 
-    /** The pinned known_hosts the container reads, relative to the checkout (the container sees it under /var/www/html, DDEV's fixed approot there). */
+    /** The pinned known_hosts the container reads, relative to the checkout (the container sees it under DdevPaths::CONTAINER_APPROOT). */
     public const string CONTAINER_KNOWN_HOSTS = '.ddev/fleet_known_hosts';
 
     /**
@@ -28,7 +29,7 @@ final readonly class GitClient
      * `IdentitiesOnly` would ignore them. Strict, pinned, never prompts. No quotes and no `$`: DDEV copies web_environment into a generated compose file and
      * a double quote there breaks it (FLE-188).
      */
-    public const string CONTAINER_SSH_COMMAND = 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/var/www/html/'.self::CONTAINER_KNOWN_HOSTS;
+    public const string CONTAINER_SSH_COMMAND = 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='.DdevPaths::CONTAINER_APPROOT.'/'.self::CONTAINER_KNOWN_HOSTS;
 
     public function __construct(private CommandRunner $runner, private FleetPaths $paths)
     {
