@@ -78,6 +78,43 @@ A deploy clones the branch, writes the instance's DDEV configuration and Drupal 
 placeholders (see [`secrets.md`](secrets.md)), starts the project, runs the template's post-deploy commands, writes the
 Caddy site for `https://<id>.<domain>` and reloads Caddy.
 
+**Git over SSH in the instance terminals.** Two places run git, and each is set up at deploy:
+
+- *On the host* (`tty1`, CI scripts, post-deploy lines): right after the clone, the checkout gets its own git `sshCommand`
+  setting, so no `~/.ssh` is needed for the `fleet` user. It uses the host's deploy key, the push key when the host has
+  one (offered first, so agent instances can push), Fleet's own `known_hosts` (`/srv/fleet/ssh/known_hosts`),
+  `StrictHostKeyChecking=yes` and `BatchMode=yes`.
+- *In the web container* (`tty2` runs `ddev exec claude`, so an agent's `git push` runs there): **opt-in per project**
+  (the container-ssh option of `fleet project:update`, see [`projects-and-templates.md`](projects-and-templates.md), or the checkbox on the project page; off by default). No key file is
+  ever mounted or copied into a container, and **nothing is ever loaded into DDEV's own `ddev-ssh-agent`**: that agent is
+  one per host and its socket is mounted into the web container of every DDEV project on the host, so a key in it would be
+  usable by code Fleet does not control. Instead, for an instance of an opted-in project, Fleet runs a dedicated
+  `ssh-agent` as the `fleet` user, with its socket in a directory only that instance mounts (a generated
+  `.ddev/docker-compose.fleet-ssh.yaml`, kept out of git status, which also sets `SSH_AUTH_SOCK` there). The agent holds
+  only the host's push key, loaded with a 24 hour lifetime (`ssh-add -t`, refreshed at every start and deploy). The agent is
+  stopped and its socket removed when the instance is stopped, redeployed or destroyed, and recreated at the next deploy or
+  start (it does not survive a reboot). Fleet's pinned `known_hosts` (public keys, not a secret) is copied to
+  `.ddev/fleet_known_hosts` in the checkout, and `config.fleet.yaml` sets `GIT_SSH_COMMAND` to a strict, `BatchMode` ssh that
+  reads it. The variable carries no identity option, because `IdentitiesOnly` would ignore the agent's key.
+
+Who can use which key:
+
+| Instance | Deploy key | Push key |
+|---|---|---|
+| Any instance, on the host (`tty1`, post-deploy lines, CI scripts), as the `fleet` user | read (clone) | yes, when the host has one |
+| Web container of an instance of a project **with** git over SSH in the container | no | signing only, through that instance's own agent, while it runs |
+| Web container of any other instance (every other Fleet project, and every other DDEV project on the host) | no | no |
+
+Whoever can run a process in an opted-in instance's container can sign with the push key (`git push`, `ssh`) while its agent
+runs; it cannot read the key out. Opt in only projects whose code you control and whose agents must push from the container.
+
+In both places a host that is not trusted fails at once with an error instead of hanging at a host-key prompt. A deploy
+fails (with the command's exit code in the job log) when the checkout setting cannot be set up, or when an opted-in project's
+agent cannot be started or loaded; a host without a push key only logs a warning. Starting a stopped instance recreates the
+agent and only warns in the job log if that fails. The seed covers the major git providers (Bitbucket
+under both of its SSH host names); add any other host with the SSH setup page or `fleet host:init`. Instances deployed
+before this change need a redeploy.
+
 **Post-deploy commands run on the host, as arguments, never through a shell.** Quotes and backslashes group words; an
 unquoted `|`, `&`, `;`, `<`, `>`, `$`, `` ` ``, `(`, `)`, `{` or `}` is refused with a hint to write `ddev exec '...'`. A
 `[[token]]` is substituted after splitting, inside each word, from the built-in tokens and then the project's and

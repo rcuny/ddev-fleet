@@ -7,6 +7,7 @@ namespace App\Fleet\Instances;
 use App\Domain\Instance\Instance;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
+use App\Fleet\Git\GitClient;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Jobs\SecretRegistry;
 use App\Fleet\Secrets\SecretStore;
@@ -67,6 +68,8 @@ final readonly class InstanceConfigWriter
         $environment = [
             'DRUSH_OPTIONS_URI=https://'.$primary,
             'FLEET_INSTANCE_HOST='.$primary,
+            // git over SSH inside the container: pinned known_hosts from the checkout, keys from DDEV's ssh-agent (FLE-145).
+            'GIT_SSH_COMMAND='.GitClient::CONTAINER_SSH_COMMAND,
         ];
         $token = $this->secrets->getFleetWide(HostSecrets::CLAUDE_TOKEN);
         if (null !== $token && '' !== $token) {

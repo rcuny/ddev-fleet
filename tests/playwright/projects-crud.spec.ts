@@ -45,6 +45,28 @@ test.describe('create', () => {
     }
   });
 
+  test('Git over SSH in the container is off by default and survives a save and a reload (FLE-145)', async ({ page }) => {
+    const name = uniqueName();
+    const box = page.getByLabel(/Git over SSH inside the container/);
+    try {
+      await openNewProject(page);
+      await fillProject(page, { name, git: 'ssh://git@git.example.com:2222/acme/blog.git' });
+      await expect(box).not.toBeChecked();
+      await page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' }).click();
+      await expect(box).toBeChecked();
+      await submitCreate(page);
+      await expect(page.getByTestId('flashes')).toContainText('Project created.');
+
+      await page.goto(`/admin/projects/${name}`);
+      await expect(box).toBeChecked();
+      await page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' }).click();
+      await submitSave(page);
+      await page.goto(`/admin/projects/${name}`);
+      await expect(box).not.toBeChecked();
+    } finally {
+      await deleteProjectViaUi(page, name);
+    }
+  });
 });
 
 test.describe('edit', () => {

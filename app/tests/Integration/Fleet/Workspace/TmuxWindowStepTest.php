@@ -24,7 +24,7 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         $tmux = new Tmux($this->tmuxRunner, $this->paths, '/opt/ddev-fleet/app/bin/console');
         $this->steps[] = $this->step = new TmuxWindowStep($tmux, $this->templates);
         // The destroy side talks to the same tmux.
-        $this->teardown = new \App\Fleet\Instances\Teardown($this->paths, $this->ddev, $this->sites, $tmux);
+        $this->teardown = new \App\Fleet\Instances\Teardown($this->paths, $this->ddev, $this->sites, $tmux, $this->agent);
     }
 
     /**

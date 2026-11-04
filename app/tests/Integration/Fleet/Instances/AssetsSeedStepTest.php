@@ -511,6 +511,6 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         $this->deploy();
 
         self::assertSame(['tmux:env=yes'], $seen->getArrayCopy());
-        self::assertSame(['git clone', 'caddy validate', 'caddy reload', 'ddev start', 'git rev-parse'], $this->commandNames());
+        self::assertSame(['git clone', 'git config', 'caddy validate', 'caddy reload', 'ddev start', 'git rev-parse'], $this->commandNames());
     }
 }

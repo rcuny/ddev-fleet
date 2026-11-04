@@ -329,7 +329,7 @@ test.describe('projects and templates', () => {
       await expect(page.getByLabel('Do not set a git identity')).not.toBeChecked();
 
       // Checkbox row: same, bottom right corner.
-      const checkboxRow = page.locator('[data-slot=checkbox-row]');
+      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Typesense' });
       const checkboxBox = (await checkboxRow.boundingBox())!;
       if (isPhone()) {
         expect(checkboxBox.height).toBeGreaterThanOrEqual(43.5);

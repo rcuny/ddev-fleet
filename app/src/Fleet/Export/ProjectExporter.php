@@ -82,6 +82,7 @@ final readonly class ProjectExporter
                 'issue_id_regexp' => $project->issueIdRegexp(),
                 'display_submodule_branch' => $project->displaySubmoduleBranch(),
                 'typesense' => $project->typesense(),
+                'container_ssh' => $project->containerSsh(),
             ],
             'ports' => array_map(static fn (NamedPort $port): array => [
                 'name' => $port->name(),

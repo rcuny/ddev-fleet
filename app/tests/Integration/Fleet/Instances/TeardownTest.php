@@ -113,4 +113,20 @@ final class TeardownTest extends InstanceJobTestCase
 
         self::assertFileDoesNotExist($this->paths->instanceSiteFile($instance->id()));
     }
+
+    public function testDestroyStopsTheInstancesAgent(): void
+    {
+        $instance = $this->instance('main', 'develop', \App\Domain\Instance\InstanceState::Running);
+        $this->checkout($instance);
+        mkdir($this->paths->agentSocketDir($instance->id()), 0o700, true);
+        touch($this->paths->agentSocket($instance->id()));
+        file_put_contents($this->paths->agentPidFile($instance->id()), "99\n");
+        $job = $this->job('destroy', $instance);
+
+        $this->teardown->removeCheckout($instance, $this->logFor($job));
+
+        self::assertCount(1, $this->runner->callsMatching(['ssh-agent', '-k']));
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir($instance->id()));
+        self::assertFileDoesNotExist($this->paths->agentPidFile($instance->id()));
+    }
 }

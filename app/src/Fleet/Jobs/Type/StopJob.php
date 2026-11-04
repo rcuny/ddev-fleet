@@ -14,6 +14,7 @@ use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
 use App\Fleet\Jobs\JobType;
 use App\Fleet\Shell\CommandRunnerException;
+use App\Fleet\Ssh\InstanceSshAgent;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -27,6 +28,7 @@ final readonly class StopJob implements JobType
         private FleetPaths $paths,
         private JobFeed $feed,
         private ClockInterface $clock,
+        private InstanceSshAgent $agent,
     ) {
     }
 
@@ -58,6 +60,7 @@ final readonly class StopJob implements JobType
             throw new JobFailed(\sprintf('ddev stop failed with exit code %d', $result->exitCode), $result->exitCode);
         }
 
+        $this->agent->stop($instance->id());
         $instance->changeState(InstanceState::Stopped, $this->clock->now());
         $this->instances->save($instance);
         $this->feed->instanceChanged($instance->id());
