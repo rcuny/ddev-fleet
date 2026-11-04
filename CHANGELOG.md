@@ -7,6 +7,142 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-04
+
+### Added
+- **FLE-149: the installer records what it installed and can check the host first.** `/etc/ddev-fleet/installed-version` holds the release tag (or `<ref>@<sha7>` when `--ref` is not a tag), written after the health check so a failed run keeps the old value. New `--preflight` flag (`run.sh`, mirrored in `install.sh`): read-only, no root, prints `BLOCK|WARN|INFO <id>: <message>` lines and exits 0 or 3. It checks free disk on `/opt`, `/srv/fleet` and `/var`, the length of every existing instance id, Docker and DDEV, `fleet.env`, the OS, the required packages and the repository. A normal run executes the same checks first and stops before step 10 on a `BLOCK`.
+- **FLE-150: release check for `fleet upgrade` (read side).** The app knows which version this host runs (the
+  `/etc/ddev-fleet/installed-version` file, else the checkout's exact tag, else `dev`) and which releases exist
+  (`git ls-remote` of the annotated `v1.*` tags, semver-sorted, pre-releases ignored), reads the CHANGELOG sections
+  between two versions with their `#### Rollout` notes and `ACTION:` lines, and plans an upgrade or downgrade between
+  them. `fleet upgrade:refresh` refreshes the cached catalog; the new `fleet-upgrade-check.timer` runs it daily. An
+  unreachable source keeps the previous list and records the reason; nothing throws.
+- **FLE-150: Rollout notes in the changelog.** A fragment may end with `## Rollout` and bullets; the release step
+  assembles them into `#### Rollout` (documented in `changelog.d/README.md`).
+- **FLE-151: pre-flight checks for `fleet upgrade`.** An extensible registry that stops an upgrade before it changes
+  anything. A check implements `UpgradeCheck`, tags itself `fleet.upgrade_check` with a priority, and returns findings
+  (id, `block`/`warn`/`info`, message, remedy, overridable); `CheckRunner` runs them in a fixed order and applies
+  `--force=<id>` only to overridable blocks. Shipped checks: sudo present, release source reachable, checkout clean
+  and at the installed revision with the expected origin (never overridable), target tag in the 1.x series, not
+  below 1.1.0 and on `main`, disk for twice the databases plus headroom (never overridable), active jobs, overlong
+  instance ids, migrations applied that the target lacks (forces the rollback path), the target installer's own
+  `--preflight`, and `ACTION:` rollout notes. The `fleet upgrade --check` command that shows them follows.
+- **FLE-152: `sudo fleet upgrade`.** The write side of the upgrade: it plans and runs the pre-flight checks, asks for
+  confirmation (`--yes` is required without a terminal), takes a database backup, runs the installer of the planned
+  release pinned to the commit the plan resolved, verifies the host (health, Authelia, installed version, migrations,
+  workers, an audit row `host.upgrade`) and appends three lines (start, installer, verify) to the root-owned
+  `/var/log/ddev-fleet/upgrade-history.jsonl`. Exit codes: 0 done and verified, 1 failed, 2 usage, 3 refused (nothing
+  changed), 5 verification failed (the rollback command is printed). A dirty checkout, a Block, a failed backup or a
+  non-root caller changes nothing. `fleet upgrade history` and `fleet upgrade verify` are new. The command runs as
+  root only: there is no sudoers entry and the web UI cannot start an upgrade. See `docs/upgrading.md`.
+- **FLE-153: rollback with `sudo fleet upgrade --to <older release>`.** The database is restored from the backup taken at
+  the start of the upgrade being undone (found in the root-owned history), the fleet services are stopped for the
+  restore, the older release is installed and the host is verified. It always needs `--yes` and names the data written
+  since the upgrade that will be lost. Refused without changing anything: across a major version, below v1.1.0, to the
+  `v0.*` series, without a usable backup (the message lists the options), and `--no-db-restore` while the database holds
+  a migration the target lacks. See `docs/upgrading.md`.
+
+- **FLE-154: the Upgrade page and the "vX.Y.Z available" notice.** Administrators see the installed version in the
+  sidebar and the phone More sheet, with a badge linking to the new `/admin/host/upgrade` page when a newer release is
+  out (read from the cached release list, never from the network). The page shows installed against latest, when the
+  releases were last checked (and why a check failed, with the last good answer kept), the changelog and rollout notes
+  of what an upgrade brings (escaped and capped, `ACTION:` notes called out), the commands to copy (`fleet upgrade
+  --check`, `sudo fleet upgrade`, `sudo fleet upgrade --to vX.Y.Z`) and an empty history. "Check now" is CSRF
+  protected and limited to one lookup a minute. The page only shows status: the upgrade itself stays a root command on
+  the host. The daily release check now also caches the changelog of the newer release.
+- **FLE-18: `fleet upgrade`, the milestone.** One safe command keeps a 1.x server current and gives it a way back.
+  `fleet upgrade --check` (no root) shows the installed and the latest release, the changelog and the rollout notes
+  between them (an `ACTION:` note is called out) and the pre-flight results; `sudo fleet upgrade [--to vX.Y.Z]` plans,
+  checks, takes a database backup, runs the installer of the resolved commit, verifies the host (health, sign-in, version,
+  migrations, workers) and records the run in a root-owned history; `sudo fleet upgrade --to <older release>` rolls back
+  and restores the database from the backup taken before the upgrade being undone. The Upgrade page and the
+  "vX.Y.Z available" notice show the status to administrators, and a daily timer keeps the release list fresh. The upgrade
+  itself is deliberately command-line only: there is no sudoers entry for it. The installer gained `--preflight` and
+  writes `/etc/ddev-fleet/installed-version`. See `docs/upgrading.md` for the commands, flags, exit codes and every
+  pre-flight check id, `docs/installation.md` section 6, and `docs/RELEASING.md` for how to write rollout notes.
+- **FLE-155: `ci/upgrade-rehearsal.sh`.** A rehearsal for a test host: it builds a local release repository with two
+  throwaway annotated tags and runs check, upgrade, upgrade, rollback and a rollback to the starting release, asserting the
+  exit codes and `installed-version` after each step, then puts the host back. `--build-only` and `--dry-run` change nothing.
+
+- **FLE-19: `fleet upgrade --check`.** The read-only command that shows what the next release changes: the installed
+  version, the latest (or `--to vX.Y.Z`), the changelog sections in between, the rollout notes (`ACTION:` lines
+  flagged) and the pre-flight results. It changes nothing and needs no root. Exit codes: 0 checked, 1 error, 2 usage
+  (an unknown `--to` lists the available tags), 3 blocked by a pre-flight check, 4 offline (the installed version and
+  the cached latest with its age are still printed). `--json` prints a documented, versioned document;
+  `--no-cache` asks the release source instead of the 6-hour list. See `docs/upgrading.md`.
+
+### Changed
+- **FLE-148: the 0.x workspace layout is back.** Every window is `[sidebar 50 cols | tty1 | tty2]` (side by side, equal shells; Claude stays in pane 2), the `host` window is now `general` with the same three panes, the sidebar lists every instance with state glyphs, live branches, the reboot banner and the key hints, `^b R` rebuilds a tab in place, and `fleet tmux:ensure` heals windows (never killing a pane) and prunes the windows of gone instances.
+- **FLE-153: the upgrade helper is hardened.** The history line cannot abort a run on a full disk, the temporary installer
+  export is always removed, and git is limited to the `file`, `https` and `ssh` transports.
+
+- **FLE-158: the Playwright accessibility checks moved into one axe sweep (`a11y*.spec.ts`, one test per page state, light and dark); the feature specs no longer run axe inline** (tests only).
+
+- **FLE-159: the Playwright `phone` project is opt-in and runs only the tests tagged `@phone` (layout at 390 px, tap targets, phone-only behaviour); `instances-phone.spec.ts` is now `instances.phone.spec.ts`** (tests only).
+
+- **FLE-160: named-port rules and messages are PHPUnit data providers** (tests only): the console-only Playwright cases (`named-ports`, `project-ports-full`) are replaced by `NamedPortInputTest`, message matrices in `NamedPortServiceTest` and `PortCommandsTest`, and `ProjectPagesTest::testPortsTab*`; the browser keeps one Ports-tab spec.
+- **FLE-161: test diet 4/7**: the admin CRUD browser specs (users, secrets, schedules, webhooks, projects, templates) keep only what needs a browser; the plain HTTP checks now run as PHPUnit Functional tests (full Playwright 773 to 714, quick tier 160 to 137).
+
+- **FLE-162: the import/export and setup-wizard refusal matrices moved from Playwright to PHPUnit Functional (`ProjectTransferMatrixTest`, `SetupFieldMatrixTest`, `SetupLinkRefusalTest`); the browser keeps download, upload, confirm, layout and the wizard walk** (tests only).
+
+- **FLE-163: the instances, jobs, assets, snapshot and audit browser specs lose their plain-HTTP cases to PHPUnit** (tests only; new `InstanceDeployFormTest` and `AuditPageTest`, 53 fewer Playwright tests).
+
+- **FLE-164: host settings and reboot banner: the HTTP cases moved to PHPUnit (`HostSettingsMatrixTest`), `host-settings-coverage.spec.ts` is gone, and the axe checks live in the sweep** (tests only).
+
+- **FLE-169: the `fleet tmux` sidebar has its 0.x colours back.** Each instance is coloured by state (running green, stopped grey, deploying cyan, failed red), the branch line under it is grey, `general` is dim when it is not the current tab, and the reboot banner is bold yellow. The current tab stays plain reverse so it reads on any background.
+
+### Fixed
+- **FLE-141: destroying an instance whose directories are read-only no longer fails.** The teardown now gives the
+  owner write access to every real directory of the checkout (Drupal sets `sites/default` to 0555) before it unlinks
+  the entries, never following a symlink, so the instance is removed instead of staying `failed`.
+- **FLE-145: git over SSH works in instance terminals and never prompts for a host key.** A deploy now sets the checkout's
+  `core.sshCommand` to the deploy key (plus the push key when the host has one, offered first), Fleet's own known_hosts,
+  `BatchMode=yes` and `StrictHostKeyChecking=yes`, so a `git fetch` in tty1/tty2 or a CI script fails fast instead of
+  hanging at an interactive host-key prompt. The known_hosts seed now also covers `ssh.bitbucket.org` (Bitbucket's new SSH
+  host name from 2026-11-12, same keys as `bitbucket.org`).
+
+- **FLE-145: git over SSH also works inside the web container, per project and opt-in** (what `tty2` and its agent use).
+  A project with the new `container_ssh` setting (`fleet project:update <name> --container-ssh`, off by default) gets a
+  dedicated `ssh-agent` per instance: the `fleet` user runs it, only the push key is loaded (24 h lifetime), and only that
+  instance's web container mounts its socket (a generated compose override). It is stopped with the instance and recreated
+  at start. Nothing is loaded into DDEV's host-wide `ddev-ssh-agent`, whose socket every DDEV project's container reaches.
+  Fleet's pinned known_hosts is copied to `.ddev/fleet_known_hosts` and a strict `GIT_SSH_COMMAND` reads it.
+
+
+- **FLE-146: upgrading to v1.1.0 no longer fails on an existing instance id of 60 to 63 characters.** The host render step skips such an instance (it cannot run: Docker refuses its host name) with a warning naming the id, instead of aborting the installer at `98-render-start`. `fleet instance:destroy`, the instance log and snapshot lookups, the instance pages, `ddev delete` and the Caddy site removal accept an existing over-long id, so it can be cleaned up through Fleet. Creating an id over 59 characters stays refused.
+
+- **FLE-148: the `fleet tmux` sidebar runs again, and the panes keep their numbers.** The sidebar pane was started with the tmux server's bare environment (no `APP_ENV`, `FLEET_HOME`), crashed, and tmux removed it, leaving two panes and shifting tty2 to pane 1. It now starts through the application environment file, a crash leaves the error on screen instead of removing the pane, and shells are addressed by position, not raw index.
+
+
+- **FLE-156: dispatched agents no longer stop at Claude's first-run onboarding on 1.x instances.** The per-instance
+  `.ddev/config.fleet.yaml` again carries the 0.x `post-start` hook that merges `hasCompletedOnboarding`, a default
+  theme and the project trust acceptance into `~/.claude.json`, keeping every other key.
+- **FLE-167: per-instance ssh-agents (`container_ssh`) survive worker restarts, keep their key, and are cleaned up on opt-out.**
+  - The job worker restarts every hour (its time limit) and on every deploy; its units now use `KillMode=process`
+    (`fleet-worker@`, `fleet-status`), so a restart no longer kills the agents it spawned and git push from the containers keeps working.
+  - The status watcher revives the agent of every running opted-in instance and renews the key lifetime every 10 minutes, so a
+    long-lived instance no longer loses push after 24 h (the lifetime stays 24 h, the shortest window for a leaked socket).
+  - Starting or redeploying an instance of a project without `container_ssh` stops its agent and removes the compose override.
+
+
+- **FLE-168: the installer pre-flight no longer blocks every upgrade on a 1.x host (FLE-149 regression).** The install and upgrade run as root, and DDEV refuses root, so `ddev version` and the instance listing failed and the `ddev.answer` check BLOCKed. As root the pre-flight now runs `ddev` as the `fleet` user; before that user exists (a fresh install) the check is reported as not checked instead of a BLOCK.
+
+### Dependencies
+- `ansible-core` >=2.22.0 for the CI tooling (#146).
+- Ansible collection `community.general` >=13.5.1 (#147).
+- `symfony/mercure-bundle` ^0.7.0 (#149).
+
+#### Rollout
+- Instances deployed before this change keep working only with a `~/.ssh/config` workaround; redeploy them (the checkout and the agent are set up at deploy).
+  Re-run `fleet host:init` (it seeds known_hosts) so a host gets
+  `ssh.bitbucket.org`.
+- A project that pushes from the container (for example the one dispatching agents) must be switched on: `fleet project:update <name> --container-ssh`, then redeploy its instances.
+- The export format gained an optional `container_ssh` key per project; older files import as off.
+- The unit files change: re-run the installer (`ddev push-product`) so systemd picks up `KillMode=process` (`daemon-reload` + restart of `fleet-worker@1` and `fleet-status`).
+  `systemctl stop fleet-worker@1` now leaves agents running by design.
+- Hosts installed before this release do not have `fleet upgrade`: move them to this release with the
+  installer (`install.sh --ref=vX.Y.Z`); every later release can use `sudo fleet upgrade`.
+
 ## [1.1.0] - 2026-11-03
 
 ### Added
@@ -867,7 +1003,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/rcuny/ddev-fleet/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/rcuny/ddev-fleet/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/rcuny/ddev-fleet/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/rcuny/ddev-fleet/compare/v1.0.4...v1.0.5
