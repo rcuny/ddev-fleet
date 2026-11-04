@@ -123,6 +123,8 @@ step_main() {
   run systemctl enable --now fleet-backup.timer
   # The daily release check (fleet-upgrade-check.service, written by step 95).
   run systemctl enable --now fleet-upgrade-check.timer
+  # The certificate health check every 10 minutes (fleet-tls-check.service, written by step 95).
+  run systemctl enable --now fleet-tls-check.timer
   # The agent workspace. enable --now is a no-op while the unit is active and is never followed by a restart: a restart
   # would end the operators' panes. A changed unit file takes effect at the next `systemctl restart fleet-tmux`.
   run systemctl enable --now fleet-tmux.service

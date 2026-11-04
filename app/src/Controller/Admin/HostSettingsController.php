@@ -22,6 +22,7 @@ use App\Fleet\Secrets\SecretConflict;
 use App\Fleet\Secrets\SecretService;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\System\ConfigValue;
+use App\Fleet\Tls\TlsStatusFile;
 use App\Fleet\Workspace\ClaudeTokenRotation;
 use App\Fleet\Workspace\WorkspaceCheck;
 use App\Form\Host\HostBackupRetentionType;
@@ -57,6 +58,7 @@ final class HostSettingsController extends AbstractController
         'claude' => 'Claude token',
         'notifications' => 'Notifications',
         'network' => 'Networking',
+        'certificates' => 'Certificates',
         'uploads' => 'Uploads',
         'backups' => 'Backups',
     ];
@@ -69,6 +71,7 @@ final class HostSettingsController extends AbstractController
         private readonly WorkspaceCheck $workspace,
         private readonly PortMirror $portMirror,
         private readonly PortMirrorSwitch $portMirrorSwitch,
+        private readonly TlsStatusFile $tlsStatus,
         private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
         private readonly ClockInterface $clock,
@@ -396,6 +399,10 @@ final class HostSettingsController extends AbstractController
 
         $forms = [];
         foreach (array_keys(self::TABS) as $key) {
+            // The certificates tab only reports; it has no form.
+            if ('certificates' === $key) {
+                continue;
+            }
             $forms[$key] = ($key === $tab && null !== $submitted ? $submitted : $this->form($key, $host))->createView();
         }
 
@@ -408,6 +415,7 @@ final class HostSettingsController extends AbstractController
             // An identity saved before the rules were tightened (FLE-59) fails its next save: say so up front.
             'gitStoredInvalid' => 'git' === $tab && null === $submitted && [] !== GitIdentityRule::violations($host->gitUserName(), $host->gitUserEmail()),
             'workspace' => $this->workspace->run()->toArray(),
+            'tls' => 'certificates' === $tab ? $this->tlsStatus->read() : null,
             'mirror' => 'network' === $tab ? $this->mirrorView() : null,
             'secrets' => [
                 'claude' => $this->rotation->lastRotated(),

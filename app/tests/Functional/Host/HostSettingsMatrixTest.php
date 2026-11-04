@@ -26,6 +26,7 @@ final class HostSettingsMatrixTest extends HostPageTestCase
         'claude' => 'Claude token',
         'notifications' => 'Notifications',
         'network' => 'Networking',
+        'certificates' => 'Certificates',
         'uploads' => 'Uploads',
         'backups' => 'Backups',
     ];
@@ -52,7 +53,7 @@ final class HostSettingsMatrixTest extends HostPageTestCase
         self::assertStringEndsWith('/admin/host?tab='.$key, $href);
     }
 
-    public function testThePhoneSelectListsTheSevenTabsNamesTheCurrentOneAndGoesToAnother(): void
+    public function testThePhoneSelectListsTheTabsNamesTheCurrentOneAndGoesToAnother(): void
     {
         $crawler = $this->open('/admin/host?tab=uploads');
         $select = $crawler->filter('[data-testid=host-tab-select] select');

@@ -10,6 +10,7 @@ const TABS = [
   { key: 'claude', label: 'Claude token' },
   { key: 'notifications', label: 'Notifications' },
   { key: 'network', label: 'Networking' },
+  { key: 'certificates', label: 'Certificates' },
   { key: 'uploads', label: 'Uploads' },
   { key: 'backups', label: 'Backups' },
 ] as const;

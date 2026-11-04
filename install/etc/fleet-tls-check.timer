@@ -1,0 +1,12 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-tls-check.timer and enabled by step 98.
+# Every 10 minutes, starting a few minutes after boot.
+[Unit]
+Description=ddev-fleet certificate health check every 10 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitActiveSec=10min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
