@@ -8,6 +8,7 @@ use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Project\Project;
+use App\Domain\Ssh\SshKeyRole;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
 use App\Fleet\Ddev\Ddev;
@@ -143,6 +144,11 @@ final class DeployWorkflow
         } catch (CommandRunnerException $e) {
             throw new JobFailed('git ssh setup did not finish: '.$e->getMessage());
         }
+        try {
+            $sshKnownHosts = $this->git->writeContainerKnownHosts($dir);
+        } catch (\RuntimeException $e) {
+            throw new JobFailed($e->getMessage());
+        }
 
         // 4. What fleet adds to the checkout, kept out of the project's git status.
         $written = [$this->config->write($instance, $project, $dir)];
@@ -151,7 +157,9 @@ final class DeployWorkflow
             EnvFile::setVar($dir.'/.env', 'DRUPAL_ENV', $template->drupalEnv());
             $written[] = '.env';
         }
+        $written[] = $sshKnownHosts;
         GitExclude::add($dir, $written);
+        $this->loadAgentKeys($dir, $log);
 
         $context = new DeployContext($instance, $project, $dir, $tokens, $log, $this->secrets);
 
@@ -246,6 +254,27 @@ final class DeployWorkflow
     {
         if (!$result->isSuccess()) {
             throw new JobFailed(\sprintf('%s failed with exit code %d', $what, $result->exitCode), $result->exitCode);
+        }
+    }
+
+    /**
+     * Ruling (FLE-145): a key file that exists but cannot be loaded into DDEV's ssh-agent fails the deploy, because an
+     * agent instance that cannot push would only find out after its work. A key the host does not have is skipped. The
+     * push key goes first: Bitbucket tries the agent's keys in order and a read-only deploy key would win otherwise.
+     */
+    private function loadAgentKeys(string $dir, JobLog $log): void
+    {
+        foreach ([SshKeyRole::Push, SshKeyRole::Deploy] as $role) {
+            $key = $this->paths->sshPrivateKey($role);
+            if (!is_file($key)) {
+                continue;
+            }
+            try {
+                $result = $this->ddev->authSsh($dir, $key, $log->output(...));
+            } catch (CommandRunnerException $e) {
+                throw new JobFailed('ssh-agent key load did not finish: '.$e->getMessage());
+            }
+            $this->requireSuccess('ddev auth ssh ('.$role->value.' key)', $result);
         }
     }
 }

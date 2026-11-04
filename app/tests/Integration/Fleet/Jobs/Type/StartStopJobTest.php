@@ -34,6 +34,22 @@ final class StartStopJobTest extends InstanceJobTestCase
         self::assertSame(InstanceState::Running, $instance->state());
     }
 
+    public function testStartReloadsTheKeysIntoTheAgentAndOnlyWarnsWhenItCannot(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Stopped);
+        $this->checkout($instance);
+        mkdir($this->paths->sshDir(), 0o700, true);
+        touch($this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push));
+        $this->runner->expect(['ddev', 'auth'], new CommandResult(1, '', "no agent\n"));
+
+        $job = $this->job('start', $instance);
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock)->execute($job, $this->logFor($job));
+
+        self::assertSame(['ddev auth', 'ddev start'], $this->commandNames());
+        self::assertSame(InstanceState::Running, $instance->state());
+        self::assertStringContainsString('warning: the push key could not be loaded into the ssh-agent (exit 1)', $this->logText($job));
+    }
+
     public function testMissingDirectoryFails(): void
     {
         $instance = $this->instance('main', 'develop', InstanceState::Stopped);

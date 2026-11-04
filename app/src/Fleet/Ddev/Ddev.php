@@ -18,6 +18,7 @@ final readonly class Ddev
     public const float LIST_TIMEOUT = 30.0;
     public const float STATS_TIMEOUT = 20.0;
     public const float DELETE_TIMEOUT = 600.0;
+    public const float AUTH_TIMEOUT = 120.0;
 
     private const array ENV = ['DDEV_NONINTERACTIVE' => 'true', 'DDEV_NO_INSTRUMENTATION' => 'true'];
 
@@ -42,6 +43,18 @@ final readonly class Ddev
     public function start(string $dir, callable $onOutput, ?float $timeout = null): CommandResult
     {
         return $this->runner->run(['ddev', 'start'], $dir, $this->env, $onOutput, $timeout ?? self::START_TIMEOUT);
+    }
+
+    /**
+     * Loads a private key into DDEV's ssh-agent (`ddev auth ssh -f`), which every project's web container reaches
+     * through the forwarded agent socket: the key file is never mounted into a container. Idempotent (ssh-add of a key
+     * that is loaded changes nothing); the key must have no passphrase, `DDEV_NONINTERACTIVE` never prompts.
+     *
+     * @param callable(string, string): void $onOutput
+     */
+    public function authSsh(string $dir, string $keyFile, callable $onOutput): CommandResult
+    {
+        return $this->runner->run(['ddev', 'auth', 'ssh', '-f', $keyFile], $dir, $this->env, $onOutput, self::AUTH_TIMEOUT);
     }
 
     /**

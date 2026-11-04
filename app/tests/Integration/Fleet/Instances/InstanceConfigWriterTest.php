@@ -141,6 +141,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
         self::assertSame([
             'DRUSH_OPTIONS_URI=https://acme--main.fleet.example.com',
             'FLEET_INSTANCE_HOST=acme--main.fleet.example.com',
+            'GIT_SSH_COMMAND='.\App\Fleet\Git\GitClient::CONTAINER_SSH_COMMAND,
             'GIT_AUTHOR_NAME=ddev-fleet bot',
             'GIT_AUTHOR_EMAIL=bot@fleet.example.com',
             'GIT_COMMITTER_NAME=ddev-fleet bot',
@@ -156,7 +157,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
         $this->secrets->putFleetWide(HostSecrets::CLAUDE_TOKEN, 'tok-1', 'admin');
         $environment = $this->written($this->project())['web_environment'];
 
-        self::assertSame('CLAUDE_CODE_OAUTH_TOKEN=tok-1', $environment[2]);
+        self::assertSame('CLAUDE_CODE_OAUTH_TOKEN=tok-1', $environment[3]);
     }
 
     public function testTheClaudeTokenIsRegisteredWithTheLogMasker(): void
@@ -172,8 +173,8 @@ final class InstanceConfigWriterTest extends KernelTestCase
     {
         $environment = $this->written($this->project(GitBotMode::Disabled))['web_environment'];
 
-        self::assertSame(2, \count($environment));
-        self::assertSame([], array_filter($environment, static fn (string $e): bool => str_starts_with($e, 'GIT_')));
+        self::assertSame(3, \count($environment));
+        self::assertSame([], array_filter($environment, static fn (string $e): bool => str_starts_with($e, 'GIT_A') || str_starts_with($e, 'GIT_C')));
     }
 
     public function testHostileValuesCannotBreakTheYaml(): void
@@ -183,8 +184,8 @@ final class InstanceConfigWriterTest extends KernelTestCase
 
         $config = $this->written($project);
 
-        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][2]);
-        self::assertCount(6, $config['web_environment']);
+        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][3]);
+        self::assertCount(7, $config['web_environment']);
         self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment', 'hooks'], array_keys($config));
     }
 
@@ -198,6 +199,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
         self::assertSame([
             'DRUSH_OPTIONS_URI=https://acme--main.fleet.example.com',
             'FLEET_INSTANCE_HOST=acme--main.fleet.example.com',
+            'GIT_SSH_COMMAND='.\App\Fleet\Git\GitClient::CONTAINER_SSH_COMMAND,
             'FLEET_PORT_TS_DASHBOARD=9111',
             'FLEET_PORT_PLAYWRIGHT=9325',
         ], $environment);

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Fleet\Instances;
 
 use App\Domain\Instance\InstanceState;
+use App\Domain\Ssh\SshKeyRole;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Instances\DeployContext;
 use App\Fleet\Instances\DeployStep;
@@ -59,6 +60,64 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString(".ddev/config.fleet.yaml\n", $exclude);
         self::assertStringContainsString(".env\n", $exclude);
         self::assertFileExists($this->paths->instanceSiteFile('acme--main'));
+    }
+
+    public function testTheContainerGetsAPinnedKnownHostsAndAnAgentOnlySshCommand(): void
+    {
+        mkdir($this->paths->sshDir(), 0o700, true);
+        file_put_contents($this->paths->knownHostsFile(), "git.example.com ssh-ed25519 AAAApinned\n");
+
+        $this->deploy();
+
+        $dir = $this->paths->instanceDir('acme--main');
+        self::assertSame("git.example.com ssh-ed25519 AAAApinned\n", file_get_contents($dir.'/.ddev/fleet_known_hosts'));
+        self::assertStringContainsString(".ddev/fleet_known_hosts\n", (string) file_get_contents($dir.'/.git/info/exclude'));
+        $config = (string) file_get_contents($dir.'/.ddev/config.fleet.yaml');
+        self::assertStringContainsString('GIT_SSH_COMMAND=', $config);
+        self::assertStringContainsString('-o StrictHostKeyChecking=yes', $config);
+        self::assertStringContainsString('-o BatchMode=yes', $config);
+        self::assertStringContainsString('UserKnownHostsFile="$DDEV_APPROOT/.ddev/fleet_known_hosts"', $config);
+        self::assertStringNotContainsString('IdentitiesOnly', $config, 'it would ignore the agent keys');
+        self::assertStringNotContainsString($this->paths->sshDir(), $config, 'no host path, no key file in the container');
+    }
+
+    public function testTheKeysGoIntoDdevsAgentPushKeyFirstAndNeverIntoTheContainer(): void
+    {
+        mkdir($this->paths->sshDir(), 0o700, true);
+        touch($this->paths->sshPrivateKey(SshKeyRole::Deploy));
+        touch($this->paths->sshPrivateKey(SshKeyRole::Push));
+
+        $this->deploy();
+
+        $loads = array_map(static fn ($call): array => $call->argv, $this->runner->callsMatching(['ddev', 'auth']));
+        self::assertSame([
+            ['ddev', 'auth', 'ssh', '-f', $this->paths->sshPrivateKey(SshKeyRole::Push)],
+            ['ddev', 'auth', 'ssh', '-f', $this->paths->sshPrivateKey(SshKeyRole::Deploy)],
+        ], $loads);
+        $names = $this->commandNames();
+        self::assertLessThan(array_search('ddev start', $names, true), array_search('ddev auth', array_reverse($names, true), true), 'the agent has the keys before the container starts');
+    }
+
+    public function testAKeyThatCannotBeLoadedIntoTheAgentFailsTheDeploy(): void
+    {
+        mkdir($this->paths->sshDir(), 0o700, true);
+        touch($this->paths->sshPrivateKey(SshKeyRole::Push));
+        $this->runner->expect(['ddev', 'auth'], new CommandResult(1, '', "Failed to add key\n"));
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('ddev auth ssh (push key) failed with exit code 1', $e->getMessage());
+        self::assertNotContains('ddev start', $this->commandNames());
+    }
+
+    public function testAFailingGitSshSetupFailsTheDeploy(): void
+    {
+        $this->runner->expect(['git', 'config'], new CommandResult(1, '', "error: could not lock config file\n"));
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('git ssh setup failed with exit code 1', $e->getMessage());
+        self::assertNotContains('ddev start', $this->commandNames());
     }
 
     public function testASecretTheDeployUsesNeverReachesTheJobLog(): void

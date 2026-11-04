@@ -96,6 +96,19 @@ final class GitClientTest extends TestCase
         }
     }
 
+    public function testContainerSshCommandIsStrictPinnedAndAgentOnly(): void
+    {
+        $ssh = GitClient::CONTAINER_SSH_COMMAND;
+
+        self::assertStringContainsString('-o StrictHostKeyChecking=yes', $ssh);
+        self::assertStringContainsString('-o BatchMode=yes', $ssh);
+        self::assertStringContainsString('UserKnownHostsFile="$DDEV_APPROOT/.ddev/fleet_known_hosts"', $ssh);
+        self::assertStringNotContainsString('IdentitiesOnly', $ssh);
+        self::assertStringNotContainsString(' -i ', $ssh);
+        self::assertStringNotContainsString('StrictHostKeyChecking=no', $ssh);
+        self::assertStringNotContainsString('accept-new', $ssh);
+    }
+
     public function testCloneStreamsOutputAndReturnsTheResult(): void
     {
         $this->runner->expect(['git'], new CommandResult(128, '', "fatal: nope\n"));

@@ -52,6 +52,16 @@ final class DdevTest extends TestCase
         self::assertSame(90.0, $stop->timeout);
     }
 
+    public function testAuthSshLoadsOneKeyFileIntoTheAgentNonInteractively(): void
+    {
+        $this->ddev->authSsh('/srv/fleet/instances/acme--dev', '/srv/fleet/ssh/push_ed25519', $this->noop());
+
+        $call = $this->runner->calls()[0];
+        self::assertSame(['ddev', 'auth', 'ssh', '-f', '/srv/fleet/ssh/push_ed25519'], $call->argv);
+        self::assertSame('/srv/fleet/instances/acme--dev', $call->cwd);
+        self::assertSame('true', $call->env['DDEV_NONINTERACTIVE']);
+    }
+
     public function testDeleteRunsInTheCheckoutWhenItHasAConfig(): void
     {
         mkdir($this->tmp.'/.ddev');
