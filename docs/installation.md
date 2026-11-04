@@ -368,7 +368,7 @@ Administrators find the host's own settings under **Settings** (`/admin/host`), 
 | Tab | What you can do |
 |---|---|
 | General | See the domain and TLS mode (read-only; the page names the commands that change them) and edit the ACME contact e-mail. After saving, apply it to Caddy with `sudo fleet host:render --apply`. |
-| Git identity | The default author name and e-mail of the commits the fleet makes in instances. Both or neither; the name has no control characters, `<` or `>` and at most 100 characters. |
+| Git identity | The default author name and e-mail of the commits the fleet makes in instances. Both or neither; the name has no control characters, `<`, `>`, `"`, `$` or `\` and at most 100 characters. |
 | Claude token | Store or replace the Claude Code token (the same secret the setup wizard writes). It is write-only: the page shows only "Set" or "Not set" and when it was last written. |
 | Notifications | The SMTP relay (host, port, user, password), sender and recipient for the host's e-mails. The password is stored encrypted, write-only, and can be removed with a checkbox. Nothing sends mail yet, and there is no test-mail button. |
 | Certificates | Read-only certificate health from `fleet:host:tls-check`: rate limits with the retry time, failed challenges, affected hostnames, certificates issued in the last 7 days against Let's Encrypt's 50-per-week limit, and the expiry of the host certificate. Administrators also get a red or amber banner on every page when something is wrong. |

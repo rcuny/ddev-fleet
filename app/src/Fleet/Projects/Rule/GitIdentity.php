@@ -28,8 +28,20 @@ final class GitIdentity
         if (1 === preg_match('/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}<>]/u', $name)) {
             return 'The name must not contain control characters, "<" or ">".';
         }
+        if (self::hasComposeUnsafe($name)) {
+            return 'The name must not contain \'"\', "$" or "\\": DDEV would write them into a broken compose file.';
+        }
 
         return null;
+    }
+
+    /**
+     * The identity lands in `web_environment`, which DDEV copies into its generated compose YAML; a double quote, `$`
+     * (compose interpolation) or backslash breaks `ddev start` (FLE-188, FLE-189). Also true of a stored value.
+     */
+    public static function hasComposeUnsafe(string $value): bool
+    {
+        return 1 === preg_match('/["$\\\\]/', $value);
     }
 
     public static function emailError(mixed $email): ?string

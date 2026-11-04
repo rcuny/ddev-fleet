@@ -181,13 +181,32 @@ final class InstanceConfigWriterTest extends KernelTestCase
     public function testHostileValuesCannotBreakTheYaml(): void
     {
         $project = $this->project(GitBotMode::Override);
-        $project->changeGitBot(GitBotMode::Override, "Acme: {x}\n- injected: 'y' #", 'a@example.com');
+        $project->changeGitBot(GitBotMode::Override, "Acme: {x}\n- injected: y #", 'a@example.com');
 
         $config = $this->written($project);
 
-        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][3]);
+        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: y #", $config['web_environment'][3]);
         self::assertCount(7, $config['web_environment']);
         self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment', 'hooks'], array_keys($config));
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function composeUnsafeNames(): iterable
+    {
+        yield 'double quote' => ['Acme "Bot"'];
+        yield 'dollar' => ['Acme $HOME'];
+        yield 'backslash' => ['Acme\\Bot'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('composeUnsafeNames')]
+    public function testAStoredIdentityThatDdevCannotCarryIsRefusedNotWritten(string $name): void
+    {
+        $project = $this->project(GitBotMode::Override);
+        $project->changeGitBot(GitBotMode::Override, $name, 'a@example.com');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('DDEV cannot carry');
+        $this->written($project);
     }
 
     public function testEveryNamedPortOfTheProjectGetsAFleetPortVariable(): void
