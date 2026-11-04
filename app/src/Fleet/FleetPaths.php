@@ -276,6 +276,14 @@ final readonly class FleetPaths
         return $this->sshDir().'/'.$role->value.'_ed25519';
     }
 
+    /**
+     * The private key of a template's extra key (FLE-190). $name must have passed SshKeyNames::error().
+     */
+    public function sshExtraKey(string $name): string
+    {
+        return $this->sshDir().'/'.$name.'_ed25519';
+    }
+
     public function sshPublicKey(SshKeyRole $role): string
     {
         return $this->sshPrivateKey($role).'.pub';

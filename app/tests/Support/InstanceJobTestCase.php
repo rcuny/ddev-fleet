@@ -106,7 +106,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             new LockFactory(new FlockStore($this->paths->locksDir())),
             new AdminGroup('fleet-admins'),
         );
-        $this->agent = new \App\Fleet\Ssh\InstanceSshAgent($this->runner, $this->paths);
+        $this->agent = new \App\Fleet\Ssh\InstanceSshAgent($this->runner, $this->paths, new \App\Fleet\Ssh\ExtraSshKey($this->paths), $this->templates);
         $this->tmux = new Tmux($this->runner, $this->paths, '/opt/ddev-fleet/app/bin/console');
         $this->teardown = new Teardown($this->paths, $this->ddev, $this->sites, $this->tmux, $this->agent);
         $this->feed = new JobFeed($this->createStub(HubInterface::class), new NullLogger());

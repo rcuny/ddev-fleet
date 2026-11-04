@@ -70,6 +70,7 @@ final class TemplateController extends AbstractController
                         postDeploy: $lists['postDeploy'],
                         tty1: $lists['tty1'],
                         tty2: $lists['tty2'],
+                        sshKeys: $lists['sshKeys'],
                     ));
                     $this->addFlash('success', 'Template created.');
 
@@ -96,6 +97,7 @@ final class TemplateController extends AbstractController
             'postDeploy' => implode("\n", $stored->postDeploy()),
             'tty1' => implode("\n", $stored->tty1()),
             'tty2' => implode("\n", $stored->tty2()),
+            'sshKeys' => implode("\n", $stored->sshKeys()),
         ], ['mode' => TemplateType::EDIT]);
         $form->handleRequest($request);
 
@@ -110,6 +112,7 @@ final class TemplateController extends AbstractController
                         postDeploy: $lists['postDeploy'],
                         tty1: $lists['tty1'],
                         tty2: $lists['tty2'],
+                        sshKeys: $lists['sshKeys'],
                     ));
                     $this->addFlash('success', 'Template saved.');
 
@@ -198,18 +201,19 @@ final class TemplateController extends AbstractController
      * @param FormInterface<mixed> $form
      * @param array<string, mixed> $data
      *
-     * @return array{postDeploy: list<string>, tty1: list<string>, tty2: list<string>}|null
+     * @return array{postDeploy: list<string>, tty1: list<string>, tty2: list<string>, sshKeys: list<string>}|null
      */
     private function lists(FormInterface $form, array $data): ?array
     {
         $postDeploy = TextLines::split($form, 'postDeploy', $data, commands: true);
         $tty1 = TextLines::split($form, 'tty1', $data, commands: true);
         $tty2 = TextLines::split($form, 'tty2', $data, commands: true);
-        if (null === $postDeploy || null === $tty1 || null === $tty2) {
+        $sshKeys = TextLines::split($form, 'sshKeys', $data);
+        if (null === $postDeploy || null === $tty1 || null === $tty2 || null === $sshKeys) {
             return null;
         }
 
-        return ['postDeploy' => $postDeploy, 'tty1' => $tty1, 'tty2' => $tty2];
+        return ['postDeploy' => $postDeploy, 'tty1' => $tty1, 'tty2' => $tty2, 'sshKeys' => $sshKeys];
     }
 
     private static function text(mixed $value): string

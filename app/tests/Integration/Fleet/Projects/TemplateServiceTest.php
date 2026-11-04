@@ -29,13 +29,16 @@ final class TemplateServiceTest extends KernelTestCase
     private TemplateRepository $templates;
     private TemplateService $service;
     private Project $blog;
+    private string $home;
 
     protected function setUp(): void
     {
+        $this->home = sys_get_temp_dir().'/fle190-tpl-'.bin2hex(random_bytes(4));
+        mkdir($this->home.'/ssh', 0o700, true);
         $this->em = $this->setUpFleetDatabase();
         $this->projects = new ProjectRepository($this->em);
         $this->templates = new TemplateRepository($this->em);
-        $this->service = new TemplateService($this->projects, $this->templates);
+        $this->service = new TemplateService($this->projects, $this->templates, new \App\Fleet\Ssh\ExtraSshKey(new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy')));
         $this->blog = new Project('blog', 'https://git.example.com/acme/blog.git');
         $this->projects->save($this->blog);
         $this->projects->save(new Project('shop', 'https://git.example.com/acme/shop.git'));
@@ -44,6 +47,7 @@ final class TemplateServiceTest extends KernelTestCase
     protected function tearDown(): void
     {
         $this->tearDownFleetDatabase();
+        exec('rm -rf '.escapeshellarg($this->home));
         parent::tearDown();
     }
 
@@ -174,6 +178,59 @@ final class TemplateServiceTest extends KernelTestCase
 
         $rows = $second->getConnection()->fetchAllAssociative('SELECT name, drupal_env FROM template');
         self::assertSame([['name' => 'full', 'drupal_env' => null]], $rows);
+    }
+
+    private function key(string $name, int $mode = 0o600): void
+    {
+        $file = $this->home.'/ssh/'.$name.'_ed25519';
+        touch($file);
+        chmod($file, $mode);
+    }
+
+    public function testExtraSshKeysAreStoredForAProjectWithContainerSsh(): void
+    {
+        $this->blog->changeContainerSsh(true);
+        $this->projects->save($this->blog);
+        $this->key('staging');
+
+        $this->service->create('blog', new TemplateInput('full', sshKeys: [' staging ']));
+        $this->em->clear();
+
+        self::assertSame(['staging'], $this->service->get('blog', 'full')->sshKeys());
+        self::assertSame(['staging'], TemplateInput::fromTemplate($this->service->get('blog', 'full'))->sshKeys);
+
+        $this->service->update('blog', 'full', new TemplateInput('full', sshKeys: []));
+        self::assertSame([], $this->service->get('blog', 'full')->sshKeys());
+    }
+
+    public function testExtraSshKeysNeedContainerSsh(): void
+    {
+        $this->key('staging');
+
+        try {
+            $this->service->create('blog', new TemplateInput('full', sshKeys: ['staging']));
+            self::fail('A key was accepted without container_ssh.');
+        } catch (ValidationFailed $e) {
+            self::assertSame(['sshKeys'], array_keys($e->errors));
+            self::assertStringContainsString('container_ssh', $e->errors['sshKeys']);
+        }
+    }
+
+    public function testExtraSshKeysAreCheckedOnDisk(): void
+    {
+        $this->blog->changeContainerSsh(true);
+        $this->projects->save($this->blog);
+
+        foreach ([['missing', null], ['loose', 0o644], ['deploy', 0o600], ['push', 0o600], ['Bad_Name', null]] as [$name, $mode]) {
+            if (null !== $mode) {
+                $this->key($name, $mode);
+            }
+            $errors = $this->service->validate(new TemplateInput('full', sshKeys: [$name]), true);
+            self::assertArrayHasKey('sshKeys', $errors, $name);
+        }
+        $this->key('staging');
+        self::assertSame([], $this->service->validate(new TemplateInput('full', sshKeys: ['staging']), true));
+        self::assertArrayHasKey('sshKeys', $this->service->validate(new TemplateInput('full', sshKeys: ['staging']), false));
     }
 
     public function testMaxFiftyTemplates(): void

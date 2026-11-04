@@ -16,7 +16,7 @@ final class CliDocsTest extends TestCase
 {
     /** guide => the App\Command sub-directories it covers (the groups are the same names, lower case). */
     private const array GUIDES = [
-        'docs/projects-and-templates.md' => ['Project', 'Template', 'Port'],
+        'docs/projects-and-templates.md' => ['Project', 'Template', 'Port', 'Ssh'],
         'docs/instances-and-jobs.md' => ['Instance', 'Job'],
     ];
 

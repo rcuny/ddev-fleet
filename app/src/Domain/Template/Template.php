@@ -45,6 +45,10 @@ class Template
     #[ORM\Column(type: Types::JSON)]
     private array $tty2 = [];
 
+    /** @var list<string> names of the extra SSH keys (ssh/<name>_ed25519) loaded into the instance's agent (FLE-190) */
+    #[ORM\Column(type: Types::JSON, options: ['default' => '[]'])]
+    private array $sshKeys = [];
+
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $createdAt;
 
@@ -104,6 +108,14 @@ class Template
         return $this->tty2;
     }
 
+    /**
+     * @return list<string>
+     */
+    public function sshKeys(): array
+    {
+        return $this->sshKeys;
+    }
+
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
@@ -130,6 +142,15 @@ class Template
         $this->postDeploy = $postDeploy;
         $this->tty1 = $tty1;
         $this->tty2 = $tty2;
+        $this->touch($now);
+    }
+
+    /**
+     * @param list<string> $sshKeys
+     */
+    public function changeSshKeys(array $sshKeys, ?\DateTimeImmutable $now = null): void
+    {
+        $this->sshKeys = $sshKeys;
         $this->touch($now);
     }
 

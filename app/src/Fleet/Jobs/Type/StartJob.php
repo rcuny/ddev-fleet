@@ -66,7 +66,7 @@ final readonly class StartJob implements JobType
                 $log->line('warning: the host has no push key; no ssh-agent for this instance');
             } else {
                 try {
-                    $this->agent->start($instance->id());
+                    $this->agent->startFor($instance);
                 } catch (\RuntimeException $e) {
                     $log->line('warning: '.$e->getMessage().' Git over SSH in the container will fail.');
                 }
