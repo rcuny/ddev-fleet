@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Fleet\Git;
 
+use App\Fleet\Ddev\DdevPaths;
 use App\Fleet\FleetPaths;
 use App\Fleet\Git\GitClient;
 use App\Fleet\Shell\CommandResult;
@@ -102,7 +103,9 @@ final class GitClientTest extends TestCase
 
         self::assertStringContainsString('-o StrictHostKeyChecking=yes', $ssh);
         self::assertStringContainsString('-o BatchMode=yes', $ssh);
-        self::assertStringContainsString('UserKnownHostsFile="$DDEV_APPROOT/.ddev/fleet_known_hosts"', $ssh);
+        self::assertStringContainsString('UserKnownHostsFile='.DdevPaths::CONTAINER_APPROOT.'/.ddev/fleet_known_hosts', $ssh);
+        self::assertStringNotContainsString('"', $ssh);
+        self::assertStringNotContainsString('$', $ssh);
         self::assertStringNotContainsString('IdentitiesOnly', $ssh);
         self::assertStringNotContainsString(' -i ', $ssh);
         self::assertStringNotContainsString('StrictHostKeyChecking=no', $ssh);
