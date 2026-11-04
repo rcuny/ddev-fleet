@@ -7,7 +7,15 @@ from fleet.core.errors import ValidationError
 
 _PART_RE = re.compile(r"^[a-z0-9]([a-z0-9-]*[a-z0-9])?$")
 _SLUGIFY_RE = re.compile(r"[^a-z0-9]+")
-_MAX_INSTANCE_ID_LENGTH = 63
+# DDEV names the web container `ddev-<id>-web` and uses `<id>-web` as its
+# hostname, a DNS label (RFC 1035, at most 63 characters; Docker rejects a
+# longer container hostname, so `ddev start` fails). An instance id therefore
+# has to leave room for the 4-character "-web": 63 - len("-web") = 59. This is
+# the creation limit (matches the 1.x line, FLE-144); lookups, listing and
+# destroy never check it, so older instances with ids of 60-63 characters stay
+# listable and destroyable (FLE-166).
+_DNS_LABEL_LIMIT = 63
+_MAX_INSTANCE_ID_LENGTH = _DNS_LABEL_LIMIT - len("-web")
 _LABEL_HASH_LENGTH = 6
 
 
@@ -58,15 +66,16 @@ def derive_label(
 
     `label`, when given, is used as is. Otherwise the label is `label_prefix` +
     `branch` minus a trailing `strip_suffix`. Either way the result is
-    slugified, and when `<project>--<label>` would exceed the 63-character DNS
-    label limit the slug is cut and ends in `-<first 6 hex of sha1(branch)>`,
+    slugified, and when `<project>--<label>` would exceed the 59-character instance id
+    limit the slug is cut and ends in `-<first 6 hex of sha1(branch)>`,
     so the id fits, stays deterministic (a re-run lands on the same instance)
     and two long branches sharing a prefix do not collide.
 
     `reserve` is the number of characters the caller needs to keep free on top
     of the id (the longest `<hostname>-` alias prefix of the project's
     `additional_hostnames`, whose label `<hostname>-<instance id>` is held to
-    the same 63-character limit): the id is fitted to `63 - reserve`.
+    a 63-character limit, or room for an allocated `-N` suffix): the id is
+    fitted to `59 - reserve`.
 
     Raises `ValidationError` if the slug is empty, or if `project` is so long
     that not even a shortened label fits."""
@@ -75,18 +84,24 @@ def derive_label(
     else:
         stem = branch.removesuffix(strip_suffix) if strip_suffix else branch
         raw = f"{label_prefix or ''}{stem}"
-    slug = slugify(raw)
+    return _fit_label(project, slugify(raw), branch, reserve)
+
+
+def _fit_label(project: str, slug: str, hash_source: str, reserve: int) -> str:
+    """`slug` unchanged when `<project>--<slug>` plus `reserve` extra characters
+    fits the instance id limit, else cut and ended by `-<6 hex of
+    sha1(hash_source)>`."""
     # 2 = the "--" separator
     room = _MAX_INSTANCE_ID_LENGTH - reserve - len(project) - 2
     if len(slug) <= room:
         return slug
-    digest = hashlib.sha1(branch.encode("utf-8"), usedforsecurity=False).hexdigest()
+    digest = hashlib.sha1(hash_source.encode("utf-8"), usedforsecurity=False).hexdigest()
     tail = f"-{digest[:_LABEL_HASH_LENGTH]}"
     keep = room - len(tail)
     if keep < 1:
         raise ValidationError(
-            f"project name {project!r} is too long to fit any label for branch {branch!r} "
-            f"within the {_MAX_INSTANCE_ID_LENGTH}-character DNS label limit"
+            f"project name {project!r} is too long to fit any label for {hash_source!r} "
+            f"within the {_MAX_INSTANCE_ID_LENGTH}-character instance id limit"
         )
     return slug[:keep].rstrip("-") + tail
 
@@ -99,7 +114,8 @@ def instance_id(project: str, label: str) -> str:
     if len(composed) > _MAX_INSTANCE_ID_LENGTH:
         raise ValidationError(
             f"instance id {composed!r} is {len(composed)} characters, exceeds "
-            f"the {_MAX_INSTANCE_ID_LENGTH}-character DNS label limit"
+            f"the {_MAX_INSTANCE_ID_LENGTH}-character limit (DDEV appends '-web' to "
+            f"the id for the web container hostname, a {_DNS_LABEL_LIMIT}-character DNS label)"
         )
     return composed
 
@@ -116,13 +132,16 @@ def allocate_multi_deploy_labels(
 
     Validates the WHOLE batch (all `count` candidates) via instance_id()
     before returning — raises ValidationError if any candidate would exceed
-    the 63-char DNS label limit, so a too-long batch fails atomically
+    the 59-char instance id limit, so a too-long batch fails atomically
     instead of partway through a later deploy loop."""
     if count == 0:
         return []
 
     labels: list[str] = []
     n = 1
+    # Reserve room for a `-NN` suffix before fitting the base, so base +
+    # suffix stays within the id limit (a batch past -99 is caught below).
+    base_label = _fit_label(project, base_label, base_label, len("-NN"))
     while len(labels) < count:
         candidate_label = f"{base_label}-{n}"
         candidate_id = f"{project}--{candidate_label}"
@@ -156,12 +175,14 @@ def allocate_free_label(existing_ids: set[str], project: str, base_label: str) -
     THIS name free?" vs "give me N names, none of which is THIS one").
 
     Validates only the FINAL chosen label through `instance_id()`, so the
-    63-char DNS label limit still raises.
+    59-char instance id limit still raises.
     """
     n = 0
     candidate_label = base_label
     while f"{project}--{candidate_label}" in existing_ids:
         n += 1
-        candidate_label = f"{base_label}-{n}"
+        # The base is cut (hash-suffixed) so base + `-N` still fits the limit.
+        fitted = _fit_label(project, base_label, base_label, len(f"-{n}"))
+        candidate_label = f"{fitted}-{n}"
     instance_id(project, candidate_label)  # raises ValidationError if too long
     return candidate_label
