@@ -75,6 +75,29 @@
     }
 }
 
+{% if ovh %}
+# ovh_dns: ONE wildcard site (one certificate for the whole host, like 0.x) instead of one certificate per instance
+# host name, which hit Let's Encrypt's weekly limit. Every instance is a `@<id> host ...` matcher plus a `handle`
+# written by the worker as `instances/<id>.conf` and imported here; the catch-all closes the connection for any
+# other name under the wildcard. A wildcard covers one label, which is all the instance and alias names use.
+*.{{ domain }} {
+    header {
+        Strict-Transport-Security "max-age=31536000"
+        -Server
+    }
+
+    @auth host auth.{{ domain }}
+    handle @auth {
+        reverse_proxy {{ authelia }}
+    }
+
+    import {{ snippet_dir }}/instances/*.conf
+
+    handle {
+        abort
+    }
+}
+{% else %}
 auth.{{ domain }} {
     header Strict-Transport-Security "max-age=31536000"
 
@@ -83,4 +106,8 @@ auth.{{ domain }} {
 
 # One site per instance, written by the worker as `<id>.conf`. An empty directory is fine.
 import {{ snippet_dir }}/instances/*.conf
+{% endif %}
+
+# Sites with their own address (named ports, and names that still hold a stored certificate), outside the wildcard block, written as `<id>.sites`.
+import {{ snippet_dir }}/instances/*.sites
 {% endautoescape %}

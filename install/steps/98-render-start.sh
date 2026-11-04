@@ -86,6 +86,8 @@ step_main() {
   # OVH credentials would otherwise sit in clear text in /srv/fleet); the exit trap in run.sh discards whatever the helper
   # did not install if a step fails. --no-reload: Caddy does not serve the new Caddyfile yet (the helper validates the
   # staged copy, and Caddy is restarted below).
+  # Before the render: the instance sites it rewrites keep every name that already holds a certificate as its own site.
+  is_dry || write_stored_certs "$CADDY_FLEET_DIR/stored-certs.list"
   fleet_console fleet:host:render --gate=auto --no-reload --stage
   run "$HELPER_DIR/apply" authelia
   run "$HELPER_DIR/apply" caddy

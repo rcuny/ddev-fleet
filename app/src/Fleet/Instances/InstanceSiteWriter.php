@@ -48,42 +48,72 @@ final readonly class InstanceSiteWriter
 
     /**
      * Renders, writes atomically and reloads; on a failure the previous file (or its absence) is put back.
+     * `$reload = false` only writes: the host render uses it while the main Caddyfile is about to change layout, so
+     * the current one cannot validate the new snippets (the root helper validates the pair when it installs).
      *
      * @throws \InvalidArgumentException for an id or host name that could change the Caddyfile's structure
      * @throws \RuntimeException         when Caddy refuses the config or cannot be reached
      */
-    public function write(Instance $instance, Project $project): void
+    public function write(Instance $instance, Project $project, bool $reload = true): void
     {
         $file = $this->paths->instanceSiteFile($instance->id());
+        $portsFile = $this->paths->instanceSitesFile($instance->id());
+        $wildcard = $this->hostnames->wildcard();
         $hosts = array_map(
             ConfigValue::domain(...),
             [$this->hostnames->primary($instance->id()), ...$this->hostnames->aliases($project, $instance->id())],
         );
-        $contents = $this->twig->render('system/instance-site.twig', [
+        // Transition: a name that already holds a stored certificate keeps its own exact-name site (Caddy prefers it to
+        // the wildcard, so it keeps serving that certificate and never needs a new order); the rest sit under the wildcard.
+        $exact = $wildcard ? $this->hostnames->withStoredCertificate($hosts, $this->paths->storedCertificatesFile()) : [];
+        $context = [
             'id' => $instance->id(),
-            'hosts' => $hosts,
+            'wildcard' => $wildcard,
+            'hosts' => array_values(array_diff($hosts, $exact)),
+            'exact_hosts' => $exact,
             'ports' => self::portBlocks($project, $hosts),
             'stripped_headers' => CaddyfileRenderer::strippedHeaders(),
             'authelia' => CaddyfileRenderer::AUTHELIA,
             'groups_pattern' => $this->groupsPattern($project),
             'router' => CaddyfileRenderer::DDEV_ROUTER,
             'router_host' => CaddyfileRenderer::DDEV_ROUTER_HOST,
-        ]);
+        ];
+        // Wildcard layout: the site is a fragment of the host's wildcard site and the named ports are a second file.
+        // The other layout has everything in the one file and no ports file.
+        $files = [
+            $file => $this->twig->render('system/instance-site.twig', $context),
+            $portsFile => $wildcard && ([] !== $context['ports'] || [] !== $exact) ? $this->twig->render('system/instance-sites.twig', $context) : null,
+        ];
         $this->ensureDir();
 
         $lock = $this->locks->createLock('caddy.sites', self::LOCK_SECONDS);
         $lock->acquire(true);
         try {
-            $previous = is_file($file) ? @file_get_contents($file) : null;
-            if (false === $previous) {
-                throw new \RuntimeException('Cannot read the current instance site; refusing to replace what cannot be restored.');
+            $previous = [];
+            foreach ($files as $path => $unused) {
+                $current = is_file($path) ? @file_get_contents($path) : null;
+                if (false === $current) {
+                    throw new \RuntimeException('Cannot read the current instance site; refusing to replace what cannot be restored.');
+                }
+                $previous[$path] = $current;
             }
 
-            AtomicFile::write($file, $contents, self::MODE);
+            if ($previous === $files) {
+                // Nothing changed: no write and no reload, which would interrupt the certificate challenges in flight.
+                return;
+            }
+
             try {
-                $this->reloader->validateAndReload();
+                foreach ($files as $path => $contents) {
+                    $this->put($path, $contents);
+                }
+                if ($reload) {
+                    $this->reloader->validateAndReload();
+                }
             } catch (\Throwable $e) {
-                $this->restore($file, $previous, $e);
+                foreach ($previous as $path => $contents) {
+                    $this->restore($path, $contents, $e);
+                }
 
                 throw $e;
             }
@@ -93,25 +123,43 @@ final readonly class InstanceSiteWriter
     }
 
     /**
-     * Deletes the site and reloads; a site that does not exist is fine.
+     * Deletes the site (and its named-port file) and reloads; a site that does not exist is fine.
      */
     public function remove(string $instanceId): void
     {
-        $file = $this->paths->instanceSiteFile($instanceId);
+        $files = [$this->paths->instanceSiteFile($instanceId), $this->paths->instanceSitesFile($instanceId)];
 
         $lock = $this->locks->createLock('caddy.sites', self::LOCK_SECONDS);
         $lock->acquire(true);
         try {
-            if (!is_file($file)) {
-                return;
+            $any = false;
+            foreach ($files as $file) {
+                if (!is_file($file)) {
+                    continue;
+                }
+                if (!@unlink($file)) {
+                    throw new \RuntimeException('Cannot remove the instance site.');
+                }
+                $any = true;
             }
-            if (!@unlink($file)) {
-                throw new \RuntimeException('Cannot remove the instance site.');
+            if ($any) {
+                $this->reloader->validateAndReload();
             }
-            $this->reloader->validateAndReload();
         } finally {
             $lock->release();
         }
+    }
+
+    private function put(string $path, ?string $contents): void
+    {
+        if (null === $contents) {
+            if (is_file($path) && !@unlink($path)) {
+                throw new \RuntimeException('Cannot remove the stale instance port file.');
+            }
+
+            return;
+        }
+        AtomicFile::write($path, $contents, self::MODE);
     }
 
     /**

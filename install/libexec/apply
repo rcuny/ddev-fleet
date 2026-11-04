@@ -362,6 +362,24 @@ restore_caddy() {
   rmdir -- "$CADDY_OVH_DIR" 2>/dev/null || true
 }
 
+# write_stored_certs <list file>: the names that hold a certificate in Caddy's storage with more than 30 days left (Caddy
+# renews from 30 days), one per line, for the app, which cannot read Caddy's storage. The app keeps such a name as its own
+# exact-name site (ovh_dns wildcard layout) so it keeps serving that certificate; the wildcard certificate itself is
+# skipped. Best effort: a failure leaves the previous list and never fails the caller.
+write_stored_certs() {
+  local list=$1 base="$ROOT/var/lib/caddy/.local/share/caddy/certificates" crt name tmp
+  [ -d "$(dirname -- "$list")" ] || return 0
+  tmp=$(mktemp) || return 0
+  for crt in "$base"/*/*/*.crt; do
+    [ -f "$crt" ] || continue
+    name=$(basename -- "$crt" .crt)
+    case $name in wildcard_* | *[!a-zA-Z0-9.-]*) continue ;; esac
+    openssl x509 -checkend 2592000 -noout -in "$crt" >/dev/null 2>&1 && printf '%s\n' "$name"
+  done | sort -u >"$tmp" || true
+  install -m 0644 -o root -g root -- "$tmp" "$list" 2>/dev/null || true
+  rm -f -- "$tmp"
+}
+
 apply_caddy() {
   local changed_env=0 name
   stage_in Caddyfile "$PRIV/Caddyfile" || fail 'nothing staged: Caddyfile is missing' 66
@@ -406,6 +424,10 @@ apply_caddy() {
   if ! install_ovh "$PRIV/env.ovh" || ! put_file "$PRIV/Caddyfile" "$CADDYFILE" 0644 root root || ! put_file "$PRIV/env.canon" "$CADDY_ENV" 0640 root caddy; then
     restore_caddy
     fail 'could not install the files; the previous Caddyfile, environment and OVH credentials were restored'
+  fi
+
+  if [ "$AS_ROOT" -eq 1 ]; then
+    write_stored_certs "$ROOT/etc/caddy/fleet/stored-certs.list"
   fi
 
   if service_active caddy; then

@@ -205,6 +205,25 @@ final readonly class FleetPaths
         return $this->caddyInstancesDir().'/'.$id.'.conf';
     }
 
+    /**
+     * The sites of an instance that need their own site address in the wildcard layout (ovh_dns): the named ports and
+     * the names that still hold a stored certificate. They cannot live in the snippet the wildcard site imports; the
+     * main Caddyfile imports `instances/*.sites` at the top level.
+     */
+    public function instanceSitesFile(string $id): string
+    {
+        return substr($this->instanceSiteFile($id), 0, -\strlen('.conf')).'.sites';
+    }
+
+    /**
+     * The names with a valid certificate in Caddy's storage (one per line), written by the root helper (`apply caddy`,
+     * the installer): the app cannot read Caddy's storage.
+     */
+    public function storedCertificatesFile(): string
+    {
+        return $this->caddyDir.'/stored-certs.list';
+    }
+
     public function gateFile(): string
     {
         return $this->caddyDir.'/gate.conf';

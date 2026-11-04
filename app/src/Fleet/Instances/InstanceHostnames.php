@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Instances;
 
 use App\Domain\Host\HostSettingsRepository;
+use App\Domain\Host\TlsMode;
 use App\Domain\Project\Project;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
@@ -68,6 +69,29 @@ final readonly class InstanceHostnames
         if (null !== $this->host->get()) {
             $this->aliases($project, $id);
         }
+    }
+
+    /**
+     * Whether the host serves every instance from one wildcard certificate (`ovh_dns`); `http01` needs one per name.
+     */
+    public function wildcard(): bool
+    {
+        return TlsMode::OvhDns === $this->host->get()?->tlsMode();
+    }
+
+    /**
+     * The names from $hosts that hold a certificate in Caddy's storage that is not near expiry (the root-written list,
+     * FleetPaths::storedCertificatesFile()). No list means none: a fresh host has no certificates to keep serving.
+     *
+     * @param list<string> $hosts
+     *
+     * @return list<string>
+     */
+    public function withStoredCertificate(array $hosts, string $listFile): array
+    {
+        $lines = is_file($listFile) ? @file($listFile, \FILE_IGNORE_NEW_LINES | \FILE_SKIP_EMPTY_LINES) : false;
+
+        return false === $lines ? [] : array_values(array_intersect($hosts, array_map('trim', $lines)));
     }
 
     public function siteUrl(string $id): string

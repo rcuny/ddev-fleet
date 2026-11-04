@@ -93,13 +93,17 @@ port, and the router (Traefik) picks the instance from the `Host` rules DDEV wro
 the `:port` in the header reaches the instance, see the live checks below.
 
 **Certificates.** The certificate belongs to the name, not to the port: `<host>:9108` uses the same certificate as
-`<host>`, and Caddy manages it automatically. Each instance host gets its own certificate (the host settings never ask
-for a wildcard certificate).
+`<host>`, and Caddy manages it automatically. In `http01` mode each instance host gets its own certificate. In
+`ovh_dns` mode the whole host is one Caddy site, `*.<domain>`, with one wildcard certificate (plus one for `<domain>`
+itself): every instance is a `host` matcher and a `handle` inside it (`instances/<id>.conf`), and `auth.<domain>` is
+a matcher too. Instance and alias names are a single label under the domain, so the wildcard covers them. The named
+ports are the exception: their sites (`instances/<id>.sites`) keep their own site address, so Caddy manages a
+certificate for those names unless the wildcard already covers them.
 
 | Mode | What it means for `<host>:<port>` |
 |---|---|
 | `http01` | The name still has to pass the HTTP-01 challenge on **port 80**, as for the plain host. Keep port 80 open and a DNS record for each name (the aliases too). Nothing to open for the challenge on the named port itself. |
-| `ovh_dns` | DNS-01 through the OVH API: no inbound port is needed for the challenge. The name is still a per-name certificate. |
+| `ovh_dns` | DNS-01 through the OVH API: no inbound port is needed for the challenge. The instance names share the host's one wildcard certificate, so a new instance never orders one (Let's Encrypt's weekly limit per registered domain). |
 
 Caddy must be reachable on the public port, so each public port in use has to be open in the firewall.
 

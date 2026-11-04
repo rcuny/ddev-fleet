@@ -85,6 +85,24 @@ FPM_CHANGED=0
 WORKER_UNIT_CHANGED=0
 MERCURE_CHANGED=0
 
+# write_stored_certs <list file>: the names that hold a certificate in Caddy's storage with more than 30 days left (Caddy
+# renews from 30 days), one per line, for the app, which cannot read Caddy's storage. The app keeps such a name as its own
+# exact-name site (ovh_dns wildcard layout) so it keeps serving that certificate; the wildcard certificate itself is
+# skipped. Best effort: a failure leaves the previous list and never fails the caller.
+write_stored_certs() {
+  local list=$1 base=/var/lib/caddy/.local/share/caddy/certificates crt name tmp
+  [ -d "$(dirname -- "$list")" ] || return 0
+  tmp=$(mktemp) || return 0
+  for crt in "$base"/*/*/*.crt; do
+    [ -f "$crt" ] || continue
+    name=$(basename -- "$crt" .crt)
+    case $name in wildcard_* | *[!a-zA-Z0-9.-]*) continue ;; esac
+    openssl x509 -checkend 2592000 -noout -in "$crt" >/dev/null 2>&1 && printf '%s\n' "$name"
+  done | sort -u >"$tmp" || true
+  install -m 0644 -o root -g root -- "$tmp" "$list" 2>/dev/null || true
+  rm -f -- "$tmp"
+}
+
 is_dry() {
   [ "${FLEET_DRY_RUN:-0}" = 1 ]
 }

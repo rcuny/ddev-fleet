@@ -72,7 +72,7 @@ final class CaddyfileRendererTest extends TestCase
         $out = self::renderer(caddyDir: '/etc/caddy/fleet')->render(self::host());
 
         self::assertStringContainsString("        import /etc/caddy/fleet/gate.conf\n", $out);
-        self::assertSame(2, substr_count($out, 'import '), 'the gate and the instance sites');
+        self::assertSame(3, substr_count($out, 'import '), 'the gate, the instance sites and the named-port sites');
         self::assertSame(1, substr_count($out, '*.conf'), 'the gate is never a glob (a silent no-op when nothing matches); only the instance sites are');
     }
 
@@ -125,6 +125,24 @@ final class CaddyfileRendererTest extends TestCase
         // Credentials live in files: no OVH value can sit in Caddy's environment, so no {env.OVH_*} placeholder remains.
         self::assertStringNotContainsString('{env.OVH', $ovh);
         self::assertStringContainsString('{env.FLEET_PROXY_SECRET}', $ovh);
+    }
+
+    public function testHttp01KeepsOneSitePerNameAndNoWildcard(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        self::assertStringNotContainsString("\n*.", $out);
+        self::assertStringContainsString("\nauth.fleet.example.com {\n", $out);
+        self::assertStringContainsString('import /etc/caddy/fleet/instances/*.conf', $out);
+    }
+
+    public function testOvhDnsServesEveryInstanceFromOneWildcardSite(): void
+    {
+        $out = self::renderer()->render(self::host(mode: TlsMode::OvhDns));
+
+        self::assertSame(1, preg_match_all('/^\*\.fleet\.example\.com \{$/m', $out), 'one wildcard site');
+        self::assertStringNotContainsString("\nauth.fleet.example.com {", $out, 'auth is a matcher inside the wildcard, not a site of its own');
+        self::assertLessThan(strpos($out, '*.conf'), strpos($out, '*.fleet.example.com {'), 'the instances are imported inside the wildcard site');
     }
 
     public function testNoEmailLineWhenUnset(): void
@@ -346,14 +364,30 @@ final class CaddyfileRendererTest extends TestCase
                 }
             }
 
-            auth.fleet.example.com {
-                header Strict-Transport-Security "max-age=31536000"
+            # ovh_dns: ONE wildcard site (one certificate for the whole host, like 0.x) instead of one certificate per instance
+            # host name, which hit Let's Encrypt's weekly limit. Every instance is a `@<id> host ...` matcher plus a `handle`
+            # written by the worker as `instances/<id>.conf` and imported here; the catch-all closes the connection for any
+            # other name under the wildcard. A wildcard covers one label, which is all the instance and alias names use.
+            *.fleet.example.com {
+                header {
+                    Strict-Transport-Security "max-age=31536000"
+                    -Server
+                }
 
-                reverse_proxy 127.0.0.1:9091
+                @auth host auth.fleet.example.com
+                handle @auth {
+                    reverse_proxy 127.0.0.1:9091
+                }
+
+                import /etc/caddy/fleet/instances/*.conf
+
+                handle {
+                    abort
+                }
             }
 
-            # One site per instance, written by the worker as `<id>.conf`. An empty directory is fine.
-            import /etc/caddy/fleet/instances/*.conf
+            # Sites with their own address (named ports, and names that still hold a stored certificate), outside the wildcard block, written as `<id>.sites`.
+            import /etc/caddy/fleet/instances/*.sites
 
             CADDY;
 
