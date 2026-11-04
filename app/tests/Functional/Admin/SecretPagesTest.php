@@ -11,10 +11,14 @@ use App\Fleet\Projects\ProjectService;
 use App\Fleet\Secrets\SecretStore;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\BrowserKit\Cookie;
+use Symfony\Component\DomCrawler\Crawler;
 
 final class SecretPagesTest extends AdminTestCase
 {
     private const string VALUE = 'tok-ABC123-never-in-html';
+    private const string NAME_FORMAT = 'Use capital letters, digits and underscores only, starting with a letter, at most 64 characters (for example JIRA_TOKEN).';
+    private const string QUOTES = 'Enter the value without surrounding quotes: the asset file that uses the placeholder adds them if it needs them.';
 
     private function makeProject(string $name = 'blog'): void
     {
@@ -188,6 +192,310 @@ final class SecretPagesTest extends AdminTestCase
 
         self::assertResponseStatusCodeSame(422);
         self::assertSame([], $this->store()->listManaged(null));
+    }
+
+    // --- what the form refuses, word for word (moved from the browser specs, FLE-161)
+
+    /**
+     * Posts the form with the name and the value exactly as given (the DomCrawler form would refuse a value its field
+     * does not offer; a crafted request does not).
+     */
+    private function put(string $path, string $name, string $value): Crawler
+    {
+        return $this->post($path, ['name' => $name, 'value' => $value]);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function formPaths(): iterable
+    {
+        yield 'fleet-wide page' => ['/admin/secrets'];
+        yield 'project tab' => ['/admin/projects/blog/secrets'];
+    }
+
+    #[DataProvider('formPaths')]
+    public function testAnEmptyFormGivesOneMessageEachAndTheFieldsPointAtThem(string $path): void
+    {
+        $this->makeProject();
+
+        $crawler = $this->put($path, '', '');
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('Enter a name.', trim($crawler->filter('[data-testid=error-name]')->text()));
+        self::assertSame('Enter a value.', trim($crawler->filter('[data-testid=error-value]')->text()));
+        self::assertSame('true', $crawler->filter('input[name=name]')->attr('aria-invalid'));
+        self::assertSame('true', $crawler->filter('textarea[name=value]')->attr('aria-invalid'));
+        self::assertSame('secret-name-error', $crawler->filter('input[name=name]')->attr('aria-describedby'));
+        self::assertSame('secret-value-error', $crawler->filter('textarea[name=value]')->attr('aria-describedby'));
+        self::assertCount(1, $crawler->filter('p#secret-name-error'));
+        self::assertCount(1, $crawler->filter('p#secret-value-error'));
+        self::assertSame([], $this->store()->listManaged('/admin/secrets' === $path ? null : 'blog'));
+    }
+
+    public function testAFormWithoutErrorsCarriesNoInvalidMarkup(): void
+    {
+        $crawler = $this->open('/admin/secrets');
+
+        self::assertNull($crawler->filter('input[name=name]')->attr('aria-invalid'));
+        self::assertNull($crawler->filter('textarea[name=value]')->attr('aria-invalid'));
+        self::assertNull($crawler->filter('input[name=name]')->attr('aria-describedby'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function badNames(): iterable
+    {
+        yield 'lower case' => ['lower_case'];
+        yield 'leading digit' => ['1LEADING_DIGIT'];
+        yield 'dash' => ['WITH-DASH'];
+        yield 'space' => ['WITH SPACE'];
+        yield 'dot' => ['WITH.DOT'];
+        yield 'accent' => ['ACCENTÉ'];
+        yield '65 characters' => ['A'.str_repeat('B', 64)];
+    }
+
+    #[DataProvider('badNames')]
+    public function testABadNameIsExplainedAndIsTheOnlyThingSentBack(string $name): void
+    {
+        $crawler = $this->put('/admin/secrets', $name, self::VALUE);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(self::NAME_FORMAT, trim($crawler->filter('[data-testid=error-name]')->text()));
+        self::assertCount(0, $crawler->filter('[data-testid=error-value]'));
+        self::assertSame($name, $crawler->filter('input[name=name]')->attr('value'));
+        self::assertSame('', trim($crawler->filter('textarea[name=value]')->text()));
+        self::assertStringNotContainsString(self::VALUE, $this->body());
+        self::assertSame([], $this->store()->listManaged(null));
+    }
+
+    /**
+     * @return iterable<int, array{string, string}>
+     */
+    public static function builtInPlaceholders(): iterable
+    {
+        yield ['INSTANCE_ID', 'instance-id'];
+        yield ['PROJECT', 'project'];
+        yield ['INSTANCE', 'instance'];
+        yield ['BRANCH', 'branch'];
+        yield ['FLEET_DOMAIN', 'fleet-domain'];
+        yield ['INSTANCE_FQDN', 'instance-fqdn'];
+        yield ['ISSUE_ID', 'issue-id'];
+    }
+
+    #[DataProvider('builtInPlaceholders')]
+    public function testANameOwnedByABuiltInPlaceholderIsRefusedWithThatPlaceholder(string $name, string $token): void
+    {
+        $crawler = $this->put('/admin/secrets', $name, self::VALUE);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('This name is taken by the built-in [['.$token.']] placeholder.', trim($crawler->filter('[data-testid=error-name]')->text()));
+        self::assertSame([], $this->store()->listManaged(null));
+    }
+
+    #[DataProvider('formPaths')]
+    public function testQuotedValuesAreRefusedWithTheSameMessagesOnBothPages(string $path): void
+    {
+        $this->makeProject();
+        $project = '/admin/secrets' === $path ? null : 'blog';
+
+        foreach (['"', "'"] as $quote) {
+            $crawler = $this->put($path, 'API_KEY', $quote.self::VALUE.$quote);
+            self::assertResponseStatusCodeSame(422);
+            self::assertSame(self::QUOTES, trim($crawler->filter('[data-testid=error-value]')->text()));
+            self::assertCount(0, $crawler->filter('[data-testid=error-name]'));
+        }
+
+        $crawler = $this->put($path, 'bad name', '"'.self::VALUE.'"');
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame(self::NAME_FORMAT, trim($crawler->filter('[data-testid=error-name]')->text()));
+        self::assertSame(self::QUOTES, trim($crawler->filter('[data-testid=error-value]')->text()));
+        self::assertSame([], $this->store()->listManaged($project));
+    }
+
+    public function testTheSixtyFourKiBBoundaryRefusesOneByteOverAndStoresTheLimit(): void
+    {
+        $crawler = $this->put('/admin/secrets', 'BIG_KEY', str_repeat('v', 65537));
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('The value must be at most 64 KiB.', trim($crawler->filter('[data-testid=error-value]')->text()));
+        self::assertSame([], $this->store()->listManaged(null));
+        self::assertSame([], $this->audit());
+
+        $this->put('/admin/secrets', 'BIG_KEY', str_repeat('v', 65536));
+        self::assertResponseRedirects('/admin/secrets', 303);
+        self::assertSame(str_repeat('v', 65536), $this->store()->getManaged(null, 'BIG_KEY'));
+        self::assertStringContainsString('Secret "BIG_KEY" saved.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function acceptedValues(): iterable
+    {
+        yield 'a single quote character' => ['"', '"'];
+        yield 'quotes only inside' => ['a"b"c', 'a"b"c'];
+        yield 'mixed quotes at the ends' => ['"abc\'', '"abc\''];
+    }
+
+    #[DataProvider('acceptedValues')]
+    public function testAValueThatIsNotWrappedInMatchingQuotesIsAccepted(string $value, string $stored): void
+    {
+        $this->put('/admin/secrets', 'API_KEY', $value);
+
+        self::assertResponseRedirects('/admin/secrets', 303);
+        self::assertSame($stored, $this->store()->getManaged(null, 'API_KEY'));
+    }
+
+    public function testAValueIsStoredAsTypedExceptForLineEndingsAndTheNewlinesAtItsEnd(): void
+    {
+        $body = "  first line\nsecond é ü 日本\n\tthird";
+
+        $this->put('/admin/secrets', 'NORM_KEY', str_replace("\n", "\r\n", $body)."\r\n\r\n\r\n");
+
+        self::assertResponseRedirects('/admin/secrets', 303);
+        self::assertSame($body, $this->store()->getManaged(null, 'NORM_KEY'));
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function hostileQueryNames(): iterable
+    {
+        yield 'lower case' => ['lower'];
+        yield 'markup' => ['A"><img src=x onerror=alert(1)>'];
+        yield 'dash' => ['WITH-DASH'];
+        yield 'built-in placeholder' => ['INSTANCE_ID'];
+    }
+
+    #[DataProvider('hostileQueryNames')]
+    public function testTheNameQueryIsEchoedOnlyWhenItPassesTheRule(string $name): void
+    {
+        $crawler = $this->open('/admin/secrets?name='.rawurlencode($name));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('', (string) $crawler->filter('input[name=name]')->attr('value'));
+        self::assertStringNotContainsString('<img src=x', $this->body());
+    }
+
+    public function testTheListShowsThePlaceholderWhoSetItAndWhenAndNeverTheValue(): void
+    {
+        $this->save('/admin/secrets', 'API_KEY', self::VALUE);
+        $actor = $this->audit()[0][0];
+
+        $row = $this->client->followRedirect()->filter('[data-testid=secret-row]');
+
+        self::assertStringContainsString('[[api-key]]', $row->text());
+        self::assertMatchesRegularExpression('/set by '.preg_quote($actor, '/').' on \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/', preg_replace('/\s+/', ' ', $row->text()) ?? '');
+        self::assertCount(0, $row->filter('[data-testid=secret-no-placeholder]'));
+        self::assertStringNotContainsString(self::VALUE, $this->body());
+    }
+
+    public function testADeleteDialogNamesTheSecretAndWarnsItCannotBeRecovered(): void
+    {
+        $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
+
+        $dialog = preg_replace('/\s+/', ' ', $this->open('/admin/secrets')->filter('[data-testid=secret-row]')->text()) ?? '';
+
+        self::assertStringContainsString('Delete API_KEY?', $dialog);
+        self::assertStringContainsString('Instances deployed later no longer receive this value. It cannot be recovered.', $dialog);
+    }
+
+    public function testAPageThatWentStaleAnswers404ToRevealAndDeleteAndASaveRecreatesTheSecret(): void
+    {
+        $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
+        $this->open('/admin/secrets');
+        $this->post('/admin/secrets/API_KEY/delete', []);
+        self::assertResponseRedirects('/admin/secrets', 303);
+        $entries = \count($this->audit());
+
+        $this->post('/admin/secrets/API_KEY/reveal', []);
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringNotContainsString(self::VALUE, $this->body());
+        $this->post('/admin/secrets/API_KEY/delete', []);
+        self::assertResponseStatusCodeSame(404);
+        self::assertCount($entries, $this->audit());
+
+        $this->save('/admin/secrets', 'API_KEY', self::VALUE);
+        self::assertResponseRedirects('/admin/secrets', 303);
+        self::assertSame(self::VALUE, $this->store()->getManaged(null, 'API_KEY'));
+    }
+
+    public function testTheSameNameInTheFleetAndInAProjectAreTwoSecrets(): void
+    {
+        $this->makeProject();
+        $this->save('/admin/secrets', 'BOTH_KEY', 'fleet-value-1');
+        $this->save('/admin/projects/blog/secrets', 'BOTH_KEY', 'project-value-1');
+
+        self::assertSame('fleet-value-1', $this->store()->getManaged(null, 'BOTH_KEY'));
+        self::assertSame('project-value-1', $this->store()->getManaged('blog', 'BOTH_KEY'));
+
+        $this->post('/admin/secrets/BOTH_KEY/reveal', []);
+        self::assertSame('fleet-value-1', trim($this->client->getCrawler()->filter('[data-testid=revealed-value]')->text()));
+        $this->post('/admin/projects/blog/secrets/BOTH_KEY/reveal', []);
+        self::assertSame('project-value-1', trim($this->client->getCrawler()->filter('[data-testid=revealed-value]')->text()));
+        $puts = array_values(array_map(static fn (array $e): string => $e[2], array_filter($this->audit(), static fn (array $e): bool => 'secret.put' === $e[1])));
+        sort($puts);
+        self::assertSame(['fleet/BOTH_KEY', 'project:blog/BOTH_KEY'], $puts);
+
+        $this->post('/admin/projects/blog/delete', []);
+        self::assertSame('fleet-value-1', $this->store()->getManaged(null, 'BOTH_KEY'));
+        self::assertSame('secret.delete', $this->audit()[0][1]);
+        self::assertSame('project:blog/BOTH_KEY', $this->audit()[0][2]);
+    }
+
+    public function testAMemberGets403OnAProjectSecretsPageEvenForAnUnknownProject(): void
+    {
+        $this->as('member');
+
+        $this->open('/admin/projects/anything/secrets');
+
+        self::assertResponseStatusCodeSame(403);
+    }
+
+    public function testTheRevealThrottleAnswersTheAlertKeepsThePageUsableAndDoesNotBlockSaving(): void
+    {
+        $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
+        for ($i = 0; $i < 10; ++$i) {
+            $this->post('/admin/secrets/API_KEY/reveal', []);
+        }
+
+        $crawler = $this->post('/admin/secrets/API_KEY/reveal', []);
+
+        self::assertResponseStatusCodeSame(429);
+        $retry = (int) $this->client->getResponse()->headers->get('Retry-After');
+        self::assertGreaterThanOrEqual(1, $retry);
+        self::assertLessThanOrEqual(61, $retry, 'a one-minute window, rounded up');
+        self::assertMatchesRegularExpression('/Too many reveals\. Try again in \d+ seconds?\./', $crawler->filter('[data-testid=reveal-throttled]')->text());
+        self::assertCount(0, $crawler->filter('[data-testid=reveal-dialog]'));
+        self::assertCount(1, $crawler->filter('[data-testid=secret-row]'));
+        self::assertCount(1, $crawler->filter('[data-testid=secret-form]'));
+
+        $this->save('/admin/secrets', 'API_KEY', 'new-value-1');
+        self::assertResponseRedirects('/admin/secrets', 303);
+
+        $actions = array_column($this->audit(), 1);
+        self::assertSame(10, \count(array_filter($actions, static fn (string $a): bool => 'secret.reveal' === $a)));
+        self::assertSame(1, \count(array_filter($actions, static fn (string $a): bool => 'secret.reveal-refused' === $a)));
+    }
+
+    public function testTheRevealThrottleIsPerUser(): void
+    {
+        $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
+        for ($i = 0; $i < 10; ++$i) {
+            $this->post('/admin/secrets/API_KEY/reveal', []);
+        }
+        $this->post('/admin/secrets/API_KEY/reveal', []);
+        self::assertResponseStatusCodeSame(429);
+        $first = $this->audit()[0][0];
+
+        $this->client->getCookieJar()->set(new Cookie('fleet_stand_in_user', 'second-admin', null, '/', 'localhost', true));
+        $crawler = $this->post('/admin/secrets/API_KEY/reveal', []);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame(self::VALUE, trim($crawler->filter('[data-testid=revealed-value]')->text()));
+        self::assertSame('second-admin', $this->audit()[0][0]);
+        self::assertNotSame($first, $this->audit()[0][0]);
     }
 
     public function testHostSecretsAreListedReadOnly(): void
