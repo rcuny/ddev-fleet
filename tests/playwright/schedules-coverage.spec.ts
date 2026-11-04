@@ -100,7 +100,8 @@ test.describe('schedules, full coverage', () => {
       await expect(page.locator('[aria-invalid=true]')).toHaveCount(4);
       await expectClean(page, 'the form with four errors');
 
-      // Cancel leaves the form without saving.
+      // Cancel leaves the form without saving (the refusal re-rendered the form, so go back to the list first).
+      await page.goto('/admin/schedules');
       await follow(page, page.getByTestId('schedule-new'));
       await fillForm(page, { name: 'cancelled', cron: '0 3 * * *', instance: fx.instance });
       await follow(page, page.getByRole('link', { name: 'Cancel' }));
