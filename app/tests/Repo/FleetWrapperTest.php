@@ -65,6 +65,10 @@ final class FleetWrapperTest extends TestCase
         yield 'another namespace keeps its name' => [['doctrine:migrations:status'], 'bin/console doctrine:migrations:status'];
         yield 'another namespace, two words, is not ours' => [['doctrine', 'migrations'], 'bin/console doctrine migrations'];
         yield 'an unknown word pair is not prefixed' => [['widget', 'list'], 'bin/console widget list'];
+        yield 'upgrade --check maps to the check command' => [['upgrade', '--check'], 'bin/console fleet:upgrade:check'];
+        yield 'upgrade --check keeps its options' => [['upgrade', '--check', '--to', 'v1.2.0', '--json'], 'bin/console fleet:upgrade:check --to v1.2.0 --json'];
+        yield 'upgrade refresh is still a group verb' => [['upgrade', 'refresh'], 'bin/console fleet:upgrade:refresh'];
+        yield 'upgrade:check also works' => [['upgrade:check', '--json'], 'bin/console fleet:upgrade:check --json'];
         yield 'a verb with an uppercase letter is not a verb' => [['project', 'List'], 'bin/console project List'];
     }
 
@@ -78,6 +82,17 @@ final class FleetWrapperTest extends TestCase
 
         self::assertSame(0, $status, $err);
         self::assertSame('php8.4 /app/'.$expected, explode('|', $out)[0], $out);
+    }
+
+    public function testUpgradeWithoutAVerbPrintsUsageAndRunsNothing(): void
+    {
+        foreach ([['upgrade'], ['upgrade', '--yes']] as $args) {
+            [$status, $out, $err] = $this->asFleet($args, null, 'echo "php must not run" >&2; exit 9');
+
+            self::assertSame(2, $status, implode(' ', $args));
+            self::assertSame('', $out);
+            self::assertStringContainsString('usage: fleet upgrade --check', $err);
+        }
     }
 
     public function testInstanceAndJobGroups(): void

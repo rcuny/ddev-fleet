@@ -125,6 +125,13 @@ if [[ $command =~ ^fleet:[a-z][a-z0-9:-]*$ ]]; then
   :
 elif [[ $command =~ ^($groups):[a-z][a-z0-9:-]*$ ]]; then
   command="fleet:$command"
+elif [[ $command == upgrade && ${1:-} == --check ]]; then
+  # `fleet upgrade --check [--to vX.Y.Z] [--json]` is the read-only check (no root needed).
+  command=fleet:upgrade:check
+  shift
+elif [[ $command == upgrade && ( $# -eq 0 || ${1:-} == -* ) ]]; then
+  printf 'usage: fleet upgrade --check [--to vX.Y.Z] [--json] [--no-cache]\n' >&2
+  exit 2
 elif [[ $command =~ ^($groups)$ && ${1:-} =~ ^[a-z][a-z0-9-]*$ ]]; then
   command="fleet:$command:$1"
   shift

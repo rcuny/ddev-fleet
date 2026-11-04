@@ -11,12 +11,15 @@ namespace App\Fleet\Upgrade;
 final readonly class CatalogState
 {
     /**
-     * @param list<Release> $releases all annotated v1.* tags, newest first (pre-releases included)
+     * @param list<Release>           $releases all annotated v1.* tags, newest first (pre-releases included)
+     * @param \DateTimeImmutable|null $listedAt when `releases` was last read successfully (the age of the list; equals
+     *                                          `checkedAt` unless the latest attempt failed)
      */
     public function __construct(
         public array $releases,
         public ?\DateTimeImmutable $checkedAt,
         public ?string $error,
+        public ?\DateTimeImmutable $listedAt = null,
     ) {
     }
 
