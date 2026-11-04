@@ -184,6 +184,7 @@ final class DeployWorkflow
             $log->line('post_deploy: '.$line);
             $result = $this->ran(fn (): CommandResult => $this->ddev->run($dir, $argv, $env, $log->output(...)), 'post_deploy command');
             if (!$result->isSuccess()) {
+                $log->line(\sprintf("tty commands not started: post-deploy failed at '%s'", $line));
                 throw new JobFailed(\sprintf("post_deploy command '%s' failed with exit code %d", $line, $result->exitCode), $result->exitCode);
             }
         }
@@ -200,6 +201,9 @@ final class DeployWorkflow
         $this->instances->save($instance);
         $log->line('deploy complete');
         $this->feed->instanceChanged($id);
+
+        // 11. The tmux window's tty commands, only now that the site is installed (FLE-171).
+        $this->runSteps(StepPhase::AfterDeploy, $context);
     }
 
     /**

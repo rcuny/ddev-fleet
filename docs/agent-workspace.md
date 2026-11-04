@@ -43,7 +43,8 @@ and skips an instance with a deploy or destroy in progress. `fleet tmux:reset [<
 
 ## What is typed, by whom, when
 
-At the end of a deploy, once `ddev start` has succeeded, the deploy step `TmuxWindowStep`:
+As the last step of a deploy or redeploy, after every post-deploy line succeeded and `deploy complete` is logged (FLE-171; if a
+post-deploy line fails nothing is created or typed), the deploy step `TmuxWindowStep`:
 
 1. creates the window, or on a redeploy rebuilds it in place (fresh shells and sidebar, the same tab);
 2. types each non-empty command of the template's **tty1** list into pane 1 (the left shell), then each command of **tty2** into pane 2 (the right shell),

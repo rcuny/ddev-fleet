@@ -14,7 +14,7 @@ use App\Fleet\Jobs\JobFailed;
  * step that is not tagged. Order: AssetsSeedStep (BeforeStart, 100), PortMirrorSyncStep (BeforeStart, 50),
  * TypesenseEnvFileStep (BeforeStart, 40, after the assets so it edits their `.ddev/.env`), PortMirrorConvergeStep
  * (AfterStart, 200, so the router is settled before the tmux window's commands run), TypesenseSearchKeyStep
- * (AfterStart, 150, needs the settled router), TmuxWindowStep (AfterStart, 100).
+ * (AfterStart, 150, needs the settled router), TmuxWindowStep (AfterDeploy, 100: the tty commands are typed only once the last post-deploy line has succeeded).
  */
 interface DeployStep
 {

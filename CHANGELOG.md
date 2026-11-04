@@ -7,6 +7,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-11-04
+
+### Changed
+- **FLE-172: Fleet CI runs less Playwright by default.** The phone project runs only when the diff touches interface code,
+  and the quick tier adds back the `*-coverage` / `*-validation` specs whose area the diff touches (`ci/pw_select.py`,
+  `FLEET_PW_PHONE`, `FLEET_PW_TARGETED`). `ci/run-gates.sh` reports the choice and the 20 slowest Playwright tests.
+
+### Fixed
+- **FLE-171: a template's `tty1`/`tty2` commands are typed only after post-deploy succeeded.** They were typed as soon as `ddev start` was up, so they raced the post-deploy lines (regression vs 0.x): a CI template's tty1 (`bash .ddev/ci/pw-ci.sh --full`) ran PHPUnit against a half-installed site, hit an "infrastructure failure" and posted no status. They are now typed as the last step of the deploy or redeploy, after `deploy complete`; if a post-deploy line fails nothing is typed and the log says `tty commands not started: post-deploy failed at '<line>'`. A plain `instance:start` still types nothing (as before).
+- **FLE-173: `ci/upgrade-rehearsal.sh` runs on a real host.** The first step no longer fails as root with git's "dubious ownership" on the fleet-owned `/opt/ddev-fleet` (the clone now runs as the checkout's owner), and the run points the checkout's `origin` at the throwaway release repository, as the `checkout.origin` pre-flight check requires, and puts it back afterwards.
+- **FLE-173: the rehearsal always puts the host back.** Its clean-up ran from an exit trap after the function that owned its variables had returned, so under `set -u` it died at once and left the `FLEET_UPGRADE_REPO_URL` line and the changed `origin` behind. It now runs before the script returns (and from the trap on `exit`, INT, TERM and HUP), restores the `origin` the host had, and verifies each step.
+- **FLE-173: `sudo fleet upgrade --repo-url=<local path>` works when that repository belongs to another user.** The root helper's tag re-check (and installer fetch) against that path was refused by git as "dubious ownership" and reported as a moved tag. The helper now trusts exactly that path for its own git calls through a private, temporary git config, and shows git's message when the re-check fails.
+
 ## [1.2.0] - 2026-11-04
 
 ### Added
@@ -1003,7 +1016,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.2.1...HEAD
+[1.2.1]: https://github.com/rcuny/ddev-fleet/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/rcuny/ddev-fleet/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/rcuny/ddev-fleet/compare/v1.0.6...v1.1.0
 [1.0.6]: https://github.com/rcuny/ddev-fleet/compare/v1.0.5...v1.0.6

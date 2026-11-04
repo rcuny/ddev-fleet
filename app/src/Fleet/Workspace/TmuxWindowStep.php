@@ -14,7 +14,8 @@ use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 
 /**
  * Gives a deployed instance its tmux window and types the template's tty1 and tty2 commands into it (the v0 behaviour).
- * Runs once ddev is up. A redeploy starts from a fresh window. This step never fails a deploy: a tmux problem, or a
+ * Runs after the last post-deploy line succeeded and `deploy complete` is logged (FLE-171: typing earlier raced the
+ * site install), so a failed post-deploy types nothing. A redeploy starts from a fresh window. This step never fails a deploy: a tmux problem, or a
  * command whose `[[token]]` cannot be resolved, is a WARNING line in the job log and the pane stays a plain shell.
  *
  * The commands carry context tokens only (ContextTokens), never a secret: the Claude token reaches the container as an
@@ -32,7 +33,7 @@ final readonly class TmuxWindowStep implements DeployStep
 
     public function phase(): StepPhase
     {
-        return StepPhase::AfterStart;
+        return StepPhase::AfterDeploy;
     }
 
     public function run(DeployContext $context): void
@@ -50,6 +51,7 @@ final readonly class TmuxWindowStep implements DeployStep
                 $this->tmux->reset($id);
             }
             $typed = 0;
+            $panes = [];
             foreach ([[Pane::Tty1, $template->tty1()], [Pane::Tty2, $template->tty2()]] as [$pane, $commands]) {
                 foreach ($commands as $command) {
                     $line = $this->prepare($command, $pane, $context);
@@ -58,9 +60,13 @@ final readonly class TmuxWindowStep implements DeployStep
                     }
                     $this->tmux->sendKeys($id, $pane, $line);
                     ++$typed;
+                    $panes[$pane->name] = strtolower($pane->name);
                 }
             }
             $context->log->line(\sprintf('tmux window ready (%d command%s typed)', $typed, 1 === $typed ? '' : 's'));
+            if ([] !== $panes) {
+                $context->log->line(\sprintf('tty commands typed (%s)', implode(', ', array_values($panes))));
+            }
         } catch (WorkspaceException|CommandRunnerException $e) {
             $context->log->line('WARNING: the tmux window could not be prepared: '.$e->getMessage());
         }
