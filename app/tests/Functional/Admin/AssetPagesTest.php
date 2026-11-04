@@ -544,6 +544,359 @@ final class AssetPagesTest extends AdminTestCase
         self::assertResponseIsSuccessful();
     }
 
+    // --- listing, folders, links and uploads: the refusals the browser specs used to check one by one
+
+    public function testTheListingOrdersFoldersFirstThenFilesIgnoringCaseWithSizesAndUtcTimes(): void
+    {
+        $this->makeProject();
+        $crawler = $this->open('/admin/projects/blog/assets');
+        self::assertSame('No files yet. Upload one above, or copy files in over SSH and press Rescan.', trim($crawler->filter('[data-testid=assets-empty]')->text()));
+        self::assertCount(0, $crawler->filter('[data-testid=assets-summary]'));
+
+        mkdir($this->dir('zeta'), 0o750, true);
+        $this->put('b.sql', str_repeat('x', 1536));
+        $this->put('A.sql', 'y');
+        $this->put('c.sql', str_repeat('z', 3 * 1024 * 1024));
+        foreach (['b.sql', 'A.sql', 'c.sql'] as $file) {
+            touch($this->dir($file), 1_700_000_000);
+        }
+
+        $crawler = $this->open('/admin/projects/blog/assets');
+        $names = $crawler->filter('[data-testid=asset-name]')->each(static fn ($n): string => trim($n->text()));
+        self::assertSame(['zeta', 'A.sql', 'b.sql', 'c.sql'], $names);
+        $rows = $crawler->filter('[data-testid=asset-row]');
+        self::assertSame('dir', $rows->first()->attr('data-kind'));
+        self::assertStringContainsString('4 items, 3.0 MiB in files.', $crawler->filter('[data-testid=assets-summary]')->text());
+        self::assertSame('-', trim($rows->first()->filter('[data-testid=asset-size]')->text()));
+        self::assertSame('1.5 KiB', trim($rows->eq(2)->filter('[data-testid=asset-size]')->text()));
+        self::assertStringContainsString('2023-11-14 22:13', $rows->eq(2)->text());
+        self::assertSame(['Name', 'Size', 'Modified (UTC)', 'Actions'], $crawler->filter('th')->each(static fn ($th): string => trim($th->text())));
+        self::assertCount(0, $rows->first()->filter('[data-testid=asset-download]'));
+        self::assertCount(1, $rows->eq(2)->filter('[data-testid=asset-download]'));
+
+        // One item is singular.
+        $this->put('c.sql', 'a');
+        @unlink($this->dir('b.sql'));
+        @unlink($this->dir('A.sql'));
+        rmdir($this->dir('zeta'));
+        $crawler = $this->open('/admin/projects/blog/assets');
+        self::assertStringContainsString('1 item, 1 B in files.', $crawler->filter('[data-testid=assets-summary]')->text());
+    }
+
+    /**
+     * @return iterable<string, array{string, string}>
+     */
+    public static function badFolderNames(): iterable
+    {
+        $dots = 'The name must not contain "." or ".." parts.';
+        $names = 'Names may use letters, digits, spaces and . _ - ( ) + @ , = ~ only, and must not end with a space.';
+        yield 'dotdot' => ['..', $dots];
+        yield 'dot' => ['.', $dots];
+        yield 'slash' => ['sub/dir', $names];
+        yield 'backslash' => ['back\\slash', $names];
+        yield 'semicolon' => ['bad;name', $names];
+        yield 'trailing space' => ['trailing ', $names];
+        yield 'leading space' => [' leading', $names];
+        yield 'leading dash' => ['-dash-first', $names];
+        yield 'reserved' => ['.fleet-upload-abc', 'That name is reserved.'];
+        yield '260 bytes' => [str_repeat('é', 130), 'A name is longer than 255 bytes.'];
+        yield 'exists' => ['taken.sql', 'A file or folder with that name exists already.'];
+    }
+
+    #[DataProvider('badFolderNames')]
+    public function testNewFolderNamesAreRefusedWithTheirReason(string $name, string $reason): void
+    {
+        $this->makeProject();
+        $this->put('taken.sql');
+
+        $this->post('/admin/projects/blog/assets/folders', ['path' => '', 'name' => $name]);
+
+        self::assertResponseRedirects('/admin/projects/blog/assets', 303);
+        self::assertStringContainsString('The folder was not created. '.$reason, $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertSame(['.', '..', 'taken.sql'], scandir($this->dir()));
+    }
+
+    public function testAFolderThatExistsTwiceIsCreatedOnce(): void
+    {
+        $this->makeProject();
+
+        $this->post('/admin/projects/blog/assets/folders', ['path' => '', 'name' => 'dup']);
+        $this->post('/admin/projects/blog/assets/folders', ['path' => '', 'name' => 'dup']);
+
+        self::assertStringContainsString('The folder was not created. A file or folder with that name exists already.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertSame(['.', '..', 'dup'], scandir($this->dir()));
+    }
+
+    public function testNewFolderAllowsPunctuationALeadingDotAndAccents(): void
+    {
+        $this->makeProject();
+
+        foreach (['données-é', 'Mix_ed (1)+a@b,c=d~e-f.g', '.config'] as $good) {
+            $this->post('/admin/projects/blog/assets/folders', ['path' => '', 'name' => $good]);
+            self::assertStringContainsString('Folder created.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        }
+
+        $found = scandir($this->dir()) ?: [];
+        sort($found);
+        self::assertSame(['.', '..', '.config', 'Mix_ed (1)+a@b,c=d~e-f.g', 'données-é'], $found);
+    }
+
+    public function testTheEighthFolderLevelIsTheLastAndTheNinthIsRefused(): void
+    {
+        $this->makeProject();
+        $levels = array_map(static fn (int $i): string => 'level'.$i.'-'.str_repeat('n', 24), range(1, 8));
+        $deepest = implode('/', $levels);
+        $this->put($deepest.'/child.sql');
+
+        $crawler = $this->open('/admin/projects/blog/assets?path='.rawurlencode($deepest));
+        self::assertResponseStatusCodeSame(200);
+        self::assertStringContainsString($levels[7], $crawler->filter('[data-testid=asset-crumbs]')->text());
+        $rows = $crawler->filter('[data-testid=asset-row]');
+        self::assertCount(1, $rows);
+        self::assertStringContainsString('name not supported here', $rows->text());
+        self::assertCount(0, $crawler->filter('[data-testid=asset-delete]'));
+
+        $this->post('/admin/projects/blog/assets/folders', ['path' => $deepest, 'name' => 'ninth']);
+        self::assertResponseRedirects('/admin/projects/blog/assets?path='.$deepest, 303);
+        self::assertStringContainsString('The folder was not created. The path is more than 8 folders deep.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertDirectoryDoesNotExist($this->dir($deepest.'/ninth'));
+
+        $this->client->request('GET', self::BASE.'/admin/projects/blog/assets', ['path' => $deepest.'/ninth'], [], $this->browserServer());
+        self::assertResponseStatusCodeSame(404);
+
+        // A folder inside a folder: breadcrumbs name the parents, and an empty folder says so.
+        $this->post('/admin/projects/blog/assets/folders', ['path' => '', 'name' => 'alpha']);
+        $this->post('/admin/projects/blog/assets/folders', ['path' => 'alpha', 'name' => 'beta']);
+        $crawler = $this->open('/admin/projects/blog/assets?path=alpha/beta');
+        self::assertSame('This folder is empty.', trim($crawler->filter('[data-testid=assets-empty]')->text()));
+        self::assertSame(['Assets', 'alpha'], $crawler->filter('[data-testid=asset-crumbs] a')->each(static fn ($a): string => trim($a->text())));
+        self::assertSame('beta', trim($crawler->filter('[data-testid=asset-crumbs] [aria-current=page]')->text()));
+        self::assertCount(1, $crawler->selectButton('Create folder'));
+    }
+
+    public function testMorePathsThatAreNotAFolderAre404(): void
+    {
+        $this->makeProject();
+
+        foreach (['a/../b', 'bad;name', str_repeat('a/', 600).'z'] as $path) {
+            $this->client->request('GET', self::BASE.'/admin/projects/blog/assets', ['path' => $path], [], $this->browserServer());
+            self::assertResponseStatusCodeSame(404, substr($path, 0, 20));
+        }
+    }
+
+    public function testSymbolicLinksAreListedButNeverFollowedDownloadedEnteredOrWrittenThrough(): void
+    {
+        $this->makeProject();
+        $this->put('real/inside.sql');
+        $this->put('plain.sql');
+        symlink('real', $this->dir('link'));
+        symlink('/etc', $this->dir('outside'));
+        symlink('nowhere', $this->dir('dangling'));
+
+        $crawler = $this->open('/admin/projects/blog/assets');
+        $links = $crawler->filter('[data-testid=asset-row]')->reduce(static fn ($r): bool => $r->filter('[data-testid=asset-link-state]')->count() > 0);
+        self::assertCount(3, $links);
+        foreach ($links->filter('[data-testid=asset-link-state]') as $state) {
+            self::assertMatchesRegularExpression('/^symbolic link, (seeded on deploy|not seeded: .+)$/', trim($state->textContent));
+        }
+        $outside = $links->reduce(static fn ($r): bool => str_contains($r->text(), 'outside'));
+        self::assertSame('→ /etc', trim($outside->filter('[data-testid=asset-link-target]')->text()));
+        self::assertCount(0, $links->filter('[data-testid=asset-delete]'));
+        self::assertCount(0, $links->filter('[data-testid=asset-download]'));
+        self::assertCount(0, $links->filter('a'));
+        self::assertCount(5, $crawler->filter('[data-testid=asset-row]'));
+
+        $crawler = $this->open('/admin/projects/blog/assets?path=link');
+        self::assertStringContainsString('A symbolic link is in the way. The browser never follows symbolic links.', $crawler->filter('[data-testid=assets-problem]')->text());
+        self::assertCount(5, $crawler->filter('[data-testid=asset-row]'));
+
+        foreach (['link/inside.sql', 'outside/passwd', 'dangling'] as $path) {
+            $this->client->request('GET', self::BASE.'/admin/projects/blog/assets/download', ['path' => $path], [], $this->browserServer());
+            self::assertResponseStatusCodeSame(409, $path);
+        }
+
+        // The folder turns into a link: creating a folder or uploading in it is refused.
+        mkdir($this->dir('moved'));
+        unlink($this->dir('link'));
+        $this->put('gone/x');
+        $this->rrmdir($this->dir('gone'));
+        $this->rrmdir($this->dir('real'));
+        symlink('moved', $this->dir('real'));
+
+        $answer = $this->api('POST', '/admin/projects/blog/assets/uploads', json_encode(['path' => 'real', 'name' => 'through.sql', 'size' => 5], \JSON_THROW_ON_ERROR));
+        self::assertGreaterThanOrEqual(400, $this->client->getResponse()->getStatusCode());
+        self::assertStringContainsString('A symbolic link is in the way. The browser never follows symbolic links.', (string) $answer['error']);
+
+        $this->post('/admin/projects/blog/assets/folders', ['path' => 'real', 'name' => 'child']);
+        self::assertStringContainsString('The folder was not created. A symbolic link is in the way.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertSame(['.', '..'], scandir($this->dir('moved')));
+    }
+
+    public function testAProjectAssetsDirectoryThatIsASymbolicLinkShowsAMessageAndAnEmptyListing(): void
+    {
+        $this->makeProject();
+        $this->outside = sys_get_temp_dir().'/fleet-outside-'.bin2hex(random_bytes(5));
+        mkdir($this->outside);
+        file_put_contents($this->outside.'/hidden.sql', 'x');
+        mkdir(\dirname($this->dir()), 0o750, true);
+        symlink($this->outside, $this->dir());
+
+        $crawler = $this->open('/admin/projects/blog/assets');
+
+        self::assertStringContainsString("The project's assets directory is a symbolic link. The browser never follows symbolic links.", $crawler->filter('[data-testid=assets-problem]')->text());
+        self::assertCount(1, $crawler->filter('[data-testid=assets-empty]'));
+        self::assertCount(0, $crawler->filter('[data-testid=asset-row]'));
+
+        $this->post('/admin/projects/blog/assets/folders', ['path' => '', 'name' => 'child']);
+        self::assertStringContainsString('The folder was not created. A symbolic link is in the way.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertSame(['.', '..', 'hidden.sql'], scandir($this->outside));
+        unlink($this->dir());
+    }
+
+    private function rrmdir(string $path): void
+    {
+        foreach (glob($path.'/*') ?: [] as $child) {
+            is_dir($child) ? $this->rrmdir($child) : unlink($child);
+        }
+        @rmdir($path);
+    }
+
+    /**
+     * @return iterable<string, array{string, int, string}>
+     */
+    public static function beginRefusals(): iterable
+    {
+        $valid = ['path' => '', 'name' => 'api.bin', 'size' => 70_000, 'chunkSize' => self::CHUNK, 'fingerprint' => 'fp-1'];
+        yield 'null body' => ['null', 400, 'The request body must be a JSON object.'];
+        yield 'size as text' => [json_encode(['name' => 'a.bin', 'size' => 'big'], \JSON_THROW_ON_ERROR), 400, 'Send path, name, size and fingerprint as text and whole numbers.'];
+        yield 'empty file' => [json_encode(['size' => 0] + $valid, \JSON_THROW_ON_ERROR), 400, 'The file is empty.'];
+        yield 'long fingerprint' => [json_encode(['fingerprint' => str_repeat('f', 513)] + $valid, \JSON_THROW_ON_ERROR), 400, 'The fingerprint is longer than 512 bytes.'];
+        yield 'absolute path' => [json_encode(['path' => '/etc'] + $valid, \JSON_THROW_ON_ERROR), 400, "The path must be relative to the project's assets directory."];
+        yield 'dotdot in path' => [json_encode(['path' => 'a/../b'] + $valid, \JSON_THROW_ON_ERROR), 400, 'The path must not contain "." or ".." parts.'];
+        yield 'empty part' => [json_encode(['path' => 'a//b'] + $valid, \JSON_THROW_ON_ERROR), 400, 'The path is empty or has an empty part.'];
+        yield 'NUL in path' => [json_encode(['path' => "a\0b"] + $valid, \JSON_THROW_ON_ERROR), 400, 'The path contains a NUL character.'];
+        yield 'nine deep' => [json_encode(['path' => str_repeat('a/', 9).'z'] + $valid, \JSON_THROW_ON_ERROR), 400, 'The path is more than 8 folders deep.'];
+        yield 'long path' => [json_encode(['path' => str_repeat('a/', 600).'z'] + $valid, \JSON_THROW_ON_ERROR), 400, 'The path is longer than 1024 bytes.'];
+        yield 'slash in name' => [json_encode(['name' => 'a/b'] + $valid, \JSON_THROW_ON_ERROR), 400, 'Names may use letters'];
+        yield 'dotdot name' => [json_encode(['name' => '..'] + $valid, \JSON_THROW_ON_ERROR), 400, 'The name must not contain "." or ".." parts.'];
+        yield 'long name' => [json_encode(['name' => str_repeat('x', 256)] + $valid, \JSON_THROW_ON_ERROR), 400, 'A name is longer than 255 bytes.'];
+        yield 'reserved name' => [json_encode(['name' => '.fleet-upload-x'] + $valid, \JSON_THROW_ON_ERROR), 400, 'That name is reserved.'];
+        yield 'bad characters' => [json_encode(['name' => 'bad;one.sql'] + $valid, \JSON_THROW_ON_ERROR), 400, 'Names may use letters, digits, spaces and . _ - ( ) + @ , = ~ only, and must not end with a space.'];
+        yield 'over the cap' => [json_encode(['size' => 3 * 1024 ** 3] + $valid, \JSON_THROW_ON_ERROR), 413, 'more than the upload limit of 2.0 GiB'];
+    }
+
+    #[DataProvider('beginRefusals')]
+    public function testBeginRefusalsAnswerAStatusAndAMessage(string $body, int $status, string $message): void
+    {
+        $this->makeProject();
+
+        $answer = $this->api('POST', '/admin/projects/blog/assets/uploads', $body);
+
+        self::assertResponseStatusCodeSame($status);
+        self::assertStringContainsString($message, (string) ($answer['error'] ?? ''));
+        self::assertDirectoryDoesNotExist($this->dir(), 'a refused upload creates nothing');
+    }
+
+    public function testAFolderInTheWayRefusesTheUploadName(): void
+    {
+        $this->makeProject();
+        mkdir($this->dir('occupied'), 0o750, true);
+
+        $answer = $this->api('POST', '/admin/projects/blog/assets/uploads', json_encode(['path' => '', 'name' => 'occupied', 'size' => 1], \JSON_THROW_ON_ERROR));
+
+        self::assertGreaterThanOrEqual(400, $this->client->getResponse()->getStatusCode());
+        self::assertStringContainsString('A folder with that name exists.', (string) $answer['error']);
+    }
+
+    public function testTheChunkAndCompleteAnswersNameTheirMistake(): void
+    {
+        $this->makeProject();
+        $base = '/admin/projects/blog/assets/uploads';
+        $begin = $this->api('POST', $base, json_encode(['path' => '', 'name' => 'api.bin', 'size' => 70_000, 'chunkSize' => self::CHUNK, 'fingerprint' => 'fp-1'], \JSON_THROW_ON_ERROR));
+        self::assertSame(2, $begin['chunks']);
+        $id = (string) $begin['id'];
+        self::assertSame([], $this->api('GET', "$base/$id")['received']);
+
+        $answer = $this->api('POST', "$base/$id/chunks/7", 'x', type: 'application/octet-stream');
+        self::assertResponseStatusCodeSame(400);
+        self::assertSame('There is no chunk 7: this upload has 2.', $answer['error']);
+        $answer = $this->api('POST', "$base/$id/chunks/0", str_repeat('x', 10), type: 'application/octet-stream');
+        self::assertResponseStatusCodeSame(400);
+        self::assertSame('Chunk 0 should be 65536 bytes; 10 bytes arrived.', $answer['error']);
+        $answer = $this->api('POST', "$base/$id/complete");
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('The upload is not complete: chunk 0, 1 are missing.', $answer['error']);
+        $answer = $this->api('POST', "$base/$id/chunks/0", str_repeat('x', self::CHUNK), type: 'application/octet-stream');
+        self::assertSame([0], $answer['received']);
+        $answer = $this->api('POST', "$base/$id/complete");
+        self::assertResponseStatusCodeSame(422);
+        self::assertSame('The upload is not complete: chunk 1 is missing.', $answer['error']);
+
+        // A write needs the CSRF token; reading a status needs none.
+        $answer = $this->api('POST', "$base/$id/abort", '', ['HTTP_X_CSRF_TOKEN' => '']);
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame('Invalid CSRF token. Reload the page.', $answer['error']);
+        $answer = $this->api('GET', "$base/$id", '', ['HTTP_X_CSRF_TOKEN' => '']);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame([0], $answer['received']);
+
+        $answer = $this->api('POST', "$base/$id/abort");
+        self::assertTrue($answer['aborted']);
+        $this->api('GET', "$base/$id");
+        self::assertResponseStatusCodeSame(404);
+        $this->api('POST', "$base/$id/complete");
+        self::assertResponseStatusCodeSame(404);
+        $this->api('GET', $base.'/'.str_repeat('0', 32));
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame([], glob($this->dir().'/*') ?: [], 'nothing was published');
+    }
+
+    public function testDownloadAnswersWithNoStoreAndAnAccentedNameAndNeedsAPath(): void
+    {
+        $this->makeProject();
+        $this->put('résumé données (1).sql', 'accents');
+
+        $this->client->request('GET', self::BASE.'/admin/projects/blog/assets/download', ['path' => 'résumé données (1).sql'], [], $this->browserServer());
+        self::assertResponseStatusCodeSame(200);
+        $response = $this->client->getResponse();
+        self::assertSame('application/octet-stream', $response->headers->get('Content-Type'));
+        self::assertStringContainsString('no-store', (string) $response->headers->get('Cache-Control'));
+        self::assertStringContainsString('attachment', (string) $response->headers->get('Content-Disposition'));
+        self::assertStringContainsString("filename*=utf-8''r%C3%A9sum%C3%A9%20donn%C3%A9es%20%281%29.sql", (string) $response->headers->get('Content-Disposition'));
+
+        $this->client->request('GET', self::BASE.'/admin/projects/blog/assets/download', [], [], $this->browserServer());
+        self::assertResponseStatusCodeSame(404);
+    }
+
+    public function testDeleteRefusalsSayWhy(): void
+    {
+        $this->makeProject();
+        $this->put('full/inside.sql');
+        mkdir($this->dir('empty'), 0o750, true);
+
+        $this->post('/admin/projects/blog/assets/delete', ['path' => 'missing.sql']);
+        self::assertStringContainsString('Nothing was deleted. That file or folder does not exist.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        $this->post('/admin/projects/blog/assets/delete', ['path' => 'full']);
+        self::assertStringContainsString('Nothing was deleted. The folder is not empty. Delete what is in it first.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertFileExists($this->dir('full/inside.sql'));
+        $this->post('/admin/projects/blog/assets/delete', ['path' => 'empty']);
+        self::assertStringContainsString('Deleted.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertDirectoryDoesNotExist($this->dir('empty'));
+    }
+
+    public function testFolderAndDeleteRejectAWrongTokenAndAMissingOne(): void
+    {
+        $this->makeProject();
+
+        foreach (['/admin/projects/blog/assets/folders' => ['path' => '', 'name' => 'sneaky'], '/admin/projects/blog/assets/delete' => ['path' => 'x']] as $url => $form) {
+            $this->client->request('POST', self::BASE.$url, $form + ['_token' => 'wrong'], [], $this->browserServer());
+            self::assertResponseStatusCodeSame(403, $url);
+            $this->client->request('POST', self::BASE.$url, $form, [], $this->browserServer());
+            self::assertResponseStatusCodeSame(403, $url);
+        }
+        self::assertDirectoryDoesNotExist($this->dir('sneaky'));
+    }
+
     // --- access
 
     /**

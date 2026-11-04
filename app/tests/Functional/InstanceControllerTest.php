@@ -9,6 +9,9 @@ use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Job\Job;
+use App\Domain\Job\JobRepository;
+use App\Domain\Job\JobStatus;
+use App\Domain\Job\JobTrigger;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\Template;
@@ -61,6 +64,38 @@ final class InstanceControllerTest extends AdminTestCase
     private function jobCount(): int
     {
         return (int) $this->em()->createQuery(\sprintf('SELECT COUNT(j.id) FROM %s j', Job::class))->getSingleScalarResult();
+    }
+
+    /**
+     * A job on the instance: queued by default, running or ended when a status is given.
+     */
+    private function jobOn(string $instance, string $type = 'deploy', JobStatus $status = JobStatus::Queued): Job
+    {
+        $job = new Job($type, $instance, explode('--', $instance)[0], JobTrigger::Ui, 'admin', []);
+        if (JobStatus::Queued !== $status) {
+            $job->markRunning(new \DateTimeImmutable());
+            if ($status->isFinal()) {
+                $job->finish($status, JobStatus::Succeeded === $status ? 0 : 1, JobStatus::Failed === $status ? 'It broke.' : null, new \DateTimeImmutable());
+            }
+        }
+        new JobRepository($this->em())->add($job);
+
+        return $job;
+    }
+
+    /**
+     * A POST without the CSRF token (the helper `post()` always sends one).
+     *
+     * @param array<string, mixed> $parameters
+     */
+    private function postWithoutToken(string $path, array $parameters = []): void
+    {
+        $this->client->request('POST', self::BASE.$path, $parameters, [], $this->browserServer());
+    }
+
+    private function flashes(): string
+    {
+        return $this->client->followRedirect()->filter('[data-testid=flashes]')->text();
     }
 
     public function testAdminListShowsEveryInstance(): void
@@ -379,5 +414,320 @@ final class InstanceControllerTest extends AdminTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('acme--i1', trim($crawler->filter('h1')->text()));
         self::assertStringContainsString('acme--i1.fleet.example.com', $this->body());
+    }
+
+    /**
+     * @return iterable<string, array{string, list<string>}>
+     */
+    public static function filterCombinations(): iterable
+    {
+        // Seed: acme--i1 running, acme--i2 stopped, acme--i3 running, demo--i1 stopped.
+        yield 'project' => ['project=acme', ['acme--i1', 'acme--i2', 'acme--i3']];
+        yield 'project and state' => ['project=acme&state=running', ['acme--i1', 'acme--i3']];
+        yield 'state stopped' => ['project=acme&state=stopped', ['acme--i2']];
+        yield 'search' => ['q=--i', ['acme--i1', 'acme--i2', 'acme--i3', 'demo--i1']];
+        yield 'search narrows' => ['q=i2', ['acme--i2']];
+        yield 'search and state' => ['q=--i&state=running', ['acme--i1', 'acme--i3']];
+        yield 'search, project and state' => ['q=--i&project=acme&state=stopped', ['acme--i2']];
+        yield 'search and project' => ['q=i1&project=demo', ['demo--i1']];
+        yield 'search misses the state' => ['q=i2&state=running', []];
+        yield 'search misses the project' => ['q=acme&project=demo', []];
+        yield 'search ignores case and spaces' => ['q=%20%20ACME--I3%20', ['acme--i3']];
+        yield 'unknown state' => ['project=acme&state=bogus', []];
+        yield 'state nobody has' => ['project=acme&state=failed', []];
+        yield 'unknown project' => ['project=nothing', []];
+    }
+
+    /**
+     * @param list<string> $expected
+     */
+    #[DataProvider('filterCombinations')]
+    public function testEveryCombinationOfTheThreeFilters(string $query, array $expected): void
+    {
+        $this->seed('acme', [InstanceState::Running, InstanceState::Stopped, InstanceState::Running]);
+        $this->seed('demo', [InstanceState::Stopped]);
+
+        $crawler = $this->open('/instances?'.$query);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame($expected, $this->listed($crawler));
+        if ([] === $expected) {
+            $empty = $crawler->filter('[data-testid=instances-empty]')->text();
+            self::assertStringContainsString('No instance matches', $empty);
+            self::assertStringContainsString('Change or clear the filters.', $empty);
+        } else {
+            self::assertCount(0, $crawler->filter('[data-testid=instances-empty]'));
+        }
+    }
+
+    public function testTheFilterFormListsTheChoicesAndKeepsItsValues(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $this->seed('demo', [InstanceState::Stopped]);
+
+        $crawler = $this->open('/instances?q=--i1&project=demo&state=stopped');
+
+        $filters = $crawler->filter('[data-testid=instance-filters]');
+        // Only projects that have an instance are offered.
+        self::assertSame(['All projects', 'acme', 'demo'], $filters->filter('select[name=project] option')->each(static fn (Crawler $o): string => trim($o->text())));
+        self::assertSame(['Any state', 'Deploying', 'Running', 'Stopped', 'Failed', 'Destroying', 'Unknown'], $filters->filter('select[name=state] option')->each(static fn (Crawler $o): string => trim($o->text())));
+        self::assertSame('--i1', $filters->filter('input[name=q]')->attr('value'));
+        self::assertSame('demo', $filters->filter('select[name=project] option[selected]')->attr('value'));
+        self::assertSame('stopped', $filters->filter('select[name=state] option[selected]')->attr('value'));
+        self::assertSame(['demo--i1'], $this->listed($crawler));
+    }
+
+    public function testARunningJobReplacesTheStateAndTurnsTheRowButtonsOff(): void
+    {
+        $this->seed('acme', [InstanceState::Running, InstanceState::Running]);
+        $this->jobOn('acme--i1', 'deploy', JobStatus::Running);
+
+        $crawler = $this->open('/instances');
+
+        $busy = $crawler->filter('[data-instance="acme--i1"]');
+        self::assertSame('Deploying…', trim($busy->filter('[data-testid=instance-state]')->text()));
+        self::assertCount(1, $busy->filter('button[formaction$="/acme--i1/stop"][disabled]'));
+        self::assertCount(1, $busy->filter('button[formaction$="/acme--i1/redeploy"][disabled]'));
+        $idle = $crawler->filter('[data-instance="acme--i2"]');
+        self::assertCount(0, $idle->filter('[disabled]'));
+        self::assertCount(1, $idle->filter('button[formaction$="/acme--i2/stop"]'));
+    }
+
+    public function testAFailedLastJobLinksToItsPage(): void
+    {
+        $this->seed('acme', [InstanceState::Failed]);
+        $job = $this->jobOn('acme--i1', 'deploy', JobStatus::Failed);
+
+        $link = $this->open('/instances')->filter('[data-instance="acme--i1"] [data-testid=last-job-failed]');
+
+        self::assertSame('Last job failed', trim($link->text()));
+        self::assertSame('/jobs/'.$job->id(), $link->attr('href'));
+    }
+
+    public function testBulkSaysHowManyJobsWereQueued(): void
+    {
+        $this->seed('acme', [InstanceState::Running, InstanceState::Stopped, InstanceState::Running]);
+
+        // A mixed selection (stopped and running) is accepted.
+        $this->post('/instances/bulk', ['action' => 'stop', 'ids' => ['acme--i1', 'acme--i2', 'acme--i3']]);
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('3 jobs queued.', trim($this->flashes()));
+        self::assertSame(3, $this->jobCount());
+
+        $this->seed('demo', [InstanceState::Stopped]);
+        $this->post('/instances/bulk', ['action' => 'start', 'ids' => ['demo--i1']]);
+        self::assertSame('1 job queued.', trim($this->flashes()));
+    }
+
+    public function testBulkRedeployAndDestroyQueueOneSequentialJobPerInstance(): void
+    {
+        $this->seed('acme', [InstanceState::Running, InstanceState::Running, InstanceState::Running]);
+
+        $this->post('/instances/bulk', ['action' => 'redeploy', 'ids' => ['acme--i1', 'acme--i2']]);
+        $this->post('/instances/bulk', ['action' => 'destroy', 'ids' => ['acme--i3']]);
+
+        /** @var list<Job> $jobs */
+        $jobs = $this->em()->createQuery(\sprintf('SELECT j FROM %s j ORDER BY j.id', Job::class))->getResult();
+        self::assertSame(['redeploy', 'redeploy', 'destroy'], array_map(static fn (Job $j): string => $j->type(), $jobs));
+        self::assertTrue($jobs[0]->isSequential());
+    }
+
+    public function testBulkWithABusyInstanceIsRefusedAsAWholeAndNothingIsQueued(): void
+    {
+        $this->seed('acme', [InstanceState::Running, InstanceState::Running]);
+        $this->jobOn('acme--i1', 'deploy', JobStatus::Running);
+        self::assertSame(1, $this->jobCount());
+
+        $this->post('/instances/bulk', ['action' => 'stop', 'ids' => ['acme--i1', 'acme--i2']]);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('Busy: acme--i1 has a job queued or running. Nothing was started.', trim($this->flashes()));
+        self::assertSame(1, $this->jobCount());
+    }
+
+    public function testBulkWithoutIdsAsksForASelection(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+
+        $this->post('/instances/bulk', ['action' => 'stop']);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('Select at least one instance first.', trim($this->flashes()));
+        self::assertSame(0, $this->jobCount());
+    }
+
+    public function testBulkWithAnUnknownActionIs400(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+
+        $this->post('/instances/bulk', ['action' => 'explode', 'ids' => ['acme--i1']]);
+
+        self::assertResponseStatusCodeSame(400);
+        self::assertSame(0, $this->jobCount());
+    }
+
+    public function testBulkWithOneUnknownIdIs404AndTheRealInstanceIsNotTouched(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+
+        $this->post('/instances/bulk', ['action' => 'stop', 'ids' => ['acme--i1', 'acme--nothing-here']]);
+
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame(0, $this->jobCount());
+    }
+
+    public function testBulkWithoutOrWithAWrongTokenIs403(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+
+        $this->postWithoutToken('/instances/bulk', ['action' => 'stop', 'ids' => ['acme--i1']]);
+        self::assertResponseStatusCodeSame(403);
+
+        $this->postWithoutToken('/instances/bulk', ['action' => 'stop', 'ids' => ['acme--i1'], '_token' => 'wrong']);
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(0, $this->jobCount());
+    }
+
+    public function testMemberSeesNoDeployLinkNoDestroyAndOnlyTheirProjectInTheFilter(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $this->seed('demo', [InstanceState::Running]);
+        $this->as('member');
+
+        $crawler = $this->open('/instances');
+
+        self::assertCount(0, $crawler->filter('[data-testid=deploy-link]'));
+        self::assertSame(['All projects', 'demo'], $crawler->filter('select[name=project] option')->each(static fn (Crawler $o): string => trim($o->text())));
+        self::assertStringNotContainsString('Destroy', $crawler->filter('[data-instance="demo--i1"]')->text('', false));
+        self::assertCount(0, $crawler->filter('[data-instance="demo--i1"] button[formaction$="/destroy"]'));
+        self::assertCount(1, $crawler->filter('[data-instance="demo--i1"] button[formaction$="/redeploy"]'));
+
+        $empty = $this->open('/instances?project=acme');
+        self::assertSame([], $this->listed($empty));
+        self::assertStringContainsString('No instance matches', $empty->filter('[data-testid=instances-empty]')->text());
+    }
+
+    public function testMemberDetailPageHasNoDestroyAndABulkStopWorksOnTheirInstance(): void
+    {
+        $this->seed('demo', [InstanceState::Running]);
+        $this->seed('acme', [InstanceState::Running]);
+        $this->as('member');
+
+        $detail = $this->open('/instances/demo--i1');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $detail->filter('button[formaction$="/destroy"]'));
+        self::assertCount(1, $detail->filter('[data-testid=instance-actions] button[formaction$="/redeploy"]'));
+
+        // The member's own token, the foreign id: the role's answer, and nothing queued.
+        $this->post('/instances/bulk', ['action' => 'stop', 'ids' => ['demo--i1', 'acme--i1']]);
+        self::assertResponseStatusCodeSame(404);
+        $this->post('/instances/acme--i1/stop', []);
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame(0, $this->jobCount());
+
+        $this->post('/instances/bulk', ['action' => 'stop', 'ids' => ['demo--i1']]);
+        self::assertSame('1 job queued.', trim($this->flashes()));
+    }
+
+    public function testDetailPageShowsTheFactsTheAddressesTheActionsOfTheStateAndTheTimeline(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $this->jobOn('acme--i1', 'deploy', JobStatus::Succeeded);
+
+        $crawler = $this->open('/instances/acme--i1');
+
+        $detail = $crawler->filter('[data-testid=instance-detail]')->text();
+        foreach (['Template', 'full', 'Requested by', 'admin', 'Head', 'Memory', 'develop'] as $fact) {
+            self::assertStringContainsString($fact, $detail);
+        }
+        $address = $crawler->filter('[data-testid=instance-detail] a[href="https://acme--i1.fleet.example.com"]');
+        self::assertCount(1, $address);
+        self::assertSame('_blank', $address->attr('target'));
+        self::assertSame('_blank', $crawler->filter('[data-testid=open-site]')->attr('target'));
+
+        $actions = $crawler->filter('[data-testid=instance-actions]');
+        self::assertCount(1, $actions->filter('button[formaction$="/stop"]:not([disabled])'));
+        self::assertCount(0, $actions->filter('button[formaction$="/start"]'));
+        self::assertCount(1, $actions->filter('button[formaction$="/redeploy"]:not([disabled])'));
+        self::assertCount(1, $actions->filter('button[formaction$="/destroy"]'));
+        self::assertCount(0, $crawler->filter('[data-testid=active-job]'));
+        $timeline = $crawler->filter('[data-testid=timeline-job]');
+        self::assertCount(1, $timeline);
+        self::assertStringContainsString('deploy', $timeline->text());
+    }
+
+    public function testAStoppedInstanceOffersStartAndNoSiteLink(): void
+    {
+        $this->seed('acme', [InstanceState::Stopped]);
+
+        $crawler = $this->open('/instances/acme--i1');
+
+        self::assertStringContainsString('Stopped', $crawler->filter('[data-testid=instance-detail]')->text());
+        self::assertCount(0, $crawler->filter('[data-testid=open-site]'));
+        $actions = $crawler->filter('[data-testid=instance-actions]');
+        self::assertCount(0, $actions->filter('button[formaction$="/stop"]'));
+        self::assertCount(1, $actions->filter('button[formaction$="/start"]'));
+    }
+
+    public function testWhileAJobRunsTheButtonsAreOffAndTheRunningJobIsOnThePage(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $job = $this->jobOn('acme--i1', 'deploy', JobStatus::Running);
+
+        $crawler = $this->open('/instances/acme--i1');
+
+        $actions = $crawler->filter('[data-testid=instance-actions]');
+        self::assertCount(1, $actions->filter('button[formaction$="/stop"][disabled]'));
+        self::assertCount(1, $actions->filter('button[formaction$="/redeploy"][disabled]'));
+        // Destroy is not switched off: the service says no.
+        self::assertCount(0, $actions->filter('button[formaction$="/destroy"][disabled]'));
+        $active = $crawler->filter('[data-testid=active-job]');
+        self::assertStringContainsString('Job #'.$job->id().' is running.', preg_replace('/\s+/', ' ', $active->text()) ?? '');
+        self::assertCount(1, $active->filter('[data-testid=job-log]'));
+    }
+
+    #[DataProvider('operationsOnABusyInstance')]
+    public function testAStalePageIsRefusedWithTheReason(string $action): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $this->jobOn('acme--i1', 'deploy', JobStatus::Running);
+
+        $this->post('/instances/acme--i1/'.$action, []);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/instances/acme--i1', parse_url((string) $this->client->getResponse()->headers->get('Location'), \PHP_URL_PATH));
+        self::assertStringContainsString('Busy: acme--i1 has a job queued or running. Nothing was started.', $this->flashes());
+        self::assertSame(1, $this->jobCount());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function operationsOnABusyInstance(): iterable
+    {
+        yield 'stop' => ['stop'];
+        yield 'redeploy' => ['redeploy'];
+        yield 'destroy' => ['destroy'];
+    }
+
+    public function testUnknownIdsBadActionsAndAMissingTokenAreRefused(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+
+        $this->open('/instances/acme--nothing-here');
+        self::assertResponseStatusCodeSame(404);
+        $this->open('/instances/Not_An_Id');
+        self::assertResponseStatusCodeSame(404);
+        $this->open('/instances/acme--i1/stop');
+        self::assertResponseStatusCodeSame(405);
+        $this->post('/instances/acme--i1/explode', []);
+        self::assertResponseStatusCodeSame(404);
+        $this->post('/instances/acme--nothing-here/stop', []);
+        self::assertResponseStatusCodeSame(404);
+        $this->postWithoutToken('/instances/acme--i1/stop');
+        self::assertResponseStatusCodeSame(403);
+        $this->postWithoutToken('/instances/acme--i1/stop', ['_token' => 'wrong']);
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame(0, $this->jobCount());
     }
 }

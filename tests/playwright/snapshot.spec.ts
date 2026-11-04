@@ -113,20 +113,4 @@ test.describe('snapshot', () => {
       await deleteProjectViaUi(page, name);
     }
   });
-
-  test('offers only running instances: a stopped one takes no snapshot', async ({ page }) => {
-    const name = uniqueName();
-
-    try {
-      await createProjectViaUi(page, name);
-      console_(['fleet:dev:fake-instance', name, 'old', 'stopped']);
-      await openSection(page, 'Assets');
-
-      await expect(page.getByTestId('snapshot-empty')).toBeVisible();
-      expect(dumps(name)).toEqual([]);
-    } finally {
-      console_(['fleet:dev:fake-instance', name, 'old', 'stopped', '--remove']);
-      await deleteProjectViaUi(page, name);
-    }
-  });
 });
