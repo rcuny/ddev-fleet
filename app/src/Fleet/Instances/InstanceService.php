@@ -263,7 +263,7 @@ final class InstanceService
         $taken = $this->instances->ids();
         foreach (glob($this->paths->instancesDir().'/*', \GLOB_ONLYDIR) ?: [] as $dir) {
             $name = basename($dir);
-            if (InstanceNaming::isInstanceId($name) && file_exists($dir.'/.git')) {
+            if (InstanceNaming::isExistingInstanceId($name) && file_exists($dir.'/.git')) {
                 $taken[] = $name;
             }
         }
@@ -295,7 +295,7 @@ final class InstanceService
         if ([] !== $selector->ids) {
             $found = [];
             foreach (array_unique($selector->ids) as $id) {
-                $instance = InstanceNaming::isInstanceId($id) ? $this->instances->find($id) : null;
+                $instance = InstanceNaming::isExistingInstanceId($id) ? $this->instances->find($id) : null;
                 $found[] = $instance ?? throw NotFound::instance($id);
             }
 

@@ -128,6 +128,7 @@ in `finally`, so it passes repeatedly against the shared dev database of the com
 list, create, edit, templates, ports and delete dialog at both widths, the member 403, the issue id tester, and (phone
 project only) the worst-case widths (40-char name, 200-char git URL, 64-char environment), 44 px targets. Interactions that depend on a lazily loaded Stimulus controller (dialog, live tester) retry until
 the controller answers, because a busy host loads them after the HTML is interactive.
+`project-ports.spec.ts` is the browser side of the named-port catalogue and the Ports tab (layout at 390 px, axe, tap targets, the 422 state); the rules, every field message, the command line and the tab's HTTP behaviour (assign, forged posts, access) are PHPUnit: `NamedPortInputTest`, `NamedPortServiceTest`, `PortCommandsTest` and `ProjectPagesTest::testPortsTab*`. It replaces the former `named-ports` and `project-ports-full` specs (FLE-160).
 `assets.spec.ts` (FLE-52, written without a browser to run it in: first run it on the pipeline) uploads files through the page
 with `setInputFiles` after lowering the chunk size to 64 KiB (the controller reads `data-asset-upload-chunk-size-value` when an
 upload starts), so a 192 KiB file travels as four requests; it compares the sha256 the server shows with the one it computed,

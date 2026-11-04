@@ -164,4 +164,33 @@ final class InstanceSiteRefresherTest extends KernelTestCase
         self::assertSame(0, $result->rewritten);
         self::assertSame(['acme--i1'], array_keys($result->failed));
     }
+
+    /**
+     * FLE-146: an instance id over the 59 character cap must not abort the refresh (the host upgrade's render step).
+     */
+    public function testOverLongIdIsSkippedWithAWarningNotFailed(): void
+    {
+        $project = $this->projectNamed('acme');
+        $long = new \App\Domain\Instance\Instance($project, str_repeat('a', 55), 'full', 'develop', 'admin');
+        $long->changeState(InstanceState::Running);
+        new InstanceRepository($this->em)->createMany([$long]);
+        $id = $long->id();
+        self::assertSame(61, \strlen($id));
+        $file = $this->paths->instanceSiteFile($id);
+        @mkdir(\dirname($file), 0o750, true);
+        file_put_contents($file, '# old site');
+        $this->runner->reset();
+
+        $result = $this->refresher->refresh();
+
+        self::assertSame([], $result->failed);
+        self::assertSame(0, $result->rewritten);
+        self::assertSame([$id], $this->refresher->skipped());
+        self::assertStringContainsString($id, (string) $this->refresher->takeWarning());
+        self::assertSame('# old site', file_get_contents($file), 'the site is left alone');
+
+        // ... and Fleet can still remove it.
+        $this->writer->remove($id);
+        self::assertFileDoesNotExist($file);
+    }
 }

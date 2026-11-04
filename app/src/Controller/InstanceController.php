@@ -259,7 +259,7 @@ final class InstanceController extends AbstractController
 
     private function instance(string $id): Instance
     {
-        if (!InstanceNaming::isInstanceId($id)) {
+        if (!InstanceNaming::isExistingInstanceId($id)) {
             throw new NotFoundHttpException();
         }
 

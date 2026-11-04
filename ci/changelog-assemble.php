@@ -13,23 +13,46 @@ declare(strict_types=1);
  * A fragment is changelog.d/<name>.md that starts with a "### <Section>" line (Added, Changed, ..., Dependencies)
  * and holds Keep a Changelog bullets. Fragments are read in file name order; text already under [Unreleased] in
  * CHANGELOG.md comes first. Sections are merged and written in the order of SECTIONS, unknown ones after them.
+ * A fragment may end with a "## Rollout" heading and bullets for the operator (a bullet starting "ACTION:" needs
+ * operator action); they are merged into one "#### Rollout" subsection at the end of the version (changelog.d/README.md).
  * Exit codes: 0 done, 1 a fragment or the changelog is malformed.
  */
 const SECTIONS = ['Added', 'Changed', 'Deprecated', 'Removed', 'Fixed', 'Security', 'Dependencies'];
 
 /**
- * @param list<string> $texts the already trimmed texts to merge: each starts with a "### Section" line
+ * @param list<string> $texts the already trimmed texts to merge: each starts with a "### Section" line, and may end with
+ *                            a rollout block ("## Rollout" in a fragment, "#### Rollout" once assembled)
  */
 function mergeSections(array $texts): string
 {
     /** @var array<string, list<string>> $sections */
     $sections = [];
+    /** @var list<string> $rollout */
+    $rollout = [];
     foreach ($texts as $text) {
         $current = null;
+        $inRollout = false;
         foreach (preg_split('/\R/', $text) ?: [] as $line) {
+            if (1 === preg_match('/^(?:##|####) Rollout\s*$/', $line)) {
+                $inRollout = true;
+                continue;
+            }
             if (1 === preg_match('/^### (.+?)\s*$/', $line, $m)) {
+                $inRollout = false;
                 $current = $m[1];
                 $sections[$current] ??= [];
+                continue;
+            }
+            if ($inRollout) {
+                if ('' !== trim($line)) {
+                    if (1 !== preg_match('/^(?:[-*] |\s+\S)/', $line)) {
+                        throw new RuntimeException('a Rollout line must be a bullet ("- text" or "- ACTION: text"): '.trim($line));
+                    }
+                    if (1 === preg_match('/^[-*] ACTION:\s*$/', $line)) {
+                        throw new RuntimeException('an ACTION bullet in Rollout needs a text');
+                    }
+                    $rollout[] = rtrim($line);
+                }
                 continue;
             }
             if (null === $current) {
@@ -52,6 +75,9 @@ function mergeSections(array $texts): string
         if ('' !== $body) {
             $out[] = "### $name\n$body";
         }
+    }
+    if ([] !== $rollout) {
+        $out[] = "#### Rollout\n".implode("\n", $rollout);
     }
 
     return implode("\n\n", $out);

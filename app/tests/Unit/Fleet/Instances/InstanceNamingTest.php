@@ -110,4 +110,15 @@ final class InstanceNamingTest extends TestCase
         $this->expectException(ValidationFailed::class);
         InstanceNaming::fitLabel(str_repeat('p', 40), str_repeat('a', 80), 's', aliasPrefix: 14, reserve: 4);
     }
+
+    public function testExistingIdsMayBeUpTo63CharactersButNewOnesStayAt59(): void
+    {
+        $id = static fn (int $len): string => 'acme--'.str_repeat('a', $len - 6);
+
+        self::assertTrue(InstanceNaming::isInstanceId($id(59)));
+        self::assertFalse(InstanceNaming::isInstanceId($id(60)));
+        self::assertTrue(InstanceNaming::isExistingInstanceId($id(63)));
+        self::assertFalse(InstanceNaming::isExistingInstanceId($id(64)));
+        self::assertFalse(InstanceNaming::isExistingInstanceId('../etc--x'));
+    }
 }

@@ -74,4 +74,22 @@ final class DestroyCommandTest extends InstanceCliTestCase
 
         self::assertSame(3, $tester->getStatusCode());
     }
+
+    /**
+     * FLE-146: an instance made before the 59 character cap (60 to 63 characters) must still be destroyable.
+     */
+    public function testOverLongExistingIdCanBeDestroyed(): void
+    {
+        $id = 'acme--'.str_repeat('a', 55);
+        self::assertSame(61, \strlen($id));
+        $instance = new \App\Domain\Instance\Instance($this->project, str_repeat('a', 55), 'full', 'develop', 'admin');
+        $instance->changeState(InstanceState::Failed);
+        new InstanceRepository($this->em)->createMany([$instance]);
+
+        $tester = $this->command('fleet:instance:destroy', ['id' => [$id]]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('1 succeeded, 0 failed', $tester->getDisplay());
+        self::assertSame([], new InstanceRepository($this->em)->ids());
+    }
 }

@@ -29,7 +29,7 @@ final readonly class SidebarRenderer
      */
     public function render(string $instanceId): string
     {
-        if (1 !== preg_match(FleetPaths::INSTANCE_ID_PATTERN, $instanceId)) {
+        if (1 !== preg_match(FleetPaths::EXISTING_INSTANCE_ID_PATTERN, $instanceId)) {
             throw new WorkspaceException('That is not an instance id.');
         }
         $instance = $this->instances->find($instanceId);

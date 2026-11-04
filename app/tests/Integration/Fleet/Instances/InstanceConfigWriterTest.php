@@ -91,7 +91,47 @@ final class InstanceConfigWriterTest extends KernelTestCase
         self::assertSame('fleet.example.com', $config['project_tld']);
         self::assertSame('none', $config['performance_mode']);
         self::assertArrayNotHasKey('additional_fqdns', $config);
-        self::assertArrayNotHasKey('hooks', $config);
+    }
+
+    public function testPostStartHookSeedsClaudeOnboardingByMergingAndIsIdempotent(): void
+    {
+        $config = $this->written($this->project());
+
+        self::assertIsArray($config['hooks']);
+        self::assertCount(1, $config['hooks']['post-start']);
+        $exec = $config['hooks']['post-start'][0]['exec'];
+        self::assertIsString($exec);
+        self::assertStringStartsWith("node -e '", $exec);
+        self::assertSame(1, substr_count($exec, "'") - 1, 'the JS holds no single quote of its own');
+
+        $home = $this->tempHome.'/claude-home';
+        mkdir($home, 0o750, true);
+        file_put_contents($home.'/.claude.json', json_encode([
+            'userID' => 'u1',
+            'theme' => 'light',
+            'projects' => ['/srv/app' => ['history' => [1]], '/other' => ['x' => true]],
+        ]));
+
+        $run = static function () use ($exec, $home): array {
+            exec('HOME='.escapeshellarg($home).' DDEV_APPROOT=/srv/app sh -c '.escapeshellarg($exec).' 2>&1', $out, $code);
+            self::assertSame(0, $code, implode("\n", $out));
+
+            return json_decode((string) file_get_contents($home.'/.claude.json'), true, 512, \JSON_THROW_ON_ERROR);
+        };
+        $first = $run();
+        self::assertTrue($first['hasCompletedOnboarding']);
+        self::assertSame('light', $first['theme'], 'an existing theme is kept');
+        self::assertSame('u1', $first['userID']);
+        self::assertTrue($first['projects']['/srv/app']['hasTrustDialogAccepted']);
+        self::assertSame([1], $first['projects']['/srv/app']['history']);
+        self::assertSame(['x' => true], $first['projects']['/other']);
+        self::assertSame($first, $run());
+
+        unlink($home.'/.claude.json');
+        $fresh = $run();
+        self::assertSame('dark', $fresh['theme']);
+        self::assertTrue($fresh['hasCompletedOnboarding']);
+        self::assertTrue($fresh['projects']['/srv/app']['hasTrustDialogAccepted']);
     }
 
     public function testWebEnvironmentOrderAndValues(): void
@@ -145,7 +185,7 @@ final class InstanceConfigWriterTest extends KernelTestCase
 
         self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][2]);
         self::assertCount(6, $config['web_environment']);
-        self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment'], array_keys($config));
+        self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment', 'hooks'], array_keys($config));
     }
 
     public function testEveryNamedPortOfTheProjectGetsAFleetPortVariable(): void
