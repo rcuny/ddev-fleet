@@ -148,12 +148,30 @@ final class UpgradeDocsTest extends TestCase
         }
     }
 
-    public function testTheMilestoneFragmentIsPresent(): void
+    public function testTheMilestoneEntryIsPresent(): void
     {
-        $fragment = self::read('changelog.d/FLE-18.md');
-        self::assertStringStartsWith('### Added', $fragment);
+        // A changelog.d fragment on develop; once a release assembles the fragments (and deletes them) the entry lives in a
+        // released version section of CHANGELOG.md.
+        $fragmentFile = self::root().'/changelog.d/FLE-18.md';
+        if (is_file($fragmentFile)) {
+            $fragment = (string) file_get_contents($fragmentFile);
+            self::assertStringStartsWith('### Added', $fragment);
+            self::assertMatchesRegularExpression('/^## Rollout$/m', $fragment);
+        } else {
+            $changelog = self::read('CHANGELOG.md');
+            self::assertGreaterThan(0, preg_match_all('/^## \[\d+\.\d+\.\d+\][^\n]*\n(.*?)(?=^## \[|\z)/ms', $changelog, $sections), 'no released version section in CHANGELOG.md');
+            $fragment = '';
+            foreach ($sections[1] as $body) {
+                if (str_contains($body, 'FLE-18')) {
+                    $fragment = $body;
+                    break;
+                }
+            }
+            self::assertNotSame('', $fragment, 'neither changelog.d/FLE-18.md nor a released CHANGELOG.md section has the FLE-18 entry');
+            self::assertStringContainsString('### Added', $fragment);
+            self::assertMatchesRegularExpression('/^#### Rollout$/m', $fragment);
+        }
         self::assertStringContainsString('fleet upgrade', $fragment);
         self::assertStringContainsString('docs/upgrading.md', $fragment);
-        self::assertMatchesRegularExpression('/^## Rollout$/m', $fragment);
     }
 }
