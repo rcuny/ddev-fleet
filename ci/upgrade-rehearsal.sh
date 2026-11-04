@@ -9,7 +9,8 @@
 #   1. builds a local bare git repository from the host's own checkout: the installed release's commit, then two
 #      throwaway annotated tags on top of it (default v1.9.1 and v1.9.2, newer than any real release) on `main`, the
 #      second with a CHANGELOG section that carries a rollout note and an ACTION: line;
-#   2. points the release source at that repository (FLEET_UPGRADE_REPO_URL in fleet.env, removed again at the end);
+#   2. points the release source at that repository (FLEET_UPGRADE_REPO_URL in fleet.env and the checkout's origin, both
+#      put back at the end);
 #   3. runs, as root: check, a refused non-interactive upgrade, upgrade to the first tag, upgrade to the latest tag,
 #      rollback to the first tag (database restored), and a rollback to the release the host started on,
 #      asserting after each step the exit code, /etc/ddev-fleet/installed-version and the check's verdict;
@@ -66,7 +67,7 @@ main() {
     printf 'Plan (nothing is run):\n'
     printf '  1. read %s/installed-version (the release the host starts on)\n' "$etc_dir"
     printf '  2. build a bare repository from %s: that release, then %s and %s on main\n' "$source_dir" "$first" "$second"
-    printf '  3. set FLEET_UPGRADE_REPO_URL in %s/fleet.env\n' "$etc_dir"
+    printf '  3. set FLEET_UPGRADE_REPO_URL in %s/fleet.env and point origin of %s at the repository\n' "$etc_dir" "$source_dir"
     printf '  4. fleet upgrade --check --no-cache (--json, and the text form: update available, rollout.action shown)\n'
     printf '  5. fleet upgrade --to %s with no terminal and no --yes: refused (exit 3), nothing changed\n' "$first"
     printf '  6. fleet upgrade --to %s --yes: installed-version %s\n' "$first" "$first"
@@ -94,11 +95,14 @@ main() {
     mkdir -p -- "$workdir"
   fi
   local repo="$workdir/releases.git" work="$workdir/work"
-  # Root builds and root runs the helper, `fleet` runs the checks: ownership differs, so git is told these two paths are
-  # safe for this process tree only (command-line scope; nothing is written to any git config).
-  export GIT_CONFIG_COUNT=2
+  # Root builds and root runs the helper, `fleet` owns the checkout and runs the checks: ownership differs, so git is told
+  # these paths are safe for this process tree only (command-line scope; nothing is written to any git config). That
+  # scope is NOT passed on to the helper process a local clone or push starts (git clears GIT_CONFIG_COUNT for it), so
+  # the one command that reads the fleet-owned checkout through such a helper, the clone, runs as the checkout's owner.
+  export GIT_CONFIG_COUNT=3
   export GIT_CONFIG_KEY_0=safe.directory GIT_CONFIG_VALUE_0=$source_dir
   export GIT_CONFIG_KEY_1=safe.directory GIT_CONFIG_VALUE_1=$repo
+  export GIT_CONFIG_KEY_2=safe.directory GIT_CONFIG_VALUE_2=$work
   export GIT_TERMINAL_PROMPT=0
   export GIT_AUTHOR_NAME='Upgrade Rehearsal' GIT_AUTHOR_EMAIL=rehearsal@example.invalid
   export GIT_COMMITTER_NAME='Upgrade Rehearsal' GIT_COMMITTER_EMAIL=rehearsal@example.invalid
@@ -121,7 +125,14 @@ main() {
 
   step "Build the release repository from $source_dir (starting release $base_tag)"
   rm -rf -- "$work" "$repo"
-  git clone --quiet -- "$source_dir" "$work"
+  if [ "$(id -u)" -eq 0 ]; then
+    # Root cloning a fleet-owned checkout fails with "dubious ownership" (FLE-173): clone as the owner, into a directory it
+    # can write; the rest of the build (root) reaches the clone through the safe.directory entry above.
+    chown -- "$fleet_user:$fleet_user" "$workdir"
+    runuser -u "$fleet_user" -- git clone --quiet -- "$source_dir" "$work"
+  else
+    git clone --quiet -- "$source_dir" "$work"
+  fi
   (
     cd "$work"
     git rev-parse --verify --quiet "refs/tags/$base_tag^{commit}" >/dev/null \
@@ -176,6 +187,10 @@ main() {
   grep -q '^FLEET_UPGRADE_REPO_URL=.' "$env_file" && { printf 'refused: %s already sets FLEET_UPGRADE_REPO_URL\n' "$env_file" >&2; trap - EXIT; return 3; }
   printf 'FLEET_UPGRADE_REPO_URL=%s\n' "$repo" >>"$env_file"
   override_added=1
+  # The pre-flight check (checkout.origin) wants origin to be the release source, and the source is the throwaway
+  # repository for this run; restore_host points origin at the public mirror again.
+  sudo -u "$fleet_user" git -C "$source_dir" remote set-url origin "$repo"
+  say "origin of $source_dir is $repo for this run"
 
   version() { tr -d '[:space:]' <"$etc_dir/installed-version"; }
   ok() { say "ok:   $*"; }

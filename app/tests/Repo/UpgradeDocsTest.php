@@ -148,6 +148,20 @@ final class UpgradeDocsTest extends TestCase
         }
     }
 
+    public function testTheRehearsalScriptClonesAsTheCheckoutOwnerAndPointsOriginAtTheRepository(): void
+    {
+        $script = self::read('ci/upgrade-rehearsal.sh');
+        // FLE-173: root cloning the fleet-owned checkout is refused by git (dubious ownership), so the clone runs as its owner.
+        self::assertMatchesRegularExpression('/runuser -u "\$fleet_user" -- git clone/', $script);
+        // The work clone, which root then commits in, is declared safe for the process tree, never in any git config.
+        self::assertStringContainsString('GIT_CONFIG_VALUE_2=$work', $script);
+        self::assertStringNotContainsString('git config --global', $script);
+        self::assertStringNotContainsString('--system', $script);
+        // checkout.origin must equal the release source for the run, and be put back afterwards.
+        self::assertMatchesRegularExpression('/remote set-url origin "\$repo"/', $script);
+        self::assertMatchesRegularExpression('/remote set-url origin "\$public_url"/', $script);
+    }
+
     public function testTheMilestoneEntryIsPresent(): void
     {
         // A changelog.d fragment on develop; once a release assembles the fragments (and deletes them) the entry lives in a

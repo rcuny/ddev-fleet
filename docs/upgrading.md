@@ -266,7 +266,7 @@ The check and the upgrade need the release source (the public mirror by default)
 
 `ci/upgrade-rehearsal.sh` proves the whole path on a host built for testing, with no public release. It builds a local
 bare repository from the host's own checkout (the installed release, then two throwaway annotated tags, by default
-`v1.9.1` and `v1.9.2`, the second with a rollout note and an `ACTION:` line), points the release source at it, and runs
+`v1.9.1` and `v1.9.2`, the second with a rollout note and an `ACTION:` line), points the release source and the checkout's `origin` at it, and runs
 as root: the check, an upgrade refused for lack of `--yes`, an upgrade to the first tag, an upgrade to the latest, a
 rollback with the database restored, and a rollback to the release the host started on. After each step it asserts the
 exit code, `/etc/ddev-fleet/installed-version` and the check's verdict, then removes the override, points `origin` at the
