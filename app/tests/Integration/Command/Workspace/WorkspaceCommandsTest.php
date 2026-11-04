@@ -323,14 +323,26 @@ final class WorkspaceCommandsTest extends KernelTestCase
 
         self::assertSame(0, $run->getStatusCode(), $run->getErrorOutput());
         $text = $run->getDisplay();
-        self::assertStringContainsString("○ general\n", $text);
+        self::assertStringContainsString("\e[2m○ general\e[0m\n", $text, 'general is dim when not current');
         self::assertStringContainsString("\e[7m● acme--i1", $text, 'the current window is reverse-highlighted');
-        self::assertStringContainsString('○ acme--i2', $text);
-        self::assertStringContainsString("\e[2mdevelop\e[0m", $text, 'the live branch under the instance');
+        self::assertStringNotContainsString("\e[32m● acme--i1", $text, 'the current row carries no colour');
+        self::assertStringContainsString("\e[90m○ acme--i2\e[0m", $text, 'stopped is grey');
+        self::assertStringContainsString("\e[90mdevelop\e[0m", $text, 'the live branch under the instance');
         self::assertStringContainsString('url      https://acme--i1.fleet.example.com', $text);
         self::assertStringContainsString('project  acme', $text);
         self::assertStringContainsString('^b R  reset tab', $text);
         self::assertStringContainsString('reattach: fleet tmux', $text);
+    }
+
+    public function testARunningInstanceIsGreenWhenItIsNotTheCurrentTab(): void
+    {
+        $instances = $this->instancesOf($this->projectNamed('acme'), [InstanceState::Running, InstanceState::Stopped]);
+        $this->runner()->expect(['git', 'for-each-ref'], new CommandResult(0, "*develop\n"));
+
+        $text = $this->cli('fleet:tmux:sidebar', ['--window' => $instances[1]->id(), '--once' => true])->getDisplay();
+
+        self::assertStringContainsString("\e[32m● acme--i1\e[0m", $text);
+        self::assertStringContainsString("\e[7m○ acme--i2", $text);
     }
 
     public function testTheSidebarOfGeneralAGoneInstanceAndABadWindow(): void
@@ -371,9 +383,10 @@ final class WorkspaceCommandsTest extends KernelTestCase
             unlink($flag);
         }
 
-        self::assertStringContainsString('! reboot required', $text);
-        self::assertStringContainsString('! acme--i1', $text, 'failed');
-        self::assertStringContainsString('• acme--i2', $text, 'deploying');
+        self::assertStringContainsString("\e[1;33m! reboot required\e[0m", $text, 'the banner is bold yellow');
+        self::assertStringContainsString("\e[31m! acme--i1\e[0m", $text, 'failed is red');
+        self::assertStringContainsString("\e[36m• acme--i2\e[0m", $text, 'deploying is cyan');
+        self::assertStringContainsString("\e[1mFLEET\e[0m", $text);
         foreach (explode("\n", $text) as $line) {
             self::assertLessThanOrEqual(50, mb_strlen((string) preg_replace('/\e\[[0-9;]*m/', '', $line)), 'every line fits the pane');
         }
