@@ -10,6 +10,20 @@ if (tier !== 'quick' && tier !== 'full') {
   throw new Error(`FLEET_PW_TIER must be "quick" or "full", got "${tier}"`);
 }
 const quick = tier === 'quick';
+// FLE-172: ci/run-gates.sh decides from the diff and passes the result. FLEET_PW_PHONE=off drops the phone project, `on` keeps it,
+// unset/auto keeps the tier's own behaviour. FLEET_PW_TARGETED (space separated spec file names) adds back those *-coverage and
+// *-validation specs in the quick tier.
+const phoneMode = process.env.FLEET_PW_PHONE ?? 'auto';
+if (!['on', 'off', 'auto'].includes(phoneMode)) {
+  throw new Error(`FLEET_PW_PHONE must be "on", "off" or "auto", got "${phoneMode}"`);
+}
+const targeted = (process.env.FLEET_PW_TARGETED ?? '')
+  .split(/\s+/)
+  .filter((n) => /^[\w.-]+\.spec\.ts$/.test(n))
+  .map((n) => n.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+// Quick-tier ignore for a spec family, except the targeted files.
+const skipUnlessTargeted = (family: string): RegExp =>
+  new RegExp(`(^|/)${targeted.length ? `(?!(?:${targeted.join('|')})$)` : ''}${family}`);
 // The axe sweep (FLE-158) runs in the full tier only: release/*, develop and nightly. Quick = smoke + JS behaviour.
 const A11Y_SWEEP = /(^|\/)(a11y|users-a11y)[^/]*\.spec\.ts$/;
 
@@ -40,15 +54,15 @@ export default defineConfig({
       name: 'desktop',
       use: { ...devices['Desktop Chrome'], viewport: { width: 1280, height: 800 } },
       testIgnore: quick
-        ? [/\.phone\.spec\.ts$/, /-coverage\.spec\.ts$/, /(projects|templates)-validation\.spec\.ts$/, A11Y_SWEEP]
+        ? [/\.phone\.spec\.ts$/, skipUnlessTargeted('[^/]*-coverage\\.spec\\.ts$'), skipUnlessTargeted('(projects|templates)-validation\\.spec\\.ts$'), A11Y_SWEEP]
         : /\.phone\.spec\.ts$/,
     },
-    {
+    ...(phoneMode === 'off' ? [] : [{
       name: 'phone',
       use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
       testIgnore: /\.desktop\.spec\.ts$/,
       grep: quick ? /^(?=.*@phone)(?=.*@smoke)/ : /@phone/,
-    },
+    }]),
   ],
   // Only when no external server is given: start the app ourselves (K25: `env -u FLEET_E2E_BASE_URL npx playwright test`).
   webServer: externalBaseURL

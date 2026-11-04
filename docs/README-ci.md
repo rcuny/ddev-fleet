@@ -338,6 +338,21 @@ FLEET_CI_INSTALL_DEPS=1 ci/run-gates.sh --full          # sudo playwright instal
 | `--quick` | `composer-install`, `composer-gates` (`composer run gates`: assets, cs, stan, lint, phpunit), `prod-check` (only if `app/composer.json` has the script) |
 | `--full` | quick, plus `playwright-install` (`npm ci`, Chromium), `playwright-typecheck`, `playwright` (whole suite with `FLEET_E2E_BASE_URL` unset), `infra-install` (`.venv`), `pytest` (`tests/pytest`), `systemd-security` (offline score; skipped without `systemd-analyze`), `ansible-lint` (non-blocking, skipped below Python 3.12) |
 
+**What Playwright runs (FLE-172).** The tier and two optional parts decide it:
+
+| Branch | Tier | Phone project | `*-coverage` / `*-validation` specs |
+|---|---|---|---|
+| `feature/*`, `renovate/*`, `develop` pushes | `quick` (`quick+targeted`) | only on a UI change | only those whose area the diff touches |
+| `release/*`, `main`, nightly develop run, `FLEET_PW_TIER=full` | `full` | always | all |
+
+`ci/pw_select.py` decides from the diff `merge-base(FLEET_CI_DIFF_BASE, FLEET_CI_DIFF_HEAD)..FLEET_CI_DIFF_HEAD` (defaults
+`origin/develop` and `HEAD`; Fleet CI sets the head to the pushed commit, since it merges develop in first, and the base of a
+`develop` push to the last green develop commit). The rules are in `tests/README-tests.md`. `FLEET_PW_PHONE=on|off|auto`
+overrides the phone decision. The choice goes to `selection.txt`, to the `playwright` row of `gates.tsv` (so the report and the
+`fleet-gates` description say `quick tier; phone: skipped (no UI change); coverage specs: 2 targeted`) and the 20 slowest
+Playwright tests of the run to `slowest-tests.txt` (`ci/slowest_tests.py`). Playwright workers stay derived from the container CPU quota
+(two thirds of the CPUs, 4 at the 6-CPU cap) and are not hard-coded.
+
 Every gate runs with a throw-away `FLEET_HOME` (`mktemp -d`, removed on exit) and without `APP_ENV`: the companion
 container exports `FLEET_HOME=/tmp/sqlite/fleet-home` (the served dev app's database, which the tests wipe) and
 `APP_ENV=dev`. Composer is called as found on PATH; `FLEET_PHP` runs it through that PHP binary instead. Unlike the
