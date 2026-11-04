@@ -93,6 +93,19 @@ main() {
   done
   [[ $repo_url =~ ^[A-Za-z0-9/][A-Za-z0-9._/:@+~%=-]{0,499}$ ]] || { err 'usage: --repo-url is not a valid url or path'; return 2; }
 
+  # A local-path source (--repo-url=/some/dir.git, the rehearsal) is typically owned by another user than root; git then
+  # refuses it as "dubious ownership" and, with stderr silenced below, the planned tag looked moved (FLE-173). The path
+  # the operator typed on this command line is trusted, so a private global config that lists exactly it is handed to
+  # git for this process only (GIT_CONFIG_GLOBAL; the host's git configuration is never written). The command-scope
+  # GIT_CONFIG_COUNT variables do not do it: git clears them for the helper process a local fetch starts.
+  safe_cfg=''
+  if [[ $repo_url == /* ]]; then
+    safe_cfg=$(mktemp "${TMPDIR:-/tmp}/fleet-upgrade-gitcfg.XXXXXX")
+    printf '[safe]\n\tdirectory = %s\n' "$repo_url" >"$safe_cfg"
+    export GIT_CONFIG_GLOBAL=$safe_cfg
+    trap 'rm -f -- "$safe_cfg"' EXIT
+  fi
+
   local actor=root
   if [ -n "${SUDO_USER:-}" ] && [[ $SUDO_USER =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]; then
     actor=$SUDO_USER
@@ -187,11 +200,18 @@ main() {
 
   # --- the tag must still point at the planned commit (a moved tag is refused before anything changes) -------------
   local peeled
-  peeled=$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags -- "$repo_url" "refs/tags/$target^{}" 2>/dev/null | awk '{print $1}' | head -n 1) || peeled=''
+  # The same --repo-url the plan was made from (the unprivileged plan reads it from FLEET_UPGRADE_REPO_URL, the root
+  # run only from its own command line).
+  local lsr_err
+  lsr_err=$(mktemp "${TMPDIR:-/tmp}/fleet-upgrade-lsr.XXXXXX")
+  peeled=$(GIT_TERMINAL_PROMPT=0 git ls-remote --tags -- "$repo_url" "refs/tags/$target^{}" 2>"$lsr_err" | awk '{print $1}' | head -n 1) || peeled=''
   if [ "$peeled" != "$sha" ]; then
+    [ -s "$lsr_err" ] && err "git said: $(head -c 300 "$lsr_err" | tr '\n' ' ')"
+    rm -f -- "$lsr_err"
     err "the tag $target no longer points at the commit the plan resolved (${sha:0:7}); nothing was changed. Run the command again."
     return 3
   fi
+  rm -f -- "$lsr_err"
 
   # --- 3. backup ---------------------------------------------------------------------------------------------------------
   local backup=''
@@ -229,7 +249,7 @@ main() {
   # Cleanup is unconditional: an EXIT trap (not RETURN) so a failing command under set -e cannot leak the directory.
   work=$(mktemp -d "${TMPDIR:-/tmp}/fleet-upgrade.XXXXXX")
   chmod 0700 "$work"
-  trap 'rm -rf -- "${work:-}"' EXIT
+  trap 'rm -rf -- "${work:-}"; rm -f -- "${safe_cfg:-}"' EXIT
   say "Fetching the installer of $target (${sha:0:7}) ..."
   if ! { GIT_TERMINAL_PROMPT=0 git init -q "$work/src" \
     && GIT_TERMINAL_PROMPT=0 git -C "$work/src" fetch -q --depth 1 -- "$repo_url" "$sha" \

@@ -164,33 +164,70 @@ main() {
   chmod 755 -- "$workdir"
 
   # --- the host: override, steps, assertions --------------------------------------------------------------------------
-  local env_file="$etc_dir/fleet.env" override_added=0 failed=0 rc=0 log="$workdir/steps.log"
+  local env_file="$etc_dir/fleet.env" override_added=0 failed=0 rc=0 log="$workdir/steps.log" restored=0
 
+  # What the host looked like before the run, so the put-back restores THAT and not an assumed value (FLE-173).
+  local origin_before='' origin_changed=0
+  origin_before=$(sudo -u "$fleet_user" git -C "$source_dir" remote get-url origin 2>/dev/null || true)
+  [ -n "$origin_before" ] || origin_before=$public_url
+
+  # Why the explicit call at the end of main: the EXIT trap fires after main has returned, when its `local` variables are
+  # gone, and under `set -u` the trap then died on the first unset name, leaving the host modified (FLE-173). The trap is
+  # kept for the paths that leave through `exit` (set -e, signals), where main's frame is still alive.
+  # Idempotent and verified: runs on every exit path (assertion failures, errors, INT/TERM/HUP), each step is attempted
+  # even when another failed, and a step that did not take effect is said loudly and makes the exit code non-zero.
   restore_host() {
-    local code=$?
+    local code=${1:-$?} restore_failed=0 got
+    [ "$restored" -eq 0 ] || return "$code"
+    restored=1
     set +e
+    trap - EXIT INT TERM HUP
     step 'Put the host back'
     if [ "$override_added" -eq 1 ]; then
-      sed -i '/^FLEET_UPGRADE_REPO_URL=/d' "$env_file" && say "removed FLEET_UPGRADE_REPO_URL from $env_file"
+      sed -i '/^FLEET_UPGRADE_REPO_URL=/d' "$env_file"
+      if grep -q '^FLEET_UPGRADE_REPO_URL=' "$env_file"; then
+        say "FAIL: FLEET_UPGRADE_REPO_URL is STILL in $env_file: delete that line by hand"
+        restore_failed=1
+      else
+        say "removed FLEET_UPGRADE_REPO_URL from $env_file"
+      fi
+    fi
+    if [ "$origin_changed" -eq 1 ] && [ -d "$source_dir/.git" ]; then
+      sudo -u "$fleet_user" git -C "$source_dir" remote set-url origin "$origin_before"
+      got=$(sudo -u "$fleet_user" git -C "$source_dir" remote get-url origin 2>/dev/null)
+      if [ "$got" = "$origin_before" ]; then
+        say "origin of $source_dir is $origin_before again"
+      else
+        say "FAIL: origin of $source_dir is '$got', expected '$origin_before': run git remote set-url origin by hand"
+        restore_failed=1
+      fi
     fi
     if [ -d "$source_dir/.git" ]; then
-      sudo -u "$fleet_user" git -C "$source_dir" remote set-url origin "$public_url" && say "origin of $source_dir is $public_url again"
       sudo -u "$fleet_user" git -C "$source_dir" tag -d "$first" "$second" >/dev/null 2>&1 && say "deleted $first and $second from the checkout"
     fi
     fleet upgrade:refresh >/dev/null 2>&1 && say 'release cache refreshed from the real source' \
       || say 'could not refresh the release cache now (offline?); the daily timer will'
     [ "$keep" -eq 1 ] || { [ "$created_workdir" -eq 0 ] || rm -rf -- "$workdir"; }
+    if [ "$restore_failed" -ne 0 ]; then
+      say 'THE HOST WAS NOT FULLY PUT BACK (see FAIL lines above)'
+      [ "$code" -ne 0 ] || code=1
+    fi
     return "$code"
   }
   trap restore_host EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  trap 'exit 129' HUP
 
-  grep -q '^FLEET_UPGRADE_REPO_URL=.' "$env_file" && { printf 'refused: %s already sets FLEET_UPGRADE_REPO_URL\n' "$env_file" >&2; trap - EXIT; return 3; }
-  printf 'FLEET_UPGRADE_REPO_URL=%s\n' "$repo" >>"$env_file"
+  grep -q '^FLEET_UPGRADE_REPO_URL=.' "$env_file" && { printf 'refused: %s already sets FLEET_UPGRADE_REPO_URL\n' "$env_file" >&2; trap - EXIT INT TERM HUP; return 3; }
+  # The flags are raised BEFORE the change, so a failure half way through the change is still put back.
   override_added=1
+  printf 'FLEET_UPGRADE_REPO_URL=%s\n' "$repo" >>"$env_file"
   # The pre-flight check (checkout.origin) wants origin to be the release source, and the source is the throwaway
-  # repository for this run; restore_host points origin at the public mirror again.
+  # repository for this run; restore_host puts origin back to what it was.
+  origin_changed=1
   sudo -u "$fleet_user" git -C "$source_dir" remote set-url origin "$repo"
-  say "origin of $source_dir is $repo for this run"
+  say "origin of $source_dir is $repo for this run (was $origin_before)"
 
   version() { tr -d '[:space:]' <"$etc_dir/installed-version"; }
   ok() { say "ok:   $*"; }
@@ -264,6 +301,7 @@ main() {
     rc=1
   fi
   say 'Also check by hand: sign in and open the dashboard; the Upgrade page shows no "available" badge for the throwaway tags.'
+  restore_host "$rc" || rc=$?
   return "$rc"
 }
 

@@ -35,6 +35,21 @@ final class UpgradeHelperTest extends TestCase
         $this->makeRepo();
     }
 
+    public function testAnOwnedByAnotherUserLocalSourceIsTrustedForThisRunOnlyAndRecheckedAgainstThatUrl(): void
+    {
+        // FLE-173: root re-verifying a tag in a repository the fleet user owns hit git's "dubious ownership" and the tag
+        // looked moved. The re-check and the installer fetch use the --repo-url of the command line, with a private
+        // global git config that lists exactly that path; it is gone afterwards and nothing else is trusted.
+        $cfgLog = $this->scratch().'/gitcfg.log';
+        [$status, $out, $err] = $this->upgrade(['--yes'], ['FAKE_GITCFG_LOG' => $cfgLog]);
+
+        self::assertSame(0, $status, $out.$err);
+        $seen = (string) file_get_contents($cfgLog);
+        self::assertStringContainsString('directory = '.$this->repo."\n", $seen);
+        self::assertSame(1, substr_count($seen, 'directory = ') / max(1, substr_count($seen, '[safe]')), 'one trusted path per config');
+        self::assertSame([], glob($this->scratch().'/tmp/fleet-upgrade-*') ?: [], 'the private git config and temp files are removed');
+    }
+
     public function testAFullRunInstallsVerifiesAndWritesTheHistory(): void
     {
         [$status, $out, $err] = $this->upgrade(['--yes'], ['SUDO_USER' => 'alice']);
@@ -384,7 +399,7 @@ final class UpgradeHelperTest extends TestCase
             mkdir($this->scratch().'/tmp', 0o700, true);
         }
         $realGit = trim((string) shell_exec('command -v git'));
-        $git = 'if [ -n "${FAKE_FETCH_FAIL:-}" ]; then case " $* " in *" fetch "*) echo "fetch refused" >&2; exit 1;; esac; fi'."\n".'exec '.escapeshellarg($realGit).' "$@"';
+        $git = 'if [ -n "${FAKE_GITCFG_LOG:-}" ]; then case " $* " in *" ls-remote "*|*" fetch "*) cat "$GIT_CONFIG_GLOBAL" >> "$FAKE_GITCFG_LOG";; esac; fi'."\n".'if [ -n "${FAKE_FETCH_FAIL:-}" ]; then case " $* " in *" fetch "*) echo "fetch refused" >&2; exit 1;; esac; fi'."\n".'exec '.escapeshellarg($realGit).' "$@"';
         $stubs = $this->stubs([
             'fleet' => $fleet,
             'systemctl' => 'if [ -n "${FAKE_SYSTEMCTL:-}" ]; then eval "$FAKE_SYSTEMCTL"; else echo "systemctl $*" >> "$FAKE_LOG"; fi',

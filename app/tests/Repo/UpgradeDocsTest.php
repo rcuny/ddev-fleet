@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Repo;
 
 use PHPUnit\Framework\TestCase;
+use Symfony\Component\Process\Process;
 
 /**
  * The upgrade documentation against the code (FLE-155): the options of the root helper, the pre-flight check ids of the
@@ -159,7 +160,60 @@ final class UpgradeDocsTest extends TestCase
         self::assertStringNotContainsString('--system', $script);
         // checkout.origin must equal the release source for the run, and be put back afterwards.
         self::assertMatchesRegularExpression('/remote set-url origin "\$repo"/', $script);
-        self::assertMatchesRegularExpression('/remote set-url origin "\$public_url"/', $script);
+        self::assertMatchesRegularExpression('/remote set-url origin "\$origin_before"/', $script);
+    }
+
+    public function testTheRehearsalPutsTheHostBackOnEveryExitPath(): void
+    {
+        // FLE-173: root, the tools and the source checkout are stubbed; the "upgrade" steps fail, so assertions fail and the
+        // script exits non-zero. The env line and origin must be back as they were, and a forced signal must do the same.
+        $dir = sys_get_temp_dir().'/fleet-rehearsal-test-'.bin2hex(random_bytes(4));
+        mkdir($dir.'/bin', 0o755, true);
+        mkdir($dir.'/etc', 0o755, true);
+        try {
+            $git = static function (string ...$args) use ($dir): string {
+                $p = new Process(['git', '-c', 'user.name=t', '-c', 'user.email=t@example.com', '-c', 'protocol.file.allow=always', ...$args], $dir.'/src', ['GIT_CONFIG_GLOBAL' => '/dev/null', 'GIT_CONFIG_SYSTEM' => '/dev/null']);
+                $p->mustRun();
+
+                return $p->getOutput();
+            };
+            mkdir($dir.'/src');
+            $git('init', '-q', '-b', 'main');
+            file_put_contents($dir.'/src/CHANGELOG.md', "# Changelog\n\n## [Unreleased]\n");
+            $git('add', 'CHANGELOG.md');
+            $git('commit', '-q', '-m', 'base');
+            $git('tag', '-a', 'v1.2.0', '-m', 'v1.2.0');
+            $git('remote', 'add', 'origin', 'https://example.invalid/original.git');
+            file_put_contents($dir.'/etc/installed-version', "v1.2.0\n");
+            file_put_contents($dir.'/etc/fleet.env', "APP_ENV=prod\n");
+            foreach (['id' => 'echo 0', 'chown' => 'exit 0', 'sudo' => 'shift 2; exec "$@"', 'runuser' => 'shift 3; exec "$@"', 'fleet' => 'if [ "$1" = upgrade ] && [ -n "${HANG:-}" ] && [ "$2" = --check ]; then kill -TERM $PPID; sleep 5; fi; [ "$1" = "upgrade:refresh" ] && exit 0; exit 1'] as $name => $body) {
+                file_put_contents($dir.'/bin/'.$name, "#!/bin/bash\n".$body."\n");
+                chmod($dir.'/bin/'.$name, 0o755);
+            }
+            foreach ([[], ['HANG' => '1']] as $extra) {
+                file_put_contents($dir.'/etc/fleet.env', "APP_ENV=prod\n");
+                $git('remote', 'set-url', 'origin', 'https://example.invalid/original.git');
+                $run = new Process(
+                    ['bash', self::root().'/ci/upgrade-rehearsal.sh', '--yes-this-is-a-test-host'],
+                    $dir,
+                    $extra + [
+                        'PATH' => $dir.'/bin:'.(string) getenv('PATH'),
+                        'FLEET_REHEARSAL_ETC_DIR' => $dir.'/etc',
+                        'FLEET_REHEARSAL_SOURCE' => $dir.'/src',
+                        'GIT_CONFIG_GLOBAL' => '/dev/null',
+                        'GIT_CONFIG_SYSTEM' => '/dev/null',
+                    ],
+                    null,
+                    120,
+                );
+                $run->run();
+                self::assertNotSame(0, $run->getExitCode(), $run->getOutput().$run->getErrorOutput());
+                self::assertSame("APP_ENV=prod\n", file_get_contents($dir.'/etc/fleet.env'), 'the override line is removed: '.$run->getOutput());
+                self::assertSame('https://example.invalid/original.git', trim($git('remote', 'get-url', 'origin')), 'origin is what it was: '.$run->getOutput());
+            }
+        } finally {
+            new Process(['rm', '-rf', '--', $dir])->run();
+        }
     }
 
     public function testTheMilestoneEntryIsPresent(): void
