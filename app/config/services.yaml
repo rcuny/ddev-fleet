@@ -191,7 +191,7 @@ when@test:
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
 
     services:
-        # No consumer yet (the upgrade commands arrive later); the registry wiring test reads it from the container.
+        # Public so the registry wiring test can read it from the container (the upgrade commands inject it).
         App\Fleet\Upgrade\Check\CheckRunner:
             autowire: true
             public: true

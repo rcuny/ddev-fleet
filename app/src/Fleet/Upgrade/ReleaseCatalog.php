@@ -47,7 +47,9 @@ final readonly class ReleaseCatalog
         $checkedAt = \is_string($data['checkedAt'] ?? null) ? \DateTimeImmutable::createFromFormat(\DATE_ATOM, $data['checkedAt']) : false;
         $error = \is_string($data['error'] ?? null) && '' !== $data['error'] ? $data['error'] : null;
 
-        return new CatalogState($releases, false === $checkedAt ? null : $checkedAt, $error);
+        $listedAt = \is_string($data['listedAt'] ?? null) ? \DateTimeImmutable::createFromFormat(\DATE_ATOM, $data['listedAt']) : false;
+
+        return new CatalogState($releases, false === $checkedAt ? null : $checkedAt, $error, false === $listedAt ? null : $listedAt);
     }
 
     public function isFresh(): bool
@@ -64,9 +66,10 @@ final readonly class ReleaseCatalog
     {
         $now = $this->clock->now();
         try {
-            $state = new CatalogState($this->tags->fetch(), $now, null);
+            $state = new CatalogState($this->tags->fetch(), $now, null, $now);
         } catch (UpgradeSourceUnavailable $e) {
-            $state = new CatalogState($this->state()->releases, $now, $e->getMessage());
+            $previous = $this->state();
+            $state = new CatalogState($previous->releases, $now, $e->getMessage(), $previous->listedAt ?? (null === $previous->error ? $previous->checkedAt : null));
         }
 
         try {
@@ -74,6 +77,7 @@ final readonly class ReleaseCatalog
             $item->set([
                 'releases' => array_map(static fn (Release $r): array => $r->toArray(), $state->releases),
                 'checkedAt' => $now->format(\DATE_ATOM),
+                'listedAt' => $state->listedAt?->format(\DATE_ATOM),
                 'error' => $state->error,
             ]);
             $item->expiresAfter(null);
