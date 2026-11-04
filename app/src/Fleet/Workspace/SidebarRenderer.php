@@ -16,7 +16,8 @@ use App\Fleet\Projects\Refused;
 /**
  * The text of the sidebar pane (50 columns): the title, the reboot banner, every instance with a state glyph and its live
  * branch (the current window reverse-highlighted), the state and URL of the current instance, and the key hints.
- * ANSI styling only (reverse, dim, bold), so the pane and a test show exactly what is returned.
+ * ANSI styling only (reverse, dim, bold, 16-colour foregrounds), so the pane and a test show exactly what is returned.
+ * Instances are coloured by state as in the 0.x sidebar; escape codes never count towards the 46 visible columns.
  */
 final readonly class SidebarRenderer
 {
@@ -27,6 +28,11 @@ final readonly class SidebarRenderer
     private const string DIM = "\e[2m";
     private const string BOLD = "\e[1m";
     private const string RESET = "\e[0m";
+    private const string GREEN = "\e[32m";
+    private const string GREY = "\e[90m";
+    private const string CYAN = "\e[36m";
+    private const string RED = "\e[31m";
+    private const string YELLOW_BOLD = "\e[1;33m";
 
     public function __construct(
         private InstanceRepository $instances,
@@ -53,18 +59,18 @@ final readonly class SidebarRenderer
         $lines = [self::BOLD.'FLEET'.self::RESET];
         $status = $this->reboot->status();
         if ($status->required) {
-            $lines[] = '! reboot required';
+            $lines[] = self::YELLOW_BOLD.'! reboot required'.self::RESET;
         }
         $lines[] = '';
-        $lines[] = $this->row('○', Tmux::HOME_WINDOW, Tmux::HOME_WINDOW === $window);
+        $lines[] = $this->row('○', Tmux::HOME_WINDOW, Tmux::HOME_WINDOW === $window, self::DIM);
 
         $all = $this->instances->all();
         foreach ($all as $instance) {
-            $lines[] = $this->row(self::glyph($instance->state()), $instance->id(), $instance->id() === $window);
+            $lines[] = $this->row(self::glyph($instance->state()), $instance->id(), $instance->id() === $window, self::colour($instance->state()));
             $git = $cache->get($instance->id(), $now, fn (): array => $this->live($instance));
             $text = '' === $git['branch'] ? '' : $git['branch'].('' === $git['head'] ? '' : ' @ '.$git['head']);
             foreach (self::wrap($text, self::WIDTH - 2) as $part) {
-                $lines[] = '  '.self::DIM.$part.self::RESET;
+                $lines[] = '  '.self::GREY.$part.self::RESET;
             }
         }
 
@@ -129,11 +135,23 @@ final readonly class SidebarRenderer
         return ['branch' => '' === $branch ? $instance->branch() : $branch, 'head' => $head];
     }
 
-    private function row(string $glyph, string $name, bool $current): string
+    private function row(string $glyph, string $name, bool $current, string $style): string
     {
         $text = self::clip($glyph.' '.$name, self::WIDTH);
 
-        return $current ? self::REVERSE.str_pad($text, self::WIDTH).self::RESET : $text;
+        // the current row is plain reverse: readable on any background
+        return $current ? self::REVERSE.mb_str_pad($text, self::WIDTH).self::RESET : ('' === $style ? $text : $style.$text.self::RESET);
+    }
+
+    private static function colour(InstanceState $state): string
+    {
+        return match ($state) {
+            InstanceState::Running => self::GREEN,
+            InstanceState::Stopped => self::GREY,
+            InstanceState::Deploying => self::CYAN,
+            InstanceState::Failed, InstanceState::Destroying => self::RED,
+            InstanceState::Unknown => '',
+        };
     }
 
     private static function glyph(InstanceState $state): string
