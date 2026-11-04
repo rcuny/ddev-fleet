@@ -11,4 +11,6 @@ enum StepPhase: string
 {
     case BeforeStart = 'before_start';
     case AfterStart = 'after_start';
+    /** After the last post-deploy line succeeded and `deploy complete` is logged (the tty commands of the tmux window). */
+    case AfterDeploy = 'after_deploy';
 }

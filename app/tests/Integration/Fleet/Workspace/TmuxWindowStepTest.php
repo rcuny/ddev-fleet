@@ -115,6 +115,49 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         self::assertStringContainsString('the value of [[branch]] is not safe to type into a shell', $this->logText($job));
     }
 
+    public function testTtyCommandsAreTypedOnlyAfterTheLastPostDeployLineAndDeployComplete(): void
+    {
+        $template = $this->saveTemplate('full', ['ddev init', 'ddev drush cr']);
+        $template->changeCommands(['ddev init', 'ddev drush cr'], ['bash run.sh'], ['echo two']);
+        $this->templates->save($template);
+        $typedAtPostDeploy = [];
+        $this->runner->expect(['ddev', 'drush'], new \App\Fleet\Shell\CommandResult(0), function () use (&$typedAtPostDeploy): void {
+            $typedAtPostDeploy = $this->tmuxRunner->typed;
+        });
+
+        $job = $this->deploy();
+
+        self::assertSame([], $typedAtPostDeploy, 'nothing typed while the post-deploy lines run');
+        self::assertSame(['bash run.sh'], $this->tmuxRunner->typedIn('tty1'));
+        $log = $this->logText($job);
+        $complete = strpos($log, 'deploy complete');
+        $typed = strpos($log, 'tty commands typed (tty1, tty2)');
+        self::assertIsInt($complete);
+        self::assertIsInt($typed);
+        self::assertGreaterThan(strpos($log, 'post_deploy: ddev drush cr'), $complete);
+        self::assertGreaterThan($complete, $typed);
+    }
+
+    public function testAFailedPostDeployTypesNothing(): void
+    {
+        $template = $this->saveTemplate('full', ['ddev init']);
+        $template->changeCommands(['ddev init'], ['bash run.sh'], ['echo two']);
+        $this->templates->save($template);
+        $this->runner->expect(['ddev', 'init'], new \App\Fleet\Shell\CommandResult(3, '', "no\n"));
+        $instance = $this->instance('main', 'develop');
+        $job = $this->job('deploy', $instance);
+
+        try {
+            $this->workflow->run($instance, $this->project, false, $this->logFor($job), false);
+            self::fail('the deploy should fail');
+        } catch (\App\Fleet\Jobs\JobFailed) {
+        }
+
+        self::assertSame([], $this->tmuxRunner->typed);
+        self::assertSame([], $this->tmuxRunner->windows);
+        self::assertStringContainsString("tty commands not started: post-deploy failed at 'ddev init'", $this->logText($job));
+    }
+
     public function testATmuxFailureIsAWarningNotAFailedDeploy(): void
     {
         $this->template([], ['echo hi']);
