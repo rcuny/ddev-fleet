@@ -56,10 +56,11 @@ plan and changes nothing.
 | `--repo-url=<url\|path>` | Git remote (or a bundle or path readable by the `fleet` user) to install from. Default: the public GitHub mirror. |
 | `--skip-dns-check` | Do not compare the DNS records with this host's addresses (for example behind NAT or a CDN). |
 | `--no-shell-profile` | Do not install the shell profile (step 35). Default: installed. |
+| `--preflight` | Only check the host and change nothing; works without root. Prints one line per finding, `BLOCK`, `WARN` or `INFO <id>: <message>`, and exits 0, or 3 when anything blocks. Checks: free disk on `/opt`, `/srv/fleet` and `/var`, the length of every existing instance id, that Docker and DDEV answer, `fleet.env`, the supported OS, the required packages and that the repository answers. Run it from a checkout: `bash install/run.sh --preflight --domain=<fqdn>`. A normal run does the same checks first and stops before step 10 on a `BLOCK`. |
 | `--dry-run` | Print the plan, change nothing. Works without root. |
 | `--help` | Print the usage text. |
 
-There are no prompts. Exit codes: `0` ok, `1` a step failed (the message names the step), `2` DNS mismatch,
+There are no prompts. Exit codes: `0` ok, `1` a step failed (the message names the step), `2` DNS mismatch, `3` the pre-flight checks blocked the run (nothing was changed),
 `64` usage error, `75` another installer run is in progress, `77` not root, `78` unsupported host.
 
 ### What the installer does
@@ -105,7 +106,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | `/srv/fleet/assets/<project>` | `fleet:fleet` 0750 | A project's seed files (database dumps, files archives, env templates), shown on the project's Assets tab; created by the first upload or by `mkdir`. Copy large files in here over SSH, see [`assets.md`](assets.md). Back it up with the databases. |
 | `/srv/fleet/uploads` | `fleet:fleet` 0700 | Chunks of browser uploads on their way to `assets/`, one directory per upload; emptied when an upload completes and by `fleet asset:gc` (after 24 hours). Leave it out of backups. |
 | `/srv/fleet/authelia` | `fleet:authelia` 2750 | `users.yml` (0640, `fleet:authelia`), the sign-in portal's user file with the argon2id hashes, written by the app. |
-| `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640 `root:fleet`, see below), `mercure.env` (`root:root` 0600), `installed-revision` (0644). |
+| `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640 `root:fleet`, see below), `mercure.env` (`root:root` 0600), `installed-revision` (0644), `installed-version` (0644: the release tag, or `<ref>@<sha7>` when `--ref` is not a tag; written after the health check, so a failed run keeps the old value). |
 | `/etc/caddy/Caddyfile` | `root:root` 0644 | Written by the root helper, never by the app. Holds `{env.X}` placeholders, no secrets. |
 | `/etc/caddy/fleet/` | `fleet:caddy` 2750 | `gate.conf` (0640), the sign-in gate, written by the app; `instances/` and `ports/` for later milestones. |
 | `/etc/caddy/fleet.env` | `root:caddy` 0640 | The proxy secret (Caddy reads it from its environment, so it only takes effect at the next start). It holds no OVH credential: an `OVH_*` line left by an older apply is dropped at the next `apply caddy`. |

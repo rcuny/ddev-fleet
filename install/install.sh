@@ -27,7 +27,7 @@ main() {
     self_dir=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
   fi
 
-  local domain='' acme_email='' ref=main dry_run=0 arg
+  local domain='' acme_email='' ref=main dry_run=0 preflight=0 arg
   local repo_url='https://github.com/rcuny/ddev-fleet.git'
   local opt_dir=/opt/ddev-fleet stage_dir=/usr/local/lib/ddev-fleet-installer fleet_home=/home/fleet
 
@@ -57,10 +57,12 @@ Options:
   --repo-url=<url|path> git remote or bundle to install from (default: the public GitHub mirror)
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
+  --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
+                        root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
   --help                this text
 
-Exit codes: 0 ok, 2 DNS mismatch, 64 usage, 77 not root, 78 unsupported host.
+Exit codes: 0 ok, 2 DNS mismatch, 3 pre-flight blocked, 64 usage, 77 not root, 78 unsupported host.
 
 The install takes several minutes. Run it inside screen (or systemd-run): a dropped SSH session would interrupt it.
 If it is interrupted anyway, run the same command again.
@@ -113,6 +115,7 @@ USAGE
       --repo-url=*) repo_url=${arg#--repo-url=} ;;
       --skip-dns-check) ;;
       --no-shell-profile) ;;
+      --preflight) preflight=1 ;;
       --dry-run) dry_run=1 ;;
       *)
         usage >&2
@@ -139,6 +142,15 @@ USAGE
   fi
   # The `fleet` user runs git and DDEV from here: the caller's directory (a home directory, say) may be closed to it.
   cd /
+
+  # --preflight changes nothing, so stage 1 (packages, the fleet user, the checkout) is not run: stage 2 checks the host from
+  # a checkout that is already there (the tag's exported copy, or this script's own directory).
+  if [ "$preflight" = 1 ]; then
+    if [ -n "$self_dir" ] && [ -f "$self_dir/run.sh" ]; then
+      exec bash "$self_dir/run.sh" "$@"
+    fi
+    fail 64 "--preflight needs a checkout: run  bash install/run.sh --preflight ...  from one"
+  fi
 
   # --- 2. host checks ---------------------------------------------------------------------------------------------
   if [ "$dry_run" != 1 ] && [ "$(id -u)" -ne 0 ]; then
