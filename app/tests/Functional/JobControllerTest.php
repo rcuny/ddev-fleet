@@ -263,4 +263,180 @@ final class JobControllerTest extends AdminTestCase
         self::assertCount(1, $crawler->filter('[data-testid=active-job] [data-testid=job-log]'));
         self::assertStringContainsString('/jobs/'.$job->id().'/log', $this->body());
     }
+
+    public function testFinishedJobShowsItsFactsAndHasNoRetry(): void
+    {
+        $job = $this->job('acme', 'deploy', JobStatus::Succeeded);
+        $id = $job->id();
+
+        $crawler = $this->open('/jobs/'.$id);
+
+        self::assertSame('Job #'.$id, trim($crawler->filter('h1')->text()));
+        self::assertStringContainsString('deploy · acme--i1', $crawler->text());
+        $meta = $crawler->filter('[data-testid=job-meta]');
+        self::assertSame('succeeded', $meta->filter('[data-testid=job-status]')->attr('data-status'));
+        self::assertStringContainsString('ui', $meta->text());
+        self::assertStringContainsString('Requested by', $meta->text());
+        self::assertSame('/instances/acme--i1', $meta->filter('a')->attr('href'));
+        foreach (['Queued', 'Started', 'Finished'] as $label) {
+            self::assertMatchesRegularExpression('/'.$label.'\s*\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2} UTC/', $meta->text(), $label);
+        }
+        self::assertStringNotContainsString('Not yet', $meta->text());
+        foreach (['job-error', 'retry-of', 'job-retry'] as $absent) {
+            self::assertCount(0, $crawler->filter('[data-testid='.$absent.']'), $absent);
+        }
+        self::assertSame('Log of job #'.$id, $crawler->filter('[data-testid=job-log]')->attr('aria-label'));
+    }
+
+    public function testFailedJobShowsItsErrorAndRetryQueuesALinkedJob(): void
+    {
+        $failed = $this->job('acme', 'start', JobStatus::Failed);
+        $failedId = $failed->id();
+
+        $crawler = $this->open('/jobs/'.$failedId);
+        self::assertSame('failed', $crawler->filter('[data-testid=job-meta] [data-testid=job-status]')->attr('data-status'));
+        self::assertSame('It broke.', trim($crawler->filter('[data-testid=job-error]')->text()));
+        self::assertCount(1, $crawler->filter('[data-testid=job-retry]'));
+
+        $this->post('/jobs/'.$failedId.'/retry', []);
+        self::assertResponseStatusCodeSame(303);
+        $retry = $this->em()->createQuery(\sprintf('SELECT j FROM %s j WHERE j.retryOf = :id', Job::class))->setParameter('id', $failedId)->getSingleResult();
+        self::assertInstanceOf(Job::class, $retry);
+        self::assertSame('start', $retry->type());
+        self::assertSame(2, $this->jobCount());
+
+        $page = $this->open('/jobs/'.$retry->id());
+        self::assertSame('#'.$failedId, trim($page->filter('[data-testid=retry-of]')->text()));
+        self::assertSame('/jobs/'.$failedId, $page->filter('[data-testid=retry-of]')->attr('href'));
+        self::assertStringContainsString('ui', $page->filter('[data-testid=job-meta]')->text());
+        self::assertSame('failed', $this->open('/jobs/'.$failedId)->filter('[data-testid=job-status]')->attr('data-status'));
+        self::assertCount(1, $this->open('/jobs/'.$failedId)->filter('[data-testid=job-retry]'));
+    }
+
+    public function testRetryIsRefusedWithTheReasonWhileTheInstanceHasAJobActive(): void
+    {
+        $failed = $this->job('acme', 'start', JobStatus::Failed);
+        $this->job('acme', 'stop', JobStatus::Running);
+
+        $this->post('/jobs/'.$failed->id().'/retry', []);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/jobs/'.$failed->id(), parse_url((string) $this->client->getResponse()->headers->get('Location'), \PHP_URL_PATH));
+        $this->client->followRedirect();
+        $flashes = $this->client->getCrawler()->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('Busy: acme--i1 has a job queued or running. Nothing was started.', $flashes);
+        self::assertSame(2, $this->jobCount());
+    }
+
+    /**
+     * @return iterable<string, array{?JobStatus}>
+     */
+    public static function notRetryableStatuses(): iterable
+    {
+        yield 'succeeded' => [JobStatus::Succeeded];
+        yield 'running' => [JobStatus::Running];
+        yield 'queued' => [null];
+    }
+
+    #[DataProvider('notRetryableStatuses')]
+    public function testAJobThatIsNotFailedOrInterruptedCannotBeRetried(?JobStatus $status): void
+    {
+        $job = $this->job('acme', 'start', $status);
+
+        $this->post('/jobs/'.$job->id().'/retry', []);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame('/jobs/'.$job->id(), parse_url((string) $this->client->getResponse()->headers->get('Location'), \PHP_URL_PATH));
+        $this->client->followRedirect();
+        self::assertStringContainsString('Only a failed or interrupted job can be retried.', $this->client->getCrawler()->filter('[data-testid=flashes]')->text());
+        self::assertSame(1, $this->jobCount());
+    }
+
+    public function testLogEndpointAnswersInPiecesAndHasTheDocumentedKeys(): void
+    {
+        $job = $this->job('acme', 'start', JobStatus::Succeeded);
+        $this->writeLog($job, "fake line 1 of 5\nfake line 2 of 5\nfake line 5 of 5\n");
+
+        $all = $this->logJson($job);
+        $keys = array_keys($all);
+        sort($keys);
+        self::assertSame(['done', 'next', 'size', 'status', 'text'], $keys);
+        self::assertSame($all['size'], $all['next']);
+        self::assertStringContainsString('fake line 1 of 5', $all['text']);
+        self::assertStringContainsString('fake line 5 of 5', $all['text']);
+
+        $size = (int) $all['size'];
+        $tail = $this->logJson($job, (string) ($size - 10));
+        self::assertStringEndsWith($tail['text'], $all['text']);
+        self::assertLessThanOrEqual(10, \strlen($tail['text']));
+
+        foreach ([$size, $size + 500] as $from) {
+            $end = $this->logJson($job, (string) $from);
+            self::assertSame('', $end['text']);
+            self::assertSame($size, $end['next']);
+            self::assertTrue($end['done']);
+        }
+    }
+
+    /**
+     * @return iterable<string, array{string, string, int}>
+     */
+    public static function refusedRequests(): iterable
+    {
+        yield 'unknown job' => ['GET', '/jobs/999999999', 404];
+        yield 'text number' => ['GET', '/jobs/abc', 404];
+        yield 'hex number' => ['GET', '/jobs/0x10', 404];
+        yield 'unknown job log' => ['GET', '/jobs/999999999/log', 404];
+        yield 'unknown job retry' => ['POST', '/jobs/999999999/retry', 404];
+        yield 'retry by GET' => ['GET', '/jobs/{id}/retry', 405];
+        yield 'POST on the page' => ['POST', '/jobs/{id}', 405];
+    }
+
+    #[DataProvider('refusedRequests')]
+    public function testUnknownJobsBadNumbersAndWrongMethodsAreRefused(string $method, string $path, int $status): void
+    {
+        $job = $this->job('acme', 'start', JobStatus::Succeeded);
+
+        $this->client->request($method, self::BASE.str_replace('{id}', (string) $job->id(), $path), ['_token' => 'csrf-token'], server: $this->browserServer());
+
+        self::assertResponseStatusCodeSame($status);
+    }
+
+    public function testRetryWithoutOrWithAWrongTokenIsForbidden(): void
+    {
+        $job = $this->job('acme', 'start', JobStatus::Failed);
+
+        $this->client->request('POST', self::BASE.'/jobs/'.$job->id().'/retry', server: $this->browserServer());
+        self::assertResponseStatusCodeSame(403);
+
+        $this->client->request('POST', self::BASE.'/jobs/'.$job->id().'/retry', ['_token' => 'wrong'], server: $this->browserServer());
+        self::assertResponseStatusCodeSame(403);
+
+        self::assertSame(1, $this->jobCount());
+    }
+
+    public function testMemberCanRetryTheirOwnFailedJobButNotAForeignOne(): void
+    {
+        $own = $this->job('demo', 'start', JobStatus::Failed);
+        $foreign = $this->job('acme', 'start', JobStatus::Failed);
+        $this->as('member');
+
+        $this->logJson($own);
+        self::assertResponseStatusCodeSame(200);
+        $page = $this->open('/jobs/'.$own->id());
+        self::assertSame('It broke.', trim($page->filter('[data-testid=job-error]')->text()));
+        self::assertCount(1, $page->filter('[data-testid=job-retry]'));
+
+        $this->post('/jobs/'.$foreign->id().'/retry', []);
+        self::assertResponseStatusCodeSame(404);
+        self::assertSame(2, $this->jobCount());
+
+        $this->post('/jobs/'.$own->id().'/retry', []);
+        self::assertResponseStatusCodeSame(303);
+        self::assertSame(3, $this->jobCount());
+        $location = (string) parse_url((string) $this->client->getResponse()->headers->get('Location'), \PHP_URL_PATH);
+        $retryPage = $this->open($location);
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('#'.$own->id(), trim($retryPage->filter('[data-testid=retry-of]')->text()));
+    }
 }

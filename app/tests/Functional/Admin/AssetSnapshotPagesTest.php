@@ -135,6 +135,58 @@ final class AssetSnapshotPagesTest extends AdminTestCase
         self::assertSame([], $this->dumps());
     }
 
+    public function testTheSelectListsRunningInstancesInOrderAndIsRequired(): void
+    {
+        $this->makeProject();
+        $this->instance('blog', 'bb', InstanceState::Running);
+        $this->instance('blog', 'aa', InstanceState::Running);
+
+        $crawler = $this->open('/admin/projects/blog/assets');
+
+        $select = $crawler->filter('[data-testid=snapshot-instance]');
+        self::assertSame(['blog--aa', 'blog--bb'], $select->filter('option')->each(static fn ($o): string => $o->attr('value') ?? ''));
+        self::assertNotNull($select->attr('required'));
+    }
+
+    public function testRefusalMessagesNameTheStateTheBusyInstanceAndTheUnknownId(): void
+    {
+        $this->makeProject();
+        $this->makeProject('shop');
+        $this->instance('blog', 'old', InstanceState::Stopped);
+        $this->instance('blog', 'busy', InstanceState::Running);
+        $this->instance('shop', 'main', InstanceState::Running);
+        new JobRepository($this->em())->add(new Job('start', 'blog--busy', 'blog', JobTrigger::Ui, 'admin', [], null, false, null, new \DateTimeImmutable()));
+
+        $expected = [
+            'blog--old' => 'No snapshot was started. Instance blog--old is not running (stopped): only a running instance can be snapshotted.',
+            'blog--busy' => 'No snapshot was started. Busy: blog--busy has a job queued or running. Nothing was started.',
+            'shop--main' => 'No snapshot was started. Instance "shop--main" does not exist.',
+            'blog--ghost' => 'No snapshot was started. Instance "blog--ghost" does not exist.',
+            'not an instance id' => 'No snapshot was started. Instance "not an instance id" does not exist.',
+        ];
+        foreach ($expected as $id => $message) {
+            $this->post('/admin/projects/blog/assets/snapshot', ['instance' => $id]);
+            self::assertResponseRedirects('/admin/projects/blog/assets');
+            self::assertStringContainsString($message, $this->client->followRedirect()->filter('[data-testid=flashes]')->text(), $id);
+        }
+        self::assertSame([], $this->dumps());
+        $paths = $this->container()->get(FleetPaths::class);
+        self::assertInstanceOf(FleetPaths::class, $paths);
+        self::assertDirectoryDoesNotExist($paths->assetsDir('blog').'/dumps');
+        self::assertDirectoryDoesNotExist($paths->assetsDir('shop').'/dumps');
+    }
+
+    public function testTheFlashTellsWhereTheDumpWillAppear(): void
+    {
+        $this->makeProject();
+        $this->instance('blog', 'main', InstanceState::Running);
+
+        $this->post('/admin/projects/blog/assets/snapshot', ['instance' => 'blog--main']);
+
+        self::assertStringContainsString('The dump appears under dumps/ when it is done: press Rescan.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        self::assertMatchesRegularExpression('/^default-blog--main-\d{8}T\d{6}Z\.sql\.gz$/', $this->dumps()[0]);
+    }
+
     public function testItNeedsAValidSameOriginRequest(): void
     {
         $this->makeProject();
