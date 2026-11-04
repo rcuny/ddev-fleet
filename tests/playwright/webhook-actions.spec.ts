@@ -47,7 +47,7 @@ async function createBitbucketSecret(page: Page, project: string): Promise<strin
 }
 
 test.describe('webhook actions', () => {
-  test('the pipeline token is set, replaced and removed, and never shown again', async ({ page }) => {
+  test('the pipeline token is set, replaced and removed, and never shown again @phone', async ({ page }) => {
     const project = uniqueName('wa');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);
@@ -95,7 +95,7 @@ test.describe('webhook actions', () => {
     }
   });
 
-  test('a delivery shows its outcome and both pages filter by source and outcome', async ({ page }) => {
+  test('a delivery shows its outcome and both pages filter by source and outcome @phone', async ({ page }) => {
     const project = uniqueName('wa');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);

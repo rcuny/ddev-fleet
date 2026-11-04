@@ -20,7 +20,7 @@ async function expectTouchTargets(where: string, controls: Locator[]): Promise<v
   }
 }
 
-test.describe('instances on a phone', () => {
+test.describe('instances on a phone @phone', () => {
   test.skip(({ isMobile }) => !isMobile, 'phone project only');
 
   test('list, deploy form, detail and job page fit and have touch targets @smoke', async ({ page, context, baseURL }) => {

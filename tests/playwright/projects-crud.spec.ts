@@ -208,7 +208,7 @@ test.describe('edit', () => {
 });
 
 test.describe('delete', () => {
-  test('the dialog names the project, Cancel and Escape keep it, the confirmation removes it everywhere', async ({ page }) => {
+  test('the dialog names the project, Cancel and Escape keep it, the confirmation removes it everywhere @phone', async ({ page }) => {
     const name = uniqueName();
     try {
       await createProjectViaUi(page, name);
@@ -296,7 +296,7 @@ test.describe('delete', () => {
 });
 
 test.describe('phone and long values', () => {
-  test('the flash of a long project name does not widen the page', async ({ page }) => {
+  test('the flash of a long project name does not widen the page @phone', async ({ page }) => {
     const name = `pw-${Date.now().toString(36)}-`.padEnd(40, 'q');
     try {
       await createProjectViaUi(page, name, `https://git.example.com/${'g'.repeat(180)}.git`);

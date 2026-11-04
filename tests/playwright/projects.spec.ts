@@ -261,7 +261,7 @@ test.describe('projects and templates', () => {
     expect(live.headers()['content-type'] ?? '').not.toContain('live-component');
   });
 
-  test('issue id tester shows the key', async ({ page }) => {
+  test('issue id tester shows the key @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
@@ -309,7 +309,7 @@ test.describe('projects and templates', () => {
     }
   });
 
-  test('a form row toggles from its edge, over the full 44 px row', async ({ page }) => {
+  test('a form row toggles from its edge, over the full 44 px row @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const name = uniqueName();
 
@@ -351,7 +351,7 @@ test.describe('projects and templates', () => {
   });
 });
 
-test.describe('phone layout of the project pages (390 px)', () => {
+test.describe('phone layout of the project pages (390 px) @phone', () => {
   test.skip(() => !isPhone(), 'phone only');
 
   // The worst case the form fields allow: a 40-char project name, a 200-char git URL, a 40-char template name and a

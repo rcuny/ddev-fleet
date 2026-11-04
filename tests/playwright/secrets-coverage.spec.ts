@@ -48,7 +48,7 @@ async function saveAndWait(page: Page, name: string, value: string): Promise<num
 }
 
 test.describe('secrets: what the form refuses', () => {
-  test('an empty name and an empty value: one message each, answered 422, nothing is stored', async ({ page }) => {
+  test('an empty name and an empty value: one message each, answered 422, nothing is stored @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     await page.goto('/admin/secrets');
     const form = page.getByTestId('secret-form');
@@ -152,7 +152,7 @@ test.describe('secrets: what the form refuses', () => {
 });
 
 test.describe('secrets: values and the Replace form', () => {
-  test('a value is stored as typed except for line endings and the newlines at its end', async ({ page }) => {
+  test('a value is stored as typed except for line endings and the newlines at its end @phone', async ({ page }) => {
     const name = uniqueSecret('NORM');
     const body = `  first ${uniqueValue()}\nsecond é ü 日本\n\tthird`;
     await page.goto('/admin/secrets');
@@ -302,7 +302,7 @@ test.describe('secrets: delete', () => {
 });
 
 test.describe('secrets: reveal', () => {
-  test('the dialog shows the value once, fits the screen; the response is not cached', async ({ page, actor }) => {
+  test('the dialog shows the value once, fits the screen; the response is not cached @phone', async ({ page, actor }) => {
     test.setTimeout(120_000);
     const name = uniqueSecret('SHOW');
     const value = `${uniqueValue()}-${'long-'.repeat(60)}`;
@@ -338,7 +338,7 @@ test.describe('secrets: reveal', () => {
     }
   });
 
-  test('the 11th reveal within a minute is refused: 429, Retry-After, the alert, an audit entry and no value', async ({ page, actor }) => {
+  test('the 11th reveal within a minute is refused: 429, Retry-After, the alert, an audit entry and no value @phone', async ({ page, actor }) => {
     test.setTimeout(240_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueSecret('THR');
@@ -421,7 +421,7 @@ test.describe('secrets: reveal', () => {
 });
 
 test.describe('secrets: in a project', () => {
-  test('"No placeholder" appears only for a secret no asset file mentions, and the asset notice follows the files', async ({ page }) => {
+  test('"No placeholder" appears only for a secret no asset file mentions, and the asset notice follows the files @phone', async ({ page }) => {
     test.setTimeout(180_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName();
@@ -504,7 +504,7 @@ test.describe('secrets: in a project', () => {
 });
 
 test.describe('secrets: host secrets', () => {
-  test('a stored Claude token appears in the read-only Host secrets list, without a value or any button', async ({ page }) => {
+  test('a stored Claude token appears in the read-only Host secrets list, without a value or any button @phone', async ({ page }) => {
     const token = `sk-ant-oat01-e2e-host-secrets-${uniqueValue()}`;
     await page.goto('/admin/host?tab=claude');
     await page.getByLabel(/Claude OAuth token/).fill(token);
@@ -527,7 +527,7 @@ test.describe('secrets: host secrets', () => {
   });
 });
 
-test.describe('secrets: phone', () => {
+test.describe('secrets: phone @phone', () => {
   test.skip(() => test.info().project.name !== 'phone', 'phone only');
 
   test('a 64-character name, a long invalid name echoed back and the warning fit 390 px with 44 px targets', async ({ page }) => {

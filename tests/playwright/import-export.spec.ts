@@ -11,7 +11,7 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
   expect(await hasHorizontalOverflow(page), `horizontal overflow on ${where}`).toBe(false);
 }
 
-test('export a project, delete it, import the file, preview and confirm', async ({ page }) => {
+test('export a project, delete it, import the file, preview and confirm @phone', async ({ page }) => {
   const name = uniqueName('pwx');
   try {
     await createProjectViaUi(page, name);
@@ -60,7 +60,7 @@ test('export a project, delete it, import the file, preview and confirm', async 
   }
 });
 
-test('a file that is not an export is refused and nothing is imported', async ({ page }) => {
+test('a file that is not an export is refused and nothing is imported @phone', async ({ page }) => {
   await page.goto('/admin/import');
   await page.getByTestId('import-file').setInputFiles({ name: 'broken.json', mimeType: 'application/json', buffer: Buffer.from('{"format":"fleet-project-export","version":99}') });
   await page.getByTestId('import-preview').click();

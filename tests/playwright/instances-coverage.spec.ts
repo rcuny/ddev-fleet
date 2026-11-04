@@ -4,7 +4,7 @@ import { follow, navigate, openDialog, submitAndWait, uniqueName } from './suppo
 import { hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
 
-// The coverage companion of instances.spec.ts and instances-phone.spec.ts: every field and every message of the deploy
+// The coverage companion of instances.spec.ts and instances.phone.spec.ts: every field and every message of the deploy
 // form, the list filters in every combination, the bulk actions with their dialogs and refusals, the actions of the
 // detail page and what the pages answer when the state or the role forbids an action. The recording runner finishes a
 // job inside the request, so a "busy" instance is made with a fake job that holds it (and is killed at the end of the
@@ -171,7 +171,7 @@ test.describe('deploy form: admin', () => {
     await expect(rowOf(page, `${project}--${label}`)).toHaveCount(0);
   });
 
-  test('each rule of the service shows its message under the right field and keeps what was typed', async ({ page }) => {
+  test('each rule of the service shows its message under the right field and keeps what was typed @phone', async ({ page }) => {
     await page.goto(`/instances/new?project=${ADMIN_PROJECT}`);
     const form = page.getByTestId('deploy-form');
     const branch = form.getByLabel('Branch', { exact: true });
@@ -303,7 +303,7 @@ test.describe('deploy form: admin', () => {
     await expect(page.getByTestId('instance-alias')).toContainText(`${hostname}-${project}--${label}`);
   });
 
-  test('the form fits at the phone width with its errors', async ({ page }) => {
+  test('the form fits at the phone width with its errors @phone', async ({ page }) => {
     test.skip(!isPhone(), 'phone width only');
     await page.goto(`/instances/new?project=${ADMIN_PROJECT}`);
     const form = page.getByTestId('deploy-form');
@@ -462,7 +462,7 @@ test.describe('bulk actions: admin', () => {
     await setStandInRole(context, 'admin', baseURL!);
   });
 
-  test('the selection drives the bar and its count; select all is the box in the header', async ({ page }) => {
+  test('the selection drives the bar and its count; select all is the box in the header @phone', async ({ page }) => {
     const project = await ownProject();
     const ids = await deployMany(page, project, 3);
     await page.goto(`/instances?project=${project}`);
@@ -633,7 +633,7 @@ test.describe('bulk actions: admin', () => {
     await expect(page.getByTestId('instance-detail')).toContainText('Running');
   });
 
-  test('a long id keeps the list, the bar and the dialog inside the phone width', async ({ page }) => {
+  test('a long id keeps the list, the bar and the dialog inside the phone width @phone', async ({ page }) => {
     test.skip(!isPhone(), 'phone width only');
     const project = uniqueName('lg').padEnd(40, 'x').slice(0, 40);
     await createDeployableProject(project);
@@ -750,7 +750,7 @@ test.describe('instance page: admin', () => {
     await expect(page.getByTestId('timeline-job')).toHaveCount(1);
   });
 
-  test('fits the phone width with a long id, a long branch and a long log line', async ({ page }) => {
+  test('fits the phone width with a long id, a long branch and a long log line @phone', async ({ page }) => {
     test.skip(!isPhone(), 'phone width only');
     const project = await ownProject();
     const branch = `feature/${'very-long-branch-name-'.repeat(6)}end`;

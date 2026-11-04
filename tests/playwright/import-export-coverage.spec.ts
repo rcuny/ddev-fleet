@@ -162,7 +162,7 @@ async function sealedExport(page: Page, project: string, secret: string, value: 
 }
 
 test.describe('export form', () => {
-  test('the passphrase is optional: without it the file has no secrets, and the field is a plain password box', async ({ page }) => {
+  test('the passphrase is optional: without it the file has no secrets, and the field is a plain password box @phone', async ({ page }) => {
     const name = uniqueName('pwe');
     const secret = `PW_EXPORT_${randomBytes(3).toString('hex').toUpperCase()}`;
     const value = `pw-value-${randomBytes(8).toString('hex')}`;
@@ -225,7 +225,7 @@ test.describe('export form', () => {
     ['too short (7 characters)', 'abcdefg', 'The passphrase needs at least 8 characters.'],
     ['too long (1025 bytes)', 'x'.repeat(1025), 'The passphrase is limited to 1024 bytes.'],
   ] as const) {
-    test(`a passphrase that is ${label} is refused with a message and no download`, async ({ page }) => {
+    test(`a passphrase that is ${label} is refused with a message and no download @phone`, async ({ page }) => {
       const name = uniqueName('pwr');
       try {
         await createProjectViaUi(page, name);
@@ -259,7 +259,7 @@ test.describe('export form', () => {
 });
 
 test.describe('import: upload page', () => {
-  test('the empty page: the two fields, the limit, the way back; no file is refused', async ({ page }) => {
+  test('the empty page: the two fields, the limit, the way back; no file is refused @phone', async ({ page }) => {
     await page.goto('/admin/import');
     await expect(page.getByRole('heading', { level: 1, name: 'Import a project' })).toBeVisible();
     await expect(page.getByTestId('import-upload')).toContainText('1. Upload the file');
@@ -306,7 +306,7 @@ test.describe('import: upload page', () => {
     ['a document nested deeper than the parser reads', () => '{"format":"fleet-project-export","version":1,"x":' + '['.repeat(40) + ']'.repeat(40) + '}', 'The file is not valid JSON.'],
   ];
   for (const [label, content, message] of REFUSED) {
-    test(`${label} is refused with "${message}" and nothing is written`, async ({ page }) => {
+    test(`${label} is refused with "${message}" and nothing is written @phone`, async ({ page }) => {
       expect(await upload(page, content())).toBe(422);
       await expect(problems(page).or(page.getByTestId('import-error'))).toContainText(message);
       await expectRefusedPage(page);
@@ -314,7 +314,7 @@ test.describe('import: upload page', () => {
     });
   }
 
-  test('a file over 2 MiB is refused', async ({ page }) => {
+  test('a file over 2 MiB is refused @phone', async ({ page }) => {
     const big = Buffer.concat([Buffer.from(json(doc('whatever'))), Buffer.alloc(2 * 1024 * 1024, ' ')]);
     expect(await upload(page, big)).toBe(422);
     await expectRefusedPage(page);
@@ -374,7 +374,7 @@ test.describe('import: what the preview refuses', () => {
   ];
 
   for (const [label, document, message] of BAD) {
-    test(`${label}: "${message}", with nothing offered to confirm`, async ({ page }) => {
+    test(`${label}: "${message}", with nothing offered to confirm @phone`, async ({ page }) => {
       expect(await upload(page, json(document))).toBe(422);
       await expect(page.getByTestId('import-errors')).toContainText('The file cannot be imported');
       await expect(page.getByTestId('import-errors')).toContainText('Nothing was written.');
@@ -394,7 +394,7 @@ test.describe('import: what the preview refuses', () => {
 });
 
 test.describe('import: preview, confirm, cancel', () => {
-  test('a new project shows every kind of row; confirming writes them and the pages show them', async ({ page }) => {
+  test('a new project shows every kind of row; confirming writes them and the pages show them @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const name = uniqueName('pwi');
     const scheduleName = `${name}-nightly`.slice(0, 40);
@@ -477,7 +477,7 @@ test.describe('import: preview, confirm, cancel', () => {
     await expectGone(page, name);
   });
 
-  test('an existing project: changed things are updates, the rest unchanged; a second import has nothing to do', async ({ page }) => {
+  test('an existing project: changed things are updates, the rest unchanged; a second import has nothing to do @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const name = uniqueName('pwu');
     const other = 'https://git.example.com/acme/other.git';
@@ -593,7 +593,7 @@ test.describe('import: preview, confirm, cancel', () => {
 });
 
 test.describe('import: sealed secrets', () => {
-  test('no passphrase: a warning, a skipped row, and the secrets can still be added at the confirm step', async ({ page }) => {
+  test('no passphrase: a warning, a skipped row, and the secrets can still be added at the confirm step @phone', async ({ page }) => {
     test.setTimeout(180_000);
     const name = uniqueName('pwq');
     const secret = `PW_SEAL_${randomBytes(3).toString('hex').toUpperCase()}`;
@@ -720,7 +720,7 @@ test.describe('import: sealed secrets', () => {
 });
 
 test.describe('import: long values', () => {
-  test('a 40-character project, template and schedule name wrap at every width', async ({ page }) => {
+  test('a 40-character project, template and schedule name wrap at every width @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const stamp = Date.now().toString(36);
     const name = `pw-long-${stamp}-${'x'.repeat(40)}`.slice(0, 40);
@@ -743,7 +743,7 @@ test.describe('import: long values', () => {
     }
   });
 
-  test('a long error line (a 40-character key in the file) wraps on the refusal page', async ({ page }) => {
+  test('a long error line (a 40-character key in the file) wraps on the refusal page @phone', async ({ page }) => {
     const long = 'k'.repeat(40);
     expect(await upload(page, json({ ...doc('pw-wrap'), [long]: 1, ['q'.repeat(300)]: 2 }))).toBe(422);
     await expect(problems(page).first()).toBeVisible();

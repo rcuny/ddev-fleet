@@ -182,7 +182,7 @@ test.describe('assets coverage: folders', () => {
     }
   }
 
-  test('the New folder field is required and capped, and the name rules refuse each bad character', async ({ page }) => {
+  test('the New folder field is required and capped, and the name rules refuse each bad character @phone', async ({ page }) => {
     await withProject(page, async () => {
       // The field is required and capped at 255 characters by the browser itself.
       const field = page.getByLabel('New folder');
@@ -231,7 +231,7 @@ test.describe('assets coverage: folders', () => {
     });
   });
 
-  test('allowed punctuation, a leading dot and accents make a folder', async ({ page }) => {
+  test('allowed punctuation, a leading dot and accents make a folder @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
 
     await withProject(page, async (_name, dir) => {
@@ -246,7 +246,7 @@ test.describe('assets coverage: folders', () => {
     expect(errors).toEqual([]);
   });
 
-  test('nested folders: breadcrumbs, Rescan stays in the folder, and the eighth level is the last', async ({ page }) => {
+  test('nested folders: breadcrumbs, Rescan stays in the folder, and the eighth level is the last @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
 
     await withProject(page, async (_name, dir) => {
@@ -314,7 +314,7 @@ test.describe('assets coverage: folders', () => {
 });
 
 test.describe('assets coverage: symbolic links', () => {
-  test('a symbolic link is listed but never followed, downloaded, entered or written through', async ({ page }) => {
+  test('a symbolic link is listed but never followed, downloaded, entered or written through @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
 
     await withProject(page, async (name, dir) => {
@@ -397,7 +397,7 @@ test.describe('assets coverage: symbolic links', () => {
 });
 
 test.describe('assets coverage: uploads', () => {
-  test('refusals: empty file, over the cap, a bad name, a folder in the way, and the queue goes on', async ({ page }) => {
+  test('refusals: empty file, over the cap, a bad name, a folder in the way, and the queue goes on @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const errors = collectBrowserErrors(page);
 
@@ -552,7 +552,7 @@ test.describe('assets coverage: upload endpoints', () => {
 });
 
 test.describe('assets coverage: listing, delete and download', () => {
-  test('the listing: folders first, then files by name ignoring case, sizes, UTC times, plural and empty states', async ({ page }) => {
+  test('the listing: folders first, then files by name ignoring case, sizes, UTC times, plural and empty states @phone', async ({ page }) => {
     await withProject(page, async (_name, dir) => {
       await expect(page.getByTestId('assets-empty')).toHaveText('No files yet. Upload one above, or copy files in over SSH and press Rescan.');
       await expect(page.getByTestId('assets-summary')).toHaveCount(0);
@@ -581,7 +581,7 @@ test.describe('assets coverage: listing, delete and download', () => {
     });
   });
 
-  test('Cancel and Escape keep the file; a file that vanished, or a folder with content, is reported; an empty folder goes', async ({ page }) => {
+  test('Cancel and Escape keep the file; a file that vanished, or a folder with content, is reported; an empty folder goes @phone', async ({ page }) => {
     await withProject(page, async (_name, dir) => {
       const keep = put(dir, 'keep.sql');
       put(dir, 'gone.sql');
@@ -664,7 +664,7 @@ test.describe('assets coverage: listing, delete and download', () => {
     });
   });
 
-  test('long names wrap at every width: rows, unsupported names, the delete dialog', async ({ page }) => {
+  test('long names wrap at every width: rows, unsupported names, the delete dialog @phone', async ({ page }) => {
     await withProject(page, async (_name, dir) => {
       const longFile = `${'a-long-file-name-'.repeat(14)}.sql`.slice(0, 250);
       const longFolder = 'folder'.repeat(35);
@@ -723,7 +723,7 @@ test.describe('assets coverage: snapshot card refusals', () => {
 
   const submit = (page: Page): Promise<void> => submitAndWait(page, page.getByTestId('snapshot-submit'));
 
-  test('the select lists the running instances in order and the chosen one is dumped', async ({ page }) => {
+  test('the select lists the running instances in order and the chosen one is dumped @phone', async ({ page }) => {
     await withInstances(page, ['bb', 'aa'], async (name) => {
       await expect(page.getByTestId('snapshot-instance').locator('option')).toHaveText([`${name}--aa`, `${name}--bb`]);
       await expect(page.getByTestId('snapshot-instance')).toHaveAttribute('required', '');
@@ -742,7 +742,7 @@ test.describe('assets coverage: snapshot card refusals', () => {
     });
   });
 
-  test('an instance stopped after the page loaded is refused with its state', async ({ page }) => {
+  test('an instance stopped after the page loaded is refused with its state @phone', async ({ page }) => {
     await withInstances(page, ['main'], async (name) => {
       console_(['fleet:dev:fake-instance', name, 'main', '--remove']);
       console_(['fleet:dev:fake-instance', name, 'main', 'stopped']);
@@ -799,7 +799,7 @@ test.describe('assets coverage: snapshot card refusals', () => {
     }
   });
 
-  test('a long instance id wraps in the select and in the flash on the phone', async ({ page }) => {
+  test('a long instance id wraps in the select and in the flash on the phone @phone', async ({ page }) => {
     await withInstances(page, ['l'.repeat(30)], async (name) => {
       await expectNoOverflow(page, 'a card with a long instance id');
       if (isPhone()) {

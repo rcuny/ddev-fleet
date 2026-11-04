@@ -9,7 +9,7 @@ import { uniqueName } from './support/projects';
 // specs used to check inline. Phone only, so the viewport is the one the phone project gives (390 px). The long-id
 // (59 character) variants of the feature specs are folded into the base states: axe does not depend on text length.
 
-test.describe('axe sweep: phone shell', () => {
+test.describe('axe sweep: phone shell @phone', () => {
   test.beforeEach(async ({ context, baseURL }) => {
     await setStandInRole(context, 'admin', baseURL!);
   });
@@ -23,7 +23,7 @@ test.describe('axe sweep: phone shell', () => {
   }
 });
 
-test.describe('axe sweep: phone instances and jobs', () => {
+test.describe('axe sweep: phone instances and jobs @phone', () => {
   test.beforeEach(async ({ context, baseURL }) => {
     await setStandInRole(context, 'admin', baseURL!);
   });
