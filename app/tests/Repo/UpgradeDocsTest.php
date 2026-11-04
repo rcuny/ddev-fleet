@@ -230,7 +230,8 @@ final class UpgradeDocsTest extends TestCase
             self::assertGreaterThan(0, preg_match_all('/^## \[\d+\.\d+\.\d+\][^\n]*\n(.*?)(?=^## \[|\z)/ms', $changelog, $sections), 'no released version section in CHANGELOG.md');
             $fragment = '';
             foreach ($sections[1] as $body) {
-                if (str_contains($body, 'FLE-18')) {
+                // Word boundary: FLE-188 and friends must not match the FLE-18 milestone entry.
+                if (1 === preg_match('/\bFLE-18\b/', $body)) {
                     $fragment = $body;
                     break;
                 }

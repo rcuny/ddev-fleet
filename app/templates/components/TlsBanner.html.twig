@@ -1,0 +1,15 @@
+{# The certificate health banner of the app shell (App\Fleet\Tls\TlsStatusFile, written by fleet:host:tls-check); administrators only, nothing while certificates are healthy. #}
+{% set notice = this.notice %}
+{% if notice is not null %}
+    {% set is_error = notice.level.name == 'Error' %}
+    <twig:Alert :variant="is_error ? 'destructive' : 'default'" {{ ...attributes.defaults({'data-testid': 'tls-banner', 'data-level': notice.level.label, class: is_error ? 'mb-6' : 'mb-6 border-transparent bg-signal-faded text-signal-darker dark:text-signal'}) }}>
+        <twig:ux:icon name="lucide:triangle-alert" />
+        <twig:Alert:Title>{{ is_error ? 'Certificates are failing' : 'Certificate warning' }}</twig:Alert:Title>
+        <twig:Alert:Description class="text-ink-body">
+            {% for headline in notice.headlines %}
+                <p{% if not loop.first %} class="mt-1"{% endif %}>{{ headline }}</p>
+            {% endfor %}
+            <p class="mt-2"><a href="{{ path('settings', {tab: 'certificates'}) }}" data-testid="tls-banner-link">Certificate details</a></p>
+        </twig:Alert:Description>
+    </twig:Alert>
+{% endif %}

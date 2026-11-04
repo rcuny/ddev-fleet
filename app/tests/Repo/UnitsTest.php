@@ -283,6 +283,47 @@ final class UnitsTest extends TestCase
         self::assertStringContainsString('fleet-upgrade-check.service"', $uninstall);
     }
 
+    public function testTlsCheckServiceOnlyReadsTheJournalAndTheLocalCaddy(): void
+    {
+        $unit = $this->unit('fleet-tls-check.service');
+        $service = $unit['Service'];
+
+        self::assertSame(['oneshot'], $service['Type']);
+        self::assertSame(['fleet'], $service['User']);
+        self::assertSame(['systemd-journal'], $service['SupplementaryGroups']);
+        self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:host:tls-check'], $service['ExecStart']);
+        self::assertArrayNotHasKey('Install', $unit, 'only the timer is enabled');
+        self::assertSame(['strict'], $service['ProtectSystem']);
+        self::assertSame(['/srv/fleet /opt/ddev-fleet/app/var'], $service['ReadWritePaths']);
+        foreach (['NoNewPrivileges', 'PrivateTmp', 'PrivateDevices', 'ProtectHome', 'RestrictSUIDSGID', 'LockPersonality'] as $directive) {
+            self::assertSame(['yes'], $service[$directive], $directive);
+        }
+        self::assertSame([''], $service['CapabilityBoundingSet']);
+    }
+
+    public function testTlsCheckTimerRunsEveryTenMinutes(): void
+    {
+        $unit = $this->unit('fleet-tls-check.timer');
+
+        self::assertSame(['10min'], $unit['Timer']['OnUnitActiveSec']);
+        self::assertSame(['3min'], $unit['Timer']['OnBootSec']);
+        self::assertSame(['timers.target'], $unit['Install']['WantedBy']);
+        self::assertArrayNotHasKey('Service', $unit);
+    }
+
+    public function testTlsCheckUnitsAreInstalledAndTheTimerEnabledByTheSteps(): void
+    {
+        $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
+        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $uninstall = (string) file_get_contents(self::installDir().'/uninstall.sh');
+
+        self::assertStringContainsString('install_etc fleet-tls-check.service "$SYSTEMD_DIR/fleet-tls-check.service" 0644 root:root', $units);
+        self::assertStringContainsString('install_etc fleet-tls-check.timer "$SYSTEMD_DIR/fleet-tls-check.timer" 0644 root:root', $units);
+        self::assertStringContainsString('systemctl enable --now fleet-tls-check.timer', $start);
+        self::assertStringContainsString('systemctl disable --now fleet-tls-check.timer', $uninstall);
+        self::assertStringContainsString('fleet-tls-check.service"', $uninstall);
+    }
+
     public function testSchedulerUnitIsInstalledAndEnabledByTheSteps(): void
     {
         $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
@@ -476,7 +517,7 @@ final class UnitsTest extends TestCase
 
     public function testEveryUnitFileSectionIsWellFormed(): void
     {
-        foreach (['php-fpm-env.conf', 'fleet-worker@.service', 'fleet-backup.service', 'fleet-upgrade-check.service', 'fleet-scheduler.service', 'fleet-mercure.service', 'caddy-sandbox.conf', 'caddy-env.conf', 'authelia-secrets.conf'] as $file) {
+        foreach (['php-fpm-env.conf', 'fleet-worker@.service', 'fleet-backup.service', 'fleet-upgrade-check.service', 'fleet-tls-check.service', 'fleet-scheduler.service', 'fleet-mercure.service', 'caddy-sandbox.conf', 'caddy-env.conf', 'authelia-secrets.conf'] as $file) {
             $unit = $this->unit($file);
             self::assertArrayHasKey('Service', $unit, $file);
         }
@@ -484,7 +525,7 @@ final class UnitsTest extends TestCase
 
     public function testNoWorldWritablePathsAreGrantedToServices(): void
     {
-        foreach (['fleet-worker@.service', 'fleet-backup.service', 'fleet-upgrade-check.service', 'fleet-scheduler.service', 'php-fpm-env.conf'] as $file) {
+        foreach (['fleet-worker@.service', 'fleet-backup.service', 'fleet-upgrade-check.service', 'fleet-tls-check.service', 'fleet-scheduler.service', 'php-fpm-env.conf'] as $file) {
             foreach ($this->unit($file)['Service']['ReadWritePaths'] ?? [] as $value) {
                 foreach (explode(' ', $value) as $path) {
                     self::assertNotContains($path, ['/', '/etc', '/usr', '/var', '/home', '/srv', '/opt'], $file);

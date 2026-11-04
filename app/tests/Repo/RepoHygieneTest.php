@@ -23,6 +23,8 @@ final class RepoHygieneTest extends TestCase
         'tests/playwright/node_modules', 'tests/playwright/test-results', 'tests/playwright/playwright-report',
         'tests/playwright/blob-report', 'tests/playwright/.run', 'tests/playwright/.auth',
         // Lock files carry third-party package metadata; the baseline names the live host the owner probes.
+        // DDEV's fixed container approot, spelled once as a named constant (not the companion workspace).
+        'app/src/Fleet/Ddev/DdevPaths.php',
         'app/composer.lock', 'app/symfony.lock', 'tests/playwright/package-lock.json', 'ci/systemd-security-baseline.json',
     ];
 

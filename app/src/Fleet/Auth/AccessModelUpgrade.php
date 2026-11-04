@@ -5,7 +5,9 @@ declare(strict_types=1);
 namespace App\Fleet\Auth;
 
 use App\Domain\Host\HostSettings;
+use App\Domain\Host\TlsMode;
 use App\Domain\User\UserRepository;
+use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceSiteRefresher;
 
 /**
@@ -26,6 +28,7 @@ final readonly class AccessModelUpgrade
         private UserRepository $users,
         private AutheliaUsersFile $usersFile,
         private InstanceSiteRefresher $sites,
+        private FleetPaths $paths,
     ) {
     }
 
@@ -54,11 +57,28 @@ final readonly class AccessModelUpgrade
             throw new \RuntimeException('users.yml cannot be written: '.$e->getMessage(), 0, $e);
         }
 
-        $result = $this->sites->refresh();
+        // When the installed Caddyfile is still the other layout (a host switching to the ovh_dns wildcard site, or
+        // back), it cannot validate the new snippets: write them without reloading, `apply caddy` validates the pair.
+        $result = $this->sites->refresh(null, !$this->layoutChanges($host));
         if ([] !== $result->failed) {
             throw new \RuntimeException(\sprintf('The Caddy site of %d instance(s) could not be rewritten with the project access check (%s). Authelia was left as it is, so the sites keep their old protection; fix the cause and run this again.', \count($result->failed), implode('; ', array_map(static fn (string $id, string $reason): string => $id.': '.$reason, array_keys($result->failed), $result->failed))));
         }
 
         return $result->rewritten;
+    }
+
+    /**
+     * Whether the installed main Caddyfile has the other site layout than the one the host's TLS mode renders now.
+     * No Caddyfile yet (first install) means nothing is live to break.
+     */
+    private function layoutChanges(HostSettings $host): bool
+    {
+        $installed = @file_get_contents($this->paths->caddyMainFile());
+        if (false === $installed) {
+            return false;
+        }
+        $wildcard = str_contains($installed, "\n*.".$host->domain().' {');
+
+        return $wildcard !== (TlsMode::OvhDns === $host->tlsMode());
     }
 }

@@ -353,6 +353,24 @@ overrides the phone decision. The choice goes to `selection.txt`, to the `playwr
 Playwright tests of the run to `slowest-tests.txt` (`ci/slowest_tests.py`). Playwright workers stay derived from the container CPU quota
 (two thirds of the CPUs, 4 at the 6-CPU cap) and are not hard-coded.
 
+### Wall-clock design (FLE-174)
+
+Chosen over sharding Playwright across the two CI slots: it needs no coordination between runs and keeps one `fleet-gates`
+status. `ci/run-gates.sh` runs independent work side by side inside one run (the container has 6 CPUs):
+
+- **`composer-gates`** is `assets` first, then lanes in parallel: `cs` + `stan` + `lint` in one, and one PHPUnit process per
+  suite (Unit, Integration, Functional, Repo). Every PHPUnit process makes its own `FLEET_HOME` and uses `APP_ENV=test`, while
+  stan and lint warm the dev cache, so the lanes share nothing. Keep the lane list in step with the `gates` script of
+  `app/composer.json`; `FLEET_CI_SERIAL=1` runs plain `composer run gates`.
+- **Full tier:** `npm ci` and the Chromium install run while the composer gates run; the pytest / systemd score / ansible-lint
+  chain runs while Playwright runs. Composer gates and Playwright stay sequential (both use the dev cache in `app/var/cache/dev`).
+- **Caches** survive between runs because the CI instance persists: `npm ci` is skipped when `package-lock.json` is unchanged
+  (stamp `tests/playwright/node_modules/.ci-lock-hash`), the Python venvs are reused when `ci/requirements-*.txt` are unchanged,
+  `playwright install-deps` runs once per lock hash (`~/.cache/fleet-ci/`), Chromium and Composer download caches live in the
+  container home, and `fleet-ci.sh` installs systemd only when `systemd-analyze` is missing.
+- **Reports:** `slowest-phpunit.txt` (20 slowest PHPUnit tests from the per-suite `--log-junit` files) next to
+  `slowest-tests.txt` (Playwright), both linked from the report index.
+
 Every gate runs with a throw-away `FLEET_HOME` (`mktemp -d`, removed on exit) and without `APP_ENV`: the companion
 container exports `FLEET_HOME=/tmp/sqlite/fleet-home` (the served dev app's database, which the tests wipe) and
 `APP_ENV=dev`. Composer is called as found on PATH; `FLEET_PHP` runs it through that PHP binary instead. Unlike the

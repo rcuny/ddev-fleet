@@ -86,6 +86,8 @@ step_main() {
   # OVH credentials would otherwise sit in clear text in /srv/fleet); the exit trap in run.sh discards whatever the helper
   # did not install if a step fails. --no-reload: Caddy does not serve the new Caddyfile yet (the helper validates the
   # staged copy, and Caddy is restarted below).
+  # Before the render: the instance sites it rewrites keep every name that already holds a certificate as its own site.
+  is_dry || write_stored_certs "$CADDY_FLEET_DIR/stored-certs.list"
   fleet_console fleet:host:render --gate=auto --no-reload --stage
   run "$HELPER_DIR/apply" authelia
   run "$HELPER_DIR/apply" caddy
@@ -123,6 +125,8 @@ step_main() {
   run systemctl enable --now fleet-backup.timer
   # The daily release check (fleet-upgrade-check.service, written by step 95).
   run systemctl enable --now fleet-upgrade-check.timer
+  # The certificate health check every 10 minutes (fleet-tls-check.service, written by step 95).
+  run systemctl enable --now fleet-tls-check.timer
   # The agent workspace. enable --now is a no-op while the unit is active and is never followed by a restart: a restart
   # would end the operators' panes. A changed unit file takes effect at the next `systemctl restart fleet-tmux`.
   run systemctl enable --now fleet-tmux.service

@@ -32,13 +32,17 @@ final readonly class Tmux
     /** What the home window was called before 1.1.x; a window with that name is renamed. */
     public const string LEGACY_HOME_WINDOW = 'host';
     public const int SIDEBAR_WIDTH = 50;
-    /** The size a detached session starts with (tmux would pick 80x24); an attaching client resizes it. */
-    private const string DETACHED_WIDTH = '200';
-    private const string DETACHED_HEIGHT = '50';
+    /** The size a detached session starts with (tmux would pick 80x24); an attaching client resizes it. Also the session's `default-size`, so windows
+     *  created while detached are not 80x24 either (FLE-187). */
+    private const string DETACHED_WIDTH = '300';
+    private const string DETACHED_HEIGHT = '80';
     /** A shell pane narrower than this is not worth equalising (the 0.x floor). */
     private const int MIN_SHELL_WIDTH = 10;
     public const int COMMAND_MAX = 4096;
     public const float TIMEOUT = 15.0;
+
+    /** Foreground commands that mean "a shell at its prompt". */
+    private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', '-bash', '-sh', '-zsh'];
 
     private const string PANE_FORMAT = "#{pane_id}\t#{pane_left}\t#{pane_top}\t#{pane_width}\t#{window_width}\t#{@fleet_role}\t#{pane_start_command}";
 
@@ -114,6 +118,8 @@ final readonly class Tmux
         $session = '='.self::SESSION.':';
         foreach ([
             ['set-option', '-t', $session, 'mouse', 'on'],
+            ['set-option', '-t', $session, 'default-size', self::DETACHED_WIDTH.'x'.self::DETACHED_HEIGHT],
+            ['set-option', '-t', $session, 'window-size', 'latest'],
             ['set-option', '-s', 'set-clipboard', 'on'],
             ['set-option', '-t', $session, 'status', 'on'],
             ['set-option', '-t', $session, 'status-position', 'bottom'],
@@ -232,6 +238,37 @@ final readonly class Tmux
 
         $this->must(['send-keys', '-t', $target->id, '-l', '--', $command], 'send the keys');
         $this->must(['send-keys', '-t', $target->id, 'Enter'], 'send Enter');
+    }
+
+    /**
+     * Whether tty1 or tty2 of the window is running something: the foreground command is not a shell, or the shell has
+     * child processes (a job in the background). A pane that cannot be found counts as idle.
+     *
+     * @throws WorkspaceException
+     */
+    public function isBusy(string $instanceId, Pane $pane): bool
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane) {
+            throw new WorkspaceException('Only tty1 or tty2 can be busy, not the sidebar.');
+        }
+        $target = self::shells($this->panes($instanceId))[Pane::Tty1 === $pane ? 0 : 1] ?? null;
+        if (null === $target) {
+            return false;
+        }
+        $result = $this->tmux(['display-message', '-p', '-t', $target->id, "#{pane_current_command}\t#{pane_pid}"]);
+        if (!$result->isSuccess()) {
+            return false;
+        }
+        [$command, $pid] = array_pad(explode("\t", trim($result->stdout), 2), 2, '');
+        if ('' !== $command && !\in_array($command, self::SHELLS, true)) {
+            return true;
+        }
+        if (1 !== preg_match('/^[0-9]+$/D', $pid)) {
+            return false;
+        }
+
+        return $this->runner->run(['pgrep', '-P', $pid], null, [], null, self::TIMEOUT)->isSuccess();
     }
 
     /**

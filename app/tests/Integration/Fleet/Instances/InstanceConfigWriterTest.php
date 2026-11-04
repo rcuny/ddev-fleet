@@ -11,6 +11,7 @@ use App\Domain\Port\NamedPortRepository;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Secret\SecretRepository;
+use App\Fleet\Ddev\DdevPaths;
 use App\Fleet\FleetPaths;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Instances\DomainGitIdentity;
@@ -180,13 +181,32 @@ final class InstanceConfigWriterTest extends KernelTestCase
     public function testHostileValuesCannotBreakTheYaml(): void
     {
         $project = $this->project(GitBotMode::Override);
-        $project->changeGitBot(GitBotMode::Override, "Acme: {x}\n- injected: 'y' #", 'a@example.com');
+        $project->changeGitBot(GitBotMode::Override, "Acme: {x}\n- injected: y #", 'a@example.com');
 
         $config = $this->written($project);
 
-        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: 'y' #", $config['web_environment'][3]);
+        self::assertSame("GIT_AUTHOR_NAME=Acme: {x}\n- injected: y #", $config['web_environment'][3]);
         self::assertCount(7, $config['web_environment']);
         self::assertSame(['name', 'project_tld', 'performance_mode', 'web_environment', 'hooks'], array_keys($config));
+    }
+
+    /** @return iterable<string, array{string}> */
+    public static function composeUnsafeNames(): iterable
+    {
+        yield 'double quote' => ['Acme "Bot"'];
+        yield 'dollar' => ['Acme $HOME'];
+        yield 'backslash' => ['Acme\\Bot'];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('composeUnsafeNames')]
+    public function testAStoredIdentityThatDdevCannotCarryIsRefusedNotWritten(string $name): void
+    {
+        $project = $this->project(GitBotMode::Override);
+        $project->changeGitBot(GitBotMode::Override, $name, 'a@example.com');
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('DDEV cannot carry');
+        $this->written($project);
     }
 
     public function testEveryNamedPortOfTheProjectGetsAFleetPortVariable(): void
@@ -210,5 +230,24 @@ final class InstanceConfigWriterTest extends KernelTestCase
         $environment = $this->written($this->project())['web_environment'];
 
         self::assertSame([], array_filter($environment, static fn (string $e): bool => str_starts_with($e, 'FLEET_PORT_')));
+    }
+
+    public function testRenderedWebEnvironmentIsSafeForDdevCompose(): void
+    {
+        $this->secrets->putFleetWide(HostSecrets::CLAUDE_TOKEN, 'tok-1', 'admin');
+        $project = $this->project(GitBotMode::Inherit, 'edge');
+        $project->changePorts([new NamedPort('ts-dashboard', 9111, 8110)]);
+
+        $config = $this->written($project);
+
+        self::assertNotSame([], $config['web_environment']);
+        foreach ($config['web_environment'] as $entry) {
+            self::assertStringNotContainsString('"', $entry, 'FLE-188: a double quote breaks the compose file DDEV generates');
+            self::assertStringNotContainsString('$', $entry, 'DDEV would interpolate a dollar sign');
+        }
+        self::assertContains(
+            'GIT_SSH_COMMAND=ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='.DdevPaths::CONTAINER_APPROOT.'/.ddev/fleet_known_hosts',
+            $config['web_environment'],
+        );
     }
 }

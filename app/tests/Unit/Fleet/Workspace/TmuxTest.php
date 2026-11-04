@@ -62,8 +62,10 @@ final class TmuxTest extends TestCase
         self::assertTrue($this->tmux->ensureSession());
 
         $argvs = $this->argvs();
-        self::assertSame(['tmux', '-L', 'fleet', 'new-session', '-d', '-s', 'fleet', '-n', 'general', '-c', '/srv/fleet', '-x', '200', '-y', '50'], $argvs[1]);
+        self::assertSame(['tmux', '-L', 'fleet', 'new-session', '-d', '-s', 'fleet', '-n', 'general', '-c', '/srv/fleet', '-x', '300', '-y', '80'], $argvs[1]);
         self::assertContains(['tmux', '-L', 'fleet', 'set-option', '-t', '=fleet:', 'mouse', 'on'], $argvs);
+        self::assertContains(['tmux', '-L', 'fleet', 'set-option', '-t', '=fleet:', 'default-size', '300x80'], $argvs);
+        self::assertContains(['tmux', '-L', 'fleet', 'set-option', '-t', '=fleet:', 'window-size', 'latest'], $argvs);
         self::assertContains(['tmux', '-L', 'fleet', 'set-option', '-s', 'set-clipboard', 'on'], $argvs);
         self::assertContains(['tmux', '-L', 'fleet', 'set-option', '-t', '=fleet:', 'window-status-current-style', 'reverse,bold'], $argvs);
         self::assertContains(['tmux', '-L', 'fleet', 'set-option', '-w', '-t', '=fleet:=general', '@fleet_managed', '1'], $argvs);

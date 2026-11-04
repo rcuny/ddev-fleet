@@ -276,6 +276,7 @@ final class HostRenderCommandTest extends KernelTestCase
             $this->fx->users,
             new AutheliaUsersFile($this->fx->paths, new AutheliaUsersRenderer(), null, new ProjectAccessRepository($this->em)),
             new InstanceSiteRefresher(new InstanceRepository($this->em), $writer, $this->fx->paths),
+            $this->fx->paths,
         );
     }
 
