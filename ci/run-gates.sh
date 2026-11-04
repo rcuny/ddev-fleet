@@ -131,34 +131,72 @@ skip_gate() {
 
 app() { (cd "$root/app" && "$@"); }
 
-# Stale Symfony caches give false Playwright and PHPUnit reds after a branch switch.
-rm -rf "$root/app/var/cache/dev" "$root/app/var/cache/test"
-
-if [ "${#composer[@]}" -eq 0 ] || [ -z "${composer[${#composer[@]}-1]}" ]; then
-    printf '==> composer-install\n    composer not found on PATH\n'
-    printf 'composer-install\tfailed\t0\t1\tcomposer not found on PATH\n' >> "$report_dir/gates.tsv"
-    skip_gate composer-gates 1 "composer not found"
-    skip_gate prod-check 1 "composer not found"
-elif run_gate composer-install 1 app "${composer[@]}" install --no-interaction --prefer-dist; then
-    run_gate composer-gates 1 app "${composer[@]}" run gates || true
-    scripts="$(app "${composer[@]}" run-script --list 2>/dev/null || true)"
-    if grep -q '^ *prod-check\b' <<< "$scripts"; then
-        run_gate prod-check 1 app "${composer[@]}" run prod-check || true
-    else
-        skip_gate prod-check 1 "no prod-check script in app/composer.json"
-    fi
-else
-    skip_gate composer-gates 1 "composer install failed"
-    skip_gate prod-check 1 "composer install failed"
-fi
-
 if [ "$mode" = full ]; then
     pw="$root/tests/playwright"
     in_pw() { (cd "$pw" && "$@"); }
+    venv="$root/.venv"
+    # Stamps (FLE-174): a dependency step is skipped when its lock file is unchanged since the last successful run in this
+    # tree. The CI instance persists between runs, so node_modules, .venv and the Chromium cache survive.
+    stamp_ok() { [ "$(cat "$1" 2> /dev/null || true)" = "$(sha256sum "$2" | cut -d' ' -f1)$3" ]; }
+    stamp_set() { sha256sum "$2" | cut -d' ' -f1 | tr -d '\n' > "$1"; printf '%s\n' "$3" >> "$1"; }
+
+    # Parallel plan (FLE-174). The composer gates and Playwright both use app/var/cache/dev (stan and lint warm it, the
+    # throw-away server runs in dev), so they stay sequential. Everything else is independent and runs beside them:
+    #   background A: npm ci + Chromium install      (while the composer gates run)
+    #   background B: infra venv, pytest, systemd security, ansible-lint   (while Playwright runs)
+    # Every gate still writes its own log and gates.tsv row (single short appended lines, atomic).
+    pw_install() {
+        local pw_deps='' lockstamp="$pw/node_modules/.ci-lock-hash"
+        [ "${FLEET_CI_INSTALL_DEPS:-}" != 1 ] || pw_deps='sudo -E env "PATH=$PATH" npx playwright install-deps chromium && '
+        local depstamp="$HOME/.cache/fleet-ci/pw-deps-$(sha256sum "$pw/package-lock.json" | cut -c1-16)"
+        if [ -n "$pw_deps" ] && [ -f "$depstamp" ]; then pw_deps=''; fi
+        local npm_ci='npm ci'
+        if stamp_ok "$lockstamp" "$pw/package-lock.json" '' && [ -d "$pw/node_modules/.bin" ]; then npm_ci='echo "npm ci skipped: package-lock.json unchanged"'; fi
+        gate_note='cached when the lock files are unchanged' run_gate playwright-install 1 in_pw bash -c "$npm_ci && ${pw_deps}npx playwright install --only-shell chromium" || return 1
+        stamp_set "$lockstamp" "$pw/package-lock.json" ''
+        if [ -n "${FLEET_CI_INSTALL_DEPS:-}" ]; then mkdir -p "$(dirname "$depstamp")" && : > "$depstamp"; fi
+    }
+    infra_chain() {
+        local venvstamp="$venv/.ci-req-hash" pipcmd
+        pipcmd="python3 -m venv '$venv' && '$venv/bin/pip' install -q -r '$root/ci/requirements-dev.txt'"
+        if stamp_ok "$venvstamp" "$root/ci/requirements-dev.txt" '' && [ -x "$venv/bin/pytest" ]; then pipcmd='echo "venv reused: requirements-dev.txt unchanged"'; fi
+        if run_gate infra-install 1 bash -c "$pipcmd"; then
+            stamp_set "$venvstamp" "$root/ci/requirements-dev.txt" ''
+            # Like the pipeline: a missing systemd-analyze fails the scoring tests instead of skipping them.
+            # Only demanded when the binary exists here, so a container without systemd still runs the rest.
+            local require_systemd=0
+            command -v systemd-analyze > /dev/null 2>&1 && require_systemd=1
+            run_gate pytest 1 env FLEET_REQUIRE_SYSTEMD_ANALYZE="$require_systemd" "$venv/bin/pytest" -q "$root/tests/pytest" || true
+            if [ "$require_systemd" -eq 1 ]; then
+                run_gate systemd-security 1 bash -c "'$venv/bin/python' '$root/ci/systemd_security.py' offline --out '$report_dir/systemd-offline.json' && '$venv/bin/python' '$root/ci/systemd_security.py' compare --env offline --current '$report_dir/systemd-offline.json'" || true
+            else
+                skip_gate systemd-security 1 "systemd-analyze not installed"
+            fi
+        else
+            skip_gate pytest 1 "infra install failed"
+            skip_gate systemd-security 1 "infra install failed"
+        fi
+        # Non-blocking, like the pipeline: ansible-core >= 2.21 needs Python >= 3.12.
+        if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
+            local lint_venv="$root/.venv-lint" lintstamp="$root/.venv-lint/.ci-req-hash" lintcmd
+            lintcmd="python3 -m venv '$lint_venv' && '$lint_venv/bin/pip' install -q -r '$root/ci/requirements-infra.txt'"
+            if stamp_ok "$lintstamp" "$root/ci/requirements-infra.txt" '' && [ -x "$lint_venv/bin/ansible-lint" ]; then lintcmd='echo "venv reused: requirements-infra.txt unchanged"'; fi
+            run_gate ansible-lint 0 bash -c "$lintcmd && cd '$root' && '$lint_venv/bin/ansible-lint' ansible/ && '$lint_venv/bin/yamllint' ansible/" || true
+            [ ! -x "$lint_venv/bin/ansible-lint" ] || stamp_set "$lintstamp" "$root/ci/requirements-infra.txt" ''
+        else
+            skip_gate ansible-lint 0 "Python $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])') is older than 3.12"
+        fi
+    }
+    pw_install_ok="$report_dir/.pw-install-ok"
+    rm -f "$pw_install_ok"
+    ( pw_install && : > "$pw_install_ok" ) &
+    pid_pw_install=$!
+    infra_pid=''
     pw_workers=()
     # Workers: FLEET_CI_WORKERS wins. Otherwise a container with a CPU quota (docker cpus: N, cgroup v2 cpu.max) gets
     # two thirds of its CPUs, at least 1: every worker is a chromium plus the shared php server, and FLE-143 showed
     # 5 workers on 3 CPUs turning a 1 s page load into 10 s and axe runs into 18 s (60 s test timeouts, lost clicks).
+    # 6 CPUs (the Fleet CI cap since 2026-11-04) = 4 workers.
     pw_wanted="${FLEET_CI_WORKERS:-}"
     if [ -z "$pw_wanted" ] && [ -r /sys/fs/cgroup/cpu.max ]; then
         read -r pw_quota pw_period < /sys/fs/cgroup/cpu.max || true
@@ -171,10 +209,68 @@ if [ "$mode" = full ]; then
 
     printf '%s\n' "$pw_note" > "$report_dir/selection.txt"
     echo "playwright selection: $pw_note"
+fi
 
-    pw_deps=''
-    [ "${FLEET_CI_INSTALL_DEPS:-}" != 1 ] || pw_deps='sudo -E env "PATH=$PATH" npx playwright install-deps chromium && '
-    if run_gate playwright-install 1 in_pw bash -c "npm ci && ${pw_deps}npx playwright install --only-shell chromium"; then
+# Stale Symfony caches give false Playwright and PHPUnit reds after a branch switch.
+rm -rf "$root/app/var/cache/dev" "$root/app/var/cache/test"
+
+if [ "${#composer[@]}" -eq 0 ] || [ -z "${composer[${#composer[@]}-1]}" ]; then
+    printf '==> composer-install\n    composer not found on PATH\n'
+    printf 'composer-install\tfailed\t0\t1\tcomposer not found on PATH\n' >> "$report_dir/gates.tsv"
+    skip_gate composer-gates 1 "composer not found"
+    skip_gate prod-check 1 "composer not found"
+elif run_gate composer-install 1 app "${composer[@]}" install --no-interaction --prefer-dist; then
+    # FLE-174: composer-gates is the `gates` script (assets, cs, stan, lint, test) run as parallel lanes: `assets` first
+    # (it writes the built assets every other step reads), then one lane for cs + stan + lint and one PHPUnit process per
+    # suite (Unit, Integration, Functional, Repo). Each PHPUnit process makes its own FLEET_HOME and uses APP_ENV=test,
+    # while stan and lint warm the dev cache, so the lanes share nothing. FLEET_CI_SERIAL=1 runs plain `composer run gates`.
+    # Keep the lane list in step with app/composer.json (`gates`).
+    parallel_gates() {
+        local suite lane_pids=() rc=0 junit_dir="$report_dir/junit"
+        mkdir -p "$junit_dir"
+        printf '==> assets\n'
+        app "${composer[@]}" run assets || return 1
+        (app "${composer[@]}" run cs && app "${composer[@]}" run stan && app "${composer[@]}" run lint) > "$report_dir/.lane-static.log" 2>&1 &
+        lane_pids+=($!)
+        for suite in Unit Integration Functional Repo; do
+            (cd "$root/app" && "${FLEET_PHP:-php}" vendor/bin/phpunit --testsuite "$suite" --log-junit "$junit_dir/$suite.xml") > "$report_dir/.lane-$suite.log" 2>&1 &
+            lane_pids+=($!)
+        done
+        local pid
+        for pid in "${lane_pids[@]}"; do wait "$pid" || rc=1; done
+        # One log, the lanes in order: gates_summary.py sums every PHPUnit summary it finds in it.
+        for suite in static Unit Integration Functional Repo; do
+            printf '##### lane: %s\n' "$suite"
+            cat "$report_dir/.lane-$suite.log"
+        done
+        rm -f "$report_dir"/.lane-*.log
+        python3 "$root/ci/slowest_tests.py" "$junit_dir" > "$report_dir/slowest-phpunit.txt" 2> /dev/null || true
+        return "$rc"
+    }
+    if [ "${FLEET_CI_SERIAL:-}" = 1 ]; then
+        run_gate composer-gates 1 app "${composer[@]}" run gates || true
+    else
+        run_gate composer-gates 1 parallel_gates || true
+    fi
+    scripts="$(app "${composer[@]}" run-script --list 2>/dev/null || true)"
+    if grep -q '^ *prod-check\b' <<< "$scripts"; then
+        run_gate prod-check 1 app "${composer[@]}" run prod-check || true
+    else
+        skip_gate prod-check 1 "no prod-check script in app/composer.json"
+    fi
+else
+    skip_gate composer-gates 1 "composer install failed"
+    skip_gate prod-check 1 "composer install failed"
+fi
+
+
+if [ "$mode" = full ]; then
+    # Playwright proper: needs the composer install (vendor) and the npm install, both finished by now.
+    wait "$pid_pw_install" || true
+    if [ -f "$pw_install_ok" ]; then
+        # The infra chain (pytest, systemd score, ansible-lint) shares nothing with the app, so it runs beside Playwright.
+        infra_chain &
+        infra_pid=$!
         run_gate playwright-typecheck 1 in_pw npm run typecheck || true
         # The merge gate runs with FLEET_E2E_BASE_URL unset: Playwright starts its own throw-away server.
         gate_note="$pw_note"
@@ -187,36 +283,11 @@ if [ "$mode" = full ]; then
     else
         skip_gate playwright-typecheck 1 "playwright install failed"
         skip_gate playwright 1 "playwright install failed"
+        infra_chain &
+        infra_pid=$!
     fi
-
-    venv="$root/.venv"
-    infra_ok=0
-    if run_gate infra-install 1 bash -c "python3 -m venv '$venv' && '$venv/bin/pip' install -q -r '$root/ci/requirements-dev.txt'"; then
-        infra_ok=1
-    fi
-    if [ "$infra_ok" -eq 1 ]; then
-        # Like the pipeline: a missing systemd-analyze fails the scoring tests instead of skipping them.
-        # Only demanded when the binary exists here, so a container without systemd still runs the rest.
-        require_systemd=0
-        command -v systemd-analyze > /dev/null 2>&1 && require_systemd=1
-        run_gate pytest 1 env FLEET_REQUIRE_SYSTEMD_ANALYZE="$require_systemd" "$venv/bin/pytest" -q "$root/tests/pytest" || true
-        if [ "$require_systemd" -eq 1 ]; then
-            run_gate systemd-security 1 bash -c "'$venv/bin/python' '$root/ci/systemd_security.py' offline --out '$report_dir/systemd-offline.json' && '$venv/bin/python' '$root/ci/systemd_security.py' compare --env offline --current '$report_dir/systemd-offline.json'" || true
-        else
-            skip_gate systemd-security 1 "systemd-analyze not installed"
-        fi
-    else
-        skip_gate pytest 1 "infra install failed"
-        skip_gate systemd-security 1 "infra install failed"
-    fi
-
-    # Non-blocking, like the pipeline: ansible-core >= 2.21 needs Python >= 3.12.
-    if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
-        lint_venv="$root/.venv-lint"
-        run_gate ansible-lint 0 bash -c "python3 -m venv '$lint_venv' && '$lint_venv/bin/pip' install -q -r '$root/ci/requirements-infra.txt' && cd '$root' && '$lint_venv/bin/ansible-lint' ansible/ && '$lint_venv/bin/yamllint' ansible/" || true
-    else
-        skip_gate ansible-lint 0 "Python $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])') is older than 3.12"
-    fi
+    wait "$infra_pid" || true
+    rm -f "$pw_install_ok"
 fi
 
 echo
