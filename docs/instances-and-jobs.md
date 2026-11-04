@@ -78,13 +78,13 @@ A deploy clones the branch, writes the instance's DDEV configuration and Drupal 
 placeholders (see [`secrets.md`](secrets.md)), starts the project, runs the template's post-deploy commands, writes the
 Caddy site for `https://<id>.<domain>` and reloads Caddy.
 
-**Git over SSH in the instance terminals.** Right after the clone, the deploy sets the checkout's `core.sshCommand`, so a
+**Git over SSH in the instance terminals.** Right after the clone, the deploy sets the checkout's own git `sshCommand` setting, so a
 `git fetch` or `git push` typed in `tty1`/`tty2` (or run by a CI script) needs no `~/.ssh` for the `fleet` user. It uses the
 host's deploy key, the push key when the host has one (offered first, so agent instances can push), Fleet's own
 `known_hosts` (`/srv/fleet/ssh/known_hosts`), `StrictHostKeyChecking=yes` and `BatchMode=yes`: a host that is not trusted
-fails at once with an error instead of hanging at a host-key prompt. The seeded hosts are `github.com`, `bitbucket.org`,
-`ssh.bitbucket.org` and `gitlab.com`; add any other host with the SSH setup page or `fleet host:init`. Instances deployed
-before this change need a redeploy (or `git config core.sshCommand` by hand).
+fails at once with an error instead of hanging at a host-key prompt. The seed covers the major git providers (Bitbucket under both
+of its SSH host names); add any other host with the SSH setup page or `fleet host:init`. Instances deployed
+before this change need a redeploy (or set the checkout's `sshCommand` by hand).
 
 **Post-deploy commands run on the host, as arguments, never through a shell.** Quotes and backslashes group words; an
 unquoted `|`, `&`, `;`, `<`, `>`, `$`, `` ` ``, `(`, `)`, `{` or `}` is refused with a hint to write `ddev exec '...'`. A

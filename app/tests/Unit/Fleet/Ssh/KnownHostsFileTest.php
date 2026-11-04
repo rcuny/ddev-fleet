@@ -54,7 +54,7 @@ final class KnownHostsFileTest extends TestCase
             }
         }
         self::assertSame(
-            ['github.com' => self::GITHUB_ED25519, 'bitbucket.org' => self::BITBUCKET_ED25519, 'gitlab.com' => self::GITLAB_ED25519],
+            ['github.com' => self::GITHUB_ED25519, 'bitbucket.org' => self::BITBUCKET_ED25519, 'ssh.bitbucket.org' => self::BITBUCKET_ED25519, 'gitlab.com' => self::GITLAB_ED25519],
             $fingerprints,
         );
         self::assertTrue($this->file->has('github.com'));

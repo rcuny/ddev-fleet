@@ -44,7 +44,7 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         $job = $this->deploy();
         $instance = $this->instances->find('acme--main');
 
-        self::assertSame(['git clone', 'caddy validate', 'caddy reload', 'ddev start', 'ddev init', 'ddev drush', 'git rev-parse'], $this->commandNames());
+        self::assertSame(['git clone', 'git config', 'caddy validate', 'caddy reload', 'ddev start', 'ddev init', 'ddev drush', 'git rev-parse'], $this->commandNames());
         self::assertNotNull($instance);
         self::assertSame(InstanceState::Running, $instance->state());
         self::assertSame('abc1234', $instance->headSha());
