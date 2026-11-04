@@ -32,9 +32,10 @@ final readonly class Tmux
     /** What the home window was called before 1.1.x; a window with that name is renamed. */
     public const string LEGACY_HOME_WINDOW = 'host';
     public const int SIDEBAR_WIDTH = 50;
-    /** The size a detached session starts with (tmux would pick 80x24); an attaching client resizes it. */
-    private const string DETACHED_WIDTH = '200';
-    private const string DETACHED_HEIGHT = '50';
+    /** The size a detached session starts with (tmux would pick 80x24); an attaching client resizes it. Also the session's `default-size`, so windows
+     *  created while detached are not 80x24 either (FLE-187). */
+    private const string DETACHED_WIDTH = '300';
+    private const string DETACHED_HEIGHT = '80';
     /** A shell pane narrower than this is not worth equalising (the 0.x floor). */
     private const int MIN_SHELL_WIDTH = 10;
     public const int COMMAND_MAX = 4096;
@@ -117,6 +118,8 @@ final readonly class Tmux
         $session = '='.self::SESSION.':';
         foreach ([
             ['set-option', '-t', $session, 'mouse', 'on'],
+            ['set-option', '-t', $session, 'default-size', self::DETACHED_WIDTH.'x'.self::DETACHED_HEIGHT],
+            ['set-option', '-t', $session, 'window-size', 'latest'],
             ['set-option', '-s', 'set-clipboard', 'on'],
             ['set-option', '-t', $session, 'status', 'on'],
             ['set-option', '-t', $session, 'status-position', 'bottom'],
