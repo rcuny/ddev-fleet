@@ -13,7 +13,7 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
 }
 
 test.describe('templates', () => {
-  test('empty state, then the new template form starts blank', async ({ page }) => {
+  test('empty state, then the new template form starts blank @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const project = uniqueName();
     try {
@@ -40,7 +40,7 @@ test.describe('templates', () => {
     }
   });
 
-  test('a template with every field is created, listed and re-read in its edit form', async ({ page }) => {
+  test('a template with every field is created, listed and re-read in its edit form @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const project = uniqueName();
     try {
@@ -269,7 +269,7 @@ test.describe('templates', () => {
     }
   });
 
-  test('long values wrap: a 40 character name and 2000 character command lines never widen the page', async ({ page }) => {
+  test('long values wrap: a 40 character name and 2000 character command lines never widen the page @phone', async ({ page }) => {
     const project = uniqueName();
     const longName = `${'long-template-name-'.repeat(3)}x`.slice(0, 40).replace(/-$/, 'x');
     const longLine = `echo ${'0123456789'.repeat(199)}`;
@@ -295,7 +295,7 @@ test.describe('templates', () => {
     }
   });
 
-  test('unknown project or template is a 404, and a project without templates still lists the New template link', async ({ page }) => {
+  test('unknown project or template is a 404, and a project without templates still lists the New template link @phone', async ({ page }) => {
     const project = uniqueName();
     try {
       await createProjectViaUi(page, project);

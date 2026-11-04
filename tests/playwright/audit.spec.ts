@@ -191,7 +191,7 @@ test.describe('audit log', () => {
     await expect(page.getByTestId('audit-row')).toHaveCount(0);
   });
 
-  test('no horizontal overflow, and 44 px filter controls on the phone', async ({ page }) => {
+  test('no horizontal overflow, and 44 px filter controls on the phone @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const name = uniqueSecret('AX');
     await page.goto('/admin/secrets');
@@ -212,7 +212,7 @@ test.describe('audit log', () => {
     }
   });
 
-  test('the longest subject, project:<40 characters>/<64 characters>, wraps instead of widening the page', async ({ page }) => {
+  test('the longest subject, project:<40 characters>/<64 characters>, wraps instead of widening the page @phone', async ({ page }) => {
     test.setTimeout(180_000);
     const project = uniqueName().padEnd(40, 'z');
     const name = `PW_${uniqueValue().slice(-6).toUpperCase().replace(/[^A-Z0-9]/g, 'X')}_`.padEnd(64, 'Q');

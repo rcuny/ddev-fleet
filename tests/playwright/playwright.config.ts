@@ -3,6 +3,8 @@ import { baseURL, externalBaseURL, ignoreHTTPSErrors } from './support/env';
 
 // FLEET_PW_TIER (FLE-126): `full` (default, the documented gate) runs every spec; `quick` is the Fleet CI merge gate for
 // feature and Renovate branches: desktop without the coverage and validation matrices and the axe sweep, phone limited to @smoke tests.
+// The phone project is opt-in (FLE-159): it runs only what is tagged @phone (layout at 390 px, tap targets, phone-only behaviour;
+// every test of a *.phone.spec.ts file carries the tag on its describe). Everything else is checked once, on the desktop project.
 const tier = process.env.FLEET_PW_TIER ?? 'full';
 if (tier !== 'quick' && tier !== 'full') {
   throw new Error(`FLEET_PW_TIER must be "quick" or "full", got "${tier}"`);
@@ -45,7 +47,7 @@ export default defineConfig({
       name: 'phone',
       use: { ...devices['Desktop Chrome'], viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true },
       testIgnore: /\.desktop\.spec\.ts$/,
-      grep: quick ? /@smoke/ : undefined,
+      grep: quick ? /^(?=.*@phone)(?=.*@smoke)/ : /@phone/,
     },
   ],
   // Only when no external server is given: start the app ourselves (K25: `env -u FLEET_E2E_BASE_URL npx playwright test`).

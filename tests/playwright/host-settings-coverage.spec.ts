@@ -27,7 +27,7 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
 }
 
 test.describe('host settings: tabs', () => {
-  test('an unknown tab shows General, and each tab link marks itself current', async ({ page }) => {
+  test('an unknown tab shows General, and each tab link marks itself current @phone', async ({ page }) => {
     test.skip(test.info().project.name === 'phone', 'the strip is desktop only; the phone has the select');
     await page.goto('/admin/host?tab=nonsense');
     await expect(page.getByTestId('host-tab-general')).toBeVisible();
@@ -41,7 +41,7 @@ test.describe('host settings: tabs', () => {
     }
   });
 
-  test('the phone select lists the seven tabs, names the current one and opens another with Go', async ({ page }) => {
+  test('the phone select lists the seven tabs, names the current one and opens another with Go @phone', async ({ page }) => {
     test.skip(test.info().project.name !== 'phone', 'phone only');
     await page.goto('/admin/host?tab=uploads');
     const select = page.getByTestId('host-tab-select').getByLabel('Section');
@@ -56,7 +56,7 @@ test.describe('host settings: tabs', () => {
 });
 
 test.describe('host settings: General', () => {
-  test('the domain and TLS mode are shown read-only with the way to change them', async ({ page }) => {
+  test('the domain and TLS mode are shown read-only with the way to change them @phone', async ({ page }) => {
     const tab = await openHostTab(page, 'general');
     await expect(tab.getByTestId('host-domain')).toContainText(/\S+\.\S+/);
     await expect(tab.getByTestId('host-tls-mode')).toContainText(/http01|ovh_dns/);
@@ -107,7 +107,7 @@ test.describe('host settings: General', () => {
 });
 
 test.describe('host settings: Git identity', () => {
-  test('every refusal has its message, and the saved identity flips the workspace check', async ({ page, hostLock }) => {
+  test('every refusal has its message, and the saved identity flips the workspace check @phone', async ({ page, hostLock }) => {
     void hostLock;
     test.setTimeout(120_000);
     const tab = await openHostTab(page, 'git');
@@ -164,7 +164,7 @@ test.describe('host settings: Git identity', () => {
 });
 
 test.describe('host settings: Claude token', () => {
-  test('an empty or malformed token is refused and never shown back; a good one is stored, rotated and recorded', async ({ page, actor }) => {
+  test('an empty or malformed token is refused and never shown back; a good one is stored, rotated and recorded @phone', async ({ page, actor }) => {
     test.setTimeout(120_000);
     const tab = await openHostTab(page, 'claude');
     const field = tab.getByLabel(/Claude OAuth token/);
@@ -214,7 +214,7 @@ test.describe('host settings: Claude token', () => {
 });
 
 test.describe('host settings: Notifications', () => {
-  test('every field has its message and nothing is saved while one is wrong', async ({ page, hostLock }) => {
+  test('every field has its message and nothing is saved while one is wrong @phone', async ({ page, hostLock }) => {
     void hostLock;
     test.setTimeout(120_000);
     const tab = await openHostTab(page, 'notifications');
@@ -341,7 +341,7 @@ test.describe('host settings: Notifications', () => {
 });
 
 test.describe('host settings: Uploads', () => {
-  test('the limit refuses 0, a negative number, text and more than a TiB; a valid one is saved, shown and restored', async ({ page, hostLock }) => {
+  test('the limit refuses 0, a negative number, text and more than a TiB; a valid one is saved, shown and restored @phone', async ({ page, hostLock }) => {
     void hostLock;
     test.setTimeout(120_000);
     const tab = await openHostTab(page, 'uploads');
@@ -417,7 +417,7 @@ test.describe('host settings: Backups', () => {
     }
   });
 
-  test('the list shows date, size and a download; a new backup is added; unknown names answer 404', async ({ page }) => {
+  test('the list shows date, size and a download; a new backup is added; unknown names answer 404 @phone', async ({ page }) => {
     const tab = await openHostTab(page, 'backups');
     await expect(tab).toContainText('A snapshot of the fleet database is written every day.');
     await expect(tab).toContainText('keys/secret.key');
@@ -446,7 +446,7 @@ test.describe('host settings: Backups', () => {
 });
 
 test.describe('host settings: Networking and access', () => {
-  test('the Networking tab explains the mirror and shows its state, with 44 px controls on the phone', async ({ page }) => {
+  test('the Networking tab explains the mirror and shows its state, with 44 px controls on the phone @phone', async ({ page }) => {
     const tab = await openHostTab(page, 'network');
     await expect(tab).toContainText('Named ports exist on the host\'s Caddy only.');
     await expect(tab.getByLabel('Mirror the named ports inside the Docker network')).toBeAttached();

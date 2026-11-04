@@ -298,7 +298,7 @@ test.describe('users: the New user form refuses', () => {
 });
 
 test.describe('users: the list', () => {
-  test('shows the badges and the project count of each kind of user, and opens the edit page', async ({ page }) => {
+  test('shows the badges and the project count of each kind of user, and opens the edit page @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const p1 = uniqueName('prj');
     const p2 = uniqueName('prj');
@@ -354,7 +354,7 @@ test.describe('users: the list', () => {
     }
   });
 
-  test('long values wrap or truncate at every width: no horizontal overflow on the list, new and edit pages', async ({ page }) => {
+  test('long values wrap or truncate at every width: no horizontal overflow on the list, new and edit pages @phone', async ({ page }) => {
     const username = uniqueName('lng').padEnd(64, 'u');
     const display = `${'Wide'.repeat(63)}x`;
     expect(display).toHaveLength(253);
@@ -847,7 +847,7 @@ test.describe('users: administrators', () => {
     }
   });
 
-  test('you cannot disable, demote or delete your own account, not even with a crafted request', async ({ page, adminLock, baseURL }) => {
+  test('you cannot disable, demote or delete your own account, not even with a crafted request @phone', async ({ page, adminLock, baseURL }) => {
     void adminLock;
     const errors = collectBrowserErrors(page);
     const other = uniqueName('usr');
@@ -908,7 +908,7 @@ test.describe('users: administrators', () => {
 });
 
 test.describe('users: layout and accessibility of every state', () => {
-  test('refused and filled forms, the dialog and the lists fit 390 px', async ({ page }) => {
+  test('refused and filled forms, the dialog and the lists fit 390 px @phone', async ({ page }) => {
     const project = uniqueName('prj');
     const username = uniqueName('usr');
 

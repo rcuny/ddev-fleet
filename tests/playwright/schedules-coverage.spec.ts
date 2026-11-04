@@ -88,7 +88,7 @@ async function fillForm(page: Page, values: { name?: string; cron?: string; time
 const field = (page: Page, label: string): Locator => page.getByLabel(label, { exact: label === 'Name' });
 
 test.describe('schedules, full coverage', () => {
-  test('the new-schedule form refuses every bad value with its own message and keeps what was typed', async ({ page }) => {
+  test('the new-schedule form refuses every bad value with its own message and keeps what was typed @phone', async ({ page }) => {
     test.setTimeout(240_000);
     const errors = collectBrowserErrors(page);
     const fx = await fixture(page);
@@ -471,7 +471,7 @@ test.describe('schedules, full coverage', () => {
     }
   });
 
-  test('deleting asks first, can be cancelled, removes the history and a second delete finds nothing', async ({ page }) => {
+  test('deleting asks first, can be cancelled, removes the history and a second delete finds nothing @phone', async ({ page }) => {
     test.setTimeout(180_000);
     const fx = await fixture(page);
     const name = uniqueName('doomed');
@@ -571,7 +571,7 @@ test.describe('schedules, full coverage', () => {
     }
   });
 
-  test('long names, expressions and instance ids wrap on every page and every control is a full-size target', async ({ page }) => {
+  test('long names, expressions and instance ids wrap on every page and every control is a full-size target @phone', async ({ page }) => {
     test.setTimeout(180_000);
     const fx = await fixture(page);
     const longName = uniqueName('l').padEnd(40, 'x');

@@ -20,7 +20,7 @@ function row(page: Page, label: string): Locator {
 
 const unexpected = (errors: string[]): string[] => errors.filter((error) => !error.includes('status of 422'));
 
-test('all refusals show at once and the create form has no overflow', async ({ page }) => {
+test('all refusals show at once and the create form has no overflow @phone', async ({ page }) => {
   const errors = collectBrowserErrors(page);
   const project = uniqueName();
   try {
@@ -44,7 +44,7 @@ test('all refusals show at once and the create form has no overflow', async ({ p
   }
 });
 
-test('a refused edit shows its error and keeps the stored template', async ({ page }) => {
+test('a refused edit shows its error and keeps the stored template @phone', async ({ page }) => {
   const errors = collectBrowserErrors(page);
   const project = uniqueName();
   try {

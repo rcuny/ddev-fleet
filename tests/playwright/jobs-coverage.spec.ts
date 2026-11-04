@@ -4,7 +4,7 @@ import { follow, submitAndWait, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
 
-// The coverage companion of jobs.spec.ts and instances-phone.spec.ts: the job page (facts, log, Retry and its
+// The coverage companion of jobs.spec.ts and instances.phone.spec.ts: the job page (facts, log, Retry and its
 // refusals, unknown jobs, the log endpoint, what a member may see) and the job history at /admin/jobs (every filter,
 // the paging, the empty states). A job that has to be "running" is a fake job that is killed at the end of the test.
 // Runs on the desktop (1280 px) and the phone (390 px) project; every test owns its project and its instances.
@@ -195,7 +195,7 @@ test.describe('job page: admin', () => {
     await expect(page.getByTestId('timeline-job').filter({ hasText: 'fake' })).toHaveCount(1);
   });
 
-  test('a very long log line and the longest id stay inside the page', async ({ page }) => {
+  test('a very long log line and the longest id stay inside the page @phone', async ({ page }) => {
     const project = uniqueName('jl').padEnd(40, 'x').slice(0, 40);
     await createDeployableProject(project);
     const id = await deployOne(page, project, 'l'.repeat(17));
@@ -404,7 +404,7 @@ test.describe('job history: admin', () => {
     }
   });
 
-  test('fits the phone width with the longest id and shows the filters as stacked controls', async ({ page }) => {
+  test('fits the phone width with the longest id and shows the filters as stacked controls @phone', async ({ page }) => {
     test.skip(test.info().project.name !== 'phone', 'phone width only');
     const project = uniqueName('jw').padEnd(40, 'x').slice(0, 40);
     await createDeployableProject(project);

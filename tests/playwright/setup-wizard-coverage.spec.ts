@@ -376,7 +376,7 @@ test.describe('step 1: administrator', () => {
     await expect(page.getByText('Enter a username.')).toHaveCount(0);
   });
 
-  test('every username refusal', async ({ page, host }) => {
+  test('every username refusal @phone', async ({ page, host }) => {
     await enter(page, host);
     const form = page.getByTestId('setup-admin-form');
     const message = 'Use 1 to 64 lowercase letters, digits, dots, underscores or dashes, starting with a letter or digit.';
@@ -407,7 +407,7 @@ test.describe('step 1: administrator', () => {
     await expect(page).toHaveURL(/\/setup\/tls$/);
   });
 
-  test('every display name and email refusal, and the values stay', async ({ page, host }) => {
+  test('every display name and email refusal, and the values stay @phone', async ({ page, host }) => {
     await enter(page, host);
     const form = page.getByTestId('setup-admin-form');
     const cases: Array<[string, Partial<AdminValues>, string]> = [
@@ -438,7 +438,7 @@ test.describe('step 1: administrator', () => {
     await expectSound(page, 'the administrator step with a refused email');
   });
 
-  test('every password refusal, and the password never comes back', async ({ page, host }) => {
+  test('every password refusal, and the password never comes back @phone', async ({ page, host }) => {
     await enter(page, host);
     const form = page.getByTestId('setup-admin-form');
     const long = 'p'.repeat(129);
@@ -536,7 +536,7 @@ test.describe('step 1: administrator', () => {
     expect(host.scalar('SELECT COUNT(*) FROM fleet_user')).toBe(1);
   });
 
-  test('the longest values wrap on every page that shows them', async ({ page, host }) => {
+  test('the longest values wrap on every page that shows them @phone', async ({ page, host }) => {
     const username = `a${'b'.repeat(62)}c`;
     const displayName = 'D'.repeat(255);
     const email = `${'e'.repeat(64)}@${'x'.repeat(63)}.${'y'.repeat(63)}.${'z'.repeat(55)}.com`;
@@ -611,7 +611,7 @@ test.describe('step 2: domain and TLS', () => {
     await expect(page.getByText('Stored. Leave blank to keep it.')).toHaveCount(0);
   });
 
-  test('DNS mode names every missing credential', async ({ page, host }) => {
+  test('DNS mode names every missing credential @phone', async ({ page, host }) => {
     await enter(page, host);
     await page.goto('/setup/tls');
     const form = page.getByTestId('setup-tls-form');
@@ -641,7 +641,7 @@ test.describe('step 2: domain and TLS', () => {
     ['consumer', 'OVH consumer key', 'consumer key'],
   ];
   for (const [field, label, noun] of ovhFields) {
-    test(`the ${noun} must have the shape OVH issues`, async ({ page, host }) => {
+    test(`the ${noun} must have the shape OVH issues @phone`, async ({ page, host }) => {
       await enter(page, host);
       await page.goto('/setup/tls');
       const form = page.getByTestId('setup-tls-form');
@@ -875,7 +875,7 @@ test.describe('step 3: SSH keys', () => {
     });
   }
 
-  test('a very long server name does not widen the page', async ({ page, host }) => {
+  test('a very long server name does not widen the page @phone', async ({ page, host }) => {
     await enter(page, host);
     await page.goto('/setup/ssh');
     const name = `${'a'.repeat(63)}.${'b'.repeat(63)}.${'c'.repeat(63)}.example.org`;
@@ -1037,7 +1037,7 @@ test.describe('step 4: Claude token', () => {
     await expectSound(page, 'the Claude step');
   });
 
-  test('a blank save and a token of the wrong shape are refused with their messages', async ({ page, host }) => {
+  test('a blank save and a token of the wrong shape are refused with their messages @phone', async ({ page, host }) => {
     await enter(page, host);
     await page.goto('/setup/claude');
     const form = page.getByTestId('setup-claude-form');
@@ -1251,7 +1251,7 @@ test.describe('step 5: finish', () => {
     expect(host.scalar("SELECT COUNT(*) FROM fleet_user WHERE username = 'cov-admin'")).toBe(1);
   });
 
-  test('Finish in DNS mode also reports the certificate settings', async ({ page, host }) => {
+  test('Finish in DNS mode also reports the certificate settings @phone', async ({ page, host }) => {
     await enter(page, host);
     await saveAdmin(page);
     await fillOvh(page);

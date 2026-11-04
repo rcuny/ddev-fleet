@@ -17,7 +17,7 @@ async function createSecret(page: Page, project: string): Promise<string> {
 }
 
 test.describe('webhooks', () => {
-  test('the page lists every project with its addresses and works without overflow', async ({ page }, testInfo) => {
+  test('the page lists every project with its addresses and works without overflow @phone', async ({ page }, testInfo) => {
     const project = uniqueName('wh');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);
@@ -47,7 +47,7 @@ test.describe('webhooks', () => {
     }
   });
 
-  test('a secret is shown once, a bad signature is refused and the old secret dies on rotation', async ({ page }) => {
+  test('a secret is shown once, a bad signature is refused and the old secret dies on rotation @phone', async ({ page }) => {
     const project = uniqueName('wh');
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);

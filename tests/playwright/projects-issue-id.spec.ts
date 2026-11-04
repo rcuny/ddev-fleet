@@ -130,7 +130,7 @@ test.describe('issue id tester', () => {
     }
   });
 
-  test('the samples are limited to 63 and 200 characters', async ({ page }) => {
+  test('the samples are limited to 63 and 200 characters @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const name = uniqueName();
     try {

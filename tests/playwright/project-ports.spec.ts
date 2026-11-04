@@ -12,7 +12,7 @@ import { createPort, deletePort, runConsole } from './support/ports';
 const PORT = 'typesense';
 
 test.describe('project ports tab', () => {
-  test('assign, unassign and the typesense flag follow the port', async ({ page }, testInfo) => {
+  test('assign, unassign and the typesense flag follow the port @phone', async ({ page }, testInfo) => {
     test.setTimeout(120_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
@@ -61,7 +61,7 @@ test.describe('project ports tab', () => {
     expect(errors).toEqual([]);
   });
 
-  test('a 40-character port name and 5-digit numbers wrap inside the table without widening the page', async ({ page }) => {
+  test('a 40-character port name and 5-digit numbers wrap inside the table without widening the page @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName();
@@ -95,7 +95,7 @@ test.describe('project ports tab', () => {
     }
   });
 
-  test('a port removed from the catalogue while the tab is open gives the 422 message, keeps the ticks and passes axe', async ({ page }) => {
+  test('a port removed from the catalogue while the tab is open gives the 422 message, keeps the ticks and passes axe @phone', async ({ page }) => {
     test.setTimeout(120_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName();
@@ -129,7 +129,7 @@ test.describe('project ports tab', () => {
     expect(errors.filter((message) => !message.includes('422'))).toEqual([]);
   });
 
-  test('the checkbox and the button are touch-sized on the phone', async ({ page }, testInfo) => {
+  test('the checkbox and the button are touch-sized on the phone @phone', async ({ page }, testInfo) => {
     test.skip('phone' !== testInfo.project.name, 'phone layout only');
     const project = uniqueName();
     const port = createPort(uniqueName('pp'));

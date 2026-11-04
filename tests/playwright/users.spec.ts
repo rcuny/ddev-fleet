@@ -23,7 +23,7 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
 }
 
 test.describe('users and project access', () => {
-  test('admin adds a user to a project', async ({ page }) => {
+  test('admin adds a user to a project @phone', async ({ page }) => {
     // About 20 page loads; a busy shared host needs minutes, not seconds.
     test.setTimeout(240_000);
     const errors = collectBrowserErrors(page);
@@ -98,7 +98,7 @@ test.describe('users and project access', () => {
     }
   });
 
-  test('creating a project and a user shows the result at once and keeps the admin signed in', async ({ page }) => {
+  test('creating a project and a user shows the result at once and keeps the admin signed in @phone', async ({ page }) => {
     // FLE-100: both used to restart Authelia (everyone signed out, the save looked like it did nothing). The stand-in
     // stands in for the session: it must still be there, and each page shows what was just created.
     test.setTimeout(240_000);
@@ -135,7 +135,7 @@ test.describe('users and project access', () => {
     }
   });
 
-  test('admin sets a password, disables and deletes a user', async ({ page }) => {
+  test('admin sets a password, disables and deletes a user @phone', async ({ page }) => {
     test.setTimeout(240_000);
     const errors = collectBrowserErrors(page);
     const username = uniqueName('usr');
@@ -206,7 +206,7 @@ test.describe('users and project access', () => {
     }
   });
 
-  test('the user pages fit the screen', async ({ page }) => {
+  test('the user pages fit the screen @phone', async ({ page }) => {
     test.setTimeout(240_000);
     const project = uniqueName('prj');
     const username = uniqueName('usr');
@@ -254,7 +254,7 @@ test.describe('users and project access', () => {
       await deleteProjectViaUi(page, project);
     }
   });
-  test('a site-only user needs no email, may have a short password and is marked in the list', async ({ page }) => {
+  test('a site-only user needs no email, may have a short password and is marked in the list @phone', async ({ page }) => {
     test.setTimeout(240_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName('prj');

@@ -54,7 +54,7 @@ const dumps = (project: string): string[] => {
 };
 
 test.describe('snapshot', () => {
-  test('shows an empty state when no instance of the project is running', async ({ page }) => {
+  test('shows an empty state when no instance of the project is running @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
 
@@ -71,7 +71,7 @@ test.describe('snapshot', () => {
     }
   });
 
-  test('takes a snapshot of a running instance, keeps the first one on the second, and downloads it', async ({ page }) => {
+  test('takes a snapshot of a running instance, keeps the first one on the second, and downloads it @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
     const instance = `${name}--main`;

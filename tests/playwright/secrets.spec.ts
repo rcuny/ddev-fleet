@@ -199,7 +199,7 @@ test.describe('secrets', () => {
   });
 });
 
-test.describe('phone layout of the secrets pages (390 px)', () => {
+test.describe('phone layout of the secrets pages (390 px) @phone', () => {
   test.skip(() => !isPhone(), 'phone only');
   test.describe.configure({ timeout: 180_000 });
 

@@ -77,7 +77,7 @@ function prepareDeploy(project: string): void {
 }
 
 test.describe('webhooks, full coverage', () => {
-  test('both pages list every receiver with its address, empty states and a working copy button', async ({ page, context, baseURL }) => {
+  test('both pages list every receiver with its address, empty states and a working copy button @phone', async ({ page, context, baseURL }) => {
     test.setTimeout(180_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName('wc');
@@ -144,7 +144,7 @@ test.describe('webhooks, full coverage', () => {
     }
   });
 
-  test('a secret is created and rotated from either page, shown once, and a stale tab cannot create a second one', async ({ page, context }) => {
+  test('a secret is created and rotated from either page, shown once, and a stale tab cannot create a second one @phone', async ({ page, context }) => {
     test.setTimeout(180_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName('ws');
@@ -346,7 +346,7 @@ test.describe('webhooks, full coverage', () => {
     }
   });
 
-  test('every outcome of a delivery is in the log with its reason, and the receiver refuses what it should', async ({ page }) => {
+  test('every outcome of a delivery is in the log with its reason, and the receiver refuses what it should @phone', async ({ page }) => {
     test.setTimeout(300_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName('wl');
@@ -504,7 +504,7 @@ test.describe('webhooks, full coverage', () => {
     }
   });
 
-  test('the log is paged fifty to a page and the overview shows the latest twenty-five', async ({ page }) => {
+  test('the log is paged fifty to a page and the overview shows the latest twenty-five @phone', async ({ page }) => {
     test.setTimeout(300_000);
     const project = uniqueName('wp');
     try {
@@ -563,7 +563,7 @@ test.describe('webhooks, full coverage', () => {
     }
   });
 
-  test('the pipeline token refuses a bad value, can be cancelled, replaced and removed, and is never shown', async ({ page }) => {
+  test('the pipeline token refuses a bad value, can be cancelled, replaced and removed, and is never shown @phone', async ({ page }) => {
     test.setTimeout(240_000);
     const errors = collectBrowserErrors(page);
     const project = uniqueName('wt');

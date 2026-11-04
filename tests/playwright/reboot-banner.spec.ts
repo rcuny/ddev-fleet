@@ -23,7 +23,7 @@ test.describe('reboot banner', () => {
     await expect(page.getByTestId('reboot-banner')).toHaveCount(0);
   });
 
-  test('an administrator sees the banner with the packages, without overflow', async ({ page }) => {
+  test('an administrator sees the banner with the packages, without overflow @phone', async ({ page }) => {
     mkdirSync(fleetHome, { recursive: true });
     writeFileSync(flag, '*** System restart required ***\n');
     writeFileSync(packages, 'linux-image-6.12.0-amd64\nlibc6\n');
@@ -44,7 +44,7 @@ test.describe('reboot banner', () => {
     expect(await hasHorizontalOverflow(page)).toBe(false);
   });
 
-  test('the banner shows on other shell pages and without a package list', async ({ page }) => {
+  test('the banner shows on other shell pages and without a package list @phone', async ({ page }) => {
     mkdirSync(fleetHome, { recursive: true });
     writeFileSync(flag, '');
 

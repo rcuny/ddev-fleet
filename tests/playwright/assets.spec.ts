@@ -101,7 +101,7 @@ async function deleteRow(page: Page, row: Locator): Promise<void> {
 }
 
 test.describe('assets', () => {
-  test('uploads a file in chunks, lists it, downloads it and deletes it', async ({ page }) => {
+  test('uploads a file in chunks, lists it, downloads it and deletes it @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
@@ -171,7 +171,7 @@ test.describe('assets', () => {
     }
   });
 
-  test('creates a folder, uploads into it and finds the way back', async ({ page }) => {
+  test('creates a folder, uploads into it and finds the way back @phone', async ({ page }) => {
     test.setTimeout(150_000);
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
@@ -280,7 +280,7 @@ test.describe('assets', () => {
     }
   });
 
-  test('Rescan shows a file copied into the assets directory over SSH', async ({ page }) => {
+  test('Rescan shows a file copied into the assets directory over SSH @phone', async ({ page }) => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName();
     const directory = join(fleetHome(), 'assets', name);

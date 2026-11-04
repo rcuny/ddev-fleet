@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test';
 import { collectBrowserErrors } from './support/shell';
 
 test.describe('app shell @smoke', () => {
-  test('home renders the shell without browser errors', async ({ page }, testInfo) => {
+  test('home renders the shell without browser errors @phone', async ({ page }, testInfo) => {
     const errors = collectBrowserErrors(page);
 
     await page.goto('/');

@@ -26,7 +26,7 @@ async function openTab(page: Page, key: string): Promise<void> {
 }
 
 test.describe('host settings', () => {
-  test('the page has one h1, the Settings entry in the menu and no browser errors', async ({ page }, testInfo) => {
+  test('the page has one h1, the Settings entry in the menu and no browser errors @phone', async ({ page }, testInfo) => {
     const errors = collectBrowserErrors(page);
     await page.goto('/admin/host');
     await page.waitForLoadState('networkidle');
@@ -42,7 +42,7 @@ test.describe('host settings', () => {
     expect(errors).toEqual([]);
   });
 
-  test('tabs: a strip on desktop, a select with a Go button on the phone', async ({ page }, testInfo) => {
+  test('tabs: a strip on desktop, a select with a Go button on the phone @phone', async ({ page }, testInfo) => {
     await openTab(page, 'general');
 
     if (isPhone(testInfo)) {
@@ -63,7 +63,7 @@ test.describe('host settings', () => {
   });
 
   for (const { key, label } of TABS) {
-    test(`no horizontal overflow and 44 px tap targets on the ${label} tab`, async ({ page }, testInfo) => {
+    test(`no horizontal overflow and 44 px tap targets on the ${label} tab @phone`, async ({ page }, testInfo) => {
       await openTab(page, key);
 
       expect(await hasHorizontalOverflow(page)).toBe(false);
@@ -78,7 +78,7 @@ test.describe('host settings', () => {
     });
   }
 
-  test('the Networking tab switches the port mirror off and on', async ({ page }, testInfo) => {
+  test('the Networking tab switches the port mirror off and on @phone', async ({ page }, testInfo) => {
     // The setting is one row shared by both projects, which run in parallel: toggling it twice at once is a race.
     test.skip(isPhone(testInfo), 'desktop only: the switch is shared host state');
     const errors = collectBrowserErrors(page);
@@ -121,7 +121,7 @@ test.describe('host settings', () => {
     await expect(page.getByLabel(/New Claude OAuth token/)).toHaveValue('');
   });
 
-  test('the Claude tab names the rotation command and shows the workspace checks without values', async ({ page }) => {
+  test('the Claude tab names the rotation command and shows the workspace checks without values @phone', async ({ page }) => {
     await openTab(page, 'claude');
     await page.getByLabel(/Claude OAuth token/).fill(TOKEN);
     await page.getByRole('button', { name: /Store token|Replace token/ }).click();
@@ -139,7 +139,7 @@ test.describe('host settings', () => {
     expect(await hasHorizontalOverflow(page)).toBe(false);
   });
 
-  test('the Git identity tab shows the same workspace checks', async ({ page }) => {
+  test('the Git identity tab shows the same workspace checks @phone', async ({ page }) => {
     await openTab(page, 'git');
 
     const checks = page.getByTestId('host-workspace-checks');
@@ -192,7 +192,7 @@ test.describe('host settings', () => {
     expect(await page.content()).not.toContain(SMTP_PASSWORD);
   });
 
-  test('Back up now adds a backup that can be downloaded', async ({ page }) => {
+  test('Back up now adds a backup that can be downloaded @phone', async ({ page }) => {
     await openTab(page, 'backups');
     const before = await page.getByTestId('backup-row').count();
 

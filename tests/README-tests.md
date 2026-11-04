@@ -30,7 +30,7 @@ What the numbers include:
 | Suite | Where | Notes |
 |---|---|---|
 | PHPUnit `Unit`, `Integration`, `Functional`, `Repo` | `app/tests/<Suite>/` | `Repo` tests skip without their tool: `FLEET_CADDY_BIN`, `FLEET_MERCURE_BIN`, or when not run as root (one test only runs as root) |
-| Playwright | `tests/playwright/` | each spec runs on the `desktop` and the `phone` project where it applies (`projects.spec.ts` has phone-only tests, skipped on desktop). Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-instances.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL`, `FLEET_LIVE_ADMIN_PASSWORD` and `FLEET_LIVE_GIT_URL`, a public DDEV repository; it deploys and destroys real instances) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
+| Playwright | `tests/playwright/` | every spec runs on the `desktop` project; the `phone` project is **opt-in** (FLE-159) and runs only the tests tagged `@phone` (layout at 390 px, tap targets, phone-only behaviour; every test of a `*.phone.spec.ts` file carries the tag on its describe). To give a test a phone run, put `@phone` in its title; a new phone-only spec is named `<topic>.phone.spec.ts` with `@phone` on its describe. Against an external server (`FLEET_E2E_BASE_URL` set) the wizard tests skip. Not counted: `live-install.desktop.spec.ts` (only with `FLEET_LIVE_SETUP_URL`) and `live-instances.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL`, `FLEET_LIVE_ADMIN_PASSWORD` and `FLEET_LIVE_GIT_URL`, a public DDEV repository; it deploys and destroys real instances) and `live-projects.desktop.spec.ts` (only with `FLEET_E2E_BASE_URL` and `FLEET_LIVE_ADMIN_PASSWORD`; `FLEET_LIVE_PHASE=build\|ports\|clean` splits it around host-side checks) |
 | pytest | `tests/pytest/` | a test skips when an optional binary is missing |
 
 ## Layout
@@ -102,7 +102,7 @@ npx playwright show-report                         # the HTML report of the last
 **Tiers (`FLEET_PW_TIER`, FLE-126).** `full` (the default, also when the variable is unset) runs every spec: the
 documented gate and what Fleet CI runs on `release/*`, `develop` and nightly. `quick` is the Fleet CI merge gate on
 `feature/*` and `renovate/*`: project `desktop` without `*-coverage.spec.ts`, `projects-validation.spec.ts` and
-`templates-validation.spec.ts` and the axe sweep (`a11y*.spec.ts`, `users-a11y.desktop.spec.ts`: full tier only), project `phone` limited to `@smoke` tests (about 170 tests instead of 1000). Any other
+`templates-validation.spec.ts` and the axe sweep (`a11y*.spec.ts`, `users-a11y.desktop.spec.ts`: full tier only), project `phone` limited to tests tagged both `@phone` and `@smoke` (about 160 tests instead of 1000; counts: `npx playwright test --list`). Any other
 value is an error. No test is removed; `npx playwright test --list` shows what a tier runs.
 
 With `FLEET_E2E_BASE_URL` unset, Playwright starts the app itself (`support/start-app.mjs`: a throw-away

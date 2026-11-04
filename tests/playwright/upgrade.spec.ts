@@ -67,7 +67,7 @@ test.describe('upgrade notice and page', () => {
     rmSync(lock, { recursive: true, force: true });
   });
 
-  test('a host one release behind shows the badge, and the page fits the viewport', async ({ page }) => {
+  test('a host one release behind shows the badge, and the page fits the viewport @phone', async ({ page }) => {
     await page.goto('/admin/host/upgrade');
     await page.waitForLoadState('networkidle');
 
