@@ -7,7 +7,6 @@ namespace App\Fleet\Jobs\Type;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Job\Job;
-use App\Domain\Ssh\SshKeyRole;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Jobs\JobFailed;
@@ -16,6 +15,7 @@ use App\Fleet\Jobs\JobLog;
 use App\Fleet\Jobs\JobType;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunnerException;
+use App\Fleet\Ssh\InstanceSshAgent;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -31,6 +31,7 @@ final readonly class StartJob implements JobType
         private FleetPaths $paths,
         private JobFeed $feed,
         private ClockInterface $clock,
+        private InstanceSshAgent $agent,
     ) {
     }
 
@@ -53,20 +54,17 @@ final readonly class StartJob implements JobType
         $params = $job->params();
         $timeout = \is_int($params['timeout'] ?? null) || \is_float($params['timeout'] ?? null) ? (float) $params['timeout'] : null;
 
-        // DDEV's ssh-agent forgets its keys when the host reboots or its container is recreated (FLE-145). Ruling: a
-        // failed load is only logged here, so a stopped instance can still be started; deploy is the strict place.
-        foreach ([SshKeyRole::Push, SshKeyRole::Deploy] as $role) {
-            $key = $this->paths->sshPrivateKey($role);
-            if (!is_file($key)) {
-                continue;
-            }
-            try {
-                $loaded = $this->ddev->authSsh($dir, $key, $log->output(...));
-                if (!$loaded->isSuccess()) {
-                    $log->line(\sprintf('warning: the %s key could not be loaded into the ssh-agent (exit %d); git over SSH in the container may fail', $role->value, $loaded->exitCode));
+        // A project that opted in to git over SSH in the container gets its own agent back (FLE-145): it does not survive
+        // a reboot. Ruling: a failure is only logged here so a stopped instance can still start; deploy is the strict place.
+        if ($instance->project()->containerSsh()) {
+            if (!$this->agent->hasKey()) {
+                $log->line('warning: the host has no push key; no ssh-agent for this instance');
+            } else {
+                try {
+                    $this->agent->start($instance->id());
+                } catch (\RuntimeException $e) {
+                    $log->line('warning: '.$e->getMessage().' Git over SSH in the container will fail.');
                 }
-            } catch (CommandRunnerException $e) {
-                $log->line(\sprintf('warning: the %s key could not be loaded into the ssh-agent: %s', $role->value, $e->getMessage()));
             }
         }
 

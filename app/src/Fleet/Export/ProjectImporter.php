@@ -509,6 +509,7 @@ final readonly class ProjectImporter
             $project['issue_id_regexp'],
             $project['display_submodule_branch'],
             $project['typesense'],
+            $project['container_ssh'],
         );
     }
 

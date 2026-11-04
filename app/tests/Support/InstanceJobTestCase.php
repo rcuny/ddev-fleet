@@ -67,6 +67,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
     protected Project $project;
     protected Template $template;
     protected Ddev $ddev;
+    protected \App\Fleet\Ssh\InstanceSshAgent $agent;
     protected InstanceSiteWriter $sites;
     protected Teardown $teardown;
     protected Tmux $tmux;
@@ -105,8 +106,9 @@ abstract class InstanceJobTestCase extends KernelTestCase
             new LockFactory(new FlockStore($this->paths->locksDir())),
             new AdminGroup('fleet-admins'),
         );
+        $this->agent = new \App\Fleet\Ssh\InstanceSshAgent($this->runner, $this->paths);
         $this->tmux = new Tmux($this->runner, $this->paths, '/opt/ddev-fleet/app/bin/console');
-        $this->teardown = new Teardown($this->paths, $this->ddev, $this->sites, $this->tmux);
+        $this->teardown = new Teardown($this->paths, $this->ddev, $this->sites, $this->tmux, $this->agent);
         $this->feed = new JobFeed($this->createStub(HubInterface::class), new NullLogger());
         $this->workflow = new DeployWorkflow(
             $this->instances,
@@ -121,6 +123,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->sites,
             $this->teardown,
             $this->paths,
+            $this->agent,
             $this->feed,
             $this->clock,
             $this->steps,

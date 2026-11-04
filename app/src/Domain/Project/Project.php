@@ -63,6 +63,10 @@ class Project
     #[ORM\Column(type: Types::BOOLEAN)]
     private bool $typesense = false;
 
+    /** Opt-in: a dedicated ssh-agent with the push key for git over SSH inside the web container (FLE-145). */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $containerSsh = false;
+
     /** @var Collection<int, NamedPort> */
     #[ORM\ManyToMany(targetEntity: NamedPort::class)]
     #[ORM\JoinTable(name: 'project_port')]
@@ -235,6 +239,17 @@ class Project
     public function changeDisplaySubmoduleBranch(?string $path, ?\DateTimeImmutable $now = null): void
     {
         $this->displaySubmoduleBranch = $path;
+        $this->touch($now);
+    }
+
+    public function containerSsh(): bool
+    {
+        return $this->containerSsh;
+    }
+
+    public function changeContainerSsh(bool $containerSsh, ?\DateTimeImmutable $now = null): void
+    {
+        $this->containerSsh = $containerSsh;
         $this->touch($now);
     }
 

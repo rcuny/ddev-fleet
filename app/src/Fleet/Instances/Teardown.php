@@ -9,6 +9,7 @@ use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobLog;
+use App\Fleet\Ssh\InstanceSshAgent;
 use App\Fleet\Workspace\Tmux;
 
 /**
@@ -24,6 +25,7 @@ final readonly class Teardown
         private Ddev $ddev,
         private InstanceSiteWriter $sites,
         private Tmux $tmux,
+        private InstanceSshAgent $agent,
     ) {
     }
 
@@ -38,6 +40,7 @@ final readonly class Teardown
         $dir = $this->paths->instanceDir($instance->id());
 
         $this->closeWindow($instance, $log);
+        $this->agent->stop($instance->id());
         if (is_dir($dir)) {
             try {
                 $result = $this->ddev->delete($dir, $instance->id(), $log->output(...));

@@ -50,6 +50,7 @@ validation messages never echo what you typed (a "does not exist" message repeat
 | Issue id pattern | Optional, at most 200 characters. A regular expression (PCRE, case-insensitive, no delimiters, so `~` is not allowed) that finds the issue id in an instance label or a branch name, for example `(?:ABC\|XYZ)-\d{1,6}`. See [the pattern rules](#issue-id-patterns). |
 | Submodule branch | Optional. A relative path inside the repository, such as `web/modules/custom/blog`: segments of letters, digits, `.`, `_`, `-`, each starting with a letter or digit, at most 200 characters. |
 | Typesense | A yes/no switch for a Typesense search server per instance. |
+| Git over SSH in the container | A yes/no switch, off by default: each instance gets its own ssh-agent holding the host's push key, mounted into that instance's web container only. See [`instances-and-jobs.md`](instances-and-jobs.md#git-over-ssh-in-the-instance-terminals). |
 
 ### Template
 
@@ -91,7 +92,7 @@ follow the design system. A refused value shows an error under its field and not
 | Page | URL | What it does |
 |---|---|---|
 | Projects | `/admin/projects` | The list: name, git URL, default branch and the number of templates. **New project** opens the create form. |
-| New project | `/admin/projects/new` | Name, git URL, default branch, hostnames (one per line), git identity, issue id pattern, submodule, Typesense. |
+| New project | `/admin/projects/new` | Name, git URL, default branch, hostnames (one per line), git identity, issue id pattern, submodule, Typesense, git over SSH in the container. |
 | Project, General tab | `/admin/projects/<project>` | The same fields (the name is fixed) plus the default template. Below the form: the **issue id tester** (type a pattern, a sample instance label and a sample branch, and see the id a deploy would extract; nothing typed there is saved) and the **Danger zone** with the delete button and its confirmation dialog. |
 | Project, Templates tab | `/admin/projects/<project>/templates` | The project's templates with their counts of commands; the default one carries a badge. **New template**, edit and delete. |
 | Template form | `.../templates/new`, `.../templates/<template>` | Name, Drupal environment, and three text boxes with one command per line. |
@@ -179,6 +180,7 @@ $ echo $?
 | `--issue-id-regexp=<pattern>` | The issue id pattern. |
 | `--display-submodule-branch=<path>` | The submodule whose branch is shown. |
 | `--typesense` | Give the project a Typesense search server. On update `--no-typesense` removes it. |
+| `--container-ssh` | Give each instance its own ssh-agent with the push key for git over SSH in the web container. On update `--no-container-ssh` removes it. Off by default. |
 | `--unset=<name>` | `project:update` only. Clears `default-branch`, `default-template`, `hostnames`, `ports`, `issue-id-regexp` or `display-submodule-branch`. Repeat for several. Combining `--unset=x` with a new value for `x` is refused. |
 
 **Template options** (`template:create` and `template:update`):
@@ -228,6 +230,7 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
     "issue_id_regexp": "(?:ABC|XYZ)-\\d{1,6}",
     "display_submodule_branch": null,
     "typesense": false,
+    "container_ssh": false,
     "templates": [
         {
             "name": "web",

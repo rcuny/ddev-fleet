@@ -45,6 +45,7 @@ final readonly class ProjectSnapshot
             'issue_id_regexp' => $project->issueIdRegexp(),
             'display_submodule_branch' => $project->displaySubmoduleBranch(),
             'typesense' => $project->typesense(),
+            'container_ssh' => $project->containerSsh(),
             'templates' => array_map(static fn (Template $template): array => [
                 'name' => $template->name(),
                 'drupal_env' => $template->drupalEnv(),

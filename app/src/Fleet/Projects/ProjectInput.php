@@ -31,6 +31,7 @@ final readonly class ProjectInput
         public ?string $issueIdRegexp = null,
         public ?string $displaySubmoduleBranch = null,
         public bool $typesense = false,
+        public bool $containerSsh = false,
     ) {
     }
 
@@ -49,6 +50,7 @@ final readonly class ProjectInput
             $project->issueIdRegexp(),
             $project->displaySubmoduleBranch(),
             $project->typesense(),
+            $project->containerSsh(),
         );
     }
 
@@ -88,6 +90,7 @@ final readonly class ProjectInput
             self::blankToNull($this->issueIdRegexp),
             self::blankToNull($this->displaySubmoduleBranch),
             $this->typesense,
+            $this->containerSsh,
         );
     }
 

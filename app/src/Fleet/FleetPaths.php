@@ -218,6 +218,35 @@ final readonly class FleetPaths
         return rtrim(\dirname($this->caddyDir), '/').'/Caddyfile';
     }
 
+    /**
+     * Runtime state of the per-instance ssh-agents (FLE-145): owner only, created on demand by InstanceSshAgent.
+     */
+    public function runDir(): string
+    {
+        return $this->home.'/run';
+    }
+
+    /**
+     * The one directory a container sees: it holds the instance's agent socket and nothing else (0700).
+     */
+    public function agentSocketDir(string $instanceId): string
+    {
+        return $this->runDir().'/'.self::id($instanceId, 'instance').'.agent';
+    }
+
+    public function agentSocket(string $instanceId): string
+    {
+        return $this->agentSocketDir($instanceId).'/agent.sock';
+    }
+
+    /**
+     * The agent's pid, kept outside the mounted directory.
+     */
+    public function agentPidFile(string $instanceId): string
+    {
+        return $this->runDir().'/'.self::id($instanceId, 'instance').'.agent.pid';
+    }
+
     public function knownHostsFile(): string
     {
         return $this->sshDir().'/known_hosts';

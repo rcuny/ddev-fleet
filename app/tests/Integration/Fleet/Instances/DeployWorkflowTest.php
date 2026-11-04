@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Tests\Integration\Fleet\Instances;
 
 use App\Domain\Instance\InstanceState;
-use App\Domain\Ssh\SshKeyRole;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Instances\DeployContext;
 use App\Fleet\Instances\DeployStep;
@@ -81,32 +80,75 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringNotContainsString($this->paths->sshDir(), $config, 'no host path, no key file in the container');
     }
 
-    public function testTheKeysGoIntoDdevsAgentPushKeyFirstAndNeverIntoTheContainer(): void
+    private function withPushKey(): void
     {
-        mkdir($this->paths->sshDir(), 0o700, true);
-        touch($this->paths->sshPrivateKey(SshKeyRole::Deploy));
-        touch($this->paths->sshPrivateKey(SshKeyRole::Push));
+        if (!is_dir($this->paths->sshDir())) {
+            mkdir($this->paths->sshDir(), 0o700, true);
+        }
+        touch($this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push));
+    }
+
+    /**
+     * @return list<list<string>>
+     */
+    private function agentCalls(): array
+    {
+        return array_values(array_filter($this->argvs(), static fn (array $argv): bool => \in_array($argv[0], ['ssh-agent', 'ssh-add'], true)));
+    }
+
+    public function testAnOptedInProjectGetsItsOwnAgentAndASocketMountForThisInstanceOnly(): void
+    {
+        $this->withPushKey();
+        $this->project->changeContainerSsh(true);
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AGENT_PID=4242; export SSH_AGENT_PID;\n"));
 
         $this->deploy();
 
-        $loads = array_map(static fn ($call): array => $call->argv, $this->runner->callsMatching(['ddev', 'auth']));
-        self::assertSame([
-            ['ddev', 'auth', 'ssh', '-f', $this->paths->sshPrivateKey(SshKeyRole::Push)],
-            ['ddev', 'auth', 'ssh', '-f', $this->paths->sshPrivateKey(SshKeyRole::Deploy)],
-        ], $loads);
-        $names = $this->commandNames();
-        self::assertLessThan(array_search('ddev start', $names, true), array_search('ddev auth', array_reverse($names, true), true), 'the agent has the keys before the container starts');
+        $names = array_column($this->agentCalls(), 0);
+        self::assertSame(['ssh-agent', 'ssh-add'], $names, 'the agent, then the key; nothing else');
+        $dir = $this->paths->instanceDir('acme--main');
+        $override = (string) file_get_contents($dir.'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertStringContainsString($this->paths->agentSocketDir('acme--main').':/run/fleet-ssh-agent', $override);
+        self::assertStringContainsString('SSH_AUTH_SOCK=/run/fleet-ssh-agent/agent.sock', $override);
+        self::assertStringContainsString(".ddev/docker-compose.fleet-ssh.yaml\n", (string) file_get_contents($dir.'/.git/info/exclude'));
+        $started = array_search('ddev start', $this->commandNames(), true);
+        self::assertNotFalse($started);
+        self::assertEmpty(array_filter($this->argvs(), static fn (array $argv): bool => 'ddev' === $argv[0] && 'auth' === ($argv[1] ?? '')), 'nothing goes into the global DDEV agent');
     }
 
-    public function testAKeyThatCannotBeLoadedIntoTheAgentFailsTheDeploy(): void
+    public function testAnOptOutProjectGetsNoAgentNoSocketAndNoOverride(): void
     {
-        mkdir($this->paths->sshDir(), 0o700, true);
-        touch($this->paths->sshPrivateKey(SshKeyRole::Push));
-        $this->runner->expect(['ddev', 'auth'], new CommandResult(1, '', "Failed to add key\n"));
+        $this->withPushKey();
+
+        $this->deploy();
+
+        self::assertSame([], $this->agentCalls());
+        self::assertFileDoesNotExist($this->paths->instanceDir('acme--main').'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir('acme--main'));
+        $config = (string) file_get_contents($this->paths->instanceDir('acme--main').'/.ddev/config.fleet.yaml');
+        self::assertStringNotContainsString('SSH_AUTH_SOCK', $config);
+    }
+
+    public function testAnOptedInProjectOnAHostWithoutAPushKeyOnlyLogsAWarning(): void
+    {
+        $this->project->changeContainerSsh(true);
+
+        $job = $this->deploy();
+
+        self::assertSame([], $this->agentCalls());
+        self::assertFileDoesNotExist($this->paths->instanceDir('acme--main').'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertStringContainsString('the host has no push key', $this->logText($job));
+    }
+
+    public function testAnAgentThatCannotBeStartedFailsTheDeployBeforeDdevStart(): void
+    {
+        $this->withPushKey();
+        $this->project->changeContainerSsh(true);
+        $this->runner->expect(['ssh-agent'], new CommandResult(1, '', 'cannot bind'));
 
         $e = $this->failedDeploy();
 
-        self::assertStringContainsString('ddev auth ssh (push key) failed with exit code 1', $e->getMessage());
+        self::assertStringContainsString('ssh-agent setup failed', $e->getMessage());
         self::assertNotContains('ddev start', $this->commandNames());
     }
 

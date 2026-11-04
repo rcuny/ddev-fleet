@@ -8,7 +8,6 @@ use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Project\Project;
-use App\Domain\Ssh\SshKeyRole;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
 use App\Fleet\Ddev\Ddev;
@@ -24,6 +23,8 @@ use App\Fleet\Secrets\TokenRenderer;
 use App\Fleet\Secrets\UnresolvedTokens;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunnerException;
+use App\Fleet\Ssh\AtomicFile;
+use App\Fleet\Ssh\InstanceSshAgent;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 
@@ -53,6 +54,7 @@ final class DeployWorkflow
         private readonly InstanceSiteWriter $sites,
         private readonly Teardown $teardown,
         private readonly FleetPaths $paths,
+        private readonly InstanceSshAgent $agent,
         private readonly JobFeed $feed,
         private readonly ClockInterface $clock,
         #[AutowireIterator('fleet.deploy_step')]
@@ -158,8 +160,8 @@ final class DeployWorkflow
             $written[] = '.env';
         }
         $written[] = $sshKnownHosts;
+        array_push($written, ...$this->setUpContainerAgent($instance, $project, $dir, $log));
         GitExclude::add($dir, $written);
-        $this->loadAgentKeys($dir, $log);
 
         $context = new DeployContext($instance, $project, $dir, $tokens, $log, $this->secrets);
 
@@ -258,23 +260,30 @@ final class DeployWorkflow
     }
 
     /**
-     * Ruling (FLE-145): a key file that exists but cannot be loaded into DDEV's ssh-agent fails the deploy, because an
-     * agent instance that cannot push would only find out after its work. A key the host does not have is skipped. The
-     * push key goes first: Bitbucket tries the agent's keys in order and a read-only deploy key would win otherwise.
+     * Ruling (FLE-145): only a project that opted in (`containerSsh`) gets an agent, and only that instance's container
+     * mounts its socket; nothing is ever loaded into DDEV's host-wide agent. An agent that cannot be started fails the
+     * deploy (an agent instance that cannot push would only find out after its work); a host without a push key only logs.
+     *
+     * @return list<string> files added to the checkout, relative to $dir
      */
-    private function loadAgentKeys(string $dir, JobLog $log): void
+    private function setUpContainerAgent(Instance $instance, Project $project, string $dir, JobLog $log): array
     {
-        foreach ([SshKeyRole::Push, SshKeyRole::Deploy] as $role) {
-            $key = $this->paths->sshPrivateKey($role);
-            if (!is_file($key)) {
-                continue;
-            }
-            try {
-                $result = $this->ddev->authSsh($dir, $key, $log->output(...));
-            } catch (CommandRunnerException $e) {
-                throw new JobFailed('ssh-agent key load did not finish: '.$e->getMessage());
-            }
-            $this->requireSuccess('ddev auth ssh ('.$role->value.' key)', $result);
+        if (!$project->containerSsh()) {
+            return [];
         }
+        if (!$this->agent->hasKey()) {
+            $log->line('warning: the project asks for git over SSH in the container, but the host has no push key; no ssh-agent was started');
+
+            return [];
+        }
+        try {
+            $this->agent->start($instance->id());
+            AtomicFile::write($dir.'/'.InstanceSshAgent::OVERRIDE_FILE, $this->agent->composeOverride($instance->id()), 0o640);
+        } catch (\RuntimeException $e) {
+            throw new JobFailed('ssh-agent setup failed: '.$e->getMessage());
+        }
+        $log->line('started a dedicated ssh-agent for this instance (push key, '.InstanceSshAgent::KEY_LIFETIME.' s)');
+
+        return [InstanceSshAgent::OVERRIDE_FILE];
     }
 }
