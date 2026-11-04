@@ -114,6 +114,44 @@ final class InstallerPreflightTest extends TestCase
         self::assertStringContainsString('BLOCK ddev.answer:', $out);
     }
 
+    private const ROOT_REFUSING_DDEV = 'if [ "${DDEV_AS:-}" != fleet ]; then echo "DDEV is not designed to be run with root privileges" >&2; exit 1; fi; echo \'{"raw":[]}\'';
+    private const RUNUSER_STUB = 'export DDEV_AS=fleet; shift 3; exec "$@"';
+
+    public function testAsRootDdevRunsAsTheFleetUserAndDoesNotBlock(): void
+    {
+        [$status, $out, $err] = $this->preflight(
+            ['ddev' => self::ROOT_REFUSING_DDEV, 'runuser' => self::RUNUSER_STUB, 'getent' => 'exit 0'],
+            ['PREFLIGHT_EUID' => '0'],
+        );
+
+        self::assertSame(0, $status, $err.$out);
+        self::assertStringContainsString('INFO ddev.answer: ddev answers', $out);
+        self::assertStringNotContainsString('BLOCK', $out);
+    }
+
+    public function testAsRootWithoutTheFleetUserDdevIsNotCheckedNorBlocked(): void
+    {
+        [$status, $out, $err] = $this->preflight(
+            ['ddev' => self::ROOT_REFUSING_DDEV, 'getent' => 'exit 2'],
+            ['PREFLIGHT_EUID' => '0'],
+        );
+
+        self::assertSame(0, $status, $err.$out);
+        self::assertStringContainsString('INFO ddev.answer:', $out);
+        self::assertStringContainsString('not checked', $out);
+    }
+
+    public function testAsRootADdevThatFailsAsTheFleetUserIsStillABlock(): void
+    {
+        [$status, $out] = $this->preflight(
+            ['ddev' => 'exit 1', 'runuser' => self::RUNUSER_STUB, 'getent' => 'exit 0'],
+            ['PREFLIGHT_EUID' => '0'],
+        );
+
+        self::assertSame(3, $status);
+        self::assertStringContainsString('BLOCK ddev.answer:', $out);
+    }
+
     public function testGithubUnreachableIsABlockButAPathIsNotChecked(): void
     {
         [$status, $out] = $this->preflight(['curl' => 'exit 22']);
