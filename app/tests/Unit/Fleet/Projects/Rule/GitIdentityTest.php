@@ -21,7 +21,7 @@ final class GitIdentityTest extends TestCase
     /** @return iterable<string, array{mixed}> */
     public static function badNames(): iterable
     {
-        foreach (['', ' ', 'a<b', 'a>b', "a\nb", "a\tb", "a\0b", "a\x1bb", "a\u{2028}b", "a\u{200B}b", "\xff", str_repeat('a', 101), null, 5] as $i => $name) {
+        foreach (['', ' ', 'a<b', 'a>b', 'a"b', 'a$b', 'a\\b', "a\nb", "a\tb", "a\0b", "a\x1bb", "a\u{2028}b", "a\u{200B}b", "\xff", str_repeat('a', 101), null, 5] as $i => $name) {
             yield '#'.$i.' '.(\is_string($name) ? addcslashes(substr($name, 0, 20), "\0..\37\177..\377") : get_debug_type($name)) => [$name];
         }
     }

@@ -10,6 +10,7 @@ use App\Domain\Project\Project;
 use App\Fleet\Git\GitClient;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Jobs\SecretRegistry;
+use App\Fleet\Projects\Rule\GitIdentity;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Ssh\AtomicFile;
 use App\Fleet\Typesense\TypesenseEnvironment;
@@ -80,6 +81,10 @@ final readonly class InstanceConfigWriter
         array_push($environment, ...self::portVariables($project));
         $identity = $this->identities->forProject($project);
         if (null !== $identity) {
+            // A value stored before the input rule existed must not reach DDEV's compose file (FLE-189).
+            if (GitIdentity::hasComposeUnsafe($identity['name']) || GitIdentity::hasComposeUnsafe($identity['email'])) {
+                throw new \RuntimeException('The git identity contains a double quote, "$" or backslash, which DDEV cannot carry in web_environment. Fix the name or e-mail in the project or host settings.');
+            }
             $environment[] = 'GIT_AUTHOR_NAME='.$identity['name'];
             $environment[] = 'GIT_AUTHOR_EMAIL='.$identity['email'];
             $environment[] = 'GIT_COMMITTER_NAME='.$identity['name'];
