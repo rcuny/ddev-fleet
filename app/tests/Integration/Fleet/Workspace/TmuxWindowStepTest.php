@@ -181,7 +181,7 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         self::assertStringContainsString('WARNING: the tmux window could not be prepared: tmux is not installed', $this->logText($job));
     }
 
-    public function testARedeployStartsFromAFreshWindow(): void
+    public function testARedeployKeepsTheWindowAndTypesIntoIdlePanes(): void
     {
         $this->template([], ['echo hi']);
         $instance = $this->instance('main', 'develop');
@@ -193,8 +193,25 @@ final class TmuxWindowStepTest extends InstanceJobTestCase
         self::assertSame(['acme--main'], $this->tmuxRunner->windows);
         self::assertSame(['echo hi', 'echo hi'], $this->tmuxRunner->typedIn('tty2'), 'typed once per deploy');
         $verbs = array_column($this->tmuxRunner->argvs, 3);
-        self::assertContains('respawn-pane', $verbs, 'the panes were respawned in place');
-        self::assertNotContains('kill-window', $verbs, 'the window (and its tab index) stays');
+        self::assertNotContains('respawn-pane', $verbs, 'no pane is reset on a redeploy');
+        self::assertNotContains('kill-window', $verbs);
+    }
+
+    public function testARedeployLeavesABusyPaneAloneAndLogsIt(): void
+    {
+        $this->template(['echo ci'], ['echo hi']);
+        $instance = $this->instance('main', 'develop');
+        $this->deployed($instance);
+        $tty1 = array_values(array_filter($this->tmuxRunner->panes['acme--main'], static fn (array $p): bool => 'sidebar' !== $p['role']))[0]['id'];
+        $this->tmuxRunner->busy = [$tty1];
+
+        $job = $this->job('redeploy', $instance);
+        $this->workflow->run($instance, $this->project, true, $this->logFor($job), false);
+
+        self::assertSame(['echo ci'], $this->tmuxRunner->typedIn('tty1'), 'only the first deploy typed into the busy pane');
+        self::assertSame(['echo hi', 'echo hi'], $this->tmuxRunner->typedIn('tty2'));
+        self::assertStringContainsString('tty1 busy, not restarted', $this->logText($job));
+        self::assertNotContains('respawn-pane', array_column($this->tmuxRunner->argvs, 3));
     }
 
     public function testAWindowCreatedByAReconcileDuringTheDeployStillGetsItsCommandsTyped(): void
