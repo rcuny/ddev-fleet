@@ -3,13 +3,13 @@ import { randomBytes } from 'node:crypto';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { test } from './support/secrets';
-import { setStandInRole } from './support/standIn';
 
 // Secrets in a real browser, at 1280 px (desktop project) and 390 px (phone project): the fleet-wide page, the project's
 // Secrets tab, reveal, the audit log. Every test owns uniquely named secrets and removes them in `finally`, so the
 // suite is repeatable against the shared dev database and safe in parallel. `test` is the fixture-extended one: each
 // test signs in as an admin of its own, so the reveal throttle (10 a minute per user) never crosses tests. The "no placeholder" warning needs asset
-// files on the server's disk, which a browser test cannot create: the functional tests cover it.
+// files on the server's disk, which a browser test cannot create: the functional tests cover it. The refused-input messages and the
+// member 403s are PHPUnit Functional tests (app/tests/Functional/Admin/SecretPagesTest.php, FLE-161).
 
 const isPhone = (): boolean => test.info().project.name === 'phone';
 
@@ -136,23 +136,6 @@ test.describe('secrets', () => {
     expect(errors).toEqual([]);
   });
 
-  test('refused input is explained and the value is not sent back', async ({ page }) => {
-    const value = uniqueValue();
-    await page.goto('/admin/secrets');
-
-    const form = page.getByTestId('secret-form');
-    await form.getByLabel('Name').fill('lower_case');
-    await form.getByLabel('Value').fill(`"${value}"`);
-    await form.getByTestId('secret-save').click();
-
-    await expect(page.getByTestId('error-name')).toContainText('capital letters');
-    await expect(page.getByTestId('error-value')).toContainText('without surrounding quotes');
-    await expect(form.getByLabel('Name')).toHaveValue('lower_case');
-    await expect(form.getByLabel('Value')).toHaveValue('');
-    expect(await page.content()).not.toContain(value);
-    // Other tests save secrets in parallel on the shared database: only this name must be absent.
-    await expect(rowOf(page, 'lower_case')).toHaveCount(0);
-  });
 
   test('project: the Secrets tab keeps its own secrets and reveals them', async ({ page }) => {
     test.setTimeout(180_000);
@@ -190,13 +173,6 @@ test.describe('secrets', () => {
     expect(errors).toEqual([]);
   });
 
-  test('a member cannot open any secrets page', async ({ page, context, baseURL }) => {
-    await setStandInRole(context, 'member', baseURL!);
-    for (const path of ['/admin/secrets', '/admin/audit', '/admin/projects/anything/secrets']) {
-      const response = await page.goto(path);
-      expect(response?.status(), path).toBe(403);
-    }
-  });
 });
 
 test.describe('phone layout of the secrets pages (390 px) @phone', () => {

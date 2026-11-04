@@ -600,6 +600,7 @@ final class ProjectValidationTest extends AdminTestCase
         foreach ($expected as $field => $message) {
             self::assertStringContainsString($message, $crawler->filter('#project_'.$field.'_errors')->text(), $field);
             self::assertSame('true', $crawler->filter('#project_'.$field)->attr('aria-invalid'), $field);
+            self::assertStringContainsString('project_'.$field.'_errors', (string) $crawler->filter('#project_'.$field)->attr('aria-describedby'), $field.' points at its message');
         }
         $shown = $this->shown($crawler, 'Create project');
         foreach ($fields as $field => $value) {

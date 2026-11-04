@@ -13,6 +13,7 @@ use App\Fleet\Projects\TemplateService;
 use App\Fleet\Webhooks\Signature;
 use App\Fleet\Webhooks\WebhookSecrets;
 use App\Tests\Support\FleetDatabase;
+use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Bundle\FrameworkBundle\Console\Application;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -173,6 +174,112 @@ final class WebhookCommandsTest extends KernelTestCase
 
         $ok = $this->cli('fleet:webhook:rule:add', ['project' => 'blog', '--source' => 'bitbucket', '--action' => 'run-pipeline', '--on-event' => 'pullrequest:approved', '--repo' => 'acme/blog', '--match-branch' => 'renovate/*', '--pattern' => 'renovate-merge', '--ref' => 'develop']);
         self::assertSame(0, $ok->getStatusCode(), $ok->getErrorOutput());
+    }
+
+    /**
+     * @return iterable<string, array{array<string, string>, string}> the options of fleet:webhook:rule:add, the message it refuses with
+     */
+    public static function ruleRefusals(): iterable
+    {
+        yield 'jira only deploys' => [['--source' => 'jira', '--action' => 'run-pipeline', '--on-status' => 'Dispatched', '--template' => 'jira-work'], 'A Jira rule can only deploy.'];
+        yield 'jira no status' => [['--source' => 'jira', '--template' => 'jira-work'], 'Enter the Jira status the issue moves into (at most 100 characters).'];
+        yield 'jira status too long' => [['--source' => 'jira', '--on-status' => str_repeat('s', 101), '--template' => 'jira-work'], 'Enter the Jira status the issue moves into (at most 100 characters).'];
+        yield 'jira no template' => [['--source' => 'jira', '--on-status' => 'Dispatched'], "Choose one of the project's templates."];
+        yield 'jira unknown template' => [['--source' => 'jira', '--on-status' => 'Dispatched', '--template' => 'nope'], "Choose one of the project's templates."];
+        yield 'jira bad branch' => [['--source' => 'jira', '--on-status' => 'Dispatched', '--template' => 'jira-work', '--branch' => '-bad'], 'Enter a valid branch name.'];
+        yield 'jira bad label' => [['--source' => 'jira', '--on-status' => 'Dispatched', '--template' => 'jira-work', '--label' => 'fixed'], 'Use lowercase letters, digits and single dashes, at most 40 characters.'];
+        yield 'jira label prefix' => [['--source' => 'jira', '--on-status' => 'Dispatched', '--template' => 'jira-work', '--label-prefix' => 'fb'], 'A Jira rule names its instance after the issue key.'];
+        yield 'jira duplicate status' => [['--source' => 'jira', '--on-status' => 'dispatched', '--template' => 'jira-work'], 'There is already a rule for this status.'];
+        yield 'bb no event' => [['--source' => 'bitbucket', '--repo' => 'acme/blog', '--action' => 'run-pipeline', '--pattern' => 'x'], 'Enter a Bitbucket event key such as pullrequest:approved or repo:push.'];
+        yield 'bb event without colon' => [['--source' => 'bitbucket', '--on-event' => 'push', '--repo' => 'acme/blog', '--action' => 'run-pipeline', '--pattern' => 'x'], 'Enter a Bitbucket event key such as pullrequest:approved or repo:push.'];
+        yield 'bb no repo' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--action' => 'run-pipeline', '--pattern' => 'x'], 'Enter the repository as workspace/slug.'];
+        yield 'bb repo without slash' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme', '--action' => 'run-pipeline', '--pattern' => 'x'], 'Enter the repository as workspace/slug.'];
+        yield 'bb repo with two slashes' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'a/b/c', '--action' => 'run-pipeline', '--pattern' => 'x'], 'Enter the repository as workspace/slug.'];
+        yield 'bb bad branch glob' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--match-branch' => 'bad branch!', '--action' => 'run-pipeline', '--pattern' => 'x'], 'Use letters, digits, dot, underscore, dash, slash and the wildcards * and ?.'];
+        yield 'bb bad state' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--state' => '1', '--action' => 'run-pipeline', '--pattern' => 'x'], 'Enter a commit status state such as SUCCESSFUL.'];
+        yield 'bb comment too long' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--comment' => str_repeat('c', 201), '--action' => 'run-pipeline', '--pattern' => 'x'], 'Enter the comment line to look for (one line, at most 200 characters).'];
+        yield 'bb no pipeline' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--action' => 'run-pipeline'], 'Enter the name of the custom pipeline.'];
+        yield 'bb pipeline with a space' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--action' => 'run-pipeline', '--pattern' => 'two words'], 'Enter the name of the custom pipeline.'];
+        yield 'bb bad ref' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--action' => 'run-pipeline', '--pattern' => 'x', '--ref' => '-bad'], 'Enter a valid branch name.'];
+        yield 'bb unknown action' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--action' => 'teleport'], 'The action is deploy or run-pipeline.'];
+        yield 'bb deploy without a glob' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--template' => 'jira-work'], 'A deploy rule needs the branch glob to deploy.'];
+        yield 'bb deploy unknown template' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--match-branch' => 'feature/*', '--template' => 'nope'], "Choose one of the project's templates."];
+        yield 'bb deploy bad label' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--match-branch' => 'feature/*', '--template' => 'jira-work', '--label' => 'Fixed'], 'Use lowercase letters, digits and single dashes, at most 40 characters.'];
+        yield 'bb label with prefix' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--match-branch' => 'feature/*', '--template' => 'jira-work', '--label' => 'fixed', '--label-prefix' => 'fb'], 'A fixed label cannot be combined with a label prefix or a suffix to strip.'];
+        yield 'bb bad prefix' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--match-branch' => 'feature/*', '--template' => 'jira-work', '--label-prefix' => '-fb'], 'Use lowercase letters, digits and dashes, at most 20 characters.'];
+        yield 'bb suffix without prefix' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--match-branch' => 'feature/*', '--template' => 'jira-work', '--strip-suffix' => '-x'], 'A suffix to strip needs a label prefix too.'];
+        yield 'bb glob not ending in the suffix' => [['--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--match-branch' => 'feature/*', '--template' => 'jira-work', '--label-prefix' => 'fb', '--strip-suffix' => '-x'], 'The branch glob must end with the suffix to strip.'];
+    }
+
+    /**
+     * @param array<string, string> $options
+     */
+    #[DataProvider('ruleRefusals')]
+    public function testEveryRuleRefusalHasItsOwnMessage(array $options, string $message): void
+    {
+        $this->cli('fleet:webhook:secret', ['project' => 'blog']);
+        $this->cli('fleet:webhook:secret', ['project' => 'blog', '--source' => 'bitbucket']);
+        self::assertSame(0, $this->cli('fleet:webhook:rule:add', ['project' => 'blog', '--source' => 'jira', '--on-status' => 'Dispatched', '--template' => 'jira-work'])->getStatusCode());
+
+        $result = $this->cli('fleet:webhook:rule:add', ['project' => 'blog'] + $options);
+
+        self::assertNotSame(0, $result->getStatusCode());
+        self::assertStringContainsString($message, $result->getErrorOutput());
+        self::assertSame(1, array_sum(array_map(static fn (array $endpoint): int => \count($endpoint['rules']), self::jsonList($this->cli('fleet:webhook:list', ['--json' => true])))), 'a refusal adds nothing');
+    }
+
+    public function testARuleNeedsTheReceiverOfItsOwnSourceFirst(): void
+    {
+        $jira = $this->cli('fleet:webhook:rule:add', ['project' => 'blog', '--source' => 'jira', '--on-status' => 'Dispatched', '--template' => 'jira-work']);
+        self::assertSame(3, $jira->getStatusCode());
+        self::assertStringContainsString('blog has no Jira webhook yet: create its secret first.', $jira->getErrorOutput());
+
+        $bitbucket = $this->cli('fleet:webhook:rule:add', ['project' => 'blog', '--source' => 'bitbucket', '--on-event' => 'repo:push', '--repo' => 'acme/blog', '--action' => 'run-pipeline', '--pattern' => 'x']);
+        self::assertSame(3, $bitbucket->getStatusCode());
+        self::assertStringContainsString('blog has no Bitbucket webhook yet: create its secret first.', $bitbucket->getErrorOutput());
+    }
+
+    public function testARuleCannotBeRemovedTwiceOrFromAnotherProject(): void
+    {
+        $this->cli('fleet:webhook:secret', ['project' => 'blog']);
+        $projects = self::getContainer()->get(ProjectService::class);
+        self::assertInstanceOf(ProjectService::class, $projects);
+        $projects->create(new ProjectInput('shop', 'https://git.example.com/acme/shop.git'));
+        $id = (string) self::json($this->cli('fleet:webhook:rule:add', ['project' => 'blog', '--on-status' => 'Dispatched', '--template' => 'jira-work', '--json' => true]))['id'];
+
+        $foreign = $this->cli('fleet:webhook:rule:remove', ['project' => 'shop', 'rule' => $id]);
+        self::assertSame(3, $foreign->getStatusCode());
+        self::assertStringContainsString(\sprintf('Rule %s does not exist in project shop.', $id), $foreign->getErrorOutput());
+        self::assertSame(0, $this->cli('fleet:webhook:rule:remove', ['project' => 'blog', 'rule' => $id])->getStatusCode());
+        $again = $this->cli('fleet:webhook:rule:remove', ['project' => 'blog', 'rule' => $id]);
+        self::assertSame(3, $again->getStatusCode());
+        self::assertStringContainsString(\sprintf('Rule %s does not exist in project blog.', $id), $again->getErrorOutput());
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function badTokens(): iterable
+    {
+        yield 'blank' => ['   '];
+        yield 'inner space' => ['two words'];
+        yield 'non-ASCII' => ['tökën'];
+        yield 'over 2048 characters' => [str_repeat('A', 2049)];
+    }
+
+    #[DataProvider('badTokens')]
+    public function testABadTokenIsRefusedWithoutEchoingItAndTheLongestOneIsAccepted(string $bad): void
+    {
+        $this->cli('fleet:webhook:secret', ['project' => 'blog', '--source' => 'bitbucket']);
+
+        $refused = $this->cli('fleet:webhook:token', ['project' => 'blog'], [$bad."\n"]);
+
+        self::assertSame(1, $refused->getStatusCode());
+        self::assertStringContainsString('Enter the access token: printable characters without spaces, at most 2048.', $refused->getErrorOutput());
+        if ('' !== trim($bad)) {
+            self::assertStringNotContainsString(trim($bad), $refused->getDisplay().$refused->getErrorOutput());
+        }
+        self::assertSame(0, $this->cli('fleet:webhook:token', ['project' => 'blog'], [str_repeat('A', 2048)."\n"])->getStatusCode(), '2048 characters is the limit');
     }
 
     public function testLogShowsDeliveriesNewestFirst(): void
