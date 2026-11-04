@@ -44,6 +44,7 @@ final class RebootBannerTest extends HostPageTestCase
             $banner = $crawler->filter('[data-testid=reboot-banner]');
             self::assertCount(1, $banner, $path);
             self::assertStringContainsString('This host needs a reboot', $banner->text());
+            self::assertStringContainsString('never reboots the host by itself', $banner->text());
             self::assertSame(['linux-image-6.12.0-amd64', 'libc6'], $banner->filter('[data-testid=reboot-packages] li')->each(static fn ($li): string => trim($li->text())), $path);
         }
         self::assertStringNotContainsString('<script>alert', $this->body());
@@ -53,9 +54,11 @@ final class RebootBannerTest extends HostPageTestCase
     {
         file_put_contents($this->flag, '');
 
-        $crawler = $this->open('/');
-        self::assertCount(1, $crawler->filter('[data-testid=reboot-banner]'));
-        self::assertCount(0, $crawler->filter('[data-testid=reboot-packages]'));
+        foreach (['/', '/admin/host'] as $path) {
+            $crawler = $this->open($path);
+            self::assertCount(1, $crawler->filter('[data-testid=reboot-banner]'), $path);
+            self::assertCount(0, $crawler->filter('[data-testid=reboot-packages]'), $path);
+        }
     }
 
     public function testAMemberNeverSeesTheBannerOrThePackageNames(): void
