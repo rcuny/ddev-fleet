@@ -22,6 +22,14 @@ final class UnitsTest extends TestCase
 
     private const string SUDOERS_LINE = 'fleet ALL=(root) NOPASSWD: /usr/local/libexec/fleet/apply caddy, /usr/local/libexec/fleet/apply authelia';
 
+    public function testTheUnitsThatStartSshAgentsDoNotKillThemOnRestart(): void
+    {
+        // FLE-167: the worker (hourly time limit, deploys) and the status watcher (revives agents) spawn per-instance ssh-agents.
+        foreach (['fleet-worker@.service', 'fleet-status.service'] as $file) {
+            self::assertSame(['process'], $this->unit($file)['Service']['KillMode'] ?? null, $file);
+        }
+    }
+
     public function testPoolSocketMatchesRenderer(): void
     {
         $pool = $this->ini('php-fpm-fleet.conf');

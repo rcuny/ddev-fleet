@@ -51,6 +51,26 @@ final class StartStopJobTest extends InstanceJobTestCase
         self::assertDirectoryExists($this->paths->agentSocketDir($instance->id()), 'present before ddev start, so Docker never creates it');
     }
 
+    public function testStartRemovesTheOverrideAndAgentOfAProjectThatOptedOut(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Stopped);
+        $this->checkout($instance);
+        $override = $this->paths->instanceDir($instance->id()).'/'.\App\Fleet\Ssh\InstanceSshAgent::OVERRIDE_FILE;
+        @mkdir(\dirname($override), 0o755, true);
+        file_put_contents($override, 'old');
+        mkdir($this->paths->agentSocketDir($instance->id()), 0o700, true);
+        touch($this->paths->agentSocket($instance->id()));
+        file_put_contents($this->paths->agentPidFile($instance->id()), "99\n");
+
+        $job = $this->job('start', $instance);
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+
+        self::assertFileDoesNotExist($override);
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir($instance->id()));
+        self::assertCount(1, $this->runner->callsMatching(['ssh-agent', '-k']));
+        self::assertStringContainsString('no longer uses container_ssh', $this->logText($job));
+    }
+
     public function testStartLeavesAnOptOutProjectAlone(): void
     {
         $instance = $this->instance('main', 'develop', InstanceState::Stopped);

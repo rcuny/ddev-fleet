@@ -129,6 +129,20 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringNotContainsString('SSH_AUTH_SOCK', $config);
     }
 
+    public function testARedeployOfAProjectThatOptedOutDropsTheOldOverrideAndAgent(): void
+    {
+        $this->withPushKey();
+        mkdir($this->paths->agentSocketDir('acme--main'), 0o700, true);
+        touch($this->paths->agentSocket('acme--main'));
+        file_put_contents($this->paths->agentPidFile('acme--main'), "77\n");
+
+        $job = $this->deploy();
+
+        self::assertFileDoesNotExist($this->paths->instanceDir('acme--main').'/.ddev/docker-compose.fleet-ssh.yaml');
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir('acme--main'));
+        self::assertStringContainsString('no longer uses container_ssh', $this->logText($job));
+    }
+
     public function testAnOptedInProjectOnAHostWithoutAPushKeyOnlyLogsAWarning(): void
     {
         $this->project->changeContainerSsh(true);

@@ -22,7 +22,7 @@ final class InstanceWatcherTest extends InstanceJobTestCase
     /** @var list<string> */
     private array $published = [];
 
-    private function watcher(): InstanceWatcher
+    private function watcher(bool $withAgent = false): InstanceWatcher
     {
         $hub = $this->createStub(HubInterface::class);
         $hub->method('publish')->willReturnCallback(function (Update $update): string {
@@ -42,6 +42,7 @@ final class InstanceWatcherTest extends InstanceJobTestCase
             new JobPruner($jobs, $this->paths, $this->clock),
             $feed,
             90,
+            $withAgent ? $this->agent : null,
         );
     }
 
@@ -80,6 +81,35 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         self::assertSame(InstanceState::Stopped, $this->stateOf($c));
         self::assertNull($this->instances->find('acme--other'), 'a ddev project without a row is ignored');
         self::assertNotNull($this->instances->find('acme--a')?->lastObservedAt());
+    }
+
+    public function testTheWatcherRefreshesTheAgentOfRunningOptedInInstancesOnly(): void
+    {
+        mkdir($this->paths->sshDir(), 0o700, true);
+        touch($this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push));
+        $this->project->changeContainerSsh(true);
+        $running = $this->instance('a', 'develop', InstanceState::Running);
+        $this->instance('b', 'develop', InstanceState::Stopped);
+        $this->runner->expect(['ddev', 'list'], $this->ddevList(['acme--a' => 'running', 'acme--b' => 'stopped']));
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AGENT_PID=11; export SSH_AGENT_PID;\n"));
+
+        $watcher = $this->watcher(true);
+        $watcher->tick($this->clock->now());
+
+        $adds = $this->runner->callsMatching(['ssh-add', '-t']);
+        self::assertCount(1, $adds, 'one key refresh, for the running instance');
+        self::assertSame($this->paths->agentSocket($running->id()), $adds[0]->env['SSH_AUTH_SOCK']);
+
+        $this->runner->reset();
+        $this->runner->expect(['ddev', 'list'], $this->ddevList(['acme--a' => 'running', 'acme--b' => 'stopped']));
+        $watcher->tick($this->clock->now()->modify('+30 seconds'));
+        self::assertSame([], $this->runner->callsMatching(['ssh-add', '-t']), 'not due again so soon');
+
+        $this->runner->reset();
+        $this->runner->expect(['ddev', 'list'], $this->ddevList(['acme--a' => 'running', 'acme--b' => 'stopped']));
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AGENT_PID=12; export SSH_AGENT_PID;\n"));
+        $watcher->tick($this->clock->now()->modify('+'.(\App\Fleet\Ssh\InstanceSshAgent::REFRESH_SECONDS + 1).' seconds'));
+        self::assertCount(1, $this->runner->callsMatching(['ssh-add', '-t']), 'refreshed again when due');
     }
 
     public function testListFailureMakesThemUnknown(): void
