@@ -56,7 +56,12 @@ final readonly class StartJob implements JobType
 
         // A project that opted in to git over SSH in the container gets its own agent back (FLE-145): it does not survive
         // a reboot. Ruling: a failure is only logged here so a stopped instance can still start; deploy is the strict place.
-        if ($instance->project()->containerSsh()) {
+        if (!$instance->project()->containerSsh()) {
+            // Opted out (FLE-167): no agent, and no override that would mount its socket directory.
+            if ($this->agent->cleanUp($instance->id(), $dir)) {
+                $log->line('removed the ssh-agent and its compose override: this project no longer uses container_ssh');
+            }
+        } else {
             if (!$this->agent->hasKey()) {
                 $log->line('warning: the host has no push key; no ssh-agent for this instance');
             } else {

@@ -22,6 +22,11 @@ use Symfony\Component\Yaml\Yaml;
  *
  * Everything is idempotent: start() reuses a live agent and refreshes the key lifetime, stop() does nothing when there is
  * no agent. The agent does not survive a reboot; the next start (deploy or `fleet instance:start`) recreates it.
+ *
+ * FLE-167: the agent is a child of whichever process started it (the job worker, the status watcher). Those units run with
+ * `KillMode=process`, so a restart of the unit (the worker restarts every hour by its own time limit, and on every
+ * deploy) no longer takes the agents with it. The status watcher also calls start() for every running opted-in instance
+ * every REFRESH_SECONDS, which revives an agent that died anyway and renews the key lifetime long before KEY_LIFETIME ends.
  */
 final readonly class InstanceSshAgent
 {
@@ -33,6 +38,9 @@ final readonly class InstanceSshAgent
     public const string CONTAINER_SOCKET = self::CONTAINER_DIR.'/agent.sock';
 
     public const string OVERRIDE_FILE = '.ddev/docker-compose.fleet-ssh.yaml';
+
+    /** How often the status watcher calls start() for a running opted-in instance (revive + lifetime refresh). */
+    public const int REFRESH_SECONDS = 600;
 
     private const float TIMEOUT = 20.0;
 
@@ -97,6 +105,26 @@ final readonly class InstanceSshAgent
         @unlink($socket);
         @rmdir($this->paths->agentSocketDir($instanceId));
         @unlink($pidFile);
+    }
+
+    /**
+     * Opt-out cleanup (FLE-167): a project that no longer asks for `container_ssh` keeps neither an agent nor the compose
+     * override, otherwise the next `ddev start` would mount a socket directory that no longer exists (Docker then creates
+     * an empty root-owned one). Never throws; does nothing, and runs no command, when there is nothing to clean.
+     *
+     * @return bool whether an agent or an override was found
+     */
+    public function cleanUp(string $instanceId, string $checkoutDir): bool
+    {
+        $override = $checkoutDir.'/'.self::OVERRIDE_FILE;
+        $found = is_file($override)
+            || file_exists($this->paths->agentSocket($instanceId))
+            || is_file($this->paths->agentPidFile($instanceId));
+
+        $this->stop($instanceId);
+        @unlink($override);
+
+        return $found;
     }
 
     /**

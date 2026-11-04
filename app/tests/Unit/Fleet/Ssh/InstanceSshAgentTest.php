@@ -161,4 +161,26 @@ final class InstanceSshAgentTest extends TestCase
         touch($this->home.'/ssh/push_ed25519');
         self::assertTrue($this->agent->hasKey());
     }
+
+    public function testCleanUpStopsTheAgentAndRemovesTheOverrideOfAnOptedOutInstance(): void
+    {
+        $checkout = $this->home.'/checkout';
+        mkdir($checkout.'/.ddev', 0o755, true);
+        file_put_contents($checkout.'/'.InstanceSshAgent::OVERRIDE_FILE, 'x');
+        mkdir($this->paths->agentSocketDir(self::ID), 0o700, true);
+        touch($this->paths->agentSocket(self::ID));
+        file_put_contents($this->paths->agentPidFile(self::ID), "4242\n");
+
+        self::assertTrue($this->agent->cleanUp(self::ID, $checkout));
+
+        self::assertFileDoesNotExist($checkout.'/'.InstanceSshAgent::OVERRIDE_FILE);
+        self::assertDirectoryDoesNotExist($this->paths->agentSocketDir(self::ID));
+        self::assertCount(1, $this->runner->callsMatching(['ssh-agent', '-k']));
+    }
+
+    public function testCleanUpWithNothingToCleanRunsNothing(): void
+    {
+        self::assertFalse($this->agent->cleanUp(self::ID, $this->home.'/checkout'));
+        self::assertSame([], $this->runner->calls());
+    }
 }

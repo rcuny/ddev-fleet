@@ -15,6 +15,10 @@ WorkingDirectory=/opt/ddev-fleet/app
 ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console messenger:consume jobs --time-limit=3600 --memory-limit=256M -vv
 Restart=always
 RestartSec=5
+# FLE-167: per-instance ssh-agents (container_ssh) are started by this worker. KillMode=process makes a restart of the unit
+# (the hourly --time-limit, deploys, upgrades) stop only the worker, not the agents it spawned or the ddev they ran; the
+# status watcher revives an agent that died anyway. A `systemctl stop` therefore leaves them running, by design.
+KillMode=process
 # A restart on upgrade lets the running message finish (a `ddev start` can take minutes) before systemd kills it.
 TimeoutStopSec=600
 # /etc, /usr and /boot read-only except what the worker writes. Deliberately NOT set: NoNewPrivileges (sudo),

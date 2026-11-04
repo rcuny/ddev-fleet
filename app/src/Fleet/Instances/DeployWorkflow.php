@@ -269,6 +269,11 @@ final class DeployWorkflow
     private function setUpContainerAgent(Instance $instance, Project $project, string $dir, JobLog $log): array
     {
         if (!$project->containerSsh()) {
+            // Opted out (FLE-167): a redeploy drops what an earlier opted-in deploy left behind.
+            if ($this->agent->cleanUp($instance->id(), $dir)) {
+                $log->line('removed the ssh-agent and its compose override: this project no longer uses container_ssh');
+            }
+
             return [];
         }
         if (!$this->agent->hasKey()) {
