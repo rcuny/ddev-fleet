@@ -1,0 +1,44 @@
+# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-tls-check.service.
+# One certificate health check (fleet:host:tls-check): reads Caddy's journal for Let's Encrypt rate limits and failed
+# challenges, looks at the certificate Caddy serves for the host name, and writes $FLEET_HOME/var/tls-status.json for
+# the banner, the Host page and `fleet host:tls-status`. Started by fleet-tls-check.timer; `systemctl start
+# fleet-tls-check` runs it by hand. It only reads: nothing here changes Caddy or the host.
+[Unit]
+Description=ddev-fleet certificate health check
+
+[Service]
+Type=oneshot
+User=fleet
+Group=fleet
+# Read access to the journal (Caddy's log) and nothing else: the app itself gains no group.
+SupplementaryGroups=systemd-journal
+EnvironmentFile=/etc/ddev-fleet/fleet.env
+Environment=HOME=/tmp
+WorkingDirectory=/opt/ddev-fleet/app
+ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:host:tls-check
+TimeoutStartSec=3min
+Nice=10
+IOSchedulingClass=idle
+# journalctl and a TLS handshake with the local Caddy. No sudo, no Docker, no home directory.
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+# The status file lives under FLEET_HOME; the cache and logs under the app's var directory (UnitsTest keeps them in step).
+ReadWritePaths=/srv/fleet /opt/ddev-fleet/app/var
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+# The local Caddy (loopback) and journalctl's socket.
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+LockPersonality=yes
+CapabilityBoundingSet=
+SystemCallArchitectures=native
+SystemCallFilter=@system-service

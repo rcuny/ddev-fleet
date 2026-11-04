@@ -1,0 +1,67 @@
+{# Certificate health (App\Fleet\Tls\TlsStatus, written every 10 minutes by fleet:host:tls-check). #}
+<twig:Card data-testid="host-tab-certificates">
+    <twig:Card:Header>
+        <twig:Card:Title>Certificates</twig:Card:Title>
+        <twig:Card:Description>Whether Let's Encrypt is issuing certificates for this host: rate limits, failed challenges and expiry, read from Caddy's journal and the certificate it serves.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-4">
+        {% if tls is null %}
+            <p class="text-sm text-ink-muted" data-testid="tls-none">No check has run yet. <code>fleet-tls-check.timer</code> writes the status every 10 minutes; <code>sudo systemctl start fleet-tls-check</code> runs it now.</p>
+        {% else %}
+            <p data-testid="tls-level">
+                {% if tls.level.name == 'Error' %}
+                    <twig:Badge variant="destructive">Error</twig:Badge>
+                {% elseif tls.level.name == 'Warning' %}
+                    <twig:Badge class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">Warning</twig:Badge>
+                {% else %}
+                    <twig:Badge class="border-transparent bg-brand-faded text-brand-darker dark:text-brand">Healthy</twig:Badge>
+                {% endif %}
+                <span class="ms-2 text-sm text-ink-muted">checked {{ tls.checkedAt|date('Y-m-d H:i', 'UTC') }} UTC</span>
+            </p>
+            {% for headline in tls.headlines %}
+                <p class="text-sm" data-testid="tls-headline">{{ headline }}</p>
+            {% endfor %}
+            <dl class="grid gap-3 text-sm sm:grid-cols-2">
+                <div data-testid="tls-issued">
+                    <dt class="text-ink-muted">Certificates issued in the last 7 days</dt>
+                    <dd><strong>{{ tls.issuedLastWeek is null ? 'Not reported' : tls.issuedLastWeek ~ ' of ' ~ constant('App\\Fleet\\Tls\\TlsStatus::WEEKLY_LIMIT') }}</strong></dd>
+                </div>
+                {% if tls.rateLimitedCount > 0 %}
+                    <div data-testid="tls-ratelimited">
+                        <dt class="text-ink-muted">Rate limited</dt>
+                        <dd><strong>{{ tls.rateLimitedCount }} refusal{{ tls.rateLimitedCount == 1 ? '' : 's' }} in the last hour</strong>{% if tls.retryAfter is not null %}<span class="block">retry after {{ tls.retryAfter|date('Y-m-d H:i', 'UTC') }} UTC</span>{% endif %}</dd>
+                    </div>
+                {% endif %}
+                {% if tls.failedSolveCount > 0 %}
+                    <div data-testid="tls-failed-solves">
+                        <dt class="text-ink-muted">Failed challenges</dt>
+                        <dd><strong>{{ tls.failedSolveCount }} in the last hour</strong></dd>
+                    </div>
+                {% endif %}
+                {% for cert in tls.certificates %}
+                    <div data-testid="tls-certificate">
+                        <dt class="text-ink-muted break-all">Certificate of {{ cert.name }}</dt>
+                        <dd><strong>{{ cert.daysLeft is null ? 'none served' : (cert.daysLeft < 0 ? 'expired' : cert.daysLeft ~ ' days left') }}</strong></dd>
+                    </div>
+                {% endfor %}
+            </dl>
+            {% if tls.affectedNames is not empty %}
+                <div data-testid="tls-affected">
+                    <p class="text-sm text-ink-muted">Affected hostnames</p>
+                    <ul class="mt-1 flex list-none flex-wrap gap-x-3 gap-y-1 p-0 text-sm break-all">
+                        {% for name in tls.affectedNames %}<li>{{ name }}</li>{% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+            {% if tls.errors is not empty %}
+                <div data-testid="tls-errors">
+                    <p class="text-sm text-ink-muted">Last errors</p>
+                    <ul class="mt-1 grid list-none gap-1 p-0 text-sm break-words">
+                        {% for error in tls.errors %}<li>{{ error }}</li>{% endfor %}
+                    </ul>
+                </div>
+            {% endif %}
+        {% endif %}
+        <p class="text-sm text-ink-muted">On the host: <code class="break-all">fleet host:tls-status</code> (exit 0 ok, 1 warning, 2 error)</p>
+    </twig:Card:Content>
+</twig:Card>

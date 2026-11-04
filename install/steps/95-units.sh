@@ -8,6 +8,7 @@
 #   - the schedule ticker fleet-scheduler.service (enabled and started by step 98);
 #   - the daily database backup: fleet-backup.service (oneshot) and fleet-backup.timer (enabled by step 98);
 #   - the daily release check: fleet-upgrade-check.service (oneshot) and fleet-upgrade-check.timer (enabled by step 98);
+#   - the certificate health check: fleet-tls-check.service (oneshot) and fleet-tls-check.timer (every 10 minutes, enabled by step 98);
 #   - the agent workspace fleet-tmux.service (enabled and started by step 98, never restarted: that would kill the panes);
 #   - the Mercure hub: pinned release, sha256-checked, plus its unit and configuration.
 # Every configuration is validated (php-fpm -t, mercure validate) before a service is asked to use it.
@@ -98,6 +99,12 @@ step_main() {
   install_etc fleet-upgrade-check.service "$SYSTEMD_DIR/fleet-upgrade-check.service" 0644 root:root
   [ "$FILE_CHANGED" = 0 ] || units_changed=1
   install_etc fleet-upgrade-check.timer "$SYSTEMD_DIR/fleet-upgrade-check.timer" 0644 root:root
+  [ "$FILE_CHANGED" = 0 ] || units_changed=1
+
+  # --- the certificate health check (fleet:host:tls-check every 10 minutes; it only reads, see fleet-tls-check.service) ---
+  install_etc fleet-tls-check.service "$SYSTEMD_DIR/fleet-tls-check.service" 0644 root:root
+  [ "$FILE_CHANGED" = 0 ] || units_changed=1
+  install_etc fleet-tls-check.timer "$SYSTEMD_DIR/fleet-tls-check.timer" 0644 root:root
   [ "$FILE_CHANGED" = 0 ] || units_changed=1
 
   # --- the agent workspace ----------------------------------------------------------------------------------------
