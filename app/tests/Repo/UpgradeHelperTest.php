@@ -230,11 +230,13 @@ final class UpgradeHelperTest extends TestCase
         $calls = $this->calls();
         self::assertSame('fleet upgrade:prepare --to=v1.2.1', $calls[0]);
         self::assertStringStartsWith('systemctl list-units', $calls[1]);
-        self::assertStringStartsWith('systemctl stop fleet-scheduler fleet-worker@1 fleet-status', $calls[2]);
-        self::assertSame('fleet upgrade:restore --backup=fleet-20261101-100000.sqlite', $calls[3]);
-        self::assertStringStartsWith('installer --domain=fleet.example.com --ref=v1.2.1', $calls[4]);
-        self::assertStringStartsWith('systemctl start fleet-scheduler fleet-worker@1 fleet-status', $calls[5]);
-        self::assertStringStartsWith('fleet upgrade:verify --to=v1.2.1 --from=v1.2.2', $calls[6]);
+        self::assertStringStartsWith('systemctl list-units', $calls[2]);
+        self::assertStringStartsWith('systemctl stop fleet-scheduler fleet-worker@1 fleet-status', $calls[3]);
+        self::assertSame('fleet upgrade:restore --backup=fleet-20261101-100000.sqlite', $calls[4]);
+        self::assertStringStartsWith('installer --domain=fleet.example.com --ref=v1.2.1', $calls[5]);
+        self::assertStringStartsWith('systemctl start fleet-scheduler fleet-worker@1 fleet-status', $calls[6]);
+        self::assertSame('fleet help upgrade:verify', $calls[7]);
+        self::assertStringStartsWith('fleet upgrade:verify --to=v1.2.1 --from=v1.2.2', $calls[8]);
         self::assertNotContains('fleet upgrade:backup', $calls, 'the restore keeps the current database itself');
 
         $history = $this->history();
@@ -286,6 +288,52 @@ final class UpgradeHelperTest extends TestCase
         self::assertStringContainsString('GIT_ALLOW_PROTOCOL=file:https:ssh', (string) file_get_contents(self::installDir().'/libexec/upgrade'));
     }
 
+    public function testAFetchFailureDuringARollbackHappensBeforeAnyServiceIsStopped(): void
+    {
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes'], ['FAKE_DOWN' => '1', 'FAKE_FETCH_FAIL' => '1']);
+
+        self::assertSame(1, $status, $out.$err);
+        self::assertStringContainsString('Nothing was stopped or restored', $err);
+        self::assertStringNotContainsString('unchanged except for the backup', $err);
+        $calls = $this->calls();
+        self::assertSame([], array_values(array_filter($calls, static fn (string $c): bool => str_starts_with($c, 'systemctl') || str_contains($c, 'upgrade:restore'))), 'no service stopped, no restore');
+        self::assertSame([], glob($this->scratch().'/tmp/fleet-upgrade.*') ?: []);
+    }
+
+    public function testARollbackToAReleaseWithoutTheVerifyCommandChecksVersionAndHealthItself(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-version', "v1.2.1\n");
+
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes', '--no-db-restore'], ['FAKE_DOWN' => '0', 'FAKE_NO_VERIFY' => '1']);
+
+        self::assertSame(0, $status, $out.$err);
+        self::assertStringContainsString('has no upgrade:verify command', $out);
+        $calls = $this->calls();
+        self::assertSame([], array_values(array_filter($calls, static fn (string $c): bool => str_starts_with($c, 'fleet upgrade:verify'))));
+        self::assertNotSame([], array_values(array_filter($calls, static fn (string $c): bool => str_starts_with($c, 'curl') && str_contains($c, 'fleet.example.com/health'))));
+        self::assertSame('ok', $this->history()[2]['result']);
+    }
+
+    public function testTheFallbackVerifyFailsWhenTheInstalledVersionIsNotTheTarget(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-version', "v1.2.2\n");
+
+        [$status, , $err] = $this->upgrade(['--to', 'v1.2.1', '--yes', '--no-db-restore'], ['FAKE_DOWN' => '0', 'FAKE_NO_VERIFY' => '1']);
+
+        self::assertSame(5, $status);
+        self::assertStringContainsString("installed-version is 'v1.2.2'", $err);
+    }
+
+    public function testEveryActiveWorkerInstanceIsStoppedAndStartedAgain(): void
+    {
+        $systemctl = 'echo "systemctl $*" >> "$FAKE_LOG"; case "$1" in list-units) case "$*" in *fleet-worker*) printf "fleet-worker@1.service loaded active running w\\nfleet-worker@2.service loaded active running w\\n";; esac;; esac';
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes'], ['FAKE_DOWN' => '1', 'FAKE_SYSTEMCTL' => $systemctl]);
+
+        self::assertSame(0, $status, $out.$err);
+        self::assertContains('systemctl stop fleet-scheduler fleet-worker@1.service fleet-worker@2.service fleet-status', $this->calls());
+        self::assertContains('systemctl start fleet-scheduler fleet-worker@1.service fleet-worker@2.service fleet-status', $this->calls());
+    }
+
     // --- fixtures ----------------------------------------------------------------------------------------------------
 
     /** A local repository with one annotated tag v1.2.1 whose install/install.sh is a fake installer. */
@@ -328,13 +376,21 @@ final class UpgradeHelperTest extends TestCase
                 exit "${FAKE_PREPARE_EXIT:-0}" ;;
               upgrade:backup) [ "${FAKE_BACKUP_EXIT:-0}" = 0 ] || { echo "backup failed" >&2; exit 1; }; echo "BACKUP=fleet-20261104-100000.sqlite" ;;
               upgrade:restore) [ "${FAKE_RESTORE_EXIT:-0}" = 0 ] || { echo "restore failed" >&2; exit 1; }; echo "RESTORED=ok" ;;
+              help) [ -z "${FAKE_NO_VERIFY:-}" ] || exit 1 ;;
               upgrade:verify) exit "${FAKE_VERIFY_EXIT:-0}" ;;
             esac
             SH;
         if (!is_dir($this->scratch().'/tmp')) {
             mkdir($this->scratch().'/tmp', 0o700, true);
         }
-        $stubs = $this->stubs(['fleet' => $fleet, 'systemctl' => 'echo "systemctl $*" >> "$FAKE_LOG"']);
+        $realGit = trim((string) shell_exec('command -v git'));
+        $git = 'if [ -n "${FAKE_FETCH_FAIL:-}" ]; then case " $* " in *" fetch "*) echo "fetch refused" >&2; exit 1;; esac; fi'."\n".'exec '.escapeshellarg($realGit).' "$@"';
+        $stubs = $this->stubs([
+            'fleet' => $fleet,
+            'systemctl' => 'if [ -n "${FAKE_SYSTEMCTL:-}" ]; then eval "$FAKE_SYSTEMCTL"; else echo "systemctl $*" >> "$FAKE_LOG"; fi',
+            'curl' => 'echo "curl $*" >> "$FAKE_LOG"',
+            'git' => $git,
+        ]);
         $process = new Process(
             ['bash', self::installDir().'/libexec/upgrade', ...$args, '--repo-url='.$this->repo],
             null,

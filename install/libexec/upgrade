@@ -225,16 +225,36 @@ main() {
   history_line start started "$backup"
 
   # --- 5. the target's installer, by the planned sha -----------------------------------------------------------------
+  local -a units=()
   # Cleanup is unconditional: an EXIT trap (not RETURN) so a failing command under set -e cannot leak the directory.
   work=$(mktemp -d "${TMPDIR:-/tmp}/fleet-upgrade.XXXXXX")
   chmod 0700 "$work"
   trap 'rm -rf -- "${work:-}"' EXIT
+  say "Fetching the installer of $target (${sha:0:7}) ..."
+  if ! { GIT_TERMINAL_PROMPT=0 git init -q "$work/src" \
+    && GIT_TERMINAL_PROMPT=0 git -C "$work/src" fetch -q --depth 1 -- "$repo_url" "$sha" \
+    && [ "$(git -C "$work/src" rev-parse FETCH_HEAD)" = "$sha" ] \
+    && mkdir "$work/export" \
+    && git -C "$work/src" archive --format=tar FETCH_HEAD install | tar -x --no-same-owner -C "$work/export" \
+    && chmod -R go-w "$work/export" \
+    && [ -f "$work/export/install/install.sh" ]; } >/dev/null 2>&1; then
+    history_line installer failed
+    err "could not fetch the installer of $target from $repo_url. Nothing was stopped or restored; run the command again."
+    return 1
+  fi
+
+
   if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
+    # The older installer was fetched and unpacked above, so an unreachable source costs nothing: the services are only
+    # stopped once everything the rollback needs is in hand.
     # Stop everything that writes the databases, restore (as fleet, no migration), and bring the services back on any
     # failure. The older installer below starts them again after it ran its migrations.
     say 'Stopping the fleet services ...'
-    local -a units=(fleet-scheduler fleet-worker@1 fleet-status)
-    local fpm
+    local workers fpm
+    workers=$(systemctl list-units --plain --no-legend --state=active 'fleet-worker@*.service' 2>/dev/null | awk '{print $1}' | grep -E '^fleet-worker@[A-Za-z0-9_.:-]+\.service$' | tr '\n' ' ' || true)
+    [ -n "$workers" ] || workers=fleet-worker@1
+    # shellcheck disable=SC2206
+    units=(fleet-scheduler $workers fleet-status)
     fpm=$(systemctl list-units --plain --no-legend --state=active 'php*-fpm.service' 2>/dev/null | awk '{print $1}' | grep -E '^php[0-9.]+-fpm\.service$' || true)
     # shellcheck disable=SC2206
     units+=($fpm)
@@ -247,19 +267,6 @@ main() {
       return 1
     fi
     history_line restore ok "$rb_backup"
-  fi
-
-  say "Fetching the installer of $target (${sha:0:7}) ..."
-  if ! { GIT_TERMINAL_PROMPT=0 git init -q "$work/src" \
-    && GIT_TERMINAL_PROMPT=0 git -C "$work/src" fetch -q --depth 1 -- "$repo_url" "$sha" \
-    && [ "$(git -C "$work/src" rev-parse FETCH_HEAD)" = "$sha" ] \
-    && mkdir "$work/export" \
-    && git -C "$work/src" archive --format=tar FETCH_HEAD install | tar -x --no-same-owner -C "$work/export" \
-    && chmod -R go-w "$work/export" \
-    && [ -f "$work/export/install/install.sh" ]; } >/dev/null 2>&1; then
-    history_line installer failed
-    err "could not fetch the installer of $target from $repo_url. The host is unchanged except for the backup; run the command again."
-    return 1
   fi
 
   say "Running the installer (log: $install_log) ..."
@@ -280,7 +287,21 @@ main() {
   # --- 6. verify (the new code answers) --------------------------------------------------------------------------------
   say "Verifying ..."
   rc=0
-  as_fleet upgrade:verify "--to=$target" "--from=$from" "--sha=$sha" "--actor=$actor" || rc=$?
+  if [ "$direction" = down ] && ! as_fleet help upgrade:verify >/dev/null 2>&1; then
+    # The older release has no `upgrade:verify` (none of the releases before the upgrade tooling does): the helper
+    # checks what it can itself, the installed version and the health endpoint.
+    say "$target has no upgrade:verify command; checking the installed version and /health here ..."
+    local have=''
+    [ -r "$root/etc/ddev-fleet/installed-version" ] && have=$(head -n 1 "$root/etc/ddev-fleet/installed-version" | tr -d '[:space:]')
+    if [ "$have" = "$target" ] && curl -fsS --max-time 20 --resolve "$domain:443:127.0.0.1" -o /dev/null "https://$domain/health" 2>/dev/null; then
+      rc=0
+    else
+      rc=1
+      err "installed-version is '${have:-unreadable}' (expected $target) or /health does not answer"
+    fi
+  else
+    as_fleet upgrade:verify "--to=$target" "--from=$from" "--sha=$sha" "--actor=$actor" || rc=$?
+  fi
   if [ "$rc" -ne 0 ]; then
     history_line verify unverified
     err "verification failed (exit $rc). To go back: sudo fleet upgrade --to $from --yes (restores the pre-upgrade database backup; data written since is lost)"

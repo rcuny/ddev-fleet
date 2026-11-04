@@ -121,10 +121,12 @@ database since that upgrade is **lost**: instances, jobs, users, projects, secre
 after it. The command prints that, naming the backup and the time, and always needs `--yes`. The history file is not in
 the database, so the record of both the upgrade and the rollback survives.
 
-Steps: plan (as for an upgrade, including the schema comparison), the fleet services (scheduler, worker, status watcher
-and php-fpm) are stopped, the backup is restored (`fleet-user`, the current database is kept next to the backups as
+Steps: plan (as for an upgrade, including the schema comparison), the installer of the older release is fetched and
+unpacked first (an unreachable source therefore costs nothing), the fleet services (scheduler, every active worker
+instance, status watcher and php-fpm) are stopped, the backup is restored (`fleet-user`, the current database is kept next to the backups as
 `*.pre-restore-*`), the installer of the older release runs (it applies that release's migrations with its own code and
-starts the services again), then the verification. If the restore fails, the previous database stays in place, the
+starts the services again), then the verification (a release older than the upgrade tooling has no `fleet upgrade verify`; the helper then checks
+the installed version and `/health` itself). If the restore fails, the previous database stays in place, the
 services are started again and the installer never runs (exit 1).
 
 Refused, nothing changed (exit 3):
