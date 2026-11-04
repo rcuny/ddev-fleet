@@ -151,6 +151,32 @@ final class HostInitCommandTest extends KernelTestCase
         self::assertNull($this->fx->settings->get());
     }
 
+    /**
+     * @return iterable<string, array{array<string, string>, string}>
+     */
+    public static function refusedInitOptions(): iterable
+    {
+        yield 'an underscore domain' => [['--domain' => 'not_a_domain'], '"not_a_domain" is not a valid lowercase fully qualified domain name.'];
+        yield 'localhost' => [['--domain' => 'localhost'], '"localhost" is not a valid lowercase fully qualified domain name.'];
+        yield 'a one-letter top level' => [['--domain' => 'a.b'], '"a.b" is not a valid lowercase fully qualified domain name.'];
+        yield 'a leading dash' => [['--domain' => '-bad.example.com'], 'is not a valid lowercase fully qualified domain name.'];
+        yield 'a bad ACME email' => [['--domain' => 'fleet.example.com', '--acme-email' => 'bad'], '"bad" is not a valid ACME contact email address.'];
+        yield 'an unknown TLS mode' => [['--domain' => 'fleet.example.com', '--tls-mode' => 'pigeon'], '--tls-mode must be http01 or ovh_dns.'];
+    }
+
+    /**
+     * @param array<string, string> $options
+     */
+    #[\PHPUnit\Framework\Attributes\DataProvider('refusedInitOptions')]
+    public function testEachRefusalNamesItsProblem(array $options, string $message): void
+    {
+        $tester = $this->init($options);
+
+        self::assertSame(1, $tester->getStatusCode());
+        self::assertStringContainsString($message, (string) preg_replace('/\s+/', ' ', $tester->getErrorOutput()));
+        self::assertNull($this->fx->settings->get());
+    }
+
     public function testTheDomainIsRequiredTheFirstTime(): void
     {
         $tester = $this->init([]);
