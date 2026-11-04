@@ -7,6 +7,7 @@ namespace App\Fleet\Export;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Webhook\WebhookSource;
 use App\Fleet\Projects\ProjectService;
+use App\Fleet\Projects\Rule\SshKeyNames;
 use App\Fleet\Projects\TemplateService;
 
 /**
@@ -147,7 +148,7 @@ final class ExportParser
         $templates = [];
         foreach ($this->items($value, 'templates', TemplateService::MAX_PER_PROJECT) as $i => $item) {
             $path = "templates[$i]";
-            if (!$this->keys($item, $path, ['name', 'drupal_env', 'post_deploy'])) {
+            if (!$this->keys($item, $path, ['name', 'drupal_env', 'post_deploy'], ['ssh_keys'])) {
                 continue;
             }
             \assert(\is_array($item));
@@ -162,6 +163,7 @@ final class ExportParser
                 'name' => $this->string($item['name'], "$path.name") ?? '',
                 'drupal_env' => $this->nullableString($item['drupal_env'], "$path.drupal_env"),
                 'post_deploy' => $commands,
+                'ssh_keys' => \array_key_exists('ssh_keys', $item) ? $this->stringList($item['ssh_keys'], "$path.ssh_keys", SshKeyNames::MAX_KEYS) : [],
             ];
         }
 

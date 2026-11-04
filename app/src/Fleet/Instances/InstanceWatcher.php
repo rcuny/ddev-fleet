@@ -97,7 +97,7 @@ final class InstanceWatcher
                 continue;
             }
             try {
-                $this->agent->start($instance->id());
+                $this->agent->startFor($instance);
             } catch (\RuntimeException $e) {
                 $this->logger->warning('The ssh-agent of an instance could not be refreshed.', ['instance' => $instance->id(), 'exception' => $e]);
             }

@@ -213,6 +213,19 @@ final class TemplatePagesTest extends AdminTestCase
 
     // --- edit
 
+    public function testExtraSshKeysNeedContainerSshAndAreShownOnTheForm(): void
+    {
+        $this->makeTemplate('full');
+
+        $crawler = $this->open(self::LIST.'/full');
+        self::assertCount(1, $crawler->filter('#template_sshKeys'));
+        $this->submit($crawler, 'Save', ['template[sshKeys]' => "staging\n"]);
+
+        self::assertResponseStatusCodeSame(422);
+        self::assertStringContainsString('container_ssh', $this->client->getResponse()->getContent() ?: '');
+        self::assertSame([], ($this->stored('full') ?? self::fail())->sshKeys());
+    }
+
     public function testEditShowsTheStoredLinesAndSaves(): void
     {
         $this->makeTemplate('full', new TemplateInput('full', 'production', ['composer install', 'drush cr'], ['npm run dev'], ['tail -f log']));

@@ -65,6 +65,12 @@ final class TemplateType extends AbstractType
                 'help' => 'Typed into the right terminal pane when the instance window is first created.',
                 'attr' => $commands + ['rows' => 3],
             ])
+            ->add('sshKeys', TextareaType::class, [
+                'label' => 'Extra SSH keys',
+                'required' => false,
+                'help' => "One key name per line: the file ssh/<name>_ed25519 in the fleet home, loaded into the instance's own ssh-agent next to the push key. The project needs git over SSH in the container.",
+                'attr' => $text + ['wrap' => 'off', 'class' => 'font-mono', 'rows' => 2, 'maxlength' => 400],
+            ])
             ->add('save', SubmitType::class, ['label' => $create ? 'Create template' : 'Save']);
     }
 

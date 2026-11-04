@@ -91,7 +91,8 @@ Caddy site for `https://<id>.<domain>` and reloads Caddy.
   usable by code Fleet does not control. Instead, for an instance of an opted-in project, Fleet runs a dedicated
   `ssh-agent` as the `fleet` user, with its socket in a directory only that instance mounts (a generated
   `.ddev/docker-compose.fleet-ssh.yaml`, kept out of git status, which also sets `SSH_AUTH_SOCK` there). The agent holds
-  only the host's push key, loaded with a 24 hour lifetime (`ssh-add -t`, refreshed at every start and deploy). The agent is
+  the host's push key, plus the extra keys the instance's template names (the template's ssh keys, see the template options in
+  [`projects-and-templates.md`](projects-and-templates.md)), each loaded with a 24 hour lifetime (`ssh-add -t`, refreshed at every start, deploy and status-watcher pass, so an extra key is back after an agent restart). The agent is
   stopped and its socket removed when the instance is stopped, redeployed or destroyed, and recreated at the next deploy or
   start (it does not survive a reboot). Fleet's pinned `known_hosts` (public keys, not a secret) is copied to
   `.ddev/fleet_known_hosts` in the checkout, and `config.fleet.yaml` sets `GIT_SSH_COMMAND` to a strict, `BatchMode` ssh that

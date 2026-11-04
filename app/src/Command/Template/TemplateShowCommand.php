@@ -43,6 +43,7 @@ final class TemplateShowCommand extends Command
                     'post-deploy' => $template->postDeploy(),
                     'tty1' => $template->tty1(),
                     'tty2' => $template->tty2(),
+                    'ssh keys' => $template->sshKeys(),
                 ]);
             });
         });

@@ -51,6 +51,57 @@ final class StartStopJobTest extends InstanceJobTestCase
         self::assertDirectoryExists($this->paths->agentSocketDir($instance->id()), 'present before ddev start, so Docker never creates it');
     }
 
+    /**
+     * @return list<string> the key files given to `ssh-add -t`
+     */
+    private function loadedKeys(): array
+    {
+        $keys = [];
+        foreach ($this->runner->callsMatching(['ssh-add', '-t']) as $call) {
+            $argv = $call->argv;
+            $keys[] = (string) end($argv);
+        }
+
+        return $keys;
+    }
+
+    public function testEveryStartLoadsTheTemplatesExtraKeysAndNoOtherTemplateGetsThem(): void
+    {
+        $this->project->changeContainerSsh(true);
+        mkdir($this->paths->sshDir(), 0o700, true);
+        foreach (['push', 'staging'] as $name) {
+            touch($this->paths->sshDir().'/'.$name.'_ed25519');
+            chmod($this->paths->sshDir().'/'.$name.'_ed25519', 0o600);
+        }
+        $this->template->changeSshKeys(['staging']);
+        $this->templates->save($this->template);
+        $plain = $this->saveTemplate('plain', []);
+
+        $instance = $this->instance('main', 'develop', InstanceState::Stopped);
+        $this->checkout($instance);
+        $other = $this->instance('other', 'develop', InstanceState::Stopped, $plain->name());
+        $this->checkout($other);
+        $socket = $this->paths->agentSocket($instance->id());
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AUTH_SOCK=$socket; export SSH_AUTH_SOCK;\nSSH_AGENT_PID=4242; export SSH_AGENT_PID;\n"));
+
+        // start job, stop, start again: the agent is gone in between, the key is loaded again.
+        $this->start($instance);
+        $this->agent->stop($instance->id());
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AUTH_SOCK=$socket; export SSH_AUTH_SOCK;\nSSH_AGENT_PID=4343; export SSH_AGENT_PID;\n"));
+        $this->agent->startFor($instance); // what the second StartJob and the watcher's refresh call
+
+        $staging = $this->paths->sshDir().'/staging_ed25519';
+        $push = $this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push);
+        self::assertSame([$push, $staging, $push, $staging], $this->loadedKeys());
+
+        // The recording runner keeps its history, so the other instance is checked by what is added after the first one.
+        $before = \count($this->loadedKeys());
+        $socketOther = $this->paths->agentSocket($other->id());
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AUTH_SOCK=$socketOther; export SSH_AUTH_SOCK;\nSSH_AGENT_PID=4444; export SSH_AGENT_PID;\n"));
+        $this->start($other);
+        self::assertSame([$push], \array_slice($this->loadedKeys(), $before), 'an instance of another template gets the push key only');
+    }
+
     public function testStartRemovesTheOverrideAndAgentOfAProjectThatOptedOut(): void
     {
         $instance = $this->instance('main', 'develop', InstanceState::Stopped);

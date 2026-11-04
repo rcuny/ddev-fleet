@@ -11,6 +11,8 @@ use App\Domain\Template\TemplateRepository;
 use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\Rule\DrupalEnv;
 use App\Fleet\Projects\Rule\ResourceName;
+use App\Fleet\Projects\Rule\SshKeyNames;
+use App\Fleet\Ssh\ExtraSshKey;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 
 /**
@@ -24,6 +26,7 @@ final readonly class TemplateService
     public function __construct(
         private ProjectRepository $projects,
         private TemplateRepository $templates,
+        private ExtraSshKey $sshKeys,
     ) {
     }
 
@@ -53,7 +56,7 @@ final readonly class TemplateService
     {
         $owner = $this->project($project);
         $input = $input->normalised();
-        $errors = $this->check($input);
+        $errors = $this->check($input, $owner->containerSsh());
 
         if (!isset($errors['name'])) {
             if (null !== $this->templates->find($owner, $input->name)) {
@@ -70,6 +73,7 @@ final readonly class TemplateService
         $template = new Template($owner, $input->name, $now);
         $template->changeDrupalEnv($input->drupalEnv, $now);
         $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
+        $template->changeSshKeys($input->sshKeys, $now);
 
         try {
             $this->templates->save($template);
@@ -89,7 +93,7 @@ final readonly class TemplateService
     {
         $template = $this->get($project, $name);
         $input = $input->normalised();
-        $errors = $this->check($input);
+        $errors = $this->check($input, $template->project()->containerSsh());
         if ($input->name !== $template->name()) {
             $errors = ['name' => 'The name cannot be changed.'] + $errors;
         }
@@ -100,6 +104,7 @@ final readonly class TemplateService
         $now = new \DateTimeImmutable();
         $template->changeDrupalEnv($input->drupalEnv, $now);
         $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
+        $template->changeSshKeys($input->sshKeys, $now);
         $this->templates->save($template);
 
         return $template;
@@ -123,17 +128,19 @@ final readonly class TemplateService
      * The field => message map create() would refuse the input with (the name's uniqueness and the project's limit
      * aside), without touching the database. A project import checks a whole file with it before it writes anything.
      *
+     * @param bool|null $containerSsh whether the project (as it will be after the import) has container_ssh on; null skips that check
+     *
      * @return array<string, string>
      */
-    public function validate(TemplateInput $input): array
+    public function validate(TemplateInput $input, ?bool $containerSsh = null): array
     {
-        return $this->check($input->normalised());
+        return $this->check($input->normalised(), $containerSsh);
     }
 
     /**
      * @return array<string, string> the first error of every field except the name rules that need the database
      */
-    private function check(TemplateInput $input): array
+    private function check(TemplateInput $input, ?bool $containerSsh): array
     {
         $errors = [];
         if (null !== $error = ResourceName::error($input->name)) {
@@ -148,7 +155,37 @@ final readonly class TemplateService
             }
         }
 
+        if (null !== $error = $this->sshKeysError($input->sshKeys, $containerSsh)) {
+            $errors['sshKeys'] = $error;
+        }
+
         return $errors;
+    }
+
+    /**
+     * FLE-190: extra keys only make sense for a project that gets an agent (container_ssh), and each key file must exist on
+     * this host with the right mode and owner.
+     *
+     * @param list<string> $names
+     */
+    private function sshKeysError(array $names, ?bool $containerSsh): ?string
+    {
+        if ([] === $names) {
+            return null;
+        }
+        if (null !== $error = SshKeyNames::error($names)) {
+            return $error;
+        }
+        if (false === $containerSsh) {
+            return 'Extra SSH keys need "git over SSH in the container" (container_ssh) turned on for the project first.';
+        }
+        foreach ($names as $name) {
+            if (null !== $error = $this->sshKeys->problem($name)) {
+                return $error;
+            }
+        }
+
+        return null;
     }
 
     private function project(string $name): Project

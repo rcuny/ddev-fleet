@@ -59,14 +59,14 @@ final class TemplateCommandsTest extends KernelTestCase
         self::assertSame('web', $object['name']);
         self::assertSame('dev', $object['drupal_env']);
         self::assertSame(['exec' => ['composer install', 'drush deploy'], 'tty1' => ['npm run watch'], 'tty2' => ['tail -f var/log/dev.log']], $object['post_deploy']);
-        self::assertSame(['project', 'name', 'drupal_env', 'post_deploy', 'created_at', 'updated_at'], array_keys($object));
+        self::assertSame(['project', 'name', 'drupal_env', 'post_deploy', 'ssh_keys', 'created_at', 'updated_at'], array_keys($object));
         self::assertMatchesRegularExpression('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', (string) $object['created_at']);
 
         self::assertSame($object, $this->json($this->cli('fleet:template:show', ['project' => 'blog', 'name' => 'web', '--format' => 'json'])));
 
         $show = $this->cli('fleet:template:show', ['project' => 'blog', 'name' => 'web']);
         self::assertSame(0, $show->getStatusCode());
-        self::assertStringContainsString("project: blog\nname: web\ndrupal env: dev\npost-deploy:\n  - composer install\n  - drush deploy\ntty1:\n  - npm run watch\ntty2:\n  - tail -f var/log/dev.log\n", $show->getDisplay());
+        self::assertStringContainsString("project: blog\nname: web\ndrupal env: dev\npost-deploy:\n  - composer install\n  - drush deploy\ntty1:\n  - npm run watch\ntty2:\n  - tail -f var/log/dev.log\nssh keys: -\n", $show->getDisplay());
     }
 
     public function testListAllProjectsAndOne(): void
@@ -159,6 +159,35 @@ final class TemplateCommandsTest extends KernelTestCase
         self::assertSame(['b'], $template->tty1());
         self::assertSame(['d', 'e'], $template->tty2());
         self::assertSame(['d', 'e'], $this->json($update)['post_deploy']['tty2'] ?? null);
+    }
+
+    public function testSshKeyOptionStoresShowsAndUnsets(): void
+    {
+        $home = self::getContainer()->get(\App\Fleet\FleetPaths::class)->sshDir();
+        @mkdir($home, 0o700, true);
+        foreach (['staging', 'prod-ro'] as $name) {
+            touch($home.'/'.$name.'_ed25519');
+            chmod($home.'/'.$name.'_ed25519', 0o600);
+        }
+
+        // Without container_ssh on the project the keys are refused, naming the option.
+        $refused = $this->cli('fleet:template:create', ['project' => 'blog', 'name' => 'web', '--ssh-key' => ['staging']]);
+        self::assertSame(1, $refused->getStatusCode());
+        self::assertStringContainsString('--ssh-key:', $refused->getErrorOutput());
+
+        $projects = self::getContainer()->get(ProjectService::class);
+        $projects->update('blog', ProjectInput::fromProject($projects->get('blog'))->with(['containerSsh' => true]), false);
+
+        $created = $this->cli('fleet:template:create', ['project' => 'blog', 'name' => 'web', '--ssh-key' => ['staging', 'prod-ro'], '--json' => true]);
+        self::assertSame(0, $created->getStatusCode(), $created->getErrorOutput());
+        self::assertSame(['staging', 'prod-ro'], $this->json($created)['ssh_keys']);
+        self::assertStringContainsString("ssh keys:\n  - staging\n  - prod-ro\n", $this->cli('fleet:template:show', ['project' => 'blog', 'name' => 'web'])->getDisplay());
+
+        $this->cli('fleet:template:update', ['project' => 'blog', 'name' => 'web', '--drupal-env' => 'dev']);
+        self::assertSame(['staging', 'prod-ro'], $this->stored('blog', 'web')->sshKeys(), 'untouched by an update that does not name them');
+
+        $this->cli('fleet:template:update', ['project' => 'blog', 'name' => 'web', '--unset' => ['ssh-keys']]);
+        self::assertSame([], $this->stored('blog', 'web')->sshKeys());
     }
 
     public function testUnsetTty1(): void

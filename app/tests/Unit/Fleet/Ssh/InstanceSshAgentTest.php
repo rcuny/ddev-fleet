@@ -4,10 +4,17 @@ declare(strict_types=1);
 
 namespace App\Tests\Unit\Fleet\Ssh;
 
+use App\Domain\Instance\Instance;
+use App\Domain\Project\Project;
+use App\Domain\Template\Template;
+use App\Domain\Template\TemplateRepository;
 use App\Fleet\FleetPaths;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\RecordingCommandRunner;
+use App\Fleet\Ssh\ExtraSshKey;
 use App\Fleet\Ssh\InstanceSshAgent;
+use Doctrine\ORM\EntityManagerInterface;
+use Doctrine\ORM\EntityRepository;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Yaml\Yaml;
 
@@ -26,7 +33,102 @@ final class InstanceSshAgentTest extends TestCase
         mkdir($this->home.'/ssh', 0o700, true);
         $this->paths = new FleetPaths($this->home, $this->home.'/caddy');
         $this->runner = new RecordingCommandRunner();
-        $this->agent = new InstanceSshAgent($this->runner, $this->paths);
+        $this->agent = new InstanceSshAgent($this->runner, $this->paths, new ExtraSshKey($this->paths), $this->templates());
+    }
+
+    private ?Template $stored = null;
+
+    private function templates(): TemplateRepository
+    {
+        $repository = $this->createStub(EntityRepository::class);
+        $repository->method('findOneBy')->willReturnCallback(fn (): ?Template => $this->stored);
+        $em = $this->createStub(EntityManagerInterface::class);
+        $em->method('getRepository')->willReturn($repository);
+
+        return new TemplateRepository($em);
+    }
+
+    private function extraKey(string $name, int $mode = 0o600): string
+    {
+        $file = $this->home.'/ssh/'.$name.'_ed25519';
+        touch($file);
+        chmod($file, $mode);
+
+        return $file;
+    }
+
+    /**
+     * @return list<string> the key files given to `ssh-add -t`
+     */
+    private function loadedKeys(): array
+    {
+        $keys = [];
+        foreach ($this->runner->calls() as $call) {
+            if ('ssh-add' === $call->argv[0] && '-t' === ($call->argv[1] ?? '')) {
+                $keys[] = $call->argv[array_key_last($call->argv)];
+            }
+        }
+
+        return $keys;
+    }
+
+    private function agentIsUp(): void
+    {
+        $this->pushKey();
+        mkdir($this->paths->agentSocketDir(self::ID), 0o700, true);
+        touch($this->paths->agentSocket(self::ID));
+        $this->runner->expect(['ssh-add', '-l'], new CommandResult(1, 'The agent has no identities.'));
+    }
+
+    public function testStartLoadsTheTemplatesExtraKeysAfterThePushKeyWithTheSameLifetime(): void
+    {
+        $this->agentIsUp();
+        $staging = $this->extraKey('staging');
+
+        $this->agent->start(self::ID, ['staging']);
+
+        $adds = array_values(array_filter(array_map(static fn ($call): array => $call->argv, $this->runner->calls()), static fn (array $argv): bool => 'ssh-add' === $argv[0] && '-t' === $argv[1]));
+        self::assertSame([['ssh-add', '-t', '86400', $this->home.'/ssh/push_ed25519'], ['ssh-add', '-t', '86400', $staging]], $adds);
+    }
+
+    public function testStartFailsClearlyForAnExtraKeyThatIsNotUsable(): void
+    {
+        $this->agentIsUp();
+        $this->extraKey('loose', 0o644);
+
+        foreach (['missing', 'loose', 'deploy', 'push', '../x'] as $name) {
+            try {
+                $this->agent->start(self::ID, [$name]);
+                self::fail("$name was loaded");
+            } catch (\RuntimeException $e) {
+                self::assertStringNotContainsString($this->home, $e->getMessage(), 'no path in the message');
+            }
+        }
+        $argvs = array_map(static fn ($call): array => $call->argv, $this->runner->calls());
+        self::assertSame([], array_filter($argvs, static fn (array $argv): bool => 'ssh-add' === $argv[0] && '-t' === ($argv[1] ?? '')), 'nothing was loaded, not even the push key');
+    }
+
+    public function testStartForReadsTheKeysOfTheInstancesOwnTemplate(): void
+    {
+        $this->agentIsUp();
+        $staging = $this->extraKey('staging');
+        $project = new Project('acme', 'https://git.example.com/acme/acme.git');
+        $instance = new Instance($project, 'main', 'agent', 'develop', 'test');
+
+        $this->stored = new Template($project, 'agent');
+        $this->stored->changeSshKeys(['staging']);
+        $this->agent->startFor($instance);
+        $loaded = $this->loadedKeys();
+        self::assertContains($staging, $loaded);
+
+        // Another template of the same project (or a template that is gone) gets the push key only.
+        $this->runner = new RecordingCommandRunner();
+        $this->agent = new InstanceSshAgent($this->runner, $this->paths, new ExtraSshKey($this->paths), $this->templates());
+        $this->runner->expect(['ssh-add', '-l'], new CommandResult(1, 'none'));
+        $this->stored = new Template($project, 'agent');
+        $this->agent->startFor($instance);
+        $loaded = $this->loadedKeys();
+        self::assertSame([$this->home.'/ssh/push_ed25519'], $loaded);
     }
 
     protected function tearDown(): void

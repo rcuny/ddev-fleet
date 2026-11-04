@@ -15,6 +15,7 @@ final readonly class TemplateInput
      * @param list<string> $postDeploy command lines run inside the web container with `ddev exec` after a deploy
      * @param list<string> $tty1       command lines typed into the first instance terminal
      * @param list<string> $tty2       command lines typed into the second instance terminal
+     * @param list<string> $sshKeys    names of extra SSH keys (ssh/<name>_ed25519) loaded into the instance's agent (FLE-190)
      */
     public function __construct(
         public string $name,
@@ -22,6 +23,7 @@ final readonly class TemplateInput
         public array $postDeploy = [],
         public array $tty1 = [],
         public array $tty2 = [],
+        public array $sshKeys = [],
     ) {
     }
 
@@ -33,6 +35,7 @@ final readonly class TemplateInput
             $template->postDeploy(),
             $template->tty1(),
             $template->tty2(),
+            $template->sshKeys(),
         );
     }
 
@@ -62,6 +65,7 @@ final readonly class TemplateInput
             self::lines($this->postDeploy),
             self::lines($this->tty1),
             self::lines($this->tty2),
+            self::lines($this->sshKeys),
         );
     }
 

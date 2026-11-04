@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Fleet\Ssh;
 
+use App\Domain\Instance\Instance;
 use App\Domain\Ssh\SshKeyRole;
+use App\Domain\Template\TemplateRepository;
 use App\Fleet\FleetPaths;
 use App\Fleet\Shell\CommandRunner;
 use App\Fleet\Shell\CommandRunnerException;
@@ -44,8 +46,12 @@ final readonly class InstanceSshAgent
 
     private const float TIMEOUT = 20.0;
 
-    public function __construct(private CommandRunner $runner, private FleetPaths $paths)
-    {
+    public function __construct(
+        private CommandRunner $runner,
+        private FleetPaths $paths,
+        private ExtraSshKey $extraKeys,
+        private TemplateRepository $templates,
+    ) {
     }
 
     /**
@@ -57,16 +63,37 @@ final readonly class InstanceSshAgent
     }
 
     /**
+     * start() for an instance: the push key plus the extra keys its template names (FLE-190). The template is read fresh
+     * from the repository on every call, so a start, a restart and the watcher's refresh all load what the template says now.
+     *
+     * @throws \RuntimeException as start()
+     */
+    public function startFor(Instance $instance): void
+    {
+        $template = $this->templates->find($instance->project(), $instance->templateName());
+        $this->start($instance->id(), $template?->sshKeys() ?? []);
+    }
+
+    /**
      * Makes sure the instance's agent runs and holds the push key. The socket directory exists afterwards (0700) even
      * when this throws, so a container that starts anyway never makes Docker create a root-owned directory there.
      *
-     * @throws \RuntimeException when the agent cannot be started or the key cannot be loaded
+     * @param list<string> $extraKeys names of the template's extra keys (ssh/<name>_ed25519), loaded after the push key with
+     *                                the same lifetime; each is checked first (exists, 0600, owned by fleet), never the deploy key
+     *
+     * @throws \RuntimeException when the agent cannot be started or a key cannot be loaded
      */
-    public function start(string $instanceId): void
+    public function start(string $instanceId, array $extraKeys = []): void
     {
         $dir = $this->paths->agentSocketDir($instanceId);
         $this->makeDir($this->paths->runDir());
         $this->makeDir($dir);
+
+        foreach ($extraKeys as $name) {
+            if (null !== $problem = $this->extraKeys->problem($name)) {
+                throw new \RuntimeException($problem);
+            }
+        }
 
         $socket = $this->paths->agentSocket($instanceId);
         if (!$this->alive($socket)) {
@@ -82,6 +109,14 @@ final readonly class InstanceSshAgent
         $added = $this->runner->run(['ssh-add', '-t', (string) self::KEY_LIFETIME, $key], null, ['SSH_AUTH_SOCK' => $socket], null, self::TIMEOUT);
         if (!$added->isSuccess()) {
             throw new \RuntimeException(\sprintf('The push key could not be loaded into the instance\'s ssh-agent (exit %d).', $added->exitCode));
+        }
+
+        // The key path is the only argument: the key material never reaches argv, a log or the database.
+        foreach ($extraKeys as $name) {
+            $added = $this->runner->run(['ssh-add', '-t', (string) self::KEY_LIFETIME, $this->extraKeys->path($name)], null, ['SSH_AUTH_SOCK' => $socket], null, self::TIMEOUT);
+            if (!$added->isSuccess()) {
+                throw new \RuntimeException(\sprintf('The SSH key "%s" could not be loaded into the instance\'s ssh-agent (exit %d).', $name, $added->exitCode));
+            }
         }
     }
 

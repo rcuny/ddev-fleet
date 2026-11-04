@@ -15,6 +15,7 @@ final readonly class FieldErrors
         'additionalHostnames' => 'hostname',
         'ports' => 'port',
         'gitBotMode' => 'git-bot',
+        'sshKeys' => 'ssh-key',
     ];
 
     /**

@@ -54,6 +54,7 @@ final readonly class ProjectSnapshot
                     'tty1' => $template->tty1(),
                     'tty2' => $template->tty2(),
                 ],
+                'ssh_keys' => $template->sshKeys(),
             ], $project->templates()),
             'created_at' => $project->createdAt()->setTimezone($utc)->format(self::TIME),
             'updated_at' => $project->updatedAt()->setTimezone($utc)->format(self::TIME),

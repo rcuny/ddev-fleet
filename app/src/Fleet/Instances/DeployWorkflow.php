@@ -160,7 +160,7 @@ final class DeployWorkflow
             $written[] = '.env';
         }
         $written[] = $sshKnownHosts;
-        array_push($written, ...$this->setUpContainerAgent($instance, $project, $dir, $log));
+        array_push($written, ...$this->setUpContainerAgent($instance, $project, $template, $dir, $log));
         GitExclude::add($dir, $written);
 
         $context = new DeployContext($instance, $project, $dir, $tokens, $log, $this->secrets);
@@ -270,7 +270,7 @@ final class DeployWorkflow
      *
      * @return list<string> files added to the checkout, relative to $dir
      */
-    private function setUpContainerAgent(Instance $instance, Project $project, string $dir, JobLog $log): array
+    private function setUpContainerAgent(Instance $instance, Project $project, Template $template, string $dir, JobLog $log): array
     {
         if (!$project->containerSsh()) {
             // Opted out (FLE-167): a redeploy drops what an earlier opted-in deploy left behind.
@@ -286,12 +286,13 @@ final class DeployWorkflow
             return [];
         }
         try {
-            $this->agent->start($instance->id());
+            $this->agent->startFor($instance);
             AtomicFile::write($dir.'/'.InstanceSshAgent::OVERRIDE_FILE, $this->agent->composeOverride($instance->id()), 0o640);
         } catch (\RuntimeException $e) {
             throw new JobFailed('ssh-agent setup failed: '.$e->getMessage());
         }
-        $log->line('started a dedicated ssh-agent for this instance (push key, '.InstanceSshAgent::KEY_LIFETIME.' s)');
+        $extra = $template->sshKeys();
+        $log->line('started a dedicated ssh-agent for this instance (push key'.([] === $extra ? '' : ' and the template\'s extra key(s): '.implode(', ', $extra)).', '.InstanceSshAgent::KEY_LIFETIME.' s)');
 
         return [InstanceSshAgent::OVERRIDE_FILE];
     }
