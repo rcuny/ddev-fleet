@@ -1,10 +1,10 @@
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { expect, test } from '@playwright/test';
-import { baseURL } from './support/env';
 import { acquire, clearFlag, flag, fleetHome, lock, packages } from './support/rebootFlag';
 import { hasHorizontalOverflow } from './support/shell';
-import { setStandInRole } from './support/standIn';
 
+// The banner's logic (who sees it, the package list, escaping, the flag without a list) is covered by
+// app/tests/Functional/Host/RebootBannerTest.php; this spec keeps the layout check, which needs a real viewport.
 test.describe('reboot banner', () => {
   test.beforeEach(async () => {
     await acquire();
@@ -13,14 +13,6 @@ test.describe('reboot banner', () => {
   test.afterEach(() => {
     clearFlag();
     rmSync(lock, { recursive: true, force: true });
-  });
-
-  test('no banner while no reboot is pending', async ({ page }) => {
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-
-    await expect(page.locator('h1')).toBeVisible();
-    await expect(page.getByTestId('reboot-banner')).toHaveCount(0);
   });
 
   test('an administrator sees the banner with the packages, without overflow @phone', async ({ page }) => {
@@ -42,29 +34,5 @@ test.describe('reboot banner', () => {
     expect(box!.x).toBeGreaterThanOrEqual(0);
     expect(box!.x + box!.width).toBeLessThanOrEqual(page.viewportSize()!.width);
     expect(await hasHorizontalOverflow(page)).toBe(false);
-  });
-
-  test('the banner shows on other shell pages and without a package list @phone', async ({ page }) => {
-    mkdirSync(fleetHome, { recursive: true });
-    writeFileSync(flag, '');
-
-    await page.goto('/admin/host');
-    await page.waitForLoadState('networkidle');
-
-    await expect(page.getByTestId('reboot-banner')).toBeVisible();
-    await expect(page.getByTestId('reboot-packages')).toHaveCount(0);
-    expect(await hasHorizontalOverflow(page)).toBe(false);
-  });
-
-  test('a member does not see the banner', async ({ page, context }) => {
-    mkdirSync(fleetHome, { recursive: true });
-    writeFileSync(flag, '');
-    await setStandInRole(context, 'member', baseURL);
-
-    await page.goto('/');
-    await page.waitForLoadState('networkidle');
-
-    await expect(page.locator('h1')).toBeVisible();
-    await expect(page.getByTestId('reboot-banner')).toHaveCount(0);
   });
 });

@@ -5,7 +5,6 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
-import { setStandInRole } from './support/standIn';
 
 // The Assets tab of a project in a real browser, at 1280 px (desktop project) and 390 px (phone project): the chunked
 // upload (several chunks, the sha256 the server reports), the listing, download, delete, new folder, resuming and the
@@ -311,19 +310,6 @@ test.describe('assets', () => {
     } finally {
       await deleteProjectViaUi(page, name);
     }
-  });
-
-  test('a member cannot open the Assets tab or its endpoints', async ({ page, context, baseURL }) => {
-    await setStandInRole(context, 'member', baseURL!);
-
-    for (const path of ['/admin/projects/anything/assets', '/admin/projects/anything/assets/download?path=a.sql']) {
-      const response = await page.goto(path);
-      expect(response?.status(), path).toBe(403);
-      await expect(page.getByRole('heading', { level: 1, name: 'Access denied' })).toBeVisible();
-    }
-
-    const begin = await context.request.post('/admin/projects/anything/assets/uploads', { data: { path: '', name: 'a.sql', size: 1 }, headers: { 'X-CSRF-Token': 'csrf-token' } });
-    expect(begin.status()).toBe(403);
   });
 });
 

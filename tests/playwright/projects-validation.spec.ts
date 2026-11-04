@@ -4,8 +4,7 @@ import { createProjectViaUi, deleteProjectViaUi, GIT_URL, uniqueName } from './s
 import { hasHorizontalOverflow } from './support/shell';
 
 // Long values must not widen the page, on desktop and on the phone. The per-rule validation matrices are PHPUnit Functional
-// tests (app/tests/Functional/Admin/ProjectValidationTest.php, FLE-127); the rest of what a browser adds is in
-// projects-validation.desktop.spec.ts.
+// tests (app/tests/Functional/Admin/ProjectValidationTest.php, FLE-127, FLE-161).
 
 let created: string | null = null;
 

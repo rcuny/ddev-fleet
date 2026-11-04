@@ -1,7 +1,8 @@
 import { expect, type Page } from '@playwright/test';
+// Tab texts, refusal messages, saves, write-only secrets, the 403 page and the retention bounds are covered by
+// app/tests/Functional/Host/HostSettingsMatrixTest.php and HostPageTest.php; this spec keeps what needs a browser.
 import { test } from './support/host';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
-import { setStandInRole } from './support/standIn';
 
 const TABS = [
   { key: 'general', label: 'General' },
@@ -12,10 +13,6 @@ const TABS = [
   { key: 'uploads', label: 'Uploads' },
   { key: 'backups', label: 'Backups' },
 ] as const;
-
-// Not a real credential; unique so a leak into the page is unmistakable.
-const TOKEN = 'sk-ant-oat01-e2e-host-settings-0123456789-abcdef';
-const SMTP_PASSWORD = 'e2e smtp password 7Hk-unique';
 
 const isPhone = (testInfo: { project: { name: string } }) => testInfo.project.name === 'phone';
 
@@ -108,90 +105,6 @@ test.describe('host settings', () => {
     expect(errors).toEqual([]);
   });
 
-  test('a Claude token is stored write-only: the page never shows it back', async ({ page }) => {
-    await openTab(page, 'claude');
-    await page.getByLabel(/Claude OAuth token/).fill(TOKEN);
-    await page.getByRole('button', { name: /Store token|Replace token/ }).click();
-
-    await expect(page).toHaveURL(/\/admin\/host\?tab=claude$/);
-    await expect(page.getByTestId('flashes')).toContainText('Claude token stored.');
-    await expect(page.getByTestId('host-claude-status')).toContainText('Set');
-    await expect(page.getByTestId('host-claude-status')).toContainText(/Last rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
-    expect(await page.content()).not.toContain(TOKEN);
-    await expect(page.getByLabel(/New Claude OAuth token/)).toHaveValue('');
-  });
-
-  test('the Claude tab names the rotation command and shows the workspace checks without values @phone', async ({ page }) => {
-    await openTab(page, 'claude');
-    await page.getByLabel(/Claude OAuth token/).fill(TOKEN);
-    await page.getByRole('button', { name: /Store token|Replace token/ }).click();
-    await expect(page.getByTestId('flashes')).toContainText('Claude token stored.');
-
-    await expect(page.getByTestId('host-claude-command')).toContainText('sudo fleet claude:token:set');
-    await expect(page.getByTestId('host-claude-status')).toContainText(/Last rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC/);
-    const checks = page.getByTestId('host-workspace-checks');
-    await expect(checks).toBeVisible();
-    await expect(checks.getByTestId('host-check-claude-token')).toContainText('Present');
-    // The push key may or may not exist on the machine running the suite: either way, a word and no value.
-    await expect(checks.getByTestId('host-check-push-key')).toContainText(/Present|Missing/);
-    await expect(checks.getByTestId('host-check-git-identity')).toContainText(/Present|Missing/);
-    expect(await checks.innerText()).not.toContain(TOKEN);
-    expect(await hasHorizontalOverflow(page)).toBe(false);
-  });
-
-  test('the Git identity tab shows the same workspace checks @phone', async ({ page }) => {
-    await openTab(page, 'git');
-
-    const checks = page.getByTestId('host-workspace-checks');
-    await expect(checks).toBeVisible();
-    for (const key of ['push-key', 'git-identity', 'claude-token']) {
-      await expect(checks.getByTestId(`host-check-${key}`)).toContainText(/Present|Missing/);
-    }
-    expect(await hasHorizontalOverflow(page)).toBe(false);
-  });
-
-  test('a token with a space is refused and is not echoed', async ({ page }) => {
-    await openTab(page, 'claude');
-    await page.getByLabel(/Claude OAuth token/).fill(`two words ${TOKEN}`);
-    await page.getByRole('button', { name: /Store token|Replace token/ }).click();
-
-    await expect(page.getByTestId('host-tab-claude')).toContainText('has no spaces or control characters');
-    expect(await page.content()).not.toContain(TOKEN);
-  });
-
-  test('the git identity needs both fields and keeps the saved values', async ({ page, hostLock }) => {
-    void hostLock;
-    await openTab(page, 'git');
-    // The host settings are shared by every test (and by the desktop and phone projects): an earlier run may have
-    // saved both fields, so empty the e-mail explicitly to get a name without an e-mail.
-    await page.getByLabel('Name').fill('Fleet Bot');
-    await page.getByLabel('E-mail').fill('');
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByTestId('host-tab-git')).toContainText('Set both the name and the e-mail address');
-
-    await page.getByLabel('E-mail').fill('bot@example.com');
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByTestId('flashes')).toContainText('Git identity saved.');
-    await expect(page.getByLabel('Name')).toHaveValue('Fleet Bot');
-    await expect(page.getByLabel('E-mail')).toHaveValue('bot@example.com');
-  });
-
-  test('notification e-mail is saved and the SMTP password is never shown back', async ({ page, hostLock }) => {
-    void hostLock;
-    await openTab(page, 'notifications');
-    await page.getByLabel('SMTP host').fill('smtp.example.com');
-    await page.getByLabel('SMTP port').fill('587');
-    await page.getByLabel(/SMTP password/).fill(SMTP_PASSWORD);
-    await page.getByLabel('Sender address').fill('fleet@example.com');
-    await page.getByLabel('Recipient address').fill('ops@example.com');
-    await page.getByRole('button', { name: 'Save' }).click();
-
-    await expect(page.getByTestId('flashes')).toContainText('Notification e-mail settings saved.');
-    await expect(page.getByTestId('host-smtp-status')).toContainText('Set');
-    await expect(page.getByLabel('SMTP host')).toHaveValue('smtp.example.com');
-    expect(await page.content()).not.toContain(SMTP_PASSWORD);
-  });
-
   test('Back up now adds a backup that can be downloaded @phone', async ({ page }) => {
     await openTab(page, 'backups');
     const before = await page.getByTestId('backup-row').count();
@@ -207,28 +120,5 @@ test.describe('host settings', () => {
     await link.click();
     expect((await download).suggestedFilename()).toMatch(/^fleet-\d{8}-\d{6}\.sqlite$/);
     expect(await hasHorizontalOverflow(page)).toBe(false);
-  });
-
-  test('the retention field accepts 1 to 3650 days', async ({ page, hostLock }) => {
-    void hostLock;
-    await openTab(page, 'backups');
-    await page.getByLabel(/Keep backups for/).fill('0');
-    await page.getByRole('button', { name: 'Save' }).click();
-    // The browser blocks a value below min before the server sees it; either way nothing is saved.
-    await openTab(page, 'backups');
-    await expect(page.getByLabel(/Keep backups for/)).not.toHaveValue('0');
-
-    await page.getByLabel(/Keep backups for/).fill('21');
-    await page.getByRole('button', { name: 'Save' }).click();
-    await expect(page.getByTestId('flashes')).toContainText('Backup retention saved.');
-    await expect(page.getByLabel(/Keep backups for/)).toHaveValue('21');
-  });
-
-  test('a member is refused', async ({ page, context, baseURL }) => {
-    await setStandInRole(context, 'member', baseURL!);
-    await page.goto('/admin/host');
-
-    await expect(page.getByText('You do not have access to this page')).toBeVisible();
-    await expect(page.getByTestId('host-tab-general')).toHaveCount(0);
   });
 });

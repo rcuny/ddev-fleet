@@ -109,6 +109,100 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertStringContainsString('shop', $rows->eq(1)->text());
     }
 
+    public function testListOffersImportAndNewAndSaysOneTemplateAndShowsTheUrlAloneWithoutABranch(): void
+    {
+        $this->makeProject('shop');
+        $this->makeTemplate('shop', 'web');
+
+        $crawler = $this->open('/admin/projects');
+        self::assertMatchesRegularExpression('#/admin/import#', (string) $crawler->selectLink('Import')->attr('href'));
+        self::assertSame('/admin/projects/new', $crawler->selectLink('New project')->attr('href'));
+        $row = $crawler->filter('[data-testid=project-row]')->eq(0);
+        self::assertStringContainsString('1 template', $row->text());
+        self::assertStringNotContainsString('1 templates', $row->text());
+        self::assertStringNotContainsString('·', $row->text());
+
+        $crawler = $this->open('/admin/projects/new');
+        self::assertSame('/admin/projects', $crawler->selectLink('Cancel')->attr('href'));
+    }
+
+    public function testTheCreateFormOffersEveryFieldWithItsHelpText(): void
+    {
+        $crawler = $this->open('/admin/projects/new');
+
+        $labels = array_map('trim', $crawler->filter('[data-testid=project-form] label')->each(static fn (Crawler $l): string => $l->text()));
+        foreach (['Name', 'Git URL', 'Default branch', 'Additional hostnames', 'Identity name', 'Identity email', 'Issue id pattern', 'Submodule whose branch is shown', 'Use the host default', 'Run a Typesense search server for each instance'] as $label) {
+            self::assertContains($label, $labels, $label);
+        }
+        $text = $crawler->filter('[data-testid=project-form]')->text();
+        foreach (['cannot be changed later', 'Use a deploy key, not a token in the URL.', 'One label per line.', 'Leave blank to use the repository default.'] as $help) {
+            self::assertStringContainsString($help, $text, $help);
+        }
+        self::assertCount(0, $crawler->filter('#project_typesense[checked]'));
+        self::assertCount(1, $crawler->selectButton('Create project'));
+    }
+
+    public function testTheEditPageOffersTheTesterTheExportCardAndTheDangerZone(): void
+    {
+        $this->makeProject();
+
+        $crawler = $this->open('/admin/projects/blog');
+
+        self::assertCount(1, $crawler->filter('[data-testid=issue-id-preview]'));
+        self::assertCount(1, $crawler->filter('[data-testid=export-project]'));
+        self::assertStringContainsString('It is refused while the project has instances.', $crawler->filter('[data-testid=danger-zone]')->text());
+    }
+
+    public function testSavingWithoutAChangeIsANormalSaveAndKeepsTheValues(): void
+    {
+        $this->makePort('typesense', 9108, 8108);
+        $this->makeProject('blog', new ProjectInput('blog', self::GIT, 'main', additionalHostnames: ['www'], typesense: true));
+
+        $this->submit($this->open('/admin/projects/blog'), 'Save', []);
+
+        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertStringContainsString('Project saved.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+        $project = $this->stored('blog') ?? self::fail();
+        self::assertSame(self::GIT, $project->git());
+        self::assertSame('main', $project->defaultBranch());
+        self::assertSame(['www'], $project->additionalHostnames());
+        self::assertTrue($project->typesense());
+    }
+
+    public function testADeletedNameCanBeUsedAgainAndStartsEmpty(): void
+    {
+        $this->makePort('typesense', 9108, 8108);
+        $this->makeProject('blog', new ProjectInput('blog', self::GIT, 'old', additionalHostnames: ['www'], typesense: true));
+        $this->post('/admin/projects/blog/delete', []);
+        self::assertResponseRedirects('/admin/projects', 303);
+
+        $this->makeProject('blog', new ProjectInput('blog', 'https://git.example.com/acme/second.git'));
+
+        $project = $this->stored('blog') ?? self::fail();
+        self::assertSame('https://git.example.com/acme/second.git', $project->git());
+        self::assertNull($project->defaultBranch());
+        self::assertSame([], $project->additionalHostnames());
+        self::assertFalse($project->typesense());
+    }
+
+    public function testDeleteRefusedWhileInstancesExistExplainsAndTheProjectCanBeDeletedOnceTheyAreGone(): void
+    {
+        $this->makeProject();
+        $this->guard()->set('blog', 1);
+
+        $this->post('/admin/projects/blog/delete', []);
+        $flash = $this->client->followRedirect()->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('The project was not deleted.', $flash);
+        self::assertStringContainsString('instance(s) exist: destroy them first', $flash);
+        self::assertStringContainsString('blog--i1', $flash);
+        self::assertNotNull($this->stored('blog'));
+
+        $this->guard()->set('blog', 0);
+        $this->post('/admin/projects/blog/delete', []);
+        self::assertResponseRedirects('/admin/projects', 303);
+        self::assertNull($this->stored('blog'));
+    }
+
     // --- create
 
     public function testCreateRedirectsToEditWithAFlash(): void

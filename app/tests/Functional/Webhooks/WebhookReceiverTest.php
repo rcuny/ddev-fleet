@@ -145,6 +145,14 @@ final class WebhookReceiverTest extends AdminTestCase
         self::assertSame([], $this->deliveries());
     }
 
+    public function testTheReceiverAnswersOnlyPost(): void
+    {
+        $this->client->request('GET', self::BASE.'/hooks/jira/blog', server: ['HTTPS' => 'on', 'REMOTE_ADDR' => $this->clientIp]);
+
+        self::assertSame(405, $this->client->getResponse()->getStatusCode());
+        self::assertSame([], $this->deliveries());
+    }
+
     public function testUnknownProjectOrNoReceiverIs404WithoutRevealingAnything(): void
     {
         $body = '{}';
