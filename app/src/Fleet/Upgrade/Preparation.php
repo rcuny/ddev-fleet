@@ -25,6 +25,8 @@ final readonly class Preparation
         public array $reasons = [],
         public array $actions = [],
         public ?UpgradeAssessment $assessment = null,
+        /** Set for a rollback (a Ready preparation whose direction is down). */
+        public ?RollbackPlan $rollback = null,
     ) {
     }
 

@@ -12,6 +12,7 @@ final readonly class HistoryEntry
 {
     public const string START = 'start';
     public const string INSTALLER = 'installer';
+    public const string RESTORE = 'restore';
     public const string VERIFY = 'verify';
 
     /**

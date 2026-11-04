@@ -8,7 +8,7 @@ Type: documentation
 # Upgrading
 
 How to see what the next release of Fleet changes (`fleet upgrade --check`) and how to install it (`sudo fleet upgrade`).
-The rollback (`sudo fleet upgrade --to <older tag>`) is added by a later ticket of the same milestone; the upgrade
+The rollback (`sudo fleet upgrade --to <older tag>`) is described under "Roll back"; the upgrade
 engine is the installer re-run (`installation.md`, section "Upgrading"), which `sudo fleet upgrade` wraps with a plan,
 a backup, a verification and a history.
 
@@ -82,14 +82,13 @@ blocks. It is internal: the upgrade command reads it, people use `--check`.
 ## Upgrade the host
 
 ```
-sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]...
+sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restore]
 ```
 
-Moves the host up to the latest release (or `--to`, which must be newer than the installed version). It needs root: run
+Moves the host up to the latest release (or `--to`). A `--to` that is older than the installed version is a rollback, see "Roll back" below. It needs root: run
 it with `sudo`. Without root it changes nothing and prints the exact `sudo` line. The steps, in order:
 
-1. **Plan and pre-flight**, as the `fleet` user (the same report as `--check`). A `BLOCK`, a modified checkout, a target
-   older than the installed version, a host that runs a branch instead of a release, or an unreachable release source
+1. **Plan and pre-flight**, as the `fleet` user (the same report as `--check`). A `BLOCK`, a modified checkout, a host that runs a branch instead of a release, or an unreachable release source
    refuses the upgrade (exit 3) before anything changes.
 2. **Confirmation.** `--yes` confirms; a terminal asks `[y/N]`; a non-interactive run without `--yes` is refused (exit 3).
 3. **Backup.** The pre-upgrade database backup (`fleet backup`); if it cannot be taken the upgrade stops (exit 1).
@@ -99,14 +98,48 @@ it with `sudo`. Without root it changes nothing and prints the exact `sudo` line
 5. **Verification**, by the new code: `/health` answers, the Authelia portal answers, `installed-version` is the target,
    the checkout is at the planned commit, no migration is pending, `fleet-worker@1` and `fleet-status` are active, and a
    `host.upgrade` audit row is written (best effort: a missing row only warns). A failure exits 5 and prints the way back:
-   `sudo fleet upgrade --to <previous version>`.
+   `sudo fleet upgrade --to <previous version>` (a rollback, below).
 
 | Option | Meaning |
 |---|---|
 | `--to vX.Y.Z` | Upgrade to this published release instead of the latest. |
 | `--yes` | Confirm without asking. Required when there is no terminal. |
 | `--force=<check-id>` | Waive one overridable pre-flight Block (repeatable). A modified checkout and a full disk cannot be waived. |
+| `--no-db-restore` | Rollback only: keep the current database. Refused when the database has a migration the target release lacks. |
 | `--repo-url=<url or path>` | Install from this git remote instead of the public mirror (mirrors, rehearsals). The root run ignores `FLEET_UPGRADE_REPO_URL`. |
+
+## Roll back
+
+```
+sudo fleet upgrade --to vX.Y.Z --yes [--no-db-restore]
+```
+
+`--to` an older release returns the host to it. Doctrine migrations only go forward, so older code over a newer schema
+would not boot: the **database is restored from the backup taken at the start of the upgrade being undone** (the newest
+`start` line of the history whose `from` is the target and whose backup file still exists). Everything written to the
+database since that upgrade is **lost**: instances, jobs, users, projects, secrets and audit entries created or changed
+after it. The command prints that, naming the backup and the time, and always needs `--yes`. The history file is not in
+the database, so the record of both the upgrade and the rollback survives.
+
+Steps: plan (as for an upgrade, including the schema comparison), the installer of the older release is fetched and
+unpacked first (an unreachable source therefore costs nothing), the fleet services (scheduler, every active worker
+instance, status watcher and php-fpm) are stopped, the backup is restored (`fleet-user`, the current database is kept next to the backups as
+`*.pre-restore-*`), the installer of the older release runs (it applies that release's migrations with its own code and
+starts the services again), then the verification (a release older than the upgrade tooling has no `fleet upgrade verify`; the helper then checks
+the installed version and `/health` itself). If the restore fails, the previous database stays in place, the
+services are started again and the installer never runs (exit 1).
+
+Refused, nothing changed (exit 3):
+
+- a target **across a major version**, **below v1.1.0**, a pre-release, and the `v0.*` series (a separate product line);
+- no usable backup in the history (it was pruned, or the upgrade ran before the history existed): the message lists the
+  options, restoring one by hand with `fleet backup:restore <file>` and then running the rollback with
+  `--no-db-restore`, or staying on the installed version;
+- `--no-db-restore` while the database has migrations the target does not ship (check `schema.ahead` in
+  `fleet upgrade --check --to <older>`).
+
+`--no-db-restore` keeps the current database and takes a fresh backup first; use it for a code-only rollback between
+releases without migrations, or after restoring a backup yourself.
 
 ### Exit codes of `sudo fleet upgrade`
 | Code | Meaning |
@@ -121,16 +154,17 @@ it with `sudo`. Without root it changes nothing and prints the exact `sudo` line
 
 `fleet upgrade history [--limit=N] [--json]` lists the upgrades run on this host, newest first. The record is
 `/var/log/ddev-fleet/upgrade-history.jsonl` (root-owned, mode 0644, one JSON object per line, appended by the root
-helper only, so a restored database cannot erase it). Three lines per upgrade:
+helper only, so a restored database cannot erase it). Three lines per upgrade (four for a rollback that restores the database):
 
 | Event | Result values | When |
 |---|---|---|
 | `start` | `started` | After the backup, before the installer; carries the `backup` file name. |
 | `installer` | `ok`, `failed` | When the installer returned. |
+| `restore` | `ok`, `failed` | Rollback only: when the database was restored from the named backup. |
 | `verify` | `ok`, `unverified` | When the verification returned. |
 
 Every line has `ts` (UTC), `event`, `result`, `from`, `to`, `sha` (the commit the plan resolved), `actor` (the `sudo`
-user) and, on `start`, `backup`. No secret is ever written. `fleet upgrade verify --to vX.Y.Z` runs the verification on
+user) and, on `start` and `restore`, `backup` (the file taken before the upgrade, or the one a rollback restored). A rollback is a line whose `to` is older than its `from`. No secret is ever written. `fleet upgrade verify --to vX.Y.Z` runs the verification on
 its own.
 
 ### Why only the command line
@@ -142,5 +176,5 @@ history, and the command to copy. There is no sudoers entry for the upgrade help
 
 ### Internal commands
 
-`fleet:upgrade:prepare` (the plan, `KEY=value` lines for the helper), `fleet:upgrade:backup` and `fleet:upgrade:verify`
+`fleet:upgrade:prepare` (the plan, `KEY=value` lines for the helper), `fleet:upgrade:backup`, `fleet:upgrade:restore` (the database step of a rollback) and `fleet:upgrade:verify`
 are the fleet-user steps the root helper calls; they are not meant to be run by hand, apart from `verify`.
