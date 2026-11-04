@@ -138,6 +138,26 @@ def _append_log(log_path: Path, message: str) -> None:
         fh.write(f"[{_now_iso()}] {message}\n")
 
 
+_FAILED_MARKER = ".fleet/failed"
+
+
+def _write_failed_marker(instance_dir: Path, reason: str) -> None:
+    """Record that this instance's last deploy failed (best effort)."""
+    try:
+        marker = instance_dir / _FAILED_MARKER
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(f"{_now_iso()} {reason}\n", encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _clear_failed_marker(instance_dir: Path) -> None:
+    try:
+        (instance_dir / _FAILED_MARKER).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def _write_instance_yaml(
     instance_dir: Path,
     project: str,
@@ -792,8 +812,15 @@ def deploy(
             ensure_git_exclude(instance_dir, [str(env_path.relative_to(instance_dir))])
             _append_log(deploy_log, f"DRUPAL_ENV={resolved.drupal_env} written to .env")
 
+        _clear_failed_marker(instance_dir)
         start_result = ddev.start(instance_dir, log_path=deploy_log, runner=runner)
         if start_result.returncode != 0:
+            # FLE-166: `fleet list` derives "deployed" from "not running", so a
+            # failed start would look like a healthy stopped instance. Leave a
+            # marker that list_instances() reports as "failed".
+            _write_failed_marker(
+                instance_dir, f"ddev start failed with exit code {start_result.returncode}"
+            )
             raise DeployError(
                 f"ddev start failed in {instance_dir} with exit code {start_result.returncode}"
             )
@@ -1761,6 +1788,8 @@ def list_instances(
 
         if current_id in running_ids:
             state = "running"
+        elif (entry / _FAILED_MARKER).is_file():
+            state = "failed"
         elif live_state_known:
             state = "deployed"
         else:

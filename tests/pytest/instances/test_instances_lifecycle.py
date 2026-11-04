@@ -477,3 +477,79 @@ def test_destroy_raises_fleet_error_when_auth_snippet_reload_fails(fleet_home, g
 
     with pytest.raises(FleetError, match="basic-auth"):
         instances.destroy(paths, registry, "demo--develop", runner=FailingReloadRunner())
+
+
+# --- FLE-166 ------------------------------------------------------------------
+
+
+class _FailingStartRunner(HybridRunner):
+    def __call__(self, cmd, **kwargs):
+        if list(cmd) == ["ddev", "start"]:
+            self.calls.append({"cmd": list(cmd), **kwargs})
+            return RunResult(returncode=1, lines=["Failed to start"])
+        return super().__call__(cmd, **kwargs)
+
+
+def test_failed_ddev_start_marks_instance_failed_not_deployed(fleet_home, git_repo):
+    from fleet.core.errors import DeployError
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    with pytest.raises(DeployError):
+        instances.deploy(
+            paths,
+            registry,
+            "demo",
+            "default",
+            branch="main",
+            label="boom",
+            runner=_FailingStartRunner(),
+        )
+
+    def fake(cmd, **kwargs):
+        return RunResult(returncode=0, lines=[])
+
+    statuses = instances.list_instances(paths, registry, runner=fake)
+    assert [(s.instance_id, s.state) for s in statuses] == [("demo--boom", "failed")]
+
+
+def test_successful_redeploy_clears_failed_marker(fleet_home, git_repo):
+    from fleet.core.errors import DeployError
+
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    with pytest.raises(DeployError):
+        instances.deploy(
+            paths,
+            registry,
+            "demo",
+            "default",
+            branch="main",
+            label="x",
+            runner=_FailingStartRunner(),
+        )
+    instances.deploy(
+        paths,
+        registry,
+        "demo",
+        "default",
+        branch="main",
+        label="x",
+        replace=True,
+        runner=HybridRunner(),
+    )
+    assert not (paths.instances / "demo--x" / ".fleet" / "failed").exists()
+
+
+def test_existing_overlong_instance_is_still_listable_and_destroyable(fleet_home, git_repo):
+    paths, registry = _make_paths_and_registry(fleet_home, str(git_repo["origin"]))
+    old_id = "demo--" + "o" * 55  # 61 chars: created before the 59 cap
+    assert len(old_id) == 61
+    inst = paths.instances / old_id
+    inst.mkdir(parents=True)
+
+    def fake(cmd, **kwargs):
+        return RunResult(returncode=0, lines=[])
+
+    listed = instances.list_instances(paths, registry, runner=fake)
+    assert [s.instance_id for s in listed] == [old_id]
+    instances.destroy(paths, registry, old_id, runner=HybridRunner())
+    assert not inst.exists()
