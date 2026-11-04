@@ -110,7 +110,7 @@ def specs_in(pw_dir: Path) -> dict[str, str]:
     return out
 
 
-def select(changed: list[str] | None, specs: dict[str, str]) -> dict[str, object]:
+def select(changed: list[str] | None, specs: dict[str, str], phone_tag_files: list[str] | None = None) -> dict[str, object]:
     """changed=None means the diff is unknown: the safe answer."""
     if changed is None:
         return {
@@ -120,6 +120,8 @@ def select(changed: list[str] | None, specs: dict[str, str]) -> dict[str, object
             "targeted_reason": "diff unknown, every coverage spec",
         }
     ui = [p for p in changed if _matches_any(p, UI_PATTERNS)]
+    # A change that adds, removes or edits a line carrying @phone in any other spec file also reaches the phone project.
+    ui += [p for p in (phone_tag_files or []) if p not in ui]
     if ui:
         phone, phone_reason = "on", "UI change: " + ", ".join(ui[:3]) + (" ..." if len(ui) > 3 else "")
     else:
@@ -145,6 +147,26 @@ def changed_files(repo: Path, base: str, head: str) -> list[str] | None:
         return None
 
 
+def phone_tag_files(repo: Path, base: str, head: str) -> list[str]:
+    """Files under tests/playwright/ whose diff hunks add or remove a line mentioning @phone."""
+    try:
+        mb = subprocess.run(["git", "-C", str(repo), "merge-base", base, head], check=True, capture_output=True, text=True).stdout.strip()
+        diff = subprocess.run(
+            ["git", "-C", str(repo), "diff", "-U0", mb, head, "--", "tests/playwright"],
+            check=True, capture_output=True, text=True,
+        ).stdout
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return []
+    files: list[str] = []
+    current = ""
+    for line in diff.splitlines():
+        if line.startswith("+++ b/"):
+            current = line[6:]
+        elif line[:1] in "+-" and not line.startswith(("+++", "---")) and "@phone" in line and current and current not in files:
+            files.append(current)
+    return files
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--repo", default=str(Path(__file__).resolve().parent.parent))
@@ -156,7 +178,8 @@ def main(argv: list[str]) -> int:
 
     repo = Path(args.repo)
     files = args.files if args.files is not None else changed_files(repo, args.base, args.head)
-    result = select(files, specs_in(repo / "tests" / "playwright"))
+    tagged = phone_tag_files(repo, args.base, args.head) if args.files is None else []
+    result = select(files, specs_in(repo / "tests" / "playwright"), tagged)
     if args.format == "json":
         print(json.dumps(result, indent=2))
     else:

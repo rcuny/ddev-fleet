@@ -105,3 +105,42 @@ def test_slowest_tests_orders_by_total_duration():
     ]}]}
     rows = mod.slowest(report, 1)
     assert rows[0][3] == "slow" and rows[0][0] == 5.0
+
+
+def test_phone_tag_in_a_non_phone_spec_turns_phone_on():
+    r = pw.select(["tests/playwright/projects.spec.ts"], SPECS, ["tests/playwright/projects.spec.ts"])
+    assert r["phone"] == "on"
+    assert "@phone" not in r["phone_reason"] or "projects.spec.ts" in r["phone_reason"]
+
+
+def test_phone_tag_detected_in_diff_hunks(tmp_path):
+    def git(*a):
+        subprocess.run(["git", "-C", str(tmp_path), "-c", "user.name=t", "-c", "user.email=t@example.com", *a], check=True, capture_output=True)
+
+    (tmp_path / "tests" / "playwright").mkdir(parents=True)
+    spec = tmp_path / "tests" / "playwright" / "x.spec.ts"
+    spec.write_text("test('a', async () => {});\n")
+    git("init", "-q", "-b", "main")
+    git("add", ".")
+    git("commit", "-qm", "base")
+    spec.write_text("test('a @phone', async () => {});\n")
+    git("commit", "-qam", "tag")
+    assert pw.phone_tag_files(tmp_path, "HEAD~1", "HEAD") == ["tests/playwright/x.spec.ts"]
+
+
+def _select_only(env_extra):
+    import os
+
+    env = {**os.environ, **env_extra}
+    out = subprocess.run(
+        [str(ROOT / "ci" / "run-gates.sh"), "--full", "--select-only"], check=True, capture_output=True, text=True, env=env
+    ).stdout
+    return dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+
+
+def test_run_gates_falls_back_to_phone_and_every_spec_when_selection_fails():
+    got = _select_only({"FLEET_PW_TIER": "quick", "FLEET_CI_PW_SELECT": "/bin/false"})
+    assert got["FLEET_PW_PHONE"] == "on"
+    specs = set(got["FLEET_PW_TARGETED"].split())
+    assert specs == set(pw.specs_in(ROOT / "tests" / "playwright"))
+    assert "selection unavailable" in got["NOTE"]

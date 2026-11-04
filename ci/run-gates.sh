@@ -3,7 +3,9 @@
 # so the three can never drift. The source of truth for the gate list is bitbucket-pipelines.yml (steps Gates,
 # Infra tests, Ansible lint); keep both in step.
 #
-#   ci/run-gates.sh [--quick|--full] [--report-dir DIR]
+#   ci/run-gates.sh [--quick|--full] [--report-dir DIR] [--select-only]
+#
+#   --select-only  print the Playwright selection (phone, targeted specs) and exit; used by the tests
 #
 #   --quick   composer install, `composer run gates` (assets, cs, stan, lint, phpunit) and `composer run prod-check`
 #   --full    quick + Playwright (npm ci, browser install, typecheck, the whole suite) + infra tests (pytest,
@@ -26,6 +28,7 @@ set -euo pipefail
 
 root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 mode=full
+select_only=0
 report_dir="$root/var/ci-report"
 
 usage() {
@@ -36,6 +39,7 @@ while [ $# -gt 0 ]; do
     case "$1" in
         --quick) mode=quick ;;
         --full) mode=full ;;
+        --select-only) select_only=1 ;;
         --report-dir)
             [ $# -ge 2 ] || { echo "run-gates: --report-dir needs a directory" >&2; exit 2; }
             report_dir="$2"
@@ -47,6 +51,39 @@ while [ $# -gt 0 ]; do
     esac
     shift
 done
+
+# Playwright selection (FLE-172), computed before any gate so --select-only and a failing pw_select.py are testable.
+if [ "$mode" = full ]; then
+    # Optional parts from the diff (FLE-172). Without python3 or a diff the answer is the safe one: everything runs.
+    pw_tier="${FLEET_PW_TIER:-full}"
+    pw_phone="${FLEET_PW_PHONE:-auto}"
+    pw_targeted="${FLEET_PW_TARGETED:-}"
+    PW_PHONE_REASON=''
+    PW_TARGETED_REASON=''
+    sel="$(python3 "${FLEET_CI_PW_SELECT:-$root/ci/pw_select.py}" --repo "$root" --base "${FLEET_CI_DIFF_BASE:-origin/develop}" --head "${FLEET_CI_DIFF_HEAD:-HEAD}" 2> /dev/null || true)"
+    if [ -n "$sel" ]; then
+        eval "$(grep -E '^(FLEET_PW_PHONE|FLEET_PW_TARGETED|PW_PHONE_REASON|PW_TARGETED_REASON)=' <<< "$sel" | sed -E 's/^FLEET_PW_PHONE=/sel_phone=/; s/^FLEET_PW_TARGETED=/sel_targeted=/')"
+        [ "$pw_phone" != auto ] || { [ "$pw_tier" = full ] && pw_phone=on || pw_phone="$sel_phone"; }
+        [ -n "$pw_targeted" ] || pw_targeted="$sel_targeted"
+    else
+        # Unsure means run: phone on and every coverage / validation spec (FLE-172 review).
+        [ "$pw_phone" != auto ] || pw_phone=on
+        [ -n "$pw_targeted" ] || pw_targeted="$(cd "$root/tests/playwright" && ls -- *-coverage.spec.ts *-validation.spec.ts 2> /dev/null | tr '\n' ' ')"
+        PW_PHONE_REASON='selection unavailable'
+    fi
+    [ "${FLEET_PW_PHONE:-auto}" = auto ] || PW_PHONE_REASON="FLEET_PW_PHONE=${FLEET_PW_PHONE}"
+    [ "$pw_tier" = quick ] || pw_targeted=''   # the full tier runs every spec anyway
+    if [ "$pw_phone" = off ]; then pw_phone_note='phone: skipped'; else pw_phone_note='phone: ran'; fi
+    [ -z "$PW_PHONE_REASON" ] || pw_phone_note="$pw_phone_note ($PW_PHONE_REASON)"
+    pw_note="$pw_tier tier; $pw_phone_note"
+    if [ "$pw_tier" = quick ]; then
+        pw_note="$pw_note; coverage specs: $(wc -w <<< "$pw_targeted" | tr -d ' ') targeted"
+    fi
+fi
+if [ "$select_only" = 1 ]; then
+    printf 'FLEET_PW_PHONE=%s\nFLEET_PW_TARGETED=%s\nNOTE=%s\n' "${pw_phone:-}" "${pw_targeted:-}" "${pw_note:-}"
+    exit 0
+fi
 
 mkdir -p "$report_dir"
 report_dir="$(cd "$report_dir" && pwd)"
@@ -132,29 +169,6 @@ if [ "$mode" = full ]; then
     fi
     [ -z "$pw_wanted" ] || pw_workers=(--workers="$pw_wanted")
 
-    # Optional parts from the diff (FLE-172). Without python3 or a diff the answer is the safe one: everything runs.
-    pw_tier="${FLEET_PW_TIER:-full}"
-    pw_phone="${FLEET_PW_PHONE:-auto}"
-    pw_targeted="${FLEET_PW_TARGETED:-}"
-    PW_PHONE_REASON=''
-    PW_TARGETED_REASON=''
-    sel="$(python3 "$root/ci/pw_select.py" --repo "$root" --base "${FLEET_CI_DIFF_BASE:-origin/develop}" --head "${FLEET_CI_DIFF_HEAD:-HEAD}" 2> /dev/null || true)"
-    if [ -n "$sel" ]; then
-        eval "$(grep -E '^(FLEET_PW_PHONE|FLEET_PW_TARGETED|PW_PHONE_REASON|PW_TARGETED_REASON)=' <<< "$sel" | sed -E 's/^FLEET_PW_PHONE=/sel_phone=/; s/^FLEET_PW_TARGETED=/sel_targeted=/')"
-        [ "$pw_phone" != auto ] || { [ "$pw_tier" = full ] && pw_phone=on || pw_phone="$sel_phone"; }
-        [ -n "$pw_targeted" ] || pw_targeted="$sel_targeted"
-    else
-        [ "$pw_phone" != auto ] || pw_phone=on
-        PW_PHONE_REASON='selection unavailable'
-    fi
-    [ "${FLEET_PW_PHONE:-auto}" = auto ] || PW_PHONE_REASON="FLEET_PW_PHONE=${FLEET_PW_PHONE}"
-    [ "$pw_tier" = quick ] || pw_targeted=''   # the full tier runs every spec anyway
-    if [ "$pw_phone" = off ]; then pw_phone_note='phone: skipped'; else pw_phone_note='phone: ran'; fi
-    [ -z "$PW_PHONE_REASON" ] || pw_phone_note="$pw_phone_note ($PW_PHONE_REASON)"
-    pw_note="$pw_tier tier; $pw_phone_note"
-    if [ "$pw_tier" = quick ]; then
-        pw_note="$pw_note; coverage specs: $(wc -w <<< "$pw_targeted" | tr -d ' ') targeted"
-    fi
     printf '%s\n' "$pw_note" > "$report_dir/selection.txt"
     echo "playwright selection: $pw_note"
 
