@@ -21,6 +21,7 @@
             {% endfor %}
         </ul>
     {% endif %}
+    {{ include('_shell/upgrade_notice.html.twig') }}
     {% if fleet_stand_in_enabled %}
         {{ include('_shell/stand_in_switch.html.twig') }}
     {% endif %}

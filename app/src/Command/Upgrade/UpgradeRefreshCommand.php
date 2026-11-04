@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command\Upgrade;
 
 use App\Fleet\Upgrade\ReleaseCatalog;
+use App\Fleet\Upgrade\UpgradeRefresher;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputInterface;
@@ -23,7 +24,7 @@ use Symfony\Component\Console\Style\SymfonyStyle;
 )]
 final class UpgradeRefreshCommand extends Command
 {
-    public function __construct(private readonly ReleaseCatalog $catalog)
+    public function __construct(private readonly ReleaseCatalog $catalog, private readonly UpgradeRefresher $refresher)
     {
         parent::__construct();
     }
@@ -39,7 +40,7 @@ final class UpgradeRefreshCommand extends Command
             return Command::SUCCESS;
         }
 
-        $state = $this->catalog->refresh();
+        $state = $this->refresher->refresh();
         if (null !== $state->error) {
             new SymfonyStyle($input, $output)->getErrorStyle()->warning('Release check failed, keeping the previous list: '.$state->error);
         }
