@@ -1,7 +1,7 @@
 #!/bin/bash
 # Root helper of ddev-fleet: installs config that the app has rendered into its staging directory.
 #
-#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia>
+#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices>
 #
 # Installed by install/steps/90-privileged.sh as root:root 0755, reachable by the `fleet` user through one sudoers
 # line (install/etc/sudoers-fleet-apply). The only input is the target name; the files come from a fixed place,
@@ -26,6 +26,15 @@
 #     any OVH_* line an older apply left there is dropped;
 #   - deletes the staged files on every exit path (the staged environment file holds the OVH credentials).
 # `apply authelia` with no staged configuration only restarts Authelia (the password-reset path).
+# `apply slices` (capacity allotments) differs in kind: the staged slices.json is DATA ([{unit, quota_percent|null}]),
+# never config text. The helper validates every unit name (^fleet(-[a-z0-9_]+){0,2}\.slice$, parents listed, no
+# duplicates) and every quota (an integer 100..threads*100, threads from `nproc --all`) and then GENERATES the unit
+# files and drop-ins itself: nothing of the staged file is copied into /etc. It writes /etc/systemd/system/<unit>
+# (carrying an ownership marker line) and <unit>.d/10-fleet-quota.conf, removes the fleet*.slice units it owns (marker)
+# that are no longer listed, runs daemon-reload, STARTS every slice (parents first: a missing slice would silently give
+# containers no limit) and applies every quota to the running slice with `systemctl set-property --runtime` (a drop-in
+# plus daemon-reload does not change a live cpu.max). A failure puts the previous files back and re-applies the previous
+# quotas.
 #
 # Threat model, honestly: `fleet` is in the `docker` group, which is root-equivalent anyway. This helper keeps a
 # half-written or invalid config from reaching Caddy or Authelia; it is not a security boundary.
@@ -35,7 +44,7 @@
 set -euo pipefail
 
 # The only targets. A repo test keeps this word list equal to App\Fleet\System\ApplyTarget and to the sudoers line.
-ALLOWED_TARGETS='caddy authelia'
+ALLOWED_TARGETS='caddy authelia slices'
 readonly ALLOWED_TARGETS
 readonly MAX_BYTES=262144
 readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
@@ -48,6 +57,12 @@ readonly AUTHELIA_SECRET_FILES='AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secre
 # Budget: the app gives one apply 60 s, lock wait included. Caddy: lock 5 + validate 15 + reload 15 + rollback reload
 # 15 = 50; authelia: lock 5 + validate 15 + restart 20 + rollback restart 20 = 60.
 readonly T_LOCK=5 T_VALIDATE=15 T_RELOAD=15 T_RESTART=20 T_OPEN=5
+# slices: lock 5 + jq + daemon-reloads + per-slice systemctl calls (T_SLICE each, MAX_SLICES at most, normally
+# milliseconds) must stay inside the app's 60 s.
+readonly T_SLICE=5 MAX_SLICES=500 SLICE_MAX_NAME=200
+readonly SLICE_MARK='# Managed by ddev-fleet (apply slices). Hand edits are overwritten.'
+readonly SLICE_UNIT_RE='^fleet(-[a-z0-9_]+){0,2}\.slice$'
+readonly SLICE_DROPIN=10-fleet-quota.conf
 
 umask 077
 IFS=$' \t\n'
@@ -64,11 +79,11 @@ fail() {
 }
 
 # --- 1. arguments: exactly one known target -------------------------------------------------------------------
-[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia>' 64
+[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices>' 64
 TARGET=$1
 case " $ALLOWED_TARGETS " in
   *" $TARGET "*) ;;
-  *) fail 'unknown target (usage: apply <caddy|authelia>)' 64 ;;
+  *) fail 'unknown target (usage: apply <caddy|authelia|slices>)' 64 ;;
 esac
 
 # --- 2. who may run this, and where the files are ---------------------------------------------------------------
@@ -105,13 +120,15 @@ CADDYFILE="$ROOT/etc/caddy/Caddyfile"
 CADDY_ENV="$ROOT/etc/caddy/fleet.env"
 CADDY_OVH_DIR="$ROOT/etc/caddy/ovh"
 AUTHELIA_CONFIG="$ROOT/etc/authelia/configuration.yml"
+SYSTEMD_UNIT_DIR="$ROOT/etc/systemd/system"
 LOCK="$WORK_PARENT/fleet-apply.lock"
-readonly SRV_REAL STAGE STAGE_EXPECTED CADDYFILE CADDY_ENV CADDY_OVH_DIR AUTHELIA_CONFIG LOCK
+readonly SRV_REAL STAGE STAGE_EXPECTED CADDYFILE CADDY_ENV CADDY_OVH_DIR AUTHELIA_CONFIG SYSTEMD_UNIT_DIR LOCK
 
 # The file names each target consumes; cleanup removes exactly these from the pinned directory.
 case $TARGET in
   caddy) STAGED_NAMES='Caddyfile env' ;;
   authelia) STAGED_NAMES='configuration.yml' ;;
+  slices) STAGED_NAMES='slices.json' ;;
 esac
 readonly STAGED_NAMES
 
@@ -507,8 +524,199 @@ apply_authelia() {
   fi
 }
 
+# --- 6. slices -------------------------------------------------------------------------------------------------
+
+# slice_depth <unit>: 0 for fleet.slice, 1 for fleet-<p>.slice, 2 for fleet-<p>-<t>.slice.
+slice_depth() {
+  local name=${1%.slice} dashes=${1//[^-]/}
+  if [ "$name" = fleet ]; then
+    printf '0\n'
+    return 0
+  fi
+  printf '%s\n' "${#dashes}"
+}
+
+slice_parent() {
+  local name=${1%.slice}
+  [ "$name" != fleet ] || return 1
+  printf '%s.slice\n' "${name%-*}"
+}
+
+# systemctl_slice <args>...: one systemctl call with a timeout (the helper must stay inside the app's 60 s).
+systemctl_slice() {
+  timeout "$T_SLICE" systemctl "$@" </dev/null
+}
+
+# set_quota <unit> <percent|->: applies the quota to the RUNNING slice. `--runtime`: the persistent value is the drop-in
+# this helper wrote, a second persistent copy (/etc/systemd/system.control) would only shadow it.
+set_quota() {
+  if [ "$2" = - ]; then
+    systemctl_slice set-property --runtime "$1" 'CPUQuota='
+  else
+    systemctl_slice set-property --runtime "$1" "CPUQuota=$2%"
+  fi
+}
+
+# drop_unit_dir <unit>: removes the unit's drop-in directory when it is empty (the unit name is validated by then).
+drop_unit_dir() {
+  rmdir -- "${SYSTEMD_UNIT_DIR:?}/${1:?}.d" 2>/dev/null || true
+}
+
+# slices_restore: puts every touched unit file and drop-in back (or removes the new ones), reloads and re-applies the
+# previous quotas. Best effort, reports what it could not do.
+slices_restore() {
+  local unit prev q
+  for unit in "${TOUCHED[@]}"; do
+    restore_previous "$SYSTEMD_UNIT_DIR/$unit" "unit.$unit" 0644 root root
+    restore_previous "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" "quota.$unit" 0644 root root
+    drop_unit_dir "$unit"
+  done
+  timeout "$T_RELOAD" systemctl daemon-reload </dev/null || printf 'apply: daemon-reload after the rollback failed\n' >&2
+  for unit in "${TOUCHED[@]}"; do
+    # Only slices that existed before have a previous state worth re-applying.
+    [ -f "$PRIV/prev.unit.$unit.present" ] || continue
+    q=-
+    if [ -f "$PRIV/prev.quota.$unit.present" ]; then
+      prev=$(sed -n 's/^CPUQuota=\([0-9]\{1,6\}\)%$/\1/p' "$PRIV/prev.quota.$unit" | head -n 1)
+      [ -z "$prev" ] || q=$prev
+    fi
+    set_quota "$unit" "$q" || printf 'apply: could not re-apply the previous quota of %s\n' "$unit" >&2
+  done
+}
+
+apply_slices() {
+  local threads max unit quota count=0 parent name u
+  local -A want=()
+  local -a order=() TOUCHED=() stale=()
+
+  stage_in slices.json "$PRIV/slices.json" || fail 'nothing staged: slices.json is missing' 66
+
+  threads=$(nproc --all 2>/dev/null || true)
+  if ! [[ $threads =~ ^[0-9]{1,5}$ ]] || [ "$threads" -lt 1 ]; then
+    fail 'cannot determine the number of CPU threads'
+  fi
+  max=$((threads * 100))
+
+  # Shape first (jq, on the root-owned copy, with a timeout), then every value again in bash: the bash checks are
+  # authoritative, jq only makes the line format below safe to read.
+  if ! timeout "$T_VALIDATE" jq -e '
+      type == "array" and length > 0 and length <= 500 and
+      all(.[]; type == "object" and (keys | sort) == ["quota_percent", "unit"]
+        and (.unit | type == "string" and length <= 200 and test("^[a-z0-9_.-]+$"))
+        and (.quota_percent == null or (.quota_percent | type == "number" and . == floor and . >= 100 and . <= 100000)))' \
+    "$PRIV/slices.json" >/dev/null 2>&1 </dev/null; then
+    fail 'slices.json is not a list of {"unit": ..., "quota_percent": integer|null} objects' 65
+  fi
+  timeout "$T_VALIDATE" jq -r '.[] | "\(.unit)\t\(.quota_percent // "-")"' "$PRIV/slices.json" >"$PRIV/slices.tsv" 2>/dev/null </dev/null ||
+    fail 'cannot read slices.json' 65
+
+  while IFS=$'\t' read -r unit quota; do
+    count=$((count + 1))
+    [ "$count" -le "$MAX_SLICES" ] || fail "more than $MAX_SLICES slices" 65
+    if ! [[ $unit =~ $SLICE_UNIT_RE ]] || [ "${#unit}" -gt "$SLICE_MAX_NAME" ]; then
+      fail "refused slice unit name (entry $count)" 65
+    fi
+    [ -z "${want[$unit]:-}" ] || fail "slice listed twice (entry $count)" 65
+    if [ "$quota" != - ]; then
+      [[ $quota =~ ^[1-9][0-9]{2,5}$ ]] || fail "refused quota for entry $count" 65
+      if [ "$quota" -gt "$max" ]; then
+        fail "quota of entry $count is above the host's $max% ($threads threads)" 65
+      fi
+    fi
+    want[$unit]=$quota
+    order+=("$unit")
+  done <"$PRIV/slices.tsv"
+  [ -n "${want[fleet.slice]:-}" ] || fail 'fleet.slice is missing from the list' 65
+  for unit in "${order[@]}"; do
+    if parent=$(slice_parent "$unit"); then
+      [ -n "${want[$parent]:-}" ] || fail "the parent of entry $unit is not listed" 65
+    fi
+  done
+  # Parents first: shallowest units first (stable by name).
+  mapfile -t order < <(for unit in "${order[@]}"; do printf '%s %s\n' "$(slice_depth "$unit")" "$unit"; done | sort -k1,1n -k2,2 | cut -d' ' -f2)
+
+  # Every existing file under a wanted name must be one this helper wrote.
+  for unit in "${order[@]}"; do
+    if [ -e "$SYSTEMD_UNIT_DIR/$unit" ] || [ -L "$SYSTEMD_UNIT_DIR/$unit" ]; then
+      if [ -L "$SYSTEMD_UNIT_DIR/$unit" ] || [ ! -f "$SYSTEMD_UNIT_DIR/$unit" ] || ! grep -qxF -- "$SLICE_MARK" "$SYSTEMD_UNIT_DIR/$unit"; then
+        fail "$unit exists and is not managed by ddev-fleet; refusing to replace it" 65
+      fi
+    fi
+    if [ -L "$SYSTEMD_UNIT_DIR/$unit.d" ] || { [ -e "$SYSTEMD_UNIT_DIR/$unit.d" ] && [ ! -d "$SYSTEMD_UNIT_DIR/$unit.d" ]; }; then
+      fail "$unit.d is not a directory; refusing to use it" 65
+    fi
+    if [ -L "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" ]; then
+      fail "the drop-in of $unit is a symlink; refusing to use it" 65
+    fi
+  done
+  # Stale: managed fleet*.slice files that are no longer listed. A glob over the one directory, no find, no recursion.
+  for u in "$SYSTEMD_UNIT_DIR"/fleet*.slice; do
+    if [ ! -f "$u" ] || [ -L "$u" ]; then
+      continue
+    fi
+    name=$(basename -- "$u")
+    [[ $name =~ $SLICE_UNIT_RE ]] || continue
+    [ -z "${want[$name]:-}" ] || continue
+    grep -qxF -- "$SLICE_MARK" "$u" || continue
+    stale+=("$name")
+  done
+
+  # --- install (atomic per file), remembering every previous state
+  for unit in "${order[@]}" "${stale[@]}"; do
+    TOUCHED+=("$unit")
+    keep_previous "$SYSTEMD_UNIT_DIR/$unit" "unit.$unit"
+    keep_previous "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" "quota.$unit"
+  done
+  for unit in "${order[@]}"; do
+    printf '%s\n[Unit]\nDescription=ddev-fleet CPU allotment (%s)\n\n[Slice]\nCPUAccounting=yes\n' "$SLICE_MARK" "$unit" >"$PRIV/new.unit"
+    quota=${want[$unit]}
+    if ! put_file "$PRIV/new.unit" "$SYSTEMD_UNIT_DIR/$unit" 0644 root root; then
+      slices_restore
+      fail 'could not install the slice units; the previous ones were restored'
+    fi
+    if [ "$quota" = - ]; then
+      rm -f -- "${SYSTEMD_UNIT_DIR:?}/${unit:?}.d/$SLICE_DROPIN"
+      drop_unit_dir "$unit"
+    else
+      printf '%s\n[Slice]\nCPUQuota=%s%%\n' "$SLICE_MARK" "$quota" >"$PRIV/new.drop"
+      if ! install -d -m 0755 -- "$SYSTEMD_UNIT_DIR/$unit.d" || ! put_file "$PRIV/new.drop" "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" 0644 root root; then
+        slices_restore
+        fail 'could not install the slice drop-ins; the previous ones were restored'
+      fi
+    fi
+  done
+  for unit in "${stale[@]}"; do
+    rm -f -- "${SYSTEMD_UNIT_DIR:?}/${unit:?}" "${SYSTEMD_UNIT_DIR:?}/${unit:?}.d/$SLICE_DROPIN"
+    drop_unit_dir "$unit"
+  done
+
+  # --- make it live: reload, start every slice before anything uses it, then the quotas on the running slices
+  if ! timeout "$T_RELOAD" systemctl daemon-reload </dev/null; then
+    slices_restore
+    fail 'systemd did not reload; the previous slice units were restored'
+  fi
+  for unit in "${order[@]}"; do
+    if ! systemctl_slice start "$unit"; then
+      slices_restore
+      fail "could not start $unit; the previous slice units were restored"
+    fi
+  done
+  for unit in "${order[@]}"; do
+    if ! set_quota "$unit" "${want[$unit]}"; then
+      slices_restore
+      fail "could not set the quota of $unit; the previous slice units and quotas were restored"
+    fi
+  done
+  # A removed slice stops limiting new containers; containers still inside it keep running (unlimited) rather than being killed.
+  for unit in "${stale[@]}"; do
+    set_quota "$unit" - || printf 'apply: could not lift the quota of the removed slice %s\n' "$unit" >&2
+  done
+  printf 'apply: slices installed (%d, %d removed)\n' "${#order[@]}" "${#stale[@]}"
+}
+
 pin_staging || true
 case $TARGET in
   caddy) apply_caddy ;;
   authelia) apply_authelia ;;
+  slices) apply_slices ;;
 esac

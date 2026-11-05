@@ -30,6 +30,7 @@ use App\Fleet\Secrets\SecretName;
 use App\Fleet\Secrets\SecretService;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Secrets\SecretValue;
+use App\Fleet\System\SlicesApplier;
 use App\Fleet\Webhooks\WebhookSecrets;
 use App\Fleet\Webhooks\WebhookService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -66,6 +67,7 @@ final readonly class ProjectImporter
         private EntityManagerInterface $em,
         private ProjectAccessRefresher $access,
         private InstanceSiteRefresher $sites,
+        private ?SlicesApplier $slices = null,
     ) {
     }
 
@@ -157,6 +159,9 @@ final readonly class ProjectImporter
         if (!$existed) {
             $this->access->refresh();
             $warning = $this->access->takeWarning();
+            // A new project has a slice (the templates it brought are synced by the template service).
+            $this->slices?->sync();
+            $warning ??= $this->slices?->takeWarning();
         } elseif (ImportItem::UPDATE === $this->actionOf($plan, 'project', $name) && $this->portsChanged($plan, $name)) {
             $project = $this->projects->findByName($name);
             if (null !== $project) {

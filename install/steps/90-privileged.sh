@@ -4,7 +4,7 @@
 #   /usr/local/libexec/fleet/apply   the root helper (root:root 0755)
 #   /usr/local/libexec/fleet/upgrade the root helper of `sudo fleet upgrade` (root:root 0755; NO sudoers entry: root only)
 #   /etc/tmpfiles.d/ddev-fleet.conf  creates /var/log/ddev-fleet and its root-owned upgrade-history.jsonl (0644)
-#   /etc/sudoers.d/fleet-apply       one line: fleet may run `apply caddy` and `apply authelia`, nothing else
+#   /etc/sudoers.d/fleet-apply       one line: fleet may run `apply caddy`, `apply authelia` and `apply slices`, nothing else
 #   /usr/local/bin/fleet             the command-line wrapper
 # The sudoers file is checked with visudo before it lands: a broken sudoers can lock everybody out of sudo.
 

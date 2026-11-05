@@ -14,6 +14,7 @@ use App\Fleet\Projects\Rule\DrupalEnv;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\Rule\SshKeyNames;
 use App\Fleet\Ssh\ExtraSshKey;
+use App\Fleet\System\SlicesApplier;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 
 /**
@@ -28,6 +29,7 @@ final readonly class TemplateService
         private ProjectRepository $projects,
         private TemplateRepository $templates,
         private ExtraSshKey $sshKeys,
+        private ?SlicesApplier $slices = null,
     ) {
     }
 
@@ -83,6 +85,8 @@ final readonly class TemplateService
             // Two creates raced past the existence check. The entity manager is closed now: touch nothing else.
             throw new ValidationFailed(['name' => 'A template with this name already exists in this project.']);
         }
+        // The template's slice must exist before its first instance starts. A failure is a warning.
+        $this->slices?->sync();
 
         return $template;
     }
@@ -104,11 +108,16 @@ final readonly class TemplateService
         }
 
         $now = new \DateTimeImmutable();
+        $limitBefore = $template->cpuThreads();
         $template->changeDrupalEnv($input->drupalEnv, $now);
         $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
         $template->changeSshKeys($input->sshKeys, $now);
         $template->changeCapacity($input->cpuThreads, $input->slots, $now);
         $this->templates->save($template);
+        // A new limit reaches the running slice at once (no restart of the instances).
+        if ($limitBefore !== $template->cpuThreads()) {
+            $this->slices?->sync();
+        }
 
         return $template;
     }
@@ -125,6 +134,7 @@ final readonly class TemplateService
         }
 
         $this->templates->remove($template);
+        $this->slices?->sync();
     }
 
     /**

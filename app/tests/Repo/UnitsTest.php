@@ -20,7 +20,7 @@ final class UnitsTest extends TestCase
 {
     use InstallerHarness;
 
-    private const string SUDOERS_LINE = 'fleet ALL=(root) NOPASSWD: /usr/local/libexec/fleet/apply caddy, /usr/local/libexec/fleet/apply authelia';
+    private const string SUDOERS_LINE = 'fleet ALL=(root) NOPASSWD: /usr/local/libexec/fleet/apply caddy, /usr/local/libexec/fleet/apply authelia, /usr/local/libexec/fleet/apply slices';
 
     public function testTheUnitsThatStartSshAgentsDoNotKillThemOnRestart(): void
     {

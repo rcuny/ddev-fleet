@@ -354,6 +354,7 @@ The remaining commands exist mostly for the installer:
 | `fleet:host:ovh-credentials [--endpoint=ovh-eu\|ovh-ca\|ovh-us]` | DNS mode only: replace the OVH application key, secret and consumer key (hidden prompts, or three lines on standard input), then install them through the root helper and reload Caddy. Nothing is stored unless all three are valid. |
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:host:tls-check` | Check Caddy's certificate health (Let's Encrypt rate limits and failed challenges in the last hour, certificates issued in the last 7 days, expiry of the host's certificate) and write the status file. Run every 10 minutes by `fleet-tls-check.timer`. |
+| `fleet:host:slices [--print]` | Install the CPU slices (`fleet.slice`, `fleet-<project>.slice`, `fleet-<project>-<template>.slice`) for the CPU allotments of the projects and templates through the root helper (`apply slices`). A change of a limit or of the set of projects and templates does this on its own; run it once after an upgrade to a release with slices, or to repair a host. `--print` shows the slice list and installs nothing. |
 | `fleet:host:tls-status [--json]` | Print the last certificate check. Exit code 0 ok, 1 warning (failed solves, expiry under 14 days, no check yet or one older than an hour), 2 error (Let's Encrypt is rate limiting, or a certificate has expired). The same status drives the banner and the Host page's Certificates tab. |
 | `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
 | `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity, schema version and whether it was sealed by this host's secret key, read-only (see below). |
@@ -540,10 +541,17 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   signs everyone out, so such a change is announced as that.
 - **The root helper.** The app never runs as root. To install a rendered Caddy or Authelia configuration it writes
   the files into `/srv/fleet/staging/<target>/` and runs `sudo -n /usr/local/libexec/fleet/apply <target>`. The
-  sudoers file contains exactly one line, allowing `apply caddy` and `apply authelia` for `fleet`, with the
-  arguments matched exactly. The helper pins the staging directory, rejects symlinks, hard links and oversized or
+  sudoers file contains exactly one line, allowing `apply caddy`, `apply authelia` and `apply slices` for `fleet`,
+  with the arguments matched exactly. The helper pins the staging directory, rejects symlinks, hard links and oversized or
   foreign files, validates the files with the real Caddy or Authelia binary running as their own users, installs
   atomically, rolls back if the reload fails, and deletes the staged files afterwards.
+- **CPU slices (`apply slices`).** The staged `slices.json` is data, a list of `{unit, quota_percent|null}`, never
+  config text. The helper accepts only unit names matching `^fleet(-[a-z0-9_]+){0,2}\.slice$` (every parent listed,
+  `fleet.slice` always), refuses duplicates, more than 500 entries, and any quota that is not an integer from 100 to
+  `nproc --all` x 100. It then writes the unit files and `10-fleet-quota.conf` drop-ins itself (nothing staged is
+  copied), removes only the `fleet*.slice` units it wrote earlier (an ownership marker line), reloads systemd, starts
+  every slice and applies each quota to the running slice with `systemctl set-property` in runtime mode. Containers are not
+  restarted. On failure the previous files and quotas are put back.
 - **Be honest about what that buys.** `fleet` is a member of the `docker` group, which is root-equivalent on the
   host. The helper prevents accidents and half-applied configurations; it is **not a security boundary** against
   a compromised `fleet` account or a compromised app. This is why php-fpm's unit sets `NoNewPrivileges=no`
