@@ -23,7 +23,8 @@ use Psr\Log\LoggerInterface;
  * at once, within the usual 30 minute give-up.
  *
  * The consumer never blocks on a job. For each RunJob message it prunes the finished children, then:
- *  - concurrency 1 (the default; no host row counts as 1): runs the job in this process, exactly as before;
+ *  - concurrency 1 (the default; no host row counts as 1) and no child of this process running: runs the job in this process,
+ *    exactly as before (the instance lock alone serialises jobs of one instance);
  *  - the job is no longer queued, or waits for its sequential batch: JobExecutor decides, as before;
  *  - all slots are taken, or a child already works on the same instance: the message goes back on the queue with a delay
  *    and the job stays `queued` (waiting for a slot never counts against the 30 minute give-up);
@@ -64,7 +65,10 @@ final class ConcurrentJobRunner
     public function handle(int $jobId, ?int $eligibleSince): void
     {
         $limit = $this->settings->fresh()?->maxConcurrentJobs() ?? HostSettings::DEFAULT_MAX_CONCURRENT_JOBS;
-        if ($limit <= 1 && [] === $this->busy()) {
+        if ($limit <= 1 && [] === $this->ownChildren()) {
+            // Jobs of other processes that are `running` are not counted here: at the default limit the instance lock is the only
+            // guard (as before FLE-209). Counting them made every request of a `sync://` transport (dev, test: one request per
+            // click, several at once) re-queue behind its neighbour's job, which cannot wait there, and fail (FLE-214).
             $this->executor->run($jobId, $eligibleSince);
 
             return;
@@ -105,6 +109,24 @@ final class ConcurrentJobRunner
             $child['process']->wait();
         }
         $this->busy();
+    }
+
+    /**
+     * The children this process started and that still run (prunes the finished ones).
+     *
+     * @return array<int, string> lock key by job id
+     */
+    private function ownChildren(): array
+    {
+        $own = [];
+        foreach ($this->children as $id => $child) {
+            if ($child['process']->isRunning()) {
+                $own[$id] = $child['key'];
+            }
+        }
+        $this->busy();
+
+        return $own;
     }
 
     /**
