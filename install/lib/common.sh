@@ -73,6 +73,7 @@ HARDEN=0
 HARDEN_SSH_USERS=()
 HARDEN_TRUSTED_IPS=()
 HARDEN_GRACE=
+HARDEN_TMP=0
 # --preflight: run only the pre-flight checks (lib/preflight.sh), change nothing.
 PREFLIGHT_ONLY=0
 
@@ -266,6 +267,7 @@ Options:
   --ssh-allow-user=<u>  with --harden: an account that may log in over SSH (repeatable; default: the account running sudo)
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
+  --harden-tmp          with --harden: also mount /tmp nosuid,nodev,noexec at the next boot (can break builds that run files from /tmp)
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -334,6 +336,7 @@ parse_args() {
         validate_grace "${arg#--firewall-grace=}" || die "$EX_USAGE" "--firewall-grace must be 2 to 120 minutes"
         HARDEN_GRACE=${arg#--firewall-grace=}
         ;;
+      --harden-tmp) HARDEN_TMP=1 ;;
       --preflight) PREFLIGHT_ONLY=1 ;;
       --dry-run) FLEET_DRY_RUN=1 ;;
       *)
@@ -352,8 +355,8 @@ parse_args() {
   fi
   validate_ref "$REF" || die "$EX_USAGE" "--ref is not a valid git ref"
   validate_repo_url "$REPO_URL" || die "$EX_USAGE" "--repo-url is not a valid url or path"
-  if [ "$HARDEN" != 1 ] && { [ "${#HARDEN_SSH_USERS[@]}" -gt 0 ] || [ "${#HARDEN_TRUSTED_IPS[@]}" -gt 0 ] || [ -n "$HARDEN_GRACE" ]; }; then
-    die "$EX_USAGE" "--ssh-allow-user, --trusted-ip and --firewall-grace only make sense with --harden"
+  if [ "$HARDEN" != 1 ] && { [ "${#HARDEN_SSH_USERS[@]}" -gt 0 ] || [ "${#HARDEN_TRUSTED_IPS[@]}" -gt 0 ] || [ -n "$HARDEN_GRACE" ] || [ "$HARDEN_TMP" = 1 ]; }; then
+    die "$EX_USAGE" "--ssh-allow-user, --trusted-ip, --firewall-grace and --harden-tmp only make sense with --harden"
   fi
 }
 

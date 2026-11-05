@@ -56,9 +56,10 @@ plan and changes nothing.
 | `--repo-url=<url\|path>` | Git remote (or a bundle or path readable by the `fleet` user) to install from. Default: the public GitHub mirror. |
 | `--skip-dns-check` | Do not compare the DNS records with this host's addresses (for example behind NAT or a CDN). |
 | `--no-shell-profile` | Do not install the shell profile (step 35). Default: installed. |
-| `--harden` | **Opt-in** host hardening (section 8): key-only SSH with `AllowUsers`, fail2ban, a firewall with a dead-man's switch, LLMNR off, sysctl, auditd, `/tmp` mount options. Off by default; once enabled, later runs and upgrades re-apply it. |
+| `--harden` | **Opt-in** host hardening (section 8): key-only SSH with `AllowUsers`, fail2ban, a firewall with a dead-man's switch, LLMNR off, sysctl, auditd, `/tmp` mount options (only with `--harden-tmp`). Off by default; once enabled, later runs and upgrades re-apply it. |
 | `--ssh-allow-user=<name>` | With `--harden`, repeatable: an account allowed to log in over SSH. Default: the account that ran `sudo`. The run is refused when that account is not in the list. |
 | `--trusted-ip=<ip\|cidr>` | With `--harden`, repeatable: an address that fail2ban never bans and the firewall always lets through. |
+| `--harden-tmp` | With `--harden`: also mount `/tmp` with `nosuid,nodev,noexec` at the next boot (see section 8: it can break tools that run files from `/tmp`, and it has no dead-man's switch). Stored; later runs keep it. |
 | `--firewall-grace=<minutes>` | With `--harden`: how long the dead-man's switch waits for your confirmation before it turns the firewall off (2 to 120, default 10). |
 | `--preflight` | Only check the host and change nothing; works without root. Prints one line per finding, `BLOCK`, `WARN` or `INFO <id>: <message>`, and exits 0, or 3 when anything blocks. Checks: free disk on `/opt`, `/srv/fleet` and `/var`, the length of every existing instance id, that Docker and DDEV answer, `fleet.env`, the supported OS, the required packages and that the repository answers. Run it from a checkout: `bash install/run.sh --preflight --domain=<fqdn>`. A normal run does the same checks first and stops before step 10 on a `BLOCK`. |
 | `--dry-run` | Print the plan, change nothing. Works without root. |
@@ -585,13 +586,19 @@ settings without `--harden`. A list flag replaces that list; `--harden` alone ke
 
 | Part | Result |
 |---|---|
-| SSH | Drop-in `/etc/ssh/sshd_config.d/10-fleet-hardening.conf`: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `AllowUsers <list>`. The drop-in is checked with `sshd -t` before it is installed and the whole configuration after; a failure restores the previous state. The daemon is reloaded (running sessions survive). The run is refused when the account you are using is not in the allow list. |
-| fail2ban | The `sshd` jail with `maxretry = 5`, `findtime = 10m`, `bantime = 1h` and `ignoreip` = localhost + your `--trusted-ip` values (`/etc/fail2ban/jail.d/fleet-sshd.conf`). |
+| SSH | Drop-in `/etc/ssh/sshd_config.d/10-fleet-hardening.conf`: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `AllowUsers <list>`. The drop-in is checked with `sshd -t` before it is installed and the whole configuration after; a failure restores the previous state. The daemon is reloaded (running sessions survive). Before anything is written the run is refused when the account you are using is not in the allow list, **has no usable public key** (it would be locked out by `PasswordAuthentication no`), or when **another account that has an `authorized_keys` file** (`/home/*`, `/root`: colleagues on a shared host) is not in the list: add each one with `--ssh-allow-user`. After the reload the installer reads `sshd -T` and warns loudly when the drop-in is not the effective configuration. |
+| fail2ban | The `sshd` jail with `maxretry = 5`, `findtime = 10m`, `bantime = 1h` and `ignoreip` = localhost + your `--trusted-ip` values + the address of your current SSH session when the installer can see it (`SSH_CONNECTION`; `sudo` may hide it, so pass `--trusted-ip`) (`/etc/fail2ban/jail.d/fleet-sshd.conf`, `backend = systemd`). |
 | Firewall | UFW: deny incoming, allow outgoing, allow SSH (the daemon's real ports), 80, 443, the `--trusted-ip` addresses (everything) and the **named ports Fleet reports** (`fleet port:firewall`, from the database). A guard block in `/etc/ufw/after.rules` (`DOCKER-USER`) keeps Docker's own rules from bypassing it; it assumes DDEV's router listens on loopback only and refuses to enable the firewall when `router_bind_all_interfaces` is true. |
 | Named-port sync | `fleet-firewall-sync.timer` runs `/usr/local/sbin/fleet-firewall-sync` every minute as root: a named port added to a project in Fleet is opened, one no project uses any more is closed, within a minute. It touches only the ports it opened itself (listed in `/var/lib/ddev-fleet/firewall-ports`), never SSH, 80, 443 or your own rules, and changes nothing when Fleet does not answer. The `fleet` user gets no new privilege. |
 | Dead-man's switch | When the firewall is enabled, `fleet-firewall-deadman.timer` turns it **off** again after the grace period unless you confirm (below). On every boot `fleet-firewall-deadman-bootcheck.service` does the same until you have confirmed once. |
 | LLMNR | `LLMNR=no` for systemd-resolved (`/etc/systemd/resolved.conf.d/fleet-llmnr.conf`): port 5355 stops listening. |
-| Kernel, audit, `/tmp` | `/etc/sysctl.d/60-fleet-hardening.conf` (`kernel.dmesg_restrict`, `log_martians`; no `ip_forward` or `rp_filter` change, Docker needs them); auditd with scoped watch rules (`/etc/audit/rules.d/50-fleet.rules`); `/tmp` gets `nosuid,nodev,noexec` at the next boot, only when it is already its own mount point. |
+| Kernel, audit, `/tmp` | `/etc/sysctl.d/60-fleet-hardening.conf` (`kernel.dmesg_restrict`, `log_martians`; no `ip_forward` or `rp_filter` change, Docker needs them); auditd with scoped watch rules (`/etc/audit/rules.d/50-fleet.rules`); `/tmp` is **left alone** unless you pass `--harden-tmp`. |
+
+**About `--harden-tmp`.** On Debian 13 `/tmp` is already a tmpfs, so the change applies at the **next boot** without any dead-man protection. The override (`/etc/systemd/system/tmp.mount.d/override.conf`) keeps the options systemd uses now (`size=`, `nr_inodes=`) and adds `nosuid,nodev,noexec`. `noexec` can break composer, npm, Playwright and DDEV helpers that execute files from `/tmp`: test a build first. To undo, delete the override file and reboot.
+
+**Keys and `MaxAuthTries 3`.** With three attempts, an SSH agent offering many keys can hit "Too many authentication failures" before the right key is tried. Connect with `ssh -o IdentitiesOnly=yes -i <key> ...` (or set `IdentitiesOnly yes` for the host in `~/.ssh/config`).
+
+**Firewall notes.** `ufw` denies incoming traffic by default, which also applies to containers talking to the host's own addresses (as on the 0.x hosts); containers still reach the Internet and each other. If the SSH daemon is socket-activated (`ssh.socket`), the ports are read from the socket as well as from `sshd -T`. The Docker guard block is replaced, never duplicated, on every run (check with `iptables -S DOCKER-USER`).
 
 ### Confirming the firewall
 
@@ -602,7 +609,7 @@ you off):
 sudo /usr/local/sbin/fleet-firewall-confirm
 ```
 
-It writes `/etc/ddev-fleet/firewall-confirmed` and stops the timer. Without it the firewall is switched off after the
+It needs root and should come from a second session, never the one the installer ran in. It writes `/etc/ddev-fleet/firewall-confirmed` (which persists) and stops the timer. The installer clears that file, and arms the switch again, whenever it (re-)enables the firewall or when the SSH ports or trusted addresses change. Without confirmation the firewall is switched off after the
 grace period (`systemctl list-timers fleet-firewall-deadman.timer` shows the time left); run the installer again to
 retry.
 
@@ -612,8 +619,11 @@ Wait for the grace period: the firewall turns itself off and SSH is reachable ag
 (`AllowUsers`, keys) or a ban, use the provider console (rescue mode or KVM), then remove
 `/etc/ssh/sshd_config.d/10-fleet-hardening.conf` and reload `ssh`, or `fail2ban-client unban <ip>`. To undo
 hardening on purpose: set `ENABLED=0` in `/etc/ddev-fleet/hardening.conf` (so upgrades stop re-applying it), run
-`ufw disable`, `systemctl disable fleet-firewall-sync.timer fleet-firewall-deadman-bootcheck.service` (and stop the timer), and delete
-the drop-ins listed above. The uninstaller does not undo hardening.
+`ufw disable`, `systemctl disable fleet-firewall-sync.timer fleet-firewall-deadman-bootcheck.service` and `systemctl stop fleet-firewall-sync.timer fleet-firewall-deadman.timer`, delete
+the drop-ins listed above (`/etc/ssh/sshd_config.d/10-fleet-hardening.conf`, `/etc/fail2ban/jail.d/fleet-sshd.conf`,
+`/etc/systemd/resolved.conf.d/fleet-llmnr.conf`, `/etc/sysctl.d/60-fleet-hardening.conf`, `/etc/audit/rules.d/50-fleet.rules`,
+`/etc/systemd/system/tmp.mount.d/override.conf`), remove the `ddev-fleet DOCKER-USER guard` block from `/etc/ufw/after.rules`,
+then reload `ssh`, restart `fail2ban` and `systemd-resolved`. The uninstaller does not undo hardening.
 
 ### Adding a trusted address later
 

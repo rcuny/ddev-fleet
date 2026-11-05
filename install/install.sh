@@ -62,6 +62,7 @@ Options:
   --ssh-allow-user=<u>  with --harden: an account that may log in over SSH (repeatable; default: the account running sudo)
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
+  --harden-tmp          with --harden: also mount /tmp nosuid,nodev,noexec at the next boot (can break builds that run files from /tmp)
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -120,7 +121,7 @@ USAGE
       --repo-url=*) repo_url=${arg#--repo-url=} ;;
       --skip-dns-check) ;;
       --no-shell-profile) ;;
-      --harden | --ssh-allow-user=* | --trusted-ip=* | --firewall-grace=*) ;; # validated by stage 2 (lib/common.sh)
+      --harden | --ssh-allow-user=* | --trusted-ip=* | --firewall-grace=* | --harden-tmp) ;; # validated by stage 2 (lib/common.sh)
       --preflight) preflight=1 ;;
       --dry-run) dry_run=1 ;;
       *)

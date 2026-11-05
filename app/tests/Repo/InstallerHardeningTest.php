@@ -30,7 +30,7 @@ final class InstallerHardeningTest extends TestCase
     public function testDryRunWithHardenListsEveryChangeAndChangesNothing(): void
     {
         $before = $this->snapshot();
-        [$status, $out, $err] = $this->dryRun(['--domain=fleet.example.com', '--skip-dns-check', '--harden', '--trusted-ip=203.0.113.7', '--trusted-ip=2001:db8::/32']);
+        [$status, $out, $err] = $this->dryRun(['--domain=fleet.example.com', '--skip-dns-check', '--harden', '--harden-tmp', '--trusted-ip=203.0.113.7', '--trusted-ip=2001:db8::/32']);
 
         self::assertSame(0, $status, $err);
         foreach ([
@@ -65,6 +65,7 @@ final class InstallerHardeningTest extends TestCase
             ['--ssh-allow-user=x'],
             ['--trusted-ip=203.0.113.7'],
             ['--firewall-grace=5'],
+            ['--harden-tmp'],
             ['--harden', '--trusted-ip=300.1.1.1'],
             ['--harden', '--trusted-ip=1.2.3.4/33'],
             ['--harden', '--trusted-ip=abc'],
@@ -94,7 +95,7 @@ final class InstallerHardeningTest extends TestCase
     {
         foreach (['install.sh', 'lib/common.sh'] as $file) {
             $text = (string) file_get_contents(self::installDir().'/'.$file);
-            foreach (['--harden', '--ssh-allow-user', '--trusted-ip', '--firewall-grace'] as $flag) {
+            foreach (['--harden', '--ssh-allow-user', '--trusted-ip', '--firewall-grace', '--harden-tmp'] as $flag) {
                 self::assertStringContainsString($flag, $text, "$file: $flag");
             }
         }
@@ -112,9 +113,9 @@ final class InstallerHardeningTest extends TestCase
         $stubs = $this->stubs([
             'apt-get' => 'exit 0',
             'dpkg' => 'exit 0',
-            'sshd' => 'if [ "$1" = -T ]; then echo "port 2222"; fi; exit 0',
-            'systemctl' => 'echo "systemctl $*" >> '.escapeshellarg($root.'/calls.log').'; exit 0',
-            'ufw' => 'echo "ufw $*" >> '.escapeshellarg($root.'/calls.log').'; case "$1" in status) exit 0;; show) echo "ufw allow 2222/tcp"; echo "ufw allow 80/tcp";; esac; exit 0',
+            'sshd' => 'if [ "$1" = -T ]; then echo "port 2222"; '.($env['SSHD_INEFFECTIVE'] ?? '' ? '' : 'echo "passwordauthentication no"; echo "maxauthtries 3"; echo "allowusers operator deploy"; ').'fi; exit 0',
+            'systemctl' => 'echo "systemctl $*" >> '.escapeshellarg($root.'/calls.log').'; case "$1" in show) [ "$2" = tmp.mount ] && echo "mode=1777,strictatime,nosuid,nodev,size=50%,nr_inodes=1m";; esac; exit 0',
+            'ufw' => 'echo "ufw $*" >> '.escapeshellarg($root.'/calls.log').'; case "$1" in status) [ -f '.escapeshellarg($root.'/ufw-active').' ] && echo "Status: active"; exit 0;; show) echo "ufw allow 2222/tcp"; echo "ufw allow 80/tcp";; esac; exit 0',
             'findmnt' => 'echo /tmp',
             'augenrules' => 'exit 0',
             'sysctl' => 'exit 0',
@@ -126,7 +127,7 @@ final class InstallerHardeningTest extends TestCase
         return $this->withCommon($code, ['FLEET_ROOT_PREFIX' => $root] + $env, $stubs);
     }
 
-    private function prefix(): string
+    private function prefix(bool $keys = true): string
     {
         if (0 === posix_geteuid()) {
             self::markTestSkipped('Root ignores FLEET_ROOT_PREFIX by design.');
@@ -134,6 +135,12 @@ final class InstallerHardeningTest extends TestCase
         $root = $this->scratch().'/root';
         mkdir($root.'/etc/ddev-fleet', 0o700, true);
         touch($root.'/calls.log');
+        if ($keys) {
+            foreach (['operator'] as $user) {
+                mkdir($root.'/home/'.$user.'/.ssh', 0o700, true);
+                file_put_contents($root.'/home/'.$user.'/.ssh/authorized_keys', "# comment\nssh-ed25519 AAAAC3Nza test@example\n");
+            }
+        }
 
         return $root;
     }
@@ -146,7 +153,7 @@ final class InstallerHardeningTest extends TestCase
         self::assertSame(0, $status, $err);
         self::assertStringContainsString('host hardening: off', $out);
         self::assertSame('', (string) file_get_contents($root.'/calls.log'));
-        self::assertSame(['calls.log', 'etc'], array_values(array_diff(scandir($root) ?: [], ['.', '..'])));
+        self::assertSame(['calls.log', 'etc', 'home'], array_values(array_diff(scandir($root) ?: [], ['.', '..'])));
 
         [$status] = $this->applyStep($root, "ENABLED=0\n");
         self::assertSame(0, $status);
@@ -156,7 +163,9 @@ final class InstallerHardeningTest extends TestCase
     public function testAnExplicitRunWritesTheFilesAndAStoredRunReappliesThem(): void
     {
         $root = $this->prefix();
-        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator'], 'HARDEN=1; HARDEN_SSH_USERS=(operator deploy); HARDEN_TRUSTED_IPS=(203.0.113.7); HARDEN_GRACE=15; ');
+        mkdir($root.'/home/deploy/.ssh', 0o700, true);
+        file_put_contents($root.'/home/deploy/.ssh/authorized_keys', "ssh-ed25519 AAAAC3Nza deploy@example\n");
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator'], 'HARDEN=1; HARDEN_SSH_USERS=(operator deploy); HARDEN_TRUSTED_IPS=(203.0.113.7); HARDEN_GRACE=15; HARDEN_TMP=1; ');
 
         self::assertSame(0, $status, $err);
         $ssh = (string) file_get_contents($root.'/etc/ssh/sshd_config.d/10-fleet-hardening.conf');
@@ -167,14 +176,17 @@ final class InstallerHardeningTest extends TestCase
         self::assertStringContainsString('ignoreip = 127.0.0.1/8 ::1 203.0.113.7', $f2b);
         self::assertStringContainsString('maxretry = 5', $f2b);
         self::assertStringContainsString('LLMNR=no', (string) file_get_contents($root.'/etc/systemd/resolved.conf.d/fleet-llmnr.conf'));
-        self::assertStringContainsString('noexec', (string) file_get_contents($root.'/etc/systemd/system/tmp.mount.d/override.conf'));
+        $tmp = (string) file_get_contents($root.'/etc/systemd/system/tmp.mount.d/override.conf');
+        self::assertStringContainsString('Options=mode=1777,strictatime,nosuid,nodev,size=50%,nr_inodes=1m,noexec', $tmp, 'keeps the existing options, adds only the missing one');
         self::assertStringContainsString('OnActiveSec=15min', (string) file_get_contents($root.'/etc/systemd/system/fleet-firewall-deadman.timer'));
         $conf = (string) file_get_contents($root.'/etc/ddev-fleet/hardening.conf');
-        self::assertStringContainsString("ENABLED=1\nSSH_ALLOW_USERS=operator deploy\nTRUSTED_IPS=203.0.113.7\nFIREWALL_GRACE_MINUTES=15\nSSH_PORTS=2222\n", $conf);
+        self::assertStringContainsString("ENABLED=1\nSSH_ALLOW_USERS=operator deploy\nTRUSTED_IPS=203.0.113.7\nFIREWALL_GRACE_MINUTES=15\nSSH_PORTS=2222\nHARDEN_TMP=1\n", $conf);
         $calls = (string) file_get_contents($root.'/calls.log');
         self::assertStringContainsString('ufw allow 2222/tcp', $calls, 'the real SSH port, not a guessed 22');
         self::assertStringContainsString('ufw allow from 203.0.113.7', $calls);
         self::assertLessThan(strpos($calls, 'ufw --force enable'), strpos($calls, 'ufw allow 2222/tcp'));
+        self::assertLessThan(strpos($calls, 'ufw default deny incoming'), strpos($calls, 'ufw allow 2222/tcp'), 'allows are staged before the default policy changes');
+        self::assertStringContainsString('backend = systemd', $f2b);
         self::assertStringContainsString('start fleet-firewall-deadman.timer', $calls, 'a first enable arms the dead-man switch');
         $after = (string) file_get_contents($root.'/etc/ufw/after.rules');
         self::assertStringStartsWith('# BEGIN ddev-fleet DOCKER-USER guard', $after);
@@ -187,6 +199,89 @@ final class InstallerHardeningTest extends TestCase
         self::assertSame($before, (string) file_get_contents($root.'/etc/ddev-fleet/hardening.conf'));
         self::assertSame(1, substr_count((string) file_get_contents($root.'/etc/ufw/after.rules'), ':DOCKER-USER'));
         self::assertStringContainsString('AllowUsers operator deploy', (string) file_get_contents($root.'/etc/ssh/sshd_config.d/10-fleet-hardening.conf'));
+    }
+
+    public function testTmpIsLeftAloneWithoutItsOwnFlag(): void
+    {
+        $root = $this->prefix();
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator'], 'HARDEN=1; HARDEN_SSH_USERS=(operator); ');
+
+        self::assertSame(0, $status, $err);
+        self::assertFileDoesNotExist($root.'/etc/systemd/system/tmp.mount.d/override.conf');
+        self::assertStringContainsString('HARDEN_TMP=0', (string) file_get_contents($root.'/etc/ddev-fleet/hardening.conf'));
+    }
+
+    public function testTheCurrentSshAddressIsNeverBanned(): void
+    {
+        $root = $this->prefix();
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator', 'SSH_CONNECTION' => '198.51.100.9 5555 10.0.0.1 22'], 'HARDEN=1; HARDEN_SSH_USERS=(operator); ');
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString('ignoreip = 127.0.0.1/8 ::1 198.51.100.9', (string) file_get_contents($root.'/etc/fail2ban/jail.d/fleet-sshd.conf'));
+    }
+
+    public function testRefusesWhenTheAccountInUseHasNoPublicKey(): void
+    {
+        $root = $this->prefix(false);
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator'], 'HARDEN=1; HARDEN_SSH_USERS=(operator); ');
+
+        self::assertNotSame(0, $status);
+        self::assertStringContainsString('no usable public key', $err);
+        self::assertFileDoesNotExist($root.'/etc/ssh/sshd_config.d/10-fleet-hardening.conf');
+        self::assertFileDoesNotExist($root.'/etc/ddev-fleet/hardening.conf', 'nothing is stored by a refused run');
+    }
+
+    public function testRefusesToShutOutAnotherAccountThatHasKeys(): void
+    {
+        $root = $this->prefix();
+        mkdir($root.'/home/colleague/.ssh', 0o700, true);
+        file_put_contents($root.'/home/colleague/.ssh/authorized_keys', "ssh-ed25519 AAAAC3Nza colleague@example\n");
+
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator'], 'HARDEN=1; HARDEN_SSH_USERS=(operator); ');
+        self::assertNotSame(0, $status);
+        self::assertStringContainsString('colleague', $err);
+        self::assertFileDoesNotExist($root.'/etc/ssh/sshd_config.d/10-fleet-hardening.conf');
+
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator'], 'HARDEN=1; HARDEN_SSH_USERS=(operator colleague); ');
+        self::assertSame(0, $status, $err);
+    }
+
+    public function testWarnsLoudlyWhenTheDropInIsNotTheEffectiveConfiguration(): void
+    {
+        $root = $this->prefix();
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator', 'SSHD_INEFFECTIVE' => '1'], 'HARDEN=1; HARDEN_SSH_USERS=(operator); ');
+
+        self::assertSame(0, $status, $err);
+        self::assertStringContainsString('NOT effective', $err);
+    }
+
+    public function testAChangeOfTrustedAddressesOrAReEnableRearmsTheDeadMansSwitch(): void
+    {
+        $root = $this->prefix();
+        $base = "ENABLED=1\nSSH_ALLOW_USERS=operator\nTRUSTED_IPS=203.0.113.7\nFIREWALL_GRACE_MINUTES=10\nSSH_PORTS=2222\n";
+        touch($root.'/ufw-active');
+        touch($root.'/etc/ddev-fleet/firewall-confirmed');
+
+        // Active and confirmed, nothing changed: stays confirmed, no new timer.
+        [$status, , $err] = $this->applyStep($root, $base, ['SUDO_USER' => 'operator']);
+        self::assertSame(0, $status, $err);
+        self::assertFileExists($root.'/etc/ddev-fleet/firewall-confirmed');
+        self::assertStringNotContainsString('start fleet-firewall-deadman.timer', (string) file_get_contents($root.'/calls.log'));
+
+        // A new trusted address: confirmation is cleared and the switch armed again.
+        [$status, , $err] = $this->applyStep($root, $base, ['SUDO_USER' => 'operator'], 'HARDEN=1; HARDEN_TRUSTED_IPS=(198.51.100.4); ');
+        self::assertSame(0, $status, $err);
+        self::assertFileDoesNotExist($root.'/etc/ddev-fleet/firewall-confirmed');
+        self::assertStringContainsString('start fleet-firewall-deadman.timer', (string) file_get_contents($root.'/calls.log'));
+
+        // Firewall found inactive although confirmed earlier: re-enabling clears the marker and arms.
+        unlink($root.'/ufw-active');
+        touch($root.'/etc/ddev-fleet/firewall-confirmed');
+        file_put_contents($root.'/calls.log', '');
+        [$status, , $err] = $this->applyStep($root, $base, ['SUDO_USER' => 'operator']);
+        self::assertSame(0, $status, $err);
+        self::assertFileDoesNotExist($root.'/etc/ddev-fleet/firewall-confirmed');
+        self::assertStringContainsString('start fleet-firewall-deadman.timer', (string) file_get_contents($root.'/calls.log'));
     }
 
     public function testASshdThatRejectsTheDropInChangesNothing(): void
