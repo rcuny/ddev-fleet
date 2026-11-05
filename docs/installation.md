@@ -515,8 +515,13 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   cause and run it again. Never install the new Authelia configuration by other means before the sites are rewritten:
   `fleet port:refresh` rewrites the sites on demand. A user group starting with `fleet-project-` is reserved for this and
   refused.
-- **Upgrading while a job runs.** Re-running the installer restarts the workers when the code changed. A job running at that
-  moment is marked `interrupted` (its worker is gone) and can be retried; wait for running deploys before upgrading when you can.
+- **Upgrading while a job runs.** Jobs run as detached child processes, so a worker restart does not stop them. But a child
+  that is still running while the installer swaps the code, the dependencies and the database (migrations) runs on against
+  the new code, which can fail it. The installer therefore waits before that swap, up to 300 seconds, for running jobs to
+  finish (`FLEET_INSTALL_JOB_WAIT=<seconds>` in the installer's environment changes the limit, `0` skips the wait); jobs
+  still running after that are left to finish. Upgrade at an idle moment when you can and retry any job that failed. A queued
+  job whose child never claimed it (the child died, for instance while the worker restarted) is queued again after about a
+  minute.
 - **Root-owned leftovers.** A container can leave files owned by root in an instance checkout. Destroy then fails with the
   exact `sudo rm -rf <directory>` line; run it and retry the job.
 - **No rate limit on `/_components`.** The live components endpoint is open to every signed-in user, each component checks
