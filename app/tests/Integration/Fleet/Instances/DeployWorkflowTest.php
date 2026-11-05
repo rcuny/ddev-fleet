@@ -390,6 +390,32 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertSame("DRUPAL_ENV=staging\n", file_get_contents($this->paths->instanceDir('acme--main').'/.env'));
     }
 
+    public function testTheTemplateDrupalEnvWinsOverAnEnvSeededFromTheAssets(): void
+    {
+        // FLE-192: the assets seed (a BeforeStart step) copies the project's own .env, which says DRUPAL_ENV=dev.
+        $this->steps->append(new class implements DeployStep {
+            public function phase(): StepPhase
+            {
+                return StepPhase::BeforeStart;
+            }
+
+            public function run(DeployContext $context): void
+            {
+                file_put_contents($context->dir.'/.env', "# env\nDRUPAL_ENV=dev\nME=\"DDEV Fleet\"\n");
+            }
+        });
+        $this->saveTemplate('full', [], 'staging');
+        $seen = null;
+        $env = $this->paths->instanceDir('acme--main').'/.env';
+        $this->runner->expect(['ddev', 'start'], new CommandResult(0), static function () use (&$seen, $env): void {
+            $seen = file_get_contents($env);
+        });
+
+        $this->deploy();
+
+        self::assertSame("# env\nDRUPAL_ENV=staging\nME=\"DDEV Fleet\"\n", $seen, 'set before ddev start, the rest of the file kept');
+    }
+
     public function testStepsAndSiteComeBeforeDdevStart(): void
     {
         /** @var \ArrayObject<int, string> $seen */
