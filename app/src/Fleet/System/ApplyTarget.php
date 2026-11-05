@@ -12,4 +12,5 @@ enum ApplyTarget: string
 {
     case Caddy = 'caddy';
     case Authelia = 'authelia';
+    case Slices = 'slices';
 }
