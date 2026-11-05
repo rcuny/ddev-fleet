@@ -15,6 +15,7 @@ use App\Domain\Job\JobTrigger;
 use App\Fleet\Instances\InstanceService;
 use App\Fleet\Instances\OperationOptions;
 use App\Fleet\Instances\Selector;
+use App\Fleet\Projects\ValidationFailed;
 use Symfony\Component\Console\Input\InputInterface;
 use Symfony\Component\Console\Output\OutputInterface;
 
@@ -30,10 +31,20 @@ final class StartStop
         $status = $out->run(static function () use ($input, $output, $out, $op, $instances, $attached, &$code): void {
             $selector = InstanceOptions::selector($input);
             if ($selector->all) {
+                try {
+                    $existing = $instances->resolve($selector);
+                } catch (ValidationFailed $e) {
+                    // A host with no instance at all (fresh install, FLE-195) is not an error for `--all`: the boot unit
+                    // must not end up failed. Only a pure `--all` reaches here; ids, project and state keep failing.
+                    if ('No instance matches.' !== ($e->errors['selector'] ?? null)) {
+                        throw $e;
+                    }
+                    $existing = [];
+                }
                 $ids = array_map(
                     static fn (Instance $i): string => $i->id(),
                     array_filter(
-                        $instances->resolve($selector),
+                        $existing,
                         static fn (Instance $i): bool => !\in_array($i->state(), [InstanceState::Deploying, InstanceState::Destroying, InstanceState::Failed], true),
                     ),
                 );
