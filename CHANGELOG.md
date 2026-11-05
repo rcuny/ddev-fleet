@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.1] - 2026-11-05
+
+### Fixed
+- **FLE-195: `fleet:instance:start --all` (and `stop --all`) exits 0 with "nothing to start" on a host with no instance at all**, so `fleet-boot.service` no longer ends `failed` on a fresh install. An explicit id, a project or a state matching nothing still fails.
+- **FLE-196: `fleet-boot.service` no longer blocks Authelia after a reboot (regression of FLE-4)**: the unit is now `Type=exec` instead of `Type=oneshot`, so `multi-user.target` does not wait for the sequential start of all instances and Authelia (and every public URL behind it) comes up within about a minute of boot.
+
+#### Rollout
+- Existing hosts pick up the new unit at the next installer run (`ddev push-product`). Until then a reboot still delays Authelia until every instance is started.
+
 ## [1.3.0] - 2026-11-05
 
 ### Added
@@ -1078,7 +1087,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.3.1...HEAD
+[1.3.1]: https://github.com/rcuny/ddev-fleet/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/rcuny/ddev-fleet/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/rcuny/ddev-fleet/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/rcuny/ddev-fleet/compare/v1.2.0...v1.2.1
