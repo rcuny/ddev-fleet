@@ -9,6 +9,7 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Instances\SliceMembership;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -25,6 +26,8 @@ use Psr\Clock\ClockInterface;
  * slice used at least ACTIVE_CORES threads over the last sample, so an agent that holds no slot lock still counts. The
  * template pool reads its own slice; the `_project` pool reads the project slice minus its template slices (a cgroup
  * slice includes its children). `unreadable_locks` (additive) counts lock files/directories that could not be read.
+ *
+ * `instances.not_under_slice` (additive) lists the instances without the cgroup override (SliceMembership).
  *
  * `used_cores` is null = unknown: no sample yet, a sample older than UsageSampler::STALE_SECONDS (the status watcher is
  * down), or the slice does not exist (nothing ran in it). After a watcher restart the first reading needs two samples,
@@ -45,6 +48,7 @@ final readonly class HostCapacity
         private UsageSampler $sampler,
         private SlotLocks $locks,
         private ClockInterface $clock,
+        private ?SliceMembership $membership = null,
     ) {
     }
 
@@ -114,7 +118,7 @@ final readonly class HostCapacity
             'allocatable_threads' => $allocatable,
             'committed_threads' => $committed,
             'overcommitted' => $committed > $allocatable,
-            'instances' => ['count' => \count($this->instances->ids()), 'max' => $maxInstances],
+            'instances' => ['count' => \count($this->instances->ids()), 'max' => $maxInstances, 'not_under_slice' => $this->membership?->outside() ?? []],
             'projects' => $projects,
         ];
     }
