@@ -278,6 +278,21 @@ final class WebhookActionsTest extends AdminTestCase
         self::assertSame('feature/x--pw-run', $this->jobs()[0]->params()['branch']);
     }
 
+    public function testAReuseRuleRedeploysTheInstanceOfAPreviousPushInPlace(): void
+    {
+        $this->pushRule(['branch' => 'feature/*'], ['label_prefix' => 'ci-', 'reuse' => '1']);
+        $receiver = $this->receiver();
+        $headers = ['x-event-key' => 'repo:push'];
+
+        [, $first] = $this->send($receiver, WebhookSource::Bitbucket, self::push([self::branch('feature/x')], 'a'), $headers + ['x-request-uuid' => 'u1']);
+        [, $second] = $this->send($receiver, WebhookSource::Bitbucket, self::push([self::branch('feature/x')], 'b'), $headers + ['x-request-uuid' => 'u2']);
+
+        self::assertSame('blog--ci-feature-x', $first['instance']);
+        self::assertSame('blog--ci-feature-x', $second['instance'], 'one instance, no -1 copy');
+        self::assertStringStartsWith('redeploy queued', $second['note']);
+        self::assertSame(['deploy', 'redeploy'], array_map(static fn (Job $j): string => $j->type(), $this->jobs()));
+    }
+
     public function testAPushOfSeveralBranchesDeploysEachOnce(): void
     {
         $this->pushRule(['branch' => 'feature/*'], []);

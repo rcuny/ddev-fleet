@@ -258,6 +258,9 @@ final readonly class WebhookService
         if (isset($params['label']) && (!$labelAllowed || 1 !== preg_match(self::LABEL_PATTERN, $params['label']))) {
             $errors['label'] = 'Use lowercase letters, digits and single dashes, at most 40 characters.';
         }
+        if (isset($params['reuse']) && (!$labelAllowed || '1' !== $params['reuse'])) {
+            $errors['reuse'] = 'Reuse applies to Bitbucket deploy rules only.';
+        }
         if (!$labelAllowed) {
             return $errors;
         }

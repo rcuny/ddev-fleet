@@ -153,7 +153,7 @@ final class RuleMatcher
                     return $this->forRule($project, $rule, $event, $repo, $branch, null);
                 }
                 $target = $this->deployTarget($project, $rule, $branch);
-                if (!$target->replace && \in_array($target->label, $fixed, true)) {
+                if (!isset($rule->params()['label']) && \in_array($target->label, $fixed, true)) {
                     $skipped[] = ['subject' => $branch, 'reason' => 'collides with a fixed-label rule'];
                 } elseif (!self::hasTarget($targets, $target)) {
                     $targets[] = $target;
@@ -219,7 +219,7 @@ final class RuleMatcher
             throw new TargetUnresolvable('The branch cannot be turned into an instance label.');
         }
 
-        return new DeployTarget($rule, $branch, $label);
+        return new DeployTarget($rule, $branch, $label, isset($params['reuse']));
     }
 
     private static function fit(Project $project, string $label, string $seed): string

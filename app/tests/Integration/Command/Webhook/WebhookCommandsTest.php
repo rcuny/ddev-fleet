@@ -336,6 +336,10 @@ final class WebhookCommandsTest extends KernelTestCase
         self::assertSame(0, $ok->getStatusCode(), $ok->getErrorOutput());
         self::assertSame(['template' => 'jira-work', 'label_prefix' => 'pw-', 'strip_suffix' => '--pw-run'], self::json($ok)['params']);
 
+        $reuse = $this->cli('fleet:webhook:rule:add', $base + ['--match-branch' => 'feature/*', '--label-prefix' => 'ci-', '--reuse' => true, '--json' => true]);
+        self::assertSame(0, $reuse->getStatusCode(), $reuse->getErrorOutput());
+        self::assertSame(['template' => 'jira-work', 'label_prefix' => 'ci-', 'reuse' => '1'], self::json($reuse)['params']);
+
         $both = $this->cli('fleet:webhook:rule:add', $base + ['--match-branch' => 'a', '--label' => 'x', '--label-prefix' => 'pw-']);
         self::assertSame(1, $both->getStatusCode());
         self::assertStringContainsString('--label: A fixed label cannot be combined', $both->getErrorOutput());
