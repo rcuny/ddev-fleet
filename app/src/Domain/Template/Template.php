@@ -49,6 +49,14 @@ class Template
     #[ORM\Column(type: Types::JSON, options: ['default' => '[]'])]
     private array $sshKeys = [];
 
+    /** CPU threads all instances of the template may use together; null = inherits the project's (FLE-197). */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $cpuThreads = null;
+
+    /** Concurrent heavy runs of this template; null = unlimited. */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $slots = null;
+
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $createdAt;
 
@@ -151,6 +159,23 @@ class Template
     public function changeSshKeys(array $sshKeys, ?\DateTimeImmutable $now = null): void
     {
         $this->sshKeys = $sshKeys;
+        $this->touch($now);
+    }
+
+    public function cpuThreads(): ?int
+    {
+        return $this->cpuThreads;
+    }
+
+    public function slots(): ?int
+    {
+        return $this->slots;
+    }
+
+    public function changeCapacity(?int $cpuThreads, ?int $slots, ?\DateTimeImmutable $now = null): void
+    {
+        $this->cpuThreads = $cpuThreads;
+        $this->slots = $slots;
         $this->touch($now);
     }
 

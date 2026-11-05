@@ -51,6 +51,8 @@ final class ProjectShowCommand extends Command
                     'display submodule branch' => $project->displaySubmoduleBranch(),
                     'typesense' => $project->typesense() ? 'yes' : 'no',
                     'container ssh' => $project->containerSsh() ? 'yes' : 'no',
+                    'cpu threads' => $project->cpuThreads() ?? 'unlimited',
+                    'slots' => $project->slots() ?? 'unlimited',
                     'templates' => array_map(static fn (Template $template): string => $template->name(), $project->templates()),
                     'created' => $project->createdAt()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s').' UTC',
                     'updated' => $project->updatedAt()->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i:s').' UTC',

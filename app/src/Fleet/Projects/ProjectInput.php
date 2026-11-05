@@ -32,6 +32,8 @@ final readonly class ProjectInput
         public ?string $displaySubmoduleBranch = null,
         public bool $typesense = false,
         public bool $containerSsh = false,
+        public ?int $cpuThreads = null,
+        public ?int $slots = null,
     ) {
     }
 
@@ -51,6 +53,8 @@ final readonly class ProjectInput
             $project->displaySubmoduleBranch(),
             $project->typesense(),
             $project->containerSsh(),
+            $project->cpuThreads(),
+            $project->slots(),
         );
     }
 
@@ -91,6 +95,8 @@ final readonly class ProjectInput
             self::blankToNull($this->displaySubmoduleBranch),
             $this->typesense,
             $this->containerSsh,
+            $this->cpuThreads,
+            $this->slots,
         );
     }
 

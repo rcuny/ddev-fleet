@@ -407,6 +407,10 @@ final readonly class ProjectImporter
         $existing = $this->projects->findByName($slug);
         $keptDefault = $existing?->defaultTemplate();
         $input = $this->projectInput($project, $keptDefault, $project['ports']);
+        // Capacity is per host and not in the file: an update keeps what the host has.
+        if (null !== $existing) {
+            $input = $input->with(['cpuThreads' => $existing->cpuThreads(), 'slots' => $existing->slots()]);
+        }
         if (null === $existing) {
             $this->projectService->create($input, false);
         } elseif (ImportItem::UPDATE === $this->actionOf($plan, 'project', $slug)) {
@@ -416,7 +420,7 @@ final readonly class ProjectImporter
         foreach ($document['templates'] as $template) {
             match ($this->actionOf($plan, 'template', $template['name'])) {
                 ImportItem::CREATE => $this->templates->create($slug, self::templateInput($template)),
-                ImportItem::UPDATE => $this->templates->update($slug, $template['name'], self::templateInput($template)),
+                ImportItem::UPDATE => $this->templates->update($slug, $template['name'], $this->keepCapacity($slug, self::templateInput($template))),
                 default => null,
             };
         }
@@ -526,6 +530,13 @@ final readonly class ProjectImporter
             $template['post_deploy']['tty2'],
             $template['ssh_keys'],
         );
+    }
+
+    private function keepCapacity(string $project, TemplateInput $input): TemplateInput
+    {
+        $stored = $this->templates->get($project, $input->name);
+
+        return $input->with(['cpuThreads' => $stored->cpuThreads(), 'slots' => $stored->slots()]);
     }
 
     private function actionOf(ImportPlan $plan, string $kind, string $name): ?string

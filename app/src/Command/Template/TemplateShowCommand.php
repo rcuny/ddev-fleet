@@ -44,6 +44,8 @@ final class TemplateShowCommand extends Command
                     'tty1' => $template->tty1(),
                     'tty2' => $template->tty2(),
                     'ssh keys' => $template->sshKeys(),
+                    'cpu threads' => $template->cpuThreads() ?? 'inherits the project\'s',
+                    'slots' => $template->slots() ?? 'unlimited',
                 ]);
             });
         });
