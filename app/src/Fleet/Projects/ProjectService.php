@@ -13,6 +13,7 @@ use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\Projects\Rule\BranchName;
+use App\Fleet\Projects\Rule\Capacity;
 use App\Fleet\Projects\Rule\GitIdentity;
 use App\Fleet\Projects\Rule\GitUrl;
 use App\Fleet\Projects\Rule\IssueIdPattern;
@@ -263,6 +264,20 @@ final readonly class ProjectService
             $errors['displaySubmoduleBranch'] = $error;
         }
 
+        foreach (['cpuThreads' => 'CPU threads', 'slots' => 'Slots'] as $field => $what) {
+            if (null !== $error = Capacity::error($input->{$field})) {
+                $errors[$field] = $error;
+            } elseif (null !== $existing) {
+                // Lowering the project below a template's explicit value is refused, never silently applied.
+                foreach ($this->projects->templateCapacities($existing) as $template) {
+                    if (null !== $error = Capacity::projectBelowTemplate($what, $input->{$field}, $template['name'], $template[$field])) {
+                        $errors[$field] = $error;
+                        break;
+                    }
+                }
+            }
+        }
+
         return [$errors, $ports];
     }
 
@@ -314,5 +329,6 @@ final readonly class ProjectService
         $project->changeDisplaySubmoduleBranch($input->displaySubmoduleBranch, $now);
         $project->changeTypesense($input->typesense, $now);
         $project->changeContainerSsh($input->containerSsh, $now);
+        $project->changeCapacity($input->cpuThreads, $input->slots, $now);
     }
 }

@@ -67,6 +67,14 @@ class Project
     #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
     private bool $containerSsh = false;
 
+    /** CPU threads all instances of the project may use together; null = unlimited (capacity allotments, FLE-197). */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $cpuThreads = null;
+
+    /** Concurrent heavy runs across all templates of the project; null = unlimited. */
+    #[ORM\Column(type: Types::INTEGER, nullable: true)]
+    private ?int $slots = null;
+
     /** @var Collection<int, NamedPort> */
     #[ORM\ManyToMany(targetEntity: NamedPort::class)]
     #[ORM\JoinTable(name: 'project_port')]
@@ -250,6 +258,23 @@ class Project
     public function changeContainerSsh(bool $containerSsh, ?\DateTimeImmutable $now = null): void
     {
         $this->containerSsh = $containerSsh;
+        $this->touch($now);
+    }
+
+    public function cpuThreads(): ?int
+    {
+        return $this->cpuThreads;
+    }
+
+    public function slots(): ?int
+    {
+        return $this->slots;
+    }
+
+    public function changeCapacity(?int $cpuThreads, ?int $slots, ?\DateTimeImmutable $now = null): void
+    {
+        $this->cpuThreads = $cpuThreads;
+        $this->slots = $slots;
         $this->touch($now);
     }
 

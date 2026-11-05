@@ -78,6 +78,8 @@ final class ProjectSnapshotTest extends KernelTestCase
             'display_submodule_branch' => 'web/modules/custom',
             'typesense' => true,
             'container_ssh' => false,
+            'cpu_threads' => null,
+            'slots' => null,
             'templates' => [
                 [
                     'name' => 'full',
@@ -88,12 +90,16 @@ final class ProjectSnapshotTest extends KernelTestCase
                         'tty2' => ['tail -f log', 'ls'],
                     ],
                     'ssh_keys' => [],
+                    'cpu_threads' => null,
+                    'slots' => null,
                 ],
                 [
                     'name' => 'light',
                     'drupal_env' => null,
                     'post_deploy' => ['exec' => [], 'tty1' => [], 'tty2' => []],
                     'ssh_keys' => [],
+                    'cpu_threads' => null,
+                    'slots' => null,
                 ],
             ],
             'created_at' => '2026-10-01T08:00:00Z',
@@ -110,7 +116,7 @@ final class ProjectSnapshotTest extends KernelTestCase
         $data = ProjectSnapshot::fromProject($projects->findByName('blog') ?? self::fail())->toArray();
 
         self::assertSame(
-            ['name', 'git', 'default_branch', 'default_template', 'additional_hostnames', 'ports', 'git_bot', 'issue_id_regexp', 'display_submodule_branch', 'typesense', 'container_ssh', 'templates', 'created_at', 'updated_at'],
+            ['name', 'git', 'default_branch', 'default_template', 'additional_hostnames', 'ports', 'git_bot', 'issue_id_regexp', 'display_submodule_branch', 'typesense', 'container_ssh', 'cpu_threads', 'slots', 'templates', 'created_at', 'updated_at'],
             array_keys($data),
         );
         self::assertNull($data['default_branch']);

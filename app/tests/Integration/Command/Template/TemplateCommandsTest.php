@@ -59,7 +59,7 @@ final class TemplateCommandsTest extends KernelTestCase
         self::assertSame('web', $object['name']);
         self::assertSame('dev', $object['drupal_env']);
         self::assertSame(['exec' => ['composer install', 'drush deploy'], 'tty1' => ['npm run watch'], 'tty2' => ['tail -f var/log/dev.log']], $object['post_deploy']);
-        self::assertSame(['project', 'name', 'drupal_env', 'post_deploy', 'ssh_keys', 'created_at', 'updated_at'], array_keys($object));
+        self::assertSame(['project', 'name', 'drupal_env', 'post_deploy', 'ssh_keys', 'cpu_threads', 'slots', 'created_at', 'updated_at'], array_keys($object));
         self::assertMatchesRegularExpression('/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/', (string) $object['created_at']);
 
         self::assertSame($object, $this->json($this->cli('fleet:template:show', ['project' => 'blog', 'name' => 'web', '--format' => 'json'])));
