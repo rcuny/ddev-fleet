@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\Template;
 
+use App\Command\Support\CapacityOption;
 use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\ValidationFailed;
 use Symfony\Component\Console\Command\Command;
@@ -33,6 +34,8 @@ final class TemplateOptions
             ->addOption('tty1', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the first instance terminal (repeat for several; replaces the old list)')
             ->addOption('tty2', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the second instance terminal (repeat for several; replaces the old list)')
             ->addOption('ssh-key', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Name of an extra SSH key (the file ssh/<name>_ed25519 in the fleet home) loaded into the instance\'s ssh-agent; the project needs container_ssh (repeat for several; replaces the old list)')
+            ->addOption('cpu-threads', null, InputOption::VALUE_REQUIRED, 'CPU threads all instances of the template may use together, at most the project\'s: a number, or none to inherit the project\'s')
+            ->addOption('slots', null, InputOption::VALUE_REQUIRED, 'Concurrent heavy runs of the template, at most the project\'s slots: a number, or none for unlimited')
         ;
         if ($update) {
             $command->addOption('unset', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Clear a value: '.implode(', ', array_keys(self::UNSET)).' (repeat for several)');
@@ -75,6 +78,7 @@ final class TemplateOptions
         if ([] !== $keys) {
             $changes['sshKeys'] = $keys;
         }
+        $errors += CapacityOption::collect($input, $changes);
         if ($update) {
             $given = array_keys($changes);
             foreach ((array) $input->getOption('unset') as $word) {

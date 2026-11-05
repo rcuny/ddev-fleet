@@ -46,6 +46,8 @@ final readonly class ProjectSnapshot
             'display_submodule_branch' => $project->displaySubmoduleBranch(),
             'typesense' => $project->typesense(),
             'container_ssh' => $project->containerSsh(),
+            'cpu_threads' => $project->cpuThreads(),
+            'slots' => $project->slots(),
             'templates' => array_map(static fn (Template $template): array => [
                 'name' => $template->name(),
                 'drupal_env' => $template->drupalEnv(),
@@ -55,6 +57,8 @@ final readonly class ProjectSnapshot
                     'tty2' => $template->tty2(),
                 ],
                 'ssh_keys' => $template->sshKeys(),
+                'cpu_threads' => $template->cpuThreads(),
+                'slots' => $template->slots(),
             ], $project->templates()),
             'created_at' => $project->createdAt()->setTimezone($utc)->format(self::TIME),
             'updated_at' => $project->updatedAt()->setTimezone($utc)->format(self::TIME),

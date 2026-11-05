@@ -24,6 +24,11 @@ class HostSettings
     public const int DEFAULT_MAX_CONCURRENT_JOBS = 1;
     public const int MAX_MAX_CONCURRENT_JOBS = 8;
 
+    /** Threads kept for the OS, Docker, Caddy, php-fpm and the Fleet workers (capacity allotments, FLE-197). */
+    public const int DEFAULT_CPU_RESERVE_THREADS = 2;
+    /** Instances that may exist on the host at once (the dispatch gate's cap). */
+    public const int DEFAULT_MAX_INSTANCES = 25;
+
     /** Browser uploads: the default cap per file, 2 GiB (design spec section 17). Bigger files go in over SSH. */
     public const int DEFAULT_ASSET_UPLOAD_MAX_BYTES = 2_147_483_648;
     /** The host settings page edits the cap in MiB, up to 1 TiB. */
@@ -64,6 +69,13 @@ class HostSettings
     /** How many jobs (of different instances) the worker runs at the same time. */
     #[ORM\Column(type: Types::SMALLINT, options: ['default' => self::DEFAULT_MAX_CONCURRENT_JOBS])]
     private int $maxConcurrentJobs = self::DEFAULT_MAX_CONCURRENT_JOBS;
+
+    /** CPU threads kept back from the allotments (allocatable = threads - reserve). */
+    #[ORM\Column(type: Types::SMALLINT, options: ['default' => self::DEFAULT_CPU_RESERVE_THREADS])]
+    private int $cpuReserveThreads = self::DEFAULT_CPU_RESERVE_THREADS;
+
+    #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_MAX_INSTANCES])]
+    private int $maxInstances = self::DEFAULT_MAX_INSTANCES;
 
     /** Whether ddev-router mirrors the catalogue's public ports (and :443) inside the Docker network (FLE-29, FLE-32). */
     #[ORM\Column(type: Types::BOOLEAN, options: ['default' => true])]
@@ -241,6 +253,29 @@ class HostSettings
             throw new \InvalidArgumentException(\sprintf('The job concurrency must be between 1 and %d.', self::MAX_MAX_CONCURRENT_JOBS));
         }
         $this->maxConcurrentJobs = $jobs;
+        $this->touch($now);
+    }
+
+    public function cpuReserveThreads(): int
+    {
+        return $this->cpuReserveThreads;
+    }
+
+    public function maxInstances(): int
+    {
+        return $this->maxInstances;
+    }
+
+    public function changeCapacity(int $cpuReserveThreads, int $maxInstances, \DateTimeImmutable $now): void
+    {
+        if ($cpuReserveThreads < 0 || $cpuReserveThreads > 32767) {
+            throw new \InvalidArgumentException('The CPU reserve must be between 0 and 32767 threads.');
+        }
+        if ($maxInstances < 1) {
+            throw new \InvalidArgumentException('The instance cap must be at least 1.');
+        }
+        $this->cpuReserveThreads = $cpuReserveThreads;
+        $this->maxInstances = $maxInstances;
         $this->touch($now);
     }
 
