@@ -7,6 +7,8 @@ namespace App\Tests\Integration\Command;
 use App\Fleet\Host\Capacity\UsageSampler;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
+use App\Fleet\Shell\CommandResult;
+use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RunsFleetCommands;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -109,6 +111,87 @@ final class HostCapacityCommandTest extends KernelTestCase
         $text = $this->cli('fleet:host:capacity');
         self::assertSame(0, $text->getStatusCode());
         self::assertStringContainsString('allocatable 46', $text->getDisplay());
+    }
+
+    public function testTwoSocketBoxThroughTheCommand(): void
+    {
+        $runner = self::getContainer()->get(\App\Fleet\Shell\CommandRunner::class);
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        $runner->expect(['nproc', '--all'], new CommandResult(0, "48\n"));
+        $runner->expect(['lscpu'], new CommandResult(0, "Thread(s) per core: 2\nCore(s) per socket: 12\nSocket(s): 2\n"));
+
+        $report = $this->json($this->cli('fleet:host:capacity', ['--json' => true]));
+
+        self::assertSame(48, $report['threads']);
+        self::assertSame(24, $report['cores']);
+    }
+
+    public function testRestrictedNprocIsNotWhatTheHostHas(): void
+    {
+        $runner = self::getContainer()->get(\App\Fleet\Shell\CommandRunner::class);
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        // Nothing is scripted: a plain `nproc` (affinity-bound) is never asked, `nproc --all` is, and cpuinfo answers.
+
+        $report = $this->json($this->cli('fleet:host:capacity', ['--json' => true]));
+
+        self::assertSame(48, $report['threads']);
+        self::assertCount(1, $runner->callsMatching(['nproc', '--all']));
+        self::assertCount(1, $runner->callsMatching(['nproc']), 'only the --all call starts with nproc');
+    }
+
+    public function testStaleUsageFileIsUnknownNotZero(): void
+    {
+        $this->cli('fleet:template:create', ['project' => 'ci', 'name' => 'gates']);
+        $cg = $this->tempHome.'/test-cgroup/fleet.slice/fleet-ci.slice/fleet-ci-gates.slice';
+        mkdir($cg, 0o775, true);
+        $sampler = self::getContainer()->get(UsageSampler::class);
+        $old = new \DateTimeImmutable('-1 hour');
+        file_put_contents($cg.'/cpu.stat', "usage_usec 0\nnr_throttled 0\n");
+        $sampler->sample($old->modify('-10 seconds'));
+        file_put_contents($cg.'/cpu.stat', "usage_usec 30000000\nnr_throttled 0\n");
+        $sampler->sample($old);
+
+        $report = $this->json($this->cli('fleet:host:capacity', ['--json' => true]));
+        $ci = $report['projects'][array_search('ci', array_column($report['projects'], 'name'), true)];
+
+        self::assertNull($ci['templates'][0]['used_cores'], 'a sample older than two minutes is unknown (null), not 0');
+        self::assertSame(0, $ci['templates'][0]['busy']);
+        self::assertSame(0, $ci['unreadable_locks']);
+    }
+
+    public function testBusyByCpuActivityWithoutASlotLock(): void
+    {
+        $this->cli('fleet:template:create', ['project' => 'ci', 'name' => 'gates']);
+        $this->cli('fleet:template:create', ['project' => 'ci', 'name' => 'idle']);
+        $root = $this->tempHome.'/test-cgroup/fleet.slice';
+        $slices = [
+            'fleet-ci.slice' => $root.'/fleet-ci.slice',
+            'fleet-ci-gates.slice' => $root.'/fleet-ci.slice/fleet-ci-gates.slice',
+            'fleet-ci-idle.slice' => $root.'/fleet-ci.slice/fleet-ci-idle.slice',
+        ];
+        foreach ($slices as $dir) {
+            mkdir($dir, 0o775, true);
+        }
+        $sampler = self::getContainer()->get(UsageSampler::class);
+        $now = new \DateTimeImmutable();
+        $write = static function (array $usec) use ($slices): void {
+            foreach ($usec as $name => $value) {
+                file_put_contents($slices[$name].'/cpu.stat', "usage_usec {$value}\nnr_throttled 0\n");
+            }
+        };
+        $write(['fleet-ci.slice' => 0, 'fleet-ci-gates.slice' => 0, 'fleet-ci-idle.slice' => 0]);
+        $sampler->sample($now->modify('-10 seconds'));
+        // gates: 0.5 cores; idle: 0.1 core (< 0.2); the project slice also holds 0.3 cores of its own (no template).
+        $write(['fleet-ci-gates.slice' => 5_000_000, 'fleet-ci-idle.slice' => 1_000_000, 'fleet-ci.slice' => 9_000_000]);
+        $sampler->sample($now);
+
+        $report = $this->json($this->cli('fleet:host:capacity', ['--json' => true]));
+        $ci = $report['projects'][array_search('ci', array_column($report['projects'], 'name'), true)];
+        $byName = array_column($ci['templates'], null, 'name');
+
+        self::assertSame(1, $byName['gates']['busy'], '0.5 threads >= 0.2 and no slot lock: counted');
+        self::assertSame(0, $byName['idle']['busy'], '0.1 threads is below the threshold');
+        self::assertSame(1, $ci['busy'], 'the project pool reads the project slice minus its templates (0.9 - 0.6 = 0.3)');
     }
 
     public function testBadOptionIsUsageError(): void
