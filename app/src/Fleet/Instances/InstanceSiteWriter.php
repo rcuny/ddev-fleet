@@ -220,7 +220,7 @@ final readonly class InstanceSiteWriter
      *
      * @param list<string> $hosts validated
      *
-     * @return list<array{name: string, public: int, router: int, hosts: list<string>}>
+     * @return list<array{name: string, public: int, router: int, public_access: bool, hosts: list<string>}>
      *
      * @throws \InvalidArgumentException for a port that Caddy or the DDEV router already uses
      */
@@ -240,6 +240,7 @@ final readonly class InstanceSiteWriter
                 'name' => ConfigValue::portName($port->name()),
                 'public' => $public,
                 'router' => ConfigValue::port($port->routerPort()),
+                'public_access' => $port->isPublic(),
                 'hosts' => array_map(static fn (string $host): string => $host.':'.$public, $hosts),
             ];
         }

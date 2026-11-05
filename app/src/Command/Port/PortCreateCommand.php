@@ -29,6 +29,7 @@ final class PortCreateCommand extends Command
         $this->addArgument('name', InputArgument::REQUIRED, 'Port name, for example typesense');
         $this->addOption('public', null, InputOption::VALUE_REQUIRED, 'Port Caddy listens on (required)');
         $this->addOption('router', null, InputOption::VALUE_REQUIRED, 'Port of the DDEV router the traffic is forwarded to (required)');
+        $this->addOption('access', null, InputOption::VALUE_REQUIRED, 'gated (behind the login, default) or public (no login; typesense defaults to public)');
         JsonOutput::addOptions($this);
     }
 
@@ -41,9 +42,10 @@ final class PortCreateCommand extends Command
                 (string) $input->getArgument('name'),
                 (string) $input->getOption('public'),
                 (string) $input->getOption('router'),
+                \is_string($input->getOption('access')) ? $input->getOption('access') : null,
             ));
             $out->emit(Shapes::port($port, []), static function (JsonOutput $out) use ($port): void {
-                $out->success(\sprintf('Named port "%s" created (public %d, router %d).', $port->name(), $port->publicPort(), $port->routerPort()));
+                $out->success(\sprintf('Named port "%s" created (public %d, router %d, %s).', $port->name(), $port->publicPort(), $port->routerPort(), $port->access()));
             });
         });
     }
