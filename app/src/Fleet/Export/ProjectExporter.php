@@ -97,6 +97,7 @@ final readonly class ProjectExporter
                     'tty1' => $template->tty1(),
                     'tty2' => $template->tty2(),
                 ],
+                'ssh_keys' => $template->sshKeys(),
             ], $this->templates->forProject($project)),
             'webhooks' => $this->webhookSection($project),
             'schedules' => $this->scheduleSection($project),

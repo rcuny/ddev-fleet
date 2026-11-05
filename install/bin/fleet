@@ -141,6 +141,7 @@ FLEET_GROUPS=(
   schedule
   secret
   setup
+  ssh
   template
   tmux
   upgrade

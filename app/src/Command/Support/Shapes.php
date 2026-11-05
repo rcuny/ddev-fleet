@@ -31,6 +31,7 @@ final class Shapes
                 'tty1' => $template->tty1(),
                 'tty2' => $template->tty2(),
             ],
+            'ssh_keys' => $template->sshKeys(),
             'created_at' => $template->createdAt()->setTimezone($utc)->format(self::TIME),
             'updated_at' => $template->updatedAt()->setTimezone($utc)->format(self::TIME),
         ];

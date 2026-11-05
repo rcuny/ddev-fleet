@@ -261,7 +261,7 @@ final readonly class ProjectImporter
         }
         $before = self::byName($current['templates'] ?? []);
         foreach ($document['templates'] as $i => $template) {
-            foreach ($this->templates->validate(self::templateInput($template)) as $field => $message) {
+            foreach ($this->templates->validate(self::templateInput($template), $document['project']['container_ssh'] ?? null) as $field => $message) {
                 $errors[] = "templates[$i].".self::snake($field).': '.$message;
             }
             $items[] = isset($before[$template['name']])
@@ -524,6 +524,7 @@ final readonly class ProjectImporter
             $template['post_deploy']['exec'],
             $template['post_deploy']['tty1'],
             $template['post_deploy']['tty2'],
+            $template['ssh_keys'],
         );
     }
 

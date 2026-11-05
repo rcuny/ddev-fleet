@@ -58,6 +58,7 @@ validation messages never echo what you typed (a "does not exist" message repeat
 |---|---|
 | Name | Same as a project name (1 to 40 characters, `new` reserved), unique within the project, fixed after creation. At most 50 templates per project. |
 | Drupal environment | Optional. 1 to 64 letters, digits, `.`, `_` or `-`. It is written verbatim as `DRUPAL_ENV=<value>` into the instance's `.env`, so quotes, spaces and shell characters are refused. Blank leaves the project's own value. |
+| Extra SSH keys | Optional list of at most 8 key names (lower case letters, digits and single dashes, starting with a letter, at most 32 characters; `deploy` and `push` are the host's own keys and refused). Each name is the file `ssh/<name>_ed25519` in the fleet home (the `FLEET_HOME` of the host), which must exist, have mode `0600` and belong to the user the fleet runs as. The project needs *git over SSH in the container* turned on, otherwise the template is refused. The instance's own ssh-agent then holds these keys next to the push key, with the same lifetime, whenever it is started: a deploy, `instance:start`, a restart and the status watcher's refresh all load them again. An instance of another template of the same project gets the push key only. Never put a key's content in the database, a command line or a log: only the name is stored. A key removed from the list leaves a running agent at its next restart. To let the instance reach the target host, add the host's keys with `fleet ssh:trust` (below). |
 | Post-deploy, terminal 1, terminal 2 | Each a list of at most 50 command lines of at most 2000 characters. **One line per command:** every control character is refused (newline, tab, escape, NUL), as are Unicode line separators and format characters, and the text must be valid UTF-8. Blank lines are dropped and surrounding spaces trimmed. A line is never run through a shell: **post-deploy lines run on the host as an argument list** in the instance's checkout (`ddev composer install`, `ddev drush deploy`), quotes and backslashes group words, and an unquoted `|`, `&`, `;`, `<`, `>`, `$`, backtick, `(`, `)`, `{` or `}` is refused when the deploy runs, with a hint to write `ddev exec '...'` for a command that needs the container's shell. `[[token]]` placeholders are substituted after splitting. **Terminal lines are typed on the host** into a terminal pane (`ddev logs -f` is fine there). A failing post-deploy command fails the deploy (see [`instances-and-jobs.md`](instances-and-jobs.md)).  A whole command list is also bounded as one text, to 100 100 characters (50 lines of 2000 characters with a line break between them): the browser text box and `--post-deploy`/`--tty1`/`--tty2` refuse a longer text with the same message, so every list one of them accepts the other accepts too. |
 
 ### Named port
@@ -159,6 +160,7 @@ $ echo $?
 | `fleet template:create <project> <name> [options]` | Creates a template. |
 | `fleet template:update <project> <name> [options]` | Changes the options you give and nothing else. |
 | `fleet template:delete <project> <name> [--yes]` | Deletes a template. |
+| `fleet ssh:trust <host> [options]` | Adds the host keys of a server to the fleet's known hosts (`ssh/known_hosts`), the file each instance's `.ddev/fleet_known_hosts` is copied from at deploy, so an instance can reach that host with an extra SSH key. The keys are read with `ssh-keyscan`; nothing is trusted before you compared the fingerprints. |
 | `fleet port:list` | The named-port catalogue, with the projects using each port. |
 | `fleet port:create <name> --public=<port> --router=<port>` | Adds a port to the catalogue. |
 | `fleet port:delete <name> [--yes]` | Removes a port that no project uses. |
@@ -190,7 +192,17 @@ $ echo $?
 | `--drupal-env=<value>` | The `DRUPAL_ENV` value. |
 | `--post-deploy=<command>` | A post-deploy command. Repeat for several; the list **replaces** the old one. A multi-line text works too (`--post-deploy="$(cat commands.txt)"`): it is split into lines like the text box in the browser. |
 | `--tty1=<command>`, `--tty2=<command>` | Commands typed into the first and second terminal pane. Same rules. |
-| `--unset=<name>` | `template:update` only. Clears `drupal-env`, `post-deploy`, `tty1` or `tty2`. |
+| `--ssh-key=<name>` | The name of an extra SSH key (the file `ssh/<name>_ed25519`) for the instance's agent. Repeat for several; the list **replaces** the old one. The project needs `--container-ssh`. |
+| `--unset=<name>` | `template:update` only. Clears `drupal-env`, `post-deploy`, `tty1`, `tty2` or `ssh-keys`. |
+
+**Trust options** (`ssh:trust`):
+
+| Option | Meaning |
+|---|---|
+| `--fingerprint=<SHA256:...>` | Trust only the offered key with this fingerprint, without a prompt. Repeat for several. Use it in scripts, with a fingerprint you verified out of band. |
+| `--yes` | Trust every key the host offers without a prompt. Only when you verified them some other way. |
+
+On a terminal, `ssh:trust` lists the offered fingerprints and asks. Without a terminal, and in JSON mode, it never prompts: without `--fingerprint` or `--yes` it stops with exit code `2` and lists the fingerprints the host offers. A host the file already holds with a different key is refused. Instances pick the new keys up at their next deploy.
 
 `project:delete`, `template:delete` and `port:delete` ask for confirmation on a terminal; `--yes` (`-y`) skips the
 question. Without a terminal, and in JSON mode, they never prompt: without `--yes` they stop with exit code `2`.
@@ -244,7 +256,7 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
 ```
 
 `git_bot.mode` is `inherit`, `disabled` or `override`. A template (from `template:show`, `template:list` and
-`template:create|update`) has `project`, `name`, `drupal_env`, `post_deploy` (`exec`, `tty1`, `tty2`),
+`template:create|update`) has `project`, `name`, `drupal_env`, `post_deploy` (`exec`, `tty1`, `tty2`), `ssh_keys` (names),
 `created_at` and `updated_at`; the post-deploy commands are under the key `exec`, as in 0.x. A port has `name`,
 `public`, `router` and `projects` (the names of the projects using it). `*:delete` answers `{"deleted": "<name>"}`.
 

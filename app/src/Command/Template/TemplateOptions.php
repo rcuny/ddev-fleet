@@ -22,6 +22,7 @@ final class TemplateOptions
         'post-deploy' => ['postDeploy', []],
         'tty1' => ['tty1', []],
         'tty2' => ['tty2', []],
+        'ssh-keys' => ['sshKeys', []],
     ];
 
     public static function configure(Command $command, bool $update): void
@@ -31,6 +32,7 @@ final class TemplateOptions
             ->addOption('post-deploy', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command run inside the web container with `ddev exec` after a deploy (one line; repeat for several; the given list replaces the old one)')
             ->addOption('tty1', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the first instance terminal (repeat for several; replaces the old list)')
             ->addOption('tty2', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the second instance terminal (repeat for several; replaces the old list)')
+            ->addOption('ssh-key', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Name of an extra SSH key (the file ssh/<name>_ed25519 in the fleet home) loaded into the instance\'s ssh-agent; the project needs container_ssh (repeat for several; replaces the old list)')
         ;
         if ($update) {
             $command->addOption('unset', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Clear a value: '.implode(', ', array_keys(self::UNSET)).' (repeat for several)');
@@ -68,6 +70,10 @@ final class TemplateOptions
                 array_push($lines, ...CommandLines::normalise((string) $text));
             }
             $changes[$property] = $lines;
+        }
+        $keys = array_map(static fn (mixed $name): string => (string) $name, (array) $input->getOption('ssh-key'));
+        if ([] !== $keys) {
+            $changes['sshKeys'] = $keys;
         }
         if ($update) {
             $given = array_keys($changes);

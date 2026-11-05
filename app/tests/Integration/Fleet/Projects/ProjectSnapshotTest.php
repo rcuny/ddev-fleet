@@ -87,11 +87,13 @@ final class ProjectSnapshotTest extends KernelTestCase
                         'tty1' => ['npm run watch'],
                         'tty2' => ['tail -f log', 'ls'],
                     ],
+                    'ssh_keys' => [],
                 ],
                 [
                     'name' => 'light',
                     'drupal_env' => null,
                     'post_deploy' => ['exec' => [], 'tty1' => [], 'tty2' => []],
+                    'ssh_keys' => [],
                 ],
             ],
             'created_at' => '2026-10-01T08:00:00Z',
