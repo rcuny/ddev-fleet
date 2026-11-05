@@ -20,6 +20,14 @@ class HostSettings
     public const int ID = 1;
     public const int DEFAULT_BACKUP_RETENTION_DAYS = 14;
     public const int MAX_BACKUP_RETENTION_DAYS = 3650;
+    /** Jobs of different instances that may run at once (FLE-209). 1 = one after another, the behaviour before the setting. */
+    public const int DEFAULT_MAX_CONCURRENT_JOBS = 1;
+    public const int MAX_MAX_CONCURRENT_JOBS = 8;
+
+    /** Threads kept for the OS, Docker, Caddy, php-fpm and the Fleet workers (capacity allotments, FLE-197). */
+    public const int DEFAULT_CPU_RESERVE_THREADS = 2;
+    /** Instances that may exist on the host at once (the dispatch gate's cap). */
+    public const int DEFAULT_MAX_INSTANCES = 25;
 
     /** Browser uploads: the default cap per file, 2 GiB (design spec section 17). Bigger files go in over SSH. */
     public const int DEFAULT_ASSET_UPLOAD_MAX_BYTES = 2_147_483_648;
@@ -57,6 +65,17 @@ class HostSettings
     /** Days a database backup is kept (fleet:backup:create prunes older ones). */
     #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_BACKUP_RETENTION_DAYS])]
     private int $backupRetentionDays = self::DEFAULT_BACKUP_RETENTION_DAYS;
+
+    /** How many jobs (of different instances) the worker runs at the same time. */
+    #[ORM\Column(type: Types::SMALLINT, options: ['default' => self::DEFAULT_MAX_CONCURRENT_JOBS])]
+    private int $maxConcurrentJobs = self::DEFAULT_MAX_CONCURRENT_JOBS;
+
+    /** CPU threads kept back from the allotments (allocatable = threads - reserve). */
+    #[ORM\Column(type: Types::SMALLINT, options: ['default' => self::DEFAULT_CPU_RESERVE_THREADS])]
+    private int $cpuReserveThreads = self::DEFAULT_CPU_RESERVE_THREADS;
+
+    #[ORM\Column(type: Types::INTEGER, options: ['default' => self::DEFAULT_MAX_INSTANCES])]
+    private int $maxInstances = self::DEFAULT_MAX_INSTANCES;
 
     /** Whether ddev-router mirrors the catalogue's public ports (and :443) inside the Docker network (FLE-29, FLE-32). */
     #[ORM\Column(type: Types::BOOLEAN, options: ['default' => true])]
@@ -220,6 +239,43 @@ class HostSettings
             throw new \InvalidArgumentException(\sprintf('The backup retention must be between 1 and %d days.', self::MAX_BACKUP_RETENTION_DAYS));
         }
         $this->backupRetentionDays = $days;
+        $this->touch($now);
+    }
+
+    public function maxConcurrentJobs(): int
+    {
+        return $this->maxConcurrentJobs;
+    }
+
+    public function changeMaxConcurrentJobs(int $jobs, \DateTimeImmutable $now): void
+    {
+        if ($jobs < 1 || $jobs > self::MAX_MAX_CONCURRENT_JOBS) {
+            throw new \InvalidArgumentException(\sprintf('The job concurrency must be between 1 and %d.', self::MAX_MAX_CONCURRENT_JOBS));
+        }
+        $this->maxConcurrentJobs = $jobs;
+        $this->touch($now);
+    }
+
+    public function cpuReserveThreads(): int
+    {
+        return $this->cpuReserveThreads;
+    }
+
+    public function maxInstances(): int
+    {
+        return $this->maxInstances;
+    }
+
+    public function changeCapacity(int $cpuReserveThreads, int $maxInstances, \DateTimeImmutable $now): void
+    {
+        if ($cpuReserveThreads < 0 || $cpuReserveThreads > 32767) {
+            throw new \InvalidArgumentException('The CPU reserve must be between 0 and 32767 threads.');
+        }
+        if ($maxInstances < 1) {
+            throw new \InvalidArgumentException('The instance cap must be at least 1.');
+        }
+        $this->cpuReserveThreads = $cpuReserveThreads;
+        $this->maxInstances = $maxInstances;
         $this->touch($now);
     }
 

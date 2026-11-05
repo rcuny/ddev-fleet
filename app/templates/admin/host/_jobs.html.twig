@@ -1,0 +1,16 @@
+{% set form = forms.jobs %}
+<twig:Card data-testid="host-tab-jobs">
+    <twig:Card:Header>
+        <twig:Card:Title>Job concurrency</twig:Card:Title>
+        <twig:Card:Description>How many jobs (deploys, starts, destroys ...) of different instances run at the same time. Jobs of one instance always run one after another. The worker picks up a change on its next job.</twig:Card:Description>
+    </twig:Card:Header>
+    <twig:Card:Content class="grid gap-6">
+        {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-job-concurrency-form'}}) }}
+            {{ form_errors(form) }}
+            {{ form_row(form.jobs) }}
+            {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+        {{ form_end(form) }}
+
+        <p class="text-sm text-ink-muted">Now: <strong data-testid="host-job-concurrency-current">{{ host.maxConcurrentJobs }}</strong>. Each running job is its own process: size this to the host's CPU and memory.</p>
+    </twig:Card:Content>
+</twig:Card>

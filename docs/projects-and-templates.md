@@ -162,7 +162,8 @@ $ echo $?
 | `fleet template:delete <project> <name> [--yes]` | Deletes a template. |
 | `fleet ssh:trust <host> [options]` | Adds the host keys of a server to the fleet's known hosts (`ssh/known_hosts`), the file each instance's `.ddev/fleet_known_hosts` is copied from at deploy, so an instance can reach that host with an extra SSH key. The keys are read with `ssh-keyscan`; nothing is trusted before you compared the fingerprints. |
 | `fleet port:list` | The named-port catalogue, with the projects using each port. |
-| `fleet port:create <name> --public=<port> --router=<port>` | Adds a port to the catalogue. |
+| `fleet port:create <name> --public=<port> --router=<port> [--access=gated\|public]` | Adds a port to the catalogue. `access` is `gated` (login, default) or `public` (no login; `typesense` defaults to public). |
+| `fleet port:update <name> --access=gated\|public` | Changes who may reach the port; run `fleet port:refresh` after. |
 | `fleet port:delete <name> [--yes]` | Removes a port that no project uses. |
 | `fleet port:refresh [--project=<name>]` | Rewrites the Caddy sites of the instances so they carry their projects' ports. |
 | `fleet port:mirror [<state>]` | Shows, or with `on` or `off` switches, the in-network mirror of the named ports (the host settings' Networking tab does the same). |
@@ -183,6 +184,8 @@ $ echo $?
 | `--display-submodule-branch=<path>` | The submodule whose branch is shown. |
 | `--typesense` | Give the project a Typesense search server. On update `--no-typesense` removes it. |
 | `--container-ssh` | Give each instance its own ssh-agent with the push key for git over SSH in the web container. On update `--no-container-ssh` removes it. Off by default. |
+| `--cpu-threads=<N\|none>` | CPU threads all instances of the project may use together (a whole number of at least 1); `none` means unlimited, the default. A value above the host's usable threads is accepted and capped at run time. Lowering it below a template's own value is refused, naming the template. |
+| `--slots=<N\|none>` | Concurrent heavy runs across the project's templates (at least 1); `none` means unlimited. Lowering it below a template's own slots is refused, naming the template. |
 | `--unset=<name>` | `project:update` only. Clears `default-branch`, `default-template`, `hostnames`, `ports`, `issue-id-regexp` or `display-submodule-branch`. Repeat for several. Combining `--unset=x` with a new value for `x` is refused. |
 
 **Template options** (`template:create` and `template:update`):
@@ -193,6 +196,8 @@ $ echo $?
 | `--post-deploy=<command>` | A post-deploy command. Repeat for several; the list **replaces** the old one. A multi-line text works too (`--post-deploy="$(cat commands.txt)"`): it is split into lines like the text box in the browser. |
 | `--tty1=<command>`, `--tty2=<command>` | Commands typed into the first and second terminal pane. Same rules. |
 | `--ssh-key=<name>` | The name of an extra SSH key (the file `ssh/<name>_ed25519`) for the instance's agent. Repeat for several; the list **replaces** the old one. The project needs `--container-ssh`. |
+| `--cpu-threads=<N\|none>` | CPU threads all instances of the template may use together, at most the project's value when it has one; `none` means the template inherits the project's. |
+| `--slots=<N\|none>` | Concurrent heavy runs of the template, at most the project's `--slots` when it has one; `none` means unlimited. |
 | `--unset=<name>` | `template:update` only. Clears `drupal-env`, `post-deploy`, `tty1`, `tty2` or `ssh-keys`. |
 
 **Trust options** (`ssh:trust`):
@@ -224,7 +229,7 @@ Template "web" created in project "blog".
 $ fleet project update blog --default-template=web --issue-id-regexp='(?:ABC|XYZ)-\d{1,6}'
 Project "blog" updated.
 $ fleet port create typesense --public=9108 --router=8108
-Named port "typesense" created (public 9108, router 8108).
+Named port "typesense" created (public 9108, router 8108, public).
 $ fleet project update blog --port=typesense
 ```
 
@@ -243,6 +248,8 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
     "display_submodule_branch": null,
     "typesense": false,
     "container_ssh": false,
+    "cpu_threads": null,
+    "slots": null,
     "templates": [
         {
             "name": "web",
@@ -256,7 +263,7 @@ A script reads a project with `--json`. Keys are the 0.x names; times are UTC; a
 ```
 
 `git_bot.mode` is `inherit`, `disabled` or `override`. A template (from `template:show`, `template:list` and
-`template:create|update`) has `project`, `name`, `drupal_env`, `post_deploy` (`exec`, `tty1`, `tty2`), `ssh_keys` (names),
+`template:create|update`) has `project`, `name`, `drupal_env`, `post_deploy` (`exec`, `tty1`, `tty2`), `ssh_keys` (names), `cpu_threads` and `slots` (numbers or null),
 `created_at` and `updated_at`; the post-deploy commands are under the key `exec`, as in 0.x. A port has `name`,
 `public`, `router` and `projects` (the names of the projects using it). `*:delete` answers `{"deleted": "<name>"}`.
 

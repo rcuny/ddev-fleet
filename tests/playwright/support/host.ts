@@ -55,6 +55,7 @@ export const TAB_LABELS: Record<string, string> = {
   network: 'Networking',
   certificates: 'Certificates',
   uploads: 'Uploads',
+  jobs: 'Jobs',
   backups: 'Backups',
 };
 

@@ -29,6 +29,7 @@ use App\Form\Host\HostBackupRetentionType;
 use App\Form\Host\HostClaudeTokenType;
 use App\Form\Host\HostGeneralType;
 use App\Form\Host\HostGitIdentityType;
+use App\Form\Host\HostJobConcurrencyType;
 use App\Form\Host\HostNotificationType;
 use App\Form\Host\HostPortMirrorType;
 use App\Form\Host\HostUploadLimitType;
@@ -60,6 +61,7 @@ final class HostSettingsController extends AbstractController
         'network' => 'Networking',
         'certificates' => 'Certificates',
         'uploads' => 'Uploads',
+        'jobs' => 'Jobs',
         'backups' => 'Backups',
     ];
 
@@ -310,6 +312,31 @@ final class HostSettingsController extends AbstractController
         return $this->back('backups');
     }
 
+    #[Route('/admin/host/jobs', name: 'settings_jobs', methods: ['POST'])]
+    public function jobs(Request $request): Response
+    {
+        if (null === $host = $this->settings->get()) {
+            return $this->notInitialised();
+        }
+        $form = $this->form('jobs', $host);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $jobs = $form->get('jobs')->getData();
+            if (!\is_int($jobs) || $jobs < 1 || $jobs > HostSettings::MAX_MAX_CONCURRENT_JOBS) {
+                $form->get('jobs')->addError(new FormError(\sprintf('Enter a number from 1 to %d.', HostSettings::MAX_MAX_CONCURRENT_JOBS)));
+            } else {
+                $host->changeMaxConcurrentJobs($jobs, $this->clock->now());
+                $this->settings->save($host);
+                $this->addFlash('success', 'Job concurrency saved.');
+
+                return $this->back('jobs');
+            }
+        }
+
+        return $this->show('jobs', $host, $form);
+    }
+
     #[Route('/admin/host/backups/retention', name: 'settings_backup_retention', methods: ['POST'])]
     public function retention(Request $request): Response
     {
@@ -381,6 +408,7 @@ final class HostSettingsController extends AbstractController
             ]),
             'network' => $this->createForm(HostPortMirrorType::class, ['enabled' => $host->portMirror()], ['action' => $this->generateUrl('settings_network')]),
             'uploads' => $this->createForm(HostUploadLimitType::class, ['megabytes' => intdiv($host->assetUploadMaxBytes(), 1_048_576)], ['action' => $this->generateUrl('settings_uploads')]),
+            'jobs' => $this->createForm(HostJobConcurrencyType::class, ['jobs' => $host->maxConcurrentJobs()], ['action' => $this->generateUrl('settings_jobs')]),
             default => $this->createForm(HostBackupRetentionType::class, ['days' => $host->backupRetentionDays()], ['action' => $this->generateUrl('settings_backup_retention')]),
         };
     }

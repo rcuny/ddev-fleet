@@ -76,6 +76,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
     protected SecretStore $secretStore;
     protected TokenRenderer $secretRenderer;
     protected DeployWorkflow $workflow;
+    protected InstanceHostnames $instanceHostnames;
 
     /** @var \ArrayObject<int, DeployStep> */
     protected \ArrayObject $steps;
@@ -105,17 +106,32 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $hostnames,
             new LockFactory(new FlockStore($this->paths->locksDir())),
             new AdminGroup('fleet-admins'),
+            new ProjectRepository($this->em),
         );
         $this->agent = new \App\Fleet\Ssh\InstanceSshAgent($this->runner, $this->paths, new \App\Fleet\Ssh\ExtraSshKey($this->paths), $this->templates);
         $this->tmux = new Tmux($this->runner, $this->paths, '/opt/ddev-fleet/app/bin/console');
         $this->teardown = new Teardown($this->paths, $this->ddev, $this->sites, $this->tmux, $this->agent);
         $this->feed = new JobFeed($this->createStub(HubInterface::class), new NullLogger());
-        $this->workflow = new DeployWorkflow(
+        $this->instanceHostnames = $hostnames;
+        $this->workflow = $this->workflowWith();
+        $this->project = new ProjectRepository($this->em)->findByName('acme') ?? $this->saveProject();
+        $this->template = $this->saveTemplate('full', []);
+    }
+
+    /**
+     * A deploy workflow wired like production; the capacity collaborators are optional (null = a host without them).
+     */
+    protected function workflowWith(?\App\Fleet\Instances\InstanceCgroupWriter $cgroup = null, ?\App\Fleet\Instances\InstanceCapacityEnvironment $capacity = null): DeployWorkflow
+    {
+        $hostnames = $this->instanceHostnames;
+        $secrets = $this->secretStore;
+
+        return new DeployWorkflow(
             $this->instances,
             $this->templates,
             new GitClient($this->runner, $this->paths),
             $this->ddev,
-            new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $secrets, $this->masker, new TypesenseEnvironment(new TypesenseKeys($secrets), new NamedPortRepository($this->em), $hostnames, $this->masker)),
+            new InstanceConfigWriter($hostnames, new GitIdentityResolver(new DomainGitIdentity($hostnames)), $secrets, $this->masker, new TypesenseEnvironment(new TypesenseKeys($secrets), new NamedPortRepository($this->em), $hostnames, $this->masker), $capacity),
             new DrupalSettingsWriter(),
             new ContextTokens($hostnames),
             $this->secretRenderer = new TokenRenderer($secrets, $this->masker),
@@ -127,10 +143,8 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->feed,
             $this->clock,
             $this->steps,
+            $cgroup,
         );
-
-        $this->project = new ProjectRepository($this->em)->findByName('acme') ?? $this->saveProject();
-        $this->template = $this->saveTemplate('full', []);
     }
 
     protected function tearDown(): void

@@ -13,7 +13,7 @@ use PHPUnit\Framework\TestCase;
 final class HostCommandSeamTest extends TestCase
 {
     /** The single class that may start processes. */
-    private const PROCESS_OWNER = 'src/Fleet/Shell/ProcessCommandRunner.php';
+    private const PROCESS_OWNERS = ['src/Fleet/Shell/ProcessCommandRunner.php', 'src/Fleet/Shell/DetachedProcess.php'];
 
     /** Concrete runners may be referenced only inside this directory (the factory lives there). */
     private const RUNNER_DIR = 'src/Fleet/Shell/';
@@ -24,7 +24,7 @@ final class HostCommandSeamTest extends TestCase
     {
         $offenders = [];
         foreach (self::sources() as $relative => $code) {
-            if (self::PROCESS_OWNER === $relative) {
+            if (\in_array($relative, self::PROCESS_OWNERS, true)) {
                 continue;
             }
             foreach (self::processViolations($code) as $violation) {

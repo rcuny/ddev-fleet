@@ -18,10 +18,10 @@ Everything in this directory (the roles, `site.yml` and the scoped playbooks bes
 - **0.x hosts only.** Run a role against a live 0.x host only through the scoped playbooks, `--check --diff` first;
   never the full `site.yml` against a live host (its `fleet_service` role rewrites the checkout's git remote).
   See the repository's `CLAUDE.md` and `docs/v0/` for the 0.x procedures.
-- **Host hardening stays an operator decision.** The 1.x installer never touches `sshd`, the firewall (UFW, iptables),
+- **Host hardening stays an operator decision.** The 1.x installer touches nothing of the kind unless asked with `--harden`; it never touches `sshd`, the firewall (UFW, iptables),
   fail2ban or unattended-upgrades: that is deliberate, because a mistake locks you out of a remote host. The
   hardening roles here (`network_hardening`, `security_hardening` and `hardening.yml`) describe what a 0.x host
-  applies; a 1.x hardening procedure is documented with the host operations milestone (M0.12).
+  applies; the 1.x replacement is the opt-in `install.sh --harden` ([`../docs/installation.md`](../docs/installation.md), section 8).
 
 The roles are kept as the reference for what the 1.x installer and later milestones re-implement, and are removed
 once the 0.x line is retired.

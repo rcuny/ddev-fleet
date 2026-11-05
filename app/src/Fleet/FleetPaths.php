@@ -216,6 +216,16 @@ final readonly class FleetPaths
     }
 
     /**
+     * The 404 catch-all of the named ports (unknown host names), shared by every instance: the same site address in
+     * two files is a Caddy error. It matches the `instances/*.sites` import; no instance id can be named like it
+     * (ids contain `--`).
+     */
+    public function portsFallbackFile(): string
+    {
+        return $this->caddyInstancesDir().'/ports-fallback.sites';
+    }
+
+    /**
      * The names with a valid certificate in Caddy's storage (one per line), written by the root helper (`apply caddy`,
      * the installer): the app cannot read Caddy's storage.
      */

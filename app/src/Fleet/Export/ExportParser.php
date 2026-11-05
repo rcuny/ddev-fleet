@@ -126,7 +126,7 @@ final class ExportParser
         $ports = [];
         foreach ($this->items($value, 'ports', ProjectService::MAX_PORTS) as $i => $item) {
             $path = "ports[$i]";
-            if (!$this->keys($item, $path, ['name', 'public', 'router'])) {
+            if (!$this->keys($item, $path, ['name', 'public', 'router'], ['access'])) {
                 continue;
             }
             \assert(\is_array($item));
@@ -134,6 +134,7 @@ final class ExportParser
                 'name' => $this->string($item['name'], "$path.name") ?? '',
                 'public' => $this->int($item['public'], "$path.public"),
                 'router' => $this->int($item['router'], "$path.router"),
+                'access' => isset($item['access']) ? $this->string($item['access'], "$path.access") : null,
             ];
         }
 

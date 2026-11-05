@@ -44,6 +44,22 @@ final readonly class ProjectRepository
     }
 
     /**
+     * The explicit capacity values of a project's templates (read from the database, never the loaded collection).
+     *
+     * @return list<array{name: string, cpuThreads: int|null, slots: int|null}>
+     */
+    public function templateCapacities(Project $project): array
+    {
+        /** @var list<array{name: string, cpuThreads: int|null, slots: int|null}> $rows */
+        $rows = $this->em
+            ->createQuery(\sprintf('SELECT t.name AS name, t.cpuThreads AS cpuThreads, t.slots AS slots FROM %s t WHERE t.project = :project ORDER BY t.name ASC', Template::class))
+            ->setParameter('project', $project)
+            ->getArrayResult();
+
+        return $rows;
+    }
+
+    /**
      * How many templates every project has, in one query (the project list page): project name => count. A project
      * without templates is absent.
      *

@@ -10,6 +10,7 @@ use App\Domain\Instance\InstanceState;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\Ddev\DdevProject;
 use App\Fleet\Ddev\DdevUnavailable;
+use App\Fleet\Host\Capacity\UsageSampler;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobPruner;
 use App\Fleet\Jobs\JobReaper;
@@ -23,6 +24,7 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * `docker stats` every 30 s (memory), the job reaper every tick and the retention prune once a day. It only moves
  * instances that are running, stopped or unknown: deploying, destroying and failed belong to a job or to a person.
  * Every InstanceSshAgent::REFRESH_SECONDS it also revives and re-keys the ssh-agents of opted-in instances (FLE-167).
+ * Every USAGE_SECONDS it samples the CPU use of the capacity slices from cgroup `cpu.stat` (FLE-200).
  * When ddev does not answer, those instances become `unknown`, never `stopped`.
  */
 final class InstanceWatcher
@@ -30,11 +32,13 @@ final class InstanceWatcher
     public const int LIST_SECONDS = 10;
     public const int RAM_SECONDS = 30;
     public const int PRUNE_SECONDS = 86400;
+    public const int USAGE_SECONDS = 10;
 
     private ?\DateTimeImmutable $listedAt = null;
     private ?\DateTimeImmutable $measuredAt = null;
     private ?\DateTimeImmutable $prunedAt = null;
     private ?\DateTimeImmutable $agentsAt = null;
+    private ?\DateTimeImmutable $sampledAt = null;
 
     /** @var array<string, int> */
     private array $ram = [];
@@ -49,6 +53,7 @@ final class InstanceWatcher
         private readonly int $retentionDays = 90,
         private readonly ?InstanceSshAgent $agent = null,
         private readonly LoggerInterface $logger = new NullLogger(),
+        private readonly ?UsageSampler $usage = null,
     ) {
     }
 
@@ -78,6 +83,16 @@ final class InstanceWatcher
         if (null !== $this->agent && (null === $this->agentsAt || self::due($this->agentsAt, $now, InstanceSshAgent::REFRESH_SECONDS))) {
             $this->superviseAgents();
             $this->agentsAt = $now;
+        }
+
+        if (null !== $this->usage && (null === $this->sampledAt || self::due($this->sampledAt, $now, self::USAGE_SECONDS))) {
+            // FLE-200: the CPU use of the capacity slices; a failure here must not stop the state updates.
+            try {
+                $this->usage->sample($now);
+            } catch (\Throwable $e) {
+                $this->logger->warning('The capacity usage could not be sampled.', ['exception' => $e]);
+            }
+            $this->sampledAt = $now;
         }
 
         return $changed;

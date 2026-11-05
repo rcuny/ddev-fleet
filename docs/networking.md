@@ -85,8 +85,14 @@ Only Caddy listens on the Internet. Everything else is on loopback or inside the
 
 For every instance of a project that has a named port, Caddy serves one more site per host: `<host>:<public port>`
 (the primary host and every alias). It is the instance's own site again: identity headers stripped, Authelia's
-`forward_auth` first, then `reverse_proxy 127.0.0.1:<router port>`. A named port is never reachable without a session
-that may open the instance.
+`forward_auth` first, then `reverse_proxy 127.0.0.1:<router port>`. A **gated** port (the default) is never reachable
+without a session that may open the instance.
+
+**Public ports (FLE-216).** A port with access `public` skips the `forward_auth` and the group check (identity headers
+are still stripped, HSTS and `-Server` stay). It is for a service the browser calls cross-origin: the CORS preflight
+(`OPTIONS`) carries no cookie, so behind Authelia it gets a 302 and the call is blocked. `typesense` (9108) is public by
+default, as in 0.x; its search-only key is what protects it. `ts-dashboard` and `playwright` stay gated. Change it with
+`fleet port:update <name> --access=gated|public`, then `fleet port:refresh` to rewrite the sites.
 
 **Host header.** The browser sends `Host: <host>:<public port>`. Caddy forwards the request as it is to the router
 port, and the router (Traefik) picks the instance from the `Host` rules DDEV wrote for it. Check that a request with

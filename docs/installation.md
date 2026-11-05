@@ -56,6 +56,11 @@ plan and changes nothing.
 | `--repo-url=<url\|path>` | Git remote (or a bundle or path readable by the `fleet` user) to install from. Default: the public GitHub mirror. |
 | `--skip-dns-check` | Do not compare the DNS records with this host's addresses (for example behind NAT or a CDN). |
 | `--no-shell-profile` | Do not install the shell profile (step 35). Default: installed. |
+| `--harden` | **Opt-in** host hardening (section 8): key-only SSH with `AllowUsers`, fail2ban, a firewall with a dead-man's switch, LLMNR off, sysctl, auditd, `/tmp` mount options (only with `--harden-tmp`). Off by default; once enabled, later runs and upgrades re-apply it. |
+| `--ssh-allow-user=<name>` | With `--harden`, repeatable: an account allowed to log in over SSH. Default: the account that ran `sudo`. The run is refused when that account is not in the list. |
+| `--trusted-ip=<ip\|cidr>` | With `--harden`, repeatable: an address that fail2ban never bans and the firewall always lets through. |
+| `--harden-tmp` | With `--harden`: also mount `/tmp` with `nosuid,nodev,noexec` at the next boot (see section 8: it can break tools that run files from `/tmp`, and it has no dead-man's switch). Stored; later runs keep it. |
+| `--firewall-grace=<minutes>` | With `--harden`: how long the dead-man's switch waits for your confirmation before it turns the firewall off (2 to 120, default 10). |
 | `--preflight` | Only check the host and change nothing; works without root. Prints one line per finding, `BLOCK`, `WARN` or `INFO <id>: <message>`, and exits 0, or 3 when anything blocks. Checks: free disk on `/opt`, `/srv/fleet` and `/var`, the length of every existing instance id, that Docker and DDEV answer, `fleet.env`, the supported OS, the required packages and that the repository answers. Run it from a checkout: `bash install/run.sh --preflight --domain=<fqdn>`. A normal run does the same checks first and stops before step 10 on a `BLOCK`. |
 | `--dry-run` | Print the plan, change nothing. Works without root. |
 | `--help` | Print the usage text. |
@@ -80,7 +85,7 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | 50 caddy | Caddy from its repository plus a **custom build with the OVH DNS module**; the package binary is diverted so `apt` never replaces the custom one. A re-run refreshes the custom build when it is older than the packaged Caddy. The sandbox drop-in is installed. |
 | 60 authelia | Authelia from its repository, its three secrets (generated once), the tmpfiles mask (see Troubleshooting), and a `users.yml` with one disabled placeholder user (Authelia 4.39 refuses an empty user list; the placeholder can never sign in and disappears when the first real user exists). |
 | 70 env | `/etc/ddev-fleet/fleet.env` and `mercure.env`: only missing keys are added, secrets are generated once. |
-| 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. |
+| 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. The Tailwind CLI comes from a host cache (`/srv/fleet/cache/tailwind/<version>/`, downloaded once with retries and a SHA-256 check, only the current version kept), so a re-run or upgrade works while GitHub releases are unreachable; if the cache cannot be filled the build downloads the binary itself. |
 | 85 app init | Migrations, the queue transport, `fleet:host:init` (domain, ACME email). |
 | 90 privileged | The root helper, its single sudoers line and the `fleet` command. |
 | 95 units | The `fleet` php-fpm pool, the job worker `fleet-worker@.service`, the status watcher `fleet-status.service`, `fleet-boot.service`, the standalone Mercure hub (pinned release, sha256-checked) and its unit. |
@@ -99,6 +104,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | user `fleet` | home `/home/fleet`, group `docker` | Runs php-fpm, the workers, DDEV and the CLI. |
 | `/opt/ddev-fleet` | `fleet:fleet` 0755 | The git checkout of the product. Stays `fleet`-owned. |
 | `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/` (0750; `fleet.sqlite` and `queue.sqlite`, 0644 inside it), `locks/`, `logs/`, `assets/`, `instances/` (0750). |
+| `/srv/fleet/cache/tailwind` | `fleet:fleet` | The Tailwind CLI binary of the configured version (plus its `.sha256`), seeded into `app/var/tailwind/` by step 80. Safe to delete; leave it out of backups. |
 | `/srv/fleet/backups` | `fleet:fleet` 0700 | Database backups written by `fleet-backup.timer` (files 0600; see "Backup and restore" in section 5). |
 | `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
 | `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
@@ -128,7 +134,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | `caddy` | 80, 443 | The only Internet-facing process; sandboxed by a drop-in. Reads `/etc/caddy/fleet.env`. |
 | `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
 | `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
-| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Jobs of different instances therefore run one after another. |
+| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Concurrency comes from this one worker instead: with **Jobs at the same time** above 1 (host settings, Jobs tab, or `fleet fleet:host:job-concurrency N`; default 1) it starts each job as a child process (`fleet:job:work`) and keeps consuming, so jobs of different instances overlap while jobs of one instance stay in order. Each running job is a separate, detached process: when the worker leaves (hourly time limit, `systemctl restart`, an upgrade) the jobs it started keep running (`KillMode=process`) and the new worker counts them from their `running` job rows, so the limit and the one-job-per-instance rule hold across restarts. Only a reboot or killing the job's own process interrupts it (the reaper then marks it `interrupted`). |
 | `fleet-scheduler` | | The schedule ticker (`messenger:consume scheduler_default`, one tick every 30 seconds): fires the due schedules and queues their jobs for `fleet-worker@1`. See `docs/schedules.md`. |
 | `fleet-status` | | The status watcher (`fleet:instance:watch --interval=10`): keeps instance states and memory true to `ddev list` and `docker stats`, reaps dead jobs and prunes old ones. Restarted by an upgrade. |
 | `fleet-boot` | | A oneshot, enabled but never started by the installer: after a reboot it runs `fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict`, which starts every instance, stopped ones too (as 0.x did). |
@@ -353,7 +359,9 @@ The remaining commands exist mostly for the installer:
 | `fleet:host:ovh-credentials [--endpoint=ovh-eu\|ovh-ca\|ovh-us]` | DNS mode only: replace the OVH application key, secret and consumer key (hidden prompts, or three lines on standard input), then install them through the root helper and reload Caddy. Nothing is stored unless all three are valid. |
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:host:tls-check` | Check Caddy's certificate health (Let's Encrypt rate limits and failed challenges in the last hour, certificates issued in the last 7 days, expiry of the host's certificate) and write the status file. Run every 10 minutes by `fleet-tls-check.timer`. |
+| `fleet:host:slices [--print]` | Install the CPU slices (`fleet.slice`, `fleet-<project>.slice`, `fleet-<project>-<template>.slice`) for the CPU allotments of the projects and templates through the root helper (`apply slices`). A change of a limit or of the set of projects and templates does this on its own; run it once after an upgrade to a release with slices, or to repair a host. `--print` shows the slice list and installs nothing. |
 | `fleet:host:tls-status [--json]` | Print the last certificate check. Exit code 0 ok, 1 warning (failed solves, expiry under 14 days, no check yet or one older than an hour), 2 error (Let's Encrypt is rate limiting, or a certificate has expired). The same status drives the banner and the Host page's Certificates tab. |
+| `fleet:host:capacity [--json] [--reserve=N] [--max-instances=N]` | Print the host's threads, cores and RAM, the CPU reserve, the allocatable threads, the effective CPU limit, live use and busy slots of every project and template, and the instance count against its cap. `--reserve` and `--max-instances` are what-ifs, never saved. Information only: exit code 0. The JSON is schema 1 (additive changes only). `busy` of a pool is the larger of the lock files held now (read from `/proc/locks`, nothing is ever locked to ask) and 1 when the pool's slice used at least 0.2 threads over the last sample, so an agent without a slot lock still counts (the `_project` pool reads the project slice minus its template slices); `unreadable_locks` counts lock files or directories that could not be read. `used_cores: null` means unknown: no sample yet, a sample older than 2 minutes (the status watcher is down) or no slice (nothing ran there); after a watcher restart the first value needs 10 to 20 seconds. Threads come from `nproc --all`, not the affinity-bound `nproc`. |
 | `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
 | `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity, schema version and whether it was sealed by this host's secret key, read-only (see below). |
 | `fleet:backup:restore <file> [--yes] [--accept-key-mismatch] [--json]` | Restore a backup into the live databases: verified first, swapped atomically, the previous database kept as `*.pre-restore-*`, then migrated; refuses while jobs run, while a unit that writes the databases is active, on a secret key mismatch, or as the wrong user (see below). |
@@ -494,7 +502,7 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
 
 - **Wildcard DNS.** Add one record `*.<domain>` (A, and AAAA if you use IPv6) pointing at this host. Every instance is
   served at `https://<id>.<domain>`; without the record the deploy works and the site does not open.
-- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one), `fleet-status` keeps the
+- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one; it starts child processes when concurrency is above 1), `fleet-status` keeps the
   instance states true, and `fleet-boot` starts the instances one at a time after a reboot. `systemctl list-units` should show none of them as failed.
 - **Certificates.** Each instance site gets **its own certificate** from Caddy (HTTP-01, or DNS-01 in `ovh_dns` mode). Let's
   Encrypt limits how many certificates one registered domain may obtain per week, so deploying dozens of new instances in
@@ -513,8 +521,13 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   cause and run it again. Never install the new Authelia configuration by other means before the sites are rewritten:
   `fleet port:refresh` rewrites the sites on demand. A user group starting with `fleet-project-` is reserved for this and
   refused.
-- **Upgrading while a job runs.** Re-running the installer restarts the workers when the code changed. A job running at that
-  moment is marked `interrupted` (its worker is gone) and can be retried; wait for running deploys before upgrading when you can.
+- **Upgrading while a job runs.** Jobs run as detached child processes, so a worker restart does not stop them. But a child
+  that is still running while the installer swaps the code, the dependencies and the database (migrations) runs on against
+  the new code, which can fail it. The installer therefore waits before that swap, up to 300 seconds, for running jobs to
+  finish (`FLEET_INSTALL_JOB_WAIT=<seconds>` in the installer's environment changes the limit, `0` skips the wait); jobs
+  still running after that are left to finish. Upgrade at an idle moment when you can and retry any job that failed. A queued
+  job whose child never claimed it (the child died, for instance while the worker restarted) is queued again after about a
+  minute.
 - **Root-owned leftovers.** A container can leave files owned by root in an instance checkout. Destroy then fails with the
   exact `sudo rm -rf <directory>` line; run it and retry the job.
 - **No rate limit on `/_components`.** The live components endpoint is open to every signed-in user, each component checks
@@ -539,10 +552,17 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   signs everyone out, so such a change is announced as that.
 - **The root helper.** The app never runs as root. To install a rendered Caddy or Authelia configuration it writes
   the files into `/srv/fleet/staging/<target>/` and runs `sudo -n /usr/local/libexec/fleet/apply <target>`. The
-  sudoers file contains exactly one line, allowing `apply caddy` and `apply authelia` for `fleet`, with the
-  arguments matched exactly. The helper pins the staging directory, rejects symlinks, hard links and oversized or
+  sudoers file contains exactly one line, allowing `apply caddy`, `apply authelia` and `apply slices` for `fleet`,
+  with the arguments matched exactly. The helper pins the staging directory, rejects symlinks, hard links and oversized or
   foreign files, validates the files with the real Caddy or Authelia binary running as their own users, installs
   atomically, rolls back if the reload fails, and deletes the staged files afterwards.
+- **CPU slices (`apply slices`).** The staged `slices.json` is data, a list of `{unit, quota_percent|null}`, never
+  config text. The helper accepts only unit names matching `^fleet(-[a-z0-9_]+){0,2}\.slice$` (every parent listed,
+  `fleet.slice` always), refuses duplicates, more than 500 entries, and any quota that is not an integer from 100 to
+  `nproc --all` x 100. It then writes the unit files and `10-fleet-quota.conf` drop-ins itself (nothing staged is
+  copied), removes only the `fleet*.slice` units it wrote earlier (an ownership marker line), reloads systemd, starts
+  every slice and applies each quota to the running slice with `systemctl set-property` in runtime mode. Containers are not
+  restarted. On failure the previous files and quotas are put back.
 - **Be honest about what that buys.** `fleet` is a member of the `docker` group, which is root-equivalent on the
   host. The helper prevents accidents and half-applied configurations; it is **not a security boundary** against
   a compromised `fleet` account or a compromised app. This is why php-fpm's unit sets `NoNewPrivileges=no`
@@ -555,14 +575,81 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
   secrets do not appear in command-line arguments.
 - **The Mercure hub** listens on loopback only and is reachable only through Caddy.
 
-## 8. What the installer deliberately does not touch
+## 8. Host hardening (opt-in) and what the installer leaves alone
 
-The installer **never changes `sshd`, the firewall (`ufw`, `iptables`, `nftables`), `fail2ban` or unattended-upgrades
-settings**: a mistake there locks you out of a remote host, so host hardening is the operator's decision. Do it
-yourself, and do it carefully (keep a second SSH session open while you test). At the least, allow SSH, 80 and 443
-and deny the rest, and remember that Docker publishes container ports by editing the firewall itself. A
-hardening guide for 1.x is planned with the host operations milestone. The Ansible roles in `ansible/` describe the
-0.x layout and are not used by this installer (see [`../ansible/LEGACY-0x.md`](../ansible/LEGACY-0x.md)).
+A plain install or upgrade **never changes `sshd`, the firewall (`ufw`, `iptables`, `nftables`), `fail2ban` or
+unattended-upgrades settings**: a mistake there locks you out of a remote host, so hardening is something you ask for,
+host by host. The Ansible roles in `ansible/` describe the 0.x layout and are not used (see
+[`../ansible/LEGACY-0x.md`](../ansible/LEGACY-0x.md)); `--harden` is their 1.x replacement. Unattended-upgrades is
+already enabled on 1.x hosts and untouched; Docker's `daemon.json` (live-restore restarts Docker) is not part of it.
+
+### Turning it on
+
+Open a **second** SSH session first and keep it open. Then preview, and apply:
+
+```bash
+sudo bash install/install.sh --dry-run --domain=fleet.example.com --harden --trusted-ip=203.0.113.7   # prints every file and command
+sudo bash install/install.sh --domain=fleet.example.com --harden --trusted-ip=203.0.113.7
+```
+
+(use the same `--domain`, `--ref` and other flags as for the install; `--dry-run` changes nothing). The choices
+(`--ssh-allow-user`, `--trusted-ip`, grace period) are stored in `/etc/ddev-fleet/hardening.conf`. While that file
+says `ENABLED=1`, every later run of the installer, so `sudo fleet upgrade` and `ddev push-product`, re-applies the same
+settings without `--harden`. A list flag replaces that list; `--harden` alone keeps what was stored.
+
+### What it does
+
+| Part | Result |
+|---|---|
+| SSH | Drop-in `/etc/ssh/sshd_config.d/10-fleet-hardening.conf`: `PasswordAuthentication no`, `KbdInteractiveAuthentication no`, `PermitRootLogin prohibit-password`, `MaxAuthTries 3`, `AllowUsers <list>`. The drop-in is checked with `sshd -t` before it is installed and the whole configuration after; a failure restores the previous state. The daemon is reloaded (running sessions survive). Before anything is written the run is refused when the account you are using is not in the allow list, **has no usable public key** (it would be locked out by `PasswordAuthentication no`), or when **another account that has an `authorized_keys` file** (`/home/*`, `/root`: colleagues on a shared host) is not in the list: add each one with `--ssh-allow-user`. After the reload the installer reads `sshd -T` and warns loudly when the drop-in is not the effective configuration. |
+| fail2ban | The `sshd` jail with `maxretry = 5`, `findtime = 10m`, `bantime = 1h` and `ignoreip` = localhost + your `--trusted-ip` values + the address of your current SSH session when the installer can see it (`SSH_CONNECTION`; `sudo` may hide it, so pass `--trusted-ip`) (`/etc/fail2ban/jail.d/fleet-sshd.conf`, `backend = systemd`). |
+| Firewall | UFW: deny incoming, allow outgoing, allow SSH (the daemon's real ports), 80, 443, the `--trusted-ip` addresses (everything) and the **named ports Fleet reports** (`fleet port:firewall`, from the database). A guard block in `/etc/ufw/after.rules` (`DOCKER-USER`) keeps Docker's own rules from bypassing it; it assumes DDEV's router listens on loopback only and refuses to enable the firewall when `router_bind_all_interfaces` is true. |
+| Named-port sync | `fleet-firewall-sync.timer` runs `/usr/local/sbin/fleet-firewall-sync` every minute as root: a named port added to a project in Fleet is opened, one no project uses any more is closed, within a minute. It touches only the ports it opened itself (listed in `/var/lib/ddev-fleet/firewall-ports`), never SSH, 80, 443 or your own rules, and changes nothing when Fleet does not answer. The `fleet` user gets no new privilege. |
+| Dead-man's switch | When the firewall is enabled, `fleet-firewall-deadman.timer` turns it **off** again after the grace period unless you confirm (below). On every boot `fleet-firewall-deadman-bootcheck.service` does the same until you have confirmed once. |
+| LLMNR | `LLMNR=no` for systemd-resolved (`/etc/systemd/resolved.conf.d/fleet-llmnr.conf`): port 5355 stops listening. |
+| Kernel, audit, `/tmp` | `/etc/sysctl.d/60-fleet-hardening.conf` (`kernel.dmesg_restrict`, `log_martians`; no `ip_forward` or `rp_filter` change, Docker needs them); auditd with scoped watch rules (`/etc/audit/rules.d/50-fleet.rules`); `/tmp` is **left alone** unless you pass `--harden-tmp`. |
+
+**About `--harden-tmp`.** On Debian 13 `/tmp` is already a tmpfs, so the change applies at the **next boot** without any dead-man protection. The override (`/etc/systemd/system/tmp.mount.d/override.conf`) keeps the options systemd uses now (`size=`, `nr_inodes=`) and adds `nosuid,nodev,noexec`. `noexec` can break composer, npm, Playwright and DDEV helpers that execute files from `/tmp`: test a build first. To undo, delete the override file and reboot.
+
+**Keys and `MaxAuthTries 3`.** With three attempts, an SSH agent offering many keys can hit "Too many authentication failures" before the right key is tried. Connect with `ssh -o IdentitiesOnly=yes -i <key> ...` (or set `IdentitiesOnly yes` for the host in `~/.ssh/config`).
+
+**Firewall notes.** `ufw` denies incoming traffic by default, which also applies to containers talking to the host's own addresses (as on the 0.x hosts); containers still reach the Internet and each other. If the SSH daemon is socket-activated (`ssh.socket`), the ports are read from the socket as well as from `sshd -T`. The Docker guard block is replaced, never duplicated, on every run (check with `iptables -S DOCKER-USER`).
+
+### Confirming the firewall
+
+The installer prints this at the end. From a **second, independent** SSH session (proof that the firewall did not cut
+you off):
+
+```bash
+sudo /usr/local/sbin/fleet-firewall-confirm
+```
+
+It needs root and should come from a second session, never the one the installer ran in. It writes `/etc/ddev-fleet/firewall-confirmed` (which persists) and stops the timer. The installer clears that file, and arms the switch again, whenever it (re-)enables the firewall or when the SSH ports or trusted addresses change. Without confirmation the firewall is switched off after the
+grace period (`systemctl list-timers fleet-firewall-deadman.timer` shows the time left); run the installer again to
+retry.
+
+### If you are locked out
+
+Wait for the grace period: the firewall turns itself off and SSH is reachable again. For an SSH lock-out
+(`AllowUsers`, keys) or a ban, use the provider console (rescue mode or KVM), then remove
+`/etc/ssh/sshd_config.d/10-fleet-hardening.conf` and reload `ssh`, or `fail2ban-client unban <ip>`. To undo
+hardening on purpose: set `ENABLED=0` in `/etc/ddev-fleet/hardening.conf` (so upgrades stop re-applying it), run
+`ufw disable`, `systemctl disable fleet-firewall-sync.timer fleet-firewall-deadman-bootcheck.service` and `systemctl stop fleet-firewall-sync.timer fleet-firewall-deadman.timer`, delete
+the drop-ins listed above (`/etc/ssh/sshd_config.d/10-fleet-hardening.conf`, `/etc/fail2ban/jail.d/fleet-sshd.conf`,
+`/etc/systemd/resolved.conf.d/fleet-llmnr.conf`, `/etc/sysctl.d/60-fleet-hardening.conf`, `/etc/audit/rules.d/50-fleet.rules`,
+`/etc/systemd/system/tmp.mount.d/override.conf`), remove the `ddev-fleet DOCKER-USER guard` block from `/etc/ufw/after.rules`,
+then reload `ssh`, restart `fail2ban` and `systemd-resolved`. The uninstaller does not undo hardening.
+
+### Adding a trusted address later
+
+Run the installer again with `--harden` and the full list of `--trusted-ip` values you want. fail2ban's `ignoreip` and the
+firewall allow rule are updated; an address you drop from the list is not removed from UFW (`ufw status numbered`,
+`ufw delete <n>`).
+
+### Left alone
+
+Docker's `daemon.json`, mail relays and unattended-upgrades are not touched. Everything outside `--harden` stays the
+operator's decision: a plain run does not even read the SSH or firewall configuration.
 
 ## 9. Uninstalling
 
@@ -590,7 +677,7 @@ backup.tgz --exclude=srv/fleet/staging srv/fleet etc/ddev-fleet etc/authelia/sec
 
 It stops DDEV (`ddev poweroff`), disables and removes the units and configuration, restores the stock php-fpm pool
 and the packaged Caddy, removes the helper, the sudoers line, the `fleet` command, `/opt/ddev-fleet` and (unless
-`--keep-data`) `/srv/fleet` and the `fleet` user. It never touches `sshd` or the firewall, so your SSH access is
+`--keep-data`) `/srv/fleet` and the `fleet` user. It never touches `sshd` or the firewall (also not what `--harden` set up, section 8), so your SSH access is
 unaffected. It leaves `/var/log/ddev-fleet-install.log` and the apt packages (unless asked) in place.
 
 A failed or half-finished install needs no uninstall: run the install command again.

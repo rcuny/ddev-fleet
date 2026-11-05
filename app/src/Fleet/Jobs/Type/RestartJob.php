@@ -8,6 +8,7 @@ use App\Domain\Instance\InstanceRepository;
 use App\Domain\Job\Job;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
+use App\Fleet\Instances\InstanceCgroupWriter;
 use App\Fleet\Instances\InstanceConfigWriter;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
@@ -16,7 +17,7 @@ use App\Fleet\Jobs\JobType;
 use App\Fleet\Shell\CommandRunnerException;
 
 /**
- * Rewrites an instance's `.ddev/config.fleet.yaml` from the current settings (the Claude token among them) and runs
+ * Rewrites an instance's `.ddev/config.fleet.yaml` and its CPU slice override from the current settings (the Claude token among them) and runs
  * `ddev restart`, so the container environment picks the new values up. Queued by ClaudeTokenApplier, on request only: the
  * restart ends whatever runs inside the containers, a Claude agent included. The token is read by the config writer
  * when the job runs; it is not a job parameter and never reaches the log.
@@ -29,6 +30,7 @@ final readonly class RestartJob implements JobType
         private Ddev $ddev,
         private FleetPaths $paths,
         private JobFeed $feed,
+        private ?InstanceCgroupWriter $cgroup = null,
     ) {
     }
 
@@ -54,12 +56,22 @@ final readonly class RestartJob implements JobType
             throw new JobFailed('The instance configuration could not be written: '.$e->getMessage());
         }
         try {
+            $this->cgroup?->write($instance, $instance->project(), $dir, $log);
+        } catch (\RuntimeException $e) {
+            throw new JobFailed('The CPU slice override could not be written: '.$e->getMessage());
+        }
+        try {
             $result = $this->ddev->restart($dir, $log->output(...));
         } catch (CommandRunnerException $e) {
             throw new JobFailed('ddev restart did not finish: '.$e->getMessage());
         }
         if (!$result->isSuccess()) {
             throw new JobFailed(\sprintf('ddev restart failed with exit code %d', $result->exitCode), $result->exitCode);
+        }
+
+        $warning = $this->cgroup?->check($instance, $instance->project());
+        if (null !== $warning) {
+            $log->line($warning);
         }
 
         $this->feed->instanceChanged($instance->id());

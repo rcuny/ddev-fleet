@@ -106,14 +106,13 @@ final class TemplateController extends AbstractController
             $lists = $this->lists($form, $data);
             if (null !== $lists) {
                 try {
-                    $this->templates->update($name, $template, new TemplateInput(
-                        name: $stored->name(),
-                        drupalEnv: self::optionalText($data['drupalEnv'] ?? null),
-                        postDeploy: $lists['postDeploy'],
-                        tty1: $lists['tty1'],
-                        tty2: $lists['tty2'],
-                        sshKeys: $lists['sshKeys'],
-                    ));
+                    $this->templates->update($name, $template, TemplateInput::fromTemplate($stored)->with([
+                        'drupalEnv' => self::optionalText($data['drupalEnv'] ?? null),
+                        'postDeploy' => $lists['postDeploy'],
+                        'tty1' => $lists['tty1'],
+                        'tty2' => $lists['tty2'],
+                        'sshKeys' => $lists['sshKeys'],
+                    ]));
                     $this->addFlash('success', 'Template saved.');
 
                     return $this->redirectToRoute('project_templates', ['name' => $name], Response::HTTP_SEE_OTHER);

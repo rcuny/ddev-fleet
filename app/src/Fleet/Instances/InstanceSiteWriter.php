@@ -7,6 +7,7 @@ namespace App\Fleet\Instances;
 use App\Domain\Instance\Instance;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
+use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\AdminGroup;
 use App\Fleet\Auth\ProjectGroup;
 use App\Fleet\FleetPaths;
@@ -43,6 +44,7 @@ final readonly class InstanceSiteWriter
         private InstanceHostnames $hostnames,
         private LockFactory $locks,
         private AdminGroup $admins,
+        private ProjectRepository $projects,
     ) {
     }
 
@@ -82,6 +84,7 @@ final readonly class InstanceSiteWriter
         // The other layout has everything in the one file and no ports file.
         $files = [
             $file => $this->twig->render('system/instance-site.twig', $context),
+            $this->paths->portsFallbackFile() => $this->fallbackSite($project),
             $portsFile => $wildcard && ([] !== $context['ports'] || [] !== $exact) ? $this->twig->render('system/instance-sites.twig', $context) : null,
         ];
         $this->ensureDir();
@@ -133,6 +136,13 @@ final readonly class InstanceSiteWriter
         $lock->acquire(true);
         try {
             $any = false;
+            $fallback = $this->paths->portsFallbackFile();
+            $current = is_file($fallback) ? @file_get_contents($fallback) : null;
+            $wanted = $this->fallbackSite();
+            if (false !== $current && $current !== $wanted) {
+                $this->put($fallback, $wanted);
+                $any = true;
+            }
             foreach ($files as $file) {
                 if (!is_file($file)) {
                     continue;
@@ -148,6 +158,26 @@ final readonly class InstanceSiteWriter
         } finally {
             $lock->release();
         }
+    }
+
+    /**
+     * The 404 catch-all of the named ports: one block per distinct public port of every project (plus `$extra`, a
+     * project not saved yet), or null when there is none.
+     */
+    private function fallbackSite(?Project $extra = null): ?string
+    {
+        $public = [];
+        foreach ([...$this->projects->all(), ...(null === $extra ? [] : [$extra])] as $project) {
+            foreach ($project->ports() as $port) {
+                $public[ConfigValue::port($port->publicPort())] = true;
+            }
+        }
+        if ([] === $public) {
+            return null;
+        }
+        ksort($public);
+
+        return $this->twig->render('system/ports-fallback.twig', ['public_ports' => array_keys($public)]);
     }
 
     private function put(string $path, ?string $contents): void
@@ -190,7 +220,7 @@ final readonly class InstanceSiteWriter
      *
      * @param list<string> $hosts validated
      *
-     * @return list<array{name: string, public: int, router: int, hosts: list<string>}>
+     * @return list<array{name: string, public: int, router: int, public_access: bool, hosts: list<string>}>
      *
      * @throws \InvalidArgumentException for a port that Caddy or the DDEV router already uses
      */
@@ -210,6 +240,7 @@ final readonly class InstanceSiteWriter
                 'name' => ConfigValue::portName($port->name()),
                 'public' => $public,
                 'router' => ConfigValue::port($port->routerPort()),
+                'public_access' => $port->isPublic(),
                 'hosts' => array_map(static fn (string $host): string => $host.':'.$public, $hosts),
             ];
         }

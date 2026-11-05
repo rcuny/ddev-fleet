@@ -13,12 +13,14 @@ use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\Projects\Rule\BranchName;
+use App\Fleet\Projects\Rule\Capacity;
 use App\Fleet\Projects\Rule\GitIdentity;
 use App\Fleet\Projects\Rule\GitUrl;
 use App\Fleet\Projects\Rule\IssueIdPattern;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\Rule\SubmodulePath;
 use App\Fleet\Secrets\SecretService;
+use App\Fleet\System\SlicesApplier;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 
 /**
@@ -41,6 +43,7 @@ final readonly class ProjectService
         private ?ProjectAccessRefresher $accessRefresher = null,
         private ?SecretService $secrets = null,
         private ?InstanceSiteRefresher $sites = null,
+        private ?SlicesApplier $slices = null,
     ) {
     }
 
@@ -87,6 +90,8 @@ final readonly class ProjectService
         if ($refresh) {
             $this->accessRefresher?->refresh();
         }
+        // The project's slice (and its limit) must exist before its first instance starts. A failure is a warning.
+        $this->slices?->sync();
 
         return $project;
     }
@@ -107,12 +112,17 @@ final readonly class ProjectService
         }
 
         $before = self::portNames($project->ports());
+        $limitBefore = $project->cpuThreads();
         $this->apply($project, $input, $ports, new \DateTimeImmutable());
         $this->projects->save($project);
         // Each port is a site block of every instance: the sites follow an assignment (a failure is a warning,
         // takeWarning() on the refresher). A named port that is created or deleted is assigned to no project.
         if ($refresh && $before !== self::portNames($project->ports())) {
             $this->sites?->refresh($project);
+        }
+        // A new limit reaches the running slice at once (no restart of the instances).
+        if ($limitBefore !== $project->cpuThreads()) {
+            $this->slices?->sync();
         }
 
         return $project;
@@ -138,6 +148,7 @@ final readonly class ProjectService
         $this->secrets?->removeAllOfProject($name, $by);
         $this->projects->remove($project);
         $this->accessRefresher?->refresh();
+        $this->slices?->sync();
     }
 
     /**
@@ -263,6 +274,20 @@ final readonly class ProjectService
             $errors['displaySubmoduleBranch'] = $error;
         }
 
+        foreach (['cpuThreads' => 'CPU threads', 'slots' => 'Slots'] as $field => $what) {
+            if (null !== $error = Capacity::error($input->{$field})) {
+                $errors[$field] = $error;
+            } elseif (null !== $existing) {
+                // Lowering the project below a template's explicit value is refused, never silently applied.
+                foreach ($this->projects->templateCapacities($existing) as $template) {
+                    if (null !== $error = Capacity::projectBelowTemplate($what, $input->{$field}, $template['name'], $template[$field])) {
+                        $errors[$field] = $error;
+                        break;
+                    }
+                }
+            }
+        }
+
         return [$errors, $ports];
     }
 
@@ -314,5 +339,6 @@ final readonly class ProjectService
         $project->changeDisplaySubmoduleBranch($input->displaySubmoduleBranch, $now);
         $project->changeTypesense($input->typesense, $now);
         $project->changeContainerSsh($input->containerSsh, $now);
+        $project->changeCapacity($input->cpuThreads, $input->slots, $now);
     }
 }

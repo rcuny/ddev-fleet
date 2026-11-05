@@ -371,6 +371,7 @@ final class CaddyfileRendererTest extends TestCase
             *.fleet.example.com {
                 header {
                     Strict-Transport-Security "max-age=31536000"
+                    X-Robots-Tag "noindex, nofollow"
                     -Server
                 }
 

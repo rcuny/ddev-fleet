@@ -32,6 +32,8 @@ final class Shapes
                 'tty2' => $template->tty2(),
             ],
             'ssh_keys' => $template->sshKeys(),
+            'cpu_threads' => $template->cpuThreads(),
+            'slots' => $template->slots(),
             'created_at' => $template->createdAt()->setTimezone($utc)->format(self::TIME),
             'updated_at' => $template->updatedAt()->setTimezone($utc)->format(self::TIME),
         ];
@@ -48,6 +50,7 @@ final class Shapes
             'name' => $port->name(),
             'public' => $port->publicPort(),
             'router' => $port->routerPort(),
+            'access' => $port->access(),
             'projects' => $projects,
         ];
     }

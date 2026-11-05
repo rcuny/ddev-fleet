@@ -20,7 +20,7 @@ final class UnitsTest extends TestCase
 {
     use InstallerHarness;
 
-    private const string SUDOERS_LINE = 'fleet ALL=(root) NOPASSWD: /usr/local/libexec/fleet/apply caddy, /usr/local/libexec/fleet/apply authelia';
+    private const string SUDOERS_LINE = 'fleet ALL=(root) NOPASSWD: /usr/local/libexec/fleet/apply caddy, /usr/local/libexec/fleet/apply authelia, /usr/local/libexec/fleet/apply slices';
 
     public function testTheUnitsThatStartSshAgentsDoNotKillThemOnRestart(): void
     {
@@ -168,7 +168,6 @@ final class UnitsTest extends TestCase
         self::assertSame(['exec'], $service['Type']);
         self::assertSame(['0'], $service['TimeoutStartSec']);
         self::assertSame(['fleet'], $service['User']);
-        self::assertSame(['0'], $service['TimeoutStartSec']);
         self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict'], $service['ExecStart']);
         self::assertSame(['docker.service network-online.target fleet-worker@1.service'], $unit['Unit']['After']);
         self::assertSame(['multi-user.target'], $unit['Install']['WantedBy']);
