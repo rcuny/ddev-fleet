@@ -140,6 +140,34 @@ final class ProjectTransferTest extends KernelTestCase
         self::assertSame($counts, $this->fingerprint(), 'An import with nothing to change writes nothing.');
     }
 
+    private function portAccess(): string
+    {
+        $ports = $this->service(NamedPortService::class);
+        \assert($ports instanceof NamedPortService);
+
+        return $ports->get('typesense')->access();
+    }
+
+    public function testThePortAccessRoundTripsAndAnOlderFileWithoutItGetsTheDefault(): void
+    {
+        $this->seedBlog();
+        $ports = $this->service(NamedPortService::class);
+        \assert($ports instanceof NamedPortService);
+        $ports->setAccess('typesense', 'gated');
+        $text = $this->exporter()->export('blog', null, 'admin');
+        $document = $this->decode($text);
+        self::assertSame('gated', $document['ports'][0]['access']);
+
+        $this->switchToEmptyHost();
+        $this->importer()->apply($text, null, 'admin');
+        self::assertSame('gated', $this->portAccess());
+
+        unset($document['ports'][0]['access']);
+        $this->switchToEmptyHost();
+        $this->importer()->apply($this->encode($document), null, 'admin');
+        self::assertSame('public', $this->portAccess());
+    }
+
     public function testTheImportedWebhookEndpointsGetTheirOwnSecretsAndSchedulesKeepTheirState(): void
     {
         $this->seedBlog();

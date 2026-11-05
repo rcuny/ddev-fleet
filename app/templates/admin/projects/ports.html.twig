@@ -11,7 +11,7 @@
 
     <div class="mt-6 grid max-w-2xl gap-4">
         <p class="text-sm text-ink-body" data-testid="ports-note">
-            These are the named ports the host offers. Tick the ones this project uses: each becomes a public port on every instance of the project.
+            These are the named ports the host offers. Tick the ones this project uses: each becomes a port on every instance of the project. The access column shows whether the port needs the login; the host admin changes it with <code>fleet:port:update</code>.
         </p>
 
         {% if errors|length > 0 %}
@@ -35,6 +35,7 @@
                             <twig:Table:Head>Name</twig:Table:Head>
                             <twig:Table:Head>Public port</twig:Table:Head>
                             <twig:Table:Head>Router port</twig:Table:Head>
+                            <twig:Table:Head>Access</twig:Table:Head>
                         </twig:Table:Row>
                     </twig:Table:Header>
                     <twig:Table:Body>
@@ -46,6 +47,7 @@
                                 <twig:Table:Cell class="font-medium"><label for="port-{{ port.name }}">{{ port.name }}</label></twig:Table:Cell>
                                 <twig:Table:Cell>{{ port.publicPort }}</twig:Table:Cell>
                                 <twig:Table:Cell>{{ port.routerPort }}</twig:Table:Cell>
+                                <twig:Table:Cell data-testid="port-access">{{ port.access == 'public' ? 'Public (no login)' : 'Login required' }}</twig:Table:Cell>
                             </twig:Table:Row>
                         {% endfor %}
                     </twig:Table:Body>

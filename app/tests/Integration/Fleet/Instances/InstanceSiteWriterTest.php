@@ -284,6 +284,11 @@ final class InstanceSiteWriterTest extends KernelTestCase
 
         self::assertStringNotContainsString('forward_auth', $typesense);
         self::assertStringNotContainsString('respond @forbidden', $typesense);
+        // A cross-origin preflight (OPTIONS, no cookie) must reach the backend: nothing in the block may answer or
+        // redirect before the reverse proxy. (No caddy binary in the gates to adapt the file; this is the structural check.)
+        self::assertStringNotContainsString('redir', $typesense);
+        self::assertStringNotContainsString('@options', $typesense);
+        self::assertStringNotContainsString('forward_auth', $typesense);
         self::assertStringContainsString('request_header -Remote-User', $typesense);
         self::assertStringContainsString('Strict-Transport-Security', $typesense);
         self::assertStringContainsString('reverse_proxy 127.0.0.1:8108', $typesense);
