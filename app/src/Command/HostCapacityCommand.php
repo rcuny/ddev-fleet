@@ -49,9 +49,12 @@ final class HostCapacityCommand extends Command
             return Command::SUCCESS;
         }
 
-        /* @var array{threads: int, cores: int, ram_mb: int, reserve_threads: int, allocatable_threads: int, committed_threads: int, overcommitted: bool, instances: array{count: int, max: int}, projects: list<array<string, mixed>>} $report */
+        /* @var array{threads: int, cores: int, ram_mb: int, reserve_threads: int, allocatable_threads: int, committed_threads: int, overcommitted: bool, instances: array{count: int, max: int}, docker_networks: array{used: int, max: int}|null, projects: list<array<string, mixed>>} $report */
         $output->writeln(\sprintf('threads %d, cores %d, RAM %d MB; reserve %d, allocatable %d, committed %d%s', $report['threads'], $report['cores'], $report['ram_mb'], $report['reserve_threads'], $report['allocatable_threads'], $report['committed_threads'], $report['overcommitted'] ? ' (OVERCOMMITTED)' : ''));
         $output->writeln(\sprintf('instances %d/%d', $report['instances']['count'], $report['instances']['max']));
+        if (null !== $report['docker_networks']) {
+            $output->writeln(\sprintf('docker networks %d/%d', $report['docker_networks']['used'], $report['docker_networks']['max']));
+        }
         foreach ($report['projects'] as $project) {
             $output->writeln(\sprintf('  %s: %s threads%s, slots %s, busy %s, use %s', $project['name'], $project['effective_threads'], null === $project['cpu_threads'] ? ' (unlimited)' : '', $this->show($project['slots'], 'unlimited'), $project['busy'], $this->show($project['used_cores'], 'n/a')));
             /** @var list<array<string, mixed>> $templates */

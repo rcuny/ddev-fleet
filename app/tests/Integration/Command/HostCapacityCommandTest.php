@@ -113,6 +113,24 @@ final class HostCapacityCommandTest extends KernelTestCase
         self::assertStringContainsString('allocatable 46', $text->getDisplay());
     }
 
+    public function testDockerNetworkUsageLimitsTheInstanceCap(): void
+    {
+        $runner = self::getContainer()->get(\App\Fleet\Shell\CommandRunner::class);
+        self::assertInstanceOf(RecordingCommandRunner::class, $runner);
+        $runner->expect(['docker', 'info'], new CommandResult(0, "null\n"));
+        $runner->expect(['docker', 'network', 'ls'], new CommandResult(0, str_repeat("abc\n", 29)));
+
+        $report = $this->json($this->cli('fleet:host:capacity', ['--json' => true, '--max-instances' => '40']));
+
+        self::assertSame(['used' => 29, 'max' => 31], $report['docker_networks']);
+        self::assertSame(['count' => 0, 'max' => 2], $report['instances'], 'the built-in pools leave room for 2 more');
+
+        $runner->expect(['docker', 'info'], new CommandResult(0, "null\n"));
+        $runner->expect(['docker', 'network', 'ls'], new CommandResult(0, str_repeat("abc\n", 29)));
+        $text = $this->cli('fleet:host:capacity');
+        self::assertStringContainsString('docker networks 29/31', $text->getDisplay());
+    }
+
     public function testTwoSocketBoxThroughTheCommand(): void
     {
         $runner = self::getContainer()->get(\App\Fleet\Shell\CommandRunner::class);
