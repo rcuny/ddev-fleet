@@ -18,6 +18,8 @@ async function number(page: Page, testId: string): Promise<number> {
 
 test.describe('capacity', () => {
   test('the Capacity tab shows the host, allotments and instances; no overflow, 44 px targets, axe @phone', async ({ page }) => {
+    // Axe walks the whole table, which grows with every project the other specs left behind: a busy CI host needs the slow budget.
+    test.slow();
     const errors = collectBrowserErrors(page);
     await openHostTab(page, 'capacity');
 
@@ -77,6 +79,7 @@ test.describe('capacity', () => {
   });
 
   test('the reserve and the instance cap are saved, and refused out of range @phone', async ({ page, hostLock }) => {
+    test.slow();
     void hostLock;
     const tab = await openHostTab(page, 'capacity');
     const reserve = tab.getByLabel('Reserved threads');
