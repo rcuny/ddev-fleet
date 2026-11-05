@@ -45,6 +45,7 @@ test.describe('capacity', () => {
   });
 
   test('two projects each allotted the whole host trigger the overcommit warning, listed with their templates @phone', async ({ page }) => {
+    test.slow();
     const first = uniqueName('cap');
     const second = uniqueName('cap');
     try {
@@ -102,7 +103,8 @@ test.describe('capacity', () => {
     }
   });
 
-  test('the project and template forms take CPU threads and slots and render the refusals @phone', async ({ page }) => {
+  test('the project form takes CPU threads and slots and renders the refusals @phone', async ({ page }) => {
+    test.slow();
     const errors = collectBrowserErrors(page);
     const name = uniqueName('cap');
     try {
@@ -119,8 +121,24 @@ test.describe('capacity', () => {
       await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
       await expect(page.getByTestId('flashes')).toContainText('Project saved.');
       await expect(page.getByLabel('CPU threads')).toHaveValue('4');
+    } finally {
+      await deleteProjectViaUi(page, name).catch(() => undefined);
+    }
+    // The refusals are 422 responses on purpose.
+    expect(errors.filter((message) => !message.includes('422'))).toEqual([]);
+  });
 
-      // Template: inherits the project's 4; above it is refused; an explicit value within it is kept.
+  test('the template form inherits the project, refuses values above it and keeps its own @phone', async ({ page }) => {
+    test.slow();
+    const errors = collectBrowserErrors(page);
+    const name = uniqueName('cap');
+    try {
+      await createProjectViaUi(page, name);
+      await page.getByLabel('CPU threads').fill('4');
+      await page.getByLabel('Slots').fill('2');
+      await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
+      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+
       await page.goto(`/admin/projects/${name}/templates/new`);
       const templateFields = page.getByTestId('template-capacity-fields');
       await expect(templateFields).toContainText('inherit the project: 4');
@@ -149,7 +167,6 @@ test.describe('capacity', () => {
     } finally {
       await deleteProjectViaUi(page, name).catch(() => undefined);
     }
-    // The refusals are 422 responses on purpose.
     expect(errors.filter((message) => !message.includes('422'))).toEqual([]);
   });
 });
