@@ -320,4 +320,31 @@ final class RuleMatcherTest extends TestCase
         $this->expectException(TargetUnresolvable::class);
         new RuleMatcher()->match(WebhookSource::Bitbucket, $project, ['x-event-key' => 'repo:push'], self::push([self::branch('///')]), [$rule]);
     }
+
+    public function testAPrefixedBranchOfATypesenseProjectLeavesRoomForTheSuffixAndTheServiceName(): void
+    {
+        $project = $this->project();
+        $project->changeTypesense(true);
+        $rule = $this->pushRule($project, ['label_prefix' => 'ci-', 'strip_suffix' => '--ci-run'], ['branch' => '*--ci-run']);
+        $branch = 'feature/PWD8-1795-harden-media-derivatives-and-more-things--ci-run';
+
+        $label = new RuleMatcher()->match(WebhookSource::Bitbucket, $project, ['x-event-key' => 'repo:push'], self::push([self::branch($branch)]), [$rule])->targets[0]->label;
+
+        self::assertLessThanOrEqual(37, \strlen('blog--'.$label.'-1'));
+        self::assertLessThanOrEqual(63, \strlen('ddev-blog--'.$label.'-1-typesense-dashboard'));
+    }
+
+    public function testAFixedLabelKeepsItsIdWhateverTheProjectAddOns(): void
+    {
+        $label = str_repeat('a', 40);
+        $ids = [];
+        foreach ([false, true] as $typesense) {
+            $project = $this->project();
+            $project->changeTypesense($typesense);
+            $rule = $this->pushRule($project, ['label' => $label], ['branch' => '*']);
+            $ids[] = new RuleMatcher()->match(WebhookSource::Bitbucket, $project, ['x-event-key' => 'repo:push'], self::push([self::branch('x')]), [$rule])->targets[0]->label;
+        }
+
+        self::assertSame([$label, $label], $ids, 'an existing instance with a fixed label is redeployed, never recreated under a new id');
+    }
 }

@@ -194,8 +194,9 @@ final class RuleMatcher
 
     /**
      * The instance a deploy rule makes of a branch: a fixed `label`, or `label_prefix` + the branch minus
-     * `strip_suffix`, slugified, then fitted to 59 characters (the project's additional hostname aliases included; a
-     * derived label keeps room for a `-999` suffix).
+     * `strip_suffix`, slugified, then fitted to 59 characters (the project's additional hostname aliases included). A fixed label is fitted as
+     * before FLE-217 so an existing instance keeps its id (the rule redeploys it); a derived label keeps room for a
+     * `-999` suffix and, for a project with Typesense, for `ddev-<id>-typesense-dashboard` within 63 characters.
      *
      * @throws TargetUnresolvable
      */
@@ -205,7 +206,7 @@ final class RuleMatcher
         $alias = InstanceHostnames::longestPrefix($project);
         try {
             if (isset($params['label'])) {
-                $label = InstanceNaming::fitLabel($project->name(), Labels::slug($params['label']), $branch, $alias);
+                $label = InstanceNaming::fitLabel($project->name(), Labels::slug($params['label']), $branch, $alias, 0, 0);
 
                 return new DeployTarget($rule, $branch, $label, true);
             }
@@ -214,7 +215,7 @@ final class RuleMatcher
             if ('' !== $suffix && str_ends_with($text, $suffix)) {
                 $text = substr($text, 0, -\strlen($suffix));
             }
-            $label = InstanceNaming::fitLabel($project->name(), Labels::slug(($params['label_prefix'] ?? '').$text), $branch, $alias, 4);
+            $label = InstanceNaming::fitLabel($project->name(), Labels::slug(($params['label_prefix'] ?? '').$text), $branch, $alias, 4, InstanceNaming::serviceBudgetFor($project->typesense()));
         } catch (ValidationFailed) {
             throw new TargetUnresolvable('The branch cannot be turned into an instance label.');
         }
@@ -225,7 +226,7 @@ final class RuleMatcher
     private static function fit(Project $project, string $label, string $seed): string
     {
         try {
-            return InstanceNaming::fitLabel($project->name(), $label, $seed, InstanceHostnames::longestPrefix($project));
+            return InstanceNaming::fitLabel($project->name(), $label, $seed, InstanceHostnames::longestPrefix($project), 4, InstanceNaming::serviceBudgetFor($project->typesense()));
         } catch (ValidationFailed) {
             throw new TargetUnresolvable('The instance label does not fit the project name.');
         }
