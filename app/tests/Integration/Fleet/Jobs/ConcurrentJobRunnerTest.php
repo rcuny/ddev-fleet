@@ -24,6 +24,18 @@ final class ConcurrentJobRunnerTest extends JobTestCase
 {
     private HostSettingsRepository $settings;
 
+    /** @var list<string> */
+    private array $gates = [];
+
+    protected function tearDown(): void
+    {
+        foreach ($this->gates as $gate) {
+            @touch($gate);
+            @unlink($gate);
+        }
+        parent::tearDown();
+    }
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -121,47 +133,153 @@ final class ConcurrentJobRunnerTest extends JobTestCase
     public function testRealChildrenOverlapAcrossInstancesUpToTheLimit(): void
     {
         $this->setLimit(3);
-        $runner = new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new ProcessCommandRunner(), \dirname(__DIR__, 4));
-        // Four instances at limit 3, ~1.2 s per job, 40 log lines (DB writes) each: the fourth waits for a free slot.
+        $runner = $this->realRunner();
+        $gate = $this->gateFile();
         $jobs = [];
         foreach (['a--main', 'b--main', 'c--main', 'd--main'] as $instance) {
-            $job = new Job('fake', $instance, 'acme', JobTrigger::Cli, 'test', ['lines' => 40, 'delay' => 30, 'width' => 0, 'fail' => false], null, false, null, $this->clock->now());
-            $this->jobs->add($job);
-            $jobs[] = $job;
+            $jobs[] = $this->fakeJob($instance, $gate);
         }
 
-        $deadline = microtime(true) + 60;
-        $pending = array_map(static fn (Job $j): int => (int) $j->id(), $jobs);
-        while ([] !== $pending && microtime(true) < $deadline) {
-            foreach ($pending as $i => $id) {
-                $job = $this->jobs->find($id);
-                self::assertNotNull($job);
-                $this->jobs->refresh($job);
-                if (JobStatus::Queued === $job->status()) {
-                    $before = $runner->running();
-                    $runner->handle($id, null);
-                    if ($runner->running() > $before) {
-                        unset($pending[$i]);
-                    }
-                } else {
-                    unset($pending[$i]);
-                }
-            }
-            usleep(100_000);
+        // Three start; the fourth finds no slot (a gated job holds each) and goes back on the queue.
+        foreach ($jobs as $job) {
+            $runner->handle((int) $job->id(), null);
         }
-        self::assertSame([], $pending, 'every job was started');
+        self::assertTrue($this->waitFor(fn (): bool => 3 === $this->countStatus($jobs, JobStatus::Running)), 'three instances run together');
+        self::assertSame(JobStatus::Queued, $this->fresh($jobs[3])->status(), 'never more than 3 at once');
+
+        touch($gate);
+        $runner->wait();
+        self::assertTrue($this->waitFor(fn (): bool => 3 === $this->countStatus($jobs, JobStatus::Succeeded)));
+        $runner->handle((int) $jobs[3]->id(), null);
+        $runner->wait();
+        self::assertTrue($this->waitFor(fn (): bool => 4 === $this->countStatus($jobs, JobStatus::Succeeded)), 'the fourth ran once a slot freed');
+    }
+
+    public function testAChildOutlivesTheRunnerThatStartedIt(): void
+    {
+        $this->setLimit(2);
+        $gate = $this->gateFile();
+        $job = $this->fakeJob('a--main', $gate);
+
+        $runner = $this->realRunner();
+        $runner->handle((int) $job->id(), null);
+        self::assertTrue($this->waitFor(fn (): bool => JobStatus::Running === $this->fresh($job)->status()));
+
+        // The worker leaves (time-limit, restart): the Process objects are destroyed; the child must not be killed.
+        $runner = null;
+        gc_collect_cycles();
+        touch($gate);
+
+        self::assertTrue($this->waitFor(fn (): bool => JobStatus::Succeeded === $this->fresh($job)->status()), 'the job finished');
+    }
+
+    public function testASurvivingChildOfAStoppedWorkerStillCountsAgainstTheLimitAndItsInstance(): void
+    {
+        $this->setLimit(2);
+        $gate = $this->gateFile();
+        $running = $this->fakeJob('a--main', $gate);
+        $this->realRunner()->handle((int) $running->id(), null);
+        self::assertTrue($this->waitFor(fn (): bool => JobStatus::Running === $this->fresh($running)->status()));
+
+        // A second runner (the restarted worker) has no children of its own.
+        $fresh = $this->realRunner();
+        self::assertSame(1, $fresh->running());
+        $other = $this->fakeJob('b--main', $gate);
+        $fresh->handle((int) $other->id(), null);
+        self::assertTrue($this->waitFor(static fn (): bool => 2 === $fresh->running()), 'another instance gets the free slot');
+
+        $third = $this->fakeJob('c--main', $gate);
+        $fresh->handle((int) $third->id(), null);
+        self::assertSame(JobStatus::Queued, $this->fresh($third)->status());
+        self::assertContains(ConcurrentJobRunner::WAIT_DELAY_MS, $this->bus->delays(), 'the limit counts the survivors');
+
+        touch($gate);
+        $fresh->wait();
+        self::assertTrue($this->waitFor(static fn (): bool => 0 === $fresh->running()));
+    }
+
+    public function testAChildThatDiesBeforeClaimingRequeuesItsJobAtOnce(): void
+    {
+        $this->setLimit(2);
+        $job = $this->queuedJob('deploy', 'a--main');
+        $runner = new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new ProcessCommandRunner(), \dirname(__DIR__, 4));
+        $runner->useSpawner(static fn (): BackgroundProcess => new class implements BackgroundProcess {
+            private Process $process;
+
+            public function __construct()
+            {
+                $this->process = new Process(['sh', '-c', 'exit 3']);
+                $this->process->start();
+            }
+
+            public function isRunning(): bool
+            {
+                return $this->process->isRunning();
+            }
+
+            public function exitCode(): ?int
+            {
+                return $this->process->isRunning() ? null : $this->process->getExitCode();
+            }
+
+            public function wait(): void
+            {
+                $this->process->wait();
+            }
+        });
+
+        $runner->handle((int) $job->id(), null);
         $runner->wait();
 
-        $ranges = [];
-        foreach ($jobs as $job) {
-            $this->jobs->refresh($job);
-            self::assertSame(JobStatus::Succeeded, $job->status(), (string) $job->error());
-            $ranges[] = [$job->instanceId(), (float) $job->startedAt()?->format('U.u'), (float) $job->finishedAt()?->format('U.u')];
+        self::assertSame(JobStatus::Queued, $job->status());
+        self::assertSame([1000], $this->bus->delays(), 'the dead child\'s job is back on the queue, not left for the reaper');
+    }
+
+    private function realRunner(): ConcurrentJobRunner
+    {
+        return new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new ProcessCommandRunner(), \dirname(__DIR__, 4));
+    }
+
+    private function gateFile(): string
+    {
+        $gate = sys_get_temp_dir().'/fle209-gate-'.bin2hex(random_bytes(6));
+        $this->gates[] = $gate;
+
+        return $gate;
+    }
+
+    private function fakeJob(string $instance, string $gate): Job
+    {
+        $job = new Job('fake', $instance, 'acme', JobTrigger::Cli, 'test', ['lines' => 3, 'delay' => 0, 'width' => 0, 'fail' => false, 'gate' => $gate], null, false, null, $this->clock->now());
+        $this->jobs->add($job);
+
+        return $job;
+    }
+
+    private function fresh(Job $job): Job
+    {
+        $this->jobs->refresh($job);
+
+        return $job;
+    }
+
+    /** @param list<Job> $jobs */
+    private function countStatus(array $jobs, JobStatus $status): int
+    {
+        return \count(array_filter($jobs, fn (Job $j): bool => $this->fresh($j)->status() === $status));
+    }
+
+    private function waitFor(callable $condition, int $seconds = 60): bool
+    {
+        $deadline = microtime(true) + $seconds;
+        while (microtime(true) < $deadline) {
+            if ($condition()) {
+                return true;
+            }
+            usleep(50_000);
         }
-        $overlap = static fn (array $x, array $y): bool => $x[1] < $y[2] && $y[1] < $x[2];
-        self::assertTrue($overlap($ranges[0], $ranges[1]) && $overlap($ranges[1], $ranges[2]), 'three instances ran together');
-        $firstFinish = min($ranges[0][2], $ranges[1][2], $ranges[2][2]);
-        self::assertGreaterThanOrEqual($firstFinish - 0.05, $ranges[3][1], 'the fourth waited for a slot: never more than 3 at once');
+
+        return false;
     }
 
     private function setLimit(int $jobs): void
@@ -191,6 +309,11 @@ final class ConcurrentJobRunnerTest extends JobTestCase
                 public function isRunning(): bool
                 {
                     return $this->process->isRunning();
+                }
+
+                public function exitCode(): ?int
+                {
+                    return $this->process->isRunning() ? null : $this->process->getExitCode();
                 }
 
                 public function wait(): void

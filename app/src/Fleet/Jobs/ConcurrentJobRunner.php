@@ -11,10 +11,16 @@ use App\Domain\Job\JobRepository;
 use App\Domain\Job\JobStatus;
 use App\Fleet\Shell\BackgroundProcess;
 use App\Fleet\Shell\BackgroundRunner;
+use Psr\Log\LoggerInterface;
 
 /**
  * The worker side of FLE-209: the one Messenger consumer (the SQLite queue takes a single one) hands each job to a child
  * process (`fleet:job:work`) instead of running it itself, so jobs of different instances overlap.
+ *
+ * Children are detached (DetachedProcess): they outlive the worker (time-limit, restart, upgrade). A new worker does not
+ * know them, so the jobs with status `running` count as busy slots too (a `running` job always has a live lock holder,
+ * JobReaper keeps it so). A child that ends non-zero while its job is still `queued` (it died before claiming) is retried
+ * at once, within the usual 30 minute give-up.
  *
  * The consumer never blocks on a job. For each RunJob message it prunes the finished children, then:
  *  - concurrency 1 (the default; no host row counts as 1): runs the job in this process, exactly as before;
@@ -29,7 +35,7 @@ final class ConcurrentJobRunner
 {
     public const int WAIT_DELAY_MS = 3000;
 
-    /** @var array<int, array{process: BackgroundProcess, key: string}> live children by job id */
+    /** @var array<int, array{process: BackgroundProcess, key: string, since: ?int}> children this process started, by job id */
     private array $children = [];
 
     /** @var (callable(int, ?int): BackgroundProcess)|null */
@@ -41,6 +47,7 @@ final class ConcurrentJobRunner
         private readonly HostSettingsRepository $settings,
         private readonly BackgroundRunner $background,
         private readonly string $projectDir,
+        private readonly ?LoggerInterface $logger = null,
     ) {
     }
 
@@ -57,7 +64,7 @@ final class ConcurrentJobRunner
     public function handle(int $jobId, ?int $eligibleSince): void
     {
         $limit = $this->settings->fresh()?->maxConcurrentJobs() ?? HostSettings::DEFAULT_MAX_CONCURRENT_JOBS;
-        if ($limit <= 1 && [] === $this->children()) {
+        if ($limit <= 1 && [] === $this->busy()) {
             $this->executor->run($jobId, $eligibleSince);
 
             return;
@@ -73,23 +80,22 @@ final class ConcurrentJobRunner
             return;
         }
 
-        $children = $this->children();
+        $busy = $this->busy();
         $key = JobExecutor::lockKey($job);
-        $sameKey = array_filter($children, static fn (array $child): bool => $child['key'] === $key);
-        if (\count($children) >= max($limit, 1) || [] !== $sameKey) {
+        if (\count($busy) >= max($limit, 1) || \in_array($key, $busy, true)) {
             $this->executor->requeue($job, self::WAIT_DELAY_MS, $eligibleSince);
 
             return;
         }
 
         $process = $this->spawn($jobId, $eligibleSince);
-        $this->children[$jobId] = ['process' => $process, 'key' => $key];
+        $this->children[$jobId] = ['process' => $process, 'key' => $key, 'since' => $eligibleSince];
     }
 
     /** The number of children still running (after pruning the finished ones). */
     public function running(): int
     {
-        return \count($this->children());
+        return \count($this->busy());
     }
 
     /** Waits for every child (tests, and a worker that is stopping). */
@@ -98,21 +104,51 @@ final class ConcurrentJobRunner
         foreach ($this->children as $child) {
             $child['process']->wait();
         }
-        $this->children();
+        $this->busy();
     }
 
     /**
-     * @return array<int, array{process: BackgroundProcess, key: string}>
+     * The lock keys of the jobs running now, one entry per job: the children this process started plus the `running`
+     * jobs of children it does not know (started by a worker that has since stopped). Prunes the finished children.
+     *
+     * @return array<int, string> lock key by job id
      */
-    private function children(): array
+    private function busy(): array
     {
         foreach ($this->children as $id => $child) {
-            if (!$child['process']->isRunning()) {
-                unset($this->children[$id]);
+            if ($child['process']->isRunning()) {
+                continue;
             }
+            unset($this->children[$id]);
+            $this->afterExit($id, $child['process']->exitCode(), $child['since']);
         }
 
-        return $this->children;
+        $busy = [];
+        foreach ($this->children as $id => $child) {
+            $busy[$id] = $child['key'];
+        }
+        foreach ($this->jobs->running() as $job) {
+            $busy[(int) $job->id()] ??= JobExecutor::lockKey($job);
+        }
+
+        return $busy;
+    }
+
+    /** A child that ended without a clean exit and left its job `queued` never claimed it: try again now. */
+    private function afterExit(int $jobId, ?int $exitCode, ?int $since): void
+    {
+        if (0 === $exitCode) {
+            return;
+        }
+        $this->logger?->warning('Job {id}: its child process ended with exit code {code}.', ['id' => $jobId, 'code' => $exitCode ?? 'signal']);
+        $job = $this->jobs->find($jobId);
+        if (null === $job) {
+            return;
+        }
+        $this->jobs->refresh($job);
+        if (JobStatus::Queued === $job->status()) {
+            $this->executor->requeueOrGiveUp($job, 1000, $since);
+        }
     }
 
     private function spawn(int $jobId, ?int $eligibleSince): BackgroundProcess

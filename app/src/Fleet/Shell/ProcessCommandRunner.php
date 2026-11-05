@@ -79,7 +79,8 @@ final class ProcessCommandRunner implements CommandRunner, BackgroundRunner
             throw new CommandRunnerException(\sprintf('Working directory "%s" does not exist.', $cwd));
         }
 
-        $process = new Process($argv, $cwd, $this->childEnvironment($env), null, null);
+        // Detached: a plain Process kills its child in __destruct (worker time-limit, restart), a job must outlive the worker.
+        $process = new DetachedProcess($argv, $cwd, $this->childEnvironment($env), null, null);
         $process->disableOutput();
         try {
             $process->start();
@@ -95,6 +96,11 @@ final class ProcessCommandRunner implements CommandRunner, BackgroundRunner
             public function isRunning(): bool
             {
                 return $this->process->isRunning();
+            }
+
+            public function exitCode(): ?int
+            {
+                return $this->process->isRunning() ? null : $this->process->getExitCode();
             }
 
             public function wait(): void

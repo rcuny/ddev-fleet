@@ -43,6 +43,11 @@ final class RecordingCommandRunner implements CommandRunner, BackgroundRunner
                 return false;
             }
 
+            public function exitCode(): int
+            {
+                return 0;
+            }
+
             public function wait(): void
             {
             }

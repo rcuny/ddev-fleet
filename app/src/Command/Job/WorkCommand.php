@@ -41,7 +41,14 @@ final class WorkCommand extends Command
             return Command::INVALID;
         }
         $since = $input->getOption('eligible-since');
-        $this->executor->run((int) $id, \is_string($since) && ctype_digit($since) ? (int) $since : null);
+        try {
+            $this->executor->run((int) $id, \is_string($since) && ctype_digit($since) ? (int) $since : null);
+        } catch (\Throwable $e) {
+            // Non-zero exit: the worker then retries a job that is still queued instead of waiting for the reaper.
+            $output->writeln('<error>'.$e::class.': '.$e->getMessage().'</error>');
+
+            return Command::FAILURE;
+        }
 
         return Command::SUCCESS;
     }

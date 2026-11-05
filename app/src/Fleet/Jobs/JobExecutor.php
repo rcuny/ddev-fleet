@@ -152,7 +152,8 @@ final class JobExecutor
         }
     }
 
-    private function requeueOrGiveUp(Job $job, int $delayMs, ?int $eligibleSince): void
+    /** Re-queues the job, or fails it once it has waited past the give-up time (counted from $eligibleSince). */
+    public function requeueOrGiveUp(Job $job, int $delayMs, ?int $eligibleSince): void
     {
         // Past the batch gate the clock no longer moves, so it is read once and then travels with the message.
         $eligibleSince ??= $this->jobs->eligibleSince($job)->getTimestamp();

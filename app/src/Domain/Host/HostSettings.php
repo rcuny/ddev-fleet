@@ -22,7 +22,7 @@ class HostSettings
     public const int MAX_BACKUP_RETENTION_DAYS = 3650;
     /** Jobs of different instances that may run at once (FLE-209). 1 = one after another, the behaviour before the setting. */
     public const int DEFAULT_MAX_CONCURRENT_JOBS = 1;
-    public const int MAX_MAX_CONCURRENT_JOBS = 32;
+    public const int MAX_MAX_CONCURRENT_JOBS = 8;
 
     /** Browser uploads: the default cap per file, 2 GiB (design spec section 17). Bigger files go in over SSH. */
     public const int DEFAULT_ASSET_UPLOAD_MAX_BYTES = 2_147_483_648;
