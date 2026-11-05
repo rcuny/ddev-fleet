@@ -68,6 +68,11 @@ REF=main
 REPO_URL=https://github.com/rcuny/ddev-fleet.git
 SKIP_DNS_CHECK=0
 SHELL_PROFILE=1
+# --harden and its settings (opt-in host hardening, install/harden/): off unless asked for or stored by an earlier run.
+HARDEN=0
+HARDEN_SSH_USERS=()
+HARDEN_TRUSTED_IPS=()
+HARDEN_GRACE=
 # --preflight: run only the pre-flight checks (lib/preflight.sh), change nothing.
 PREFLIGHT_ONLY=0
 
@@ -256,6 +261,11 @@ Options:
   --repo-url=<url|path> git remote or bundle to install from (default: the public GitHub mirror)
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
+  --harden              opt-in host hardening: key-only logins, login bans, a firewall with a dead-man's switch and more
+                        (off by default; docs/installation.md section 8). Once enabled, later runs re-apply it
+  --ssh-allow-user=<u>  with --harden: an account that may log in over SSH (repeatable; default: the account running sudo)
+  --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
+  --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -311,6 +321,19 @@ parse_args() {
       --repo-url=*) REPO_URL=${arg#--repo-url=} ;;
       --skip-dns-check) SKIP_DNS_CHECK=1 ;;
       --no-shell-profile) SHELL_PROFILE=0 ;;
+      --harden) HARDEN=1 ;;
+      --ssh-allow-user=*)
+        validate_unix_user "${arg#--ssh-allow-user=}" || die "$EX_USAGE" "--ssh-allow-user is not a valid user name"
+        HARDEN_SSH_USERS+=("${arg#--ssh-allow-user=}")
+        ;;
+      --trusted-ip=*)
+        validate_ip_or_cidr "${arg#--trusted-ip=}" || die "$EX_USAGE" "--trusted-ip must be an IPv4/IPv6 address or CIDR"
+        HARDEN_TRUSTED_IPS+=("${arg#--trusted-ip=}")
+        ;;
+      --firewall-grace=*)
+        validate_grace "${arg#--firewall-grace=}" || die "$EX_USAGE" "--firewall-grace must be 2 to 120 minutes"
+        HARDEN_GRACE=${arg#--firewall-grace=}
+        ;;
       --preflight) PREFLIGHT_ONLY=1 ;;
       --dry-run) FLEET_DRY_RUN=1 ;;
       *)
@@ -329,6 +352,36 @@ parse_args() {
   fi
   validate_ref "$REF" || die "$EX_USAGE" "--ref is not a valid git ref"
   validate_repo_url "$REPO_URL" || die "$EX_USAGE" "--repo-url is not a valid url or path"
+  if [ "$HARDEN" != 1 ] && { [ "${#HARDEN_SSH_USERS[@]}" -gt 0 ] || [ "${#HARDEN_TRUSTED_IPS[@]}" -gt 0 ] || [ -n "$HARDEN_GRACE" ]; }; then
+    die "$EX_USAGE" "--ssh-allow-user, --trusted-ip and --firewall-grace only make sense with --harden"
+  fi
+}
+
+# Account name as useradd accepts it (a lowercase name, digits, - and _).
+validate_unix_user() {
+  local LC_ALL=C
+  [[ $1 =~ ^[a-z_][a-z0-9_-]{0,31}$ ]]
+}
+
+# 2 to 120 minutes.
+validate_grace() {
+  local LC_ALL=C
+  [[ $1 =~ ^[0-9]{1,3}$ ]] && [ "$((10#$1))" -ge 2 ] && [ "$((10#$1))" -le 120 ]
+}
+
+# An IPv4 or IPv6 address with an optional prefix length. Strict enough to be written into a config file and a rule.
+validate_ip_or_cidr() {
+  local LC_ALL=C addr=${1%%/*} prefix='' o
+  [[ $1 == */* ]] && prefix=${1#*/}
+  if [[ $addr =~ ^[0-9]{1,3}(\.[0-9]{1,3}){3}$ ]]; then
+    local IFS=.
+    for o in $addr; do [ "$((10#$o))" -le 255 ] || return 1; done
+    [ -z "$prefix" ] || { [[ $prefix =~ ^[0-9]{1,2}$ ]] && [ "$((10#$prefix))" -le 32 ]; }
+  elif [[ $addr == *:* ]] && [[ $addr =~ ^[0-9a-fA-F:]{2,39}$ ]] && [[ $addr != *:::* ]]; then
+    [ -z "$prefix" ] || { [[ $prefix =~ ^[0-9]{1,3}$ ]] && [ "$((10#$prefix))" -le 128 ]; }
+  else
+    return 1
+  fi
 }
 
 # --- host checks -------------------------------------------------------------------------------------------------
