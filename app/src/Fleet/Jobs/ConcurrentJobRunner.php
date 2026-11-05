@@ -11,6 +11,7 @@ use App\Domain\Job\JobRepository;
 use App\Domain\Job\JobStatus;
 use App\Fleet\Shell\BackgroundProcess;
 use App\Fleet\Shell\BackgroundRunner;
+use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 
 /**
@@ -21,6 +22,11 @@ use Psr\Log\LoggerInterface;
  * know them, so the jobs with status `running` count as busy slots too (a `running` job always has a live lock holder,
  * JobReaper keeps it so). A child that ends non-zero while its job is still `queued` (it died before claiming) is retried
  * at once, within the usual 30 minute give-up.
+ *
+ * Before it starts a child the worker stamps the job (`spawned_at`). A queued job with that stamp counts as a busy slot, so
+ * a freshly restarted worker sees children that have not claimed their job yet. A child claims within seconds; a job still
+ * queued SPAWN_GRACE_SECONDS after its stamp lost its child (it died before claiming, and the worker that started it is
+ * gone): the stamp is cleared and the job is re-queued at once instead of waiting for JobReaper's 40 minutes.
  *
  * The consumer never blocks on a job. For each RunJob message it prunes the finished children, then:
  *  - concurrency 1 (the default; no host row counts as 1) and no child of this process running: runs the job in this process,
@@ -36,6 +42,9 @@ final class ConcurrentJobRunner
 {
     public const int WAIT_DELAY_MS = 3000;
 
+    /** How long a started child may take to claim its job before it counts as lost. */
+    public const int SPAWN_GRACE_SECONDS = 60;
+
     /** @var array<int, array{process: BackgroundProcess, key: string, since: ?int}> children this process started, by job id */
     private array $children = [];
 
@@ -48,6 +57,7 @@ final class ConcurrentJobRunner
         private readonly HostSettingsRepository $settings,
         private readonly BackgroundRunner $background,
         private readonly string $projectDir,
+        private readonly ClockInterface $clock,
         private readonly ?LoggerInterface $logger = null,
     ) {
     }
@@ -92,7 +102,15 @@ final class ConcurrentJobRunner
             return;
         }
 
-        $process = $this->spawn($jobId, $eligibleSince);
+        // Stamped first: a worker that restarts between here and the child's claim still counts this slot as taken.
+        $this->jobs->markSpawned($jobId, $this->clock->now());
+        try {
+            $process = $this->spawn($jobId, $eligibleSince);
+        } catch (\Throwable $e) {
+            $this->jobs->markSpawned($jobId, null);
+
+            throw $e;
+        }
         $this->children[$jobId] = ['process' => $process, 'key' => $key, 'since' => $eligibleSince];
     }
 
@@ -152,25 +170,56 @@ final class ConcurrentJobRunner
         foreach ($this->jobs->running() as $job) {
             $busy[(int) $job->id()] ??= JobExecutor::lockKey($job);
         }
+        foreach ($this->jobs->spawning() as $job) {
+            $id = (int) $job->id();
+            if (isset($busy[$id])) {
+                continue;
+            }
+            if ($this->isLost($job)) {
+                $this->recoverLost($job);
+
+                continue;
+            }
+            $busy[$id] = JobExecutor::lockKey($job);
+        }
 
         return $busy;
+    }
+
+    /** A queued job whose child, unknown to this process, had SPAWN_GRACE_SECONDS to claim it and did not. */
+    private function isLost(Job $job): bool
+    {
+        $at = $job->spawnedAt();
+
+        return null !== $at && $this->clock->now()->getTimestamp() - $at->getTimestamp() >= self::SPAWN_GRACE_SECONDS;
+    }
+
+    private function recoverLost(Job $job): void
+    {
+        $this->logger?->warning('Job {id}: its child process never claimed it; queuing it again.', ['id' => $job->id()]);
+        $this->jobs->markSpawned((int) $job->id(), null);
+        $this->executor->requeueOrGiveUp($job, 1000, null);
     }
 
     /** A child that ended without a clean exit and left its job `queued` never claimed it: try again now. */
     private function afterExit(int $jobId, ?int $exitCode, ?int $since): void
     {
-        if (0 === $exitCode) {
-            return;
-        }
-        $this->logger?->warning('Job {id}: its child process ended with exit code {code}.', ['id' => $jobId, 'code' => $exitCode ?? 'signal']);
         $job = $this->jobs->find($jobId);
         if (null === $job) {
             return;
         }
         $this->jobs->refresh($job);
-        if (JobStatus::Queued === $job->status()) {
-            $this->executor->requeueOrGiveUp($job, 1000, $since);
+        if (JobStatus::Queued !== $job->status()) {
+            return;
         }
+        // The child is gone: its slot is free whatever the exit code (a clean exit also leaves a queued job when the child
+        // put the message back itself, for a busy instance lock).
+        $this->jobs->markSpawned($jobId, null);
+        if (0 === $exitCode) {
+            return;
+        }
+        $this->logger?->warning('Job {id}: its child process ended with exit code {code}.', ['id' => $jobId, 'code' => $exitCode ?? 'signal']);
+        $this->executor->requeueOrGiveUp($job, 1000, $since);
     }
 
     private function spawn(int $jobId, ?int $eligibleSince): BackgroundProcess

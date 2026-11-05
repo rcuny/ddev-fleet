@@ -64,6 +64,35 @@ final readonly class JobRepository
         return $claimed;
     }
 
+    /** FLE-213: records that a child process was started for the queued job (or, with null, that it is no longer expected). */
+    public function markSpawned(int $id, ?\DateTimeImmutable $at): void
+    {
+        $this->em->getConnection()->executeStatement(
+            'UPDATE job SET spawned_at = :at WHERE id = :id AND status = :queued',
+            ['at' => $at, 'id' => $id, 'queued' => JobStatus::Queued->value],
+            ['at' => UtcDateTimeImmutableType::NAME],
+        );
+        $managed = $this->em->getUnitOfWork()->tryGetById($id, Job::class);
+        if ($managed instanceof Job) {
+            $this->em->refresh($managed);
+        }
+    }
+
+    /**
+     * Queued jobs a child process was started for and that none has claimed yet.
+     *
+     * @return list<Job> ordered by id
+     */
+    public function spawning(): array
+    {
+        /** @var list<Job> $jobs */
+        $jobs = $this->em->createQuery(\sprintf('SELECT j FROM %s j WHERE j.status = :queued AND j.spawnedAt IS NOT NULL ORDER BY j.id ASC', Job::class))
+            ->setParameter('queued', JobStatus::Queued)
+            ->getResult();
+
+        return $jobs;
+    }
+
     /**
      * Whether an earlier job (lower id) of the same batch is still queued or running.
      */
