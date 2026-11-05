@@ -86,4 +86,24 @@ final class TypesenseSeedMigrationTest extends KernelTestCase
 
         self::assertSame([['search', 9108, 8108]], $rows);
     }
+
+    public function testTheAccessMigrationOpensOnlyTheTypesensePort(): void
+    {
+        $em = $this->setUpFleetDatabase(keepSeed: true);
+        $connection = $em->getConnection();
+        $connection->executeStatement('DELETE FROM named_port');
+        $connection->executeStatement("INSERT INTO named_port (name, public_port, router_port, created_at) VALUES ('typesense', 9108, 8108, '2026-10-19 09:00:00'), ('ts-dashboard', 9111, 8110, '2026-10-19 09:00:00')");
+        $connection->executeStatement("UPDATE named_port SET access = 'gated'");
+        $connection->executeStatement("DELETE FROM doctrine_migration_versions WHERE version = 'DoctrineMigrations\\Version20261105160000'");
+        $connection->executeStatement('ALTER TABLE named_port DROP COLUMN access');
+
+        self::ensureKernelShutdown();
+        self::bootKernel();
+        [$exit, $output] = $this->console('doctrine:migrations:migrate', ['--no-interaction' => true]);
+        self::assertSame(0, $exit, $output);
+
+        $rows = self::getContainer()->get('doctrine.orm.default_entity_manager')->getConnection()->fetchAllKeyValue('SELECT name, access FROM named_port');
+        ksort($rows);
+        self::assertSame(['ts-dashboard' => 'gated', 'typesense' => 'public'], $rows);
+    }
 }

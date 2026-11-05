@@ -19,6 +19,13 @@ use Doctrine\ORM\Mapping as ORM;
 #[ORM\UniqueConstraint(name: 'uniq_named_port_router', columns: ['router_port'])]
 class NamedPort
 {
+    /** Behind Authelia and the project-group check (the default). */
+    public const string GATED = 'gated';
+    /** Served without Authelia: for a service the browser calls cross-origin (FLE-216). */
+    public const string PUBLIC = 'public';
+    /** The access of the catalogue port that is public unless said otherwise: Typesense was public in v0. */
+    public const string PUBLIC_BY_DEFAULT = 'typesense';
+
     #[ORM\Id]
     #[ORM\GeneratedValue]
     #[ORM\Column(type: Types::INTEGER)]
@@ -33,11 +40,15 @@ class NamedPort
     #[ORM\Column(type: Types::INTEGER)]
     private int $routerPort;
 
+    #[ORM\Column(type: Types::STRING, length: 8, options: ['default' => 'gated'])]
+    private string $access = self::GATED;
+
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
     private \DateTimeImmutable $createdAt;
 
-    public function __construct(string $name, int $publicPort, int $routerPort, ?\DateTimeImmutable $now = null)
+    public function __construct(string $name, int $publicPort, int $routerPort, ?\DateTimeImmutable $now = null, string $access = self::GATED)
     {
+        $this->access = $access;
         $this->name = $name;
         $this->publicPort = $publicPort;
         $this->routerPort = $routerPort;
@@ -62,6 +73,21 @@ class NamedPort
     public function routerPort(): int
     {
         return $this->routerPort;
+    }
+
+    public function access(): string
+    {
+        return $this->access;
+    }
+
+    public function isPublic(): bool
+    {
+        return self::PUBLIC === $this->access;
+    }
+
+    public function changeAccess(string $access): void
+    {
+        $this->access = $access;
     }
 
     public function createdAt(): \DateTimeImmutable

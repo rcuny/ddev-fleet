@@ -88,6 +88,7 @@ final readonly class ProjectExporter
                 'name' => $port->name(),
                 'public' => $port->publicPort(),
                 'router' => $port->routerPort(),
+                'access' => $port->access(),
             ], $ports),
             'templates' => array_map(static fn (Template $template): array => [
                 'name' => $template->name(),

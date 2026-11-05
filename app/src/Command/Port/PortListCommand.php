@@ -34,8 +34,8 @@ final class PortListCommand extends Command
         return $out->run(function () use ($out): void {
             $ports = array_map(fn (NamedPort $port): array => Shapes::port($port, $this->ports->usedBy($port)), $this->ports->list());
             $out->emit($ports, static fn (JsonOutput $out) => $out->table(
-                ['NAME', 'PUBLIC', 'ROUTER', 'PROJECTS'],
-                array_map(static fn (array $port): array => [$port['name'], $port['public'], $port['router'], implode(', ', $port['projects']) ?: '-'], $ports),
+                ['NAME', 'PUBLIC', 'ROUTER', 'ACCESS', 'PROJECTS'],
+                array_map(static fn (array $port): array => [$port['name'], $port['public'], $port['router'], $port['access'], implode(', ', $port['projects']) ?: '-'], $ports),
             ));
         });
     }

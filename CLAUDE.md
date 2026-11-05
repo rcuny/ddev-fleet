@@ -257,8 +257,9 @@ Facts to keep true when editing it:
   (`apply`, sudoers, wrapper) are always installed from that copy, never from the fleet-writable checkout. Steps are
   `install/steps/NN-*.sh`, each defines `step_main`, each is idempotent; `run.sh` prints `==> <step>` lines only for
   steps. `--dry-run` prints the whole plan and changes nothing.
-- **Never touched:** `sshd`, ufw / iptables / nftables, fail2ban, unattended-upgrades (a lockout risk; hardening is the
-  operator's). `/opt/ddev-fleet` stays `fleet:fleet`. Authelia's `/etc/tmpfiles.d/authelia.conf` mask is installed
+- **Never touched unless `--harden` is given (or stored in `/etc/ddev-fleet/hardening.conf`):** `sshd`, ufw / iptables / nftables, fail2ban
+  (a lockout risk). All of it lives in `install/harden/` + step `99-harden.sh`, the only place `InstallerSafetyTest` allows those
+  words; unattended-upgrades is never touched. `/opt/ddev-fleet` stays `fleet:fleet`. Authelia's `/etc/tmpfiles.d/authelia.conf` mask is installed
   before the package. Caddy snippet directories are `fleet:caddy` 2750 (setgid).
 - **Env files:** `/etc/ddev-fleet/fleet.env` (`root:fleet` 0640; app, workers, CLI, php-fpm via a unit drop-in),
   `mercure.env` (0600), `/etc/caddy/fleet.env` (written by `apply caddy`). Only missing keys are added and secrets are
@@ -272,7 +273,7 @@ Facts to keep true when editing it:
 - **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
   workers when the code or env changed.
 - Not shipped yet (do not assume it exists): `fleet-tmux`, named ports and Typesense exposure, the branch picker and
-  live-branch indicator, host hardening. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/installation.md`; recovery: `fleet user:reset-password`).
+  live-branch indicator. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/installation.md`; recovery: `fleet user:reset-password`).
 - Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
   install/bin/fleet` before committing a script.
 
