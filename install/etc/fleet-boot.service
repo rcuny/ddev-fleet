@@ -7,7 +7,14 @@ After=docker.service network-online.target fleet-worker@1.service
 Wants=network-online.target
 
 [Service]
-Type=oneshot
+# Type=exec (NOT oneshot) is deliberate (FLE-4, regression FLE-196). A Type=exec unit counts as started once
+# ExecStart is exec'd, so multi-user.target completes at once and the sequential batch keeps running. With
+# Type=oneshot, multi-user.target (this unit is WantedBy it) waited for the whole batch, and the Authelia .deb unit
+# has After=multi-user.target, so Authelia (and with it every forward_auth URL) answered 502 until the last instance
+# was up. Do NOT add Before=/After= against multi-user.target or authelia.service: it would block again.
+# The unit goes inactive when the batch ends; a non-zero exit (an instance failed) marks it failed, visible in
+# `systemctl --failed`. Result log: `journalctl -u fleet-boot -b`.
+Type=exec
 User=fleet
 Group=fleet
 EnvironmentFile=/etc/ddev-fleet/fleet.env
