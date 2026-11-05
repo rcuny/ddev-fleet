@@ -316,7 +316,7 @@ final class InstanceService
             $found = array_values(array_filter($found, static fn (Instance $i): bool => $i->state() === $state));
         }
         if ([] === $found) {
-            throw new ValidationFailed(['selector' => 'No instance matches.']);
+            throw new NoInstanceMatches();
         }
 
         return $found;
