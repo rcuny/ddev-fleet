@@ -144,6 +144,34 @@ final class ApplySlicesHelperTest extends TestCase
         self::assertSame([], $this->calls());
     }
 
+    public function testItRefusesToReplaceOrDeleteADropInItDoesNotOwn(): void
+    {
+        mkdir($this->root.'/etc/systemd/system/fleet.slice.d');
+        file_put_contents($this->root.'/etc/systemd/system/fleet.slice.d/10-fleet-quota.conf', "[Slice]\nCPUQuota=50%\n");
+        $this->stage([['unit' => 'fleet.slice', 'quota_percent' => 1400]]);
+
+        [$status, , $err] = $this->apply();
+
+        self::assertSame(65, $status, $err);
+        self::assertStringContainsString('drop-in of fleet.slice is not managed by ddev-fleet', $err);
+        self::assertSame("[Slice]\nCPUQuota=50%\n", $this->read('etc/systemd/system/fleet.slice.d/10-fleet-quota.conf'));
+        self::assertSame([], $this->calls());
+    }
+
+    public function testAStaleSliceWithAForeignDropInIsRefusedNotStripped(): void
+    {
+        file_put_contents($this->root.'/etc/systemd/system/fleet-old.slice', self::MARK."\n[Unit]\nDescription=x\n");
+        mkdir($this->root.'/etc/systemd/system/fleet-old.slice.d');
+        file_put_contents($this->root.'/etc/systemd/system/fleet-old.slice.d/10-fleet-quota.conf', "[Slice]\nCPUQuota=50%\n");
+        $this->stage([['unit' => 'fleet.slice', 'quota_percent' => 1400]]);
+
+        [$status, , $err] = $this->apply();
+
+        self::assertSame(65, $status, $err);
+        self::assertFileExists($this->root.'/etc/systemd/system/fleet-old.slice.d/10-fleet-quota.conf');
+        self::assertSame([], $this->calls());
+    }
+
     /**
      * @return iterable<string, array{mixed}>
      */

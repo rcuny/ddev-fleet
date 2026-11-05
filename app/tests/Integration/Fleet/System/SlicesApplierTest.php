@@ -17,6 +17,7 @@ use App\Fleet\System\PrivilegedApplyFailed;
 use App\Fleet\System\SlicesApplier;
 use App\Fleet\System\SlicesRenderer;
 use App\Fleet\System\SystemRenderer;
+use App\Fleet\System\TargetSupport;
 use App\Tests\Support\FleetDatabase;
 use App\Tests\Support\RecordingApplier;
 use Symfony\Bundle\FrameworkBundle\Test\KernelTestCase;
@@ -98,6 +99,29 @@ final class SlicesApplierTest extends KernelTestCase
         self::assertStringContainsString('the CPU limits were not applied on the host', (string) $slices->takeWarning());
         self::assertNull($slices->takeWarning(), 'a warning is shown once');
         self::assertFileDoesNotExist($this->paths->stagingFile('slices', 'slices.json'), 'the staged file is removed on failure too');
+    }
+
+    public function testAHostWithAnOldHelperIsSkippedSilently(): void
+    {
+        $applier = new class implements Applier, TargetSupport {
+            public int $calls = 0;
+
+            public function apply(ApplyTarget $target): void
+            {
+                ++$this->calls;
+            }
+
+            public function supports(ApplyTarget $target): bool
+            {
+                return false;
+            }
+        };
+        $slices = $this->slices($applier, 8);
+
+        $slices->sync();
+
+        self::assertSame(0, $applier->calls);
+        self::assertNull($slices->takeWarning());
     }
 
     private function slices(Applier $applier, int $threads): SlicesApplier

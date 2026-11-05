@@ -16,6 +16,8 @@ use Psr\Log\LoggerInterface;
  *
  * The change that triggered it is already committed, so a failure is a warning, never a rollback: it is logged and
  * kept for the caller (takeWarning()), and the next sync retries. Stale and missing slices are healed by any sync.
+ * On a host whose installed helper does not know `slices` yet (TargetSupport), sync() does nothing and says nothing;
+ * after the installer has run, `fleet host:slices` creates the slices once.
  */
 final class SlicesApplier
 {
@@ -70,6 +72,14 @@ final class SlicesApplier
      */
     public function sync(): void
     {
+        // A host whose helper predates `apply slices` is not upgraded yet: nothing to apply, nothing to warn about.
+        // `fleet host:slices` is the one-time repair once the installer has run.
+        if ($this->applier instanceof TargetSupport && !$this->applier->supports(ApplyTarget::Slices)) {
+            $this->logger?->debug('The installed root helper has no "slices" target; skipping the CPU slice sync.');
+
+            return;
+        }
+
         try {
             $this->apply();
         } catch (\RuntimeException $e) {

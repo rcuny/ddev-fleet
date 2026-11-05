@@ -114,4 +114,21 @@ final class PrivilegedApplyTest extends TestCase
 
         new PrivilegedApply($runner)->apply(ApplyTarget::Caddy);
     }
+
+    public function testSupportsReadsTheHelpersWordList(): void
+    {
+        $dir = sys_get_temp_dir().'/apply-support-'.bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir.'/old', "#!/bin/bash\nALLOWED_TARGETS='caddy authelia'\n");
+        file_put_contents($dir.'/new', "#!/bin/bash\nALLOWED_TARGETS='caddy authelia slices'\n");
+        $runner = new RecordingCommandRunner();
+
+        self::assertFalse(new PrivilegedApply($runner, $dir.'/old')->supports(ApplyTarget::Slices));
+        self::assertTrue(new PrivilegedApply($runner, $dir.'/old')->supports(ApplyTarget::Caddy));
+        self::assertTrue(new PrivilegedApply($runner, $dir.'/new')->supports(ApplyTarget::Slices));
+        self::assertFalse(new PrivilegedApply($runner, $dir.'/missing')->supports(ApplyTarget::Caddy));
+        unlink($dir.'/old');
+        unlink($dir.'/new');
+        rmdir($dir);
+    }
 }

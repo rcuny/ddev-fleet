@@ -59,7 +59,7 @@ readonly AUTHELIA_SECRET_FILES='AUTHELIA_SESSION_SECRET_FILE=/etc/authelia/secre
 readonly T_LOCK=5 T_VALIDATE=15 T_RELOAD=15 T_RESTART=20 T_OPEN=5
 # slices: lock 5 + jq + daemon-reloads + per-slice systemctl calls (T_SLICE each, MAX_SLICES at most, normally
 # milliseconds) must stay inside the app's 60 s.
-readonly T_SLICE=5 MAX_SLICES=500 SLICE_MAX_NAME=200
+readonly T_SLICE=5 MAX_SLICES=500 SLICE_MAX_NAME=200 SLICES_BUDGET=40
 readonly SLICE_MARK='# Managed by ddev-fleet (apply slices). Hand edits are overwritten.'
 readonly SLICE_UNIT_RE='^fleet(-[a-z0-9_]+){0,2}\.slice$'
 readonly SLICE_DROPIN=10-fleet-quota.conf
@@ -544,6 +544,11 @@ slice_parent() {
 
 # systemctl_slice <args>...: one systemctl call with a timeout (the helper must stay inside the app's 60 s).
 systemctl_slice() {
+  # Overall deadline (SLICES_DEADLINE, epoch seconds, set by apply_slices): many slices must stay inside the app's 60 s.
+  if [ -n "${SLICES_DEADLINE:-}" ] && [ "$(date +%s)" -ge "$SLICES_DEADLINE" ]; then
+    printf 'apply: deadline for the slice calls reached\n' >&2
+    return 124
+  fi
   timeout "$T_SLICE" systemctl "$@" </dev/null
 }
 
@@ -566,6 +571,8 @@ drop_unit_dir() {
 # previous quotas. Best effort, reports what it could not do.
 slices_restore() {
   local unit prev q
+  # The rollback gets its own short budget: the deadline of the failed run may already be over.
+  SLICES_DEADLINE=$(($(date +%s) + 15))
   for unit in "${TOUCHED[@]}"; do
     restore_previous "$SYSTEMD_UNIT_DIR/$unit" "unit.$unit" 0644 root root
     restore_previous "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" "quota.$unit" 0644 root root
@@ -589,6 +596,7 @@ apply_slices() {
   local -A want=()
   local -a order=() TOUCHED=() stale=()
 
+  SLICES_DEADLINE=$(($(date +%s) + SLICES_BUDGET))
   stage_in slices.json "$PRIV/slices.json" || fail 'nothing staged: slices.json is missing' 66
 
   threads=$(nproc --all 2>/dev/null || true)
@@ -602,7 +610,7 @@ apply_slices() {
   if ! timeout "$T_VALIDATE" jq -e '
       type == "array" and length > 0 and length <= 500 and
       all(.[]; type == "object" and (keys | sort) == ["quota_percent", "unit"]
-        and (.unit | type == "string" and length <= 200 and test("^[a-z0-9_.-]+$"))
+        and (.unit | type == "string" and length <= 200 and (contains("\n") | not) and test("^[a-z0-9_.-]+$"))
         and (.quota_percent == null or (.quota_percent | type == "number" and . == floor and . >= 100 and . <= 100000)))' \
     "$PRIV/slices.json" >/dev/null 2>&1 </dev/null; then
     fail 'slices.json is not a list of {"unit": ..., "quota_percent": integer|null} objects' 65
@@ -648,6 +656,9 @@ apply_slices() {
     if [ -L "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" ]; then
       fail "the drop-in of $unit is a symlink; refusing to use it" 65
     fi
+    if [ -e "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" ] && { [ ! -f "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN" ] || ! grep -qxF -- "$SLICE_MARK" "$SYSTEMD_UNIT_DIR/$unit.d/$SLICE_DROPIN"; }; then
+      fail "the drop-in of $unit is not managed by ddev-fleet; refusing to replace it" 65
+    fi
   done
   # Stale: managed fleet*.slice files that are no longer listed. A glob over the one directory, no find, no recursion.
   for u in "$SYSTEMD_UNIT_DIR"/fleet*.slice; do
@@ -658,6 +669,9 @@ apply_slices() {
     [[ $name =~ $SLICE_UNIT_RE ]] || continue
     [ -z "${want[$name]:-}" ] || continue
     grep -qxF -- "$SLICE_MARK" "$u" || continue
+    if [ -e "$SYSTEMD_UNIT_DIR/$name.d/$SLICE_DROPIN" ] && { [ -L "$SYSTEMD_UNIT_DIR/$name.d/$SLICE_DROPIN" ] || ! grep -qxF -- "$SLICE_MARK" "$SYSTEMD_UNIT_DIR/$name.d/$SLICE_DROPIN"; }; then
+      fail "the drop-in of $name is not managed by ddev-fleet; refusing to remove it" 65
+    fi
     stale+=("$name")
   done
 
