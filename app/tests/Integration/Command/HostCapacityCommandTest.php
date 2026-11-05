@@ -59,7 +59,7 @@ final class HostCapacityCommandTest extends KernelTestCase
         self::assertSame(46, $report['allocatable_threads']);
         self::assertSame(24 + 46, $report['committed_threads'], 'an unlimited project counts as allocatable');
         self::assertTrue($report['overcommitted']);
-        self::assertSame(['count' => 0, 'max' => 25], $report['instances']);
+        self::assertSame(['count' => 0, 'max' => 25, 'not_under_slice' => []], $report['instances']);
 
         $ci = $report['projects'][array_search('ci', array_column($report['projects'], 'name'), true)];
         self::assertSame(24, $ci['cpu_threads']);
@@ -103,7 +103,7 @@ final class HostCapacityCommandTest extends KernelTestCase
         fclose($held);
 
         self::assertSame(40, $report['allocatable_threads']);
-        self::assertSame(['count' => 0, 'max' => 40], $report['instances']);
+        self::assertSame(['count' => 0, 'max' => 40, 'not_under_slice' => []], $report['instances']);
         $ci = $report['projects'][array_search('ci', array_column($report['projects'], 'name'), true)];
         self::assertSame(1, $ci['templates'][0]['busy']);
         self::assertSame(3.0, $ci['templates'][0]['used_cores']);

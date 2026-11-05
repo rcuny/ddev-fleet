@@ -121,6 +121,12 @@ final class AssetsSeedStep implements DeployStep
                 throw new \RuntimeException(\sprintf('cannot read "%s"', $this->printable($path)));
             }
             $type = $info['mode'] & 0o170000;
+            if (0o040000 !== $type && self::isLegacyCpuCap($path)) {
+                $context->log->line(\sprintf('assets: skipped "%s" (a legacy CPU cap; 1.x limits CPU through slices)', $this->printable($path)));
+                ++$counts['skipped'];
+
+                continue;
+            }
             if (0o120000 === $type) {
                 $this->copyLink($root, $path, $dst, $inDumps, $context, $counts);
             } elseif (0o040000 === $type) {
@@ -174,6 +180,16 @@ final class AssetsSeedStep implements DeployStep
         if (!$inDumps) {
             $context->exclude('/'.self::escape($path));
         }
+    }
+
+    /**
+     * Capacity spec decision 4: a compose file under the instance's `.ddev/` whose name matches
+     * `docker-compose.*cpu*.yaml` (`docker-compose.fleet-cpu.yaml`, `docker-compose.cpu-limit.yaml`) is a 0.x per-container
+     * cap kept in the config repo for the legacy 0.x host. 1.x ignores it, so a compose `cpus:` never stacks with the slice quota.
+     */
+    private static function isLegacyCpuCap(string $path): bool
+    {
+        return str_starts_with($path, '.ddev/') && fnmatch('docker-compose.*cpu*.yaml', basename($path));
     }
 
     private function ensureDirectory(string $dst, string $path): void

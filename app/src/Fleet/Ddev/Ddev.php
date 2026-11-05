@@ -7,6 +7,8 @@ namespace App\Fleet\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunner;
+use Symfony\Component\Yaml\Exception\ParseException;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * The ddev and docker calls the fleet makes, all through the CommandRunner. Every ddev call runs without prompts and
@@ -160,6 +162,43 @@ final readonly class Ddev
         }
 
         return array_map(static fn (float $v): int => (int) round($v), $mib);
+    }
+
+    /**
+     * The names of all services of a project, from `ddev debug compose-config`: web, db, add-ons and profile services
+     * (xhgui). Works on a stopped project, once the add-on files are in place.
+     *
+     * @return list<string>
+     *
+     * @throws DdevUnavailable when the command fails or prints no services
+     */
+    public function composeServices(string $dir): array
+    {
+        try {
+            $result = $this->runner->run(['ddev', 'debug', 'compose-config'], $dir, $this->env, null, self::LIST_TIMEOUT * 2);
+        } catch (\Throwable $e) {
+            throw new DdevUnavailable('ddev debug compose-config did not answer.', 0, $e);
+        }
+        if (!$result->isSuccess()) {
+            throw new DdevUnavailable(\sprintf('ddev debug compose-config failed (exit %d).', $result->exitCode));
+        }
+        try {
+            $config = Yaml::parse($result->stdout);
+        } catch (ParseException $e) {
+            throw new DdevUnavailable('ddev debug compose-config printed no valid YAML.', 0, $e);
+        }
+        $services = \is_array($config) && \is_array($config['services'] ?? null) ? array_keys($config['services']) : [];
+        $services = array_map('strval', $services);
+        if ([] === $services) {
+            throw new DdevUnavailable('ddev debug compose-config listed no services.');
+        }
+        foreach ($services as $service) {
+            if (1 !== preg_match('/^[A-Za-z0-9][A-Za-z0-9_.-]*$/', $service)) {
+                throw new DdevUnavailable('ddev debug compose-config listed a service with an unusable name.');
+            }
+        }
+
+        return $services;
     }
 
     /**
