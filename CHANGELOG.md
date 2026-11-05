@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-11-05
+
+### Added
+- **FLE-190: extra SSH keys per template.** A template can name extra keys (`ssh/<name>_ed25519` in the fleet home) that
+  its instances get in their own ssh-agent next to the push key, so an instance can reach another host without a
+  hand-written deploy step. The keys are loaded on deploy, start, restart and on the status watcher's refresh, so they
+  survive an agent restart; an instance of another template of the same project does not get them. Set with
+  `fleet template:create|update --ssh-key=<name>` (repeatable, `--unset=ssh-keys` clears), the template form, and the
+  project export/import (`ssh_keys`). The names are allow-listed (never the deploy or push key), the file must exist with
+  mode `0600` and be owned by the fleet user, and the project needs `container_ssh`. No key content ever reaches the
+  database, a command line or a log.
+- **FLE-190: `fleet ssh:trust <host>`** adds a server's host keys to the fleet's known hosts after you compared the
+  fingerprints (a prompt, or `--fingerprint` for scripts), so instances trust that host from their next deploy.
+
+### Fixed
+- **FLE-192: a template's Drupal environment is applied again when the project's assets hold a `.env`.** The
+  assets seed copied the project's own `.env` over the checkout after the template's `DRUPAL_ENV` had been
+  written, so the instance kept the asset's value (for example `dev` instead of `staging`). `DRUPAL_ENV` is now
+  set after the assets seed and before `ddev start`; the rest of the file is kept.
+
+#### Rollout
+- A database migration adds `template.ssh_keys` (empty for every template); it runs with the upgrade.
+- ACTION: redeploy the instances whose template sets a Drupal environment and whose project has a `.env` in its
+  assets; until then they keep the asset's value.
+
 ## [1.2.2] - 2026-11-04
 
 ### Added
@@ -1053,7 +1078,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.2.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/rcuny/ddev-fleet/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/rcuny/ddev-fleet/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/rcuny/ddev-fleet/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/rcuny/ddev-fleet/compare/v1.1.0...v1.2.0
