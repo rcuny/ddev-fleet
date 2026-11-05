@@ -17,6 +17,23 @@ final class InstanceNaming
     /** 63 (host name limit) minus the 4 characters of DDEV's `-web` suffix. */
     public const int MAX = 59;
 
+    /**
+     * Characters kept for the service name in DDEV's container name `ddev-<id>-<service>` (a DNS label for Docker's
+     * embedded DNS, so at most 63). 20 covers `typesense-dashboard` (19), the longest add-on service we ship.
+     */
+    public const int SERVICE_BUDGET = 20;
+
+    /** The longest add-on service name we ship (`typesense-dashboard`). */
+    private const string LONGEST_SERVICE = 'typesense-dashboard';
+
+    public static function longestServiceName(): string
+    {
+        return self::LONGEST_SERVICE;
+    }
+
+    /** Never cut a label below this many characters (hash included), whatever the project name or service budget. */
+    private const int MIN_LABEL = 12;
+
     /** A single DNS label (the `<hostname>-<id>` alias of an instance). */
     public const int DNS_LABEL_MAX = 63;
 
@@ -38,14 +55,20 @@ final class InstanceNaming
      * in 59 characters. A label that is cut ends in `-` and the first 6 hex of the SHA-1 of `$seed`, so the same seed
      * always lands on the same id.
      *
-     * @param int $aliasPrefix characters an alias adds in front of the id (`InstanceHostnames::longestPrefix()`)
-     * @param int $reserve     characters kept free behind the label, e.g. 4 for a `-999` allocation suffix
+     * @param int $aliasPrefix   characters an alias adds in front of the id (`InstanceHostnames::longestPrefix()`)
+     * @param int $reserve       characters kept free behind the label, e.g. 4 for a `-999` allocation suffix
+     * @param int $serviceBudget characters kept for the longest service name of `ddev-<id>-<service>` (0 = no service cap)
      *
      * @throws ValidationFailed when not even the hash fits
      */
-    public static function fitLabel(string $project, string $label, string $seed, int $aliasPrefix = 0, int $reserve = 0): string
+    public static function fitLabel(string $project, string $label, string $seed, int $aliasPrefix = 0, int $reserve = 0, int $serviceBudget = self::SERVICE_BUDGET): string
     {
-        $budget = min(self::MAX, self::DNS_LABEL_MAX - $aliasPrefix) - \strlen($project) - 2 - $reserve;
+        $cap = min(self::MAX, self::DNS_LABEL_MAX - $aliasPrefix);
+        if ($serviceBudget > 0) {
+            // 'ddev-' + id + '-' + service <= 63; never squeeze the label below MIN_LABEL for a long project name.
+            $cap = min($cap, max(self::DNS_LABEL_MAX - 6 - $serviceBudget, \strlen($project) + 2 + self::MIN_LABEL + $reserve));
+        }
+        $budget = $cap - \strlen($project) - 2 - $reserve;
         if (\strlen($label) <= $budget) {
             return $label;
         }
@@ -56,6 +79,27 @@ final class InstanceNaming
         }
 
         return rtrim(substr($label, 0, $keep), '-').$suffix;
+    }
+
+    /**
+     * Container names (`ddev-<id>-<service>`) that exceed the 63-character DNS label limit, so Docker's embedded DNS
+     * cannot resolve them (the router answers 502 for that service).
+     *
+     * @param list<string> $services service names of the instance (web, db, add-ons)
+     *
+     * @return list<string> the offending container names
+     */
+    public static function overlongContainers(string $id, array $services): array
+    {
+        $bad = [];
+        foreach ($services as $service) {
+            $name = 'ddev-'.$id.'-'.$service;
+            if (\strlen($name) > self::DNS_LABEL_MAX) {
+                $bad[] = $name;
+            }
+        }
+
+        return $bad;
     }
 
     /**

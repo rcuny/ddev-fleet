@@ -10,6 +10,7 @@ use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\Instances\InstanceNaming;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ValidationFailed;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -58,7 +59,14 @@ final class ListCommand extends Command
                 $rows[] = self::row($instance);
             }
 
-            $out->emit(['instances' => $rows], static function (JsonOutput $out) use ($rows): void {
+            $long = array_values(array_filter(array_map(static fn (array $r): string => (string) $r['id'], $rows), static fn (string $id): bool => [] !== InstanceNaming::overlongContainers($id, [InstanceNaming::longestServiceName()])));
+            $payload = $out->withWarning(['instances' => $rows], [] === $long ? null : \sprintf(
+                '%d instance id(s) are too long for add-on services such as typesense-dashboard (container name over 63 characters, the router answers 502 for them): %s. Redeploy them under a shorter label.',
+                \count($long),
+                implode(', ', $long),
+            ));
+
+            $out->emit($payload, static function (JsonOutput $out) use ($rows): void {
                 if ([] === $rows) {
                     $out->success('No instances.');
 

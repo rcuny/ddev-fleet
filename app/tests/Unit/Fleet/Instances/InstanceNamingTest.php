@@ -74,7 +74,7 @@ final class InstanceNamingTest extends TestCase
 
     public function testALabelThatDoesNotFitIsCutAndEndsInTheSeedHash(): void
     {
-        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 'feature/x');
+        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 'feature/x', serviceBudget: 0);
 
         self::assertSame(InstanceNaming::MAX, \strlen('blog--'.$label));
         self::assertSame('-'.substr(sha1('feature/x'), 0, 6), substr($label, -7));
@@ -84,7 +84,7 @@ final class InstanceNamingTest extends TestCase
     public function testTheLongestBranchLabelFitsIn59AndKeepsItsHash(): void
     {
         $branch = 'renovate/major-ansible-collections';
-        $label = InstanceNaming::fitLabel('ddev-fleet-renovate-ci', 'ci-'.Labels::slug($branch).'-and-more-words-here', $branch);
+        $label = InstanceNaming::fitLabel('ddev-fleet-renovate-ci', 'ci-'.Labels::slug($branch).'-and-more-words-here', $branch, serviceBudget: 0);
 
         self::assertSame(59, \strlen('ddev-fleet-renovate-ci--'.$label));
         self::assertMatchesRegularExpression('/-'.substr(sha1($branch), 0, 6).'$/', $label);
@@ -93,16 +93,42 @@ final class InstanceNamingTest extends TestCase
 
     public function testAnAliasThatWouldPassTheDnsLabelShortensTheLabelFurther(): void
     {
-        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 's', aliasPrefix: 10);
+        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 's', aliasPrefix: 10, serviceBudget: 0);
 
         self::assertSame(63 - 10, \strlen('blog--'.$label));
     }
 
     public function testTheAliasPrefixAndTheReservedSuffixTakeFromTheBudget(): void
     {
-        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 's', aliasPrefix: 10, reserve: 4);
+        $label = InstanceNaming::fitLabel('blog', str_repeat('a', 80), 's', aliasPrefix: 10, reserve: 4, serviceBudget: 0);
 
         self::assertSame(63 - 10 - 4, \strlen('blog--'.$label));
+    }
+
+    public function testTheServiceBudgetKeepsEveryContainerNameWithinTheDnsLabel(): void
+    {
+        $label = InstanceNaming::fitLabel('blog', 'ci-feature-fle-1795-harden-media-derivatives-long', 'feature/x', reserve: 4);
+        $id = InstanceNaming::compose('blog', $label.'-1');
+
+        self::assertSame([], InstanceNaming::overlongContainers($id, ['web', 'db', 'typesense', 'typesense-dashboard']));
+        self::assertLessThanOrEqual(63 - 6 - InstanceNaming::SERVICE_BUDGET - 4, \strlen('blog--'.$label));
+    }
+
+    public function testASuffixedIdOfTheIncidentWasTooLong(): void
+    {
+        $base = 'blog--ci-feature-fle-1795-harden-media-d-8556d2';
+
+        self::assertSame([], InstanceNaming::overlongContainers($base, ['typesense']));
+        self::assertSame(['ddev-'.$base.'-1-typesense'], InstanceNaming::overlongContainers($base.'-1', ['web', 'typesense']));
+        self::assertCount(1, InstanceNaming::overlongContainers($base, ['typesense-dashboard']));
+    }
+
+    public function testALongProjectNameKeepsAMinimumLabel(): void
+    {
+        $label = InstanceNaming::fitLabel(str_repeat('p', 30), str_repeat('a', 80), 's', reserve: 4);
+
+        self::assertSame(12, \strlen($label));
+        self::assertLessThanOrEqual(InstanceNaming::MAX, \strlen(str_repeat('p', 30).'--'.$label) + 4);
     }
 
     public function testAProjectNameWithNoRoomLeftIsRefused(): void

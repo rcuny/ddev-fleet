@@ -205,7 +205,7 @@ final class RuleMatcher
         $alias = InstanceHostnames::longestPrefix($project);
         try {
             if (isset($params['label'])) {
-                $label = InstanceNaming::fitLabel($project->name(), Labels::slug($params['label']), $branch, $alias);
+                $label = InstanceNaming::fitLabel($project->name(), Labels::slug($params['label']), $branch, $alias, 4);
 
                 return new DeployTarget($rule, $branch, $label, true);
             }
