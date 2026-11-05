@@ -188,6 +188,8 @@ harden_preflight() {
     other=${dir##*/}
     validate_unix_user "$other" || continue
     in_list "$other" "$(printf '%s\n' "${H_USERS[@]}")" && continue
+    # root (cloud-image forced-command keys) and the service account are not login accounts to protect.
+    case "$other" in root | fleet) continue ;; esac
     harden_has_key "$other" && shut+=("$other")
   done
   if [ "${#shut[@]}" -gt 0 ]; then
@@ -393,7 +395,7 @@ harden_firewall_active() {
 }
 
 harden_firewall() {
-  local sshp ip p staged content armed=0 changed=0
+  local sshp ip p staged content armed=0 changed=0 enable_now=0
   sshp=$(harden_ssh_ports)
   harden_assert_loopback_router
 
@@ -454,36 +456,42 @@ FLEETEOF
     "$H_SBIN/fleet-firewall-sync" || log_warn "the named-port sync failed; the timer retries every minute"
   fi
 
+  # The switch is armed BEFORE "ufw --force enable": if the enable drops this SSH session the installer is killed, and
+  # the timer plus the boot check must already be in place to turn the firewall off again.
   if is_dry; then
+    printf '+ arm the dead-man switch (start fleet-firewall-deadman.timer, enable the boot check) BEFORE ufw --force enable\n'
     printf '+ ufw --force enable (only if it is not active yet)\n'
-  elif ! harden_firewall_active; then
-    # (Re-)enabling always re-arms the switch: an earlier confirmation proved another firewall state.
-    run rm -f "$H_MARKER"
-    run ufw --force enable
-    armed=1
-  elif [ -f "$H_MARKER" ]; then
-    # Already active and confirmed: a change of SSH ports or trusted addresses needs a new confirmation.
-    if [ "$(printf '%s\n' $sshp | sort | tr '\n' ' ')" != "$(printf '%s\n' $H_OLD_PORTS | sort | tr '\n' ' ')" ] ||
-      [ "$(printf '%s\n' "${H_IPS[@]}" | sort | tr '\n' ' ')" != "$(printf '%s\n' $H_OLD_IPS | sort | tr '\n' ' ')" ]; then
-      changed=1
+  else
+    if ! harden_firewall_active; then
+      # (Re-)enabling always re-arms the switch: an earlier confirmation proved another firewall state.
       run rm -f "$H_MARKER"
       armed=1
+      enable_now=1
+    elif [ ! -f "$H_MARKER" ]; then
+      # Already active but never confirmed: default deny with no switch would be unrecoverable, so arm it anyway.
+      armed=1
+    else
+      # Already active and confirmed: a change of SSH ports or trusted addresses needs a new confirmation.
+      if [ "$(printf '%s\n' $sshp | sort | tr '\n' ' ')" != "$(printf '%s\n' $H_OLD_PORTS | sort | tr '\n' ' ')" ] ||
+        [ "$(printf '%s\n' "${H_IPS[@]}" | sort | tr '\n' ' ')" != "$(printf '%s\n' $H_OLD_IPS | sort | tr '\n' ' ')" ]; then
+        changed=1
+        run rm -f "$H_MARKER"
+        armed=1
+      fi
     fi
-  fi
-
-  # The boot check turns the firewall off whenever the marker is missing, so it is enabled only while the switch is
-  # armed or an earlier arm was confirmed.
-  if is_dry; then
-    printf '+ arm the dead-man switch (start fleet-firewall-deadman.timer, enable the boot check) on a first enable, unless %s exists\n' "$H_MARKER"
-  elif [ "$armed" = 1 ] || [ -f "$H_MARKER" ]; then
-    run systemctl enable fleet-firewall-deadman-bootcheck.service
-  else
-    run systemctl disable fleet-firewall-deadman-bootcheck.service
-  fi
-  if [ "$armed" = 1 ]; then
-    [ "$changed" = 0 ] || log_info "SSH ports or trusted addresses changed: the dead-man's switch is armed again"
-    run systemctl start fleet-firewall-deadman.timer
-    add_final_note "FIREWALL ENABLED with a dead-man's switch: it turns the firewall OFF again in $H_GRACE minutes unless you confirm. From a SECOND, independent SSH session run:  sudo $H_SBIN/fleet-firewall-confirm"
+    # The boot check turns the firewall off whenever the marker is missing, so it is enabled only while the switch is
+    # armed or an earlier arm was confirmed.
+    if [ "$armed" = 1 ] || [ -f "$H_MARKER" ]; then
+      run systemctl enable fleet-firewall-deadman-bootcheck.service
+    else
+      run systemctl disable fleet-firewall-deadman-bootcheck.service
+    fi
+    if [ "$armed" = 1 ]; then
+      [ "$changed" = 0 ] || log_info "SSH ports or trusted addresses changed: the dead-man's switch is armed again"
+      run systemctl start fleet-firewall-deadman.timer
+      add_final_note "FIREWALL ENABLED with a dead-man's switch: it turns the firewall OFF again in $H_GRACE minutes unless you confirm. From a SECOND, independent SSH session run:  sudo $H_SBIN/fleet-firewall-confirm"
+    fi
+    [ "$enable_now" = 0 ] || run ufw --force enable
   fi
   run systemctl enable --now fleet-firewall-sync.timer
 }
@@ -510,12 +518,13 @@ harden_main() {
   log_info "hardening: SSH users: ${H_USERS[*]}; trusted addresses: ${H_IPS[*]:-none}; firewall grace: ${H_GRACE} min"
   # Packages first: the later parts need their binaries.
   apt_install ufw fail2ban python3-systemd auditd
-  ensure_dir "$FLEET_ETC_DIR" 0755 root:root
-  harden_persist
+  ensure_dir "$FLEET_ETC_DIR" 0750 root:fleet
   harden_ssh
   harden_login_bans
   harden_llmnr
   harden_kernel_and_audit
   harden_tmp
   harden_firewall
+  # Persisted last: ENABLED=1 makes upgrades re-apply, so it must not be set before the parts above succeeded.
+  harden_persist
 }

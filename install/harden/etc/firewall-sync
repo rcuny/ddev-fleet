@@ -60,6 +60,10 @@ changed=0
 new_state=()
 for p in "${desired[@]}"; do
   if ! in_list "$p" "${managed[@]}"; then
+    if ufw show added 2>/dev/null | grep -Eq "^ufw allow $p/tcp( |$)"; then
+      # Opened by hand: leave it alone, and never close it later.
+      continue
+    fi
     ufw allow "$p/tcp" comment 'fleet named port' >/dev/null
     echo "fleet-firewall-sync: opened $p/tcp"
     changed=1

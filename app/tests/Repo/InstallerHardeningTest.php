@@ -425,6 +425,20 @@ final class InstallerHardeningTest extends TestCase
         }
     }
 
+    public function testTheDeadMansSwitchIsArmedBeforeTheFirewallIsEnabled(): void
+    {
+        $sh = (string) file_get_contents(\dirname(__DIR__, 3).'/install/harden/harden.sh');
+        $timer = strpos($sh, 'run systemctl start fleet-firewall-deadman.timer');
+        $boot = strpos($sh, 'run systemctl enable fleet-firewall-deadman-bootcheck.service');
+        $enable = strpos($sh, 'run ufw --force enable');
+        self::assertNotFalse($timer);
+        self::assertNotFalse($boot);
+        self::assertNotFalse($enable);
+        self::assertLessThan($enable, $timer);
+        self::assertLessThan($enable, $boot);
+        self::assertStringContainsString('ensure_dir "$FLEET_ETC_DIR" 0750 root:fleet', $sh);
+    }
+
     /** @return list<string> */
     private function snapshot(): array
     {
