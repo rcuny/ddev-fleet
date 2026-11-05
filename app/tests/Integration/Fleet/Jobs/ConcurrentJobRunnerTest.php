@@ -55,6 +55,21 @@ final class ConcurrentJobRunnerTest extends JobTestCase
         self::assertSame([], $spawned, 'no child at concurrency 1');
     }
 
+    public function testConcurrencyOneIgnoresARunningJobOfAnotherProcess(): void
+    {
+        // FLE-214: with a sync:// transport every request is its own "worker"; a neighbour's running job must not make this one wait.
+        $other = $this->queuedJob('deploy', 'a--main');
+        self::assertTrue($this->jobs->claim((int) $other->id(), $this->clock->now()));
+        $job = $this->queuedJob('deploy', 'b--main');
+        $spawned = [];
+        $runner = $this->runner($this->jobType('deploy', static fn () => null), $spawned);
+
+        $runner->handle((int) $job->id(), null);
+
+        self::assertSame(JobStatus::Succeeded, $this->fresh($job)->status());
+        self::assertSame([], $this->bus->delays(), 'not re-queued');
+    }
+
     public function testDifferentInstancesGetOneChildEachUpToTheLimitAndTheRestWaits(): void
     {
         $this->setLimit(2);
