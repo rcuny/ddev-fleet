@@ -27,6 +27,7 @@ parameters:
     # sampled from its cpu.stat files), the sampler's JSON result and the slot lock directories (pools of runs).
     fleet.meminfo_file: '/proc/meminfo'
     fleet.cpuinfo_file: '/proc/cpuinfo'
+    fleet.proc_locks_file: '/proc/locks'
     fleet.cgroup_root: '/sys/fs/cgroup/fleet.slice'
     fleet.capacity_usage_file: '%env(resolve:FLEET_HOME)%/capacity-usage.json'
     fleet.slots_dir: '%env(resolve:FLEET_HOME)%/slots'

@@ -24,7 +24,34 @@ seed_tailwind_binary() {
     "$FLEET_SRC_DIR/app/var/tailwind" || log_warn "could not cache the Tailwind binary: the bundle downloads it itself"
 }
 
+# FLE-213: jobs started as child processes survive the worker restart, but not the swap of the code and the database under
+# them. Before the dependencies and migrations change, wait (bounded) for the jobs that are running. FLEET_INSTALL_JOB_WAIT
+# is the limit in seconds (default 300, 0 skips the wait); a job still running at the limit is left to finish and the
+# install goes on. Reads the database directly: the application of the old release may not match the new code.
+wait_for_running_jobs() {
+  local limit=${FLEET_INSTALL_JOB_WAIT:-300} db=$FLEET_SRV_DIR/var/fleet.sqlite waited=0 running
+  [[ $limit =~ ^[0-9]+$ ]] || limit=300
+  if is_dry; then
+    printf '+ wait up to %ss for running jobs to finish (FLEET_INSTALL_JOB_WAIT)\n' "$limit"
+    return 0
+  fi
+  [ "$limit" -gt 0 ] && [ -f "$db" ] || return 0
+  while :; do
+    running=$(run_as_fleet php8.4 -r 'try { $p = new PDO("sqlite:".$argv[1]); echo (int) $p->query("SELECT COUNT(*) FROM job WHERE status = \"running\"")->fetchColumn(); } catch (Throwable) { echo 0; }' "$db" 2>/dev/null || echo 0)
+    [[ $running =~ ^[0-9]+$ ]] || running=0
+    [ "$running" -gt 0 ] || return 0
+    if [ "$waited" -ge "$limit" ]; then
+      log_warn "$running job(s) still running after ${limit}s: continuing, they run on against the new code (retry any that fail)"
+      return 0
+    fi
+    log_info "waiting for $running running job(s) to finish (${waited}s of ${limit}s)"
+    sleep 5
+    waited=$((waited + 5))
+  done
+}
+
 step_main() {
+  wait_for_running_jobs
   if is_dry; then
     CODE_CHANGED=1
     run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse HEAD
