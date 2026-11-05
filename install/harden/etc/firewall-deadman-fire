@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Installed by ddev-fleet host hardening (install --harden) as /usr/local/sbin/fleet-firewall-deadman-fire.
+# Run by BOTH triggers of the dead-man's switch: fleet-firewall-deadman.service (once, from the timer, after the grace
+# period) and fleet-firewall-deadman-bootcheck.service (on every boot, only enabled while the switch is armed or
+# confirmed). Only the marker file decides: present = the operator confirmed, the firewall stays; absent = turn it off.
+set -euo pipefail
+
+MARKER=${FLEET_FIREWALL_MARKER:-/etc/ddev-fleet/firewall-confirmed}
+
+if [ -f "$MARKER" ]; then
+  echo "fleet-firewall-deadman-fire: confirmation marker present: the firewall stays on"
+  exit 0
+fi
+
+echo "fleet-firewall-deadman-fire: no confirmation marker: turning the firewall off (fail-safe)"
+ufw disable

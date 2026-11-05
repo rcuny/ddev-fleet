@@ -35,6 +35,23 @@ final class InstallerSafetyTest extends TestCase
         self::assertSame([], $hits, "remote-access or firewall changes:\n".implode("\n", $hits));
     }
 
+    public function testHardeningStaysInItsOwnDirectory(): void
+    {
+        // The one step that may reach install/harden/ is inert unless asked for: it names neither daemon, only the
+        // settings file and the --harden switch.
+        $step = (string) file_get_contents(self::installDir().'/steps/99-harden.sh');
+        self::assertStringContainsString('"${HARDEN:-0}" != 1', $step);
+        self::assertStringContainsString('ENABLED=1', $step);
+        self::assertStringContainsString('return 0', $step);
+        $callers = [];
+        foreach (self::installFiles() as $file) {
+            if (!str_starts_with($file, self::installDir().'/harden/') && str_contains((string) file_get_contents($file), 'harden/harden.sh')) {
+                $callers[] = basename($file);
+            }
+        }
+        self::assertSame(['99-harden.sh'], $callers);
+    }
+
     public function testOnlyTheSshClientIsInstalled(): void
     {
         // ssh-keygen and ssh-keyscan come from openssh-client; the server package would also start sshd.
@@ -281,6 +298,10 @@ final class InstallerSafetyTest extends TestCase
     {
         $hits = [];
         foreach (self::installFiles() as $file) {
+            // FLE-211: the opt-in hardening lives in install/harden/ and nowhere else (see testHardeningStaysInItsOwnDirectory).
+            if (str_starts_with($file, self::installDir().'/harden/')) {
+                continue;
+            }
             foreach (self::codeLines($file) as $number => $line) {
                 if (1 === preg_match($pattern, $line)) {
                     $hits[] = str_replace(self::installDir().'/', '', $file).':'.$number.': '.trim($line);
