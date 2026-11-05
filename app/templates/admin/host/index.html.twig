@@ -26,7 +26,7 @@
         </twig:block>
     </twig:PageHeader>
 
-    <div class="mt-6 grid max-w-2xl gap-4">
+    <div class="mt-6 grid {{ 'capacity' == tab ? 'max-w-5xl' : 'max-w-2xl' }} gap-4">
         {% if host is null %}
             <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="host-not-initialised">
                 <twig:ux:icon name="lucide:triangle-alert" />

@@ -9,6 +9,7 @@ use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\ProjectAccessRefresher;
+use App\Fleet\Host\Capacity\AllocatableThreads;
 use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\PortMirror\PortMirrorSwitch;
 use App\Fleet\Projects\NamedPortService;
@@ -50,6 +51,7 @@ final class ProjectController extends AbstractController
         private readonly ProjectAccessRefresher $access,
         private readonly InstanceSiteRefresher $sites,
         private readonly PortMirrorSwitch $mirror,
+        private readonly AllocatableThreads $allocatable,
     ) {
     }
 
@@ -70,7 +72,7 @@ final class ProjectController extends AbstractController
         $this->denyAccessUnlessGranted(ProjectVoter::SETTINGS);
 
         // The host default is preselected: a new project with no radio chosen showed an identity choice nobody had made.
-        $form = $this->createForm(ProjectType::class, ['gitBotMode' => GitBotMode::Inherit], ['mode' => ProjectType::CREATE]);
+        $form = $this->createForm(ProjectType::class, ['gitBotMode' => GitBotMode::Inherit], ['mode' => ProjectType::CREATE, 'allocatable' => $this->allocatable->get()]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -90,6 +92,8 @@ final class ProjectController extends AbstractController
                         displaySubmoduleBranch: self::optionalText($data['displaySubmoduleBranch'] ?? null),
                         typesense: true === ($data['typesense'] ?? false),
                         containerSsh: true === ($data['containerSsh'] ?? false),
+                        cpuThreads: self::optionalInt($data['cpuThreads'] ?? null),
+                        slots: self::optionalInt($data['slots'] ?? null),
                     ));
                     $this->addFlash('success', 'Project created.');
                     $this->flashAccessWarning();
@@ -110,7 +114,7 @@ final class ProjectController extends AbstractController
         $project = $this->load($name);
         $templateNames = $this->templateNames($name);
 
-        $form = $this->createForm(ProjectType::class, $this->formDataOf($project), ['mode' => ProjectType::EDIT, 'templates' => $templateNames]);
+        $form = $this->createForm(ProjectType::class, $this->formDataOf($project), ['mode' => ProjectType::EDIT, 'templates' => $templateNames, 'allocatable' => $this->allocatable->get()]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -130,6 +134,8 @@ final class ProjectController extends AbstractController
                     'displaySubmoduleBranch' => self::optionalText($data['displaySubmoduleBranch'] ?? null),
                     'typesense' => true === ($data['typesense'] ?? false),
                     'containerSsh' => true === ($data['containerSsh'] ?? false),
+                    'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
+                    'slots' => self::optionalInt($data['slots'] ?? null),
                 ]);
                 try {
                     $this->projects->update($name, $input);
@@ -298,6 +304,8 @@ final class ProjectController extends AbstractController
             'displaySubmoduleBranch' => $project->displaySubmoduleBranch(),
             'typesense' => $project->typesense(),
             'containerSsh' => $project->containerSsh(),
+            'cpuThreads' => $project->cpuThreads(),
+            'slots' => $project->slots(),
         ];
     }
 
@@ -324,6 +332,11 @@ final class ProjectController extends AbstractController
     private static function text(mixed $value): string
     {
         return \is_string($value) ? $value : '';
+    }
+
+    private static function optionalInt(mixed $value): ?int
+    {
+        return \is_int($value) ? $value : null;
     }
 
     private static function optionalText(mixed $value): ?string

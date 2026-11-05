@@ -7,6 +7,7 @@ namespace App\Form\Project;
 use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\Rule\ResourceName;
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
@@ -71,6 +72,22 @@ final class TemplateType extends AbstractType
                 'help' => "One key name per line: the file ssh/<name>_ed25519 in the fleet home, loaded into the instance's own ssh-agent next to the push key. The project needs git over SSH in the container.",
                 'attr' => $text + ['wrap' => 'off', 'class' => 'font-mono', 'rows' => 2, 'maxlength' => 400],
             ])
+            ->add('cpuThreads', IntegerType::class, [
+                'label' => 'CPU threads',
+                'required' => false,
+                'help' => null === $options['projectCpuThreads']
+                    ? 'The most CPU threads all instances of this template may use together. Leave empty to inherit the project, which has no limit.'
+                    : \sprintf('The most CPU threads all instances of this template may use together, at most %1$d (the project). Leave empty to inherit the project: %1$d.', $options['projectCpuThreads']),
+                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => null === $options['projectCpuThreads'] ? 'inherits project: unlimited' : \sprintf('inherits project: %d', $options['projectCpuThreads'])],
+            ])
+            ->add('slots', IntegerType::class, [
+                'label' => 'Slots',
+                'required' => false,
+                'help' => null === $options['projectSlots']
+                    ? 'The most runs of this template at the same time. Leave empty for no limit.'
+                    : \sprintf('The most runs of this template at the same time, at most %d (the project). Leave empty for no limit of its own.', $options['projectSlots']),
+                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
+            ])
             ->add('save', SubmitType::class, ['label' => $create ? 'Create template' : 'Save']);
     }
 
@@ -79,8 +96,12 @@ final class TemplateType extends AbstractType
         $resolver->setDefaults([
             'data_class' => null,
             'mode' => self::EDIT,
+            'projectCpuThreads' => null,
+            'projectSlots' => null,
             'attr' => ['novalidate' => 'novalidate', 'data-testid' => 'template-form'],
         ]);
         $resolver->setAllowedValues('mode', [self::CREATE, self::EDIT]);
+        $resolver->setAllowedTypes('projectCpuThreads', ['null', 'int']);
+        $resolver->setAllowedTypes('projectSlots', ['null', 'int']);
     }
 }
