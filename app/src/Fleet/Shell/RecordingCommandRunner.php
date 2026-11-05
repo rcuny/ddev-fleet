@@ -7,7 +7,7 @@ namespace App\Fleet\Shell;
 /**
  * Dev/test fake: records every call, replays scripted results, executes nothing.
  */
-final class RecordingCommandRunner implements CommandRunner
+final class RecordingCommandRunner implements CommandRunner, BackgroundRunner
 {
     /** @var list<RecordedCall> */
     private array $calls = [];
@@ -30,6 +30,23 @@ final class RecordingCommandRunner implements CommandRunner
         $this->rules[] = ['prefix' => $argvPrefix, 'result' => $result, 'effect' => $effect];
 
         return $this;
+    }
+
+    /** Records the call and returns a command that has already ended: nothing is started. */
+    public function start(array $argv, ?string $cwd = null, array $env = []): BackgroundProcess
+    {
+        $this->calls[] = new RecordedCall($argv, $cwd, $env, null);
+
+        return new class implements BackgroundProcess {
+            public function isRunning(): bool
+            {
+                return false;
+            }
+
+            public function wait(): void
+            {
+            }
+        };
     }
 
     public function run(

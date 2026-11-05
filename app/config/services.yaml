@@ -91,6 +91,10 @@ services:
         arguments:
             $home: '%env(default::FLEET_USER_HOME)%'
 
+    App\Fleet\Jobs\ConcurrentJobRunner:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     App\Fleet\Upgrade\InstalledVersion:
         arguments:
             $versionFile: '%fleet.installed_version_file%'
@@ -172,6 +176,9 @@ services:
             $environment: '%kernel.environment%'
     App\Fleet\Shell\CommandRunner:
         factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'create']
+        arguments: ['%env(FLEET_RUNNER)%']
+    App\Fleet\Shell\BackgroundRunner:
+        factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'createBackground']
         arguments: ['%env(FLEET_RUNNER)%']
 
 when@dev:

@@ -13,7 +13,7 @@ use Symfony\Component\Process\Process;
 /**
  * Runs real host commands via symfony/process in array form (never a shell).
  */
-final class ProcessCommandRunner implements CommandRunner
+final class ProcessCommandRunner implements CommandRunner, BackgroundRunner
 {
     /** Inherited by every child. Everything else in the app's environment (APP_SECRET, DATABASE_URL, ...) is not. */
     private const array INHERITED_NAMES = ['PATH', 'HOME', 'LANG', 'LC_ALL', 'TERM', 'USER', 'SSH_AUTH_SOCK'];
@@ -70,6 +70,38 @@ final class ProcessCommandRunner implements CommandRunner
             $process->getErrorOutput(),
             microtime(true) - $started,
         );
+    }
+
+    public function start(array $argv, ?string $cwd = null, array $env = []): BackgroundProcess
+    {
+        $this->assertRunnable($argv);
+        if (null !== $cwd && !is_dir($cwd)) {
+            throw new CommandRunnerException(\sprintf('Working directory "%s" does not exist.', $cwd));
+        }
+
+        $process = new Process($argv, $cwd, $this->childEnvironment($env), null, null);
+        $process->disableOutput();
+        try {
+            $process->start();
+        } catch (ProcessStartFailedException $e) {
+            throw new CommandRunnerException(\sprintf('Could not start %s.', $argv[0]), 0, $e);
+        }
+
+        return new class($process) implements BackgroundProcess {
+            public function __construct(private readonly Process $process)
+            {
+            }
+
+            public function isRunning(): bool
+            {
+                return $this->process->isRunning();
+            }
+
+            public function wait(): void
+            {
+                $this->process->wait();
+            }
+        };
     }
 
     /**

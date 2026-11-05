@@ -27,14 +27,14 @@ final class HostPageTest extends HostPageTestCase
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-general]'));
 
         $tabs = $crawler->filter('[data-testid=host-tabs] a');
-        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Networking', 'Certificates', 'Uploads', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
+        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Networking', 'Certificates', 'Uploads', 'Jobs', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
         self::assertSame('page', $crawler->filter('[data-testid=host-tabs] a[aria-current]')->attr('aria-current'));
         // The phone version of the tabs: a native select with a Go button, no script needed.
-        self::assertCount(8, $crawler->filter('[data-testid=host-tab-select] option'));
+        self::assertCount(9, $crawler->filter('[data-testid=host-tab-select] option'));
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-select] button[type=submit]'));
         self::assertCount(0, $crawler->filter('main script'));
 
-        foreach (['git', 'claude', 'notifications', 'network', 'uploads', 'backups'] as $tab) {
+        foreach (['git', 'claude', 'notifications', 'network', 'uploads', 'jobs', 'backups'] as $tab) {
             $crawler = $this->open('/admin/host?tab='.$tab);
             self::assertResponseStatusCodeSame(200, $tab);
             self::assertCount(1, $crawler->filter('[data-testid=host-tab-'.$tab.']'), $tab);
@@ -419,6 +419,22 @@ final class HostPageTest extends HostPageTestCase
         $this->submit('backups', 'Save', ['host_backup_retention[days]' => '3650']);
         self::assertResponseRedirects();
         self::assertSame(3650, $this->host()->backupRetentionDays());
+    }
+
+    public function testJobConcurrencyIsSavedAndBounded(): void
+    {
+        $crawler = $this->open('/admin/host?tab=jobs');
+        self::assertSame('1', $crawler->filter('input[name="host_job_concurrency[jobs]"]')->attr('value'));
+
+        $this->submit('jobs', 'Save', ['host_job_concurrency[jobs]' => '3']);
+        self::assertResponseRedirects('/admin/host?tab=jobs');
+        self::assertSame(3, $this->host()->maxConcurrentJobs());
+
+        foreach (['0', '-1', '33', 'abc', ''] as $bad) {
+            $this->submit('jobs', 'Save', ['host_job_concurrency[jobs]' => $bad]);
+            self::assertResponseStatusCodeSame(422, $bad);
+            self::assertSame(3, $this->host()->maxConcurrentJobs());
+        }
     }
 
     public function testThePortMirrorSwitchRoundTripsAndSyncsTheFiles(): void

@@ -46,6 +46,12 @@ Statuses: `queued`, `running`, `succeeded`, `failed`, `interrupted`. The last th
 `start`, `stop`, `destroy`. Triggers: `ui`, `cli`, `webhook`, `schedule`.
 
 - A worker takes the instance's lock **before** it marks a job `running`, so `running` means someone is really working.
+- **Concurrency.** By default jobs run one after another (host setting **Jobs at the same time** = 1). Raise it on the
+  host settings page (Jobs tab) or with `fleet fleet:host:job-concurrency 3`: jobs of **different** instances then run
+  together, up to that number. Jobs of one instance never overlap, and a job past the limit stays `queued` until a slot
+  frees up (that wait does not count towards the 30 minutes below). The worker reads the setting on its next job, no restart.
+  Behind the scenes the worker starts `fleet job:work <id>` for each job (an internal command, hidden from `fleet list`;
+  `--eligible-since` carries the give-up clock): do not run it by hand. All jobs share the CPU and the Docker daemon: size the limit to the host.
 - A job that finds its instance busy goes back to the queue after 3 seconds and stays `queued`. After **30 minutes** of
   waiting for a busy instance it fails with "gave up waiting".
 - When a worker or the web app dies (a kill, a reboot), the job is marked `interrupted` within about ten seconds because its
@@ -263,7 +269,7 @@ status watcher prunes once a day; `fleet job:prune --days=<n>` does it on demand
 | Symptom | What to do |
 |---|---|
 | A job is `interrupted` | A worker or the host stopped while it ran. Read its log, then **Retry**. |
-| A job stays `queued` | Another job holds the instance (it waits up to 30 minutes), or no worker runs: `systemctl status fleet-worker@1`. |
+| A job stays `queued` | Another job holds the instance (it waits up to 30 minutes), all job slots are taken (**Jobs at the same time**), or no worker runs: `systemctl status fleet-worker@1`. |
 | "port is already allocated" at start | Another project uses the port. Stop it, or start with `--retry-port-conflict`. |
 | Destroy fails with a `sudo rm -rf` line | Root-owned files from a container. Run that exact line on the host, then Retry. |
 | The deploy fails after the start | The post-deploy line failed or a `[[token]]` was unresolved; the log shows the line. |

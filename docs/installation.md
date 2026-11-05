@@ -128,7 +128,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | `caddy` | 80, 443 | The only Internet-facing process; sandboxed by a drop-in. Reads `/etc/caddy/fleet.env`. |
 | `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
 | `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
-| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Jobs of different instances therefore run one after another. |
+| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Concurrency comes from this one worker instead: with **Jobs at the same time** above 1 (host settings, Jobs tab, or `fleet fleet:host:job-concurrency N`; default 1) it starts each job as a child process (`fleet:job:work`) and keeps consuming, so jobs of different instances overlap while jobs of one instance stay in order. Each running job is a separate process (they live in the worker's cgroup: stopping the unit interrupts them like a job run in the worker). |
 | `fleet-scheduler` | | The schedule ticker (`messenger:consume scheduler_default`, one tick every 30 seconds): fires the due schedules and queues their jobs for `fleet-worker@1`. See `docs/schedules.md`. |
 | `fleet-status` | | The status watcher (`fleet:instance:watch --interval=10`): keeps instance states and memory true to `ddev list` and `docker stats`, reaps dead jobs and prunes old ones. Restarted by an upgrade. |
 | `fleet-boot` | | A oneshot, enabled but never started by the installer: after a reboot it runs `fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict`, which starts every instance, stopped ones too (as 0.x did). |
@@ -494,7 +494,7 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
 
 - **Wildcard DNS.** Add one record `*.<domain>` (A, and AAAA if you use IPv6) pointing at this host. Every instance is
   served at `https://<id>.<domain>`; without the record the deploy works and the site does not open.
-- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one), `fleet-status` keeps the
+- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one; it starts child processes when concurrency is above 1), `fleet-status` keeps the
   instance states true, and `fleet-boot` starts the instances one at a time after a reboot. `systemctl list-units` should show none of them as failed.
 - **Certificates.** Each instance site gets **its own certificate** from Caddy (HTTP-01, or DNS-01 in `ovh_dns` mode). Let's
   Encrypt limits how many certificates one registered domain may obtain per week, so deploying dozens of new instances in

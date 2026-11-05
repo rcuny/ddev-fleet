@@ -165,7 +165,14 @@ final class JobExecutor
         $this->requeue($job, $delayMs, $eligibleSince);
     }
 
-    private function requeue(Job $job, int $delayMs, ?int $eligibleSince = null): void
+    /** Whether the job still waits for an earlier member of its sequential batch (the pre-check ConcurrentJobRunner repeats). */
+    public function isGated(Job $job): bool
+    {
+        return $job->isSequential() && $this->jobs->hasEarlierActiveInBatch($job);
+    }
+
+    /** Puts the job's message back on the queue after $delayMs; the job stays `queued`. */
+    public function requeue(Job $job, int $delayMs, ?int $eligibleSince = null): void
     {
         if ($this->requeueDepth >= self::MAX_REQUEUE_DEPTH) {
             // Only a transport that ignores the delay (sync://, dev and test) nests this deep: waiting would recurse.
@@ -182,9 +189,15 @@ final class JobExecutor
         }
     }
 
+    /** The key of the lock that serialises the jobs of one instance (also the key ConcurrentJobRunner groups them by). */
+    public static function lockKey(Job $job): string
+    {
+        return 'instance.'.($job->instanceId() ?? 'fleet');
+    }
+
     private function lockFor(Job $job): SharedLockInterface
     {
-        return $this->locks->createLock('instance.'.($job->instanceId() ?? 'fleet'));
+        return $this->locks->createLock(self::lockKey($job));
     }
 
     private function tryFinishLog(?JobLog $log): void
