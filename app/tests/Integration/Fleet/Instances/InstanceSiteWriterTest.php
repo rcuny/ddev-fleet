@@ -10,6 +10,7 @@ use App\Domain\Host\TlsMode;
 use App\Domain\Instance\Instance;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
+use App\Domain\Project\ProjectRepository;
 use App\Fleet\Auth\AdminGroup;
 use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceHostnames;
@@ -52,6 +53,7 @@ final class InstanceSiteWriterTest extends KernelTestCase
             new InstanceHostnames($host),
             new LockFactory(new FlockStore($this->paths->locksDir())),
             new AdminGroup('fleet-admins'),
+            new ProjectRepository($em),
         );
     }
 
@@ -137,6 +139,37 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertFileDoesNotExist($this->paths->instanceSiteFile('acme--main'));
     }
 
+    public function testEveryInstanceSiteSendsNoindex(): void
+    {
+        $this->settings->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
+        $project = $this->portedProject([new NamedPort('typesense', 9108, 8108)]);
+        $this->writer->write($this->instance($project), $project);
+
+        self::assertStringContainsString('X-Robots-Tag "noindex, nofollow"', (string) file_get_contents($this->paths->instanceSitesFile('acme--main')));
+
+        $http = $this->portedProject([new NamedPort('typesense', 9108, 8108)]);
+        $this->settings->changeTlsMode(TlsMode::Http01, new \DateTimeImmutable());
+        $this->writer->write($this->instance($http), $http);
+        $site = $this->site();
+        self::assertSame(2, substr_count($site, 'X-Robots-Tag "noindex, nofollow"'), 'the instance block and the named port block');
+    }
+
+    public function testAnUnknownHostOnANamedPortGets404FromOneSharedBlock(): void
+    {
+        $project = $this->portedProject([new NamedPort('typesense', 9108, 8108)]);
+        $this->writer->write($this->instance($project), $project);
+        $this->writer->write($this->instance($project, 'dev'), $project);
+        $fallback = (string) file_get_contents($this->paths->portsFallbackFile());
+
+        self::assertSame(1, substr_count($fallback, "\n:9108 {\n"), 'one catch-all however many instances share the port');
+        self::assertStringContainsString('respond "Not Found" 404', $fallback);
+        self::assertStringNotContainsString("\n:9108 {", $this->site('acme--dev'));
+
+        $plain = $this->portedProject([]);
+        $this->writer->write($this->instance($plain), $plain);
+        self::assertFileDoesNotExist($this->paths->portsFallbackFile(), 'no named port, no catch-all');
+    }
+
     public function testAnUnchangedSiteIsNeitherRewrittenNorReloaded(): void
     {
         $this->settings->changeTlsMode(TlsMode::OvhDns, new \DateTimeImmutable());
@@ -214,6 +247,7 @@ final class InstanceSiteWriterTest extends KernelTestCase
             acme--main.fleet.example.com {
                 header {
                     Strict-Transport-Security "max-age=31536000"
+                    X-Robots-Tag "noindex, nofollow"
                     -Server
                 }
 
