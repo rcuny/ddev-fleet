@@ -59,12 +59,13 @@ final class ListCommand extends Command
                 $rows[] = self::row($instance);
             }
 
-            $long = array_values(array_filter(array_map(static fn (array $r): string => (string) $r['id'], $rows), static fn (string $id): bool => [] !== InstanceNaming::overlongContainers($id, [InstanceNaming::longestServiceName()])));
-            $payload = $out->withWarning(['instances' => $rows], [] === $long ? null : \sprintf(
-                '%d instance id(s) are too long for add-on services such as typesense-dashboard (container name over 63 characters, the router answers 502 for them): %s. Redeploy them under a shorter label.',
-                \count($long),
-                implode(', ', $long),
-            ));
+            $long = [];
+            foreach ($found as $instance) {
+                if ($instance->project()->typesense() && [] !== InstanceNaming::overlongContainers($instance->id(), [InstanceNaming::longestServiceName()])) {
+                    $long[] = $instance->id();
+                }
+            }
+            $payload = $out->withWarning(['instances' => $rows], self::overlongWarning($long));
 
             $out->emit($payload, static function (JsonOutput $out) use ($rows): void {
                 if ([] === $rows) {
@@ -78,6 +79,22 @@ final class ListCommand extends Command
                 );
             });
         });
+    }
+
+    /**
+     * @param list<string> $ids ids of instances whose add-on container names exceed 63 characters
+     */
+    public static function overlongWarning(array $ids): ?string
+    {
+        if ([] === $ids) {
+            return null;
+        }
+
+        return \sprintf(
+            '%d instance id(s) are too long for add-on services such as typesense-dashboard (container name over 63 characters, the router answers 502 for them): %s. Redeploy them under a shorter label.',
+            \count($ids),
+            implode(', ', $ids),
+        );
     }
 
     /**

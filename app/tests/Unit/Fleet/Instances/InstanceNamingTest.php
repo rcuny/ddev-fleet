@@ -147,4 +147,31 @@ final class InstanceNamingTest extends TestCase
         self::assertFalse(InstanceNaming::isExistingInstanceId($id(64)));
         self::assertFalse(InstanceNaming::isExistingInstanceId('../etc--x'));
     }
+
+    public function testANewIdOfAProjectWithAddOnServicesMustLeaveRoomForTheServiceName(): void
+    {
+        $budget = InstanceNaming::serviceBudgetFor(true);
+        self::assertSame(0, InstanceNaming::serviceBudgetFor(false));
+        self::assertSame('blog--'.str_repeat('a', 31), InstanceNaming::composeNew('blog', str_repeat('a', 31), $budget));
+
+        $this->expectException(ValidationFailed::class);
+        InstanceNaming::composeNew('blog', str_repeat('a', 32), $budget);
+    }
+
+    public function testTheSuffixOfAnAllocationCountsAgainstTheServiceBudget(): void
+    {
+        $label = str_repeat('a', 31);
+        $taken = ['blog--'.$label];
+
+        self::assertSame($label.'-1', InstanceNaming::allocateFree($taken, 'blog', $label, 0), 'no add-on services: only the 59 characters of the host name count');
+
+        $this->expectException(ValidationFailed::class);
+        InstanceNaming::allocateFree($taken, 'blog', $label, InstanceNaming::SERVICE_BUDGET);
+    }
+
+    public function testABatchRefusesALabelWhoseNumberedIdsAreTooLong(): void
+    {
+        $this->expectException(ValidationFailed::class);
+        InstanceNaming::allocateBatch([], 'blog', str_repeat('a', 30), 2, InstanceNaming::SERVICE_BUDGET);
+    }
 }

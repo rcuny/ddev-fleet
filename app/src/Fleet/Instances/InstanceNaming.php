@@ -23,12 +23,22 @@ final class InstanceNaming
      */
     public const int SERVICE_BUDGET = 20;
 
-    /** The longest add-on service name we ship (`typesense-dashboard`). */
+    /**
+     * The longest add-on service name we ship (`typesense-dashboard`, 19 characters, within SERVICE_BUDGET). The
+     * budget is only applied to projects with Typesense (`Project::typesense()`), the one source of add-on services:
+     * see `serviceBudgetFor()`.
+     */
     private const string LONGEST_SERVICE = 'typesense-dashboard';
 
     public static function longestServiceName(): string
     {
         return self::LONGEST_SERVICE;
+    }
+
+    /** Characters to keep for the service name of `ddev-<id>-<service>`: SERVICE_BUDGET for a project with add-on services, else 0 (web and db fit any id of 59). */
+    public static function serviceBudgetFor(bool $hasAddonServices): int
+    {
+        return $hasAddonServices ? self::SERVICE_BUDGET : 0;
     }
 
     /** Never cut a label below this many characters (hash included), whatever the project name or service budget. */
@@ -45,6 +55,23 @@ final class InstanceNaming
         $id = $project.'--'.$label;
         if (\strlen($id) > self::MAX) {
             throw new ValidationFailed(['label' => \sprintf('The instance id would be %d characters; the limit is %d (DDEV adds -web to the container host name, and a host name has at most 63 characters). Use a shorter label.', \strlen($id), self::MAX)]);
+        }
+
+        return $id;
+    }
+
+    /**
+     * Like compose() for an id that is about to be created: with a service budget the id must also leave room for
+     * `ddev-<id>-<service>` within 63 characters, otherwise Docker's DNS cannot resolve the add-on containers.
+     *
+     * @throws ValidationFailed
+     */
+    public static function composeNew(string $project, string $label, int $serviceBudget): string
+    {
+        $id = self::compose($project, $label);
+        $max = self::DNS_LABEL_MAX - 6 - $serviceBudget;
+        if ($serviceBudget > 0 && \strlen($id) > $max) {
+            throw new ValidationFailed(['label' => \sprintf('The instance id would be %d characters; this project has add-on services (Typesense) and the limit is %d so that ddev-<id>-<service> stays within 63 characters. Use a shorter label.', \strlen($id), $max)]);
         }
 
         return $id;
@@ -107,15 +134,15 @@ final class InstanceNaming
      *
      * @return string the label: $base when free, else the first free `$base-N`
      */
-    public static function allocateFree(array $taken, string $project, string $base): string
+    public static function allocateFree(array $taken, string $project, string $base, int $serviceBudget = 0): string
     {
         $taken = array_flip($taken);
-        if (!isset($taken[self::compose($project, $base)])) {
+        if (!isset($taken[self::composeNew($project, $base, $serviceBudget)])) {
             return $base;
         }
         for ($n = 1;; ++$n) {
             $label = $base.'-'.$n;
-            if (!isset($taken[self::compose($project, $label)])) {
+            if (!isset($taken[self::composeNew($project, $label, $serviceBudget)])) {
                 return $label;
             }
         }
@@ -126,13 +153,13 @@ final class InstanceNaming
      *
      * @return list<string> $count labels `$base-1` ... skipping numbers whose id is taken; never the bare base
      */
-    public static function allocateBatch(array $taken, string $project, string $base, int $count): array
+    public static function allocateBatch(array $taken, string $project, string $base, int $count, int $serviceBudget = 0): array
     {
         $taken = array_flip($taken);
         $labels = [];
         for ($n = 1; \count($labels) < $count; ++$n) {
             $label = $base.'-'.$n;
-            if (!isset($taken[self::compose($project, $label)])) {
+            if (!isset($taken[self::composeNew($project, $label, $serviceBudget)])) {
                 $labels[] = $label;
             }
         }
