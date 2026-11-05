@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Command\Project;
 
+use App\Command\Support\CapacityOption;
 use App\Domain\Project\GitBotMode;
 use App\Fleet\Projects\ValidationFailed;
 use Symfony\Component\Console\Command\Command;
@@ -52,6 +53,8 @@ final class ProjectOptions
             ->addOption('git-bot-email', null, InputOption::VALUE_REQUIRED, 'Git identity email (with --git-bot=custom)')
             ->addOption('issue-id-regexp', null, InputOption::VALUE_REQUIRED, 'Pattern that extracts an issue id from a branch name')
             ->addOption('display-submodule-branch', null, InputOption::VALUE_REQUIRED, 'Submodule path whose branch is shown next to the instance')
+            ->addOption('cpu-threads', null, InputOption::VALUE_REQUIRED, 'CPU threads all instances of the project may use together: a number, or none for unlimited')
+            ->addOption('slots', null, InputOption::VALUE_REQUIRED, 'Concurrent heavy runs across the project\'s templates: a number, or none for unlimited')
         ;
         if ($update) {
             $command
@@ -133,6 +136,7 @@ final class ProjectOptions
                 }
             }
         }
+        $errors += CapacityOption::collect($input, $changes);
         if ([] !== $errors) {
             throw new ValidationFailed($errors);
         }

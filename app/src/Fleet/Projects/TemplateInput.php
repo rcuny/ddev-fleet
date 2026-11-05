@@ -24,6 +24,8 @@ final readonly class TemplateInput
         public array $tty1 = [],
         public array $tty2 = [],
         public array $sshKeys = [],
+        public ?int $cpuThreads = null,
+        public ?int $slots = null,
     ) {
     }
 
@@ -36,6 +38,8 @@ final readonly class TemplateInput
             $template->tty1(),
             $template->tty2(),
             $template->sshKeys(),
+            $template->cpuThreads(),
+            $template->slots(),
         );
     }
 
@@ -66,6 +70,8 @@ final readonly class TemplateInput
             self::lines($this->tty1),
             self::lines($this->tty2),
             self::lines($this->sshKeys),
+            $this->cpuThreads,
+            $this->slots,
         );
     }
 

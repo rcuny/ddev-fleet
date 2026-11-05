@@ -85,7 +85,7 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | 50 caddy | Caddy from its repository plus a **custom build with the OVH DNS module**; the package binary is diverted so `apt` never replaces the custom one. A re-run refreshes the custom build when it is older than the packaged Caddy. The sandbox drop-in is installed. |
 | 60 authelia | Authelia from its repository, its three secrets (generated once), the tmpfiles mask (see Troubleshooting), and a `users.yml` with one disabled placeholder user (Authelia 4.39 refuses an empty user list; the placeholder can never sign in and disappears when the first real user exists). |
 | 70 env | `/etc/ddev-fleet/fleet.env` and `mercure.env`: only missing keys are added, secrets are generated once. |
-| 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. |
+| 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. The Tailwind CLI comes from a host cache (`/srv/fleet/cache/tailwind/<version>/`, downloaded once with retries and a SHA-256 check, only the current version kept), so a re-run or upgrade works while GitHub releases are unreachable; if the cache cannot be filled the build downloads the binary itself. |
 | 85 app init | Migrations, the queue transport, `fleet:host:init` (domain, ACME email). |
 | 90 privileged | The root helper, its single sudoers line and the `fleet` command. |
 | 95 units | The `fleet` php-fpm pool, the job worker `fleet-worker@.service`, the status watcher `fleet-status.service`, `fleet-boot.service`, the standalone Mercure hub (pinned release, sha256-checked) and its unit. |
@@ -104,6 +104,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | user `fleet` | home `/home/fleet`, group `docker` | Runs php-fpm, the workers, DDEV and the CLI. |
 | `/opt/ddev-fleet` | `fleet:fleet` 0755 | The git checkout of the product. Stays `fleet`-owned. |
 | `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/` (0750; `fleet.sqlite` and `queue.sqlite`, 0644 inside it), `locks/`, `logs/`, `assets/`, `instances/` (0750). |
+| `/srv/fleet/cache/tailwind` | `fleet:fleet` | The Tailwind CLI binary of the configured version (plus its `.sha256`), seeded into `app/var/tailwind/` by step 80. Safe to delete; leave it out of backups. |
 | `/srv/fleet/backups` | `fleet:fleet` 0700 | Database backups written by `fleet-backup.timer` (files 0600; see "Backup and restore" in section 5). |
 | `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
 | `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
@@ -133,7 +134,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | `caddy` | 80, 443 | The only Internet-facing process; sandboxed by a drop-in. Reads `/etc/caddy/fleet.env`. |
 | `authelia` | `127.0.0.1:9091` | The sign-in portal, served publicly as `https://auth.<domain>/` by Caddy. |
 | `php8.4-fpm` | `/run/php/fleet.sock` | One pool, `fleet`. `request_terminate_timeout` is 240 s (the Finish request can take that long). The unit drop-in loads `fleet.env`. |
-| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Jobs of different instances therefore run one after another. |
+| `fleet-worker@1` | | The one Messenger worker (`messenger:consume jobs`). Do not enable `fleet-worker@2`: the SQLite message queue cannot be consumed by two workers (`database is locked`). Concurrency comes from this one worker instead: with **Jobs at the same time** above 1 (host settings, Jobs tab, or `fleet fleet:host:job-concurrency N`; default 1) it starts each job as a child process (`fleet:job:work`) and keeps consuming, so jobs of different instances overlap while jobs of one instance stay in order. Each running job is a separate, detached process: when the worker leaves (hourly time limit, `systemctl restart`, an upgrade) the jobs it started keep running (`KillMode=process`) and the new worker counts them from their `running` job rows, so the limit and the one-job-per-instance rule hold across restarts. Only a reboot or killing the job's own process interrupts it (the reaper then marks it `interrupted`). |
 | `fleet-scheduler` | | The schedule ticker (`messenger:consume scheduler_default`, one tick every 30 seconds): fires the due schedules and queues their jobs for `fleet-worker@1`. See `docs/schedules.md`. |
 | `fleet-status` | | The status watcher (`fleet:instance:watch --interval=10`): keeps instance states and memory true to `ddev list` and `docker stats`, reaps dead jobs and prunes old ones. Restarted by an upgrade. |
 | `fleet-boot` | | A oneshot, enabled but never started by the installer: after a reboot it runs `fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict`, which starts every instance, stopped ones too (as 0.x did). |
@@ -359,6 +360,7 @@ The remaining commands exist mostly for the installer:
 | `fleet:host:render [--gate=auto\|setup\|authelia] [--no-reload] [--apply] [--stage] [--force]` | Check that the Caddy and Authelia configuration renders, write the gate and leave nothing staged. `--apply` stages each target, installs it through the root helper and removes it again; `--stage` (used by the installer) leaves the files staged for a root `apply`. `--gate=setup` after completion needs `--force` (prefer `fleet:setup:reset`). |
 | `fleet:host:tls-check` | Check Caddy's certificate health (Let's Encrypt rate limits and failed challenges in the last hour, certificates issued in the last 7 days, expiry of the host's certificate) and write the status file. Run every 10 minutes by `fleet-tls-check.timer`. |
 | `fleet:host:tls-status [--json]` | Print the last certificate check. Exit code 0 ok, 1 warning (failed solves, expiry under 14 days, no check yet or one older than an hour), 2 error (Let's Encrypt is rate limiting, or a certificate has expired). The same status drives the banner and the Host page's Certificates tab. |
+| `fleet:host:capacity [--json] [--reserve=N] [--max-instances=N]` | Print the host's threads, cores and RAM, the CPU reserve, the allocatable threads, the effective CPU limit, live use and busy slots of every project and template, and the instance count against its cap. `--reserve` and `--max-instances` are what-ifs, never saved. Information only: exit code 0. The JSON is schema 1 (additive changes only). |
 | `fleet:backup:create` | Back up the databases into `/srv/fleet/backups` and prune old backups (see below). Run daily by `fleet-backup.timer`. |
 | `fleet:backup:verify <file> [--json]` | Check a backup file before a restore: SQLite integrity, schema version and whether it was sealed by this host's secret key, read-only (see below). |
 | `fleet:backup:restore <file> [--yes] [--accept-key-mismatch] [--json]` | Restore a backup into the live databases: verified first, swapped atomically, the previous database kept as `*.pre-restore-*`, then migrated; refuses while jobs run, while a unit that writes the databases is active, on a secret key mismatch, or as the wrong user (see below). |
@@ -499,7 +501,7 @@ Deploying instances ([`instances-and-jobs.md`](instances-and-jobs.md)) needs a f
 
 - **Wildcard DNS.** Add one record `*.<domain>` (A, and AAAA if you use IPv6) pointing at this host. Every instance is
   served at `https://<id>.<domain>`; without the record the deploy works and the site does not open.
-- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one), `fleet-status` keeps the
+- **Units.** `fleet-worker@1` runs the jobs (one consumer: the SQLite queue takes a single one; it starts child processes when concurrency is above 1), `fleet-status` keeps the
   instance states true, and `fleet-boot` starts the instances one at a time after a reboot. `systemctl list-units` should show none of them as failed.
 - **Certificates.** Each instance site gets **its own certificate** from Caddy (HTTP-01, or DNS-01 in `ovh_dns` mode). Let's
   Encrypt limits how many certificates one registered domain may obtain per week, so deploying dozens of new instances in

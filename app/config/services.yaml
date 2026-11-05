@@ -23,6 +23,13 @@ parameters:
     # Where Debian leaves the "reboot required" flag and the packages that asked for it (App\Fleet\Host\RebootSignal).
     fleet.reboot_flag_file: '/run/reboot-required'
     fleet.reboot_packages_file: '/run/reboot-required.pkgs'
+    # Host capacity (FLE-200): hardware files, the cgroup v2 subtree of the fleet slices (fleet.slice, the CPU usage is
+    # sampled from its cpu.stat files), the sampler's JSON result and the slot lock directories (pools of runs).
+    fleet.meminfo_file: '/proc/meminfo'
+    fleet.cpuinfo_file: '/proc/cpuinfo'
+    fleet.cgroup_root: '/sys/fs/cgroup/fleet.slice'
+    fleet.capacity_usage_file: '%env(resolve:FLEET_HOME)%/capacity-usage.json'
+    fleet.slots_dir: '%env(resolve:FLEET_HOME)%/slots'
     # The tag the installer wrote (install/steps/98-render-start.sh) and the release source (tests and rehearsals point
     # FLEET_UPGRADE_REPO_URL at a local repository; empty means the public GitHub mirror, App\Fleet\Upgrade\RepoUrl).
     env(FLEET_UPGRADE_REPO_URL): ''
@@ -90,6 +97,10 @@ services:
     App\Fleet\PortMirror\TraefikDirectory:
         arguments:
             $home: '%env(default::FLEET_USER_HOME)%'
+
+    App\Fleet\Jobs\ConcurrentJobRunner:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
 
     App\Fleet\Upgrade\InstalledVersion:
         arguments:
@@ -173,6 +184,9 @@ services:
     App\Fleet\Shell\CommandRunner:
         factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'create']
         arguments: ['%env(FLEET_RUNNER)%']
+    App\Fleet\Shell\BackgroundRunner:
+        factory: ['@App\Fleet\Shell\CommandRunnerFactory', 'createBackground']
+        arguments: ['%env(FLEET_RUNNER)%']
 
 when@dev:
     parameters:
@@ -183,6 +197,8 @@ when@dev:
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
         # Not the container's /etc: the Playwright upgrade spec writes this file to pose as a host one release behind.
         fleet.installed_version_file: '%env(resolve:FLEET_HOME)%/test-installed-version'
+        # Not the container's cgroup tree: the dev app has no fleet slices.
+        fleet.cgroup_root: '%env(resolve:FLEET_HOME)%/test-cgroup/fleet.slice'
         fleet.upgrade_history_file: '%env(resolve:FLEET_HOME)%/test-upgrade-history.jsonl'
 
     services:
@@ -199,6 +215,10 @@ when@test:
         fleet.reboot_packages_file: '%env(resolve:FLEET_HOME)%/test-reboot-required.pkgs'
         # Never the real /etc file: a test writes this one (under its own FLEET_HOME) to pose as an installed host.
         fleet.installed_version_file: '%env(resolve:FLEET_HOME)%/test-installed-version'
+        # Never the real cgroup tree or /proc files: tests build fixtures under FLEET_HOME.
+        fleet.cgroup_root: '%env(resolve:FLEET_HOME)%/test-cgroup/fleet.slice'
+        fleet.meminfo_file: '%env(resolve:FLEET_HOME)%/test-meminfo'
+        fleet.cpuinfo_file: '%env(resolve:FLEET_HOME)%/test-cpuinfo'
         fleet.upgrade_history_file: '%env(resolve:FLEET_HOME)%/test-upgrade-history.jsonl'
 
     services:

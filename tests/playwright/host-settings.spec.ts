@@ -12,6 +12,7 @@ const TABS = [
   { key: 'network', label: 'Networking' },
   { key: 'certificates', label: 'Certificates' },
   { key: 'uploads', label: 'Uploads' },
+  { key: 'jobs', label: 'Jobs' },
   { key: 'backups', label: 'Backups' },
 ] as const;
 
