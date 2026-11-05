@@ -156,8 +156,7 @@ final class DeployWorkflow
         $written = [$this->config->write($instance, $project, $dir)];
         array_push($written, ...$this->drupal->write($dir, $this->hostnames->domain()));
         if (null !== $template->drupalEnv()) {
-            EnvFile::setVar($dir.'/.env', 'DRUPAL_ENV', $template->drupalEnv());
-            $written[] = '.env';
+            $written[] = '.env'; // written after the BeforeStart steps, see below
         }
         $written[] = $sshKnownHosts;
         array_push($written, ...$this->setUpContainerAgent($instance, $project, $template, $dir, $log));
@@ -167,6 +166,11 @@ final class DeployWorkflow
 
         // 5-8. Steps, the site (never live without the gate), ddev, steps.
         $this->runSteps(StepPhase::BeforeStart, $context);
+        // After the steps (FLE-192): the assets seed copies the project's own `.env` over the checkout's, which would
+        // otherwise replace the template's DRUPAL_ENV with the asset's value. The template setting wins.
+        if (null !== $template->drupalEnv()) {
+            EnvFile::setVar($dir.'/.env', 'DRUPAL_ENV', $template->drupalEnv());
+        }
         try {
             $this->sites->write($instance, $project);
         } catch (\RuntimeException $e) {
