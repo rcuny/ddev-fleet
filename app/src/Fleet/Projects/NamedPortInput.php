@@ -14,12 +14,13 @@ final readonly class NamedPortInput
         public string $name,
         public int|string $public,
         public int|string $router,
+        public ?string $access = null,
     ) {
     }
 
     public function normalised(): self
     {
-        return new self(trim($this->name), self::number($this->public), self::number($this->router));
+        return new self(trim($this->name), self::number($this->public), self::number($this->router), null === $this->access ? null : strtolower(trim($this->access)));
     }
 
     private static function number(int|string $value): int|string

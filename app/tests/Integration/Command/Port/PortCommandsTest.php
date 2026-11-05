@@ -35,18 +35,35 @@ final class PortCommandsTest extends KernelTestCase
 
         self::assertSame(0, $created->getStatusCode(), $created->getErrorOutput());
         self::assertSame('', $created->getErrorOutput());
-        self::assertSame(['name' => 'typesense', 'public' => 9108, 'router' => 8108, 'projects' => []], $this->json($created));
+        self::assertSame(['name' => 'typesense', 'public' => 9108, 'router' => 8108, 'access' => 'public', 'projects' => []], $this->json($created));
 
         $list = $this->cli('fleet:port:list');
         self::assertSame(0, $list->getStatusCode());
-        self::assertMatchesRegularExpression('#\btypesense 9108 8108 -#', $this->squash($list->getDisplay()));
-        self::assertSame([['name' => 'typesense', 'public' => 9108, 'router' => 8108, 'projects' => []]], $this->json($this->cli('fleet:port:list', ['--json' => true])));
+        self::assertMatchesRegularExpression('#\btypesense 9108 8108 public -#', $this->squash($list->getDisplay()));
+        self::assertSame([['name' => 'typesense', 'public' => 9108, 'router' => 8108, 'access' => 'public', 'projects' => []]], $this->json($this->cli('fleet:port:list', ['--json' => true])));
 
         $deleted = $this->cli('fleet:port:delete', ['name' => 'typesense', '--yes' => true, '--json' => true]);
         self::assertSame(0, $deleted->getStatusCode(), $deleted->getErrorOutput());
         self::assertSame(['deleted' => 'typesense'], $this->json($deleted));
         self::assertSame([], $this->json($this->cli('fleet:port:list', ['--json' => true])));
         self::assertSame(3, $this->cli('fleet:port:delete', ['name' => 'typesense', '--yes' => true])->getStatusCode());
+    }
+
+    public function testAccessDefaultsToGatedExceptForTypesenseAndCanBeChanged(): void
+    {
+        $dash = $this->cli('fleet:port:create', ['name' => 'ts-dashboard', '--public' => '9111', '--router' => '8110', '--json' => true]);
+        self::assertSame('gated', $this->json($dash)['access']);
+
+        $open = $this->cli('fleet:port:update', ['name' => 'ts-dashboard', '--access' => 'public', '--json' => true]);
+        self::assertSame(0, $open->getStatusCode(), $open->getErrorOutput());
+        self::assertSame('public', $this->json($open)['access']);
+
+        $bad = $this->cli('fleet:port:update', ['name' => 'ts-dashboard', '--access' => 'open']);
+        self::assertSame(1, $bad->getStatusCode());
+        self::assertSame(3, $this->cli('fleet:port:update', ['name' => 'nope', '--access' => 'gated'])->getStatusCode());
+
+        $explicit = $this->cli('fleet:port:create', ['name' => 'typesense', '--public' => '9108', '--router' => '8108', '--access' => 'gated', '--json' => true]);
+        self::assertSame('gated', $this->json($explicit)['access']);
     }
 
     public function testReservedPortExits1(): void
@@ -186,7 +203,7 @@ final class PortCommandsTest extends KernelTestCase
         self::assertSame(['typesense'], $this->json($project)['ports']);
         $list = $this->json($this->cli('fleet:port:list', ['--json' => true]));
         self::assertSame(['blog'], $list[0]['projects']);
-        self::assertMatchesRegularExpression('#\btypesense 9108 8108 blog\b#', $this->squash($this->cli('fleet:port:list')->getDisplay()));
+        self::assertMatchesRegularExpression('#\btypesense 9108 8108 public blog\b#', $this->squash($this->cli('fleet:port:list')->getDisplay()));
     }
 
     public function testProjectCreateWithAnUnknownPortIsRefused(): void

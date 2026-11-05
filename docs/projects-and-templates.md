@@ -162,7 +162,8 @@ $ echo $?
 | `fleet template:delete <project> <name> [--yes]` | Deletes a template. |
 | `fleet ssh:trust <host> [options]` | Adds the host keys of a server to the fleet's known hosts (`ssh/known_hosts`), the file each instance's `.ddev/fleet_known_hosts` is copied from at deploy, so an instance can reach that host with an extra SSH key. The keys are read with `ssh-keyscan`; nothing is trusted before you compared the fingerprints. |
 | `fleet port:list` | The named-port catalogue, with the projects using each port. |
-| `fleet port:create <name> --public=<port> --router=<port>` | Adds a port to the catalogue. |
+| `fleet port:create <name> --public=<port> --router=<port> [--access=gated\|public]` | Adds a port to the catalogue. `access` is `gated` (login, default) or `public` (no login; `typesense` defaults to public). |
+| `fleet port:update <name> --access=gated\|public` | Changes who may reach the port; run `fleet port:refresh` after. |
 | `fleet port:delete <name> [--yes]` | Removes a port that no project uses. |
 | `fleet port:refresh [--project=<name>]` | Rewrites the Caddy sites of the instances so they carry their projects' ports. |
 | `fleet port:mirror [<state>]` | Shows, or with `on` or `off` switches, the in-network mirror of the named ports (the host settings' Networking tab does the same). |
@@ -228,7 +229,7 @@ Template "web" created in project "blog".
 $ fleet project update blog --default-template=web --issue-id-regexp='(?:ABC|XYZ)-\d{1,6}'
 Project "blog" updated.
 $ fleet port create typesense --public=9108 --router=8108
-Named port "typesense" created (public 9108, router 8108).
+Named port "typesense" created (public 9108, router 8108, public).
 $ fleet project update blog --port=typesense
 ```
 

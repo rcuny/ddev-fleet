@@ -271,6 +271,26 @@ final class InstanceSiteWriterTest extends KernelTestCase
         self::assertSame(2, preg_match_all('/^\S.* \{$/m', $site), 'the plain site plus one port block');
     }
 
+    public function testAPublicNamedPortHasNoLoginButKeepsTheHeaderHygiene(): void
+    {
+        $project = $this->portedProject([
+            new NamedPort('typesense', 9108, 8108, null, NamedPort::PUBLIC),
+            new NamedPort('ts-dashboard', 9111, 8110),
+        ]);
+        $this->writer->write($this->instance($project), $project);
+        $site = $this->site();
+        $typesense = substr($site, (int) strpos($site, ':9108 {'), (int) strpos($site, ':9111 {') - (int) strpos($site, ':9108 {'));
+        $dashboard = substr($site, (int) strpos($site, ':9111 {'));
+
+        self::assertStringNotContainsString('forward_auth', $typesense);
+        self::assertStringNotContainsString('respond @forbidden', $typesense);
+        self::assertStringContainsString('request_header -Remote-User', $typesense);
+        self::assertStringContainsString('Strict-Transport-Security', $typesense);
+        self::assertStringContainsString('reverse_proxy 127.0.0.1:8108', $typesense);
+        self::assertStringContainsString('forward_auth', $dashboard);
+        self::assertStringContainsString('respond @forbidden "Forbidden" 403', $dashboard);
+    }
+
     public function testThePlaywrightReportPortIsServedOnItsOwnPublicPortAndProxiedToTheAddonRouterPort(): void
     {
         $project = $this->portedProject([new NamedPort('playwright', 9325, 8323)]);

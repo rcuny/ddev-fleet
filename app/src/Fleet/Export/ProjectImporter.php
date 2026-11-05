@@ -206,7 +206,7 @@ final readonly class ProjectImporter
     {
         $pending = [];
         foreach ($document['ports'] as $i => $port) {
-            $input = new NamedPortInput($port['name'], $port['public'], $port['router']);
+            $input = new NamedPortInput($port['name'], $port['public'], $port['router'], $port['access'] ?? null);
             $numbers = \sprintf('public %d, router %d', $port['public'], $port['router']);
             $found = $this->ports->findByName($port['name']);
             if (null === $found) {
@@ -400,7 +400,7 @@ final readonly class ProjectImporter
 
         foreach ($document['ports'] as $port) {
             if (ImportItem::CREATE === $this->actionOf($plan, 'port', $port['name'])) {
-                $this->portService->create(new NamedPortInput($port['name'], $port['public'], $port['router']));
+                $this->portService->create(new NamedPortInput($port['name'], $port['public'], $port['router'], $port['access'] ?? null));
             }
         }
 
