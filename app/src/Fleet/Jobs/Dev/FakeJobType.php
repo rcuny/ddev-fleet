@@ -30,6 +30,12 @@ final readonly class FakeJobType implements JobType
         $delay = max(0, min(5000, \is_int($params['delay'] ?? null) ? $params['delay'] : 200));
         $width = \is_int($params['width'] ?? null) ? max(0, min(2000, $params['width'])) : 0;
 
+        // `gate` (tests): wait until this file exists, so a test decides when the job may end without guessing durations.
+        $gate = \is_string($params['gate'] ?? null) ? $params['gate'] : null;
+        for ($waited = 0; null !== $gate && !is_file($gate) && $waited < 600; ++$waited) {
+            usleep(100_000);
+        }
+
         for ($i = 1; $i <= $lines; ++$i) {
             $text = \sprintf('fake line %d of %d', $i, $lines);
             $length = \strlen($text);

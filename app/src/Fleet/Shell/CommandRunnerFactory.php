@@ -17,6 +17,16 @@ final readonly class CommandRunnerFactory
     ) {
     }
 
+    public function createBackground(string $kind): BackgroundRunner
+    {
+        return match ($kind) {
+            'process' => $this->process,
+            'recording' => 'prod' === $this->environment
+                ? throw new \InvalidArgumentException('FLEET_RUNNER=recording is not allowed in prod; use FLEET_RUNNER=process.') : $this->recording,
+            default => throw new \InvalidArgumentException(\sprintf('Unknown FLEET_RUNNER "%s"; allowed values: process, recording.', $kind)),
+        };
+    }
+
     public function create(string $kind): CommandRunner
     {
         return match ($kind) {
