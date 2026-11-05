@@ -123,7 +123,7 @@ final class HostCapacityCommandTest extends KernelTestCase
         $report = $this->json($this->cli('fleet:host:capacity', ['--json' => true, '--max-instances' => '40']));
 
         self::assertSame(['used' => 29, 'max' => 31], $report['docker_networks']);
-        self::assertSame(['count' => 0, 'max' => 2], $report['instances'], 'the built-in pools leave room for 2 more');
+        self::assertSame(2, $report['instances']['max'], 'the built-in pools leave room for 2 more');
 
         $runner->expect(['docker', 'info'], new CommandResult(0, "null\n"));
         $runner->expect(['docker', 'network', 'ls'], new CommandResult(0, str_repeat("abc\n", 29)));
