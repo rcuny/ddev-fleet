@@ -70,6 +70,24 @@ final class StartCommandTest extends InstanceCliTestCase
         self::assertStringContainsString('nothing to start', $tester->getDisplay());
     }
 
+    public function testStopAllOnAHostWithNoInstanceExitsZero(): void
+    {
+        $tester = $this->command('fleet:instance:stop', ['--all' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('nothing to stop', $tester->getDisplay());
+    }
+
+    public function testAllOnAHostWithNoInstanceInJsonListsNoJob(): void
+    {
+        foreach (['start', 'stop'] as $op) {
+            $tester = $this->command('fleet:instance:'.$op, ['--all' => true, '--format' => 'json']);
+
+            self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+            self::assertSame(['jobs' => []], json_decode($tester->getDisplay(), true), $op);
+        }
+    }
+
     public function testAnUnknownIdStillFailsOnAnEmptyHost(): void
     {
         $tester = $this->command('fleet:instance:start', ['id' => ['acme--nope']]);
