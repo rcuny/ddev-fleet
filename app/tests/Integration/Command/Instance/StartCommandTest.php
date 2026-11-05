@@ -62,6 +62,21 @@ final class StartCommandTest extends InstanceCliTestCase
         self::assertStringContainsString('nothing to start', $tester->getDisplay());
     }
 
+    public function testAllOnAHostWithNoInstanceExitsZero(): void
+    {
+        $tester = $this->command('fleet:instance:start', ['--all' => true]);
+
+        self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
+        self::assertStringContainsString('nothing to start', $tester->getDisplay());
+    }
+
+    public function testAnUnknownIdStillFailsOnAnEmptyHost(): void
+    {
+        $tester = $this->command('fleet:instance:start', ['id' => ['acme--nope']]);
+
+        self::assertNotSame(0, $tester->getStatusCode());
+    }
+
     public function testMixedResultExitsTwo(): void
     {
         $this->instances([InstanceState::Stopped, InstanceState::Stopped]);

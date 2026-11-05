@@ -164,12 +164,15 @@ final class UnitsTest extends TestCase
         $unit = $this->unit('fleet-boot.service');
         $service = $unit['Service'];
 
-        self::assertSame(['oneshot'], $service['Type']);
+        // Type=exec, not oneshot: multi-user.target must not wait for the batch (Authelia is After= it, FLE-196).
+        self::assertSame(['exec'], $service['Type']);
+        self::assertSame(['0'], $service['TimeoutStartSec']);
         self::assertSame(['fleet'], $service['User']);
         self::assertSame(['0'], $service['TimeoutStartSec']);
         self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:instance:start --all --sequential --timeout=1800 --retry-port-conflict'], $service['ExecStart']);
         self::assertSame(['docker.service network-online.target fleet-worker@1.service'], $unit['Unit']['After']);
         self::assertSame(['multi-user.target'], $unit['Install']['WantedBy']);
+        self::assertArrayNotHasKey('Before', $unit['Unit']);
     }
 
     public function testBootUnitIsEnabledButNotStarted(): void

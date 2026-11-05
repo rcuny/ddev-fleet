@@ -80,7 +80,7 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | 50 caddy | Caddy from its repository plus a **custom build with the OVH DNS module**; the package binary is diverted so `apt` never replaces the custom one. A re-run refreshes the custom build when it is older than the packaged Caddy. The sandbox drop-in is installed. |
 | 60 authelia | Authelia from its repository, its three secrets (generated once), the tmpfiles mask (see Troubleshooting), and a `users.yml` with one disabled placeholder user (Authelia 4.39 refuses an empty user list; the placeholder can never sign in and disappears when the first real user exists). |
 | 70 env | `/etc/ddev-fleet/fleet.env` and `mercure.env`: only missing keys are added, secrets are generated once. |
-| 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. |
+| 80 code | `composer install --no-dev`, assets, prod cache, as `fleet` with the application environment. The Tailwind CLI comes from a host cache (`/srv/fleet/cache/tailwind/<version>/`, downloaded once with retries and a SHA-256 check, only the current version kept), so a re-run or upgrade works while GitHub releases are unreachable; if the cache cannot be filled the build downloads the binary itself. |
 | 85 app init | Migrations, the queue transport, `fleet:host:init` (domain, ACME email). |
 | 90 privileged | The root helper, its single sudoers line and the `fleet` command. |
 | 95 units | The `fleet` php-fpm pool, the job worker `fleet-worker@.service`, the status watcher `fleet-status.service`, `fleet-boot.service`, the standalone Mercure hub (pinned release, sha256-checked) and its unit. |
@@ -99,6 +99,7 @@ The uninstaller removes the profile file and exactly the hook block step 35 adde
 | user `fleet` | home `/home/fleet`, group `docker` | Runs php-fpm, the workers, DDEV and the CLI. |
 | `/opt/ddev-fleet` | `fleet:fleet` 0755 | The git checkout of the product. Stays `fleet`-owned. |
 | `/srv/fleet` | `fleet:fleet` 0750, ACL `authelia:--x` | `FLEET_HOME`: `var/` (0750; `fleet.sqlite` and `queue.sqlite`, 0644 inside it), `locks/`, `logs/`, `assets/`, `instances/` (0750). |
+| `/srv/fleet/cache/tailwind` | `fleet:fleet` | The Tailwind CLI binary of the configured version (plus its `.sha256`), seeded into `app/var/tailwind/` by step 80. Safe to delete; leave it out of backups. |
 | `/srv/fleet/backups` | `fleet:fleet` 0700 | Database backups written by `fleet-backup.timer` (files 0600; see "Backup and restore" in section 5). |
 | `/srv/fleet/keys` | `fleet:fleet` 0700 | `secret.key`, the encryption key for the stored secrets (0600). **Back it up with the databases**: without it the OVH credentials and the Claude token cannot be read again. |
 | `/srv/fleet/ssh` | `fleet:fleet` 0700 | `deploy_ed25519` and `push_ed25519` (private keys, 0600), their `.pub` files and `known_hosts` (0644). |
