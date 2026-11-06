@@ -1,8 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { spawnSync } from 'node:child_process';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
-import { externalBaseURL } from './support/env';
+import { instanceRow } from './support/fleetData';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
@@ -11,29 +8,6 @@ import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 // instance and there is no browser path that creates one yet, so the test inserts one row straight into the SQLite
 // database of the server under test (FLEET_HOME: the throw-away home of the webServer, or the container's for the
 // served dev app). Every test owns uniquely named rows and removes them in `finally`.
-
-const here = dirname(fileURLToPath(import.meta.url));
-
-function fleetHome(): string {
-  return externalBaseURL ? (process.env.FLEET_HOME ?? '/tmp/sqlite/fleet-home') : join(resolve(here), '.run', 'fleet-home');
-}
-
-/** Inserts (or, with remove, deletes) a Running instance of an existing project, bypassing the application. */
-function instanceRow(action: 'insert' | 'delete', project: string, label: string): void {
-  const script = `
-    $pdo = new PDO('sqlite:' . $argv[1] . '/var/fleet.sqlite');
-    $pdo->exec('PRAGMA busy_timeout=10000');
-    $id = $argv[3] . '--' . $argv[4];
-    if ($argv[2] === 'delete') { $pdo->prepare('DELETE FROM instance WHERE id = ?')->execute([$id]); exit(0); }
-    $p = $pdo->prepare('SELECT id FROM project WHERE name = ?'); $p->execute([$argv[3]]);
-    $projectId = $p->fetchColumn();
-    $now = gmdate('Y-m-d H:i:s');
-    $pdo->prepare("INSERT INTO instance (id, label, template_name, branch, state, requested_by, created_at, updated_at, project_id) VALUES (?, ?, 'full', 'develop', 'running', 'admin', ?, ?, ?)")
-        ->execute([$id, $argv[4], $now, $now, $projectId]);
-  `;
-  const result = spawnSync('php', ['-r', script, fleetHome(), action, project, label], { encoding: 'utf8' });
-  expect(result.status, `instance ${action}: ${result.stderr}`).toBe(0);
-}
 
 async function expectTall(page: Page, testId: string): Promise<void> {
   const target = page.getByTestId(testId).first();
@@ -50,7 +24,7 @@ test.describe('schedules', () => {
     const name = uniqueName('nightly');
     const phone = test.info().project.name === 'phone';
     await createProjectViaUi(page, project);
-    instanceRow('insert', project, 'main');
+    instanceRow('insert', project, 'main', 'running');
     try {
       await page.goto('/admin/schedules');
       await expect(page.getByRole('heading', { level: 1, name: 'Schedules' })).toBeVisible();
