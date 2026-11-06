@@ -317,6 +317,22 @@ test.describe('axe sweep: templates', () => {
   });
 });
 
+// ---- access tab ------------------------------------------------------------------------------------------------------
+
+test.describe('axe sweep: access tab', () => {
+  test('the access tab, empty', async ({ page }) => {
+    const name = uniqueName();
+    try {
+      await createProjectViaUi(page, name);
+      await page.goto(`/admin/projects/${name}/access`);
+      await expect(page.getByTestId('project-section-access')).toBeVisible();
+      await expectNoBlockingViolations(page, 'the access tab');
+    } finally {
+      await deleteProjectViaUi(page, name);
+    }
+  });
+});
+
 // ---- ports tab -------------------------------------------------------------------------------------------------------
 
 test.describe('axe sweep: ports tab', () => {

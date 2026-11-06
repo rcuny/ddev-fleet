@@ -8,10 +8,18 @@ use App\Domain\Instance\InstanceRepository;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
+use App\Domain\Project\ProjectAccessRepository;
 use App\Domain\Project\ProjectRepository;
+use App\Domain\User\UserRepository;
 use App\Domain\Webhook\WebhookRepository;
 use App\Domain\Webhook\WebhookSource;
+use App\Fleet\Audit\AuditLog;
+use App\Fleet\Auth\AccessInstallFailed;
+use App\Fleet\Auth\AdminGroup;
+use App\Fleet\Auth\IdentitySync;
 use App\Fleet\Auth\ProjectAccessRefresher;
+use App\Fleet\Auth\ProjectAccessService;
+use App\Fleet\Auth\UnknownUser;
 use App\Fleet\Host\Capacity\AllocatableThreads;
 use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\PortMirror\PortMirrorSwitch;
@@ -59,6 +67,12 @@ final class ProjectController extends AbstractController
         private readonly InstanceRepository $instances,
         private readonly SecretStore $secrets,
         private readonly WebhookRepository $webhookEndpoints,
+        private readonly ProjectAccessRepository $accessRows,
+        private readonly ProjectAccessService $members,
+        private readonly IdentitySync $identity,
+        private readonly UserRepository $users,
+        private readonly AdminGroup $admins,
+        private readonly AuditLog $audit,
     ) {
     }
 
@@ -148,7 +162,91 @@ final class ProjectController extends AbstractController
     #[Route('/admin/projects/{name}/access', name: 'project_access', requirements: ['name' => self::NAME], methods: ['GET'])]
     public function access(string $name): Response
     {
-        return $this->render('admin/projects/access.html.twig', ['project' => $this->load($name)]);
+        $project = $this->load($name);
+        $members = array_flip($this->accessRows->usernamesOf($project));
+        $memberRows = [];
+        $adminRows = [];
+        $candidates = [];
+        $adminNames = [];
+        foreach ($this->users->all() as $user) {
+            if ($this->admins->includes($user)) {
+                $adminNames[] = $user->username();
+            }
+            if (isset($members[$user->username()])) {
+                $memberRows[] = $user;
+            } elseif ($this->admins->includes($user)) {
+                $adminRows[] = $user;
+            } else {
+                $candidates[] = $user;
+            }
+        }
+
+        return $this->render('admin/projects/access.html.twig', [
+            'project' => $project,
+            'members' => $memberRows,
+            'admins' => $adminRows,
+            'candidates' => $candidates,
+            'adminNames' => $adminNames,
+            'ports' => $project->ports(),
+        ]);
+    }
+
+    #[Route('/admin/projects/{name}/access/members', name: 'project_access_add', requirements: ['name' => self::NAME], methods: ['POST'])]
+    public function addMember(Request $request, string $name): Response
+    {
+        return $this->changeMember($request, $name, (string) $request->request->get('username'), true);
+    }
+
+    #[Route('/admin/projects/{name}/access/members/{username}/remove', name: 'project_access_remove', requirements: ['name' => self::NAME, 'username' => '[a-z0-9][a-z0-9._-]{0,63}'], methods: ['POST'])]
+    public function removeMember(Request $request, string $name, string $username): Response
+    {
+        return $this->changeMember($request, $name, $username, false);
+    }
+
+    /**
+     * The same service and sign-in sync as the user page and `fleet:user:grant` / `fleet:user:revoke`; only the audit
+     * entry is added here.
+     */
+    private function changeMember(Request $request, string $name, string $username, bool $add): Response
+    {
+        $this->denyAccessUnlessGranted('ROLE_ADMIN');
+        $project = $this->load($name);
+        if (!$this->isCsrfTokenValid('submit', (string) $request->request->get('_token'))) {
+            throw $this->createAccessDeniedException('Invalid CSRF token.');
+        }
+
+        $changed = false;
+        $warning = null;
+        try {
+            try {
+                $changed = $this->identity->commit(fn (): bool => $add
+                    ? $this->members->grant($username, $project->name())
+                    : $this->members->revoke($username, $project->name()));
+            } catch (AccessInstallFailed $failed) {
+                $changed = true === $failed->result;
+                $warning = $failed->getMessage();
+            }
+        } catch (UnknownUser) {
+            $this->addFlash('warning', \sprintf('"%s" is not a known user.', $username));
+
+            return $this->redirectToRoute('project_access', ['name' => $name], Response::HTTP_SEE_OTHER);
+        } catch (\RuntimeException|\InvalidArgumentException $failed) {
+            $this->addFlash('warning', 'Nothing was changed: '.$failed->getMessage());
+
+            return $this->redirectToRoute('project_access', ['name' => $name], Response::HTTP_SEE_OTHER);
+        }
+
+        if ($changed) {
+            $this->audit->record($this->actor->name(), $add ? AuditLog::PROJECT_MEMBER_ADD : AuditLog::PROJECT_MEMBER_REMOVE, $project->name().'/'.$username);
+            $this->addFlash('success', \sprintf($add ? '"%s" is now a member of "%s".' : '"%s" is no longer a member of "%s".', $username, $project->name()));
+        } else {
+            $this->addFlash('success', \sprintf($add ? 'No change: "%s" was already a member.' : 'No change: "%s" was not a member.', $username));
+        }
+        if (null !== $warning) {
+            $this->addFlash('warning', $warning);
+        }
+
+        return $this->redirectToRoute('project_access', ['name' => $name], Response::HTTP_SEE_OTHER);
     }
 
     #[Route('/admin/projects/{name}/capacity', name: 'project_capacity', requirements: ['name' => self::NAME], methods: ['GET'])]
