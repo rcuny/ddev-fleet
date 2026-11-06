@@ -1,0 +1,76 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Overview · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="project.name" :description="project.git">
+        <twig:block name="tabs">
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'overview'}) }}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-3xl gap-6" data-testid="project-overview">
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Project</twig:Card:Title>
+                <twig:Card:Description>A read-only summary. Each section below is edited in its own tab.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <dl class="grid gap-4 text-sm sm:grid-cols-[max-content_1fr]" data-testid="overview-details">
+                    <dt class="text-ink-body">Name</dt>
+                    <dd class="[overflow-wrap:anywhere]" data-testid="overview-name">{{ project.name }}</dd>
+                    <dt class="text-ink-body">Git URL</dt>
+                    <dd class="[overflow-wrap:anywhere]" data-testid="overview-git">{{ project.git }}</dd>
+                    <dt class="text-ink-body">Default branch</dt>
+                    <dd data-testid="overview-branch">{{ project.defaultBranch ?? 'Not set' }}</dd>
+                    <dt class="text-ink-body">Default template</dt>
+                    <dd data-testid="overview-template">{{ project.defaultTemplate ?? 'None' }}</dd>
+                    <dt class="text-ink-body">Webhooks</dt>
+                    <dd data-testid="overview-webhooks">
+                        {% set sources = [] %}
+                        {% for source in webhooks|keys %}{% set sources = sources|merge([source|capitalize]) %}{% endfor %}
+                        {{ sources|length > 0 ? 'Secret set for ' ~ sources|join(', ') : 'No webhook secret yet' }}
+                    </dd>
+                    <dt class="text-ink-body">Capacity</dt>
+                    <dd data-testid="overview-capacity">
+                        {{ effectiveThreads }} of {{ allocatable }} allocatable threads{{ project.cpuThreads is null ? ' (no project cap)' }},
+                        {{ project.slots is null ? 'unlimited slots' : project.slots ~ (project.slots == 1 ? ' slot' : ' slots') }}
+                    </dd>
+                </dl>
+            </twig:Card:Content>
+        </twig:Card>
+
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Counts</twig:Card:Title>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <dl class="grid grid-cols-2 gap-4 text-sm sm:grid-cols-4" data-testid="overview-counts">
+                    <div><dt class="text-ink-body">Instances</dt><dd class="text-lg font-medium" data-testid="count-instances">{{ counts.instances }}</dd></div>
+                    <div><dt class="text-ink-body">Templates</dt><dd class="text-lg font-medium" data-testid="count-templates">{{ counts.templates }}</dd></div>
+                    <div><dt class="text-ink-body">Ports</dt><dd class="text-lg font-medium" data-testid="count-ports">{{ counts.ports }}</dd></div>
+                    <div><dt class="text-ink-body">Secrets</dt><dd class="text-lg font-medium" data-testid="count-secrets">{{ counts.secrets }}</dd></div>
+                </dl>
+            </twig:Card:Content>
+        </twig:Card>
+
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Sections</twig:Card:Title>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <ul class="grid gap-1 text-sm sm:grid-cols-2" data-testid="overview-links">
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_source', {name: project.name}) }}">Source</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_templates', {name: project.name}) }}">Templates</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_assets', {name: project.name}) }}">Assets</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_network', {name: project.name}) }}">Network</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_access', {name: project.name}) }}">Access</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_capacity', {name: project.name}) }}">Capacity</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_keys', {name: project.name}) }}">Keys &amp; secrets</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_integrations', {name: project.name}) }}">Integrations</a></li>
+                    <li><a class="inline-flex min-h-11 items-center md:min-h-8" href="{{ path('project_transfer', {name: project.name}) }}">Transfer &amp; danger</a></li>
+                </ul>
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

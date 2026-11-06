@@ -1,0 +1,23 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Transfer & danger · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="project.name" :description="project.git">
+        <twig:block name="tabs">
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'transfer'}) }}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-2xl gap-4" data-testid="project-section-transfer">
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Transfer & danger</twig:Card:Title>
+                <twig:Card:Description>Export and Delete are on the Source tab for now.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <twig:Button as="a" variant="outline" href="{{ path('project_source', {name: project.name}) }}#danger-zone" class="h-11 md:h-8">Go to Source</twig:Button>
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

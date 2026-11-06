@@ -94,7 +94,7 @@ final class ProjectValidationTest extends AdminTestCase
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString('Project created.', $crawler->filter('[data-testid=flashes]')->text());
 
-        return $crawler;
+        return $this->open('/admin/projects/'.$name.'/source');
     }
 
     /**
@@ -314,9 +314,9 @@ final class ProjectValidationTest extends AdminTestCase
         self::assertSame('release/1.2_x-y', $this->shown($crawler)['project[defaultBranch]']);
 
         $this->save($crawler, ['defaultBranch' => '   ']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         self::assertStringContainsString('Project saved.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
-        self::assertSame('', $this->shown($this->open('/admin/projects/blog'))['project[defaultBranch]']);
+        self::assertSame('', $this->shown($this->open('/admin/projects/blog/source'))['project[defaultBranch]']);
         self::assertNull(($this->stored('blog') ?? self::fail())->defaultBranch());
     }
 
@@ -359,7 +359,7 @@ final class ProjectValidationTest extends AdminTestCase
         self::assertSame("www\nshop", str_replace("\r\n", "\n", $this->shown($crawler)['project[additionalHostnames]']));
 
         $this->save($crawler, ['additionalHostnames' => '']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         self::assertSame([], ($this->stored('blog') ?? self::fail())->additionalHostnames());
     }
 
@@ -435,12 +435,12 @@ final class ProjectValidationTest extends AdminTestCase
         self::assertSame('', $shown['project[gitBotEmail]']);
 
         $this->save($crawler, ['gitBotName' => '', 'gitBotEmail' => 'bot@example.com']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
-        $shown = $this->shown($this->open('/admin/projects/blog'));
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
+        $shown = $this->shown($this->open('/admin/projects/blog/source'));
         self::assertSame('', $shown['project[gitBotName]']);
         self::assertSame('bot@example.com', $shown['project[gitBotEmail]']);
 
-        $this->save($this->open('/admin/projects/blog'), ['gitBotName' => 'Zoë Bot', 'gitBotEmail' => 'zoe+bot@git.example.com']);
+        $this->save($this->open('/admin/projects/blog/source'), ['gitBotName' => 'Zoë Bot', 'gitBotEmail' => 'zoe+bot@git.example.com']);
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame(GitBotMode::Override, $project->gitBotMode());
         self::assertSame('Zoë Bot', $project->gitBotName());
@@ -452,14 +452,14 @@ final class ProjectValidationTest extends AdminTestCase
         $crawler = $this->createAndFollow(['gitBotMode' => 'override', 'gitBotName' => 'Acme Bot', 'gitBotEmail' => 'bot@example.com']);
 
         $this->save($crawler, ['gitBotMode' => 'disabled']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame(GitBotMode::Disabled, $project->gitBotMode());
         self::assertNull($project->gitBotName());
         self::assertNull($project->gitBotEmail());
 
-        $this->save($this->open('/admin/projects/blog'), ['gitBotMode' => 'inherit', 'gitBotEmail' => 'not an email', 'gitBotName' => '<<']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        $this->save($this->open('/admin/projects/blog/source'), ['gitBotMode' => 'inherit', 'gitBotEmail' => 'not an email', 'gitBotName' => '<<']);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         self::assertStringContainsString('Project saved.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame(GitBotMode::Inherit, $project->gitBotMode());
@@ -508,7 +508,7 @@ final class ProjectValidationTest extends AdminTestCase
         self::assertStringContainsString('nested quantifier', $crawler->filter(self::FORM)->text());
         self::assertCount(0, $crawler->filter('[data-testid=flashes]'));
         self::assertNull(($this->stored('blog') ?? self::fail())->issueIdRegexp());
-        self::assertSame('', $this->shown($this->open('/admin/projects/blog'))['project[issueIdRegexp]']);
+        self::assertSame('', $this->shown($this->open('/admin/projects/blog/source'))['project[issueIdRegexp]']);
     }
 
     public function testValidPatternsAreSavedAndShownAgainAndABlankOneClearsThePattern(): void
@@ -517,7 +517,7 @@ final class ProjectValidationTest extends AdminTestCase
         self::assertSame('(?:ABC|XYZ)-\d{1,6}', $this->shown($crawler)['project[issueIdRegexp]']);
 
         $this->save($crawler, ['issueIdRegexp' => '']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         self::assertNull(($this->stored('blog') ?? self::fail())->issueIdRegexp());
     }
 
@@ -550,7 +550,7 @@ final class ProjectValidationTest extends AdminTestCase
         self::assertSame('web/modules/custom/blog_2.x', $this->shown($crawler)['project[displaySubmoduleBranch]']);
 
         $this->save($crawler, ['displaySubmoduleBranch' => '']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         self::assertNull(($this->stored('blog') ?? self::fail())->displaySubmoduleBranch());
     }
 

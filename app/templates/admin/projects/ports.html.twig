@@ -5,7 +5,7 @@
 {% block content %}
     <twig:PageHeader :title="project.name" :description="project.git">
         <twig:block name="tabs">
-            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'ports'}) }}
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'network'}) }}
         </twig:block>
     </twig:PageHeader>
 
@@ -25,7 +25,7 @@
         {% if catalogue|length == 0 %}
             <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="ports-empty">The host has no named ports in its catalogue yet.</p>
         {% else %}
-            <form method="post" action="{{ path('project_ports', {name: project.name}) }}" novalidate class="grid gap-4" data-testid="ports-form">
+            <form method="post" action="{{ path('project_network', {name: project.name}) }}" novalidate class="grid gap-4" data-testid="ports-form">
                 {{ include('setup/_csrf.html.twig') }}
                 <twig:Table>
                     <twig:Table:Caption class="sr-only">Named ports</twig:Table:Caption>

@@ -51,7 +51,7 @@ final class ProjectTransferController extends AbstractController
         } catch (InvalidExport $e) {
             $this->addFlash('error', $e->getMessage());
 
-            return $this->redirectToRoute('project_edit', ['name' => $name], Response::HTTP_SEE_OTHER);
+            return $this->redirectToRoute('project_source', ['name' => $name], Response::HTTP_SEE_OTHER);
         }
 
         $response = new Response($text);
@@ -112,7 +112,7 @@ final class ProjectTransferController extends AbstractController
             $this->addFlash('warning', $warning);
         }
 
-        return $this->redirectToRoute('project_edit', ['name' => $plan->project], Response::HTTP_SEE_OTHER);
+        return $this->redirectToRoute('project_overview', ['name' => $plan->project], Response::HTTP_SEE_OTHER);
     }
 
     /**

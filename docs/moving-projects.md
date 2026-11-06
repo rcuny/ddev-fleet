@@ -28,7 +28,7 @@ Contents: [what is in the file](#what-is-in-the-file) · [export](#export) · [s
 
 The file starts with `"format": "fleet-project-export"` and `"version": 1`. Keys are in a fixed order and nothing
 else is in it: no ids, no timestamps, no instance state, no users, no SSH keys, no host settings. **Webhook secrets and
-URLs are not exported**: the new host issues its own, and you read them with *Rotate* on the project's Webhooks tab.
+URLs are not exported**: the new host issues its own, and you read them with *Rotate* on the project's Integrations tab.
 Pipeline access tokens of Bitbucket webhooks are not exported either; set them again on the new host.
 **Assets are not in the file**: copy them with rsync ([below](#copying-the-assets)).
 
@@ -185,4 +185,4 @@ A project member who is not an administrator gets a 403.
 | "A passphrase is needed" | `--with-secrets` without a terminal: set `FLEET_EXPORT_PASSPHRASE` or use `--passphrase-stdin`. |
 | "this host already has a port with this name and other numbers" | Rename or renumber the port on one host so both agree, then export again. |
 | "is not a known export version" / "this host reads version 1 at most" | The file comes from another release. Update the host that reads it. |
-| The imported project has no webhook secret you know | Webhook secrets are issued per host: use *Rotate* on the Webhooks tab and copy the new one into Jira or Bitbucket. |
+| The imported project has no webhook secret you know | Webhook secrets are issued per host: use *Rotate* on the Integrations tab and copy the new one into Jira or Bitbucket. |

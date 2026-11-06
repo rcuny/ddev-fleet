@@ -425,7 +425,7 @@ final class SecretPagesTest extends AdminTestCase
     {
         $this->makeProject();
         $this->save('/admin/secrets', 'BOTH_KEY', 'fleet-value-1');
-        $this->save('/admin/projects/blog/secrets', 'BOTH_KEY', 'project-value-1');
+        $this->save('/admin/projects/blog/keys', 'BOTH_KEY', 'project-value-1');
 
         self::assertSame('fleet-value-1', $this->store()->getManaged(null, 'BOTH_KEY'));
         self::assertSame('project-value-1', $this->store()->getManaged('blog', 'BOTH_KEY'));
@@ -651,16 +651,15 @@ final class SecretPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
-
-        $tab = $crawler->filter('nav[aria-label="Project sections"] a')->reduce(static fn ($a): bool => 'Secrets' === trim($a->text()));
+        $crawler = $this->open('/admin/projects/blog/source');
+        $tab = $crawler->filter('nav[aria-label="Project sections"] [data-testid=project-sections-strip] a')->reduce(static fn ($a): bool => str_starts_with(trim($a->text()), 'Keys'));
         self::assertCount(1, $tab);
-        self::assertSame('/admin/projects/blog/secrets', $tab->attr('href'));
+        self::assertSame('/admin/projects/blog/keys', $tab->attr('href'));
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
         self::assertResponseStatusCodeSame(200);
         self::assertSame('blog', trim($crawler->filter('main h1')->text()));
-        self::assertSame('Secrets', trim($crawler->filter('nav[aria-label="Project sections"] [aria-current=page]')->text()));
+        self::assertStringStartsWith('Keys & secrets', trim($crawler->filter('nav[aria-label="Project sections"] [data-testid=project-sections-strip] [aria-current=page]')->text()));
         self::assertCount(1, $crawler->filter('[data-testid=secrets-empty]'));
         self::assertCount(1, $crawler->filter('[data-testid=secrets-no-assets]'));
     }
@@ -671,15 +670,15 @@ final class SecretPagesTest extends AdminTestCase
         $this->makeProject('shop');
         $this->store()->putManaged(null, 'FLEET_KEY', 'fleet-value-1', 'admin');
 
-        $this->save('/admin/projects/blog/secrets', 'BLOG_KEY', self::VALUE);
+        $this->save('/admin/projects/blog/keys', 'BLOG_KEY', self::VALUE);
 
-        self::assertResponseRedirects('/admin/projects/blog/secrets', 303);
+        self::assertResponseRedirects('/admin/projects/blog/keys', 303);
         self::assertSame(self::VALUE, $this->store()->getManaged('blog', 'BLOG_KEY'));
         self::assertNull($this->store()->getManaged(null, 'BLOG_KEY'));
         self::assertNull($this->store()->getManaged('shop', 'BLOG_KEY'));
         self::assertSame('project:blog/BLOG_KEY', $this->audit()[0][2]);
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
         self::assertSame(['BLOG_KEY'], $crawler->filter('[data-testid=secret-name]')->each(static fn ($n): string => trim($n->text())));
         self::assertStringNotContainsString(self::VALUE, $this->body());
         $crawler = $this->open('/admin/projects/shop/secrets');
@@ -695,7 +694,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->store()->putManaged('blog', 'LONELY_KEY', 'lonely-value-1', 'admin');
         $this->addAssetFile('blog', '.env', "USED=\"[[used-key]]\"\n");
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
 
         self::assertCount(0, $crawler->filter('[data-testid=secrets-no-assets]'));
         $flagged = $crawler->filter('[data-testid=secret-row]')->reduce(static fn ($row): bool => $row->filter('[data-testid=secret-no-placeholder]')->count() > 0);
@@ -709,7 +708,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->makeProject();
         $this->store()->putManaged('blog', 'LONELY_KEY', 'lonely-value-1', 'admin');
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
 
         self::assertCount(0, $crawler->filter('[data-testid=secret-no-placeholder]'));
         self::assertStringContainsString('No asset files yet', $crawler->filter('[data-testid=secrets-no-assets]')->text());
@@ -736,7 +735,7 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame('project:blog/BLOG_KEY', $this->audit()[0][2]);
 
         $this->post('/admin/projects/blog/secrets/BLOG_KEY/delete', []);
-        self::assertResponseRedirects('/admin/projects/blog/secrets', 303);
+        self::assertResponseRedirects('/admin/projects/blog/keys', 303);
         self::assertSame([], $this->store()->listManaged('blog'));
     }
 
@@ -755,7 +754,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testUnknownProjectIs404OnEveryProjectRoute(): void
     {
-        $this->open('/admin/projects/nope/secrets');
+        $this->open('/admin/projects/nope/keys');
         self::assertResponseStatusCodeSame(404);
         $this->post('/admin/projects/nope/secrets', ['name' => 'A', 'value' => 'b']);
         self::assertResponseStatusCodeSame(404);
@@ -803,7 +802,7 @@ final class SecretPagesTest extends AdminTestCase
         yield 'fleet put' => ['POST', '/admin/secrets'];
         yield 'fleet delete' => ['POST', '/admin/secrets/API_KEY/delete'];
         yield 'fleet reveal' => ['POST', '/admin/secrets/API_KEY/reveal'];
-        yield 'project list' => ['GET', '/admin/projects/blog/secrets'];
+        yield 'project list' => ['GET', '/admin/projects/blog/keys'];
         yield 'project put' => ['POST', '/admin/projects/blog/secrets'];
         yield 'project delete' => ['POST', '/admin/projects/blog/secrets/API_KEY/delete'];
         yield 'project reveal' => ['POST', '/admin/projects/blog/secrets/API_KEY/reveal'];

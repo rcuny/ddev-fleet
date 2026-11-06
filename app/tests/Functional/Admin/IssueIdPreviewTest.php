@@ -300,7 +300,7 @@ final class IssueIdPreviewTest extends AdminTestCase
         self::assertInstanceOf(ProjectService::class, $service);
         $service->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git', issueIdRegexp: 'BLOG-[0-9]+'));
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
 
         self::assertResponseIsSuccessful();
         $card = $crawler->filter('[data-testid="issue-id-preview"]');
@@ -323,7 +323,7 @@ final class IssueIdPreviewTest extends AdminTestCase
         self::assertInstanceOf(ProjectService::class, $service);
         $service->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git'));
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
 
         self::assertSame('', (string) $crawler->filter('[data-testid="issue-id-preview"] input[data-model="debounce(300)|pattern"]')->attr('value'));
         self::assertSame('empty', $crawler->filter('[data-testid="issue-id-result"]')->attr('data-state'));

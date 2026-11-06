@@ -503,7 +503,7 @@ const endpoint = (page: Page, source: 'jira' | 'bitbucket', project?: string): L
 
 /** Creates a secret with the card's button, returns it and leaves the page on the project's Webhooks tab. */
 async function createSecret(page: Page, source: 'jira' | 'bitbucket', project: string): Promise<string> {
-  await page.goto(`/admin/projects/${project}/webhooks`);
+  await page.goto(`/admin/projects/${project}/integrations`);
   await submitAndWait(page, endpoint(page, source, project).getByTestId('webhook-create'));
   await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
   const secret = await page.getByTestId('webhook-secret-value').inputValue();
@@ -542,7 +542,7 @@ test.describe('axe sweep: webhooks', () => {
       await expect(endpoint(page, 'jira', project)).toHaveCount(1);
       await clean(page, 'the webhooks overview');
 
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       await expect(page.getByTestId('deliveries-empty')).toBeVisible();
       await clean(page, 'the webhooks project tab');
     } finally {
@@ -556,9 +556,9 @@ test.describe('axe sweep: webhooks', () => {
     try {
       await createProjectViaUi(page, project);
       const stale = await context.newPage();
-      await stale.goto(`/admin/projects/${project}/webhooks`);
+      await stale.goto(`/admin/projects/${project}/integrations`);
 
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       await submitAndWait(page, endpoint(page, 'jira', project).getByTestId('webhook-create'));
       await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
       await clean(page, 'the webhook secret page');
@@ -589,7 +589,7 @@ test.describe('axe sweep: webhooks', () => {
       const rule = consoleJson<{ id: number }>(['fleet:webhook:rule:add', project, '--source=jira', '--on-status=Dispatched', '--template=web']);
       consoleOk(['fleet:webhook:rule:add', project, '--source=bitbucket', '--on-event=pullrequest:approved', '--repo=acme/blog', '--action=run-pipeline', '--pattern=renovate-merge', '--ref=develop']);
 
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       await expect(endpoint(page, 'jira', project).getByTestId('webhook-rules').locator('li')).toHaveCount(1);
       await clean(page, 'the cards with rules');
 
@@ -626,13 +626,13 @@ test.describe('axe sweep: webhooks', () => {
       expect((await deliver(page, 'jira', project, jira, '[1,2]', jiraId())).status).toBe(400);
       expect((await deliver(page, 'bitbucket', project, bitbucket, { repository: { full_name: 'acme/blog' } }, bitbucketId('pullrequest:approved'))).body.result).toBe('failed');
 
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       for (const result of ['accepted', 'duplicate', 'ignored', 'failed']) {
         await expect(page.locator(`[data-testid=delivery-row][data-result=${result}]`).first()).toBeVisible();
       }
       await clean(page, 'the delivery log with every outcome');
 
-      await page.goto(`/admin/projects/${project}/webhooks?source=bitbucket&result=accepted`);
+      await page.goto(`/admin/projects/${project}/integrations?source=bitbucket&result=accepted`);
       await expect(page.getByTestId('deliveries-empty')).toBeVisible();
       await clean(page, 'the filtered empty delivery log');
 
@@ -645,7 +645,7 @@ test.describe('axe sweep: webhooks', () => {
         const sent = await deliver(page, 'jira', project, jira, { webhookEvent: 'jira:issue_created', issue: { key: `PG-${i}` } }, jiraId());
         expect(sent.status).toBe(200);
       }
-      await page.goto(`/admin/projects/${project}/webhooks?page=2`);
+      await page.goto(`/admin/projects/${project}/integrations?page=2`);
       await expect(page.getByRole('navigation', { name: 'Delivery pages' }).getByRole('link', { name: 'Newer' })).toBeVisible();
       await clean(page, 'page two of the delivery log');
     } finally {
@@ -662,7 +662,7 @@ test.describe('axe sweep: webhooks', () => {
     try {
       await createProjectViaUi(page, project);
       await createSecret(page, 'bitbucket', project);
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       const card = endpoint(page, 'bitbucket', project);
       await card.getByText('Set the pipeline token').click();
       await expect(card.getByTestId('webhook-token-input')).toBeVisible();
@@ -690,7 +690,7 @@ test.describe('axe sweep: webhooks', () => {
     try {
       await createProjectViaUi(page, project);
       await createSecret(page, 'jira', project);
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       // The CSRF token is made by the page's script on submit, so the request goes through one of the page's own forms.
       await page.evaluate((action) => {
         const form = document.querySelector<HTMLFormElement>('form[data-turbo=false]')!;

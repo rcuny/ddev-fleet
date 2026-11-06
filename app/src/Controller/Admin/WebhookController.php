@@ -59,7 +59,16 @@ final class WebhookController extends AbstractController
         ]);
     }
 
+    /**
+     * The old Webhooks address: it is the Integrations tab now (filters and paging in the query string are kept).
+     */
     #[Route('/admin/projects/{name}/webhooks', name: 'project_webhooks', requirements: ['name' => self::NAME], methods: ['GET'])]
+    public function legacyProject(Request $request, string $name): Response
+    {
+        return $this->redirect($this->generateUrl('project_integrations', ['name' => $name]).self::queryOf($request), Response::HTTP_MOVED_PERMANENTLY);
+    }
+
+    #[Route('/admin/projects/{name}/integrations', name: 'project_integrations', requirements: ['name' => self::NAME], methods: ['GET'])]
     public function project(Request $request, string $name): Response
     {
         $project = $this->load($name);
@@ -112,7 +121,7 @@ final class WebhookController extends AbstractController
             $this->addFlash('warning', $e->errors['token'] ?? 'The token was refused.');
         }
 
-        return $this->redirectToRoute('project_webhooks', ['name' => $name]);
+        return $this->redirectToRoute('project_integrations', ['name' => $name]);
     }
 
     #[Route('/admin/projects/{name}/webhooks/{source}/secret', name: 'webhook_secret', requirements: ['name' => self::NAME, 'source' => 'jira|bitbucket'], methods: ['POST'])]
@@ -133,7 +142,7 @@ final class WebhookController extends AbstractController
             // A second tab that still offered "Create secret": say so and keep the secret the first tab made.
             $this->addFlash('warning', $refused->getMessage());
 
-            return $this->redirectToRoute('project_webhooks', ['name' => $name]);
+            return $this->redirectToRoute('project_integrations', ['name' => $name]);
         }
 
         $response = $this->render('admin/webhooks/secret.html.twig', [
@@ -204,5 +213,16 @@ final class WebhookController extends AbstractController
         }
 
         return $rows;
+    }
+
+    /**
+     * The request's query string with its leading `?`, or nothing. Built here because a query key may equal a route
+     * parameter (`name` is both the project and the secret to replace).
+     */
+    private static function queryOf(Request $request): string
+    {
+        $query = $request->server->get('QUERY_STRING');
+
+        return \is_string($query) && '' !== $query ? '?'.$query : '';
     }
 }

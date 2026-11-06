@@ -8,7 +8,7 @@ const isPhone = (testInfo: { project: { name: string } }) => testInfo.project.na
 const sign = (body: string, secret: string): string => `sha256=${createHmac('sha256', secret).update(body).digest('hex')}`;
 
 async function createSecret(page: Page, project: string): Promise<string> {
-  await page.goto(`/admin/projects/${project}/webhooks`);
+  await page.goto(`/admin/projects/${project}/integrations`);
   await submitAndWait(page, page.locator('[data-testid=webhook-endpoint][data-source=jira]').getByTestId('webhook-create'));
   await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
   const secret = await page.getByTestId('webhook-secret-value').inputValue();
@@ -70,7 +70,7 @@ test.describe('webhooks', () => {
       expect((await good.json()).result).toBe('ignored');
 
       // The delivery log shows the accepted request and not the rejected one.
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       await expect(page.getByTestId('delivery-row')).toHaveCount(1);
       await expect(page.getByTestId('delivery-row')).toContainText('PW-1');
       expect(await hasHorizontalOverflow(page)).toBe(false);
@@ -101,8 +101,8 @@ test.describe('webhooks', () => {
     await createProjectViaUi(page, project);
     try {
       await page.goto(`/admin/projects/${project}`);
-      await page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Webhooks' }).click();
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/webhooks$`));
+      await page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Integrations' }).click();
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/integrations$`));
       await expect(page.getByTestId('deliveries-empty')).toBeVisible();
     } finally {
       await deleteProjectViaUi(page, project);

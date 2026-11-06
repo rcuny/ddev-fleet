@@ -167,7 +167,7 @@ test.describe('issue id tester', () => {
       await expect(t.box.getByTestId('issue-id-extracted')).toHaveText('OTHER-9');
 
       // Reload: the saved pattern is back and the tried one is gone.
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       expect(await readProject(page)).toMatchObject({ pattern: 'OAKS-[0-9]+' });
       await expect(tester(page).pattern).toHaveValue('OAKS-[0-9]+');
       await expect(tester(page).label).toHaveValue('');

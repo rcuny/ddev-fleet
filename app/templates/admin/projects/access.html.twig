@@ -1,0 +1,24 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Access · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
+
+{% block content %}
+    <twig:PageHeader :title="project.name" :description="project.git">
+        <twig:block name="tabs">
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'access'}) }}
+        </twig:block>
+    </twig:PageHeader>
+
+    <div class="mt-6 grid max-w-2xl gap-4" data-testid="project-section-access">
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Access</twig:Card:Title>
+                <twig:Card:Description>Project members are set on each user's page for now. The port access (public or login) is shown on the Network tab.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <twig:Button as="a" variant="outline" href="{{ path('users') }}" class="h-11 md:h-8">Users</twig:Button>
+                <twig:Button as="a" variant="outline" href="{{ path('project_network', {name: project.name}) }}" class="h-11 md:h-8">Network</twig:Button>
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

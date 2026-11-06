@@ -38,7 +38,7 @@ function console_(args: string[]): void {
 }
 
 async function createBitbucketSecret(page: Page, project: string): Promise<string> {
-  await page.goto(`/admin/projects/${project}/webhooks`);
+  await page.goto(`/admin/projects/${project}/integrations`);
   await submitAndWait(page, page.locator('[data-testid=webhook-endpoint][data-source=bitbucket]').getByTestId('webhook-create'));
   await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
   const secret = await page.getByTestId('webhook-secret-value').inputValue();
@@ -52,7 +52,7 @@ test.describe('webhook actions', () => {
     const errors = collectBrowserErrors(page);
     await createProjectViaUi(page, project);
     try {
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       // No Bitbucket secret yet: the token form is not offered, the Jira card never has one.
       await expect(page.getByTestId('webhook-token')).toHaveCount(0);
 
@@ -118,7 +118,7 @@ test.describe('webhook actions', () => {
       expect(failed.note).toContain('no pipeline token');
       expect((await send('pullrequest:approved', 'acme/other', `pw-${Date.now()}-b`)).result).toBe('ignored');
 
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       await expect(page.getByTestId('delivery-row')).toHaveCount(2);
       const failedRow = page.locator('[data-testid=delivery-row][data-result=failed]');
       await expect(failedRow).toHaveCount(1);

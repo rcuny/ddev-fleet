@@ -8,7 +8,7 @@
                     <twig:Card:Title class="flex flex-wrap items-center gap-2">
                         <span>{{ row.source.label }}</span>
                         <span class="text-ink-muted">·</span>
-                        <a href="{{ path('project_webhooks', {name: row.project.name}) }}" class="[overflow-wrap:anywhere]">{{ row.project.name }}</a>
+                        <a href="{{ path('project_integrations', {name: row.project.name}) }}" class="[overflow-wrap:anywhere]">{{ row.project.name }}</a>
                         {% if row.endpoint %}
                             <twig:Badge data-testid="webhook-secret-state" class="bg-brand-faded text-brand-darker dark:text-brand">Secret set</twig:Badge>
                         {% else %}

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { fillProject, openNewProject, readProject, submitCreate, submitSave } from './support/projectForm';
 import { createDeployableProject, deployOne, uniqueLabel } from './support/instances';
-import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // The project pages end to end: list, create, edit, delete and what each one shows afterwards. Every test owns a
@@ -33,11 +33,12 @@ test.describe('create', () => {
       await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
       await expect(page.getByRole('heading', { level: 1, name: 'New project' })).toHaveCount(0);
       await expect(page.getByText(fields.git).first()).toBeVisible();
+      await openSection(page, 'Source');
       expect(await readProject(page)).toEqual({ ...fields, mode: 'Custom identity', typesense: true });
       await expect(page.getByTestId('danger-zone')).toBeVisible();
 
       // The same state after a fresh load.
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       expect(await readProject(page)).toEqual({ ...fields, mode: 'Custom identity', typesense: true });
       expect(errors).toEqual([]);
     } finally {
@@ -57,11 +58,11 @@ test.describe('create', () => {
       await submitCreate(page);
       await expect(page.getByTestId('flashes')).toContainText('Project created.');
 
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       await expect(box).toBeChecked();
       await page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' }).click();
       await submitSave(page);
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       await expect(box).not.toBeChecked();
     } finally {
       await deleteProjectViaUi(page, name);
@@ -87,10 +88,10 @@ test.describe('edit', () => {
       await fillProject(page, { ...changed, mode: 'Custom identity', typesense: true });
       await submitSave(page);
       await expect(page.getByTestId('flashes')).toContainText('Project saved.');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
       expect(await readProject(page)).toEqual({ ...changed, mode: 'Custom identity', typesense: true });
 
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       expect(await readProject(page)).toEqual({ ...changed, mode: 'Custom identity', typesense: true });
       await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
 
@@ -98,11 +99,11 @@ test.describe('edit', () => {
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toContainText(`${changed.git} · develop`);
 
       // Back to the defaults: every optional field cleared, the typesense flag off.
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       await fillProject(page, { branch: '', hostnames: '', mode: 'Use the host default', pattern: '', submodule: '', typesense: false });
       await submitSave(page);
       await expect(page.getByTestId('flashes')).toContainText('Project saved.');
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       expect(await readProject(page)).toMatchObject({ branch: '', hostnames: '', mode: 'Use the host default', identityName: '', identityEmail: '', pattern: '', submodule: '', typesense: false });
     } finally {
       await deleteProjectViaUi(page, name);
@@ -125,8 +126,8 @@ test.describe('delete', () => {
       }
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(dialog).toBeHidden();
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-      await expect(page.getByTestId('flashes')).not.toContainText('deleted');
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
+      await expect(page.getByTestId('flashes')).toHaveCount(0);
 
       dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
       await page.keyboard.press('Escape');
@@ -135,6 +136,7 @@ test.describe('delete', () => {
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(1);
 
       await follow(page, page.getByTestId('project-row').filter({ hasText: name }).getByRole('link'));
+      await openSection(page, 'Source');
       dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
@@ -157,13 +159,13 @@ test.describe('delete', () => {
       await createDeployableProject(name);
       instance = await deployOne(page, name, label);
 
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText('The project was not deleted.');
       await expect(page.getByTestId('flashes')).toContainText('instance(s) exist: destroy them first');
       await expect(page.getByTestId('flashes')).toContainText(instance);
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
 
       await page.goto('/admin/projects');
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(1);
@@ -175,7 +177,7 @@ test.describe('delete', () => {
       await expect(page).toHaveURL(/\/jobs\/\d+$/);
       await expect(page.getByTestId('job-log')).toContainText('destroy');
       instance = '';
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       const confirm = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
       await submitAndWait(page, confirm.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
@@ -189,9 +191,10 @@ test.describe('phone and long values', () => {
   test('the flash of a long project name does not widen the page @phone', async ({ page }) => {
     const name = `pw-${Date.now().toString(36)}-`.padEnd(40, 'q');
     try {
-      await createProjectViaUi(page, name, `https://git.example.com/${'g'.repeat(180)}.git`);
+      await createProjectViaUi(page, name, `https://git.example.com/${'g'.repeat(180)}.git`, 'overview');
       expect(await hasHorizontalOverflow(page), 'overflow after create').toBe(false);
       await expect(page.getByTestId('flashes')).toContainText('Project created.');
+      await openSection(page, 'Source');
       const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
       expect(await hasHorizontalOverflow(page), 'overflow with the delete dialog').toBe(false);
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));

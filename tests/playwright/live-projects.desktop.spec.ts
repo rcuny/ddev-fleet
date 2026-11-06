@@ -114,6 +114,7 @@ test.describe('build', () => {
   });
 
   test('edits the project', async () => {
+    await openSection(page, 'Source');
     await page.getByLabel('Default branch').fill('main');
     await page.getByLabel('Additional hostnames').fill('www');
     await page.getByRole('button', { name: 'Save', exact: true }).click();

@@ -71,7 +71,16 @@ final class SecretController extends AbstractController
         return $this->reveal($request, null, $secret);
     }
 
+    /**
+     * The old Secrets address: it is the Keys & secrets tab now (the query string, e.g. the Replace link, is kept).
+     */
     #[Route('/admin/projects/{name}/secrets', name: 'project_secrets', requirements: ['name' => self::PROJECT], methods: ['GET'])]
+    public function legacyIndex(Request $request, string $name): Response
+    {
+        return $this->redirect($this->generateUrl('project_keys', ['name' => $name]).self::queryOf($request), Response::HTTP_MOVED_PERMANENTLY);
+    }
+
+    #[Route('/admin/projects/{name}/keys', name: 'project_keys', requirements: ['name' => self::PROJECT], methods: ['GET'])]
     public function projectIndex(Request $request, string $name): Response
     {
         $project = $this->load($name);
@@ -199,7 +208,7 @@ final class SecretController extends AbstractController
     {
         return null === $project
             ? $this->redirectToRoute('secrets', [], Response::HTTP_SEE_OTHER)
-            : $this->redirectToRoute('project_secrets', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
+            : $this->redirectToRoute('project_keys', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
     }
 
     private function requireCsrf(Request $request): void
@@ -227,5 +236,16 @@ final class SecretController extends AbstractController
         $name = $request->query->get('name');
 
         return \is_string($name) && null === SecretName::error($name) ? $name : '';
+    }
+
+    /**
+     * The request's query string with its leading `?`, or nothing. Built here because a query key may equal a route
+     * parameter (`name` is both the project and the secret to replace).
+     */
+    private static function queryOf(Request $request): string
+    {
+        $query = $request->server->get('QUERY_STRING');
+
+        return \is_string($query) && '' !== $query ? '?'.$query : '';
     }
 }
