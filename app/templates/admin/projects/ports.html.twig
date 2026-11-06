@@ -1,17 +1,17 @@
 {% extends 'base.html.twig' %}
 
-{% block title %}Ports · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
+{% block title %}Network · {{ project.name }} · Projects · {{ parent() }}{% endblock %}
 
 {% block content %}
     <twig:PageHeader :title="project.name" :description="project.git">
         <twig:block name="tabs">
-            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'ports'}) }}
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'network'}) }}
         </twig:block>
     </twig:PageHeader>
 
-    <div class="mt-6 grid max-w-2xl gap-4">
+    <div class="mt-6 grid max-w-3xl gap-4">
         <p class="text-sm text-ink-body" data-testid="ports-note">
-            These are the named ports the host offers. Tick the ones this project uses: each becomes a port on every instance of the project. The access column shows whether the port needs the login; the host admin changes it with <code>fleet:port:update</code>.
+            How the instances of this project are reached: extra hostnames, the Typesense search server and the named ports the host offers. Tick the ports this project uses: each becomes a port on every instance. The access of a port belongs to the port, so a change applies to every project that uses it. Adding a hostname, assigning or unassigning a public port and any access change ask for a confirmation.
         </p>
 
         {% if errors|length > 0 %}
@@ -22,40 +22,86 @@
             </twig:Alert>
         {% endif %}
 
-        {% if catalogue|length == 0 %}
-            <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="ports-empty">The host has no named ports in its catalogue yet.</p>
-        {% else %}
-            <form method="post" action="{{ path('project_ports', {name: project.name}) }}" novalidate class="grid gap-4" data-testid="ports-form">
-                {{ include('setup/_csrf.html.twig') }}
-                <twig:Table>
-                    <twig:Table:Caption class="sr-only">Named ports</twig:Table:Caption>
-                    <twig:Table:Header>
-                        <twig:Table:Row>
-                            <twig:Table:Head>Use</twig:Table:Head>
-                            <twig:Table:Head>Name</twig:Table:Head>
-                            <twig:Table:Head>Public port</twig:Table:Head>
-                            <twig:Table:Head>Router port</twig:Table:Head>
-                            <twig:Table:Head>Access</twig:Table:Head>
-                        </twig:Table:Row>
-                    </twig:Table:Header>
-                    <twig:Table:Body>
-                        {% for port in catalogue %}
-                            <twig:Table:Row data-testid="port-row">
-                                <twig:Table:Cell>
-                                    <twig:Checkbox id="port-{{ port.name }}" name="ports[]" value="{{ port.name }}" :checked="port.name in assigned" aria-label="Use port {{ port.name }}" data-testid="port-checkbox" aria-invalid="{{ errors|length > 0 ? 'true' : 'false' }}" />
-                                </twig:Table:Cell>
-                                <twig:Table:Cell class="font-medium"><label for="port-{{ port.name }}">{{ port.name }}</label></twig:Table:Cell>
-                                <twig:Table:Cell>{{ port.publicPort }}</twig:Table:Cell>
-                                <twig:Table:Cell>{{ port.routerPort }}</twig:Table:Cell>
-                                <twig:Table:Cell data-testid="port-access">{{ port.access == 'public' ? 'Public (no login)' : 'Login required' }}</twig:Table:Cell>
+        {{ form_start(form, {action: path('project_network', {name: project.name}), attr: {class: 'grid gap-6', id: 'network-form'}}) }}
+            {{ include('setup/_csrf.html.twig') }}
+            {{ form_errors(form) }}
+            {{ form_row(form.additionalHostnames) }}
+            {{ form_row(form.typesense) }}
+
+            <twig:Separator />
+
+            <section class="grid gap-3" aria-labelledby="ports-heading">
+                <h2 id="ports-heading">Named ports</h2>
+                {% if catalogue|length == 0 %}
+                    <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="ports-empty">The host has no named ports in its catalogue yet.</p>
+                {% else %}
+                    <twig:Table>
+                        <twig:Table:Caption class="sr-only">Named ports</twig:Table:Caption>
+                        <twig:Table:Header>
+                            <twig:Table:Row>
+                                <twig:Table:Head>Use</twig:Table:Head>
+                                <twig:Table:Head>Name</twig:Table:Head>
+                                <twig:Table:Head>Public port</twig:Table:Head>
+                                <twig:Table:Head>Router port</twig:Table:Head>
+                                <twig:Table:Head>Access</twig:Table:Head>
                             </twig:Table:Row>
+                        </twig:Table:Header>
+                        <twig:Table:Body>
+                            {% for port in catalogue %}
+                                {% set shown = requested[port.name] ?? port.access %}
+                                <twig:Table:Row data-testid="port-row">
+                                    <twig:Table:Cell>
+                                        <twig:Checkbox id="port-{{ port.name }}" name="ports[]" value="{{ port.name }}" :checked="port.name in assigned" aria-label="Use port {{ port.name }}" data-testid="port-checkbox" aria-invalid="{{ errors|length > 0 ? 'true' : 'false' }}" />
+                                    </twig:Table:Cell>
+                                    <twig:Table:Cell class="font-medium"><label for="port-{{ port.name }}">{{ port.name }}</label></twig:Table:Cell>
+                                    <twig:Table:Cell>{{ port.publicPort }}</twig:Table:Cell>
+                                    <twig:Table:Cell>{{ port.routerPort }}</twig:Table:Cell>
+                                    <twig:Table:Cell data-testid="port-access">
+                                        {% if port.access == 'public' %}
+                                            <twig:Badge class="bg-signal-faded text-signal-darker dark:text-signal" data-testid="port-access-badge" data-access="public">Public (no login)</twig:Badge>
+                                        {% else %}
+                                            <twig:Badge variant="secondary" data-testid="port-access-badge" data-access="gated">Login required</twig:Badge>
+                                        {% endif %}
+                                        {% if port.name in stored %}
+                                            <twig:NativeSelect name="access[{{ port.name }}]" aria-label="Access of port {{ port.name }}" data-testid="port-access-select" class="mt-2">
+                                                <twig:NativeSelect:Option value="gated" selected="{{ shown == 'gated' ? 'selected' : null }}">Login required</twig:NativeSelect:Option>
+                                                <twig:NativeSelect:Option value="public" selected="{{ shown == 'public' ? 'selected' : null }}">Public (no login)</twig:NativeSelect:Option>
+                                            </twig:NativeSelect>
+                                        {% endif %}
+                                    </twig:Table:Cell>
+                                </twig:Table:Row>
+                            {% endfor %}
+                        </twig:Table:Body>
+                    </twig:Table>
+                    <p class="text-xs text-ink-muted">The access of a port can be changed here once the port is assigned and saved.</p>
+                {% endif %}
+            </section>
+
+            <div class="flex flex-col gap-2 md:flex-row">
+                {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+            </div>
+        {{ form_end(form) }}
+
+        {% if confirm %}
+            <twig:Dialog id="network-confirm" :open="true" data-testid="network-confirm">
+                <twig:Dialog:Content :showCloseButton="false">
+                    <twig:Dialog:Header>
+                        <twig:Dialog:Title>Confirm these changes?</twig:Dialog:Title>
+                        <twig:Dialog:Description>These changes widen or change who can reach this project.</twig:Dialog:Description>
+                    </twig:Dialog:Header>
+                    <ul class="grid list-disc gap-1 ps-5" data-testid="network-confirm-changes">
+                        {% for change in changes %}
+                            <li>{{ change.describe }}</li>
                         {% endfor %}
-                    </twig:Table:Body>
-                </twig:Table>
-                <div>
-                    <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto">Save ports</twig:Button>
-                </div>
-            </form>
+                    </ul>
+                    <twig:Dialog:Footer>
+                        <twig:Dialog:Close>
+                            <twig:Button variant="outline" type="button" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }} data-testid="network-confirm-cancel">Cancel</twig:Button>
+                        </twig:Dialog:Close>
+                        <twig:Button type="submit" form="network-form" name="confirmed" value="1" class="h-11 w-full md:h-8 md:w-auto" data-testid="network-confirm-save">Confirm and save</twig:Button>
+                    </twig:Dialog:Footer>
+                </twig:Dialog:Content>
+            </twig:Dialog>
         {% endif %}
     </div>
 {% endblock %}

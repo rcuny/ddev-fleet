@@ -2,7 +2,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { baseURL, externalBaseURL } from './support/env';
-import { follow, openDialog, openSection } from './support/projects';
+import { follow, openDialog, openDeleteDialog, fillDeleteName, openSection } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // Projects and templates on a real installation, in a real browser over HTTPS (no ignoreHTTPSErrors: the certificate
@@ -114,12 +114,11 @@ test.describe('build', () => {
   });
 
   test('edits the project', async () => {
+    await openSection(page, 'Source');
     await page.getByLabel('Default branch').fill('main');
-    await page.getByLabel('Additional hostnames').fill('www');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByTestId('flashes')).toContainText('Project saved.');
     await expect(page.getByLabel('Default branch')).toHaveValue('main');
-    await expect(page.getByLabel('Additional hostnames')).toHaveValue('www');
     await shot('4-edited');
     await expectNoOverflow('the edited project');
   });
@@ -212,10 +211,11 @@ test.describe('clean', () => {
     await expect(page.getByTestId('flashes')).toContainText('Template deleted.');
 
     await openSection(page, 'General');
-    const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+    const dialog = await openDeleteDialog(page);
     await expect(dialog).toContainText(`Delete ${PROJECT}?`);
     await shot('12-delete-project-dialog');
     await expectNoOverflow('the delete dialog');
+    await fillDeleteName(dialog);
     await dialog.getByRole('button', { name: 'Delete project' }).click();
     await expect(page.getByTestId('flashes')).toContainText(`Project "${PROJECT}" deleted.`);
     await expect(page).toHaveURL(/\/admin\/projects$/);

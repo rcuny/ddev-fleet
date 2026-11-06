@@ -293,7 +293,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
         yield 'a reserved name' => [self::doc('new'), 'project.name: This name is reserved.'];
         yield 'a name over 40 characters' => [self::doc(str_repeat('a', 41)), 'project.name: The name must be at most 40 characters.'];
         yield 'a git URL with a scheme the host does not accept' => [$project(['git' => 'ftp://example.com/x.git']), 'project.git: Only https://, ssh:// and scp-like (git@host:path) URLs are accepted.'];
-        yield 'credentials in the git URL' => [$project(['git' => 'https://user:secret@example.com/x.git']), 'project.git: Do not put credentials in the URL'];
+        yield 'credentials in the git URL' => [$project(['git' => 'https://user:secret@example.com/x.git']), 'project.git: The URL contains a user name or token'];
         yield 'a default template the file does not have' => [$project(['default_template' => 'ghost']), 'project.default_template: this project has no template with this name.'];
         yield 'an invalid branch' => [$project(['default_branch' => 'bad branch']), 'project.default_branch:'];
         yield 'a git identity override without a name or email' => [$project(['git_bot' => ['mode' => 'override', 'name' => null, 'email' => null]]), 'project.git_bot_name: Enter a name, an email or both'];
@@ -435,7 +435,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
         $this->confirm($changed);
         self::assertResponseRedirects('/admin/projects/pwu', 303);
-        $this->open('/admin/projects/pwu');
+        $this->open('/admin/projects/pwu/source');
         self::assertStringContainsString($other, $this->body());
 
         $this->upload($changed);
@@ -537,7 +537,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
     {
         $this->createProject('pwe');
 
-        $crawler = $this->open('/admin/projects/pwe');
+        $crawler = $this->open('/admin/projects/pwe/transfer');
 
         $field = $crawler->filter('[data-testid=export-passphrase]');
         self::assertSame('password', $field->attr('type'));
@@ -566,6 +566,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
     public function testASealedExportHasTheSealedBlockKeysAndNeitherNameNorValueNorPassphrase(): void
     {
+        $this->confirmPassword();
         $this->createProject('pwsec');
         $store = $this->container()->get(SecretStore::class);
         self::assertInstanceOf(SecretStore::class, $store);
@@ -593,11 +594,12 @@ final class ProjectTransferMatrixTest extends AdminTestCase
     #[DataProvider('badPassphrases')]
     public function testAnUnusablePassphraseIsRefusedWithAMessageAndNoDownload(string $passphrase, string $message): void
     {
+        $this->confirmPassword();
         $this->createProject('pwr');
 
         $this->post('/admin/projects/pwr/export', ['passphrase' => $passphrase]);
 
-        self::assertResponseRedirects('/admin/projects/pwr', 303);
+        self::assertResponseRedirects('/admin/projects/pwr/transfer', 303);
         self::assertNull($this->client->getResponse()->headers->get('Content-Disposition'));
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString($message, $crawler->filter('[data-testid=flashes]')->text());
@@ -607,6 +609,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
     public function testExactlyEightCharactersAreAccepted(): void
     {
+        $this->confirmPassword();
         $this->createProject('pw8');
 
         $this->post('/admin/projects/pw8/export', ['passphrase' => '12345678']);
@@ -673,7 +676,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
         self::assertResponseRedirects('/admin/projects/pwq', 303);
         $this->client->followRedirect();
         self::assertStringNotContainsString('no passphrase was given', $this->body());
-        $crawler = $this->open('/admin/projects/pwq/secrets');
+        $crawler = $this->open('/admin/projects/pwq/keys');
         self::assertStringContainsString('PW_SEAL_AB12', $crawler->filter('[data-testid=secret-row]')->text());
         self::assertStringNotContainsString(self::SEALED_VALUE, $this->body());
     }

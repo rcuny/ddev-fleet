@@ -110,34 +110,73 @@ final class HostCapacityPageTest extends HostPageTestCase
         self::assertCount(1, $crawler->filter('[data-testid=capacity-unsliced-none]'));
     }
 
-    public function testProjectFormSavesAndRefusesCapacity(): void
+    public function testCapacityTabSavesAndRefusesCaps(): void
     {
         $this->projects()->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git'));
         $this->templates()->create('blog', new TemplateInput('web', cpuThreads: 8, slots: 2));
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/capacity');
         self::assertStringContainsString('This host can allocate 46.', $crawler->filter('[data-testid=project-capacity-fields]')->text());
-        $form = $crawler->selectButton('Save')->form(['project[cpuThreads]' => '12', 'project[slots]' => '4']);
+        $form = $crawler->selectButton('Save')->form(['capacity[cpuThreads]' => '12', 'capacity[slots]' => '4']);
         $this->client->submit($form);
         self::assertResponseRedirects();
         $project = new \App\Domain\Project\ProjectRepository($this->em())->findByName('blog') ?? self::fail('project');
         self::assertSame([12, 4], [$project->cpuThreads(), $project->slots()]);
 
         // Below the template's explicit value: refused, naming the template.
-        $crawler = $this->open('/admin/projects/blog');
-        $this->client->submit($crawler->selectButton('Save')->form(['project[cpuThreads]' => '4', 'project[slots]' => '1']));
+        $crawler = $this->open('/admin/projects/blog/capacity');
+        $this->client->submit($crawler->selectButton('Save')->form(['capacity[cpuThreads]' => '4', 'capacity[slots]' => '1']));
         self::assertResponseStatusCodeSame(422);
         self::assertStringContainsString('web', $this->text(new Crawler($this->body()), 'project-capacity-fields'));
 
-        $this->client->submit($this->client->request('GET', '/admin/projects/blog')->selectButton('Save')->form(['project[cpuThreads]' => '0', 'project[slots]' => '']));
+        $this->client->submit($this->client->request('GET', '/admin/projects/blog/capacity')->selectButton('Save')->form(['capacity[cpuThreads]' => '0', 'capacity[slots]' => '']));
         self::assertResponseStatusCodeSame(422);
         self::assertStringContainsString('at least 1', $this->body());
 
         // Emptied: unlimited again.
-        $this->client->submit($this->client->request('GET', '/admin/projects/blog')->selectButton('Save')->form(['project[cpuThreads]' => '', 'project[slots]' => '']));
+        $this->client->submit($this->client->request('GET', '/admin/projects/blog/capacity')->selectButton('Save')->form(['capacity[cpuThreads]' => '', 'capacity[slots]' => '']));
         self::assertResponseRedirects();
         $project = new \App\Domain\Project\ProjectRepository($this->em())->findByName('blog') ?? self::fail('project');
         self::assertSame([null, null], [$project->cpuThreads(), $project->slots()]);
+    }
+
+    public function testSourceTabNoLongerCarriesTheCaps(): void
+    {
+        $this->projects()->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git', cpuThreads: 6, slots: 2));
+        $crawler = $this->open('/admin/projects/blog/source');
+        self::assertCount(0, $crawler->filter('[data-testid=project-capacity-fields]'));
+        self::assertCount(0, $crawler->filter('input[name="project[cpuThreads]"]'));
+
+        // Saving Source keeps the caps.
+        $this->client->submit($crawler->selectButton('Save')->form(['project[defaultBranch]' => 'main']));
+        self::assertResponseRedirects();
+        $project = new \App\Domain\Project\ProjectRepository($this->em())->findByName('blog') ?? self::fail('project');
+        self::assertSame([6, 2], [$project->cpuThreads(), $project->slots()]);
+    }
+
+    public function testTemplateTableShowsEffectiveValuesAndWarnsWhenTemplatesExceedTheProject(): void
+    {
+        $this->projects()->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git', cpuThreads: 10, slots: 3));
+        $this->templates()->create('blog', new TemplateInput('web', cpuThreads: 6, slots: 2));
+        $this->templates()->create('blog', new TemplateInput('api'));
+
+        $crawler = $this->open('/admin/projects/blog/capacity');
+        self::assertSame('46', $this->text($crawler, 'capacity-allocatable'));
+        self::assertCount(2, $crawler->filter('[data-testid=template-cap-row]'));
+        $cells = static fn (Crawler $row): array => $row->filter('td')->slice(1)->each(static fn (Crawler $c): string => trim($c->text()));
+        $web = $crawler->filter('[data-testid=template-cap-row][data-template=web]');
+        self::assertSame(['6', '2', '6', '2'], $cells($web));
+        $api = $crawler->filter('[data-testid=template-cap-row][data-template=api]');
+        self::assertSame(['inherited', 'inherited', '10', '3'], $cells($api));
+        self::assertSame('/admin/projects/blog/templates/web', $web->filter('a')->attr('href'));
+        self::assertCount(0, $crawler->filter('[data-testid=template-caps-warning]'));
+
+        // 6 + 5 threads and 2 + 2 slots now exceed the project's 10 and 3.
+        $this->templates()->create('blog', new TemplateInput('worker', cpuThreads: 5, slots: 2));
+        $crawler = $this->open('/admin/projects/blog/capacity');
+        $warning = $this->text($crawler, 'template-caps-warning');
+        self::assertStringContainsString('CPU threads add up to 11', $warning);
+        self::assertStringContainsString('slots add up to 4', $warning);
     }
 
     public function testTemplateFormShowsInheritanceAndRefusesAboveTheProject(): void

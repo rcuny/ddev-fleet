@@ -64,7 +64,7 @@
                     <twig:Table:Body>
                         {% for project in capacity.projects %}
                             <twig:Table:Row data-testid="capacity-project-row" data-project="{{ project.name }}">
-                                <twig:Table:Cell class="font-medium"><a class="inline-flex min-h-11 items-center md:min-h-0" href="{{ path('project_edit', {name: project.name}) }}">{{ project.name }}</a></twig:Table:Cell>
+                                <twig:Table:Cell class="font-medium"><a class="inline-flex min-h-11 items-center md:min-h-0" href="{{ path('project_overview', {name: project.name}) }}">{{ project.name }}</a></twig:Table:Cell>
                                 <twig:Table:Cell data-testid="capacity-project-limit">{% if project.cpu_threads is null %}unlimited ({{ project.effective_threads }}){% else %}{{ project.cpu_threads }}{% if project.effective_threads < project.cpu_threads %} (capped at {{ project.effective_threads }}){% endif %}{% endif %}</twig:Table:Cell>
                                 <twig:Table:Cell>{% if project.slots is null %}unlimited{% else %}{{ project.slots }}{% endif %} ({{ project.busy }})</twig:Table:Cell>
                                 <twig:Table:Cell>{{ project.used_cores is null ? 'n/a' : project.used_cores|number_format(1) }}</twig:Table:Cell>

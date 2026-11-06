@@ -1,0 +1,86 @@
+{# The add-rule form of one endpoint. Needs: row (project, source, endpoint), id. The fields carry the option names of `fleet:webhook:rule:add`; the same service validates them. #}
+{% set jira = row.source.value == 'jira' %}
+<form method="post" action="{{ path('webhook_rule_add', {name: row.project.name, source: row.source.value}) }}" class="grid gap-3" data-testid="webhook-rule-form" autocomplete="off">
+    {{ include('setup/_csrf.html.twig') }}
+    {% if jira %}
+        <input type="hidden" name="rule[action]" value="deploy">
+        <div class="grid gap-2">
+            <twig:Label for="rule-on-status-{{ id }}">When an issue moves into the status</twig:Label>
+            <twig:Input id="rule-on-status-{{ id }}" name="rule[on-status]" required maxlength="100" placeholder="Dispatched" class="h-11 md:h-8" />
+        </div>
+    {% else %}
+        <div class="grid gap-2">
+            <twig:Label for="rule-action-{{ id }}">Action</twig:Label>
+            <twig:NativeSelect id="rule-action-{{ id }}" name="rule[action]" class="[&_select]:h-11 md:[&_select]:h-8">
+                <twig:NativeSelect:Option value="deploy">deploy</twig:NativeSelect:Option>
+                <twig:NativeSelect:Option value="run-pipeline">run-pipeline</twig:NativeSelect:Option>
+            </twig:NativeSelect>
+        </div>
+        <div class="grid gap-2">
+            <twig:Label for="rule-on-event-{{ id }}">Event</twig:Label>
+            <twig:Input id="rule-on-event-{{ id }}" name="rule[on-event]" required placeholder="repo:push" class="h-11 font-mono md:h-8" />
+        </div>
+        <div class="grid gap-2">
+            <twig:Label for="rule-repo-{{ id }}">Repository (workspace/slug)</twig:Label>
+            <twig:Input id="rule-repo-{{ id }}" name="rule[repo]" required placeholder="acme/blog" class="h-11 font-mono md:h-8" />
+        </div>
+        <div class="grid gap-2">
+            <twig:Label for="rule-match-branch-{{ id }}">Branch glob the event must concern</twig:Label>
+            <twig:Input id="rule-match-branch-{{ id }}" name="rule[match-branch]" placeholder="feature/*" class="h-11 font-mono md:h-8" />
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+            <div class="grid gap-2">
+                <twig:Label for="rule-state-{{ id }}">Commit status state</twig:Label>
+                <twig:Input id="rule-state-{{ id }}" name="rule[state]" placeholder="SUCCESSFUL" class="h-11 font-mono md:h-8" />
+            </div>
+            <div class="grid gap-2">
+                <twig:Label for="rule-comment-{{ id }}">Comment line to look for</twig:Label>
+                <twig:Input id="rule-comment-{{ id }}" name="rule[comment]" placeholder="/merge" class="h-11 font-mono md:h-8" />
+            </div>
+        </div>
+    {% endif %}
+    <div class="grid gap-2">
+        <twig:Label for="rule-template-{{ id }}">Template to deploy (deploy rules)</twig:Label>
+        <twig:NativeSelect id="rule-template-{{ id }}" name="rule[template]" class="[&_select]:h-11 md:[&_select]:h-8">
+            <twig:NativeSelect:Option value="">None</twig:NativeSelect:Option>
+            {% for template in row.project.templates %}
+                <twig:NativeSelect:Option :value="template.name">{{ template.name }}</twig:NativeSelect:Option>
+            {% endfor %}
+        </twig:NativeSelect>
+    </div>
+    <div class="grid gap-2">
+        <twig:Label for="rule-branch-{{ id }}">Branch to deploy (default: the project's)</twig:Label>
+        <twig:Input id="rule-branch-{{ id }}" name="rule[branch]" class="h-11 font-mono md:h-8" />
+    </div>
+    {% if not jira %}
+        <div class="grid gap-2 sm:grid-cols-3">
+            <div class="grid gap-2">
+                <twig:Label for="rule-label-{{ id }}">Fixed label</twig:Label>
+                <twig:Input id="rule-label-{{ id }}" name="rule[label]" class="h-11 font-mono md:h-8" />
+            </div>
+            <div class="grid gap-2">
+                <twig:Label for="rule-label-prefix-{{ id }}">Label prefix</twig:Label>
+                <twig:Input id="rule-label-prefix-{{ id }}" name="rule[label-prefix]" class="h-11 font-mono md:h-8" />
+            </div>
+            <div class="grid gap-2">
+                <twig:Label for="rule-strip-suffix-{{ id }}">Strip suffix</twig:Label>
+                <twig:Input id="rule-strip-suffix-{{ id }}" name="rule[strip-suffix]" class="h-11 font-mono md:h-8" />
+            </div>
+        </div>
+        <div class="flex min-h-11 items-center gap-2">
+            <twig:Checkbox id="rule-reuse-{{ id }}" name="rule[reuse]" value="1" />
+            <twig:Label for="rule-reuse-{{ id }}">Redeploy an existing instance in place (reuse)</twig:Label>
+        </div>
+        <div class="grid gap-2 sm:grid-cols-2">
+            <div class="grid gap-2">
+                <twig:Label for="rule-pattern-{{ id }}">Pipeline name (run-pipeline)</twig:Label>
+                <twig:Input id="rule-pattern-{{ id }}" name="rule[pattern]" class="h-11 font-mono md:h-8" />
+            </div>
+            <div class="grid gap-2">
+                <twig:Label for="rule-ref-{{ id }}">Branch to run it on</twig:Label>
+                <twig:Input id="rule-ref-{{ id }}" name="rule[ref]" class="h-11 font-mono md:h-8" />
+            </div>
+        </div>
+    {% endif %}
+    <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-rule-save">Add rule</twig:Button>
+</form>

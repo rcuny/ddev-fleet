@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Support;
 
+use App\Domain\User\UserRepository;
+use App\Fleet\Auth\UserService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\KernelBrowser;
 use Symfony\Bundle\FrameworkBundle\Test\WebTestCase;
@@ -20,6 +22,7 @@ abstract class AdminTestCase extends WebTestCase
     use FleetDatabase;
 
     public const string BASE = 'https://localhost';
+    public const string REAUTH_PASSWORD = 'correct horse battery staple';
 
     protected KernelBrowser $client;
     protected string $clientIp = '';
@@ -62,6 +65,42 @@ abstract class AdminTestCase extends WebTestCase
             'HTTP_X_FLEET_STAND_IN_ROLE' => $this->role,
             'HTTP_SEC_FETCH_SITE' => $fetchSite,
         ];
+    }
+
+    /**
+     * Opens the re-auth window of the stand-in admin (needed to reveal a secret or export with a passphrase): makes the
+     * user "dev-admin" with a known password when it does not exist yet, and confirms that password on the re-auth page.
+     */
+    protected function confirmPassword(string $user = 'dev-admin'): void
+    {
+        $this->createReauthUser($user);
+        $this->post('/admin/reauth', ['password' => self::REAUTH_PASSWORD, 'next' => '/admin']);
+        self::assertResponseRedirects('/admin', 303);
+    }
+
+    /** Makes the admin user $user with the known password (the stand-in identity has no row of its own). */
+    protected function createReauthUser(string $user = 'dev-admin'): void
+    {
+        $users = $this->container()->get(UserService::class);
+        self::assertInstanceOf(UserService::class, $users);
+        if (null === $this->userRepository()->findByUsername($user)) {
+            $users->create($user, 'Dev Admin', $user.'@example.com', self::REAUTH_PASSWORD, true);
+        }
+    }
+
+    /** Drops the reauth.* audit entries, for tests that count the entries of another trail. */
+    protected function forgetReauthAudit(): void
+    {
+        $this->em()->getConnection()->executeStatement("DELETE FROM audit_entry WHERE action LIKE 'reauth.%'");
+    }
+
+    private function userRepository(): UserRepository
+    {
+        $repository = $this->container()->get(UserRepository::class);
+        self::assertInstanceOf(UserRepository::class, $repository);
+        $this->em();
+
+        return $repository;
     }
 
     protected function container(): ContainerInterface

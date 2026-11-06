@@ -15,13 +15,32 @@ export function uniqueName(prefix = 'pw'): string {
 }
 
 /** Creates a project through the browser (New project form) and waits for the confirmation. */
-export async function createProjectViaUi(page: Page, name: string, git: string = GIT_URL): Promise<void> {
+export async function createProjectViaUi(page: Page, name: string, git: string = GIT_URL, landOn: 'source' | 'overview' = 'source'): Promise<void> {
   await page.goto('/admin/projects/new');
   await page.getByLabel('Name', { exact: true }).fill(name);
   await page.getByLabel('Git URL').fill(git);
   await page.getByRole('button', { name: 'Create project' }).click();
   await expect(page.getByTestId('flashes')).toContainText('Project created.');
+  // A new project lands on its Overview; most callers want the form, which is on the Source tab.
   await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+  if (landOn === 'source') {
+    await openSection(page, 'Source');
+  }
+}
+
+/** Types the project name the delete dialog asks for (read from the dialog itself, so the caller needs no name). */
+export async function fillDeleteName(dialog: Locator): Promise<void> {
+  const name = (await dialog.locator('label strong').textContent())?.trim() ?? '';
+  await dialog.getByTestId('delete-confirm-name').fill(name);
+}
+
+/** Opens the project's Delete dialog on its Transfer & danger tab (goes there first unless the page is already on it). */
+export async function openDeleteDialog(page: Page): Promise<Locator> {
+  const match = /\/admin\/projects\/([a-z0-9-]+)/.exec(new URL(page.url()).pathname);
+  if (match && !page.url().endsWith('/transfer')) {
+    await page.goto(`/admin/projects/${match[1]}/transfer`);
+  }
+  return openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
 }
 
 /**
@@ -29,11 +48,12 @@ export async function createProjectViaUi(page: Page, name: string, git: string =
  * must not throw when the test failed before the project existed).
  */
 export async function deleteProjectViaUi(page: Page, name: string): Promise<void> {
-  const response = await page.goto(`/admin/projects/${name}`);
+  const response = await page.goto(`/admin/projects/${name}/transfer`);
   if (!response || response.status() === 404) {
     return;
   }
   const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+  await fillDeleteName(dialog);
   await dialog.getByRole('button', { name: 'Delete project' }).click();
   await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
 }
@@ -121,7 +141,50 @@ export async function openDialog(page: Page, trigger: Locator): Promise<Locator>
   return dialog;
 }
 
-/** Opens one of the project sections through the tab strip (the same links at every width, no script involved). */
-export async function openSection(page: Page, section: 'General' | 'Templates' | 'Secrets' | 'Ports' | 'Assets'): Promise<void> {
-  await follow(page, page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: section }));
+/**
+ * Opens the collapsed delivery log of a project's Integrations tab (a no-op when it is open already or the page has
+ * none, like the cross-project overview).
+ */
+export async function openDeliveryLog(page: Page): Promise<void> {
+  const details = page.getByTestId('webhook-log-details');
+  if ((await details.count()) === 0 || (await details.getAttribute('open')) !== null) {
+    return;
+  }
+  await details.locator('summary').click();
+  await expect(details).toHaveAttribute('open', '');
+}
+
+/** The ten project sections, in tab order. */
+export type ProjectSection =
+  | 'Overview'
+  | 'Source'
+  | 'Templates'
+  | 'Assets'
+  | 'Network'
+  | 'Access'
+  | 'Capacity'
+  | 'Keys & secrets'
+  | 'Integrations'
+  | 'Transfer & danger';
+
+/** The names the sections had before the ten tabs (FLE-226): still accepted by openSection(). */
+const SECTION_ALIASES = { General: 'Source', Ports: 'Network', Secrets: 'Keys & secrets', Webhooks: 'Integrations' } as const;
+
+/**
+ * Opens one of the project sections. From the sm breakpoint the tab strip is a row of links; below it the same
+ * navigation is a labelled <select> that goes to the chosen tab. Old section names (General, Ports, Secrets, Webhooks)
+ * map to the tab that took them over.
+ */
+export async function openSection(page: Page, section: ProjectSection | keyof typeof SECTION_ALIASES): Promise<void> {
+  const target: ProjectSection = section in SECTION_ALIASES ? SECTION_ALIASES[section as keyof typeof SECTION_ALIASES] : (section as ProjectSection);
+  const link = page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: target });
+  if (await link.isVisible()) {
+    await follow(page, link);
+    return;
+  }
+  const select = page.getByRole('combobox', { name: 'Project section' });
+  const option = select.locator('option', { hasText: target });
+  const value = await option.getAttribute('value');
+  await Promise.all([page.waitForURL((url) => url.pathname === value || url.href.endsWith(value ?? '')), select.selectOption({ label: (await option.textContent())?.trim() ?? target })]);
+  await page.waitForLoadState('networkidle');
 }

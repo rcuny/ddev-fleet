@@ -1,7 +1,7 @@
 import { expect, type Page } from '@playwright/test';
 import { expectNoBlockingViolations } from './support/axe';
 import { openHostTab, skipBrowserValidation, test } from './support/host';
-import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { createTemplateViaUi } from './support/templates';
 
@@ -56,7 +56,8 @@ test.describe('capacity', () => {
       test.skip(allocatable < 1, 'a host without allocatable threads cannot be allotted');
 
       for (const name of [first, second]) {
-        await createProjectViaUi(page, name);
+        await createProjectViaUi(page, name, undefined, 'overview');
+        await openSection(page, 'Capacity');
         await page.getByLabel('CPU threads').fill(String(allocatable));
         await page.getByLabel('Slots').fill('2');
         await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
@@ -111,7 +112,8 @@ test.describe('capacity', () => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName('cap');
     try {
-      await createProjectViaUi(page, name);
+      await createProjectViaUi(page, name, undefined, 'overview');
+      await openSection(page, 'Capacity');
       const fields = page.getByTestId('project-capacity-fields');
       await expect(fields).toContainText('This host can allocate');
       await page.getByLabel('CPU threads').fill('0');
@@ -136,7 +138,8 @@ test.describe('capacity', () => {
     const errors = collectBrowserErrors(page);
     const name = uniqueName('cap');
     try {
-      await createProjectViaUi(page, name);
+      await createProjectViaUi(page, name, undefined, 'overview');
+      await openSection(page, 'Capacity');
       await page.getByLabel('CPU threads').fill('4');
       await page.getByLabel('Slots').fill('2');
       await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
@@ -163,7 +166,7 @@ test.describe('capacity', () => {
       await expect(page.getByLabel('Slots')).toHaveValue('1');
 
       // The project may not drop below the template's explicit value.
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/capacity`);
       await page.getByLabel('CPU threads').fill('2');
       await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
       await expect(page.getByTestId('project-capacity-fields')).toContainText('big');
@@ -171,5 +174,48 @@ test.describe('capacity', () => {
       await deleteProjectViaUi(page, name).catch(() => undefined);
     }
     expect(errors.filter((message) => !message.includes('422'))).toEqual([]);
+  });
+  test('the project Capacity tab lists template caps with effective values and warns above the project cap @phone', async ({ page }) => {
+    test.slow();
+    const errors = collectBrowserErrors(page);
+    const name = uniqueName('cap');
+    try {
+      await createProjectViaUi(page, name, undefined, 'overview');
+      await openSection(page, 'Capacity');
+      // Source no longer carries the caps.
+      await expect(page.getByTestId('project-capacity-fields')).toBeVisible();
+      await page.getByLabel('CPU threads').fill('4');
+      await page.getByLabel('Slots').fill('2');
+      await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
+      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+
+      await page.goto(`/admin/projects/${name}/templates/new`);
+      await page.getByLabel('Name', { exact: true }).fill('big');
+      await page.getByLabel('CPU threads').fill('3');
+      await page.getByLabel('Slots').fill('2');
+      await submitAndWait(page, page.getByRole('button', { name: 'Create template' }));
+      await page.goto(`/admin/projects/${name}/templates/new`);
+      await page.getByLabel('Name', { exact: true }).fill('small');
+      await page.getByLabel('CPU threads').fill('2');
+      await submitAndWait(page, page.getByRole('button', { name: 'Create template' }));
+
+      await page.goto(`/admin/projects/${name}/capacity`);
+      const rows = page.getByTestId('template-cap-row');
+      await expect(rows).toHaveCount(2);
+      const small = page.locator('[data-testid=template-cap-row][data-template=small]');
+      await expect(small.getByTestId('template-cap-threads')).toHaveText('2');
+      await expect(small.getByTestId('template-cap-slots')).toHaveText('inherited');
+      await expect(small.getByTestId('template-cap-effective-slots')).toHaveText('2');
+      // 3 + 2 = 5 threads above the project's 4.
+      await expect(page.getByTestId('template-caps-warning')).toContainText('CPU threads add up to 5');
+      expect(await hasHorizontalOverflow(page)).toBe(false);
+      await expectNoBlockingViolations(page, 'project capacity tab');
+
+      await page.getByRole('link', { name: 'big' }).click();
+      await expect(page).toHaveURL(new RegExp(`/templates/big$`));
+    } finally {
+      await deleteProjectViaUi(page, name).catch(() => undefined);
+    }
+    expect(errors).toEqual([]);
   });
 });

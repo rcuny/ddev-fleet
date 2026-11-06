@@ -1,6 +1,7 @@
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { openDialog } from './projects';
+import { navigate, openDialog } from './projects';
+import { createUserViaUi, PASSWORD } from './users';
 
 /** A valid secret name that is unique per call: capital letters, digits, underscores, at most 64 characters. */
 export function uniqueSecret(prefix = 'PW'): string {
@@ -37,33 +38,102 @@ export function secretRow(page: Page, name: string): Locator {
   return page.getByTestId('secret-row').filter({ has: page.getByTestId('secret-name').getByText(name, { exact: true }) });
 }
 
+/** Types the value: a single line into the masked field, several lines into the Multi-line textarea (opened first). */
+export async function fillSecretValue(form: Locator, value: string): Promise<void> {
+  if (value.includes('\n')) {
+    await form.getByTestId('secret-multiline').locator('summary').click();
+    await form.getByLabel('Multi-line value').fill(value);
+    return;
+  }
+  await form.getByLabel('Value', { exact: true }).fill(value);
+}
+
 /** Fills the add/replace form and presses Save, without waiting for the answer. */
 export async function submitSecret(page: Page, name: string, value: string): Promise<void> {
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await fillSecretValue(form, value);
   await form.getByTestId('secret-save').click();
 }
 
 /** Fills the form, saves and waits for the confirmation; a refused save reports its status. */
 export async function saveSecret(page: Page, name: string, value: string): Promise<void> {
+  // A phone reaches the tab through the section select: let the visit settle first, or the form being filled is replaced
+  // by the fresh one and the click submits it empty (422 "Enter a name", seen on release/1.5.2).
+  await page.waitForLoadState('networkidle');
+  // Turbo shows a cached snapshot (a preview) of a page it has seen before and swaps in the fresh one a moment later.
+  await expect(page.locator('html')).not.toHaveAttribute('data-turbo-preview', /.*/);
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await fillSecretValue(form, value);
+  await expect(form.getByLabel('Name')).toHaveValue(name);
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
-    form.getByTestId('secret-save').click(),
+    navigate(page, () => form.evaluate((node) => (node as HTMLFormElement).requestSubmit(node.querySelector('[data-testid="secret-save"]') as HTMLElement))),
   ]);
-  expect(response.status(), `save of ${name} answered ${response.status()}`).toBeLessThan(400);
+  const detail = response.status() >= 400 ? (await response.text()).match(/data-testid="error-(?:name|value)"[^>]*>[^<]*/g)?.join(' | ') : '';
+  expect(response.status(), `save of ${name} answered ${response.status()} ${detail}`).toBeLessThan(400);
   await expect(page.getByTestId('flashes')).toContainText(`Secret "${name}" saved.`);
 }
 
 /** Presses Reveal on a row and returns the dialog showing the value (a plain form POST: the page is reloaded). */
 export async function revealSecret(page: Page, name: string): Promise<Locator> {
-  await secretRow(page, name).getByTestId('secret-reveal').click();
   const dialog = page.getByTestId('reveal-dialog');
+  await secretRow(page, name).getByTestId('secret-reveal').click();
+  // With the re-auth window closed the click lands on the password page: confirm and press Reveal again.
+  const asked = await Promise.race([
+    dialog.waitFor({ timeout: 30_000 }).then(() => false),
+    page.waitForURL(/\/admin\/reauth/, { timeout: 30_000 }).then(() => true),
+  ]);
+  if (asked) {
+    await confirmPassword(page);
+    await secretRow(page, name).getByTestId('secret-reveal').click();
+  }
   await expect(dialog).toBeVisible({ timeout: 30_000 });
   return dialog;
+}
+
+const usersMade = new Set<string>();
+
+/** The stand-in name this browser context signs in as (the `actor` cookie), else the default admin. */
+async function signedInAs(page: Page): Promise<string> {
+  const cookie = (await page.context().cookies()).find((c) => c.name === 'fleet_stand_in_user');
+  return cookie?.value ?? 'dev-admin';
+}
+
+/**
+ * The stand-in identity has no database row, but the re-auth page checks a real password: make a user of
+ * that name (once per name and worker) with the spec password; a member, not an administrator, so the setup wizard still finds no admin, through the New user form in a page of its own.
+ */
+async function ensureUserRow(page: Page): Promise<string> {
+  const actor = await signedInAs(page);
+  if (!usersMade.has(actor)) {
+    usersMade.add(actor);
+    const other = await page.context().newPage();
+    try {
+      await createUserViaUi(other, { username: actor, displayName: 'Spec actor' });
+    } catch {
+      // Already there (the default admin, another spec): the password check below tells.
+    } finally {
+      await other.close();
+    }
+  }
+  return actor;
+}
+
+/** On the re-auth page: types the spec password, confirms, and waits to be sent back. */
+export async function confirmPassword(page: Page): Promise<void> {
+  await ensureUserRow(page);
+  await page.getByTestId('reauth-password').fill(PASSWORD);
+  await page.getByTestId('reauth-submit').click();
+  await expect(page).not.toHaveURL(/\/admin\/reauth/);
+}
+
+/** Opens the re-auth window from anywhere and returns to the page the test was on. */
+export async function openReauthWindow(page: Page): Promise<void> {
+  const back = new URL(page.url()).pathname;
+  await page.goto(`/admin/reauth?next=${encodeURIComponent(back)}`);
+  await confirmPassword(page);
 }
 
 /** Deletes a secret through its confirmation dialog; does nothing when it is gone (made for `finally`). */

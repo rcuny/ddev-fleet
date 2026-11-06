@@ -10,6 +10,7 @@ use App\Domain\Webhook\WebhookEndpoint;
 use App\Domain\Webhook\WebhookRepository;
 use App\Domain\Webhook\WebhookRule;
 use App\Domain\Webhook\WebhookSource;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\Rule\BranchName;
@@ -36,6 +37,7 @@ final readonly class WebhookService
         private ProjectRepository $projects,
         private WebhookRepository $webhooks,
         private WebhookSecrets $secrets,
+        private AuditLog $audit,
     ) {
     }
 
@@ -62,7 +64,7 @@ final readonly class WebhookService
      * @throws NotFound
      * @throws ValidationFailed
      */
-    public function addRule(string $projectName, WebhookSource $source, string $action, array $match, array $params): WebhookRule
+    public function addRule(string $projectName, WebhookSource $source, string $action, array $match, array $params, string $by = AuditLog::CLI_ACTOR): WebhookRule
     {
         $project = $this->project($projectName);
         $endpoint = $this->webhooks->endpoint($projectName, $source)
@@ -82,6 +84,7 @@ final readonly class WebhookService
 
         $rule = new WebhookRule($endpoint, $this->webhooks->nextRulePosition($endpoint), $action, $match, $params);
         $this->webhooks->saveRule($rule);
+        $this->audit->record($by, AuditLog::WEBHOOK_RULE_ADD, \sprintf('%s/%s rule %d (%s)', $projectName, $source->value, (int) $rule->id(), $action));
 
         return $rule;
     }
@@ -134,13 +137,15 @@ final readonly class WebhookService
     /**
      * @throws NotFound
      */
-    public function removeRule(string $projectName, int $ruleId): void
+    public function removeRule(string $projectName, int $ruleId, string $by = AuditLog::CLI_ACTOR): void
     {
         $rule = $this->webhooks->findRule($ruleId);
         if (null === $rule || $rule->endpoint()->project()->name() !== $projectName) {
             throw new NotFound(\sprintf('Rule %d does not exist in project %s.', $ruleId, $projectName));
         }
+        $source = $rule->endpoint()->source()->value;
         $this->webhooks->removeRule($rule);
+        $this->audit->record($by, AuditLog::WEBHOOK_RULE_REMOVE, \sprintf('%s/%s rule %d', $projectName, $source, $ruleId));
     }
 
     /**

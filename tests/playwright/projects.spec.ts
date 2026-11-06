@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, openSection, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, openDeleteDialog, fillDeleteName, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
 
@@ -56,7 +56,10 @@ test.describe('projects and templates', () => {
         await expect(page.getByTestId('flashes')).toContainText('Project created.');
         await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
         await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+        await expect(page.getByTestId('project-overview')).toBeVisible();
+        await openSection(page, 'Network');
         await expect(page.getByLabel('Additional hostnames')).toHaveValue('www');
+        await openSection(page, 'Source');
       });
 
       // Edit: the default branch.
@@ -70,7 +73,7 @@ test.describe('projects and templates', () => {
       // The edit page offers the other sections, the danger zone and the issue id tester.
       await timed('edit page parts', async () => {
         await expect(page.getByTestId('issue-id-preview')).toBeVisible();
-        await expect(page.getByTestId('danger-zone')).toBeVisible();
+        await expect(page.getByTestId('danger-zone')).toHaveCount(0);
       });
 
       // Templates: none yet, then one with two post-deploy lines, one tty1 and one tty2 line.
@@ -116,18 +119,18 @@ test.describe('projects and templates', () => {
       await timed('ports tab', async () => {
         await follow(page, page.getByTestId('project-row').filter({ hasText: name }).getByRole('link'));
         await openSection(page, 'Ports');
-        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/ports$`));
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/network$`));
         await expect(page.getByTestId('ports-note')).toBeVisible();
         await expect(page.getByTestId('ports-note')).not.toContainText('M0.07');
       });
 
-      // Make web the default template (General tab).
+      // Make web the default template (Templates tab).
       await timed('make web the default', async () => {
-        await openSection(page, 'General');
-        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+        await openSection(page, 'Templates');
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/templates$`));
         await page.getByLabel('Default template').selectOption('web');
-        await page.getByRole('button', { name: 'Save', exact: true }).click();
-        await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+        await page.getByRole('button', { name: 'Save default' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Default template saved.');
         await expect(page.getByLabel('Default template')).toHaveValue('web');
       });
 
@@ -145,11 +148,10 @@ test.describe('projects and templates', () => {
 
       // Clear the default, then the template can be deleted.
       await timed('clear default, delete template', async () => {
-        await openSection(page, 'General');
-        await page.getByLabel('Default template').selectOption({ label: 'None' });
-        await page.getByRole('button', { name: 'Save', exact: true }).click();
-        await expect(page.getByTestId('flashes')).toContainText('Project saved.');
         await openSection(page, 'Templates');
+        await page.getByLabel('Default template').selectOption({ label: 'None' });
+        await page.getByRole('button', { name: 'Save default' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Default template saved.');
         await expect(page.getByTestId('template-default')).toHaveCount(0);
         await follow(page, page.getByRole('link', { name: 'Edit web' }));
         const deleteDialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
@@ -160,13 +162,14 @@ test.describe('projects and templates', () => {
 
       // Delete the project through its dialog: Cancel keeps it, the confirmation removes it.
       await timed('delete the project', async () => {
-        await openSection(page, 'General');
-        const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+        await openSection(page, 'Source');
+        const dialog = await openDeleteDialog(page);
         await expect(dialog).toContainText(`Delete ${name}?`);
         await dialog.getByRole('button', { name: 'Cancel' }).click();
         await expect(dialog).toBeHidden();
-        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
-        const confirm = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
+        const confirm = await openDeleteDialog(page);
+        await fillDeleteName(confirm);
         await confirm.getByRole('button', { name: 'Delete project' }).click();
         await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
         await expect(page).toHaveURL(/\/admin\/projects$/);
@@ -314,6 +317,18 @@ test.describe('projects and templates', () => {
     const name = uniqueName();
 
     try {
+      await page.goto('/admin/projects/new');
+      // Checkbox row: same, bottom right corner, on the create form (the edit tabs have no checkbox left).
+      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' });
+      const checkboxBox = (await checkboxRow.boundingBox())!;
+      if (isPhone()) {
+        expect(checkboxBox.height).toBeGreaterThanOrEqual(43.5);
+      }
+      const typesense = page.getByLabel(/Git over SSH inside the container/);
+      await expect(typesense).not.toBeChecked();
+      await checkboxRow.click({ position: { x: checkboxBox.width - 3, y: checkboxBox.height - 2 } });
+      await expect(typesense).toBeChecked();
+
       await createProjectViaUi(page, name);
 
       // Radio row: the far right edge of the row, far from the 16 px circle and from the text.
@@ -328,23 +343,11 @@ test.describe('projects and templates', () => {
       await expect(page.getByLabel('Custom identity')).toBeChecked();
       await expect(page.getByLabel('Do not set a git identity')).not.toBeChecked();
 
-      // Checkbox row: same, bottom right corner.
-      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Typesense' });
-      const checkboxBox = (await checkboxRow.boundingBox())!;
-      if (isPhone()) {
-        expect(checkboxBox.height).toBeGreaterThanOrEqual(43.5);
-      }
-      const typesense = page.getByLabel('Run a Typesense search server for each instance');
-      await expect(typesense).not.toBeChecked();
-      await checkboxRow.click({ position: { x: checkboxBox.width - 3, y: checkboxBox.height - 2 } });
-      await expect(typesense).toBeChecked();
-
       // Both survive a save (a custom identity needs a name or an email).
       await page.getByLabel('Identity name').fill('Acme Bot');
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       await expect(page.getByTestId('flashes')).toContainText('Project saved.');
       await expect(page.getByLabel('Custom identity')).toBeChecked();
-      await expect(typesense).toBeChecked();
     } finally {
       await deleteProjectViaUi(page, name);
     }
@@ -391,11 +394,12 @@ test.describe('phone layout of the project pages (390 px) @phone', () => {
     const pages: Array<[string, string]> = [
       ['/admin/projects', 'the list'],
       ['/admin/projects/new', 'the create form'],
-      [`/admin/projects/${NAME}`, 'the edit form'],
+      [`/admin/projects/${NAME}`, 'the overview'],
+      [`/admin/projects/${NAME}/source`, 'the edit form'],
       [`/admin/projects/${NAME}/templates`, 'the template list'],
       [`/admin/projects/${NAME}/templates/new`, 'the new template form'],
       [`/admin/projects/${NAME}/templates/${TEMPLATE}`, 'the template form'],
-      [`/admin/projects/${NAME}/ports`, 'the ports tab'],
+      [`/admin/projects/${NAME}/network`, 'the ports tab'],
     ];
     for (const [path, where] of pages) {
       await page.goto(path);
@@ -415,27 +419,33 @@ test.describe('phone layout of the project pages (390 px) @phone', () => {
   });
 
   test('primary buttons are 44 px tall and the section tabs switch pages', async ({ page }) => {
-    await page.goto(`/admin/projects/${NAME}`);
+    await page.goto(`/admin/projects/${NAME}/source`);
     await expectTall(page.getByRole('button', { name: 'Save', exact: true }));
+    await page.goto(`/admin/projects/${NAME}/transfer`);
     await expectTall(page.getByRole('button', { name: 'Delete this project' }));
-    await expect(page.getByRole('combobox', { name: 'Section' })).toHaveCount(0);
+    await page.goto(`/admin/projects/${NAME}/source`);
+    // Below the sm breakpoint the ten tabs are one labelled select, not a strip of links.
     const tabs = page.getByRole('navigation', { name: 'Project sections' });
-    for (const section of ['General', 'Templates', 'Ports']) {
-      await expectTall(tabs.getByRole('link', { name: section }));
-    }
-    await expectNoOverflow(page, 'the section tabs');
-    const strip = (await tabs.boundingBox())!;
-    expect(strip.x + strip.width).toBeLessThanOrEqual(page.viewportSize()!.width + 0.5);
+    const select = tabs.getByRole('combobox', { name: 'Project section' });
+    await expect(select).toBeVisible();
+    await expect(tabs.getByRole('link')).toHaveCount(0);
+    await expectTall(select);
+    await expect(select.locator('option')).toHaveCount(10);
+    await expect(select).toHaveValue(new RegExp(`/admin/projects/${NAME}/source$`));
+    await expectNoOverflow(page, 'the section select');
 
     await openSection(page, 'Templates');
     await expect(page).toHaveURL(new RegExp(`/admin/projects/${NAME}/templates$`));
     await expectTall(page.getByRole('link', { name: 'New template' }));
-    await expect(tabs.getByRole('link', { name: 'Templates' })).toHaveAttribute('aria-current', 'page');
+    await expect(select).toHaveValue(new RegExp(`/admin/projects/${NAME}/templates$`));
 
-    await openSection(page, 'Ports');
-    await expect(page).toHaveURL(new RegExp(`/admin/projects/${NAME}/ports$`));
+    await openSection(page, 'Network');
+    await expect(page).toHaveURL(new RegExp(`/admin/projects/${NAME}/network$`));
 
-    await openSection(page, 'General');
+    await openSection(page, 'Source');
+    await expect(page).toHaveURL(new RegExp(`/admin/projects/${NAME}/source$`));
+
+    await openSection(page, 'Overview');
     await expect(page).toHaveURL(new RegExp(`/admin/projects/${NAME}$`));
   });
 
@@ -461,7 +471,7 @@ test.describe('phone layout of the project pages (390 px) @phone', () => {
 
   test('the delete dialog fits, its buttons are 44 px, Cancel closes it', async ({ page }) => {
     await page.goto(`/admin/projects/${NAME}`);
-    const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+    const dialog = await openDeleteDialog(page);
     await expect(dialog).toContainText(`Delete ${NAME}?`);
     await expectNoOverflow(page, 'the delete dialog');
     const box = (await dialog.boundingBox())!;

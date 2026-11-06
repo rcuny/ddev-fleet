@@ -61,11 +61,11 @@ final class WebhookPagesTest extends AdminTestCase
         $secret = (string) $crawler->filter('[data-testid=webhook-secret-value]')->attr('value');
         self::assertMatchesRegularExpression('/^[0-9a-f]{64}$/', $secret);
 
-        foreach (['/admin/webhooks', '/admin/projects/blog/webhooks'] as $path) {
+        foreach (['/admin/webhooks', '/admin/projects/blog/integrations'] as $path) {
             $this->open($path);
             self::assertStringNotContainsString($secret, $this->body(), $path);
         }
-        $this->open('/admin/projects/blog/webhooks');
+        $this->open('/admin/projects/blog/integrations');
         self::assertSelectorExists('[data-testid=webhook-rotate]');
         self::assertSelectorNotExists('[data-source=jira] [data-testid=webhook-create]');
 
@@ -100,7 +100,7 @@ final class WebhookPagesTest extends AdminTestCase
 
         $this->post('/admin/projects/blog/webhooks/jira/secret', []);
 
-        self::assertResponseRedirects(self::BASE.'/admin/projects/blog/webhooks');
+        self::assertResponseRedirects(self::BASE.'/admin/projects/blog/integrations');
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString('already has a webhook secret for Jira', $crawler->filter('[data-testid=flashes]')->text());
         self::assertCount(0, $crawler->filter('[data-testid=webhook-secret-once]'));
@@ -120,7 +120,7 @@ final class WebhookPagesTest extends AdminTestCase
 
     public function testAnUnknownProjectIs404(): void
     {
-        $this->open('/admin/projects/nope/webhooks');
+        $this->open('/admin/projects/nope/integrations');
         self::assertResponseStatusCodeSame(404);
         $this->post('/admin/projects/nope/webhooks/jira/secret', []);
         self::assertResponseStatusCodeSame(404);
@@ -130,7 +130,7 @@ final class WebhookPagesTest extends AdminTestCase
     {
         foreach (['member' => 403, 'none' => 401] as $role => $code) {
             $this->as($role);
-            foreach (['/admin/webhooks', '/admin/projects/blog/webhooks'] as $path) {
+            foreach (['/admin/webhooks', '/admin/projects/blog/integrations'] as $path) {
                 $this->open($path);
                 self::assertResponseStatusCodeSame($code, $role.' '.$path);
             }
@@ -153,7 +153,7 @@ final class WebhookPagesTest extends AdminTestCase
             $this->client->request('POST', self::BASE.'/hooks/jira/blog', server: ['HTTPS' => 'on', 'REMOTE_ADDR' => $this->clientIp, 'HTTP_X_HUB_SIGNATURE' => Signature::sign($body, $secret)], content: $body);
         }
 
-        $crawler = $this->open('/admin/projects/blog/webhooks');
+        $crawler = $this->open('/admin/projects/blog/integrations');
         self::assertCount(2, $crawler->filter('[data-testid=delivery-row]'));
         self::assertStringContainsString('deploy fle-9 (template jira-work', $crawler->filter('[data-result=accepted] [data-testid=delivery-decision]')->text());
         self::assertCount(1, $crawler->filter('[data-testid=webhook-rules] li'));
@@ -161,7 +161,7 @@ final class WebhookPagesTest extends AdminTestCase
         self::assertStringContainsString('deploy queued: blog--fle-9', $outcome);
         self::assertMatchesRegularExpression('/job #\d+/', $crawler->filter('[data-result=accepted] [data-testid=delivery-job]')->text());
 
-        $crawler = $this->open('/admin/projects/blog/webhooks?hide-ignored=1');
+        $crawler = $this->open('/admin/projects/blog/integrations?hide-ignored=1');
         self::assertCount(1, $crawler->filter('[data-testid=delivery-row][data-result=accepted]'));
 
         $crawler = $this->open('/admin/webhooks');
@@ -248,7 +248,7 @@ final class WebhookPagesTest extends AdminTestCase
     {
         $this->logWithEveryOutcome();
 
-        $crawler = $this->open('/admin/projects/blog/webhooks');
+        $crawler = $this->open('/admin/projects/blog/integrations');
         $count = static fn (string $result): int => $crawler->filter('[data-testid=delivery-row][data-result='.$result.']')->count();
         self::assertSame([1, 2, 5, 5], [$count('accepted'), $count('duplicate'), $count('ignored'), $count('failed')]);
         self::assertCount(13, $crawler->filter('[data-testid=delivery-row]'));
@@ -273,28 +273,28 @@ final class WebhookPagesTest extends AdminTestCase
 
         // Filters: each outcome, a source, both, and the way back; the select keeps the choice.
         foreach (['accepted' => 1, 'duplicate' => 2, 'ignored' => 5, 'failed' => 5] as $result => $expected) {
-            $page = $this->open('/admin/projects/blog/webhooks?result='.$result);
+            $page = $this->open('/admin/projects/blog/integrations?result='.$result);
             self::assertCount($expected, $page->filter('[data-testid=delivery-row]'), $result);
             self::assertCount($expected, $page->filter('[data-testid=delivery-row][data-result='.$result.']'), $result);
             self::assertSame($result, $page->filter('select[name=result] option[selected]')->attr('value'));
         }
-        $page = $this->open('/admin/projects/blog/webhooks?source=bitbucket');
+        $page = $this->open('/admin/projects/blog/integrations?source=bitbucket');
         self::assertCount(4, $page->filter('[data-testid=delivery-row]'));
         self::assertSame('bitbucket', $page->filter('select[name=source] option[selected]')->attr('value'));
-        $page = $this->open('/admin/projects/blog/webhooks?source=bitbucket&result=accepted');
+        $page = $this->open('/admin/projects/blog/integrations?source=bitbucket&result=accepted');
         self::assertCount(0, $page->filter('[data-testid=delivery-row]'));
         self::assertCount(1, $page->filter('[data-testid=deliveries-empty]'));
         self::assertCount(1, $page->filter('[data-testid=delivery-filter-clear]'));
-        self::assertCount(0, $this->open('/admin/projects/blog/webhooks')->filter('[data-testid=delivery-filter-clear]'));
-        self::assertCount(13, $this->open('/admin/projects/blog/webhooks?source=gitlab&result=bogus')->filter('[data-testid=delivery-row]'), 'unknown values are no filter');
+        self::assertCount(0, $this->open('/admin/projects/blog/integrations')->filter('[data-testid=delivery-filter-clear]'));
+        self::assertCount(13, $this->open('/admin/projects/blog/integrations?source=gitlab&result=bogus')->filter('[data-testid=delivery-row]'), 'unknown values are no filter');
 
         // Hide ignored keeps the other outcomes, combines with a filter and survives "Clear filters".
-        $page = $this->open('/admin/projects/blog/webhooks?hide-ignored=1');
+        $page = $this->open('/admin/projects/blog/integrations?hide-ignored=1');
         self::assertCount(0, $page->filter('[data-result=ignored]'));
         self::assertCount(8, $page->filter('[data-testid=delivery-row]'));
         self::assertSame('Show ignored', trim($page->filter('[data-testid=webhook-filter]')->text()));
-        self::assertSame('Hide ignored', trim($this->open('/admin/projects/blog/webhooks')->filter('[data-testid=webhook-filter]')->text()));
-        $page = $this->open('/admin/projects/blog/webhooks?hide-ignored=1&source=jira');
+        self::assertSame('Hide ignored', trim($this->open('/admin/projects/blog/integrations')->filter('[data-testid=webhook-filter]')->text()));
+        $page = $this->open('/admin/projects/blog/integrations?hide-ignored=1&source=jira');
         self::assertCount(6, $page->filter('[data-testid=delivery-row]'));
         self::assertStringContainsString('hide-ignored=1', (string) $page->filter('[data-testid=delivery-filter-clear]')->attr('href'));
 
@@ -314,11 +314,11 @@ final class WebhookPagesTest extends AdminTestCase
         }
         $subjects = static fn ($crawler): array => array_map(static fn (string $t): string => (string) (preg_match('/PG-\d+/', $t, $m) ? $m[0] : ''), $crawler->filter('[data-testid=delivery-row]')->each(static fn ($n): string => $n->text()));
 
-        $first = $this->open('/admin/projects/blog/webhooks');
+        $first = $this->open('/admin/projects/blog/integrations');
         self::assertCount(50, $first->filter('[data-testid=delivery-row]'));
         self::assertCount(0, $first->filter('nav[aria-label="Delivery pages"] a:contains("Newer")'));
         self::assertCount(1, $first->filter('nav[aria-label="Delivery pages"] a:contains("Older")'));
-        $second = $this->open('/admin/projects/blog/webhooks?page=2');
+        $second = $this->open('/admin/projects/blog/integrations?page=2');
         self::assertCount(3, $second->filter('[data-testid=delivery-row]'));
         self::assertCount(1, $second->filter('nav[aria-label="Delivery pages"] a:contains("Newer")'));
         self::assertCount(0, $second->filter('nav[aria-label="Delivery pages"] a:contains("Older")'));
@@ -327,12 +327,12 @@ final class WebhookPagesTest extends AdminTestCase
         self::assertSame('PG-52', $seen[0], 'newest first');
 
         // The pager keeps a filter; a page out of range is the first page, or an empty one.
-        $filtered = $this->open('/admin/projects/blog/webhooks?result=ignored&page=2');
+        $filtered = $this->open('/admin/projects/blog/integrations?result=ignored&page=2');
         self::assertCount(3, $filtered->filter('[data-testid=delivery-row]'));
         self::assertStringContainsString('result=ignored', (string) $filtered->filter('nav[aria-label="Delivery pages"] a:contains("Newer")')->attr('href'));
-        self::assertCount(50, $this->open('/admin/projects/blog/webhooks?page=0')->filter('[data-testid=delivery-row]'));
-        self::assertCount(50, $this->open('/admin/projects/blog/webhooks?page=-4')->filter('[data-testid=delivery-row]'));
-        $beyond = $this->open('/admin/projects/blog/webhooks?page=99');
+        self::assertCount(50, $this->open('/admin/projects/blog/integrations?page=0')->filter('[data-testid=delivery-row]'));
+        self::assertCount(50, $this->open('/admin/projects/blog/integrations?page=-4')->filter('[data-testid=delivery-row]'));
+        $beyond = $this->open('/admin/projects/blog/integrations?page=99');
         self::assertCount(0, $beyond->filter('[data-testid=delivery-row]'));
         self::assertCount(1, $beyond->filter('[data-testid=deliveries-empty]'));
         self::assertCount(1, $beyond->filter('nav[aria-label="Delivery pages"] a:contains("Newer")'));
@@ -344,11 +344,11 @@ final class WebhookPagesTest extends AdminTestCase
 
     public function testTheEmptyPagesShowNothingConfiguredAndTheSecretAddressIsNotReadable(): void
     {
-        $crawler = $this->open('/admin/projects/blog/webhooks');
+        $crawler = $this->open('/admin/projects/blog/integrations');
         self::assertCount(2, $crawler->filter('[data-testid=webhook-endpoint]'));
         self::assertSame('No delivery has arrived yet.', trim($crawler->filter('[data-testid=deliveries-empty]')->text()));
         self::assertCount(0, $crawler->filter('nav[aria-label="Delivery pages"]'));
-        self::assertSame('Webhooks', trim($crawler->filter('nav[aria-label="Project sections"] a[aria-current=page]')->text()));
+        self::assertSame('Integrations', trim($crawler->filter('nav[aria-label="Project sections"] a[aria-current=page]')->text()));
         self::assertStringContainsString('Webhooks · blog', $crawler->filter('title')->text());
         foreach (['jira', 'bitbucket'] as $source) {
             $card = $crawler->filter('[data-source='.$source.']');
@@ -374,13 +374,13 @@ final class WebhookPagesTest extends AdminTestCase
         self::assertCount(1, $once->filter('[data-testid=webhook-secret-value][readonly]'));
         self::assertStringEndsWith('/hooks/bitbucket/blog', (string) $once->filter('#webhook-secret-url')->attr('value'));
 
-        $card = $this->open('/admin/projects/blog/webhooks')->filter('[data-source=bitbucket]');
+        $card = $this->open('/admin/projects/blog/integrations')->filter('[data-source=bitbucket]');
         self::assertSame('Secret set', trim($card->filter('[data-testid=webhook-secret-state]')->text()));
         self::assertMatchesRegularExpression('/Secret created or rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\. It cannot be shown again\./', $card->filter('[data-testid=webhook-rotated]')->text());
         self::assertStringContainsString('No rules yet', $card->filter('[data-testid=webhook-no-rules]')->text());
         self::assertCount(0, $card->filter('[data-testid=webhook-create]'));
-        self::assertStringContainsString('The old secret stops working at once.', $card->filter('[data-testid=webhook-rotate-details]')->text());
-        self::assertSame('No secret', trim($this->open('/admin/projects/blog/webhooks')->filter('[data-source=jira] [data-testid=webhook-secret-state]')->text()));
+        self::assertStringContainsString('The old secret stops working at once.', $card->filter('[data-slot=dialog-content]')->last()->text());
+        self::assertSame('No secret', trim($this->open('/admin/projects/blog/integrations')->filter('[data-source=jira] [data-testid=webhook-secret-state]')->text()));
     }
 
     public function testASecondCreateKeepsTheFirstSecretWorking(): void
@@ -426,7 +426,7 @@ final class WebhookPagesTest extends AdminTestCase
         $this->client->request('POST', self::BASE.$path, $parameters, [], $this->browserServer());
 
         self::assertResponseStatusCodeSame(403);
-        $card = $this->open('/admin/projects/blog/webhooks')->filter('[data-source=bitbucket]');
+        $card = $this->open('/admin/projects/blog/integrations')->filter('[data-source=bitbucket]');
         self::assertSame('No secret', trim($card->filter('[data-testid=webhook-secret-state]')->text()));
     }
 
@@ -468,7 +468,7 @@ final class WebhookPagesTest extends AdminTestCase
     public function testThePipelineTokenFormIsHiddenRequiredAndBoundedAndTheLongestTokenIsKept(): void
     {
         $this->bitbucketSecret();
-        $crawler = $this->open('/admin/projects/blog/webhooks');
+        $crawler = $this->open('/admin/projects/blog/integrations');
         $input = $crawler->filter('[data-source=bitbucket] [data-testid=webhook-token-input]');
         self::assertSame('password', $input->attr('type'));
         self::assertSame('2048', $input->attr('maxlength'));
@@ -500,7 +500,7 @@ final class WebhookPagesTest extends AdminTestCase
         $this->service()->addRule('blog', WebhookSource::Bitbucket, 'run-pipeline', ['on_event' => 'pullrequest:approved', 'repo' => 'acme/blog'], ['pattern' => 'renovate-merge', 'ref' => 'develop']);
         $this->service()->addRule('blog', WebhookSource::Bitbucket, 'deploy', ['on_event' => 'repo:push', 'repo' => 'acme/blog', 'branch' => 'feature/*-wip'], ['template' => 'jira-work', 'label_prefix' => 'fb', 'strip_suffix' => '-wip']);
 
-        foreach (['/admin/projects/blog/webhooks', '/admin/webhooks'] as $path) {
+        foreach (['/admin/projects/blog/integrations', '/admin/webhooks'] as $path) {
             $crawler = $this->open($path);
             $jira = $crawler->filter('[data-project=blog][data-source=jira] [data-testid=webhook-rules] li');
             self::assertCount(2, $jira, $path);
@@ -518,7 +518,7 @@ final class WebhookPagesTest extends AdminTestCase
         }
 
         $this->service()->removeRule('blog', (int) $dispatched->id());
-        $jira = $this->open('/admin/projects/blog/webhooks')->filter('[data-source=jira] [data-testid=webhook-rules] li');
+        $jira = $this->open('/admin/projects/blog/integrations')->filter('[data-source=jira] [data-testid=webhook-rules] li');
         self::assertCount(1, $jira);
         self::assertStringNotContainsString('Dispatched', $jira->text());
     }
@@ -527,7 +527,14 @@ final class WebhookPagesTest extends AdminTestCase
     {
         $crawler = $this->open('/admin/projects/blog');
 
-        self::assertSame('Webhooks', trim($crawler->filter('nav[aria-label="Project sections"] a[href$="/webhooks"]')->text()));
+        self::assertSame('Integrations', trim($crawler->filter('nav[aria-label="Project sections"] [data-testid=project-sections-strip] a[href$="/integrations"]')->text()));
+    }
+
+    public function testTheOldWebhooksAddressRedirectsKeepingTheQuery(): void
+    {
+        $this->open('/admin/projects/blog/webhooks?source=bitbucket&result=accepted');
+
+        self::assertResponseRedirects('/admin/projects/blog/integrations?source=bitbucket&result=accepted', 301);
     }
 
     private function bitbucketSecret(): void
@@ -549,12 +556,12 @@ final class WebhookPagesTest extends AdminTestCase
     public function testTheTokenFormSetsReplacesAndRemovesTheTokenAndNeverShowsIt(): void
     {
         $this->bitbucketSecret();
-        $crawler = $this->open('/admin/projects/blog/webhooks');
+        $crawler = $this->open('/admin/projects/blog/integrations');
         self::assertCount(1, $crawler->filter('[data-testid=webhook-token-input]'), 'only the Bitbucket card has the form');
         self::assertStringContainsString('No pipeline token', $crawler->filter('[data-testid=webhook-token-state]')->text());
 
         $this->post('/admin/projects/blog/webhooks/bitbucket/token', ['token' => 'ATCTT-page-token-1']);
-        self::assertResponseRedirects('/admin/projects/blog/webhooks');
+        self::assertResponseRedirects('/admin/projects/blog/integrations');
         self::assertTrue($this->endpoint()->hasToken());
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString('Pipeline token set', $crawler->filter('[data-testid=webhook-token-state]')->text());
@@ -628,8 +635,8 @@ final class WebhookPagesTest extends AdminTestCase
         self::assertCount(2, $this->open('/admin/webhooks')->filter('[data-testid=delivery-row]'));
         self::assertCount(1, $this->open('/admin/webhooks?result=ignored')->filter('[data-testid=delivery-row][data-result=ignored]'));
         self::assertCount(0, $this->open('/admin/webhooks?source=bitbucket')->filter('[data-testid=delivery-row]'));
-        self::assertCount(2, $this->open('/admin/projects/blog/webhooks?source=jira')->filter('[data-testid=delivery-row]'));
-        $crawler = $this->open('/admin/projects/blog/webhooks?result=accepted');
+        self::assertCount(2, $this->open('/admin/projects/blog/integrations?source=jira')->filter('[data-testid=delivery-row]'));
+        $crawler = $this->open('/admin/projects/blog/integrations?result=accepted');
         self::assertCount(1, $crawler->filter('[data-testid=delivery-row]'));
         self::assertSame('accepted', $crawler->filter('select[name=result] option[selected]')->attr('value'));
         self::assertCount(1, $crawler->filter('[data-testid=delivery-filter-clear]'));

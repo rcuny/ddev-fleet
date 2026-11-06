@@ -49,13 +49,30 @@ Everything here is administrator-only. A member of a project cannot list, set, r
 - **Secrets** (`/admin/secrets`): the fleet-wide secrets, a form to add or replace one, and the host secrets
   (names only). **Reveal**, **Replace** (opens the form with the name filled in) and **Delete** (with a
   confirmation) are on each row.
-- **Secrets tab** of a project: the same for that project, plus a check that each secret is used.
+- **Keys & secrets tab** of a project (restricted, shown with a lock): the same for that project, plus a check that each
+  secret is used. The value field is masked (`type=password`); a multi-line value goes into the separate *Multi-line
+  value* textarea, used only when the masked field is empty. A value is never echoed back, not even after an error. The
+  tab also holds the **Git SSH** section (*git over SSH in the container*): turning it on needs the confirmation dialog
+  and the 5-minute re-auth window, like a reveal, because every process in the instance container can then use the
+  push key; the change is audited as `project.container-ssh` (subject `<project>/on` or `<project>/off`, never a key).
 - **Audit log** (`/admin/audit`, linked from the Secrets page): the latest 200 entries, newest first, optionally
   of one action. Every put, delete and reveal of a secret is an entry with who, when, the action
   (`secret.put`, `secret.delete`, `secret.reveal`, `secret.reveal-refused`) and the subject (`fleet/NAME` or
   `project:<project>/NAME`). Storing or removing the notification SMTP password on the host settings page is recorded the same way (subject
   `fleet/smtp_password`), and so is a Claude token rotation (`claude.token.rotate`). The log never contains a value. A field longer than its column is cut on a character
   boundary and ends in `…`, so a cut shows.
+- **Re-auth window.** Reveal needs a recent password check. With the window closed, Reveal sends you to
+  `/admin/reauth` (the password of the account you are signed in with, CSRF, at most 5 *failed* attempts per 15 minutes per user and client address; a right password never uses an attempt)
+  and back to the list; the window then stays open for 5 minutes (`ReauthWindow::SECONDS`), only for that user and
+  that session. Audit actions: `reauth.success`, `reauth.failure` (a wrong password or `throttled`) and
+  `reauth.required` (the stopped action and its subject). They never carry a password or a value.
+  The window is one-shot for the destructive actions: a sealed export, turning on Git over SSH in the container and
+  deleting a project close it, so the next gated action asks for the password again. Revealing keeps the window open
+  for its 5 minutes.
+- **Signed in through Authelia only.** The re-auth page checks the password against the fleet user store. An Authelia
+  user who has no account there (for example an identity that exists only in Authelia's own users file) can never
+  re-authenticate: Reveal, the sealed export and Git over SSH stay refused for them. Give them a fleet account
+  (`fleet user:create`) or let an administrator who has one do the action.
 - **Reveal** is a POST with a CSRF token. The response shows the value once in a dialog; the response is never
   cached (`Cache-Control: no-store, private`), the reveal is recorded before the value is handed out (if the audit
   entry cannot be written, nothing is shown) and reloading the page shows nothing. A value that cannot be opened (the
@@ -70,7 +87,7 @@ All pages work at 390 px: the rows stack, the buttons are 44 px high.
 ### The "No placeholder" warning
 
 In 0.x a secret that no asset file mentioned was silently inert: it was stored, never delivered, and nobody noticed.
-The Secrets tab scans the text files of the project's assets directory (`assets/<project>/` under the fleet home)
+The Keys & secrets tab scans the text files of the project's assets directory (`assets/<project>/` under the fleet home)
 for `[[token]]` placeholders and flags every project secret whose placeholder no file mentions:
 
 > No file in this project's assets mentions `[[lonely-key]]`, so instances never receive this value.
@@ -167,6 +184,6 @@ Refused values are described by field (`<name>`, `<value>`) and never echoed.
 |---|---|
 | `$FLEET_HOME/.secrets` and `secrets/<project>.env` files edited by hand | Encrypted rows, set in the browser or with `fleet secret:set` |
 | A quoted value had one pair of quotes stripped when read | A quoted value is refused with an explanation; values are inserted verbatim |
-| A secret without a placeholder was silently inert | Flagged on the project's Secrets tab and in `fleet secret:list --project` |
+| A secret without a placeholder was silently inert | Flagged on the project's Keys & secrets tab and in `fleet secret:list --project` |
 | Names such as `jira_claude_token` | `JIRA_CLAUDE_TOKEN`; the placeholder is unchanged (`[[jira-claude-token]]`) |
 | No record of who read a secret | Every reveal is in the audit log |

@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createProjectViaUi, deleteProjectViaUi, navigate, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
-import { placeholderOf, removeSecret, revealSecret, saveSecret, secretRow, test, uniqueSecret, uniqueValue } from './support/secrets';
+import { fillSecretValue, openReauthWindow, placeholderOf, removeSecret, revealSecret, saveSecret, secretRow, test, uniqueSecret, uniqueValue } from './support/secrets';
 import { collectBrowserErrors, hasHorizontalOverflow, unexpectedErrors } from './support/shell';
 
 // Secrets, what needs a browser: the 422 answer with its a11y wiring, the normalised value in the reveal dialog, the delete dialog
@@ -35,7 +35,7 @@ async function closeReveal(page: Page): Promise<void> {
 async function saveAndWait(page: Page, name: string, value: string): Promise<number> {
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').evaluate((input, text) => ((input as HTMLInputElement).value = text), name);
-  await form.getByLabel('Value').fill(value);
+  await fillSecretValue(form, value);
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
     // requestSubmit, not a click: on a CPU-starved box the page can shift between Playwright's hit-target check and the
@@ -55,9 +55,9 @@ test.describe('secrets: the form', () => {
     await expect(page.getByTestId('error-name')).toHaveText('Enter a name.');
     await expect(page.getByTestId('error-value')).toHaveText('Enter a value.');
     await expect(form.getByLabel('Name')).toHaveAttribute('aria-invalid', 'true');
-    await expect(form.getByLabel('Value')).toHaveAttribute('aria-invalid', 'true');
+    await expect(form.getByLabel('Value', { exact: true })).toHaveAttribute('aria-invalid', 'true');
     await expect(form.getByLabel('Name')).toHaveAttribute('aria-describedby', 'secret-name-error');
-    await expect(form.getByLabel('Value')).toHaveAttribute('aria-describedby', 'secret-value-error');
+    await expect(form.getByLabel('Value', { exact: true })).toHaveAttribute('aria-describedby', 'secret-value-error');
     await expectNoOverflow(page, 'the form with two errors');
     expect(unexpectedErrors(errors)).toEqual([]);
   });
@@ -137,6 +137,7 @@ test.describe('secrets: reveal', () => {
 
     try {
       await saveSecret(page, name, value);
+      await openReauthWindow(page);
       const [response] = await Promise.all([
         page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/secrets/${name}/reveal`)),
         secretRow(page, name).getByTestId('secret-reveal').click(),
@@ -250,7 +251,7 @@ test.describe('secrets: in a project', () => {
       // Replacing a value does not change the verdict; deleting the unused secret removes the warning.
       await saveSecret(page, unused, uniqueValue());
       await expect(page.getByTestId('secret-no-placeholder')).toHaveCount(1);
-      await removeSecret(page, `/admin/projects/${project}/secrets`, unused);
+      await removeSecret(page, `/admin/projects/${project}/keys`, unused);
       await expect(page.getByTestId('secret-no-placeholder')).toHaveCount(0);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -298,7 +299,7 @@ test.describe('secrets: phone @phone', () => {
       await openSection(page, 'Secrets');
       await expectTall(page.getByTestId('secret-save'));
       await expectTall(page.getByLabel('Name'));
-      await expectTall(page.getByLabel('Value'), 80);
+      await expectTall(page.getByLabel('Value', { exact: true }));
 
       expect(await saveAndWait(page, 'x'.repeat(200), uniqueValue())).toBe(422);
       await expectNoOverflow(page, 'a long invalid name echoed in the form');

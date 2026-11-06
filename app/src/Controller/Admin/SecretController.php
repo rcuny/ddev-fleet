@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Controller\Admin;
 
 use App\Domain\Project\Project;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Projects\NotFound;
+use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
+use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Secrets\RevealThrottled;
 use App\Fleet\Secrets\SecretConflict;
@@ -15,6 +18,7 @@ use App\Fleet\Secrets\SecretOpenFailed;
 use App\Fleet\Secrets\SecretService;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
+use App\Security\Reauth\ReauthGuard;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -36,6 +40,9 @@ final class SecretController extends AbstractController
         private readonly SecretService $secrets,
         private readonly ProjectService $projects,
         private readonly CurrentActor $actor,
+        private readonly ReauthGuard $reauth,
+        private readonly TemplateService $templates,
+        private readonly AuditLog $audit,
     ) {
     }
 
@@ -71,12 +78,69 @@ final class SecretController extends AbstractController
         return $this->reveal($request, null, $secret);
     }
 
+    /**
+     * The old Secrets address: it is the Keys & secrets tab now (the query string, e.g. the Replace link, is kept).
+     */
     #[Route('/admin/projects/{name}/secrets', name: 'project_secrets', requirements: ['name' => self::PROJECT], methods: ['GET'])]
+    public function legacyIndex(Request $request, string $name): Response
+    {
+        return $this->redirect($this->generateUrl('project_keys', ['name' => $name]).self::queryOf($request), Response::HTTP_MOVED_PERMANENTLY);
+    }
+
+    #[Route('/admin/projects/{name}/keys', name: 'project_keys', requirements: ['name' => self::PROJECT], methods: ['GET'])]
     public function projectIndex(Request $request, string $name): Response
     {
         $project = $this->load($name);
 
         return $this->page($project, null, ['name' => self::queryName($request)]);
+    }
+
+    /**
+     * Turns the per-instance ssh-agent with the push key on or off. Turning it ON is as sensitive as revealing a secret:
+     * the server needs `confirm=1` (the dialog's button sends it; a crafted request without it changes nothing) and a recent
+     * re-auth. Turning it off needs neither. The change is audited, a repeat of the stored value is not.
+     */
+    #[Route('/admin/projects/{name}/keys/ssh', name: 'project_keys_ssh', requirements: ['name' => self::PROJECT], methods: ['POST'])]
+    public function containerSsh(Request $request, string $name): Response
+    {
+        $project = $this->load($name);
+        $this->requireCsrf($request);
+        $enable = '1' === $request->request->get('container_ssh');
+
+        if ($enable === $project->containerSsh()) {
+            $this->addFlash('success', 'No change: Git over SSH in the container was already '.($enable ? 'on' : 'off').'.');
+
+            return $this->back($project);
+        }
+
+        if ($enable) {
+            if ('1' !== $request->request->get('confirm')) {
+                $this->addFlash('warning', 'Not changed: turning on Git over SSH needs the confirmation.');
+
+                return $this->back($project);
+            }
+            if (!$this->reauth->requireRecentAuth()) {
+                return $this->reauth->challenge('container-ssh', $name, '/admin/projects/'.$name.'/keys');
+            }
+        }
+
+        try {
+            $this->projects->update($name, ProjectInput::fromProject($project)->with(['containerSsh' => $enable]));
+        } catch (ValidationFailed $failed) {
+            $this->addFlash('warning', 'Not changed: '.implode(' ', array_values($failed->errors)));
+
+            return $this->back($project);
+        } catch (NotFound) {
+            throw new NotFoundHttpException();
+        }
+
+        if ($enable) {
+            $this->reauth->close();
+        }
+        $this->audit->record($this->actor->name(), AuditLog::PROJECT_CONTAINER_SSH, $name.'/'.($enable ? 'on' : 'off'));
+        $this->addFlash('success', 'Git over SSH in the container is now '.($enable ? 'on' : 'off').'.');
+
+        return $this->back($project);
     }
 
     #[Route('/admin/projects/{name}/secrets', name: 'project_secret_put', requirements: ['name' => self::PROJECT], methods: ['POST'])]
@@ -107,6 +171,11 @@ final class SecretController extends AbstractController
     {
         $this->requireCsrf($request);
         $submitted = $request->request->all();
+        // A multi-line value comes from the textarea, a single line from the masked input.
+        $multiline = $submitted['value_multiline'] ?? null;
+        if (('' === ($submitted['value'] ?? '')) && \is_string($multiline)) {
+            $submitted['value'] = $multiline;
+        }
         $name = $submitted['name'] ?? null;
         $shown = \is_string($name) ? $name : '';
 
@@ -146,6 +215,10 @@ final class SecretController extends AbstractController
     private function reveal(Request $request, ?Project $project, string $secret): Response
     {
         $this->requireCsrf($request);
+        if (!$this->reauth->requireRecentAuth()) {
+            // Before the throttle: a stopped attempt opens nothing and must not use up the reveal quota.
+            return $this->reauth->challenge('reveal', SecretService::subject($project?->name(), $secret), null === $project ? '/admin/secrets' : '/admin/projects/'.$project->name().'/keys');
+        }
 
         try {
             $value = $this->secrets->reveal($project?->name(), $secret, $this->actor->name());
@@ -186,6 +259,7 @@ final class SecretController extends AbstractController
             'form' => $form,
             'errors' => $errors,
             'retryAfter' => $retryAfter,
+            'templates' => null === $project ? [] : $this->templates->list($project->name()),
         ], new Response(status: $status));
         if (null !== $revealed) {
             // The one response that carries a value: no browser or proxy may keep it.
@@ -199,7 +273,7 @@ final class SecretController extends AbstractController
     {
         return null === $project
             ? $this->redirectToRoute('secrets', [], Response::HTTP_SEE_OTHER)
-            : $this->redirectToRoute('project_secrets', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
+            : $this->redirectToRoute('project_keys', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
     }
 
     private function requireCsrf(Request $request): void
@@ -227,5 +301,16 @@ final class SecretController extends AbstractController
         $name = $request->query->get('name');
 
         return \is_string($name) && null === SecretName::error($name) ? $name : '';
+    }
+
+    /**
+     * The request's query string with its leading `?`, or nothing. Built here because a query key may equal a route
+     * parameter (`name` is both the project and the secret to replace).
+     */
+    private static function queryOf(Request $request): string
+    {
+        $query = $request->server->get('QUERY_STRING');
+
+        return \is_string($query) && '' !== $query ? '?'.$query : '';
     }
 }

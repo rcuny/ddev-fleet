@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createProjectViaUi, deleteProjectViaUi, GIT_URL, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { openReauthWindow } from './support/secrets';
 import { hasHorizontalOverflow } from './support/shell';
 
 // Project export and import beyond import-export.spec.ts (which owns the happy round trip and the version refusal): what
@@ -92,16 +93,16 @@ async function expectGone(page: Page, name: string): Promise<void> {
 
 /** Saves a project secret on the project's Secrets tab and waits for the confirmation. */
 async function addProjectSecret(page: Page, project: string, name: string, value: string): Promise<void> {
-  await page.goto(`/admin/projects/${project}/secrets`);
+  await page.goto(`/admin/projects/${project}/keys`);
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await form.getByLabel('Value', { exact: true }).fill(value);
   await submitAndWait(page, form.getByTestId('secret-save'));
   await expect(page.getByTestId('flashes')).toContainText(`Secret "${name}" saved.`);
 }
 
 async function deleteProjectSecret(page: Page, project: string, name: string): Promise<void> {
-  await page.goto(`/admin/projects/${project}/secrets`);
+  await page.goto(`/admin/projects/${project}/keys`);
   const row = page.getByTestId('secret-row').filter({ has: page.getByTestId('secret-name').getByText(name, { exact: true }) });
   if ((await row.count()) === 0) {
     return;
@@ -127,6 +128,11 @@ async function exportText(page: Page, passphrase?: string): Promise<string> {
   if (undefined !== passphrase) {
     await page.getByTestId('export-passphrase').fill(passphrase);
   }
+  if (undefined !== passphrase) {
+    // A sealed export needs a recent password check (the re-auth window).
+    await openReauthWindow(page);
+    await page.getByTestId('export-passphrase').fill(passphrase);
+  }
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);
   return readFile(await download.path(), 'utf8');
 }
@@ -139,7 +145,7 @@ async function sealedExport(page: Page, project: string, secret: string, value: 
   try {
     await createProjectViaUi(page, project);
     await addProjectSecret(page, project, secret, value);
-    await page.goto(`/admin/projects/${project}`);
+    await page.goto(`/admin/projects/${project}/transfer`);
     return await exportText(page, passphrase);
   } finally {
     await deleteProjectSecret(page, project, secret);
@@ -155,7 +161,7 @@ test.describe('export form', () => {
     try {
       await createProjectViaUi(page, name);
       await addProjectSecret(page, name, secret, value);
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/transfer`);
 
       const field = page.getByLabel('Passphrase for the secrets (optional)');
       await expect(field).toHaveAttribute('type', 'password');
@@ -176,7 +182,7 @@ test.describe('export form', () => {
       expect(text).not.toContain(value);
       expect(document.project).toMatchObject({ name, git: GIT_URL, default_template: null, typesense: false });
       // The page is still the project page and the field was not refilled.
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
       await expect(field).toHaveValue('');
     } finally {
       await deleteProjectSecret(page, name, secret);
@@ -257,12 +263,13 @@ test.describe('import: preview, confirm, cancel', () => {
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" imported.`);
 
       // The state, read back from the pages.
+      await openSection(page, 'Source');
       await expect(page.getByLabel('Git URL')).toHaveValue(GIT_URL);
       await openSection(page, 'Templates');
       await expect(page.getByTestId('template-row')).toHaveCount(1);
       await expect(page.getByTestId('template-name')).toHaveText('main');
       await expect(page.getByTestId('template-post-deploy')).toHaveText('1');
-      await page.goto(`/admin/projects/${name}/webhooks`);
+      await page.goto(`/admin/projects/${name}/integrations`);
       await expect(page.getByTestId('webhook-rules')).toContainText('Dispatched');
       await expect(page.getByTestId('webhook-rules')).toContainText('main');
       await page.goto('/admin/schedules');
@@ -300,7 +307,7 @@ test.describe('import: sealed secrets', () => {
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" imported.`);
       await expect(page.getByTestId('flashes')).toContainText('The file holds sealed secrets and no passphrase was given: they were not imported.');
-      await page.goto(`/admin/projects/${name}/secrets`);
+      await page.goto(`/admin/projects/${name}/keys`);
       await expect(page.getByTestId('secret-row')).toHaveCount(0);
       expect(await page.content()).not.toContain(value);
 
@@ -316,7 +323,7 @@ test.describe('import: sealed secrets', () => {
       await confirm(page);
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" imported.`);
       await expect(page.getByTestId('flashes')).not.toContainText('no passphrase was given');
-      await page.goto(`/admin/projects/${name}/secrets`);
+      await page.goto(`/admin/projects/${name}/keys`);
       await expect(page.getByTestId('secret-row').filter({ hasText: secret })).toHaveCount(1);
       expect(await page.content()).not.toContain(value);
     } finally {

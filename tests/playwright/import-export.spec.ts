@@ -1,6 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile } from 'node:fs/promises';
-import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, openSection, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 
 // Moving a project between hosts in a real browser, at 1280 px (desktop project) and 390 px (phone project): the Export
@@ -17,7 +17,8 @@ test('export a project, delete it, import the file, preview and confirm @phone',
     await createProjectViaUi(page, name);
 
     // Export: a download named after the project, a versioned JSON document.
-    await expectNoOverflow(page, 'project page');
+    await openSection(page, 'Transfer & danger');
+    await expectNoOverflow(page, 'transfer page');
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);
     expect(download.suggestedFilename()).toBe(`${name}.fleet-project.json`);
     const file = await download.path();

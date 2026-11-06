@@ -12,6 +12,7 @@ use App\Fleet\Export\ProjectImporter;
 use App\Fleet\Projects\NotFound;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
+use App\Security\Reauth\ReauthGuard;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
@@ -34,6 +35,7 @@ final class ProjectTransferController extends AbstractController
         private readonly ProjectExporter $exporter,
         private readonly ProjectImporter $importer,
         private readonly CurrentActor $actor,
+        private readonly ReauthGuard $reauth,
     ) {
     }
 
@@ -44,6 +46,11 @@ final class ProjectTransferController extends AbstractController
         $this->requireCsrf($request);
 
         $passphrase = self::passphrase($request);
+        // A passphrase seals the secrets into the file: that export needs a recent password check. Without one the file
+        // carries no secrets and stays open.
+        if (null !== $passphrase && !$this->reauth->requireRecentAuth()) {
+            return $this->reauth->challenge('export', $name, '/admin/projects/'.$name.'/transfer');
+        }
         try {
             $text = $this->exporter->export($name, $passphrase, $this->actor->name());
         } catch (NotFound) {
@@ -51,9 +58,13 @@ final class ProjectTransferController extends AbstractController
         } catch (InvalidExport $e) {
             $this->addFlash('error', $e->getMessage());
 
-            return $this->redirectToRoute('project_edit', ['name' => $name], Response::HTTP_SEE_OTHER);
+            return $this->redirectToRoute('project_transfer', ['name' => $name], Response::HTTP_SEE_OTHER);
         }
 
+        if (null !== $passphrase) {
+            // One-shot: a sealed export uses up the window.
+            $this->reauth->close();
+        }
         $response = new Response($text);
         $response->headers->set('Content-Type', 'application/json; charset=utf-8');
         $response->headers->set('Content-Disposition', \sprintf('attachment; filename="%s.fleet-project.json"', $name));
@@ -112,7 +123,7 @@ final class ProjectTransferController extends AbstractController
             $this->addFlash('warning', $warning);
         }
 
-        return $this->redirectToRoute('project_edit', ['name' => $plan->project], Response::HTTP_SEE_OTHER);
+        return $this->redirectToRoute('project_overview', ['name' => $plan->project], Response::HTTP_SEE_OTHER);
     }
 
     /**

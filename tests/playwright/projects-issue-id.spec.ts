@@ -3,7 +3,7 @@ import { fillProject, readProject, submitSave } from './support/projectForm';
 import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
-// The issue id tester on a project's General tab (a live component): every state it can show, every error the pattern
+// The issue id tester on a project's Source tab (a live component): every state it can show, every error the pattern
 // rules return, the samples' limits, and that nothing typed there is saved.
 
 interface Tester {
@@ -167,7 +167,7 @@ test.describe('issue id tester', () => {
       await expect(t.box.getByTestId('issue-id-extracted')).toHaveText('OTHER-9');
 
       // Reload: the saved pattern is back and the tried one is gone.
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       expect(await readProject(page)).toMatchObject({ pattern: 'OAKS-[0-9]+' });
       await expect(tester(page).pattern).toHaveValue('OAKS-[0-9]+');
       await expect(tester(page).label).toHaveValue('');

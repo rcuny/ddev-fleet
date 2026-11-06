@@ -41,10 +41,11 @@ final class SecretPagesTest extends AdminTestCase
      */
     private function audit(): array
     {
-        return array_map(
+        // The re-auth entries (reauth.*) are not about secrets: tests of the secret trail leave them out.
+        return array_values(array_filter(array_map(
             static fn ($e): array => [$e->actor(), $e->action(), $e->subject()],
             new AuditEntryRepository($this->em())->latest(50),
-        );
+        ), static fn (array $e): bool => !str_starts_with($e[1], 'reauth.')));
     }
 
     private function addAssetFile(string $project, string $name, string $content): void
@@ -78,8 +79,8 @@ final class SecretPagesTest extends AdminTestCase
         self::assertCount(1, $crawler->filter('[data-testid=secrets-empty]'));
         self::assertCount(0, $crawler->filter('[data-testid=secret-row]'));
         self::assertCount(1, $crawler->filter('form[data-testid=secret-form] input[name=name]'));
-        self::assertCount(1, $crawler->filter('form[data-testid=secret-form] textarea[name=value]'));
-        self::assertSame('', trim($crawler->filter('textarea[name=value]')->text()));
+        self::assertCount(1, $crawler->filter('form[data-testid=secret-form] input[name=value]'));
+        self::assertSame('', trim($crawler->filter('input[name=value]')->text()));
         self::assertCount(0, $crawler->filter('[data-testid=host-secrets]'));
     }
 
@@ -119,7 +120,7 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame('/admin/secrets?name=API_KEY#set-secret', $replace);
         $crawler = $this->open('/admin/secrets?name=API_KEY');
         self::assertSame('API_KEY', $crawler->filter('input[name=name]')->attr('value'));
-        self::assertSame('', trim($crawler->filter('textarea[name=value]')->text()));
+        self::assertSame('', trim($crawler->filter('input[name=value]')->text()));
 
         self::assertSame(['secret.put', 'secret.put'], array_column($this->audit(), 1));
     }
@@ -225,9 +226,9 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame('Enter a name.', trim($crawler->filter('[data-testid=error-name]')->text()));
         self::assertSame('Enter a value.', trim($crawler->filter('[data-testid=error-value]')->text()));
         self::assertSame('true', $crawler->filter('input[name=name]')->attr('aria-invalid'));
-        self::assertSame('true', $crawler->filter('textarea[name=value]')->attr('aria-invalid'));
+        self::assertSame('true', $crawler->filter('input[name=value]')->attr('aria-invalid'));
         self::assertSame('secret-name-error', $crawler->filter('input[name=name]')->attr('aria-describedby'));
-        self::assertSame('secret-value-error', $crawler->filter('textarea[name=value]')->attr('aria-describedby'));
+        self::assertSame('secret-value-error', $crawler->filter('input[name=value]')->attr('aria-describedby'));
         self::assertCount(1, $crawler->filter('p#secret-name-error'));
         self::assertCount(1, $crawler->filter('p#secret-value-error'));
         self::assertSame([], $this->store()->listManaged('/admin/secrets' === $path ? null : 'blog'));
@@ -238,7 +239,7 @@ final class SecretPagesTest extends AdminTestCase
         $crawler = $this->open('/admin/secrets');
 
         self::assertNull($crawler->filter('input[name=name]')->attr('aria-invalid'));
-        self::assertNull($crawler->filter('textarea[name=value]')->attr('aria-invalid'));
+        self::assertNull($crawler->filter('input[name=value]')->attr('aria-invalid'));
         self::assertNull($crawler->filter('input[name=name]')->attr('aria-describedby'));
     }
 
@@ -265,7 +266,7 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame(self::NAME_FORMAT, trim($crawler->filter('[data-testid=error-name]')->text()));
         self::assertCount(0, $crawler->filter('[data-testid=error-value]'));
         self::assertSame($name, $crawler->filter('input[name=name]')->attr('value'));
-        self::assertSame('', trim($crawler->filter('textarea[name=value]')->text()));
+        self::assertSame('', trim($crawler->filter('input[name=value]')->text()));
         self::assertStringNotContainsString(self::VALUE, $this->body());
         self::assertSame([], $this->store()->listManaged(null));
     }
@@ -403,6 +404,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testAPageThatWentStaleAnswers404ToRevealAndDeleteAndASaveRecreatesTheSecret(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         $this->open('/admin/secrets');
         $this->post('/admin/secrets/API_KEY/delete', []);
@@ -423,9 +425,10 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheSameNameInTheFleetAndInAProjectAreTwoSecrets(): void
     {
+        $this->confirmPassword();
         $this->makeProject();
         $this->save('/admin/secrets', 'BOTH_KEY', 'fleet-value-1');
-        $this->save('/admin/projects/blog/secrets', 'BOTH_KEY', 'project-value-1');
+        $this->save('/admin/projects/blog/keys', 'BOTH_KEY', 'project-value-1');
 
         self::assertSame('fleet-value-1', $this->store()->getManaged(null, 'BOTH_KEY'));
         self::assertSame('project-value-1', $this->store()->getManaged('blog', 'BOTH_KEY'));
@@ -438,7 +441,7 @@ final class SecretPagesTest extends AdminTestCase
         sort($puts);
         self::assertSame(['fleet/BOTH_KEY', 'project:blog/BOTH_KEY'], $puts);
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
         self::assertSame('fleet-value-1', $this->store()->getManaged(null, 'BOTH_KEY'));
         self::assertSame('secret.delete', $this->audit()[0][1]);
         self::assertSame('project:blog/BOTH_KEY', $this->audit()[0][2]);
@@ -455,6 +458,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheRevealThrottleAnswersTheAlertKeepsThePageUsableAndDoesNotBlockSaving(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         for ($i = 0; $i < 10; ++$i) {
             $this->post('/admin/secrets/API_KEY/reveal', []);
@@ -481,6 +485,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheRevealThrottleIsPerUser(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         for ($i = 0; $i < 10; ++$i) {
             $this->post('/admin/secrets/API_KEY/reveal', []);
@@ -490,6 +495,7 @@ final class SecretPagesTest extends AdminTestCase
         $first = $this->audit()[0][0];
 
         $this->client->getCookieJar()->set(new Cookie('fleet_stand_in_user', 'second-admin', null, '/', 'localhost', true));
+        $this->confirmPassword('second-admin');
         $crawler = $this->post('/admin/secrets/API_KEY/reveal', []);
 
         self::assertResponseStatusCodeSame(200);
@@ -515,6 +521,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testRevealShowsTheValueOnceInADialogAndIsAudited(): void
     {
+        $this->confirmPassword();
         $this->save('/admin/secrets', 'API_KEY', self::VALUE);
         $crawler = $this->client->followRedirect();
         self::assertStringNotContainsString(self::VALUE, $this->body());
@@ -546,6 +553,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheEleventhRevealInAMinuteIsRefusedAndAudited(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         for ($i = 0; $i < 10; ++$i) {
             $this->post('/admin/secrets/API_KEY/reveal', []);
@@ -564,6 +572,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testRevealOfAnUnknownSecretIsA404AndNotAudited(): void
     {
+        $this->confirmPassword();
         $this->post('/admin/secrets/NOPE/reveal', []);
 
         self::assertResponseStatusCodeSame(404);
@@ -594,6 +603,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testACorruptedSecretCannotBeRevealedAndSaysSo(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         $this->em()->getConnection()->executeStatement('UPDATE secret SET ciphertext = zeroblob(40) WHERE name = ?', ['API_KEY']);
 
@@ -651,16 +661,15 @@ final class SecretPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
-
-        $tab = $crawler->filter('nav[aria-label="Project sections"] a')->reduce(static fn ($a): bool => 'Secrets' === trim($a->text()));
+        $crawler = $this->open('/admin/projects/blog/source');
+        $tab = $crawler->filter('nav[aria-label="Project sections"] [data-testid=project-sections-strip] a')->reduce(static fn ($a): bool => str_starts_with(trim($a->text()), 'Keys'));
         self::assertCount(1, $tab);
-        self::assertSame('/admin/projects/blog/secrets', $tab->attr('href'));
+        self::assertSame('/admin/projects/blog/keys', $tab->attr('href'));
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
         self::assertResponseStatusCodeSame(200);
         self::assertSame('blog', trim($crawler->filter('main h1')->text()));
-        self::assertSame('Secrets', trim($crawler->filter('nav[aria-label="Project sections"] [aria-current=page]')->text()));
+        self::assertStringStartsWith('Keys & secrets', trim($crawler->filter('nav[aria-label="Project sections"] [data-testid=project-sections-strip] [aria-current=page]')->text()));
         self::assertCount(1, $crawler->filter('[data-testid=secrets-empty]'));
         self::assertCount(1, $crawler->filter('[data-testid=secrets-no-assets]'));
     }
@@ -671,15 +680,15 @@ final class SecretPagesTest extends AdminTestCase
         $this->makeProject('shop');
         $this->store()->putManaged(null, 'FLEET_KEY', 'fleet-value-1', 'admin');
 
-        $this->save('/admin/projects/blog/secrets', 'BLOG_KEY', self::VALUE);
+        $this->save('/admin/projects/blog/keys', 'BLOG_KEY', self::VALUE);
 
-        self::assertResponseRedirects('/admin/projects/blog/secrets', 303);
+        self::assertResponseRedirects('/admin/projects/blog/keys', 303);
         self::assertSame(self::VALUE, $this->store()->getManaged('blog', 'BLOG_KEY'));
         self::assertNull($this->store()->getManaged(null, 'BLOG_KEY'));
         self::assertNull($this->store()->getManaged('shop', 'BLOG_KEY'));
         self::assertSame('project:blog/BLOG_KEY', $this->audit()[0][2]);
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
         self::assertSame(['BLOG_KEY'], $crawler->filter('[data-testid=secret-name]')->each(static fn ($n): string => trim($n->text())));
         self::assertStringNotContainsString(self::VALUE, $this->body());
         $crawler = $this->open('/admin/projects/shop/secrets');
@@ -695,7 +704,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->store()->putManaged('blog', 'LONELY_KEY', 'lonely-value-1', 'admin');
         $this->addAssetFile('blog', '.env', "USED=\"[[used-key]]\"\n");
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
 
         self::assertCount(0, $crawler->filter('[data-testid=secrets-no-assets]'));
         $flagged = $crawler->filter('[data-testid=secret-row]')->reduce(static fn ($row): bool => $row->filter('[data-testid=secret-no-placeholder]')->count() > 0);
@@ -709,7 +718,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->makeProject();
         $this->store()->putManaged('blog', 'LONELY_KEY', 'lonely-value-1', 'admin');
 
-        $crawler = $this->open('/admin/projects/blog/secrets');
+        $crawler = $this->open('/admin/projects/blog/keys');
 
         self::assertCount(0, $crawler->filter('[data-testid=secret-no-placeholder]'));
         self::assertStringContainsString('No asset files yet', $crawler->filter('[data-testid=secrets-no-assets]')->text());
@@ -726,6 +735,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testProjectRevealAndDeleteWork(): void
     {
+        $this->confirmPassword();
         $this->makeProject();
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
 
@@ -736,12 +746,13 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame('project:blog/BLOG_KEY', $this->audit()[0][2]);
 
         $this->post('/admin/projects/blog/secrets/BLOG_KEY/delete', []);
-        self::assertResponseRedirects('/admin/projects/blog/secrets', 303);
+        self::assertResponseRedirects('/admin/projects/blog/keys', 303);
         self::assertSame([], $this->store()->listManaged('blog'));
     }
 
     public function testAProjectSecretCannotBeRevealedThroughAnotherProjectOrTheFleetRoute(): void
     {
+        $this->confirmPassword();
         $this->makeProject();
         $this->makeProject('shop');
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
@@ -755,7 +766,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testUnknownProjectIs404OnEveryProjectRoute(): void
     {
-        $this->open('/admin/projects/nope/secrets');
+        $this->open('/admin/projects/nope/keys');
         self::assertResponseStatusCodeSame(404);
         $this->post('/admin/projects/nope/secrets', ['name' => 'A', 'value' => 'b']);
         self::assertResponseStatusCodeSame(404);
@@ -771,7 +782,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
         $this->store()->putManaged(null, 'FLEET_KEY', 'fleet-value-1', 'admin');
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
 
         self::assertResponseRedirects('/admin/projects', 303);
         self::assertSame(1, (int) $this->em()->getConnection()->fetchOne('SELECT COUNT(*) FROM secret'));
@@ -786,7 +797,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
         $this->guard()->set('blog', 1);
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
 
         self::assertSame(['BLOG_KEY'], array_map(static fn ($s): string => $s->name, $this->store()->listManaged('blog')));
         self::assertSame([], $this->audit());
@@ -803,7 +814,7 @@ final class SecretPagesTest extends AdminTestCase
         yield 'fleet put' => ['POST', '/admin/secrets'];
         yield 'fleet delete' => ['POST', '/admin/secrets/API_KEY/delete'];
         yield 'fleet reveal' => ['POST', '/admin/secrets/API_KEY/reveal'];
-        yield 'project list' => ['GET', '/admin/projects/blog/secrets'];
+        yield 'project list' => ['GET', '/admin/projects/blog/keys'];
         yield 'project put' => ['POST', '/admin/projects/blog/secrets'];
         yield 'project delete' => ['POST', '/admin/projects/blog/secrets/API_KEY/delete'];
         yield 'project reveal' => ['POST', '/admin/projects/blog/secrets/API_KEY/reveal'];
@@ -831,6 +842,8 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testAuditPageListsEntriesAndFiltersByAction(): void
     {
+        $this->confirmPassword();
+        $this->forgetReauthAudit();
         $crawler = $this->open('/admin/audit');
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Audit log', trim($crawler->filter('main h1')->text()));
@@ -869,5 +882,107 @@ final class SecretPagesTest extends AdminTestCase
 
         self::assertCount(200, $crawler->filter('[data-testid=audit-row]'));
         self::assertStringContainsString('fleet/K204', $crawler->filter('[data-testid=audit-row]')->first()->text());
+    }
+
+    // --- Keys & secrets tab (FLE-232)
+
+    public function testTheKeysTabShowsTheRiskTheTemplateKeyNamesAndMaskedValueFields(): void
+    {
+        $this->makeProject();
+        $crawler = $this->open('/admin/projects/blog/keys');
+
+        self::assertStringContainsString('any process in the container can use the push key', $crawler->filter('[data-testid=container-ssh-risk]')->text());
+        self::assertCount(1, $crawler->filter('[data-testid=git-ssh-section]'));
+        self::assertSame('password', $crawler->filter('input[name=value]')->attr('type'));
+        self::assertCount(1, $crawler->filter('textarea[name=value_multiline]'));
+        self::assertCount(0, $crawler->filter('textarea[name=value]'));
+        self::assertCount(1, $crawler->filter('[data-testid=container-ssh-dialog] form[action$="/keys/ssh"]'));
+    }
+
+    public function testChangingGitOverSshIsAuditedAndARepeatIsNot(): void
+    {
+        $this->makeProject();
+        $this->confirmPassword();
+        $this->open('/admin/projects/blog/keys');
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
+
+        $actions = array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1]));
+        self::assertCount(1, $actions);
+        self::assertSame('blog/on', $actions[0][2]);
+        self::assertStringContainsString('is <strong>on</strong>', $this->open('/admin/projects/blog/keys')->filter('[data-testid=container-ssh-state]')->html());
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '0']);
+        self::assertSame('blog/off', array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1]))[0][2]);
+    }
+
+    public function testGitOverSshNeedsAValidCsrfToken(): void
+    {
+        $this->makeProject();
+        $this->post('/admin/projects/blog/keys/ssh', ['_token' => 'wrong', 'container_ssh' => '1']);
+
+        self::assertResponseStatusCodeSame(403);
+    }
+
+    public function testAMultilineValueFromTheTextareaIsStoredAndNeverRenderedBack(): void
+    {
+        $this->makeProject();
+        $this->post('/admin/projects/blog/secrets', ['name' => 'TLS_KEY', 'value' => '', 'value_multiline' => "line-one\nline-two-".'zz9']);
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+
+        $this->open('/admin/projects/blog/keys');
+        $html = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('TLS_KEY', $html);
+        self::assertStringNotContainsString('line-two-zz9', $html);
+    }
+
+    private function containerSsh(): bool
+    {
+        $this->em()->clear();
+        $service = $this->container()->get(ProjectService::class);
+        self::assertInstanceOf(ProjectService::class, $service);
+
+        return $service->get('blog')->containerSsh();
+    }
+
+    public function testEnablingGitOverSshWithoutTheConfirmFieldIsRefusedAndChangesNothing(): void
+    {
+        $this->makeProject();
+        $this->confirmPassword();
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1']);
+
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+        self::assertFalse($this->containerSsh());
+        self::assertSame([], array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1])));
+        self::assertStringContainsString('needs the confirmation', (string) $this->open('/admin/projects/blog/keys')->filter('[data-testid=flashes]')->text());
+    }
+
+    public function testEnablingGitOverSshWithoutARecentReauthSendsToTheChallengeAndChangesNothing(): void
+    {
+        $this->makeProject();
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertStringContainsString('/admin/reauth', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertFalse($this->containerSsh());
+        self::assertNotEmpty(array_filter(new AuditEntryRepository($this->em())->latest(20), static fn ($e): bool => 'reauth.required' === $e->action() && str_starts_with($e->subject(), 'container-ssh blog')));
+    }
+
+    public function testDisablingGitOverSshNeedsNeitherConfirmNorReauth(): void
+    {
+        $this->makeProject();
+        $this->confirmPassword();
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
+        self::assertTrue($this->containerSsh());
+        $this->client->getCookieJar()->clear();
+        $this->as('admin');
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '0']);
+
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+        self::assertFalse($this->containerSsh());
     }
 }

@@ -2,7 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
-import { test } from './support/secrets';
+import { revealSecret, test } from './support/secrets';
 
 // Secrets in a real browser, at 1280 px (desktop project) and 390 px (phone project): the fleet-wide page, the project's
 // Secrets tab, reveal, the audit log. Every test owns uniquely named secrets and removes them in `finally`, so the
@@ -38,7 +38,7 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
 async function saveSecret(page: Page, name: string, value: string): Promise<void> {
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await form.getByLabel('Value', { exact: true }).fill(value);
   // Wait for the POST itself so a failed submit reports its status instead of a missing flash.
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
@@ -66,10 +66,7 @@ function rowOf(page: Page, name: string): Locator {
 
 /** Presses Reveal on a row and returns the dialog showing the value (a plain form POST: the page is reloaded). */
 async function reveal(page: Page, name: string): Promise<Locator> {
-  await rowOf(page, name).getByTestId('secret-reveal').click();
-  const dialog = page.getByTestId('reveal-dialog');
-  await expect(dialog).toBeVisible({ timeout: 30_000 });
-  return dialog;
+  return revealSecret(page, name);
 }
 
 test.describe('secrets', () => {
@@ -91,12 +88,12 @@ test.describe('secrets', () => {
       await expect(row).toContainText(`[[${name.toLowerCase().replaceAll('_', '-')}]]`);
       await expect(row).toContainText('set by');
       expect(await page.content()).not.toContain(first);
-      await expect(page.getByLabel('Value')).toHaveValue('');
+      await expect(page.getByLabel('Value', { exact: true })).toHaveValue('');
 
       // Replace: the link fills the name in, the value box stays empty.
       await row.getByTestId('secret-replace').click();
       await expect(page.getByTestId('secret-form').getByLabel('Name')).toHaveValue(name);
-      await expect(page.getByTestId('secret-form').getByLabel('Value')).toHaveValue('');
+      await expect(page.getByTestId('secret-form').getByLabel('Value', { exact: true })).toHaveValue('');
       await saveSecret(page, name, second);
       await expect(page.getByTestId('secret-row').filter({ hasText: name })).toHaveCount(1);
       expect(await page.content()).not.toContain(second);
@@ -114,7 +111,8 @@ test.describe('secrets', () => {
       // The audit log has the three entries and no value.
       await page.goto('/admin/audit');
       await expect(page.getByRole('heading', { level: 1, name: 'Audit log' })).toBeVisible();
-      const subject = page.getByTestId('audit-row').filter({ hasText: `fleet/${name}` });
+      // The reveal that was stopped by the re-auth page is an entry of its own (reauth.required): not counted here.
+      const subject = page.getByTestId('audit-row').filter({ hasText: `fleet/${name}` }).filter({ hasNotText: 'reauth.required' });
       await expect(subject).toHaveCount(3);
       await expect(subject.filter({ hasText: 'secret.reveal' })).toHaveCount(1);
       await expect(subject.filter({ hasText: 'secret.put' })).toHaveCount(2);
@@ -147,7 +145,7 @@ test.describe('secrets', () => {
     try {
       await createProjectViaUi(page, project);
       await openSection(page, 'Secrets');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/secrets$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/keys$`));
       await expect(page.getByRole('heading', { level: 1, name: project })).toBeVisible();
       await expect(page.getByTestId('secrets-empty')).toBeVisible();
       await expect(page.getByTestId('secrets-no-assets')).toContainText('No asset files yet');
@@ -165,7 +163,7 @@ test.describe('secrets', () => {
       await page.goto('/admin/secrets');
       await expect(rowOf(page, name)).toHaveCount(0);
 
-      await deleteSecret(page, `/admin/projects/${project}/secrets`, name);
+      await deleteSecret(page, `/admin/projects/${project}/keys`, name);
       await expect(page.getByTestId('secrets-empty')).toBeVisible();
     } finally {
       await deleteProjectViaUi(page, project);

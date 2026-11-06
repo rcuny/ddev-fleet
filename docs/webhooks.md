@@ -19,7 +19,7 @@ the answer sent back to Jira or Bitbucket. The action behind a rule is `App\Flee
 ## The addresses
 
 Every project has two receivers, shown with copy buttons on **Webhooks** (`/admin/webhooks`, all projects) and on the
-project's **Webhooks** tab:
+project's **Integrations** tab (`/admin/projects/<name>/integrations`; the old `/webhooks` address redirects there):
 
 ```
 https://<fleet-domain>/hooks/jira/<project>
@@ -41,7 +41,7 @@ fleet webhook:secret <project> [--source=jira|bitbucket]
 ```
 
 The secret is **shown once**, in the answer to that request, and can never be read again: not in the pages, the commands,
-the logs or the database (it is stored sealed with the host's secret key). `--rotate` (or **Rotate secret** on the page)
+the logs or the database (it is stored sealed with the host's secret key). `--rotate` (or **Rotate secret** on the page, which asks to confirm in a dialog)
 replaces it, and the old one stops working at once, so update the sender straight after. The command prints `url:` and
 `secret:` on labelled lines (`--json` for scripts): read the field by name, never by line number.
 
@@ -49,7 +49,7 @@ Jira and Bitbucket have separate secrets, so a Jira secret does not open the Bit
 
 ## Rules
 
-A rule says what an event means. They are added on the host for now (editing them in the browser follows); the page lists them.
+A rule says what an event means. Add and remove them on the project's **Integrations** tab (**Add a rule**, **Remove**) or with the commands below. The form takes the same fields as `webhook:rule:add` (including `reuse`, `label` and `label-prefix`) and goes through the same validation, so a rule is accepted or refused identically in both. Each change is audited (`webhook.rule.add`, `webhook.rule.remove`; the CLI actor is `cli`).
 
 ```bash
 # Jira: an issue moving INTO a status (the changelog transition, not the issue's current status) deploys a template
@@ -128,7 +128,7 @@ printf '%s' "$TOKEN" | fleet webhook:token blog
 fleet webhook:token blog --clear
 ```
 
-or on the project's **Webhooks** tab (Bitbucket card: *Set the pipeline token*, *Remove token*). The Bitbucket secret must
+or on the project's **Integrations** tab (Bitbucket card: *Set the pipeline token*, *Remove token*). The Bitbucket secret must
 exist first. The token is sealed like the HMAC secret and **shown nowhere afterwards**: not in the page, the commands, a
 delivery row, a log line or an exception message. Without a token nothing is called and the delivery says
 `no pipeline started: this project has no pipeline token yet`.
@@ -187,7 +187,7 @@ again; the signature proves who signed, not when.
 Every authenticated request is one row: when, source, event, delivery id, subject (issue key or branch), the change
 ("To Do -> Dispatched"), the rule that matched, the decision and the result (`accepted`, `ignored`, `duplicate`,
 `failed`) and, for an accepted one, the **outcome**: the job (plain text `job #12` until the job pages land) and the note of
-what the action did or why it did not. See it per project (the Webhooks tab, paged) or across projects (`/admin/webhooks`,
+what the action did or why it did not. See it per project (the Integrations tab, paged) or across projects (`/admin/webhooks`,
 the latest 25); both have **Hide ignored** and filters for the source and the outcome (`?source=jira&result=failed`), or on
 the host:
 
@@ -208,7 +208,7 @@ secret, with the events your rules name.
 - A receiver exists as soon as it has a secret; a project with no rules answers 200 `ignored` (and logs it) instead of 404,
   so a freshly configured sender can be tested.
 - Secrets live in the database, sealed, not in `secrets.env`; the delivery log is a table, not `jira.jsonl`.
-- The Bitbucket pipeline token (`pipeline:write`) is stored per project, sealed, in the database, set on the Webhooks tab or
+- The Bitbucket pipeline token (`pipeline:write`) is stored per project, sealed, in the database, set on the Integrations tab or
   with `fleet webhook:token` (0.x: `secrets.env`, `fleet webhook bitbucket-token`).
 - A derived Bitbucket label does not need `label_prefix` (0.x required one so a deploy could not replace a hand-deployed
   instance). Here only a rule with a fixed `label` ever replaces; every other deploy allocates a free label.
