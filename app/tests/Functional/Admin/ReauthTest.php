@@ -138,6 +138,57 @@ final class ReauthTest extends AdminTestCase
         self::assertSame(['dev-admin', 'reauth.failure', 'throttled'], $this->audit()[0]);
     }
 
+    public function testSuccessfulConfirmationsNeverUseUpTheAttempts(): void
+    {
+        $this->createReauthUser();
+        for ($i = 0; $i < 8; ++$i) {
+            $this->confirmPasswordWith(self::REAUTH_PASSWORD);
+            self::assertResponseRedirects('/admin', 303);
+        }
+    }
+
+    public function testFailuresFromAnotherAddressDoNotLockOutTheRealAdmin(): void
+    {
+        $this->createReauthUser();
+        // A hijacked session guesses from elsewhere until it is throttled ...
+        $this->clientIp = '203.0.113.9';
+        for ($i = 0; $i < 5; ++$i) {
+            $this->confirmPasswordWith('wrong password '.$i);
+        }
+        $this->confirmPasswordWith(self::REAUTH_PASSWORD);
+        self::assertResponseStatusCodeSame(429);
+
+        // ... the same user from their own address is not locked out.
+        $this->clientIp = '198.51.100.7';
+        $this->confirmPasswordWith(self::REAUTH_PASSWORD);
+        self::assertResponseRedirects('/admin', 303);
+    }
+
+    public function testASealedExportUsesUpTheWindow(): void
+    {
+        $this->seed();
+        $this->confirmPassword();
+        $this->post('/admin/projects/blog/export', ['passphrase' => self::PASSPHRASE]);
+        self::assertResponseStatusCodeSame(200);
+
+        $this->post('/admin/projects/blog/export', ['passphrase' => self::PASSPHRASE]);
+
+        self::assertResponseRedirects('/admin/reauth?next=/admin/projects/blog/transfer', 303);
+    }
+
+    public function testDeletingAProjectClosesTheWindow(): void
+    {
+        $this->seed();
+        $this->confirmPassword();
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
+        self::assertResponseRedirects('/admin/projects', 303);
+
+        $this->seed();
+        $this->post('/admin/projects/blog/export', ['passphrase' => self::PASSPHRASE]);
+
+        self::assertResponseRedirects('/admin/reauth?next=/admin/projects/blog/transfer', 303);
+    }
+
     public function testTheReturnPathIsKeptOnlyForAnAdminPage(): void
     {
         $crawler = $this->open('/admin/reauth?next=/admin/projects/blog/keys');

@@ -28,6 +28,12 @@ final readonly class ReauthGuard
         return $this->window->requireRecentAuth();
     }
 
+    /** Ends the window after a one-shot action (sealed export, enabling Git over SSH, deleting a project). */
+    public function close(): void
+    {
+        $this->window->close();
+    }
+
     /**
      * Sends the user to the re-auth page and back to $returnPath (a page of the admin area, not the POST), and audits
      * the stopped action. $subject names the target (a secret name, a project), never a value.

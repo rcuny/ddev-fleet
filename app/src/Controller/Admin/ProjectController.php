@@ -41,6 +41,7 @@ use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
+use App\Security\Reauth\ReauthGuard;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\Form\FormError;
 use Symfony\Component\Form\FormInterface;
@@ -80,6 +81,7 @@ final class ProjectController extends AbstractController
         private readonly UserRepository $users,
         private readonly AdminGroup $admins,
         private readonly AuditLog $audit,
+        private readonly ReauthGuard $reauth,
     ) {
     }
 
@@ -480,6 +482,8 @@ final class ProjectController extends AbstractController
             throw new NotFoundHttpException();
         }
 
+        // A deletion ends any open re-auth window (no stale window left for the next action).
+        $this->reauth->close();
         $this->addFlash('success', \sprintf('Project "%s" deleted.', $name));
         $this->flashAccessWarning();
 

@@ -1,6 +1,6 @@
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { openDialog } from './projects';
+import { navigate, openDialog } from './projects';
 import { createUserViaUi, PASSWORD } from './users';
 
 /** A valid secret name that is unique per call: capital letters, digits, underscores, at most 64 characters. */
@@ -58,14 +58,21 @@ export async function submitSecret(page: Page, name: string, value: string): Pro
 
 /** Fills the form, saves and waits for the confirmation; a refused save reports its status. */
 export async function saveSecret(page: Page, name: string, value: string): Promise<void> {
+  // A phone reaches the tab through the section select: let the visit settle first, or the form being filled is replaced
+  // by the fresh one and the click submits it empty (422 "Enter a name", seen on release/1.5.2).
+  await page.waitForLoadState('networkidle');
+  // Turbo shows a cached snapshot (a preview) of a page it has seen before and swaps in the fresh one a moment later.
+  await expect(page.locator('html')).not.toHaveAttribute('data-turbo-preview', /.*/);
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
   await fillSecretValue(form, value);
+  await expect(form.getByLabel('Name')).toHaveValue(name);
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
-    form.getByTestId('secret-save').click(),
+    navigate(page, () => form.evaluate((node) => (node as HTMLFormElement).requestSubmit(node.querySelector('[data-testid="secret-save"]') as HTMLElement))),
   ]);
-  expect(response.status(), `save of ${name} answered ${response.status()}`).toBeLessThan(400);
+  const detail = response.status() >= 400 ? (await response.text()).match(/data-testid="error-(?:name|value)"[^>]*>[^<]*/g)?.join(' | ') : '';
+  expect(response.status(), `save of ${name} answered ${response.status()} ${detail}`).toBeLessThan(400);
   await expect(page.getByTestId('flashes')).toContainText(`Secret "${name}" saved.`);
 }
 
