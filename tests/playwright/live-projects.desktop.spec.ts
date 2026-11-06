@@ -116,11 +116,9 @@ test.describe('build', () => {
   test('edits the project', async () => {
     await openSection(page, 'Source');
     await page.getByLabel('Default branch').fill('main');
-    await page.getByLabel('Additional hostnames').fill('www');
     await page.getByRole('button', { name: 'Save', exact: true }).click();
     await expect(page.getByTestId('flashes')).toContainText('Project saved.');
     await expect(page.getByLabel('Default branch')).toHaveValue('main');
-    await expect(page.getByLabel('Additional hostnames')).toHaveValue('www');
     await shot('4-edited');
     await expectNoOverflow('the edited project');
   });
