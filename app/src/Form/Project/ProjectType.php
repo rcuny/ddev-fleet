@@ -17,7 +17,6 @@ use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\EnumType;
-use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
@@ -25,7 +24,7 @@ use Symfony\Component\Form\FormBuilderInterface;
 use Symfony\Component\OptionsResolver\OptionsResolver;
 
 /**
- * The General tab of a project. The data is a plain array (keys = ProjectInput properties, hostnames one per line); the
+ * The Source tab of a project (and the create form, which also takes the caps). The data is a plain array (keys = ProjectInput properties, hostnames one per line); the
  * controller turns it into a ProjectInput and the service validates it: the form carries no constraints, so the server
  * messages are the single source (the form is `novalidate`, there is no HTML5 pattern).
  *
@@ -124,21 +123,13 @@ final class ProjectType extends AbstractType
                 'required' => false,
                 'help' => 'Only for projects whose agents push from the web container. The key is usable by every process in that instance\'s container while the agent runs.',
             ])
-            ->add('cpuThreads', IntegerType::class, [
-                'label' => 'CPU threads',
-                'required' => false,
-                'help' => null === $options['allocatable']
-                    ? 'The most CPU threads all instances of this project may use together. Leave empty for no limit.'
-                    : \sprintf('The most CPU threads all instances of this project may use together. Leave empty for no limit. This host can allocate %d.', $options['allocatable']),
-                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
-            ])
-            ->add('slots', IntegerType::class, [
-                'label' => 'Slots',
-                'required' => false,
-                'help' => 'The most runs (CI suites, working agents) of this project at the same time, across its templates. Leave empty for no limit.',
-                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
-            ])
-            ->add('save', SubmitType::class, ['label' => $create ? 'Create project' : 'Save']);
+        ;
+
+        if ($create) {
+            // Editing a project sets the caps on its Capacity tab (CapacityType).
+            CapacityType::addCapFields($builder, $options['allocatable']);
+        }
+        $builder->add('save', SubmitType::class, ['label' => $create ? 'Create project' : 'Save']);
     }
 
     public function configureOptions(OptionsResolver $resolver): void
