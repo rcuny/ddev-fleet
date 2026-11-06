@@ -73,13 +73,17 @@ final class ProjectType extends AbstractType
             ]);
         }
 
-        $builder
-            ->add('additionalHostnames', TextareaType::class, [
+        if ($create) {
+            // Edited later on the Network tab (NetworkType), which saves them without touching the other fields.
+            $builder->add('additionalHostnames', TextareaType::class, [
                 'label' => 'Additional hostnames',
                 'required' => false,
                 'help' => 'One label per line. Each instance also answers on <label>-<project>--<instance>.',
                 'attr' => $text + ['rows' => 3, 'maxlength' => TextBlock::MAX],
-            ])
+            ]);
+        }
+
+        $builder
             ->add('gitBotMode', EnumType::class, [
                 'class' => GitBotMode::class,
                 'label' => 'Git identity of the instances',
@@ -114,24 +118,25 @@ final class ProjectType extends AbstractType
                 'help' => 'A path inside the repository, for example web/modules/custom/blog.',
                 'attr' => $text + ['maxlength' => SubmodulePath::MAX],
             ])
-            ->add('typesense', CheckboxType::class, [
-                'label' => 'Run a Typesense search server for each instance',
-                'required' => false,
-            ])
         ;
 
         if ($create) {
             // Editing a project changes this on its Keys & secrets tab (confirmed and audited).
-            $builder->add('containerSsh', CheckboxType::class, [
-                'label' => 'Git over SSH inside the container: a dedicated ssh-agent with the push key for each instance',
-                'required' => false,
-                'help' => 'Only for projects whose agents push from the web container. The key is usable by every process in that instance\'s container while the agent runs.',
-            ]);
+                $builder->add('containerSsh', CheckboxType::class, [
+                    'label' => 'Git over SSH inside the container: a dedicated ssh-agent with the push key for each instance',
+                    'required' => false,
+                    'help' => 'Only for projects whose agents push from the web container. The key is usable by every process in that instance\'s container while the agent runs.',
+                ]);
         }
 
         if ($create) {
             // Editing a project sets the caps on its Capacity tab (CapacityType).
             CapacityType::addCapFields($builder, $options['allocatable']);
+            // Edited later on the Network tab (NetworkType), which saves it without touching the other fields.
+            $builder->add('typesense', CheckboxType::class, [
+                'label' => 'Run a Typesense search server for each instance',
+                'required' => false,
+            ]);
         }
         $builder->add('save', SubmitType::class, ['label' => $create ? 'Create project' : 'Save']);
     }
