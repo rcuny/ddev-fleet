@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.2] - 2026-11-06
+
+### Added
+- **FLE-229: port access is editable from the project's Network tab.** The access of a port the project uses (login required or public) can be changed in the browser with the rules of `fleet port:update`; the Public badge is drawn in the warning colour. Adding a hostname, assigning or unassigning a public port and any access change ask for a confirmation in an accessible dialog first, and the changes are written to the audit log (`port.access`, `project.hostname`, `project.port`).
+
+- **FLE-230: the project Access tab lists who can reach the project.** It shows the project members (site-only users marked), the administrators, the public or login access of each port of the project (read-only; edit it on Network) and a note on the Authelia sign-in. Members can be added and removed there (removal asks first). It uses the same service as the user page and `fleet:user:grant` / `fleet:user:revoke`, so a membership changed on either page shows on the other; each change from the tab is recorded in the audit log (`project.member.add`, `project.member.remove`).
+- **FLE-233: webhook rules can be added and removed on the project's Integrations tab.** The form takes the options of `fleet webhook:rule:add` (including `reuse`, `label` and `label-prefix`) and is checked by the same service, so a rule is accepted or refused exactly as on the command line. Both changes are audited (`webhook.rule.add`, `webhook.rule.remove`; the command now records them as `cli`).
+
+### Changed
+- **FLE-226: the project settings page has ten tabs** (Overview, Source, Templates, Assets, Network, Access, Capacity, Keys & secrets, Integrations, Transfer & danger). `/admin/projects/<name>` is the new read-only Overview; the former General form is on Source (`/source`). Below the `sm` breakpoint the tabs are a labelled select. Access, Capacity and Transfer & danger are placeholders for now. The old `/ports`, `/secrets` and `/webhooks` addresses redirect to Network, Keys & secrets and Integrations.
+- **FLE-227: project settings, Source tab and default template**: the Source tab now groups the repository (Git URL, default branch, submodule shown), the git identity and the issue id pattern under headings; the default template is chosen on the Templates tab, next to the template list; template forms have Environment, Commands and Terminals sections.
+
+- **FLE-229: the Network tab holds the additional hostnames, the Typesense toggle and the named ports** in one form (`NetworkType`), saved without touching the other project fields. The hostnames and the Typesense toggle are gone from the Source tab of an existing project (the create form keeps them). The command line is unchanged.
+- **FLE-231: project settings, Capacity tab**: the project's CPU threads and slots are now edited on the Capacity tab (they leave the Source tab; the create form keeps them). The tab also lists every template's own caps with the effective values after clamping by the project caps, links each row to the template form, and warns when the templates' own caps add up to more than the project cap. Enforcement is unchanged.
+
+- **FLE-232:** Project Keys & secrets tab: the "Git over SSH in the container" setting moved here from the Source tab. It states the risk, asks for a confirmation and writes an audit entry (`project.container-ssh`) when it changes. The tab also lists each template's extra SSH key names (read-only) and links to the host settings for key rotation.
+- **FLE-232:** Secret values are entered in a masked field (a separate textarea for multi-line values) and are never echoed back.
+- **FLE-232:** Turning on Git over SSH in the container needs the server-side confirmation and a recent re-auth, like revealing a secret; turning it off needs neither.
+- **FLE-233: Integrations tab.** Rotating a webhook secret, removing a rule and removing the pipeline token ask in a confirm dialog instead of a `<details>`; the delivery log has its own "Delivery log" heading and is collapsed until it is opened or filtered.
+- **FLE-234: the project Transfer & danger tab holds Export and Delete.** The Export card (optional passphrase, masked, with the minimum length shown; a passphrase still needs the recent password check) and the Danger zone moved there from the Source tab. Deleting a project now asks you to type its name; a wrong or missing name leaves the project untouched, and the delete is still refused while the project has instances.
+
+### Security
+- **FLE-227: a Git URL with a user name or token (`https://user:token@host/...`) is refused with a message that says so**; the URL is never written to a log or an audit entry.
+- **FLE-228: Reveal secret and the sealed Export need a recent password check.** A 5 minute re-auth window
+  (`/admin/reauth`: CSRF, 5 attempts per 15 minutes per user) gates revealing a secret value and exporting a project with a
+  passphrase; an export without a passphrase is unchanged. Success, failure and each stopped action are audited
+  (`reauth.success`, `reauth.failure`, `reauth.required`), never with a password or a value. The export passphrase field
+  now states its minimum length.
+
+### Fixed
+- **FLE-235:** The re-auth limiter counts only failed password attempts and is keyed on user and client address, so a hijacked session can no longer lock the real administrator out and successful confirmations never use the budget.
+- **FLE-235:** A sealed export, turning on Git over SSH in the container and deleting a project now close the re-auth window; `docs/secrets.md` notes that an Authelia-only user without a fleet account cannot re-authenticate.
+- **FLE-235:** Playwright: the secret save helper waits for the fresh page instead of submitting a form Turbo was about to replace (flaky 422 on phone).
+
 ## [1.5.1] - 2026-11-06
 
 ### Added
@@ -1197,7 +1231,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.2...HEAD
+[1.5.2]: https://github.com/rcuny/ddev-fleet/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/rcuny/ddev-fleet/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/rcuny/ddev-fleet/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/rcuny/ddev-fleet/compare/v1.3.1...v1.4.0
