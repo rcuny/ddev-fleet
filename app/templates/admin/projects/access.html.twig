@@ -12,13 +12,107 @@
     <div class="mt-6 grid max-w-2xl gap-4" data-testid="project-section-access">
         <twig:Card>
             <twig:Card:Header>
-                <twig:Card:Title>Access</twig:Card:Title>
-                <twig:Card:Description>Project members are set on each user's page for now. The port access (public or login) is shown on the Network tab.</twig:Card:Description>
+                <twig:Card:Title>Project members</twig:Card:Title>
+                <twig:Card:Description>Members can operate the instances of this project. This is the same list as on each user's page: a change here shows there, and the other way round.</twig:Card:Description>
             </twig:Card:Header>
-            <twig:Card:Content>
-                <twig:Button as="a" variant="outline" href="{{ path('users') }}" class="h-11 md:h-8">Users</twig:Button>
-                <twig:Button as="a" variant="outline" href="{{ path('project_network', {name: project.name}) }}" class="h-11 md:h-8">Network</twig:Button>
+            <twig:Card:Content class="grid gap-4">
+                {% if members|length == 0 %}
+                    <p class="text-sm text-ink-muted" data-testid="members-none">No member yet.</p>
+                {% else %}
+                    <twig:Table>
+                        <twig:Table:Caption class="sr-only">Members of {{ project.name }}</twig:Table:Caption>
+                        <twig:Table:Header>
+                            <twig:Table:Row>
+                                <twig:Table:Head>User</twig:Table:Head>
+                                <twig:Table:Head>Kind</twig:Table:Head>
+                                <twig:Table:Head><span class="sr-only">Actions</span></twig:Table:Head>
+                            </twig:Table:Row>
+                        </twig:Table:Header>
+                        <twig:Table:Body>
+                            {% for user in members %}
+                                <twig:Table:Row data-testid="member-row">
+                                    <twig:Table:Cell class="font-medium"><a href="{{ path('user_edit', {username: user.username}) }}">{{ user.username }}</a></twig:Table:Cell>
+                                    <twig:Table:Cell>
+                                        {% if user.username in adminNames %}<twig:Badge data-testid="member-admin">Admin</twig:Badge>{% endif %}
+                                        {% if user.siteOnly %}
+                                            <twig:Badge variant="secondary" data-testid="member-site-only">Site access only</twig:Badge>
+                                        {% else %}
+                                            <twig:Badge variant="outline" data-testid="member-full">Fleet user</twig:Badge>
+                                        {% endif %}
+                                    </twig:Table:Cell>
+                                    <twig:Table:Cell>
+                                        <twig:Dialog id="remove-member-{{ user.username|replace({'.': '-', '_': '-'}) }}">
+                                            <twig:Dialog:Trigger>
+                                                <twig:Button variant="outline" class="h-11 md:h-8" aria-label="Remove {{ user.username }} from {{ project.name }}" data-testid="member-remove" {{ ...dialog_trigger_attrs }}>Remove</twig:Button>
+                                            </twig:Dialog:Trigger>
+                                            <twig:Dialog:Content>
+                                                <twig:Dialog:Header>
+                                                    <twig:Dialog:Title>Remove {{ user.username }}?</twig:Dialog:Title>
+                                                    <twig:Dialog:Description>{{ user.username }} loses access to {{ project.name }} and its instance sites. The account itself stays.</twig:Dialog:Description>
+                                                </twig:Dialog:Header>
+                                                <twig:Dialog:Footer>
+                                                    <twig:Dialog:Close>
+                                                        <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                                    </twig:Dialog:Close>
+                                                    <form method="post" action="{{ path('project_access_remove', {name: project.name, username: user.username}) }}" class="contents">
+                                                        {{ include('setup/_csrf.html.twig') }}
+                                                        <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="member-remove-confirm">Remove member</twig:Button>
+                                                    </form>
+                                                </twig:Dialog:Footer>
+                                            </twig:Dialog:Content>
+                                        </twig:Dialog>
+                                    </twig:Table:Cell>
+                                </twig:Table:Row>
+                            {% endfor %}
+                        </twig:Table:Body>
+                    </twig:Table>
+                {% endif %}
+
+                {% if candidates|length == 0 %}
+                    <p class="text-sm text-ink-muted" data-testid="candidates-none">Every non-administrator user is already a member, or there is no other user yet. <a href="{{ path('user_new') }}" class="underline">Create a user</a>.</p>
+                {% else %}
+                    <form method="post" action="{{ path('project_access_add', {name: project.name}) }}" class="grid gap-2 sm:flex sm:items-end" data-testid="member-add-form">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <div class="grid gap-2">
+                            <label for="member-username" class="text-sm font-medium leading-none text-ink-display">Add a member</label>
+                            <select id="member-username" name="username" required class="h-11 rounded-md border border-hairline bg-surface px-3 text-sm md:h-8" data-testid="member-select">
+                                {% for user in candidates %}
+                                    <option value="{{ user.username }}">{{ user.username }}{{ user.siteOnly ? ' (site access only)' : '' }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <twig:Button type="submit" class="h-11 md:h-8" data-testid="member-add">Add member</twig:Button>
+                    </form>
+                {% endif %}
+
+                {% if admins|length > 0 %}
+                    <p class="text-sm text-ink-muted" data-testid="admins-note">
+                        Administrators reach every project and need no membership:
+                        {% for user in admins %}<a href="{{ path('user_edit', {username: user.username}) }}" class="underline">{{ user.username }}</a>{{ loop.last ? '.' : ', ' }}{% endfor %}
+                    </p>
+                {% endif %}
             </twig:Card:Content>
         </twig:Card>
+
+        <twig:Card>
+            <twig:Card:Header>
+                <twig:Card:Title>Ports</twig:Card:Title>
+                <twig:Card:Description>Whether each port of this project needs the login. This is read-only here; the ports are chosen on the Network tab.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                {% if ports|length == 0 %}
+                    <p class="text-sm text-ink-muted" data-testid="access-ports-none">This project uses no named port.</p>
+                {% else %}
+                    <ul class="grid gap-1 text-sm" data-testid="access-ports">
+                        {% for port in ports %}
+                            <li data-testid="access-port"><span class="font-medium">{{ port.name }}</span>: {{ port.access == 'public' ? 'Public (no login)' : 'Login required' }}</li>
+                        {% endfor %}
+                    </ul>
+                {% endif %}
+                <twig:Button as="a" variant="outline" href="{{ path('project_network', {name: project.name}) }}" class="mt-3 h-11 md:h-8">Network</twig:Button>
+            </twig:Card:Content>
+        </twig:Card>
+
+        <p class="text-sm text-ink-muted" data-testid="authelia-note">Sign-in is handled by Authelia on the host's auth domain. Instance sites of this project open for its members and the administrators, and for site-only users who know their site password.</p>
     </div>
 {% endblock %}
