@@ -59,6 +59,9 @@ final class ProjectControllerAuthorizationTest extends AdminTestCase
             'edit' => fn (ProjectController $c): mixed => $c->edit($this->request('POST'), 'blog'),
             'ports' => fn (ProjectController $c): mixed => $c->ports($this->request('POST'), 'blog'),
             'delete' => fn (ProjectController $c): mixed => $c->delete($this->request('POST'), 'blog'),
+            'access' => static fn (ProjectController $c): mixed => $c->access('blog'),
+            'addMember' => fn (ProjectController $c): mixed => $c->addMember($this->request('POST'), 'blog'),
+            'removeMember' => fn (ProjectController $c): mixed => $c->removeMember($this->request('POST'), 'blog', 'alice'),
         ];
     }
 
