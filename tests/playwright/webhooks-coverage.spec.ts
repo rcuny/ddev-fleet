@@ -1,7 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { expect, test, type APIResponse, type Locator, type Page } from '@playwright/test';
 import { consoleOk, instanceRow } from './support/fleetData';
-import { createProjectViaUi, deleteProjectViaUi, follow, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, openDeliveryLog, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // Browser-only coverage of the Webhooks pages at 1280 px (desktop project) and 390 px (phone project): the copy button, the
@@ -95,7 +95,7 @@ test.describe('webhooks, full coverage', () => {
         await expect(card.getByTestId('webhook-rules')).toHaveCount(0);
         await expect(card.getByTestId('webhook-no-rules')).toHaveCount(0);
         await expect(card.getByTestId('webhook-token')).toHaveCount(0);
-        await expect(card.getByTestId('webhook-rotate-details')).toHaveCount(0);
+        await expect(card.getByTestId('webhook-rotate-open')).toHaveCount(0);
         await expect(card.getByTestId('webhook-latest')).toHaveCount(0);
       }
       await expect(page.getByTestId('webhook-deliveries').getByRole('heading', { level: 2, name: 'Deliveries' })).toBeVisible();
@@ -118,6 +118,9 @@ test.describe('webhooks, full coverage', () => {
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/integrations$`));
       await expect(page).toHaveTitle(new RegExp(`Webhooks · ${project}`));
       await expect(page.getByTestId('webhook-endpoint')).toHaveCount(2);
+      await expect(page.getByTestId('webhook-log').getByRole('heading', { level: 2, name: 'Delivery log' })).toBeVisible();
+      await expect(page.getByTestId('webhook-log-details')).not.toHaveAttribute('open', '');
+      await openDeliveryLog(page);
       await expect(page.getByTestId('deliveries-empty')).toHaveText('No delivery has arrived yet.');
       await expect(page.getByTestId('delivery-row')).toHaveCount(0);
       await expect(page.getByRole('navigation', { name: 'Delivery pages' })).toHaveCount(0);
@@ -129,6 +132,7 @@ test.describe('webhooks, full coverage', () => {
       await expect(page).toHaveURL(/hide-ignored=1/);
       await expect(page.getByTestId('webhook-filter')).toHaveText('Show ignored');
       await follow(page, page.getByTestId('webhook-filter'));
+      await openDeliveryLog(page);
       await expect(page.getByTestId('webhook-filter')).toHaveText('Hide ignored');
       await expect(page).not.toHaveURL(/hide-ignored/);
 
@@ -185,24 +189,24 @@ test.describe('webhooks, full coverage', () => {
 
       const jiraFirst = await createSecret(page, 'jira', project);
 
-      // Rotation: the details open and close without doing anything, the old secret works until "Rotate now".
+      // Rotation: the dialog opens and cancels without doing anything, the old secret works until "Rotate now".
       const body = jiraMove('PW-1', 'Done');
       await page.goto(`/admin/projects/${project}/integrations`);
       const jira = endpoint(page, 'jira', project);
-      await expect(jira.getByTestId('webhook-rotate')).toBeHidden();
-      await jira.getByText('Rotate secret').click();
-      await expect(jira.getByTestId('webhook-rotate')).toBeVisible();
-      await expect(jira.getByTestId('webhook-rotate-details')).toContainText('The old secret stops working at once.');
+      await expect(page.getByTestId('webhook-rotate')).toBeHidden();
+      const rotateDialog = await openDialog(page, jira.getByTestId('webhook-rotate-open'));
+      await expect(rotateDialog.getByTestId('webhook-rotate')).toBeVisible();
+      await expect(rotateDialog).toContainText('The old secret stops working at once.');
       if (isPhone()) {
-        await expectTall(jira.getByTestId('webhook-rotate'), 'Rotate now');
+        await expectTall(rotateDialog.getByTestId('webhook-rotate'), 'Rotate now');
       }
-      await expectClean(page, 'the open rotate details');
-      await jira.getByText('Rotate secret').click();
-      await expect(jira.getByTestId('webhook-rotate')).toBeHidden();
+      await expectClean(page, 'the open rotate dialog');
+      await rotateDialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(rotateDialog).toBeHidden();
       expect((await deliver(page, 'jira', project, jiraFirst, body, jiraId())).status).toBe(200);
 
-      await jira.getByText('Rotate secret').click();
-      await submitAndWait(page, jira.getByTestId('webhook-rotate'));
+      const confirmDialog = await openDialog(page, jira.getByTestId('webhook-rotate-open'));
+      await submitAndWait(page, confirmDialog.getByTestId('webhook-rotate'));
       await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
       const second = await page.getByTestId('webhook-secret-value').inputValue();
       expect(second).toMatch(/^[0-9a-f]{64}$/);
@@ -239,6 +243,7 @@ test.describe('webhooks, full coverage', () => {
       expect((await deliver(page, 'bitbucket', project, bitbucket, { repository: { full_name: 'acme/blog' } }, bitbucketId('pullrequest:approved'))).body.result).toBe('failed');
 
       await page.goto(`/admin/projects/${project}/integrations`);
+      await openDeliveryLog(page);
       const rows = page.getByTestId('delivery-row');
       const count = (result: string): Locator => page.locator(`[data-testid=delivery-row][data-result=${result}]`);
       await expect(rows).toHaveCount(4);
@@ -263,6 +268,7 @@ test.describe('webhooks, full coverage', () => {
       await expect(rows).toHaveCount(1);
       await expect(page.getByLabel('Outcome')).toHaveValue('failed');
       await follow(page, page.getByTestId('delivery-filter-clear'));
+      await openDeliveryLog(page);
       await expect(rows).toHaveCount(4);
       await expectClean(page, 'the filtered log');
 
@@ -294,6 +300,7 @@ test.describe('webhooks, full coverage', () => {
 
       // Fifty to a page, the paging maths and the overview's latest twenty-five are asserted in WebhookPagesTest.
       await page.goto(`/admin/projects/${project}/integrations`);
+      await openDeliveryLog(page);
       await expect(rows).toHaveCount(50);
       await follow(page, pager.getByRole('link', { name: 'Older' }));
       await expect(page).toHaveURL(/page=2/);
@@ -303,6 +310,7 @@ test.describe('webhooks, full coverage', () => {
       }
       await expectClean(page, 'page two of the log');
       await follow(page, pager.getByRole('link', { name: 'Newer' }));
+      await openDeliveryLog(page);
       await expect(rows).toHaveCount(50);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -405,6 +413,7 @@ test.describe('webhooks, full coverage', () => {
 
       for (const path of [`/admin/projects/${project}/integrations`, '/admin/webhooks']) {
         await page.goto(path);
+        await openDeliveryLog(page);
         await expect(page.getByTestId('delivery-row').first()).toBeVisible();
         await expect(endpoint(page, 'jira', project).getByTestId('webhook-rules')).toContainText(status.slice(0, 40));
         await expectClean(page, `${path} with long values`);

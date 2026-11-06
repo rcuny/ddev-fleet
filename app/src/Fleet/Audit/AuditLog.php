@@ -33,6 +33,9 @@ final readonly class AuditLog
     public const string PROJECT_EXPORT = 'project.export';
     public const string PROJECT_IMPORT = 'project.import';
 
+    public const string WEBHOOK_RULE_ADD = 'webhook.rule.add';
+    public const string WEBHOOK_RULE_REMOVE = 'webhook.rule.remove';
+
     private const string ELLIPSIS = '…';
 
     /** The actor of changes made on the command line. */

@@ -8,13 +8,16 @@ use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Webhook\WebhookDelivery;
 use App\Domain\Webhook\WebhookRepository;
+use App\Domain\Webhook\WebhookRule;
 use App\Domain\Webhook\WebhookSource;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
+use App\Fleet\Webhooks\RuleInput;
 use App\Fleet\Webhooks\WebhookService;
 use App\Fleet\Webhooks\WebhookUrls;
+use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -40,6 +43,7 @@ final class WebhookController extends AbstractController
         private readonly WebhookRepository $webhooks,
         private readonly WebhookService $service,
         private readonly WebhookUrls $urls,
+        private readonly CurrentActor $actor,
     ) {
     }
 
@@ -155,6 +159,56 @@ final class WebhookController extends AbstractController
         $response->headers->set('Cache-Control', 'no-store');
 
         return $response;
+    }
+
+    /**
+     * Adds a rule. The fields are the options of `fleet:webhook:rule:add`, read through RuleInput and checked by
+     * WebhookService::addRule(), the code the command calls too: the same input is accepted or refused the same way.
+     */
+    #[Route('/admin/projects/{name}/webhooks/{source}/rules', name: 'webhook_rule_add', requirements: ['name' => self::NAME, 'source' => 'jira|bitbucket'], methods: ['POST'])]
+    public function addRule(Request $request, string $name, string $source): Response
+    {
+        $this->load($name);
+        $this->assertCsrf($request);
+        $fields = $request->request->all('rule');
+        $action = $fields['action'] ?? null;
+
+        try {
+            [$match, $params] = RuleInput::split($fields, '1' === ($fields['reuse'] ?? null));
+            $rule = $this->service->addRule($name, WebhookSource::from($source), \is_string($action) && '' !== $action ? $action : WebhookRule::ACTION_DEPLOY, $match, $params, $this->actor->name());
+            $this->addFlash('success', \sprintf('Rule %d added: %s.', (int) $rule->id(), $rule->summary()));
+        } catch (NotFound $e) {
+            $this->addFlash('warning', $e->getMessage());
+        } catch (ValidationFailed $e) {
+            $this->addFlash('warning', 'The rule was refused: '.implode(' ', $e->errors));
+        }
+
+        return $this->redirectToRoute('project_integrations', ['name' => $name]);
+    }
+
+    #[Route('/admin/projects/{name}/webhooks/rules/{rule}/remove', name: 'webhook_rule_remove', requirements: ['name' => self::NAME, 'rule' => '\d+'], methods: ['POST'])]
+    public function removeRule(Request $request, string $name, int $rule): Response
+    {
+        $this->load($name);
+        $this->assertCsrf($request);
+
+        try {
+            $this->service->removeRule($name, $rule, $this->actor->name());
+            $this->addFlash('success', \sprintf('Rule %d removed.', $rule));
+        } catch (NotFound) {
+            // A second tab that still listed the rule.
+            $this->addFlash('warning', \sprintf('Rule %d was already removed.', $rule));
+        }
+
+        return $this->redirectToRoute('project_integrations', ['name' => $name]);
+    }
+
+    private function assertCsrf(Request $request): void
+    {
+        $token = $request->request->get('_token');
+        if (!\is_string($token) || !$this->isCsrfTokenValid('submit', $token)) {
+            throw $this->createAccessDeniedException('Invalid CSRF token.');
+        }
     }
 
     /**

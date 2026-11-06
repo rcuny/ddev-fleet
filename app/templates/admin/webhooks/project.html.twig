@@ -10,9 +10,16 @@
     </twig:PageHeader>
 
     <div class="mt-6 grid gap-8">
-        {{ include('admin/webhooks/_endpoints.html.twig', {rows: rows}) }}
+        {{ include('admin/webhooks/_endpoints.html.twig', {rows: rows, editable: true}) }}
 
-        {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('project_integrations', {name: project.name}), showProject: false, filter: filter, results: results}) }}
+        {% set filtered = hideIgnored or filter.source or filter.result or page > 1 %}
+        <section aria-labelledby="delivery-log-title" class="grid gap-2" data-testid="webhook-log">
+            <h2 id="delivery-log-title" class="text-lg">Delivery log</h2>
+            <details {{ filtered ? 'open' : '' }} data-testid="webhook-log-details">
+                <summary class="min-h-11 cursor-pointer py-2 text-sm">Show the delivery log</summary>
+                {{ include('admin/webhooks/_deliveries.html.twig', {deliveries: deliveries, hideIgnored: hideIgnored, filterUrl: path('project_integrations', {name: project.name}), showProject: false, filter: filter, results: results, nested: true}) }}
+            </details>
+        </section>
 
         {% if page > 1 or hasMore %}
             <nav aria-label="Delivery pages" class="flex items-center justify-between gap-4 text-sm">

@@ -1,6 +1,7 @@
 import { createHmac } from 'node:crypto';
 import { expect, test, type Page } from '@playwright/test';
-import { createProjectViaUi, deleteProjectViaUi, submitAndWait, uniqueName } from './support/projects';
+import { consoleOk } from './support/fleetData';
+import { createProjectViaUi, deleteProjectViaUi, openDeliveryLog, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 const isPhone = (testInfo: { project: { name: string } }) => testInfo.project.name === 'phone';
@@ -71,6 +72,7 @@ test.describe('webhooks', () => {
 
       // The delivery log shows the accepted request and not the rejected one.
       await page.goto(`/admin/projects/${project}/integrations`);
+      await openDeliveryLog(page);
       await expect(page.getByTestId('delivery-row')).toHaveCount(1);
       await expect(page.getByTestId('delivery-row')).toContainText('PW-1');
       expect(await hasHorizontalOverflow(page)).toBe(false);
@@ -80,16 +82,65 @@ test.describe('webhooks', () => {
       await expect(page.getByTestId('delivery-row').first()).toBeVisible();
       expect(await hasHorizontalOverflow(page)).toBe(false);
 
-      // Rotation: confirm inside the details, then the old secret stops working.
+      // Rotation: confirm in the dialog, then the old secret stops working.
       const jira = page.locator(`[data-testid=webhook-endpoint][data-source=jira][data-project=${project}]`);
-      await jira.getByText('Rotate secret').click();
-      await submitAndWait(page, jira.getByTestId('webhook-rotate'));
+      const rotateDialog = await openDialog(page, jira.getByTestId('webhook-rotate-open'));
+      await submitAndWait(page, rotateDialog.getByTestId('webhook-rotate'));
       await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
       const second = await page.getByTestId('webhook-secret-value').inputValue();
       expect(second).not.toBe(first);
 
       expect((await page.request.post(url, { data: body, headers: headers(first) })).status()).toBe(401);
       expect((await page.request.post(url, { data: body, headers: headers(second) })).status()).toBe(200);
+      expect(errors).toEqual([]);
+    } finally {
+      await deleteProjectViaUi(page, project);
+    }
+  });
+
+  test('a rule is added and removed from the Integrations tab, with the CLI validation @phone', async ({ page }, testInfo) => {
+    test.setTimeout(180_000);
+    const project = uniqueName('wr');
+    const errors = collectBrowserErrors(page);
+    await createProjectViaUi(page, project);
+    try {
+      consoleOk(['fleet:template:create', project, 'web']);
+      await createSecret(page, project);
+      await page.goto(`/admin/projects/${project}/integrations`);
+      const jira = page.locator('[data-testid=webhook-endpoint][data-source=jira]');
+
+      const add = async (status: string, template: string): Promise<void> => {
+        const dialog = await openDialog(page, jira.getByTestId('webhook-rule-add'));
+        await dialog.getByLabel('When an issue moves into the status').fill(status);
+        await dialog.getByLabel('Template to deploy (deploy rules)').selectOption(template);
+        await submitAndWait(page, dialog.getByTestId('webhook-rule-save'));
+      };
+
+      await add('Dispatched', 'web');
+      await expect(page.getByTestId('flashes')).toContainText('added');
+      await expect(jira.getByTestId('webhook-rules')).toContainText('on_status=Dispatched');
+
+      // The same refusals as the command: a duplicate status, and no template.
+      await add('dispatched', 'web');
+      await expect(page.getByTestId('flashes')).toContainText('There is already a rule for this status.');
+      await add('Other', '');
+      await expect(page.getByTestId('flashes')).toContainText("Choose one of the project's templates.");
+      await expect(jira.getByTestId('webhook-rules').locator('li')).toHaveCount(1);
+      expect(await hasHorizontalOverflow(page)).toBe(false);
+
+      // Removing asks first.
+      const dialog = await openDialog(page, jira.getByTestId('webhook-rule-remove'));
+      await dialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(dialog).toBeHidden();
+      await expect(jira.getByTestId('webhook-rules').locator('li')).toHaveCount(1);
+      const confirm = await openDialog(page, jira.getByTestId('webhook-rule-remove'));
+      if (isPhone(testInfo)) {
+        const box = await confirm.getByTestId('webhook-rule-remove-confirm').boundingBox();
+        expect(box!.height).toBeGreaterThanOrEqual(43.5);
+      }
+      await submitAndWait(page, confirm.getByTestId('webhook-rule-remove-confirm'));
+      await expect(page.getByTestId('flashes')).toContainText('removed');
+      await expect(jira.getByTestId('webhook-no-rules')).toBeVisible();
       expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -103,6 +154,7 @@ test.describe('webhooks', () => {
       await page.goto(`/admin/projects/${project}`);
       await page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Integrations' }).click();
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/integrations$`));
+      await openDeliveryLog(page);
       await expect(page.getByTestId('deliveries-empty')).toBeVisible();
     } finally {
       await deleteProjectViaUi(page, project);

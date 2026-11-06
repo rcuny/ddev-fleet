@@ -2,7 +2,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { type APIResponse, type Locator, type Page, expect } from '@playwright/test';
 import { expectNoBlockingViolations } from './support/axe';
 import { consoleJson, consoleOk, instanceRow, runConsole } from './support/fleetData';
-import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, openDeliveryLog, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { removeSecret, revealSecret, saveSecret, secretRow, submitSecret, test as secretsTest, uniqueSecret, uniqueValue } from './support/secrets';
 import {
   acquireAdminLock,
@@ -543,6 +543,7 @@ test.describe('axe sweep: webhooks', () => {
       await clean(page, 'the webhooks overview');
 
       await page.goto(`/admin/projects/${project}/integrations`);
+      await openDeliveryLog(page);
       await expect(page.getByTestId('deliveries-empty')).toBeVisible();
       await clean(page, 'the webhooks project tab');
     } finally {
@@ -565,9 +566,17 @@ test.describe('axe sweep: webhooks', () => {
       await follow(page, page.getByTestId('webhook-secret-done'));
 
       const jira = endpoint(page, 'jira', project);
-      await jira.getByText('Rotate secret').click();
-      await expect(jira.getByTestId('webhook-rotate')).toBeVisible();
-      await clean(page, 'the open rotate details');
+      const rotateDialog = await openDialog(page, jira.getByTestId('webhook-rotate-open'));
+      await expect(rotateDialog.getByTestId('webhook-rotate')).toBeVisible();
+      await clean(page, 'the open rotate dialog');
+      await rotateDialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(rotateDialog).toBeHidden();
+
+      const addDialog = await openDialog(page, jira.getByTestId('webhook-rule-add'));
+      await expect(addDialog.getByTestId('webhook-rule-form')).toBeVisible();
+      await clean(page, 'the open add-rule dialog');
+      await addDialog.getByRole('button', { name: 'Cancel' }).click();
+      await expect(addDialog).toBeHidden();
 
       await endpoint(stale, 'jira', project).getByTestId('webhook-create').click();
       await expect(stale.getByTestId('flashes')).toContainText('already has a webhook secret for Jira');
@@ -627,6 +636,7 @@ test.describe('axe sweep: webhooks', () => {
       expect((await deliver(page, 'bitbucket', project, bitbucket, { repository: { full_name: 'acme/blog' } }, bitbucketId('pullrequest:approved'))).body.result).toBe('failed');
 
       await page.goto(`/admin/projects/${project}/integrations`);
+      await openDeliveryLog(page);
       for (const result of ['accepted', 'duplicate', 'ignored', 'failed']) {
         await expect(page.locator(`[data-testid=delivery-row][data-result=${result}]`).first()).toBeVisible();
       }
