@@ -1,9 +1,8 @@
-"""FLE-8: ci/systemd_security.py (offline scoring, baseline compare, regression
-detection) and ci/systemd-security-live.sh.
+"""FLE-8/FLE-238: ci/systemd_security.py (offline scoring of the 1.x units, baseline compare,
+regression detection).
 
 ci/ is not a package, so the script is loaded by path. The end-to-end tests
-score real units and need systemd-analyze; like tests/pytest/ansible/test_systemd_sandbox.py
-they skip without it unless FLEET_REQUIRE_SYSTEMD_ANALYZE is set (CI), in which
+score real units and need systemd-analyze; they skip without it unless FLEET_REQUIRE_SYSTEMD_ANALYZE is set (CI), in which
 case a missing binary fails the run."""
 
 from __future__ import annotations
@@ -30,9 +29,6 @@ def _load(name: str, path: Path):
 
 
 ci = _load("systemd_security_ci", ROOT / "ci" / "systemd_security.py")
-sandbox = _load(
-    "systemd_sandbox_tests", ROOT / "tests" / "pytest" / "ansible" / "test_systemd_sandbox.py"
-)
 
 BASELINE_FILE = ROOT / "ci" / "systemd-security-baseline.json"
 HAVE_ANALYZE = shutil.which("systemd-analyze") is not None
@@ -254,7 +250,6 @@ def test_environment_without_a_baseline_reports_everything_as_new(tmp_path, caps
     code, out, err = _compare(tmp_path, capsys, None, cur, "server1")
     assert code == 0
     assert "No baseline recorded for `server1` yet" in out and "| NEW |" in out
-    assert "authelia.service" in out  # not-loaded units are mentioned
     assert "update-baseline" in err and "server1" in err
 
 
@@ -362,48 +357,59 @@ def test_update_baseline_creates_the_file_with_the_default_tolerance(tmp_path, c
 # --- the committed baseline ------------------------------------------------------------
 
 
-def test_committed_baseline_has_an_offline_environment():
+def test_committed_baseline_covers_exactly_the_shipped_1x_units():
     data = json.loads(BASELINE_FILE.read_text())
     assert data["tolerance"] == 0.1
-    offline = data["environments"]["offline"]
-    assert set(offline["units"]) == {
-        "caddy.service",
-        "fleet-boot.service",
-        "fleet-reboot-notify.service",
-        "fleet.service",
-    }
-    assert all(u["score"] <= sandbox.THRESHOLD for u in offline["units"].values())
+    assert set(data["environments"]) == {"offline"}
+    assert "install_units" not in data
+    expected = set(ci.unit_files()) | {"caddy.service"}
+    assert set(data["environments"]["offline"]["units"]) == expected
+    # the 1.x units the installer ships, by name
+    for unit in (
+        "fleet-backup.service", "fleet-boot.service", "fleet-mercure.service",
+        "fleet-scheduler.service", "fleet-status.service", "fleet-tls-check.service",
+        "fleet-tmux.service", "fleet-upgrade-check.service", "fleet-worker@.service",
+        "firewall-deadman.service", "firewall-deadman-bootcheck.service",
+        "firewall-sync.service",
+    ):  # fmt: skip
+        assert unit in expected
     assert BASELINE_FILE.read_text() == json.dumps(data, indent=2, sort_keys=True) + "\n"
 
 
-# --- no drift from tests/pytest/ansible/test_systemd_sandbox.py ---------------------------
+def test_only_1x_units_are_scored_and_no_python_era_path_is_left():
+    assert all(ROOT / "install" in d.parents for d in ci.UNIT_DIRS)
+    assert not hasattr(ci, "ROLES") and not hasattr(ci, "TEMPLATE_VARS")
+    for gone in (
+        "ci/systemd-security-live.sh",
+        "ansible/security-probe.yml",
+        "ansible/roles/security_probe",
+    ):
+        assert not (ROOT / gone).exists(), gone
 
 
-def test_ci_rendering_matches_the_sandbox_tests():
-    assert ci.TEMPLATE_VARS == sandbox.VARS
-    assert ci.CADDY_VENDOR_UNIT == sandbox.CADDY_VENDOR_UNIT
-    rendered = ci.render_all()
-    assert rendered["fleet.service"] == sandbox._fleet()
-    assert rendered["fleet-boot.service"] == sandbox._boot()
-    assert rendered["fleet-reboot-notify.service"] == sandbox._notify()
-    assert rendered["caddy.service"] == sandbox._caddy_dropin()
-
-
-def test_the_report_script_is_loaded_from_the_role():
-    assert ci.REPORT_SCRIPT == ROOT / "ansible/roles/security_probe/files/fleet-security-report"
-    assert ci.load_report_module().SCHEMA == 1
+def test_a_unit_shipped_twice_is_an_error(tmp_path):
+    for d in ("a", "b"):
+        (tmp_path / d).mkdir()
+        (tmp_path / d / "x.service").write_text("[Service]\n")
+    with pytest.raises(ci.CiError, match="ships twice"):
+        ci.unit_files((tmp_path / "a", tmp_path / "b"))
 
 
 # --- end to end with the real systemd-analyze -------------------------------------------------
 
 
+def _offline_report(tmp_path, files=None):
+    files = files if files is not None else ci.unit_files()
+    return ci.collect_offline(files, ci.CADDY_DROPIN, tmp_path)
+
+
 def test_offline_scores_match_the_baseline(analyze, tmp_path, capsys):
     out = tmp_path / "offline.json"
     code, stdout, _ = _run(tmp_path, capsys, "offline", "--out", out)
-    assert code == 0 and "fleet.service" in stdout
+    assert code == 0 and "fleet-backup.service" in stdout
     report = json.loads(out.read_text())
-    assert report["host"] == "offline" and set(report["units"]) == set(ci.render_all())
-    assert all(d["score"] <= sandbox.THRESHOLD for d in report["units"].values())
+    assert report["host"] == "offline"
+    assert set(report["units"]) == set(ci.unit_files()) | {"caddy.service"}
     code, table, err = _run(
         tmp_path, capsys, "compare", "--env", "offline", "--current", out,
         "--report-md", tmp_path / "r.md", "--report-json", tmp_path / "r.json",
@@ -412,20 +418,71 @@ def test_offline_scores_match_the_baseline(analyze, tmp_path, capsys):
     assert "REGRESSION" not in table
 
 
-def test_dropping_a_sandbox_directive_is_caught_end_to_end(analyze, tmp_path, capsys):
-    rendered = ci.render_all()
-    assert "ProtectSystem=strict\n" in rendered["fleet.service"]
-    rendered["fleet.service"] = rendered["fleet.service"].replace("ProtectSystem=strict\n", "")
-    report = ci.collect_offline(rendered, tmp_path)
+def test_weakening_a_unit_is_caught_end_to_end(analyze, tmp_path, capsys):
+    """Removing ProtectSystem from fleet-backup.service (a hardened unit) must fail the check."""
+    files = ci.unit_files()
+    source = files["fleet-backup.service"].read_text()
+    assert "ProtectSystem=" in source
+    weak = tmp_path / "weak" / "fleet-backup.service"
+    weak.parent.mkdir()
+    weak.write_text(
+        "".join(l for l in source.splitlines(True) if not l.startswith("ProtectSystem="))
+    )
+    report = _offline_report(tmp_path, {**files, "fleet-backup.service": weak})
     out = _write(tmp_path / "regressed.json", report)
     code, table, err = _run(
         tmp_path, capsys, "compare", "--env", "offline", "--current", out,
         "--report-md", tmp_path / "r.md", "--report-json", tmp_path / "r.json",
     )  # fmt: skip
     assert code == 1
-    assert err.startswith("REGRESSION fleet.service (offline): 1.8 -> ")
+    assert err.startswith("REGRESSION fleet-backup.service (offline): 1.4 -> ")
     assert "ProtectSystem" in table  # the directive that moved is listed
-    assert "fleet-boot.service` | 1.8 | 1.8 | 0.0 | OK" in table  # the others are untouched
+    assert "fleet-tls-check.service` | 1.7 | 1.7 | 0.0 | OK" in table  # the others are untouched
+
+
+def test_weakening_the_caddy_dropin_is_caught(analyze, tmp_path, capsys):
+    dropin = tmp_path / "caddy-sandbox.conf"
+    dropin.write_text(
+        "".join(
+            l for l in ci.CADDY_DROPIN.read_text().splitlines(True)
+            if not l.startswith(("ProtectKernelTunables=", "PrivateDevices="))
+        )
+    )  # fmt: skip
+    report = ci.collect_offline({}, dropin, tmp_path)
+    out = _write(tmp_path / "caddy.json", report)
+    base = json.loads(BASELINE_FILE.read_text())["environments"]["offline"]
+    only_caddy = {**base, "units": {"caddy.service": base["units"]["caddy.service"]},
+                  "overview": {"caddy.service": base["overview"]["caddy.service"]}}  # fmt: skip
+    code, _, err = _run(
+        tmp_path, capsys, "compare", "--baseline", _baseline(tmp_path, offline=only_caddy),
+        "--current", out,
+    )  # fmt: skip
+    assert code == 1 and "REGRESSION caddy.service" in err
+
+
+def test_report_page_has_no_host_names_and_lists_every_unit(analyze, tmp_path, capsys):
+    out = tmp_path / "off.json"
+    _run(tmp_path, capsys, "offline", "--out", out)
+    _run(tmp_path, capsys, "compare", "--current", out, "--report-json", tmp_path / "c.json")
+    page = tmp_path / "page.md"
+    code, _, _ = _run(
+        tmp_path, capsys, "report", "--compare", tmp_path / "c.json", "--out", page,
+        "--date", "2026-11-06",
+    )  # fmt: skip
+    text = page.read_text()
+    assert code == 0 and "Generated:** 2026-11-06" in text and "Status: OK" in text
+    for unit in ci.unit_files():
+        assert f"`{unit}`" in text
+    assert "ddev" + "3" not in text and "pipeline run" not in text and "Host" not in text
+
+
+def test_committed_report_matches_the_baseline_and_names_no_host():
+    text = (ROOT / "SYSTEMD-SECURITY-REPORT.md").read_text()
+    base = json.loads(BASELINE_FILE.read_text())["environments"]["offline"]
+    for unit in base["units"]:
+        assert f"`{unit}`" in text
+    for private in [f"ddev{n}" for n in range(1, 6)] + ["bitbucket.org", "fleet" + ".pm"]:
+        assert private not in text
 
 
 def test_offline_without_systemd_analyze_is_a_clear_error(tmp_path, capsys, monkeypatch):
@@ -442,124 +499,3 @@ def test_require_flag_fails_when_systemd_analyze_is_missing(monkeypatch):
     monkeypatch.delenv("FLEET_REQUIRE_SYSTEMD_ANALYZE")
     with pytest.raises(pytest.skip.Exception):
         _require_analyze()
-
-
-# --- ci/systemd-security-live.sh ------------------------------------------------------------------
-
-LIVE = ROOT / "ci" / "systemd-security-live.sh"
-FAKE_SSH = """\
-#!/bin/sh
-echo "$@" >> "$FAKE_SSH_LOG"
-case "$*" in
-  *broken*) exit 255 ;;
-esac
-cat "$FAKE_SSH_REPORT"
-"""
-
-
-@pytest.fixture
-def live_env(tmp_path):
-    work = tmp_path / "work"
-    work.mkdir()
-    (work / "ci").symlink_to(ROOT / "ci")
-    bin_dir = tmp_path / "bin"
-    bin_dir.mkdir()
-    ssh = bin_dir / "ssh"
-    ssh.write_text(FAKE_SSH)
-    ssh.chmod(0o755)
-    python = bin_dir / "python"  # a wrapper, not a symlink: the venv is found next to argv[0]
-    python.write_text(f'#!/bin/sh\nexec "{sys.executable}" "$@"\n')
-    python.chmod(0o755)
-    report = _write(tmp_path / "report.json", _report({"fleet.service": _unit(1.8)}))
-    # Never the real baseline file: it changes whenever a real baseline is recorded.
-    baseline = _baseline(tmp_path, server1=_report({"fleet.service": _unit(1.8)}))
-    env = {
-        **os.environ,
-        "PATH": f"{bin_dir}:{os.environ['PATH']}",
-        "FAKE_SSH_LOG": str(tmp_path / "ssh.log"),
-        "FAKE_SSH_REPORT": str(report),
-        "SYSTEMD_SECURITY_BASELINE": str(baseline),
-        # a missing systemd-analyze skips the (slow, informational) offline step
-        "SYSTEMD_ANALYZE": str(tmp_path / "no-such-systemd-analyze"),
-    }
-    for name in os.environ:
-        if name.startswith(("BITBUCKET_", "JIRA_ALERT_")) or name in (
-            "SECURITY_PROBE_TARGETS",
-            "PUBLISH_REPORT",
-        ):
-            env.pop(name)
-    return work, env
-
-
-def _live(work, env, **extra):
-    return subprocess.run(
-        ["bash", str(LIVE)],
-        cwd=work,
-        env={**env, **extra},
-        capture_output=True,
-        text=True,
-        timeout=60,
-    )
-
-
-def test_live_check_skips_when_no_targets_are_configured(live_env):
-    work, env = live_env
-    for value in (None, "", "   "):
-        extra = {} if value is None else {"SECURITY_PROBE_TARGETS": value}
-        done = _live(work, env, **extra)
-        assert done.returncode == 0 and "skipping" in done.stdout
-    assert not (work / "reports").exists()
-
-
-def test_live_check_fetches_compares_and_still_checks_every_target_on_failure(live_env):
-    work, env = live_env
-    done = _live(
-        work,
-        env,
-        SECURITY_PROBE_TARGETS="down=fleet-probe@broken.example fresh=fleet-probe@fresh.example",
-    )
-    assert done.returncode == 1  # the unreachable host fails the run ...
-    assert (work / "reports" / "fresh.json").exists()  # ... but the other one was still checked
-    assert (work / "reports" / "systemd-security-fresh.md").exists()
-    assert "NEW" in done.stdout  # a host with no baseline yet: reported, not failed
-    # ("fresh" has no baseline in the fixture baseline file)
-    assert "could not fetch the security report from down" in done.stderr
-    log = (Path(env["FAKE_SSH_LOG"])).read_text()
-    for opt in ("-T", "BatchMode=yes", "StrictHostKeyChecking=yes", "ConnectTimeout=20"):
-        assert opt in log
-    assert "fleet-probe@fresh.example" in log
-
-
-def test_live_check_succeeds_when_every_target_is_fine(live_env):
-    work, env = live_env
-    done = _live(work, env, SECURITY_PROBE_TARGETS="server1=fleet-probe@server1.example")
-    assert done.returncode == 0, done.stderr
-
-
-def test_live_check_rejects_a_malformed_target(live_env):
-    work, env = live_env
-    done = _live(work, env, SECURITY_PROBE_TARGETS="just-a-host")
-    assert done.returncode == 1 and "bad SECURITY_PROBE_TARGETS entry" in done.stderr
-
-
-# --- units shipped as plain files under install/etc (FLE-80) -------------------------------
-
-
-def test_install_units_are_recorded_and_not_in_the_sandboxed_sets():
-    data = json.loads(BASELINE_FILE.read_text())
-    recorded = data["install_units"]["units"]
-    assert set(recorded) == {"fleet-mercure.service", "fleet-tmux.service"}
-    for unit in recorded:
-        assert (ROOT / "install" / "etc" / unit).is_file()
-        for env in data["environments"].values():
-            assert unit not in env["units"]
-    assert recorded["fleet-tmux.service"]["reason"].startswith("Exempt on purpose")
-
-
-@pytest.mark.parametrize("unit", ["fleet-mercure.service", "fleet-tmux.service"])
-def test_install_unit_scores_do_not_regress(analyze, unit):
-    data = json.loads(BASELINE_FILE.read_text())
-    recorded = data["install_units"]["units"][unit]["score"]
-    probe = ci.load_report_module()
-    score = probe.analyze_unit(str(ROOT / "install" / "etc" / unit), ["--offline=yes"])["score"]
-    assert score <= recorded + data["tolerance"], f"{unit} is now {score}, recorded {recorded}"

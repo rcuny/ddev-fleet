@@ -68,8 +68,8 @@ tests/playwright/    TypeScript @playwright/test, its own npm package
                          ProjectTransferMatrixTest, Setup/SetupFieldMatrixTest, Setup/SetupLinkRefusalTest; the browser keeps
                          download, upload, confirm, layout at 390 px and the wizard walk),
                          secrets (fleet-wide and project secrets, reveal, audit log)
-tests/pytest/        Python: ansible/ (role and template checks, systemd sandbox scoring), repo/ (systemd security
-                     scorer and report, the Renovate merge helper)
+tests/pytest/        Python: ansible/ (role and template checks), repo/ (systemd security scorer of the 1.x
+                     units, its baseline and report, the Renovate merge helper)
 ```
 
 ## Running

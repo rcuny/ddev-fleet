@@ -52,7 +52,7 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
 | `app/` | The Symfony 8.1 project (PHP 8.4): `src/`, `templates/`, `assets/`, `config/`, `migrations/`, `tests/` |
 | `tests/playwright/` | TypeScript browser E2E (`@playwright/test`), its own npm package |
 | `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `tests/README-tests.md`) |
-| `ci/` | Tag guard (`tag-guard.sh`), the systemd security scorer and its baseline, requirements files for the Python CI steps |
+| `ci/` | Tag guard (`tag-guard.sh`), the offline systemd security scorer for the installer's 1.x units and its baseline, requirements files for the Python CI steps |
 | `bitbucket-pipelines.yml`, `renovate-config.json` | CI and dependency updates |
 | `install/` | The 1.x installer (pure bash): `install.sh` (bootstrap), `run.sh`, `lib/common.sh`, `steps/NN-*.sh`, `etc/` (unit files, pool, sudoers line, env drop-ins), `libexec/apply` (the root helper), `bin/fleet` (the CLI wrapper), `uninstall.sh`. Tested by `app/tests/Repo/Installer*Test` and friends |
 | `ansible/` | Provisioning for the 0.x host layout, kept as reference and not used by the installer (`ansible/LEGACY-0x.md`) |
@@ -284,7 +284,7 @@ exist on `develop`, and the 1.x installer does not use it (`ansible/LEGACY-0x.md
 host from `develop`, and never run the full
 `site.yml` against a live host at all (the `fleet_service` role rewrites the checkout's git
 remote). Apply individual roles through the scoped playbooks beside it (`caddy-only.yml`,
-`hardening.yml`, `fleet-units.yml`, `security-probe.yml`, `authelia.yml`, `claude-onboarding.yml`),
+`hardening.yml`, `fleet-units.yml`, `authelia.yml`, `claude-onboarding.yml`),
 `--check --diff` first. The roles are not reshaped for 1.x. Roles, in `site.yml` order:
 
 | Role | Responsibility |
@@ -316,7 +316,7 @@ on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays i
 - `docs/development.md` — setup, environment variables, stand-in, adding a component.
 - `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
 - `changelog.d/` — **changelog fragments**: a change adds `changelog.d/<KEY>.md` (a `### Added|Changed|...` heading and bullets), never a line in `CHANGELOG.md`; `ci/changelog-assemble.php` builds the release section (`ChangelogAssembleTest`).
-- `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.
+- `docs/README-ci.md` — pipelines, tag guard, the offline systemd security check of the 1.x units and its baseline.
 - `docs/v0/` — the 0.x (Python) reference, re-implemented milestone by milestone.
 - `tests/README-tests.md` — suites and how to run them (counts: `ci/test-counts.sh`).
 
