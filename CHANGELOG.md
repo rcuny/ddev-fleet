@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`reauth.success`, `reauth.failure`, `reauth.required`), never with a password or a value. The export passphrase field
   now states its minimum length.
 
+### Fixed
+- **FLE-235:** The re-auth limiter counts only failed password attempts and is keyed on user and client address, so a hijacked session can no longer lock the real administrator out and successful confirmations never use the budget.
+- **FLE-235:** A sealed export, turning on Git over SSH in the container and deleting a project now close the re-auth window; `docs/secrets.md` notes that an Authelia-only user without a fleet account cannot re-authenticate.
+- **FLE-235:** Playwright: the secret save helper waits for the fresh page instead of submitting a form Turbo was about to replace (flaky 422 on phone).
+
 ## [1.5.1] - 2026-11-06
 
 ### Added
