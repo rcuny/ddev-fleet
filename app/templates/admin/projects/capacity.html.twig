@@ -9,16 +9,68 @@
         </twig:block>
     </twig:PageHeader>
 
-    <div class="mt-6 grid max-w-2xl gap-4" data-testid="project-section-capacity">
+    <div class="mt-6 grid max-w-3xl gap-8" data-testid="project-section-capacity">
         <twig:Card>
             <twig:Card:Header>
-                <twig:Card:Title>Capacity</twig:Card:Title>
-                <twig:Card:Description>The project's CPU threads and slots are edited on the Source tab for now.</twig:Card:Description>
+                <twig:Card:Title>Project caps</twig:Card:Title>
+                <twig:Card:Description>The ceiling shared by all instances of {{ project.name }}. Template caps below are clamped by it.</twig:Card:Description>
             </twig:Card:Header>
-            <twig:Card:Content>
-                <p class="mb-4 text-sm" data-testid="capacity-effective">Effective: {{ effectiveThreads }} of {{ allocatable }} allocatable threads{{ project.cpuThreads is null ? ' (no project cap)' }}.</p>
-                <twig:Button as="a" variant="outline" href="{{ path('project_source', {name: project.name}) }}#project-capacity-fields" class="h-11 md:h-8">Edit on Source</twig:Button>
+            <twig:Card:Content class="grid gap-6">
+                <p class="text-sm" data-testid="capacity-effective">Effective: {{ effectiveThreads }} of <span data-testid="capacity-allocatable">{{ allocatable }}</span> allocatable threads{{ project.cpuThreads is null ? ' (no project cap)' }}.</p>
+                {{ form_start(form, {attr: {class: 'grid gap-6'}}) }}
+                    {{ form_errors(form) }}
+                    <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
+                        {{ form_row(form.cpuThreads) }}
+                        {{ form_row(form.slots) }}
+                    </div>
+                    <div class="flex flex-col gap-2 md:flex-row">
+                        {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                    </div>
+                {{ form_end(form) }}
             </twig:Card:Content>
         </twig:Card>
+
+        <section class="grid gap-4" aria-labelledby="template-caps-title" data-testid="template-caps">
+            <h2 id="template-caps-title">Template caps</h2>
+            {% if threadsOver or slotsOver %}
+                <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="template-caps-warning">
+                    <twig:ux:icon name="lucide:triangle-alert" />
+                    <twig:Alert:Title>Template caps exceed the project cap</twig:Alert:Title>
+                    <twig:Alert:Description class="text-ink-body">
+                        {% if threadsOver %}The templates' own CPU threads add up to {{ explicitThreads }}, above the project's {{ effectiveThreads }}. {% endif %}
+                        {% if slotsOver %}The templates' own slots add up to {{ explicitSlots }}, above the project's {{ project.slots }}. {% endif %}
+                        That is allowed: templates rarely peak together and the project cap still holds.
+                    </twig:Alert:Description>
+                </twig:Alert>
+            {% endif %}
+            {% if rows|length == 0 %}
+                <p class="text-sm text-muted-foreground" data-testid="template-caps-empty">This project has no templates yet.</p>
+            {% else %}
+                <twig:Table>
+                    <twig:Table:Caption class="sr-only">Template caps of {{ project.name }}</twig:Table:Caption>
+                    <twig:Table:Header>
+                        <twig:Table:Row>
+                            <twig:Table:Head>Template</twig:Table:Head>
+                            <twig:Table:Head>CPU threads</twig:Table:Head>
+                            <twig:Table:Head>Slots</twig:Table:Head>
+                            <twig:Table:Head>Effective threads</twig:Table:Head>
+                            <twig:Table:Head>Effective slots</twig:Table:Head>
+                        </twig:Table:Row>
+                    </twig:Table:Header>
+                    <twig:Table:Body>
+                        {% for row in rows %}
+                            <twig:Table:Row data-testid="template-cap-row" data-template="{{ row.name }}">
+                                <twig:Table:Cell class="font-medium"><a href="{{ path('template_edit', {name: project.name, template: row.name}) }}" class="inline-flex min-h-11 items-center underline-offset-4 hover:underline md:min-h-0">{{ row.name }}</a></twig:Table:Cell>
+                                <twig:Table:Cell data-testid="template-cap-threads">{{ row.threads ?? 'inherited' }}</twig:Table:Cell>
+                                <twig:Table:Cell data-testid="template-cap-slots">{{ row.slots ?? 'inherited' }}</twig:Table:Cell>
+                                <twig:Table:Cell data-testid="template-cap-effective-threads">{{ row.effectiveThreads }}</twig:Table:Cell>
+                                <twig:Table:Cell data-testid="template-cap-effective-slots">{{ row.effectiveSlots ?? 'unlimited' }}</twig:Table:Cell>
+                            </twig:Table:Row>
+                        {% endfor %}
+                    </twig:Table:Body>
+                </twig:Table>
+                <p class="text-sm text-muted-foreground">Edit a template's own caps in its form: select its name.</p>
+            {% endif %}
+        </section>
     </div>
 {% endblock %}
