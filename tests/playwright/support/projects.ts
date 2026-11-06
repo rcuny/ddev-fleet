@@ -28,16 +28,32 @@ export async function createProjectViaUi(page: Page, name: string, git: string =
   }
 }
 
+/** Types the project name the delete dialog asks for (read from the dialog itself, so the caller needs no name). */
+export async function fillDeleteName(dialog: Locator): Promise<void> {
+  const name = (await dialog.locator('label strong').textContent())?.trim() ?? '';
+  await dialog.getByTestId('delete-confirm-name').fill(name);
+}
+
+/** Opens the project's Delete dialog on its Transfer & danger tab (goes there first unless the page is already on it). */
+export async function openDeleteDialog(page: Page): Promise<Locator> {
+  const match = /\/admin\/projects\/([a-z0-9-]+)/.exec(new URL(page.url()).pathname);
+  if (match && !page.url().endsWith('/transfer')) {
+    await page.goto(`/admin/projects/${match[1]}/transfer`);
+  }
+  return openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+}
+
 /**
  * Deletes a project through its Danger zone dialog; does nothing when it is already gone (made for `finally`, so it
  * must not throw when the test failed before the project existed).
  */
 export async function deleteProjectViaUi(page: Page, name: string): Promise<void> {
-  const response = await page.goto(`/admin/projects/${name}/source`);
+  const response = await page.goto(`/admin/projects/${name}/transfer`);
   if (!response || response.status() === 404) {
     return;
   }
   const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+  await fillDeleteName(dialog);
   await dialog.getByRole('button', { name: 'Delete project' }).click();
   await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
 }

@@ -441,7 +441,7 @@ final class SecretPagesTest extends AdminTestCase
         sort($puts);
         self::assertSame(['fleet/BOTH_KEY', 'project:blog/BOTH_KEY'], $puts);
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
         self::assertSame('fleet-value-1', $this->store()->getManaged(null, 'BOTH_KEY'));
         self::assertSame('secret.delete', $this->audit()[0][1]);
         self::assertSame('project:blog/BOTH_KEY', $this->audit()[0][2]);
@@ -782,7 +782,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
         $this->store()->putManaged(null, 'FLEET_KEY', 'fleet-value-1', 'admin');
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
 
         self::assertResponseRedirects('/admin/projects', 303);
         self::assertSame(1, (int) $this->em()->getConnection()->fetchOne('SELECT COUNT(*) FROM secret'));
@@ -797,7 +797,7 @@ final class SecretPagesTest extends AdminTestCase
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
         $this->guard()->set('blog', 1);
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
 
         self::assertSame(['BLOG_KEY'], array_map(static fn ($s): string => $s->name, $this->store()->listManaged('blog')));
         self::assertSame([], $this->audit());

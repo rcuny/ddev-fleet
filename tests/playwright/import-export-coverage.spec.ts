@@ -145,7 +145,7 @@ async function sealedExport(page: Page, project: string, secret: string, value: 
   try {
     await createProjectViaUi(page, project);
     await addProjectSecret(page, project, secret, value);
-    await page.goto(`/admin/projects/${project}/source`);
+    await page.goto(`/admin/projects/${project}/transfer`);
     return await exportText(page, passphrase);
   } finally {
     await deleteProjectSecret(page, project, secret);
@@ -161,7 +161,7 @@ test.describe('export form', () => {
     try {
       await createProjectViaUi(page, name);
       await addProjectSecret(page, name, secret, value);
-      await page.goto(`/admin/projects/${name}/source`);
+      await page.goto(`/admin/projects/${name}/transfer`);
 
       const field = page.getByLabel('Passphrase for the secrets (optional)');
       await expect(field).toHaveAttribute('type', 'password');
@@ -182,7 +182,7 @@ test.describe('export form', () => {
       expect(text).not.toContain(value);
       expect(document.project).toMatchObject({ name, git: GIT_URL, default_template: null, typesense: false });
       // The page is still the project page and the field was not refilled.
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
       await expect(field).toHaveValue('');
     } finally {
       await deleteProjectSecret(page, name, secret);

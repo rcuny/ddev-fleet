@@ -110,7 +110,7 @@ final class ProjectTransferTest extends AdminTestCase
     {
         $this->seed();
 
-        $crawler = $this->open('/admin/projects/blog/source');
+        $crawler = $this->open('/admin/projects/blog/transfer');
 
         self::assertResponseStatusCodeSame(200);
         self::assertCount(1, $crawler->filter('[data-testid=export-project] form[action="/admin/projects/blog/export"]'));
@@ -158,7 +158,7 @@ final class ProjectTransferTest extends AdminTestCase
 
         $this->post('/admin/projects/blog/export', ['passphrase' => 'short']);
 
-        self::assertResponseRedirects('/admin/projects/blog/source', 303);
+        self::assertResponseRedirects('/admin/projects/blog/transfer', 303);
         self::assertStringNotContainsString('fleet-project-export', $this->body());
     }
 
