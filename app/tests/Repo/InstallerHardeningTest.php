@@ -119,12 +119,18 @@ final class InstallerHardeningTest extends TestCase
             'findmnt' => 'echo /tmp',
             'augenrules' => 'exit 0',
             'sysctl' => 'exit 0',
-            'runuser' => 'echo \'{"ports":[{"port":80},{"port":9108}]}\'',
+            'runuser' => ($env['RUNUSER_FAIL_FIRST'] ?? '' ? 'n='.escapeshellarg($root.'/runuser-count').'; [ -f "$n" ] || { : > "$n"; exit 2; }; ' : '').'echo \'{"ports":[{"port":80},{"port":9108}]}\'',
         ]);
         $code = ($conf ? 'mkdir -p "$FLEET_ETC_DIR"; printf %s '.escapeshellarg($conf).' > "$FLEET_ETC_DIR/hardening.conf"; ' : '')
             .$pre.'DPKG_UPDATES_DIR="$FLEET_ROOT_PREFIX/none"; . "$INSTALL_DIR/steps/99-harden.sh"; step_main';
 
-        return $this->withCommon($code, ['FLEET_ROOT_PREFIX' => $root] + $env, $stubs);
+        $syncEnv = [
+            'FLEET_FIREWALL_TEST_PATH' => $stubs.':'.(string) getenv('PATH'),
+            'FLEET_FIREWALL_STATE' => $root.'/firewall-ports',
+            'FLEET_FIREWALL_LOCK' => $root.'/firewall-sync.lock',
+        ];
+
+        return $this->withCommon($code, ['FLEET_ROOT_PREFIX' => $root] + $env + $syncEnv, $stubs);
     }
 
     private function prefix(bool $keys = true): string
@@ -158,6 +164,18 @@ final class InstallerHardeningTest extends TestCase
         [$status] = $this->applyStep($root, "ENABLED=0\n");
         self::assertSame(0, $status);
         self::assertFileDoesNotExist($root.'/etc/ssh/sshd_config.d/10-fleet-hardening.conf');
+    }
+
+    public function testNamedPortsAreOpenedRightAfterTheFirstEnableEvenWhenTheFirstSyncFails(): void
+    {
+        $root = $this->prefix();
+        [$status, , $err] = $this->applyStep($root, '', ['SUDO_USER' => 'operator', 'RUNUSER_FAIL_FIRST' => '1'], 'HARDEN=1; HARDEN_SSH_USERS=(operator); HARDEN_GRACE=15; ');
+
+        self::assertSame(0, $status, $err);
+        self::assertStringNotContainsString('named-port sync failed', $err, 'a failure before the enable is not a warning');
+        $calls = (string) file_get_contents($root.'/calls.log');
+        self::assertNotFalse(strpos($calls, 'ufw allow 9108/tcp'), 'the named port is opened by the sync after the enable');
+        self::assertLessThan(strpos($calls, 'ufw allow 9108/tcp'), strpos($calls, 'ufw --force enable'));
     }
 
     public function testAnExplicitRunWritesTheFilesAndAStoredRunReappliesThem(): void

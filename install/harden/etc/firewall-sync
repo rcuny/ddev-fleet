@@ -21,7 +21,8 @@ LOCK=${FLEET_FIREWALL_LOCK:-/run/lock/fleet-firewall-sync.lock}
 
 # Ports that are never ours to open or close.
 keep='^(80|443)$'
-ssh_ports=$(sed -n 's/^SSH_PORTS=//p' "$CONF" 2>/dev/null | head -n 1 | tr -cd '0-9 ')
+# The settings file is written after the installer's first sync: a missing file means no SSH ports to skip, not a failure.
+ssh_ports=$( { sed -n 's/^SSH_PORTS=//p' "$CONF" 2>/dev/null || true; } | head -n 1 | tr -cd '0-9 ')
 
 exec 9>"$LOCK"
 flock -n 9 || { echo "fleet-firewall-sync: another run is in progress"; exit 0; }
