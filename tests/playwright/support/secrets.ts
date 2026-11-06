@@ -85,8 +85,8 @@ async function signedInAs(page: Page): Promise<string> {
 }
 
 /**
- * The stand-in identity has no database row, but the re-auth page checks a real password: make an administrator of
- * that name (once per name and worker) with the spec password, through the New user form in a page of its own.
+ * The stand-in identity has no database row, but the re-auth page checks a real password: make a user of
+ * that name (once per name and worker) with the spec password; a member, not an administrator, so the setup wizard still finds no admin, through the New user form in a page of its own.
  */
 async function ensureUserRow(page: Page): Promise<string> {
   const actor = await signedInAs(page);
@@ -94,7 +94,7 @@ async function ensureUserRow(page: Page): Promise<string> {
     usersMade.add(actor);
     const other = await page.context().newPage();
     try {
-      await createUserViaUi(other, { username: actor, displayName: 'Spec actor', admin: true });
+      await createUserViaUi(other, { username: actor, displayName: 'Spec actor' });
     } catch {
       // Already there (the default admin, another spec): the password check below tells.
     } finally {
