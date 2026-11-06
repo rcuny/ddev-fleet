@@ -101,6 +101,12 @@ row name the job and the instance: `deploy queued: blog--fle-66 (job 12)`.
   - A rule with `--label-prefix` (and optionally `--strip-suffix`, which the branch glob must end with) forms the label as
     prefix + branch minus suffix, slugified: `feature/ABC-1898-x--pw-run` gives `pw-feature-abc-1898-x`. It **never
     overwrites**: a taken label allocates `-1`, `-2`, ... A rule with neither derives the label from the branch alone.
+  - **`--reuse`** (Bitbucket deploy rules, with or without `--label-prefix`): the derived label is *reused*. A push to a branch
+    whose instance already exists **redeploys it in place** (fresh checkout, same post-deploy) instead of allocating `-1`,
+    `-2`, ...; the job list shows `deploy` then `redeploy`. Use it for CI rules (`feature/`, `release/`, `hotfix/`,
+    `renovate/`). Leave it off where each event should get a clean separate instance. As for a fixed label, a busy
+    instance refuses the redeploy (`Busy: ...` in the delivery). Jira rules do not take it: a re-dispatch still creates
+    `<key>-1`.
   - **Fitting.** When `<project>--<label>` would be longer than 59 characters the label is cut and ends in `-` plus the first
     6 hex of the SHA-1 of the branch name, so the same branch always lands on the same id. The fitting counts the project's
     additional hostnames (`<hostname>-<id>` must fit too) and, for a derived label, keeps room for a `-999` suffix.
