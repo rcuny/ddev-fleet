@@ -32,4 +32,28 @@ test.describe('project sections on a phone @phone @smoke', () => {
       await deleteProjectViaUi(page, name);
     }
   });
+
+  test('the select works from the keyboard alone', async ({ page }) => {
+    test.setTimeout(120_000);
+    const errors = collectBrowserErrors(page);
+    const name = uniqueName();
+
+    try {
+      await createProjectViaUi(page, name, undefined, 'overview');
+      const select = page.getByRole('navigation', { name: 'Project sections' }).getByRole('combobox', { name: 'Project section' });
+      // Tab until the select has the focus (it is the first control of the page body that follows the header).
+      for (let i = 0; i < 30 && !(await select.evaluate((el) => el === document.activeElement)); i++) {
+        await page.keyboard.press('Tab');
+      }
+      await expect(select).toBeFocused();
+
+      // Arrow Down moves to the next tab (Overview -> Source) and goes there; no pointer involved.
+      await page.keyboard.press('ArrowDown');
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
+      await expect(select).toHaveValue(new RegExp(`/admin/projects/${name}/source$`));
+      expect(errors).toEqual([]);
+    } finally {
+      await deleteProjectViaUi(page, name);
+    }
+  });
 });

@@ -10,6 +10,7 @@ use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Webhook\WebhookRepository;
+use App\Domain\Webhook\WebhookSource;
 use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Host\Capacity\AllocatableThreads;
 use App\Fleet\Instances\InstanceSiteRefresher;
@@ -21,7 +22,7 @@ use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
-use App\Fleet\Secrets\SecretService;
+use App\Fleet\Secrets\SecretStore;
 use App\Form\Project\ProjectType;
 use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
@@ -56,7 +57,7 @@ final class ProjectController extends AbstractController
         private readonly PortMirrorSwitch $mirror,
         private readonly AllocatableThreads $allocatable,
         private readonly InstanceRepository $instances,
-        private readonly SecretService $secrets,
+        private readonly SecretStore $secrets,
         private readonly WebhookRepository $webhookEndpoints,
     ) {
     }
@@ -122,11 +123,11 @@ final class ProjectController extends AbstractController
     {
         $project = $this->load($name);
         $allocatable = $this->allocatable->get();
-        $secrets = $this->secrets->overview($name)->secrets;
+        // Only this project's endpoints, and the secret names without the asset scan SecretService::overview() runs.
         $webhooks = [];
-        foreach ($this->webhookEndpoints->endpoints() as $endpoint) {
-            if ($endpoint->project()->name() === $name) {
-                $webhooks[$endpoint->source()->value] = true;
+        foreach (WebhookSource::cases() as $source) {
+            if (null !== $this->webhookEndpoints->endpoint($name, $source)) {
+                $webhooks[$source->value] = true;
             }
         }
 
@@ -136,7 +137,7 @@ final class ProjectController extends AbstractController
                 'instances' => \count($this->instances->byProject($project)),
                 'templates' => \count($this->templateNames($name)),
                 'ports' => \count($project->ports()),
-                'secrets' => \count($secrets),
+                'secrets' => \count($this->secrets->listManaged($name)),
             ],
             'webhooks' => $webhooks,
             'allocatable' => $allocatable,
@@ -147,7 +148,7 @@ final class ProjectController extends AbstractController
     #[Route('/admin/projects/{name}/access', name: 'project_access', requirements: ['name' => self::NAME], methods: ['GET'])]
     public function access(string $name): Response
     {
-        return $this->section($name, 'access');
+        return $this->render('admin/projects/access.html.twig', ['project' => $this->load($name)]);
     }
 
     #[Route('/admin/projects/{name}/capacity', name: 'project_capacity', requirements: ['name' => self::NAME], methods: ['GET'])]
@@ -156,9 +157,8 @@ final class ProjectController extends AbstractController
         $project = $this->load($name);
         $allocatable = $this->allocatable->get();
 
-        return $this->render('admin/projects/section.html.twig', [
+        return $this->render('admin/projects/capacity.html.twig', [
             'project' => $project,
-            'active' => 'capacity',
             'allocatable' => $allocatable,
             'effectiveThreads' => min($project->cpuThreads() ?? $allocatable, $allocatable),
         ]);
@@ -167,7 +167,7 @@ final class ProjectController extends AbstractController
     #[Route('/admin/projects/{name}/transfer', name: 'project_transfer', requirements: ['name' => self::NAME], methods: ['GET'])]
     public function transfer(string $name): Response
     {
-        return $this->section($name, 'transfer');
+        return $this->render('admin/projects/transfer.html.twig', ['project' => $this->load($name)]);
     }
 
     #[Route('/admin/projects/{name}/source', name: 'project_source', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
@@ -332,11 +332,6 @@ final class ProjectController extends AbstractController
         if (null !== $warning) {
             $this->addFlash('warning', $warning);
         }
-    }
-
-    private function section(string $name, string $active): Response
-    {
-        return $this->render('admin/projects/section.html.twig', ['project' => $this->load($name), 'active' => $active]);
     }
 
     private function load(string $name): Project
