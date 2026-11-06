@@ -344,7 +344,6 @@ final class ProjectController extends AbstractController
                 'gitBotEmail' => self::optionalText($data['gitBotEmail'] ?? null),
                 'issueIdRegexp' => self::optionalText($data['issueIdRegexp'] ?? null),
                 'displaySubmoduleBranch' => self::optionalText($data['displaySubmoduleBranch'] ?? null),
-                'containerSsh' => true === ($data['containerSsh'] ?? false),
             ]);
             try {
                 $this->projects->update($name, $input);
@@ -589,7 +588,6 @@ final class ProjectController extends AbstractController
             'gitBotEmail' => $project->gitBotEmail(),
             'issueIdRegexp' => $project->issueIdRegexp(),
             'displaySubmoduleBranch' => $project->displaySubmoduleBranch(),
-            'containerSsh' => $project->containerSsh(),
         ];
     }
 

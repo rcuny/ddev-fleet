@@ -317,6 +317,18 @@ test.describe('projects and templates', () => {
     const name = uniqueName();
 
     try {
+      await page.goto('/admin/projects/new');
+      // Checkbox row: same, bottom right corner, on the create form (the edit tabs have no checkbox left).
+      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' });
+      const checkboxBox = (await checkboxRow.boundingBox())!;
+      if (isPhone()) {
+        expect(checkboxBox.height).toBeGreaterThanOrEqual(43.5);
+      }
+      const typesense = page.getByLabel(/Git over SSH inside the container/);
+      await expect(typesense).not.toBeChecked();
+      await checkboxRow.click({ position: { x: checkboxBox.width - 3, y: checkboxBox.height - 2 } });
+      await expect(typesense).toBeChecked();
+
       await createProjectViaUi(page, name);
 
       // Radio row: the far right edge of the row, far from the 16 px circle and from the text.
@@ -331,23 +343,11 @@ test.describe('projects and templates', () => {
       await expect(page.getByLabel('Custom identity')).toBeChecked();
       await expect(page.getByLabel('Do not set a git identity')).not.toBeChecked();
 
-      // Checkbox row: same, bottom right corner.
-      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' });
-      const checkboxBox = (await checkboxRow.boundingBox())!;
-      if (isPhone()) {
-        expect(checkboxBox.height).toBeGreaterThanOrEqual(43.5);
-      }
-      const typesense = page.getByLabel(/Git over SSH inside the container/);
-      await expect(typesense).not.toBeChecked();
-      await checkboxRow.click({ position: { x: checkboxBox.width - 3, y: checkboxBox.height - 2 } });
-      await expect(typesense).toBeChecked();
-
       // Both survive a save (a custom identity needs a name or an email).
       await page.getByLabel('Identity name').fill('Acme Bot');
       await page.getByRole('button', { name: 'Save', exact: true }).click();
       await expect(page.getByTestId('flashes')).toContainText('Project saved.');
       await expect(page.getByLabel('Custom identity')).toBeChecked();
-      await expect(typesense).toBeChecked();
     } finally {
       await deleteProjectViaUi(page, name);
     }

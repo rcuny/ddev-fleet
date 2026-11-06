@@ -29,21 +29,21 @@
         {{ form_row(form.issueIdRegexp) }}
     </section>
 
+{% if create %}
     <twig:Separator />
 
-    {#- Container SSH moves to the Keys tab in a later ticket; hostnames, Typesense and the caps are create-only (Network and Capacity tabs). -#}
+    {#- Container SSH is changed on the Keys & secrets tab after creation; hostnames, Typesense and the caps are create-only (Network and Capacity tabs). -#}
     <section class="grid gap-6" aria-labelledby="project-other-heading" data-testid="source-other">
         <h2 id="project-other-heading" class="text-base">Other settings</h2>
         {{ form_row(form.containerSsh) }}
-        {% if create %}
-            {{ form_row(form.additionalHostnames) }}
-            {{ form_row(form.typesense) }}
-            <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
-                {{ form_row(form.cpuThreads) }}
-                {{ form_row(form.slots) }}
-            </div>
-        {% endif %}
+        {{ form_row(form.additionalHostnames) }}
+        {{ form_row(form.typesense) }}
+        <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
+            {{ form_row(form.cpuThreads) }}
+            {{ form_row(form.slots) }}
+        </div>
     </section>
+{% endif %}
 
     <div class="flex flex-col gap-2 md:flex-row">
         {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}

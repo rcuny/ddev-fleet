@@ -5,8 +5,11 @@ declare(strict_types=1);
 namespace App\Controller\Admin;
 
 use App\Domain\Project\Project;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Projects\NotFound;
+use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
+use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Secrets\RevealThrottled;
 use App\Fleet\Secrets\SecretConflict;
@@ -38,6 +41,8 @@ final class SecretController extends AbstractController
         private readonly ProjectService $projects,
         private readonly CurrentActor $actor,
         private readonly ReauthGuard $reauth,
+        private readonly TemplateService $templates,
+        private readonly AuditLog $audit,
     ) {
     }
 
@@ -90,6 +95,51 @@ final class SecretController extends AbstractController
         return $this->page($project, null, ['name' => self::queryName($request)]);
     }
 
+    /**
+     * Turns the per-instance ssh-agent with the push key on or off. Turning it ON is as sensitive as revealing a secret:
+     * the server needs `confirm=1` (the dialog's button sends it; a crafted request without it changes nothing) and a recent
+     * re-auth. Turning it off needs neither. The change is audited, a repeat of the stored value is not.
+     */
+    #[Route('/admin/projects/{name}/keys/ssh', name: 'project_keys_ssh', requirements: ['name' => self::PROJECT], methods: ['POST'])]
+    public function containerSsh(Request $request, string $name): Response
+    {
+        $project = $this->load($name);
+        $this->requireCsrf($request);
+        $enable = '1' === $request->request->get('container_ssh');
+
+        if ($enable === $project->containerSsh()) {
+            $this->addFlash('success', 'No change: Git over SSH in the container was already '.($enable ? 'on' : 'off').'.');
+
+            return $this->back($project);
+        }
+
+        if ($enable) {
+            if ('1' !== $request->request->get('confirm')) {
+                $this->addFlash('warning', 'Not changed: turning on Git over SSH needs the confirmation.');
+
+                return $this->back($project);
+            }
+            if (!$this->reauth->requireRecentAuth()) {
+                return $this->reauth->challenge('container-ssh', $name, '/admin/projects/'.$name.'/keys');
+            }
+        }
+
+        try {
+            $this->projects->update($name, ProjectInput::fromProject($project)->with(['containerSsh' => $enable]));
+        } catch (ValidationFailed $failed) {
+            $this->addFlash('warning', 'Not changed: '.implode(' ', array_values($failed->errors)));
+
+            return $this->back($project);
+        } catch (NotFound) {
+            throw new NotFoundHttpException();
+        }
+
+        $this->audit->record($this->actor->name(), AuditLog::PROJECT_CONTAINER_SSH, $name.'/'.($enable ? 'on' : 'off'));
+        $this->addFlash('success', 'Git over SSH in the container is now '.($enable ? 'on' : 'off').'.');
+
+        return $this->back($project);
+    }
+
     #[Route('/admin/projects/{name}/secrets', name: 'project_secret_put', requirements: ['name' => self::PROJECT], methods: ['POST'])]
     public function projectPut(Request $request, string $name): Response
     {
@@ -118,6 +168,11 @@ final class SecretController extends AbstractController
     {
         $this->requireCsrf($request);
         $submitted = $request->request->all();
+        // A multi-line value comes from the textarea, a single line from the masked input.
+        $multiline = $submitted['value_multiline'] ?? null;
+        if (('' === ($submitted['value'] ?? '')) && \is_string($multiline)) {
+            $submitted['value'] = $multiline;
+        }
         $name = $submitted['name'] ?? null;
         $shown = \is_string($name) ? $name : '';
 
@@ -201,6 +256,7 @@ final class SecretController extends AbstractController
             'form' => $form,
             'errors' => $errors,
             'retryAfter' => $retryAfter,
+            'templates' => null === $project ? [] : $this->templates->list($project->name()),
         ], new Response(status: $status));
         if (null !== $revealed) {
             // The one response that carries a value: no browser or proxy may keep it.

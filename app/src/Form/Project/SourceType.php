@@ -22,7 +22,6 @@ final class SourceType extends AbstractType
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         ProjectFields::source($builder);
-        ProjectFields::other($builder);
         $builder->add('save', SubmitType::class, ['label' => 'Save']);
     }
 

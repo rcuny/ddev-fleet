@@ -373,7 +373,7 @@ final class ProjectPagesTest extends AdminTestCase
 
         $crawler = $this->open('/admin/projects/blog/source');
 
-        self::assertSame(['Repository', 'Git identity', 'Issue ids', 'Other settings'], $crawler->filter('[data-testid=project-form] h2')->each(static fn (Crawler $h): string => trim($h->text())));
+        self::assertSame(['Repository', 'Git identity', 'Issue ids'], $crawler->filter('[data-testid=project-form] h2')->each(static fn (Crawler $h): string => trim($h->text())));
         self::assertCount(1, $crawler->filter('[data-testid=issue-id-preview]'));
         self::assertCount(0, $crawler->filter('[data-testid=project-capacity-fields]'), 'capacity moved to its own tab');
     }
@@ -557,8 +557,10 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog/source');
-        foreach (['radio-row', 'checkbox-row'] as $slot) {
+        // The edit tab has the radios; the checkboxes (Typesense, Git over SSH) are on the create form.
+        $pages = ['radio-row' => '/admin/projects/blog/source', 'checkbox-row' => '/admin/projects/new'];
+        foreach ($pages as $slot => $path) {
+            $crawler = $this->open($path);
             $rows = $crawler->filter('[data-slot='.$slot.']');
             self::assertGreaterThan(0, $rows->count(), $slot);
             foreach ($rows as $row) {

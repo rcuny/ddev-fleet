@@ -38,7 +38,7 @@ async function expectNoOverflow(page: Page, where: string): Promise<void> {
 async function saveSecret(page: Page, name: string, value: string): Promise<void> {
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await form.getByLabel('Value', { exact: true }).fill(value);
   // Wait for the POST itself so a failed submit reports its status instead of a missing flash.
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
@@ -88,12 +88,12 @@ test.describe('secrets', () => {
       await expect(row).toContainText(`[[${name.toLowerCase().replaceAll('_', '-')}]]`);
       await expect(row).toContainText('set by');
       expect(await page.content()).not.toContain(first);
-      await expect(page.getByLabel('Value')).toHaveValue('');
+      await expect(page.getByLabel('Value', { exact: true })).toHaveValue('');
 
       // Replace: the link fills the name in, the value box stays empty.
       await row.getByTestId('secret-replace').click();
       await expect(page.getByTestId('secret-form').getByLabel('Name')).toHaveValue(name);
-      await expect(page.getByTestId('secret-form').getByLabel('Value')).toHaveValue('');
+      await expect(page.getByTestId('secret-form').getByLabel('Value', { exact: true })).toHaveValue('');
       await saveSecret(page, name, second);
       await expect(page.getByTestId('secret-row').filter({ hasText: name })).toHaveCount(1);
       expect(await page.content()).not.toContain(second);
