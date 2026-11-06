@@ -124,7 +124,7 @@ def test_report_has_the_explanation_status_lines_and_sections(tmp_path, capsys, 
     assert "| [beta](#beta) | 257 | OK |" in text
     assert "## alpha" in text and "## beta" in text
     assert "## Offline: the unit files the product ships" in text
-    assert text.rstrip().endswith("[docs/README-ci.md](docs/README-ci.md).")
+    assert text.rstrip().endswith("[docs/contributing/ci.md](docs/contributing/ci.md).")
 
 
 def test_product_units_come_first_in_the_fixed_order(tmp_path, capsys, reports):

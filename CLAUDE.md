@@ -27,7 +27,7 @@ merge commit, then merged back into `develop`; one push sends `main`, `develop` 
 `hotfix/<slug>` off `main`, merged into `main` (+ tag) and `develop`. A 0.x hotfix is `hotfix/<slug>` off `legacy`,
 merged into `legacy` with a `v0.20.N` tag, and never merged into `develop` or `main`. `ci/tag-guard.sh` decides what a
 tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `v0.*` tag the tip of
-`origin/legacy`). Procedure: `docs/RELEASING.md`. Never push to GitHub by hand and never rewrite `main`, `develop`,
+`origin/legacy`). Procedure: `docs/contributing/releasing.md`. Never push to GitHub by hand and never rewrite `main`, `develop`,
 `legacy` or a tag. The `v1.0.0` to `v1.0.6` tags were cut on `develop` before the cut-over (release `v1.1.0`).
 
 ## Hard facts
@@ -42,8 +42,8 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
   pool; identity headers are trusted only from a request carrying the proxy secret (see "Production trust and the
   installer"). Never expose `app/public` any other way (`php -S`, a DDEV project): outside the installed host there
   is no proxy, and `dev` has the stand-in login.
-- The Python code of the 0.x line is gone from `main` and `develop`; it lives on the `legacy` branch, and its
-  documentation is kept under `docs/v0/` as history.
+- The Python code of the 0.x line is gone from `main` and `develop`; it lives on the `legacy` branch (with its
+  documentation).
 
 ## Repository map
 
@@ -51,12 +51,12 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
 |---|---|
 | `app/` | The Symfony 8.1 project (PHP 8.4): `src/`, `templates/`, `assets/`, `config/`, `migrations/`, `tests/` |
 | `tests/playwright/` | TypeScript browser E2E (`@playwright/test`), its own npm package |
-| `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `tests/README-tests.md`) |
+| `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `docs/contributing/testing.md`) |
 | `ci/` | Tag guard (`tag-guard.sh`), the systemd security scorer and its baseline, requirements files for the Python CI steps |
 | `bitbucket-pipelines.yml`, `renovate-config.json` | CI and dependency updates |
 | `install/` | The 1.x installer (pure bash): `install.sh` (bootstrap), `run.sh`, `lib/common.sh`, `steps/NN-*.sh`, `etc/` (unit files, pool, sudoers line, env drop-ins), `libexec/apply` (the root helper), `bin/fleet` (the CLI wrapper), `uninstall.sh`. Tested by `app/tests/Repo/Installer*Test` and friends |
-| `ansible/` | Provisioning for the 0.x host layout, kept as reference and not used by the installer (`ansible/LEGACY-0x.md`) |
-| `docs/` | Documentation index in `docs/README.md`; `docs/v0/` holds the 0.x reference |
+| `ansible/` | Provisioning for the 0.x host layout, kept as reference and not used by the installer |
+| `docs/` | Documentation: `docs/README.md` is the map (guides, reference, contributing) |
 | `demo/`, `scripts/` | A minimal DDEV project the 0.x installer seeds as `demo`; the Renovate merge helper |
 
 ### Namespaces (`app/src/`, `App\`)
@@ -94,16 +94,16 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
 | `App\Form\Setup` | The wizard's Symfony forms |
 | `App\Form\Project` | The project and template forms (`ProjectType`, `TemplateType`; plain Symfony forms, `novalidate`, errors come from the services through `ValidationErrorMapper`) |
 | `App\Form\User` | The user forms (`UserCreateType`, `UserEditType`, `UserPasswordType`, the shared `UserProjectsField`; `novalidate`; messages come from `UserService`, whose `InvalidUserInput` names the field it refused). The form theme draws a multiple expanded choice as 44 px checkbox rows |
-| `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be in `docs/installation.md` |
-| `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`, and adds `port:refresh`, which rewrites the instance Caddy sites, and `port:firewall`, which lists the public ports to open). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliDocsTest` against `docs/projects-and-templates.md`. A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
-| `App\Command\Instance`, `App\Command\Job` | `fleet:instance:deploy\|redeploy\|start\|stop\|destroy\|list\|log\|watch` and `fleet:job:list\|show\|retry\|prune`. The changing commands run **attached**: the same `JobExecutor` runs the jobs inline in the CLI process, one after another (`AttachedJobs`; `--detach` only enqueues; SIGINT marks the job `interrupted`, exit 130; trigger `cli`). Covered by `CliDocsTest` against `docs/instances-and-jobs.md` |
+| `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be named in `docs/reference/cli.md` (generated) and `InstallDocsTest` checks flags and `fleet.env` keys against `docs/reference/installer.md` and `docs/reference/configuration.md` |
+| `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`, and adds `port:refresh`, which rewrites the instance Caddy sites, and `port:firewall`, which lists the public ports to open). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliReferenceTest` (the generated `docs/reference/cli.md`). A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
+| `App\Command\Instance`, `App\Command\Job` | `fleet:instance:deploy\|redeploy\|start\|stop\|destroy\|list\|log\|watch` and `fleet:job:list\|show\|retry\|prune`. The changing commands run **attached**: the same `JobExecutor` runs the jobs inline in the CLI process, one after another (`AttachedJobs`; `--detach` only enqueues; SIGINT marks the job `interrupted`, exit 130; trigger `cli`). Covered by `CliReferenceTest` (`docs/reference/cli.md`) |
 | `App\Command\User` | `fleet:user:list\|create\|update\|delete\|grant\|revoke` (the same exit codes and `--format=json` as the project commands; every write goes through `IdentitySync::commit()`, a failed Authelia install after the commit is exit 0 with a `warning`; a password only from a hidden prompt or `--password-stdin`, never an option). `fleet:user:reset-password` stays flat in `App\Command` |
-| `App\Command\Asset` | `fleet:asset:list <project> [path]` and `fleet:asset:gc` (exit codes and `--format=table\|json` as the commands above). Own sub-directory, group `asset` in `install/bin/fleet`; covered by `AssetDocsTest` against `docs/assets.md` |
+| `App\Command\Asset` | `fleet:asset:list <project> [path]` and `fleet:asset:gc` (exit codes and `--format=table\|json` as the commands above). Own sub-directory, group `asset` in `install/bin/fleet`; covered by `AssetDocsTest` against `docs/reference/assets-and-secrets.md` |
 | `App\Fleet\Export` | Moving a project between hosts: `ExportFormat` (the `fleet-project-export` v1 JSON, 2 MiB cap), `ExportParser` (shape check: known keys, types, list sizes, paths in the problems, never a value), `ProjectExporter` (project, its ports, templates, webhook endpoints with rules, schedules by instance label; no ids, timestamps, webhook secrets), `PassphraseSealer` (secrets sealed with `crypto_pwhash` + `secretbox`, parameters in the file), `ProjectImporter` (`preview()` builds an `ImportPlan` of create / update / unchanged / skipped items from the **services' own `validate()` rules** and `apply()` writes it in one transaction, after commit refreshes access rules and Caddy sites), `InvalidExport`. Audit actions `project.export`, `project.import`; secrets are excluded unless a passphrase seals them, and a passphrase is never an option or argument |
-| `App\Command\Export`, `App\Command\Import` | `fleet:export:project`, `fleet:import:preview`, `fleet:import:apply` (groups `export` and `import` in `install/bin/fleet`; exit codes as above; `PassphraseInput` reads the passphrase from a prompt, `FLEET_EXPORT_PASSPHRASE` or stdin). Covered by `ExportDocsTest` against `docs/moving-projects.md`. The pages are `Controller\Admin\ProjectTransferController` (`/admin/projects/{name}/export`, `/admin/import`) |
-| `App\Fleet\Upgrade`, `App\Command\Upgrade` | The read side of `fleet upgrade`: `UpgradeAssessor` (installed + cached `ReleaseCatalog` + `ChangelogReader` + the `fleet.upgrade_check` registry in one call, never throws for an unreachable source) returns an `UpgradeAssessment` (`toArray()` is the documented JSON schema, `exitCode()` the R13 code); `fleet:upgrade:check` (`fleet upgrade --check`, text via `AssessmentPrinter`, `--json`, `--to`, `--no-cache`; exit 0 / 1 error / 2 usage / 3 blocked / 4 offline, **not** the `JsonOutput` codes) and the hidden `fleet:upgrade:plan` (JSON + `--force`); `fleet:upgrade:refresh` fills the cache. Read-only, no root, no sudoers line. The write side is the root helper `install/libexec/upgrade` (`sudo fleet upgrade [--to] [--yes] [--force=<id>] [--no-db-restore] [--repo-url=]`, handed over by `exec` from `install/bin/fleet`): plan and pre-flight, backup, the installer of the target commit, `fleet:upgrade:verify`, and a root-appended history file; `UpgradeRunner`, `UpgradeHistory`, `RollbackPlanner` and the hidden `fleet:upgrade:prepare\|backup\|restore` commands are its fleet-user steps. **Invariant: the upgrade has no sudoers entry and the application can never start it** (the installer restarts php-fpm and the workers, and "run any installer as root" would break "the app never runs as root"); the Upgrade page (`Controller\Admin\UpgradeController`) shows status and the command to copy, never a button. A new pre-flight check implements `UpgradeCheck` (tag `fleet.upgrade_check`, ids in `docs/upgrading.md`). Covered by `UpgradeCheckDocsTest` and `UpgradeDocsTest` against `docs/upgrading.md`; `ci/upgrade-rehearsal.sh` is the manual end-to-end rehearsal on a test host (never on a live one, never in CI) |
-| `App\Command\Ssh` | `fleet:ssh:trust <host>` (adds a server's host keys to `ssh/known_hosts` after the fingerprints were confirmed: prompt, `--fingerprint` or `--yes`); group `ssh` in `install/bin/fleet`, covered by `CliDocsTest` against `docs/projects-and-templates.md` |
-| `App\Command\Secret` | `fleet:secret:list\|set\|unset` (`--project=`; the value comes from a hidden prompt or standard input, never argv; actor `cli`), covered by `SecretsDocsTest` against `docs/secrets.md`; `SecretOptions` is not a command |
+| `App\Command\Export`, `App\Command\Import` | `fleet:export:project`, `fleet:import:preview`, `fleet:import:apply` (groups `export` and `import` in `install/bin/fleet`; exit codes as above; `PassphraseInput` reads the passphrase from a prompt, `FLEET_EXPORT_PASSPHRASE` or stdin). Covered by `ExportDocsTest` against `docs/reference/export-format.md`. The pages are `Controller\Admin\ProjectTransferController` (`/admin/projects/{name}/export`, `/admin/import`) |
+| `App\Fleet\Upgrade`, `App\Command\Upgrade` | The read side of `fleet upgrade`: `UpgradeAssessor` (installed + cached `ReleaseCatalog` + `ChangelogReader` + the `fleet.upgrade_check` registry in one call, never throws for an unreachable source) returns an `UpgradeAssessment` (`toArray()` is the documented JSON schema, `exitCode()` the R13 code); `fleet:upgrade:check` (`fleet upgrade --check`, text via `AssessmentPrinter`, `--json`, `--to`, `--no-cache`; exit 0 / 1 error / 2 usage / 3 blocked / 4 offline, **not** the `JsonOutput` codes) and the hidden `fleet:upgrade:plan` (JSON + `--force`); `fleet:upgrade:refresh` fills the cache. Read-only, no root, no sudoers line. The write side is the root helper `install/libexec/upgrade` (`sudo fleet upgrade [--to] [--yes] [--force=<id>] [--no-db-restore] [--repo-url=]`, handed over by `exec` from `install/bin/fleet`): plan and pre-flight, backup, the installer of the target commit, `fleet:upgrade:verify`, and a root-appended history file; `UpgradeRunner`, `UpgradeHistory`, `RollbackPlanner` and the hidden `fleet:upgrade:prepare\|backup\|restore` commands are its fleet-user steps. **Invariant: the upgrade has no sudoers entry and the application can never start it** (the installer restarts php-fpm and the workers, and "run any installer as root" would break "the app never runs as root"); the Upgrade page (`Controller\Admin\UpgradeController`) shows status and the command to copy, never a button. A new pre-flight check implements `UpgradeCheck` (tag `fleet.upgrade_check`, ids in `docs/reference/upgrade.md`). Covered by `UpgradeCheckDocsTest` and `UpgradeDocsTest` against `docs/reference/upgrade.md`; `ci/upgrade-rehearsal.sh` is the manual end-to-end rehearsal on a test host (never on a live one, never in CI) |
+| `App\Command\Ssh` | `fleet:ssh:trust <host>` (adds a server's host keys to `ssh/known_hosts` after the fingerprints were confirmed: prompt, `--fingerprint` or `--yes`); group `ssh` in `install/bin/fleet`, covered by `CliReferenceTest` |
+| `App\Command\Secret` | `fleet:secret:list\|set\|unset` (`--project=`; the value comes from a hidden prompt or standard input, never argv; actor `cli`), covered by `SecretsDocsTest` against `docs/reference/assets-and-secrets.md`; `SecretOptions` is not a command |
 | `App\Command\Support` | What those commands share: `JsonOutput` (`--format=table\|json`, `--json`, exit codes 0 done / 1 refused value / 2 not allowed now / 3 not found, the `{"error", "fields"}` document), `FieldErrors` (field name to `--option` or `<argument>`), `Shapes` (JSON for templates and ports). Not commands |
 | `App\Twig` | `ByteSizeExtension` (the `bytes` filter: `1536\|bytes` is `1.5 KiB`) |
 | `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`, and `IssueIdPreview`, the one LiveComponent: admin-only through `#[IsGranted]`) |
@@ -131,7 +131,7 @@ New work follows these namespaces; add a new one only with a reason.
   `queue`, Messenger transports `jobs` and `failed` only). Entities live under `App\Domain\<Area>\`.
 - **Locks** use Symfony Lock with a flock store in `FLEET_HOME/locks` (`LOCK_DSN`).
 - **Mercure** is a wake-up, never the log. `JobFeed` publishes `{"id","status","size"}` on the private topics `/jobs/<id>` and `/instances`; the text comes from `GET /jobs/<id>/log?from=<byte>`. Pages subscribe with the cookie `LiveFeedCookie` sets and poll (2 s log, 5 s list) when the hub is absent; a hub outage never fails a job. The installer runs a standalone hub (`fleet-mercure`, `127.0.0.1:3000`, legacy protocol mode) behind Caddy; the dev commands start none.
-- **Jobs.** A request never runs a process: it stores a job (`InstanceService`), a worker runs it. `dev` and `test` run the `jobs` transport as `sync://`, so a click runs the job in the request with the `RecordingCommandRunner`; `prod` is Doctrine (a test pins it). States: `queued` -> `running` -> `succeeded|failed|interrupted`; the executor takes the instance lock **before** the claim, so `running` implies a live holder, and a redelivered message finds a non-queued job and does nothing. Retry creates a new job (`retryOf`); a failed deploy retries as `redeploy`. With a `sync://` transport a busy instance cannot wait: after 3 nested re-queues the job fails. Only the `fleet-worker@1` unit consumes `jobs` (SQLite takes one consumer). Limits: 20 instances per deploy request, 90 days of retention (`FLEET_JOB_RETENTION_DAYS`). Instance states: `deploying`, `running`, `stopped`, `failed`, `destroying`, `unknown`; only the watcher moves `running|stopped|unknown`. Post-deploy lines run on the host as argv without a shell, with `[[token]]` substituted after splitting. Destroy never uses privilege: root-owned leftovers fail the job with the exact `sudo rm -rf` line and a retry is idempotent. A new job type implements `JobType` (names are unique, `UniqueJobTypesPass`) and adds its row to `docs/instances-and-jobs.md`.
+- **Jobs.** A request never runs a process: it stores a job (`InstanceService`), a worker runs it. `dev` and `test` run the `jobs` transport as `sync://`, so a click runs the job in the request with the `RecordingCommandRunner`; `prod` is Doctrine (a test pins it). States: `queued` -> `running` -> `succeeded|failed|interrupted`; the executor takes the instance lock **before** the claim, so `running` implies a live holder, and a redelivered message finds a non-queued job and does nothing. Retry creates a new job (`retryOf`); a failed deploy retries as `redeploy`. With a `sync://` transport a busy instance cannot wait: after 3 nested re-queues the job fails. Only the `fleet-worker@1` unit consumes `jobs` (SQLite takes one consumer). Limits: 20 instances per deploy request, 90 days of retention (`FLEET_JOB_RETENTION_DAYS`). Instance states: `deploying`, `running`, `stopped`, `failed`, `destroying`, `unknown`; only the watcher moves `running|stopped|unknown`. Post-deploy lines run on the host as argv without a shell, with `[[token]]` substituted after splitting. Destroy never uses privilege: root-owned leftovers fail the job with the exact `sudo rm -rf` line and a retry is idempotent. A new job type implements `JobType` (names are unique, `UniqueJobTypesPass`) and adds its row to the deploy description in `docs/concepts.md` if users see it.
 - **Authentication** is by header, never by password in the app. In `prod` the app trusts `Remote-User`,
   `Remote-Groups`, `Remote-Email` and `Remote-Name` only from a request that carries the proxy secret: Caddy sets the
   FastCGI parameter `FLEET_PROXY_AUTH` (`TrustedProxyChecker::PROXY_PARAM`) to `FLEET_PROXY_SECRET`, compared with
@@ -164,10 +164,10 @@ New work follows these namespaces; add a new one only with a reason.
 - **All project data validation lives in `App\Fleet\Projects\Rule`.** The pages (forms), the `fleet project|template|port`
   commands and later milestones (webhooks, export) go through `ProjectService`, `TemplateService` and `NamedPortService`;
   controllers, forms and commands never validate on their own. A new limit or rule is a `Rule` class plus a unit test, then
-  the field table in `docs/projects-and-templates.md`. Entities only store. Names are immutable. Git URLs, branches, command
+  the field table in `docs/reference/configuration.md`. Entities only store. Names are immutable. Git URLs, branches, command
   lines and issue id patterns are hostile input: the rules are allow-lists, and a consumer must still pass them as argv, never
-  through a shell. `docs/projects-and-templates.md` is checked by `CliDocsTest` (commands, options, exit codes): change a
-  command, change the guide.
+  through a shell. `docs/reference/cli.md` is generated and checked by `CliReferenceTest`: after changing a command's arguments or options run
+  `composer run docs:cli` in `app/`.
 - **Console commands**: `fleet <group>:<verb>` for the groups in the `FLEET_GROUPS` array of `install/bin/fleet` (one group per
   line, sorted; a new group is one new line, checked by `CliGroupsTest`; `fleet project list` also works). Commands that read or write the database are tested with
   `RunsFleetCommands` against a real migrated database; stderr assertions need `capture_stderr_separately`.
@@ -216,7 +216,7 @@ php vendor/bin/phpunit --testsuite Repo   # one suite: Unit | Integration | Func
 `FLEET_PW_TIER=quick|full` (default `full`, so a bare `npx playwright test` and the gate above are unchanged). `quick`
 is the Fleet CI merge gate on `feature/*` and `renovate/*`: `desktop` without the `*-coverage` and the
 `projects-validation` / `templates-validation` specs, `phone` limited to `@smoke`. `release/*`, `develop` and the
-nightly run use `full`. Details: `tests/README-tests.md`.
+nightly run use `full`. Details: `docs/contributing/testing.md`.
 
 ### Playwright modes
 
@@ -243,12 +243,12 @@ runner seam), `Functional/` (HTTP through `WebTestCase`, the wizard included), `
 pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its bash
 steps, the root helper, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
 `FLEET_MERCURE_BIN`, `ssh-keygen`, `shellcheck`) or run only as an unprivileged user, and skip otherwise. Each PHPUnit
-process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `tests/README-tests.md`. Current counts:
+process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `docs/contributing/testing.md`. Current counts:
 `ci/test-counts.sh` (never write counts into the docs).
 
 ## Production trust and the installer
 
-`install/install.sh --domain=<fqdn>` turns a Debian 13 host into a fleet (`docs/installation.md` is the user guide;
+`install/install.sh --domain=<fqdn>` turns a Debian 13 host into a fleet (`docs/guides/install.md` and `docs/reference/installer.md` are the user docs;
 keep it and `README.md` in step with the code, `InstallDocsTest` checks flags, commands and `fleet.env` keys).
 Facts to keep true when editing it:
 
@@ -273,14 +273,14 @@ Facts to keep true when editing it:
 - **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
   workers when the code or env changed.
 - Not shipped yet (do not assume it exists): `fleet-tmux`, named ports and Typesense exposure, the branch picker and
-  live-branch indicator. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/installation.md`; recovery: `fleet user:reset-password`).
+  live-branch indicator. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/reference/hardening.md`; recovery: `fleet user:reset-password`).
 - Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
   install/bin/fleet` before committing a script.
 
 ## The 0.x host layout (Ansible, legacy)
 
 `ansible/` still describes the 0.x host: it installs the Python package and units, which no longer
-exist on `develop`, and the 1.x installer does not use it (`ansible/LEGACY-0x.md`). Do not run it against a live
+exist on `develop`, and the 1.x installer does not use it. Do not run it against a live
 host from `develop`, and never run the full
 `site.yml` against a live host at all (the `fleet_service` role rewrites the checkout's git
 remote). Apply individual roles through the scoped playbooks beside it (`caddy-only.yml`,
@@ -298,27 +298,18 @@ remote). Apply individual roles through the scoped playbooks beside it (`caddy-o
 | `caddy` | Caddy apt repo + package, fleet-owned Caddy snippet dirs, seeded admin-auth default credentials, the rendered Caddyfile, the `50-fleet-sandbox.conf` systemd sandbox drop-in (FLE-1) |
 | `fleet_service` | Clones/updates the product repo into `{{ fleet_opt_dir }}`, installs the editable venv, deploys `fleet.service` + `fleet-boot.service` (both sandboxed via the shared `fleet-sandbox.inc.j2`, FLE-1; toggle `fleet_systemd_sandbox_enabled`) + `fleet-tmux.service` (owns the `fleet` tmux session in its own cgroup, deliberately unsandboxed; tag `fleet_tmux`) + the `fleet` CLI wrapper |
 | `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443 allows, plus the registry's named ports staged via `fleet-ufw-sync` before `ufw enable`), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
-| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/v0/operations.md`) |
+| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/reference/hardening.md`) |
 
 `network_hardening` and `security_hardening` are independently optional: every task in both gates
 on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays inert for both.
 
 ## Cross-references
 
-- `docs/README.md` — documentation index with the status of each document.
-- `docs/installation.md` — installing 1.x on a host: installer, setup wizard, recovery, security model, uninstalling.
-- `docs/assets.md` — a project's assets: the Assets tab, chunked browser upload and its cap, copying over SSH, path rules, `fleet asset:list|gc`.
-- `docs/instances-and-jobs.md` — instances and jobs: states, deploy, redeploy, start, stop, destroy, bulk work, the live log, `fleet instance:*` and `fleet job:*`, retention, troubleshooting.
-- `docs/projects-and-templates.md` — projects, templates and named ports: fields and limits, the pages, the `fleet project|template|port` commands, differences from 0.x.
-- `docs/secrets.md` — secrets: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, the `fleet secret:*` commands, the security model.
-- `docs/moving-projects.md` — moving a project between hosts: export file, sealed secrets, import preview, rsync of assets, `fleet export:project`, `fleet import:preview|apply`, `fleet backup:verify`.
-- `docs/upgrading.md` — upgrading a host: `fleet upgrade --check`, `sudo fleet upgrade`, rollback, pre-flight check ids, rollout notes, offline hosts, the rehearsal script (`ci/upgrade-rehearsal.sh`), FAQ.
-- `docs/development.md` — setup, environment variables, stand-in, adding a component.
-- `docs/RELEASING.md` — versioning, CHANGELOG conventions, release and hotfix procedure.
+- `docs/README.md` — the documentation map: four reader journeys and one line per page.
+- `docs/concepts.md`, `docs/guides/` — the user layers (concepts, install, first project, automation, CI, agents, access, operations, security).
+- `docs/reference/` — exact behaviour: `cli.md` (generated by `fleet:docs:cli`), configuration, installer, upgrade, backup, hardening, networking, capacity, assets and secrets, webhooks and schedules, export format, troubleshooting.
+- `docs/contributing/` — development setup, testing and gates, CI and the tag guard, releasing (versioning, changelog fragments, hotfixes).
 - `changelog.d/` — **changelog fragments**: a change adds `changelog.d/<KEY>.md` (a `### Added|Changed|...` heading and bullets), never a line in `CHANGELOG.md`; `ci/changelog-assemble.php` builds the release section (`ChangelogAssembleTest`).
-- `docs/README-ci.md` — pipelines, tag guard, the systemd security check and its baseline.
-- `docs/v0/` — the 0.x (Python) reference, re-implemented milestone by milestone.
-- `tests/README-tests.md` — suites and how to run them (counts: `ci/test-counts.sh`).
 
 If a tool wrapper condenses command output (RTK), treat the condensed output as complete; re-run
 a command as `rtk bypass <cmd>` only when its result is unusable (empty when output was clearly

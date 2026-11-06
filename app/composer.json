@@ -94,6 +94,7 @@
             "@php bin/console importmap:install",
             "@php bin/console tailwind:build"
         ],
+        "docs:cli": "@php bin/console fleet:docs:cli",
         "cs": "@php vendor/bin/php-cs-fixer check --diff",
         "stan": [
             "@php bin/console cache:warmup --env=dev",

@@ -55,7 +55,7 @@ final readonly class UpgradeRunner
             case UpgradeAssessment::OFFLINE:
                 return $refuse('The release source could not be read, and the upgrade needs it (the installer clones the release). Try again when GitHub is reachable.');
             case UpgradeAssessment::NOT_A_RELEASE:
-                return $refuse(\sprintf('This host runs "%s", not a release: there is nothing to compare with. Install a release with the installer (docs/installation.md, section 6).', $from));
+                return $refuse(\sprintf('This host runs "%s", not a release: there is nothing to compare with. Install a release with the installer (docs/reference/upgrade.md).', $from));
             case UpgradeAssessment::DOWNGRADE:
                 return $this->prepareRollback($assessment, $from, $noDbRestore);
             case UpgradeAssessment::UP_TO_DATE:

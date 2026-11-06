@@ -95,7 +95,7 @@ final class RepoHygieneTest extends TestCase
         // and SYSTEMD-SECURITY-REPORT.md (generated from the maintainer's live hosts). docs/v0 is scanned too.
         $roots = [
             'app', 'ci', 'install', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright', 'tests/pytest',
-            'tests/README-tests.md', 'CLAUDE.md', 'README.md', 'CONTRIBUTING.md', 'docs',
+            'CLAUDE.md', 'README.md', 'CONTRIBUTING.md', 'docs',
             '.github', '.gitignore', 'demo', 'scripts',
         ];
         $hits = $this->scan(self::root(), $roots, $this->ownerMatchers(self::OWNER_DIGESTS), self::SKIP_PATHS);

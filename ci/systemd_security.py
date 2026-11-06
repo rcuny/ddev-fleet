@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FLE-8: systemd exposure scores, a committed baseline and regression detection.
 
-Subcommands (see docs/README-ci.md):
+Subcommands (see docs/contributing/ci.md):
 
   offline          render the sandboxed units from the Ansible templates, score
                    them with `systemd-analyze security --offline=yes`, write a
@@ -385,7 +385,7 @@ def render_markdown(
     if improved:
         out += [
             f"{improved} unit(s) improved: consider `update-baseline --env {env_name}` "
-            "so the new, lower scores become the reference (see docs/README-ci.md).",
+            "so the new, lower scores become the reference (see docs/contributing/ci.md).",
             "",
         ]
     counts = {s: sum(1 for r in rows if r["status"] == s) for s in CAT_ORDER}
@@ -533,7 +533,7 @@ def _host_section(name: str, data: dict | None) -> list[str]:
     if has_no_baseline(data):
         out += [
             f"No baseline is recorded for `{name}` yet, so nothing can regress "
-            "(see docs/README-ci.md to record one).",
+            "(see docs/contributing/ci.md to record one).",
             "",
         ]
     missing = data.get("missing") or []
@@ -618,7 +618,7 @@ def render_report(
         "---",
         "",
         "How the check works, the baseline and how to update it: "
-        "[docs/README-ci.md](docs/README-ci.md).",
+        "[docs/contributing/ci.md](docs/contributing/ci.md).",
     ]
     return "\n".join(out) + "\n"
 

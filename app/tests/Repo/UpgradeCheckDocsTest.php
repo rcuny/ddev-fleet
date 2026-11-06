@@ -7,7 +7,7 @@ namespace App\Tests\Repo;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/upgrading.md against the code of `fleet upgrade --check`: every option, exit code, status and JSON key the
+ * docs/reference/upgrade.md against the code of `fleet upgrade --check`: every option, exit code, status and JSON key the
  * command has is documented.
  */
 final class UpgradeCheckDocsTest extends TestCase
@@ -19,7 +19,7 @@ final class UpgradeCheckDocsTest extends TestCase
 
     private static function doc(): string
     {
-        return (string) file_get_contents(self::root().'/docs/upgrading.md');
+        return (string) file_get_contents(self::root().'/docs/reference/upgrade.md');
     }
 
     public function testEveryOptionOfTheCheckCommandIsDocumented(): void
@@ -46,7 +46,7 @@ final class UpgradeCheckDocsTest extends TestCase
         preg_match_all("/^            '([A-Za-z]+)' =>/m", $parts[1], $keys);
         self::assertNotSame([], $keys[1]);
         foreach ($keys[1] as $key) {
-            self::assertStringContainsString('| `'.$key.'` |', self::doc(), 'undocumented JSON key '.$key);
+            self::assertMatchesRegularExpression('/^\\|[^|\\n]*`'.preg_quote($key, '/').'`[^|\\n]*\\|/m', self::doc(), 'undocumented JSON key '.$key);
         }
     }
 

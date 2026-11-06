@@ -22,7 +22,7 @@ SPECS = {
 
 
 def test_docs_only_change_runs_neither_phone_nor_coverage():
-    r = pw.select(["docs/README-ci.md", "CHANGELOG.md", "ci/run-gates.sh"], SPECS)
+    r = pw.select(["docs/contributing/ci.md", "CHANGELOG.md", "ci/run-gates.sh"], SPECS)
     assert r["phone"] == "off"
     assert r["targeted"] == []
 

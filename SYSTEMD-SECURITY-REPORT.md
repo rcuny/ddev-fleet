@@ -82,4 +82,4 @@ The units rendered from the Ansible templates and scored with `systemd-analyze s
 
 ---
 
-How the check works, the baseline and how to update it: [docs/README-ci.md](docs/README-ci.md).
+How the check works, the baseline and how to update it: [docs/contributing/ci.md](docs/contributing/ci.md).

@@ -7,7 +7,7 @@
 #   fleet fleet:host:render        ->  an already prefixed name is accepted as it is
 #   fleet doctrine:migrations:status -> ... doctrine:migrations:status, with the application environment loaded
 #   fleet tmux [<instance-id>]     ->  attaches this terminal to the agent workspace (also: fleet tmux:attach, fleet tmux attach)
-#   sudo fleet upgrade [--to] [--yes] ->  the root helper /usr/local/libexec/fleet/upgrade (runs the installer; see docs/upgrading.md)
+#   sudo fleet upgrade [--to] [--yes] ->  the root helper /usr/local/libexec/fleet/upgrade (runs the installer; see docs/reference/upgrade.md)
 #   fleet                          ->  lists the fleet:* commands
 #   fleet list | help <cmd> | ...  ->  anything that does not start with one of our groups goes to the console unchanged
 #

@@ -7,12 +7,12 @@ namespace App\Tests\Repo;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/secrets.md must describe the secret commands as they are: every command, option and argument is documented, and
+ * docs/reference/assets-and-secrets.md must describe the secret commands as they are: every command is documented (options: CliReferenceTest), and
  * the guide names nothing the code does not have. The indexes, the CHANGELOG and CLAUDE.md point at it.
  */
 final class SecretsDocsTest extends TestCase
 {
-    private const string GUIDE = 'docs/secrets.md';
+    private const string GUIDE = 'docs/reference/assets-and-secrets.md';
 
     private static function root(): string
     {
@@ -59,19 +59,12 @@ final class SecretsDocsTest extends TestCase
         ];
     }
 
-    public function testEveryCommandOptionAndArgumentIsDocumented(): void
+    public function testEveryCommandIsDocumented(): void
     {
         $guide = self::read(self::GUIDE);
-        $cli = self::cli();
 
-        foreach ($cli['commands'] as $command) {
+        foreach (self::cli()['commands'] as $command) {
             self::assertStringContainsString(substr($command, \strlen('fleet:')), $guide, "$command is not documented");
-        }
-        foreach ($cli['options'] as $option) {
-            self::assertStringContainsString($option, $guide, "$option is not documented");
-        }
-        foreach ($cli['arguments'] as $argument) {
-            self::assertStringContainsString('<'.$argument.'>', $guide, "the <$argument> argument is not documented");
         }
     }
 
@@ -79,9 +72,6 @@ final class SecretsDocsTest extends TestCase
     {
         $guide = self::read(self::GUIDE);
         $cli = self::cli();
-
-        preg_match_all('/(?<![\w-])(--[a-z][a-z0-9-]*)/', $guide, $flags);
-        self::assertSame([], array_values(array_diff(array_unique($flags[1]), $cli['options'])), 'the guide names options nothing implements');
 
         $known = array_map(static fn (string $command): string => substr($command, \strlen('fleet:')), $cli['commands']);
         preg_match_all('/\bfleet:secret:[a-z-]+/', $guide, $full);
@@ -110,7 +100,7 @@ final class SecretsDocsTest extends TestCase
         foreach ($codes as [, , $code]) {
             self::assertMatchesRegularExpression('/^\| `'.$code.'` \|/m', $guide, "exit code $code is not in the exit-code table");
         }
-        foreach (['--format=table|json', '"fields"', '"referenced"'] as $needle) {
+        foreach (['"fields"', '"referenced"'] as $needle) {
             self::assertStringContainsString($needle, $guide);
         }
     }
@@ -152,7 +142,7 @@ final class SecretsDocsTest extends TestCase
     {
         $unreleased = UnreleasedChangelog::text(self::root());
 
-        foreach (['FLE-39', 'fleet secret:', '[[token]]', 'audit log', 'docs/secrets.md'] as $needle) {
+        foreach (['fleet secret:', '[[token]]', 'audit log'] as $needle) {
             self::assertStringContainsString($needle, $unreleased, "[Unreleased] should mention $needle");
         }
         // The earlier entries stay in the same section: this one is added, not a rewrite.
@@ -162,8 +152,8 @@ final class SecretsDocsTest extends TestCase
 
     public function testTheIndexesAndAgentInstructionsPointAtTheGuide(): void
     {
-        foreach (['README.md', 'docs/README.md', 'CLAUDE.md', 'docs/projects-and-templates.md'] as $file) {
-            self::assertStringContainsString('secrets.md', self::read($file), "$file should link the guide");
+        foreach (['docs/README.md', 'docs/guides/first-project.md', 'CLAUDE.md'] as $file) {
+            self::assertStringContainsString('assets-and-secrets.md', self::read($file), "$file should link the guide");
         }
         $claude = self::read('CLAUDE.md');
         foreach (['App\Domain\Audit', 'App\Fleet\Audit', 'App\Command\Secret', 'SecretService', 'TokenRenderer', 'PlaceholderScanner', 'SecretName', 'CurrentActor', 'AuditController'] as $needle) {
