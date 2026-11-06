@@ -495,7 +495,7 @@ FLEETEOF
     fi
     if [ "$enable_now" = 1 ]; then
       run ufw --force enable
-      # Open the named ports right away instead of waiting up to a minute for the timer (osce search on 9108 etc.).
+      # Open the named ports right away instead of waiting up to a minute for the timer (for example Typesense on 9108).
       "$H_SBIN/fleet-firewall-sync" || log_warn "the named-port sync failed; the timer retries every minute"
     fi
   fi
