@@ -10,6 +10,11 @@ framework:
             policy: sliding_window
             limit: 10
             interval: '1 minute'
+        # Password re-entries on the re-auth page (App\Security\Reauth\ReauthService), per signed-in user.
+        reauth:
+            policy: sliding_window
+            limit: 5
+            interval: '15 minutes'
         # "Check now" on the Upgrade page (App\Fleet\Upgrade\CheckNowThrottle), per signed-in user: it asks GitHub.
         upgrade_check:
             policy: sliding_window
@@ -23,6 +28,8 @@ when@test:
     framework:
         rate_limiter:
             upgrade_check:
+                storage_service: fleet.test.reveal_storage
+            reauth:
                 storage_service: fleet.test.reveal_storage
             secret_reveal:
                 # In memory and without a reset between requests, so a test sees its own reveals and no other test's.

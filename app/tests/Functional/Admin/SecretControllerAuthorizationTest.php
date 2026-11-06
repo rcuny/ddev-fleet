@@ -13,6 +13,8 @@ use App\Security\FleetUser;
 use App\Tests\Support\AdminTestCase;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
+use Symfony\Component\HttpFoundation\Session\Session;
+use Symfony\Component\HttpFoundation\Session\Storage\MockArraySessionStorage;
 use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 use Symfony\Component\Security\Core\Authentication\Token\UsernamePasswordToken;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
@@ -25,6 +27,8 @@ use Symfony\Component\Security\Core\Exception\AccessDeniedException;
  */
 final class SecretControllerAuthorizationTest extends AdminTestCase
 {
+    private bool $openReauthWindow = false;
+
     private function signIn(string $group): void
     {
         $user = new FleetUser('alice', 'Alice', null, [$group], 'fleet-admins');
@@ -36,6 +40,12 @@ final class SecretControllerAuthorizationTest extends AdminTestCase
     private function request(string $method = 'GET'): Request
     {
         $request = Request::create('https://localhost/admin/secrets', $method, 'POST' === $method ? ['_token' => 'csrf-token', 'name' => 'NEW_KEY', 'value' => 'abc'] : [], [], [], ['HTTPS' => 'on', 'HTTP_SEC_FETCH_SITE' => 'same-origin']);
+        if ($this->openReauthWindow) {
+            // The reveal is gated by a recent password check: this request carries a session whose window is open.
+            $session = new Session(new MockArraySessionStorage());
+            $session->set('fleet.reauth', ['actor' => 'alice', 'until' => time() + 300]);
+            $request->setSession($session);
+        }
         $stack = $this->container()->get('request_stack');
         self::assertInstanceOf(RequestStack::class, $stack);
         $stack->push($request);
@@ -117,6 +127,7 @@ final class SecretControllerAuthorizationTest extends AdminTestCase
         $this->seed();
 
         $this->signIn('fleet-admins');
+        $this->openReauthWindow = true;
 
         self::assertSame(200, $this->controller()->fleetIndex($this->request())->getStatusCode());
         self::assertSame(200, $this->controller()->projectIndex($this->request(), 'blog')->getStatusCode());

@@ -38,7 +38,7 @@ and exporting again gives the same bytes.
 ## Export
 
 On the project's **General** tab, the **Export** card downloads `<project>.fleet-project.json`. The passphrase field
-is optional; leave it empty to export without secrets. The download is never cached (`Cache-Control: no-store`) and is
+is optional (at least 8 characters when given); leave it empty to export without secrets. An export with a passphrase carries the sealed secrets, so it needs a recent password check first: the page sends you to the re-auth page and back (a 5 minute window, see `docs/secrets.md`). An export without a passphrase carries no secrets and is not gated. The download is never cached (`Cache-Control: no-store`) and is
 recorded in the audit log as `project.export` with the project name only.
 
 On the command line, `fleet export:project <slug>` prints the file to standard output, or writes it with

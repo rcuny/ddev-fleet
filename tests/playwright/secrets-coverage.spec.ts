@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { createProjectViaUi, deleteProjectViaUi, navigate, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
-import { placeholderOf, removeSecret, revealSecret, saveSecret, secretRow, test, uniqueSecret, uniqueValue } from './support/secrets';
+import { openReauthWindow, placeholderOf, removeSecret, revealSecret, saveSecret, secretRow, test, uniqueSecret, uniqueValue } from './support/secrets';
 import { collectBrowserErrors, hasHorizontalOverflow, unexpectedErrors } from './support/shell';
 
 // Secrets, what needs a browser: the 422 answer with its a11y wiring, the normalised value in the reveal dialog, the delete dialog
@@ -137,6 +137,7 @@ test.describe('secrets: reveal', () => {
 
     try {
       await saveSecret(page, name, value);
+      await openReauthWindow(page);
       const [response] = await Promise.all([
         page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith(`/secrets/${name}/reveal`)),
         secretRow(page, name).getByTestId('secret-reveal').click(),

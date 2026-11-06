@@ -66,6 +66,8 @@ final class AuditPageTest extends AdminTestCase
 
     public function testTheEntriesOfASecretNewestFirstFourColumnsTheActorAUtcTimeAndNoValue(): void
     {
+        $this->confirmPassword();
+        $this->forgetReauthAudit();
         $this->post('/admin/secrets', ['name' => 'AUD_KEY', 'value' => 'first-value-aud-1']);
         $this->post('/admin/secrets', ['name' => 'AUD_KEY', 'value' => 'second-value-aud-2']);
         $this->post('/admin/secrets/AUD_KEY/reveal', []);
@@ -94,6 +96,8 @@ final class AuditPageTest extends AdminTestCase
 
     public function testTheFilterListsTheRecordedActionsNarrowsTheListKeepsItsSelectionAndResets(): void
     {
+        $this->confirmPassword();
+        $this->forgetReauthAudit();
         $this->post('/admin/secrets', ['name' => 'FIL_KEY', 'value' => 'fil-value']);
         $this->post('/admin/secrets/FIL_KEY/reveal', []);
 
@@ -167,6 +171,8 @@ final class AuditPageTest extends AdminTestCase
 
     public function testAProjectSecretAndItsDeletionWithTheProjectAreRecordedUnderProjectNameSecret(): void
     {
+        $this->confirmPassword();
+        $this->forgetReauthAudit();
         $this->seedProject('blog');
         $this->post('/admin/projects/blog/secrets', ['name' => 'PAUD_KEY', 'value' => 'paud-value']);
         $this->post('/admin/projects/blog/secrets/PAUD_KEY/reveal', []);

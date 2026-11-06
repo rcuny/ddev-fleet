@@ -2,7 +2,7 @@ import { expect, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
-import { test } from './support/secrets';
+import { revealSecret, test } from './support/secrets';
 
 // Secrets in a real browser, at 1280 px (desktop project) and 390 px (phone project): the fleet-wide page, the project's
 // Secrets tab, reveal, the audit log. Every test owns uniquely named secrets and removes them in `finally`, so the
@@ -66,10 +66,7 @@ function rowOf(page: Page, name: string): Locator {
 
 /** Presses Reveal on a row and returns the dialog showing the value (a plain form POST: the page is reloaded). */
 async function reveal(page: Page, name: string): Promise<Locator> {
-  await rowOf(page, name).getByTestId('secret-reveal').click();
-  const dialog = page.getByTestId('reveal-dialog');
-  await expect(dialog).toBeVisible({ timeout: 30_000 });
-  return dialog;
+  return revealSecret(page, name);
 }
 
 test.describe('secrets', () => {
@@ -114,7 +111,8 @@ test.describe('secrets', () => {
       // The audit log has the three entries and no value.
       await page.goto('/admin/audit');
       await expect(page.getByRole('heading', { level: 1, name: 'Audit log' })).toBeVisible();
-      const subject = page.getByTestId('audit-row').filter({ hasText: `fleet/${name}` });
+      // The reveal that was stopped by the re-auth page is an entry of its own (reauth.required): not counted here.
+      const subject = page.getByTestId('audit-row').filter({ hasText: `fleet/${name}` }).filter({ hasNotText: 'reauth.required' });
       await expect(subject).toHaveCount(3);
       await expect(subject.filter({ hasText: 'secret.reveal' })).toHaveCount(1);
       await expect(subject.filter({ hasText: 'secret.put' })).toHaveCount(2);

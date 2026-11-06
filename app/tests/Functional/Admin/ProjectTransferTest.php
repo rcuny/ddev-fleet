@@ -138,6 +138,7 @@ final class ProjectTransferTest extends AdminTestCase
 
     public function testTheExportWithAPassphraseSealsTheSecrets(): void
     {
+        $this->confirmPassword();
         $this->seed();
 
         $this->post('/admin/projects/blog/export', ['passphrase' => self::PASSPHRASE]);
@@ -152,6 +153,7 @@ final class ProjectTransferTest extends AdminTestCase
 
     public function testAShortPassphraseIsRefusedWithoutADownload(): void
     {
+        $this->confirmPassword();
         $this->seed();
 
         $this->post('/admin/projects/blog/export', ['passphrase' => 'short']);
