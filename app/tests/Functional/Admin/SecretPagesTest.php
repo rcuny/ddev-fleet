@@ -902,10 +902,11 @@ final class SecretPagesTest extends AdminTestCase
     public function testChangingGitOverSshIsAuditedAndARepeatIsNot(): void
     {
         $this->makeProject();
+        $this->confirmPassword();
         $this->open('/admin/projects/blog/keys');
-        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1']);
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
         self::assertResponseRedirects('/admin/projects/blog/keys');
-        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1']);
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
 
         $actions = array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1]));
         self::assertCount(1, $actions);
@@ -934,5 +935,54 @@ final class SecretPagesTest extends AdminTestCase
         $html = (string) $this->client->getResponse()->getContent();
         self::assertStringContainsString('TLS_KEY', $html);
         self::assertStringNotContainsString('line-two-zz9', $html);
+    }
+
+    private function containerSsh(): bool
+    {
+        $this->em()->clear();
+        $service = $this->container()->get(ProjectService::class);
+        self::assertInstanceOf(ProjectService::class, $service);
+
+        return $service->get('blog')->containerSsh();
+    }
+
+    public function testEnablingGitOverSshWithoutTheConfirmFieldIsRefusedAndChangesNothing(): void
+    {
+        $this->makeProject();
+        $this->confirmPassword();
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1']);
+
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+        self::assertFalse($this->containerSsh());
+        self::assertSame([], array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1])));
+        self::assertStringContainsString('needs the confirmation', (string) $this->open('/admin/projects/blog/keys')->filter('[data-testid=flashes]')->text());
+    }
+
+    public function testEnablingGitOverSshWithoutARecentReauthSendsToTheChallengeAndChangesNothing(): void
+    {
+        $this->makeProject();
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
+
+        self::assertResponseStatusCodeSame(303);
+        self::assertStringContainsString('/admin/reauth', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertFalse($this->containerSsh());
+        self::assertNotEmpty(array_filter(new AuditEntryRepository($this->em())->latest(20), static fn ($e): bool => 'reauth.required' === $e->action() && str_starts_with($e->subject(), 'container-ssh blog')));
+    }
+
+    public function testDisablingGitOverSshNeedsNeitherConfirmNorReauth(): void
+    {
+        $this->makeProject();
+        $this->confirmPassword();
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1', 'confirm' => '1']);
+        self::assertTrue($this->containerSsh());
+        $this->client->getCookieJar()->clear();
+        $this->as('admin');
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '0']);
+
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+        self::assertFalse($this->containerSsh());
     }
 }

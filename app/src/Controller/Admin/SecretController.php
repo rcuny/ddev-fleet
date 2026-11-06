@@ -96,8 +96,9 @@ final class SecretController extends AbstractController
     }
 
     /**
-     * Turns the per-instance ssh-agent with the push key on or off. The page asks for a confirmation first (a dialog whose
-     * button is the submit); the change is audited, a repeat of the stored value is not.
+     * Turns the per-instance ssh-agent with the push key on or off. Turning it ON is as sensitive as revealing a secret:
+     * the server needs `confirm=1` (the dialog's button sends it; a crafted request without it changes nothing) and a recent
+     * re-auth. Turning it off needs neither. The change is audited, a repeat of the stored value is not.
      */
     #[Route('/admin/projects/{name}/keys/ssh', name: 'project_keys_ssh', requirements: ['name' => self::PROJECT], methods: ['POST'])]
     public function containerSsh(Request $request, string $name): Response
@@ -110,6 +111,17 @@ final class SecretController extends AbstractController
             $this->addFlash('success', 'No change: Git over SSH in the container was already '.($enable ? 'on' : 'off').'.');
 
             return $this->back($project);
+        }
+
+        if ($enable) {
+            if ('1' !== $request->request->get('confirm')) {
+                $this->addFlash('warning', 'Not changed: turning on Git over SSH needs the confirmation.');
+
+                return $this->back($project);
+            }
+            if (!$this->reauth->requireRecentAuth()) {
+                return $this->reauth->challenge('container-ssh', $name, '/admin/projects/'.$name.'/keys');
+            }
         }
 
         try {

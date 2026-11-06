@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { expectNoBlockingViolations } from './support/axe';
+import { confirmPassword } from './support/secrets';
 import { createProjectViaUi, deleteProjectViaUi, openDialog, submitAndWait, uniqueName } from './support/projects';
 import { hasHorizontalOverflow } from './support/shell';
 
@@ -15,7 +16,15 @@ test.describe('keys & secrets tab', () => {
       expect(await hasHorizontalOverflow(page)).toBe(false);
       await expectNoBlockingViolations(page);
 
-      const dialog = await openDialog(page, page.getByTestId('container-ssh-change'));
+      // Turning it on needs a recent re-auth: without one the confirmation sends the person to the password page.
+      let dialog = await openDialog(page, page.getByTestId('container-ssh-change'));
+      await submitAndWait(page, dialog.getByTestId('container-ssh-confirm-button'));
+      await expect(page).toHaveURL(/\/admin\/reauth/);
+      await expect(page.getByTestId('container-ssh-state')).toHaveCount(0);
+      await confirmPassword(page);
+      await expect(page.getByTestId('container-ssh-state')).toContainText('is off');
+
+      dialog = await openDialog(page, page.getByTestId('container-ssh-change'));
       await submitAndWait(page, dialog.getByTestId('container-ssh-confirm-button'));
       await expect(page.getByTestId('flashes')).toContainText('Git over SSH in the container is now on.');
 

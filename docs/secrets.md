@@ -49,7 +49,12 @@ Everything here is administrator-only. A member of a project cannot list, set, r
 - **Secrets** (`/admin/secrets`): the fleet-wide secrets, a form to add or replace one, and the host secrets
   (names only). **Reveal**, **Replace** (opens the form with the name filled in) and **Delete** (with a
   confirmation) are on each row.
-- **Keys & secrets tab** of a project: the same for that project, plus a check that each secret is used.
+- **Keys & secrets tab** of a project (restricted, shown with a lock): the same for that project, plus a check that each
+  secret is used. The value field is masked (`type=password`); a multi-line value goes into the separate *Multi-line
+  value* textarea, used only when the masked field is empty. A value is never echoed back, not even after an error. The
+  tab also holds the **Git SSH** section (*git over SSH in the container*): turning it on needs the confirmation dialog
+  and the 5-minute re-auth window, like a reveal, because every process in the instance container can then use the
+  push key; the change is audited as `project.container-ssh` (subject `<project>/on` or `<project>/off`, never a key).
 - **Audit log** (`/admin/audit`, linked from the Secrets page): the latest 200 entries, newest first, optionally
   of one action. Every put, delete and reveal of a secret is an entry with who, when, the action
   (`secret.put`, `secret.delete`, `secret.reveal`, `secret.reveal-refused`) and the subject (`fleet/NAME` or
