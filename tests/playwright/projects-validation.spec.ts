@@ -32,6 +32,13 @@ async function expectRefused(page: Page, fields: ProjectFields, messages: string
   return name;
 }
 
+test.describe('git URL with a token', () => {
+  test('a token in the URL is refused with a clear message @phone', async ({ page }) => {
+    await expectRefused(page, { git: 'https://user:token@git.example.com/acme/blog.git' }, ['The URL contains a user name or token (user:token@). Remove it and use the deploy key instead.']);
+    expect(await hasHorizontalOverflow(page), 'overflow on the refused form').toBe(false);
+  });
+});
+
 test.describe('long values', () => {
   test('long refused values and messages do not widen the page @phone', async ({ page }) => {
     const fields = { name: 'n'.repeat(41), git: `https://git.example.com/${'a'.repeat(2030)}`, branch: 'b'.repeat(201), hostnames: 'h'.repeat(70), pattern: `A${'b'.repeat(200)}`, submodule: 's'.repeat(201) };

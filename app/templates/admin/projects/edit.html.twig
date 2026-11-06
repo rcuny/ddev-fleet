@@ -24,7 +24,8 @@
                     {{ include('setup/_csrf.html.twig') }}
                     <div class="grid gap-2" data-slot="form-row">
                         <twig:Label for="export-passphrase">Passphrase for the secrets (optional)</twig:Label>
-                        <twig:Input id="export-passphrase" type="password" name="passphrase" class="h-11 md:h-8" autocomplete="new-password" data-lpignore="true" minlength="8" data-testid="export-passphrase" />
+                        <twig:Input id="export-passphrase" type="password" name="passphrase" class="h-11 md:h-8" autocomplete="new-password" data-lpignore="true" minlength="{{ constant('App\\Fleet\\Export\\PassphraseSealer::MIN_PASSPHRASE') }}" aria-describedby="export-passphrase-help" data-testid="export-passphrase" />
+                        <p id="export-passphrase-help" class="text-xs text-ink-muted">At least {{ constant('App\\Fleet\\Export\\PassphraseSealer::MIN_PASSPHRASE') }} characters. With a passphrase the export needs your password again (a check that stays valid for {{ constant('App\\Security\\Reauth\\ReauthWindow::SECONDS') // 60 }} minutes).</p>
                     </div>
                     <div class="flex flex-col gap-2 md:flex-row">
                         <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="export-download">

@@ -24,6 +24,8 @@ use App\Fleet\Host\Capacity\AllocatableThreads;
 use App\Fleet\Instances\InstanceSiteRefresher;
 use App\Fleet\PortMirror\PortMirrorSwitch;
 use App\Fleet\Projects\NamedPortService;
+use App\Fleet\Projects\NetworkInput;
+use App\Fleet\Projects\NetworkService;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
@@ -32,12 +34,15 @@ use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Secrets\SecretStore;
 use App\Form\Project\CapacityType;
+use App\Form\Project\NetworkType;
 use App\Form\Project\ProjectType;
+use App\Form\Project\SourceType;
 use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
+use Symfony\Component\Form\FormError;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -68,6 +73,7 @@ final class ProjectController extends AbstractController
         private readonly InstanceRepository $instances,
         private readonly SecretStore $secrets,
         private readonly WebhookRepository $webhookEndpoints,
+        private readonly NetworkService $network,
         private readonly ProjectAccessRepository $accessRows,
         private readonly ProjectAccessService $members,
         private readonly IdentitySync $identity,
@@ -94,7 +100,7 @@ final class ProjectController extends AbstractController
         $this->denyAccessUnlessGranted(ProjectVoter::SETTINGS);
 
         // The host default is preselected: a new project with no radio chosen showed an identity choice nobody had made.
-        $form = $this->createForm(ProjectType::class, ['gitBotMode' => GitBotMode::Inherit], ['mode' => ProjectType::CREATE, 'allocatable' => $this->allocatable->get()]);
+        $form = $this->createForm(ProjectType::class, ['gitBotMode' => GitBotMode::Inherit], ['allocatable' => $this->allocatable->get()]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -323,47 +329,39 @@ final class ProjectController extends AbstractController
     public function edit(Request $request, string $name): Response
     {
         $project = $this->load($name);
-        $templateNames = $this->templateNames($name);
 
-        $form = $this->createForm(ProjectType::class, $this->formDataOf($project), ['mode' => ProjectType::EDIT, 'templates' => $templateNames, 'allocatable' => $this->allocatable->get()]);
+        $form = $this->createForm(SourceType::class, $this->formDataOf($project));
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
             $data = $this->formData($form);
-            $hostnames = TextLines::split($form, 'additionalHostnames', $data);
-            if (null !== $hostnames) {
-                // Start from what is stored so the fields this tab does not show (port assignments) survive the save.
-                $input = ProjectInput::fromProject($project)->with([
-                    'git' => self::text($data['git'] ?? null),
-                    'defaultBranch' => self::optionalText($data['defaultBranch'] ?? null),
-                    'defaultTemplate' => self::optionalText($data['defaultTemplate'] ?? null),
-                    'additionalHostnames' => $hostnames,
-                    'gitBotMode' => self::mode($data['gitBotMode'] ?? null),
-                    'gitBotName' => self::optionalText($data['gitBotName'] ?? null),
-                    'gitBotEmail' => self::optionalText($data['gitBotEmail'] ?? null),
-                    'issueIdRegexp' => self::optionalText($data['issueIdRegexp'] ?? null),
-                    'displaySubmoduleBranch' => self::optionalText($data['displaySubmoduleBranch'] ?? null),
-                    'typesense' => true === ($data['typesense'] ?? false),
-                    'containerSsh' => true === ($data['containerSsh'] ?? false),
-                ]);
-                try {
-                    $this->projects->update($name, $input);
-                    $this->addFlash('success', 'Project saved.');
-                    $this->flashSitesWarning();
+            // Start from what is stored so the fields this tab does not show (ports, hostnames, Typesense, caps) survive the save.
+            $input = ProjectInput::fromProject($project)->with([
+                'git' => self::text($data['git'] ?? null),
+                'defaultBranch' => self::optionalText($data['defaultBranch'] ?? null),
+                'gitBotMode' => self::mode($data['gitBotMode'] ?? null),
+                'gitBotName' => self::optionalText($data['gitBotName'] ?? null),
+                'gitBotEmail' => self::optionalText($data['gitBotEmail'] ?? null),
+                'issueIdRegexp' => self::optionalText($data['issueIdRegexp'] ?? null),
+                'displaySubmoduleBranch' => self::optionalText($data['displaySubmoduleBranch'] ?? null),
+                'containerSsh' => true === ($data['containerSsh'] ?? false),
+            ]);
+            try {
+                $this->projects->update($name, $input);
+                $this->addFlash('success', 'Project saved.');
+                $this->flashSitesWarning();
 
-                    return $this->redirectToRoute('project_source', ['name' => $name], Response::HTTP_SEE_OTHER);
-                } catch (ValidationFailed $failed) {
-                    ValidationErrorMapper::add($form, $failed);
-                } catch (NotFound) {
-                    throw new NotFoundHttpException();
-                }
+                return $this->redirectToRoute('project_source', ['name' => $name], Response::HTTP_SEE_OTHER);
+            } catch (ValidationFailed $failed) {
+                ValidationErrorMapper::add($form, $failed);
+            } catch (NotFound) {
+                throw new NotFoundHttpException();
             }
         }
 
         return $this->render('admin/projects/edit.html.twig', [
             'project' => $project,
             'form' => $form,
-            'templateNames' => $templateNames,
         ]);
     }
 
@@ -376,51 +374,84 @@ final class ProjectController extends AbstractController
         return $this->redirectToRoute('project_network', ['name' => $name], Response::HTTP_PERMANENTLY_REDIRECT);
     }
 
+    /**
+     * The Network tab: hostnames, Typesense, port assignment and port access. A change that exposes something (a new
+     * hostname, assigning or unassigning a public port, any access change) is shown again in a confirmation dialog first;
+     * its button submits the same form with `confirmed=1`, so nothing is stored twice and it works without a script.
+     */
     #[Route('/admin/projects/{name}/network', name: 'project_network', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
     public function ports(Request $request, string $name): Response
     {
         $project = $this->load($name);
         $assigned = array_map(static fn (NamedPort $port): string => $port->name(), $project->ports());
+        $selected = $assigned;
+        $requested = [];
         $errors = [];
+        $changes = [];
+        $confirm = false;
         $status = Response::HTTP_OK;
+
+        $form = $this->createForm(NetworkType::class, [
+            'additionalHostnames' => implode("\n", $project->additionalHostnames()),
+            'typesense' => $project->typesense(),
+        ]);
 
         if ($request->isMethod('POST')) {
             if (!$this->isCsrfTokenValid('submit', (string) $request->request->get('_token'))) {
                 throw $this->createAccessDeniedException('Invalid CSRF token.');
             }
+            $form->handleRequest($request);
+            $selected = self::strings($request->request->all('ports'));
+            $requested = self::keyed($request->request->all('access'));
+            $status = Response::HTTP_UNPROCESSABLE_ENTITY;
 
-            $selected = [];
-            foreach ($request->request->all('ports') as $port) {
-                if (\is_string($port)) {
-                    $selected[] = $port;
-                }
-            }
-            try {
-                $this->projects->update($name, ProjectInput::fromProject($project)->with(['ports' => $selected]));
-                $after = array_map(static fn (NamedPort $port): string => $port->name(), $this->projects->get($name)->ports());
-                if ($after === $assigned) {
-                    $this->addFlash('success', 'No change: the ports were already assigned like this.');
-                } else {
-                    $this->addFlash('success', 'Ports saved.');
-                    $this->flashSitesWarning();
-                    $this->flashMirrorWarning();
-                }
+            if (!$form->isSubmitted()) {
+                $errors[] = 'The form was not sent completely. Reload the page and try again.';
+            } elseif ($form->isValid()) {
+                $data = $this->formData($form);
+                $hostnames = TextLines::split($form, 'additionalHostnames', $data);
+                if (null !== $hostnames) {
+                    $input = new NetworkInput($hostnames, true === ($data['typesense'] ?? false), $selected, $requested);
+                    try {
+                        $this->network->validate($project, $input);
+                        $changes = $this->network->plan($project, $input);
+                        if (NetworkService::needsConfirmation($changes) && '1' !== $request->request->get('confirmed')) {
+                            $confirm = true;
+                        } else {
+                            $this->network->apply($name, $input, $this->actor->name());
+                            $this->addFlash('success', [] === $changes && $this->sameTypesense($project, $input) ? 'No change: the network settings were already like this.' : 'Network settings saved.');
+                            $this->flashSitesWarning();
+                            if ([] !== $changes || !$this->sameTypesense($project, $input)) {
+                                $this->flashMirrorWarning();
+                            }
 
-                return $this->redirectToRoute('project_network', ['name' => $name], Response::HTTP_SEE_OTHER);
-            } catch (ValidationFailed $failed) {
-                $errors = array_values($failed->errors);
-                $assigned = $selected;
-                $status = Response::HTTP_UNPROCESSABLE_ENTITY;
-            } catch (NotFound) {
-                throw new NotFoundHttpException();
+                            return $this->redirectToRoute('project_network', ['name' => $name], Response::HTTP_SEE_OTHER);
+                        }
+                    } catch (ValidationFailed $failed) {
+                        foreach ($failed->errors as $field => $message) {
+                            if ($form->has((string) $field)) {
+                                $form->get((string) $field)->addError(new FormError($message));
+                            } else {
+                                $errors[] = $message;
+                            }
+                        }
+                    } catch (NotFound) {
+                        throw new NotFoundHttpException();
+                    }
+                }
             }
         }
 
         return $this->render('admin/projects/ports.html.twig', [
             'project' => $project,
+            'form' => $form,
             'catalogue' => $this->ports->list(),
-            'assigned' => $assigned,
+            'stored' => $assigned,
+            'assigned' => $selected,
+            'requested' => $requested,
             'errors' => $errors,
+            'confirm' => $confirm,
+            'changes' => $changes,
         ], new Response(status: $status));
     }
 
@@ -481,6 +512,38 @@ final class ProjectController extends AbstractController
         }
     }
 
+    private function sameTypesense(Project $project, NetworkInput $input): bool
+    {
+        return $project->typesense() === $input->typesense;
+    }
+
+    /**
+     * @param array<mixed> $values
+     *
+     * @return list<string>
+     */
+    private static function strings(array $values): array
+    {
+        return array_values(array_filter($values, static fn (mixed $value): bool => \is_string($value)));
+    }
+
+    /**
+     * @param array<mixed> $values
+     *
+     * @return array<string, string>
+     */
+    private static function keyed(array $values): array
+    {
+        $kept = [];
+        foreach ($values as $key => $value) {
+            if (\is_string($value)) {
+                $kept[(string) $key] = $value;
+            }
+        }
+
+        return $kept;
+    }
+
     private function load(string $name): Project
     {
         try {
@@ -513,14 +576,11 @@ final class ProjectController extends AbstractController
         return [
             'git' => $project->git(),
             'defaultBranch' => $project->defaultBranch(),
-            'defaultTemplate' => $project->defaultTemplate(),
-            'additionalHostnames' => implode("\n", $project->additionalHostnames()),
             'gitBotMode' => $project->gitBotMode(),
             'gitBotName' => $project->gitBotName(),
             'gitBotEmail' => $project->gitBotEmail(),
             'issueIdRegexp' => $project->issueIdRegexp(),
             'displaySubmoduleBranch' => $project->displaySubmoduleBranch(),
-            'typesense' => $project->typesense(),
             'containerSsh' => $project->containerSsh(),
         ];
     }

@@ -1,0 +1,40 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}Confirm your password · {{ parent() }}{% endblock %}
+
+{#- The re-auth page. Needs: next (the admin path to return to), error (string|null), minutes (how long the window stays open). -#}
+{% block content %}
+    <twig:PageHeader title="Confirm your password" description="Revealing a secret and exporting sealed secrets need a recent password check." />
+
+    <div class="mt-6 grid max-w-xl grid-cols-[minmax(0,1fr)] gap-8">
+        {% if error %}
+            <twig:Alert variant="destructive" data-testid="reauth-error" role="alert">
+                <twig:ux:icon name="lucide:circle-alert" />
+                <twig:Alert:Description>{{ error }}</twig:Alert:Description>
+            </twig:Alert>
+        {% endif %}
+
+        <twig:Card data-testid="reauth-form">
+            <twig:Card:Header>
+                <twig:Card:Title>Your password</twig:Card:Title>
+                <twig:Card:Description>After you confirm, the action stays open for {{ minutes }} minutes. Then repeat it on the page you come back to.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <form method="post" action="{{ path('reauth_submit') }}" data-turbo="false" novalidate class="grid gap-6">
+                    {{ include('setup/_csrf.html.twig') }}
+                    <input type="hidden" name="next" value="{{ next }}">
+                    <div class="grid gap-2" data-slot="form-row">
+                        <twig:Label for="reauth-password">Password</twig:Label>
+                        <twig:Input id="reauth-password" type="password" name="password" class="h-11 md:h-8" autocomplete="current-password" required aria-describedby="reauth-help{{ error ? ' reauth-error-text' : '' }}" aria-invalid="{{ error ? 'true' : 'false' }}" data-testid="reauth-password" />
+                        <p id="reauth-help" class="text-xs text-ink-muted">The password of the account you are signed in with.</p>
+                        {% if error %}<p id="reauth-error-text" class="text-xs text-destructive">{{ error }}</p>{% endif %}
+                    </div>
+                    <div class="flex flex-col gap-2 md:flex-row">
+                        <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="reauth-submit">Confirm</twig:Button>
+                        <twig:Button as="a" variant="outline" href="{{ next }}" class="h-11 w-full md:h-8 md:w-auto">Cancel</twig:Button>
+                    </div>
+                </form>
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

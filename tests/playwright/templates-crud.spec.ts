@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { expectNoBlockingViolations } from './support/axe';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { createTemplateViaUi, editTemplate, fillTemplate, templateRow } from './support/templates';
 
@@ -39,6 +40,42 @@ test.describe('templates', () => {
       await expect(page.getByLabel('Terminal 2 commands')).toHaveValue('');
       await expect(page.getByRole('button', { name: 'Create template' })).toBeVisible();
       await expectNoOverflow(page, 'new template form');
+      expect(errors).toEqual([]);
+    } finally {
+      await deleteProjectViaUi(page, project);
+    }
+  });
+
+  test('the default template is chosen on the Templates tab and the template form has its sections @phone', async ({ page }) => {
+    const errors = collectBrowserErrors(page);
+    const project = uniqueName();
+    try {
+      await createProjectViaUi(page, project);
+      await createTemplateViaUi(page, project, { name: 'alpha' });
+      await openSection(page, 'Templates');
+      await expect(page.getByTestId('default-template')).toBeVisible();
+      await page.getByLabel('Default template').selectOption('alpha');
+      await submitAndWait(page, page.getByRole('button', { name: 'Save default' }));
+      await expect(page.getByTestId('flashes')).toContainText('Default template saved.');
+      await expect(page.getByLabel('Default template')).toHaveValue('alpha');
+      await expect(page.getByTestId('template-default')).toBeVisible();
+      await expectNoOverflow(page, 'templates tab with the default template form');
+      await expectNoBlockingViolations(page, 'templates tab with the default template form');
+
+      // The Source tab no longer carries it, and saving Source keeps it.
+      await openSection(page, 'Source');
+      await expect(page.getByLabel('Default template')).toHaveCount(0);
+      await submitAndWait(page, page.getByRole('button', { name: 'Save', exact: true }));
+      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+      await openSection(page, 'Templates');
+      await expect(page.getByLabel('Default template')).toHaveValue('alpha');
+
+      await follow(page, page.getByRole('link', { name: 'New template' }));
+      for (const heading of ['Environment', 'Commands', 'Terminals']) {
+        await expect(page.getByRole('heading', { name: heading, level: 3 })).toBeVisible();
+      }
+      await expectNoOverflow(page, 'new template form with sections');
+      await expectNoBlockingViolations(page, 'new template form with sections');
       expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);

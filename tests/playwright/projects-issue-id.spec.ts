@@ -3,7 +3,7 @@ import { fillProject, readProject, submitSave } from './support/projectForm';
 import { createProjectViaUi, deleteProjectViaUi, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
-// The issue id tester on a project's General tab (a live component): every state it can show, every error the pattern
+// The issue id tester on a project's Source tab (a live component): every state it can show, every error the pattern
 // rules return, the samples' limits, and that nothing typed there is saved.
 
 interface Tester {

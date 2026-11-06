@@ -4,8 +4,9 @@ import { readFile } from 'node:fs/promises';
 import { expectNoBlockingViolations } from './support/axe';
 import { createDeployableProject, deployOne, uniqueLabel } from './support/instances';
 import { createPort, deletePort } from './support/ports';
-import { fillProject, openNewProject, submitCreate, submitSave } from './support/projectForm';
+import { fillNetwork, fillProject, openNewProject, submitCreate, submitNetwork, submitSave } from './support/projectForm';
 import { createProjectViaUi, deleteProjectViaUi, GIT_URL, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { openReauthWindow } from './support/secrets';
 import { createTemplateViaUi, editTemplate, fillTemplate, submitNewTemplate } from './support/templates';
 
 // Axe sweep of the project pages: every page state the feature specs used to check inline (list, forms, 422 refusals,
@@ -131,9 +132,9 @@ test.describe('axe sweep: projects', () => {
       await expect(page.getByTestId('flashes')).toContainText('Project created.');
       await openSection(page, 'Source');
 
-      await fillProject(page, { git: 'http://x', branch: 'dev', hostnames: 'bad.label' });
+      await fillProject(page, { git: 'http://x', branch: 'dev' });
       await submitSave(page);
-      await expect(page.getByTestId('project-form')).toContainText('Hostname 1:');
+      await expect(page.getByTestId('project-form')).toContainText('Only https://, ssh:// and scp-like (git@host:path) URLs are accepted.');
       await expectNoBlockingViolations(page, 'the refused edit form');
     } finally {
       await deleteProjectViaUi(page, name);
@@ -274,11 +275,10 @@ test.describe('axe sweep: templates', () => {
       await createProjectViaUi(page, project);
       await createTemplateViaUi(page, project, { name: 'alpha' });
       await createTemplateViaUi(page, project, { name: 'beta' });
-      await openSection(page, 'General');
-      await page.getByLabel('Default template').selectOption('alpha');
-      await submitAndWait(page, page.getByRole('button', { name: 'Save', exact: true }));
-      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
       await openSection(page, 'Templates');
+      await page.getByLabel('Default template').selectOption('alpha');
+      await submitAndWait(page, page.getByRole('button', { name: 'Save default' }));
+      await expect(page.getByTestId('flashes')).toContainText('Default template saved.');
       await editTemplate(page, project, 'alpha');
       const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete template' }));
@@ -343,7 +343,7 @@ test.describe('axe sweep: ports tab', () => {
     const port = createPort(`lp-${'a1b2c3d4-'.repeat(5)}`.slice(0, 40).replace(/-$/, 'z'));
     try {
       await createProjectViaUi(page, project);
-      await openSection(page, 'Ports');
+      await openSection(page, 'Network');
       await expect(box(page, port.name)).not.toBeChecked();
       await expectNoBlockingViolations(page, 'Ports tab');
     } finally {
@@ -357,12 +357,41 @@ test.describe('axe sweep: ports tab', () => {
     const port = createPort(uniqueName('pa'));
     try {
       await createProjectViaUi(page, project);
-      await openSection(page, 'Ports');
+      await openSection(page, 'Network');
       await box(page, port.name).check();
-      await submitAndWait(page, page.getByRole('button', { name: 'Save ports' }));
-      await expect(page.getByTestId('flashes')).toContainText('Ports saved.');
+      await submitAndWait(page, page.getByRole('button', { name: 'Save network settings' }));
+      await expect(page.getByTestId('flashes')).toContainText('Network settings saved.');
       await expect(box(page, port.name)).toBeChecked();
       await expectNoBlockingViolations(page, 'Ports tab, saved');
+    } finally {
+      await deleteProjectViaUi(page, project);
+      deletePort(port.name);
+    }
+  });
+
+  test('the Network tab: confirmation dialog, editable access and refused hostnames', async ({ page }) => {
+    const project = uniqueName();
+    const port = createPort(uniqueName('pn'));
+    try {
+      await createProjectViaUi(page, project);
+      await openSection(page, 'Network');
+      await box(page, port.name).check();
+      await submitNetwork(page);
+      await expect(page.getByTestId('flashes')).toContainText('Network settings saved.');
+      await expectNoBlockingViolations(page, 'Network tab with an access select');
+
+      await page.getByRole('combobox', { name: `Access of port ${port.name}` }).selectOption('public');
+      await submitNetwork(page);
+      await expect(page.getByRole('dialog')).toBeVisible();
+      await expectNoBlockingViolations(page, 'Network tab, confirmation dialog');
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('dialog')).toBeHidden();
+
+      await page.getByRole('combobox', { name: `Access of port ${port.name}` }).selectOption('gated');
+      await fillNetwork(page, { hostnames: 'bad.label' });
+      await submitNetwork(page);
+      await expect(page.getByTestId('ports-form')).toContainText('Hostname 1:');
+      await expectNoBlockingViolations(page, 'Network tab, refused hostnames');
     } finally {
       await deleteProjectViaUi(page, project);
       deletePort(port.name);
@@ -373,7 +402,7 @@ test.describe('axe sweep: ports tab', () => {
     const project = uniqueName();
     try {
       await createProjectViaUi(page, project);
-      await openSection(page, 'Ports');
+      await openSection(page, 'Network');
       // A stale form: a port the catalogue does not know.
       await page.getByTestId('ports-form').evaluate((form) => {
         const input = document.createElement('input');
@@ -382,7 +411,7 @@ test.describe('axe sweep: ports tab', () => {
         input.value = 'ghost-port';
         form.append(input);
       });
-      await submitAndWait(page, page.getByRole('button', { name: 'Save ports' }));
+      await submitAndWait(page, page.getByRole('button', { name: 'Save network settings' }));
       await expect(page.getByTestId('ports-errors')).toContainText('Unknown port(s): ghost-port.');
       await expectNoBlockingViolations(page, 'Ports tab, error');
     } finally {
@@ -466,6 +495,7 @@ async function sealedExport(page: Page, project: string, secret: string, value: 
     await createProjectViaUi(page, project);
     await addProjectSecret(page, project, secret, value);
     await page.goto(`/admin/projects/${project}/source`);
+    await openReauthWindow(page);
     await page.getByTestId('export-passphrase').fill(passphrase);
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);
     return await readFile(await download.path(), 'utf8');

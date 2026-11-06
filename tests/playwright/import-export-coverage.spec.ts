@@ -2,6 +2,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { createProjectViaUi, deleteProjectViaUi, GIT_URL, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { openReauthWindow } from './support/secrets';
 import { hasHorizontalOverflow } from './support/shell';
 
 // Project export and import beyond import-export.spec.ts (which owns the happy round trip and the version refusal): what
@@ -125,6 +126,11 @@ async function deleteScheduleViaUi(page: Page, name: string): Promise<void> {
 /** Presses Export on the project page; resolves with the downloaded file text. */
 async function exportText(page: Page, passphrase?: string): Promise<string> {
   if (undefined !== passphrase) {
+    await page.getByTestId('export-passphrase').fill(passphrase);
+  }
+  if (undefined !== passphrase) {
+    // A sealed export needs a recent password check (the re-auth window).
+    await openReauthWindow(page);
     await page.getByTestId('export-passphrase').fill(passphrase);
   }
   const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);

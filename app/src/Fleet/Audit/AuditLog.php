@@ -30,6 +30,10 @@ final readonly class AuditLog
 
     public const string HOST_UPGRADE = 'host.upgrade';
 
+    public const string REAUTH_SUCCESS = 'reauth.success';
+    public const string REAUTH_FAILURE = 'reauth.failure';
+    public const string REAUTH_REQUIRED = 'reauth.required';
+
     public const string PROJECT_EXPORT = 'project.export';
     public const string PROJECT_IMPORT = 'project.import';
 

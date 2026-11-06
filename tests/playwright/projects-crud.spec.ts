@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { fillProject, openNewProject, readProject, submitCreate, submitSave } from './support/projectForm';
+import { fillNetwork, fillProject, openNewProject, readNetwork, readProject, saveNetworkConfirmed, submitCreate, submitSave } from './support/projectForm';
 import { createDeployableProject, deployOne, uniqueLabel } from './support/instances';
 import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
@@ -34,12 +34,15 @@ test.describe('create', () => {
       await expect(page.getByRole('heading', { level: 1, name: 'New project' })).toHaveCount(0);
       await expect(page.getByText(fields.git).first()).toBeVisible();
       await openSection(page, 'Source');
-      expect(await readProject(page)).toEqual({ ...fields, mode: 'Custom identity', typesense: true });
+      const { hostnames, ...sourceFields } = fields;
+      expect(await readProject(page)).toEqual({ ...sourceFields, mode: 'Custom identity' });
       await expect(page.getByTestId('danger-zone')).toBeVisible();
+      await openSection(page, 'Network');
+      expect(await readNetwork(page)).toEqual({ hostnames, typesense: true });
 
       // The same state after a fresh load.
       await page.goto(`/admin/projects/${name}/source`);
-      expect(await readProject(page)).toEqual({ ...fields, mode: 'Custom identity', typesense: true });
+      expect(await readProject(page)).toEqual({ ...sourceFields, mode: 'Custom identity' });
       expect(errors).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, name);
@@ -79,20 +82,26 @@ test.describe('edit', () => {
       const changed = {
         git: 'git@git.example.com:acme/shop.git',
         branch: 'develop',
-        hostnames: 'www\nshop\napi',
         identityName: 'Zoë Bot',
         identityEmail: 'zoe@example.com',
         pattern: 'PRJ-[0-9]+',
         submodule: 'web/modules/custom/blog',
       };
-      await fillProject(page, { ...changed, mode: 'Custom identity', typesense: true });
+      await fillProject(page, { ...changed, mode: 'Custom identity' });
       await submitSave(page);
       await expect(page.getByTestId('flashes')).toContainText('Project saved.');
       await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
-      expect(await readProject(page)).toEqual({ ...changed, mode: 'Custom identity', typesense: true });
+      expect(await readProject(page)).toEqual({ ...changed, mode: 'Custom identity' });
+
+      // The hostnames and the Typesense toggle are saved from the Network tab, which asks before a new name goes live.
+      await openSection(page, 'Network');
+      await fillNetwork(page, { hostnames: 'www\nshop\napi', typesense: true });
+      await saveNetworkConfirmed(page);
+      await expect(page.getByTestId('flashes')).toContainText('Network settings saved.');
+      expect(await readNetwork(page)).toEqual({ hostnames: 'www\nshop\napi', typesense: true });
 
       await page.goto(`/admin/projects/${name}/source`);
-      expect(await readProject(page)).toEqual({ ...changed, mode: 'Custom identity', typesense: true });
+      expect(await readProject(page)).toEqual({ ...changed, mode: 'Custom identity' });
       await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
 
       await page.goto('/admin/projects');
@@ -100,11 +109,16 @@ test.describe('edit', () => {
 
       // Back to the defaults: every optional field cleared, the typesense flag off.
       await page.goto(`/admin/projects/${name}/source`);
-      await fillProject(page, { branch: '', hostnames: '', mode: 'Use the host default', pattern: '', submodule: '', typesense: false });
+      await fillProject(page, { branch: '', mode: 'Use the host default', pattern: '', submodule: '' });
       await submitSave(page);
       await expect(page.getByTestId('flashes')).toContainText('Project saved.');
       await page.goto(`/admin/projects/${name}/source`);
-      expect(await readProject(page)).toMatchObject({ branch: '', hostnames: '', mode: 'Use the host default', identityName: '', identityEmail: '', pattern: '', submodule: '', typesense: false });
+      expect(await readProject(page)).toMatchObject({ branch: '', mode: 'Use the host default', identityName: '', identityEmail: '', pattern: '', submodule: '' });
+      await openSection(page, 'Network');
+      await fillNetwork(page, { hostnames: '', typesense: false });
+      await saveNetworkConfirmed(page);
+      await expect(page.getByTestId('flashes')).toContainText('Network settings saved.');
+      expect(await readNetwork(page)).toEqual({ hostnames: '', typesense: false });
     } finally {
       await deleteProjectViaUi(page, name);
     }
