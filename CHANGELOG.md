@@ -7,6 +7,86 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-11-05
+
+### Added
+- **FLE-199: capacity allotments, domain and CLI (epic FLE-197).** Projects and templates get `cpu_threads` and `slots` (empty = unlimited on a project, inherited on a template); the host settings get `cpu_reserve_threads` (default 2) and `max_instances` (default 25). `fleet project:create|update` and `fleet template:create|update` take `--cpu-threads=N|none` and `--slots=N|none`, and the show commands and JSON print them. A template above its project's value is refused, and lowering a project below one of its templates is refused naming the template. Nothing is enforced yet.
+
+- **FLE-200: host capacity report and CPU usage sampler (epic FLE-197).** `fleet host:capacity [--json] [--reserve=N] [--max-instances=N]` prints the detected threads, cores and RAM, the reserve, allocatable threads, the effective CPU limit of every project and template, what is committed (with an overcommit flag), the instance count against its cap, live use, and the busy slots read from the lock directories `/srv/fleet/slots/<project>/<template>/` and `.../<project>/_project/`. The JSON is schema 1 (additive changes only) and the exit code is 0. The status watcher now samples the CPU use of the `fleet.slice` subtree from cgroup `cpu.stat` every 10 seconds (read-only, no root). Nothing is enforced yet.
+
+- **FLE-201: capacity S3, the `slices` target of the root helper (epic FLE-197).** `apply slices` installs the systemd slice tree of the CPU allotments: `fleet.slice` (allocatable threads), `fleet-<project>.slice` and `fleet-<project>-<template>.slice` (`-` in a name becomes `_`), as unit files plus `10-fleet-quota.conf` drop-ins. The helper takes data only (`slices.json`, a list of `{unit, quota_percent|null}`), validates every unit name and quota (an integer from 100 to threads x 100), generates the files itself, removes only the slices it wrote earlier, starts every slice before any container and applies each quota to the running slice (`systemctl set-property --runtime`), so a changed limit is live without restarting a container. A failure restores the previous files and quotas. The app syncs the slices after every project or template create, delete and limit change (a failure is a warning); `fleet host:slices [--print]` installs them on demand. Nothing puts a container into a slice yet. On a host whose installed helper predates `slices`, the sync does nothing and stays silent until the installer has run; the uninstaller stops and removes the managed slices.
+
+- **FLE-202: capacity S4, instances join their CPU slice and get the slot environment (epic FLE-197).** A deploy and a restart write `.ddev/docker-compose.fleet-cgroup.yaml`, a compose override that sets `cgroup_parent` to the template's slice on every service of the instance (web, db, add-ons, profile services such as xhgui). The service list comes from `ddev debug compose-config`, read after the assets are seeded and before `ddev start`, and the file is kept out of git status. After the start, the slice that carries the limit is checked: a missing slice or one with no quota (`cpu.max` is `max`, which Docker and systemd create silently) is reported in the job log. The override is written only when the installed root helper has the `slices` target; on a host that has not been upgraded, instances deploy exactly as before. `config.fleet.yaml` now exports `FLEET_PROJECT_SLOTS`, `FLEET_TEMPLATE_SLOTS` (empty = unlimited), `FLEET_TEMPLATE_CPU_THREADS` (effective allotment), `FLEET_SLOT_DIR` and `FLEET_PROJECT_SLOT_DIR` (`<FLEET_HOME>/slots/<project>/<template>/` and `.../_project/`, created at deploy); a change reaches a running instance at its next restart or redeploy. `fleet:host:capacity --json` lists the instances without the override under `instances.not_under_slice` (additive, schema 1).
+
+- **FLE-209: jobs of different instances can run at the same time.** A new host setting, **Jobs at the same time**
+  (Jobs tab of the host settings, or `fleet fleet:host:job-concurrency N`; 1 to 8), lets the single worker start each
+  job as a child process (`fleet:job:work`) instead of running them one after another. Jobs of one instance still never
+  overlap (instance lock), a job past the limit stays `queued` until a slot frees up, and the SQLite queue keeps its one
+  consumer. Before, a CI host deployed strictly one instance at a time whatever its size.
+
+- **FLE-211: opt-in host hardening for 1.x hosts (`install.sh --harden`)**: key-only SSH with `MaxAuthTries 3` and
+  `AllowUsers` (checked with `sshd -t`, session-safe), fail2ban with `ignoreip` from `--trusted-ip`, a UFW firewall
+  (SSH, 80, 443 and Fleet's named ports, kept in step by a one-minute timer, plus a `DOCKER-USER` guard) behind a
+  dead-man's switch (`fleet-firewall-confirm`), LLMNR off, a sysctl drop-in and auditd rules; `/tmp` mount options only with the separate `--harden-tmp`. The run is refused
+  when the account in use has no SSH key or another account with keys would be shut out.
+  `--dry-run` lists every change. Off by default: a plain install or upgrade changes none of it. The choices are stored
+  in `/etc/ddev-fleet/hardening.conf` and re-applied by later runs. See `docs/installation.md`, section 8.
+
+### Changed
+- **FLE-202: the 1.x assets seed skips legacy CPU cap files.** Any file under the instance's `.ddev/` matching `docker-compose.*cpu*.yaml` (for example `docker-compose.fleet-cpu.yaml`, `docker-compose.cpu-limit.yaml`) is no longer copied, so a per-container `cpus:` from the config repo never stacks with the slice quota. The config repo keeps the files for the legacy 0.x line.
+
+- **FLE-210: `start --all` / `stop --all` on an empty host use a dedicated `NoInstanceMatches` exception instead of matching the error text** (internal; messages and exit codes unchanged), with tests for `stop --all` and `--format=json`.
+- **FLE-212: capacity `busy` follow-ups (epic FLE-197).** `fleet host:capacity` now counts a pool as busy when its CPU slice used at least 0.2 threads over the last sample, even without a slot lock (the `_project` pool reads the project slice minus its templates), reads slot locks from `/proc/locks` instead of probing with `flock` (a probe could make a runner's `flock -n` fail and missed shared-lock holders), reports unreadable lock files and directories (`unreadable_locks`, additive), takes the host thread count from `nproc --all`, and documents `used_cores: null` as unknown. The JSON stays schema 1.
+
+- The installer waits, up to 300 seconds, for running jobs to finish before it swaps the code and migrates (`FLEET_INSTALL_JOB_WAIT=<seconds>`, `0` skips the wait).
+
+### Fixed
+- **FLE-193: the installer and `fleet upgrade` no longer depend on a live GitHub download of the Tailwind CLI**: step 80 now keeps the binary in a host cache (`/srv/fleet/cache/tailwind/<version>/`), downloaded once with retries and a SHA-256 check against the release's `sha256sums.txt`, and seeds `app/var/tailwind/<version>/` from it before `tailwind:build`. A re-run or upgrade with GitHub unreachable succeeds when the cache holds the configured version; a version bump downloads once and drops the old version from the cache. If the cache cannot be filled the installer warns and the bundle tries its own download.
+- **FLE-213: jobs handed to a child process are no longer lost or double-counted across a worker restart.** The worker stamps a job (`job.spawned_at`) before it starts its child, so a restarted worker counts children that have not claimed their job yet and no longer overshoots *Jobs at the same time*. A child that dies before claiming its job is detected after about a minute (before: up to 40 minutes, by the orphan reaper) and the job is queued again.
+
+
+- At the default job concurrency (1) a job no longer waits behind a `running` job of another process; only the instance lock serialises jobs, as before concurrent jobs (FLE-209). With the `sync://` transport of dev and test (several requests at once) the job used to fail with "The instance is busy and this queue cannot wait for it", which turned `instances.spec.ts` red on `develop`.
+- **FLE-216: the Typesense port (9108) is public again, so the browser search works on 1.x.** Every named port was behind
+  Authelia, and the browser's CORS preflight (`OPTIONS`, no cookies) got a 302 to the login: the search widget showed
+  nothing. Named ports now have an **access** setting, `gated` (default, Authelia and the project group) or `public`
+  (no login; the identity headers are still stripped). `typesense` is public by default, as in 0.x (its search-only key
+  protects it); `ts-dashboard` and `playwright` stay gated. `fleet:port:create --access=`, the new `fleet:port:update
+  <name> --access=`, `fleet:port:list` and the project export/import (`ports[].access`, optional) carry it.
+
+The CORS headers come from Typesense's own `Access-Control-Allow-Origin` answer; Caddy adds none.
+
+- **FLE-217: instance ids stay short enough for `ddev-<id>-<service>` to fit in 63 characters, `-N` suffix included.** DDEV container names longer than a DNS label cannot be resolved by Docker, so the router answered 502 for add-on services (Typesense on a `-1` instance, `typesense-dashboard` always). For a project with Typesense, webhook-derived labels keep 20 characters for the service name and room for a `-999` suffix (never cut below 12 characters), and a deploy from the CLI or the UI (single, batch, `-N` allocation) is refused with a clear message when the id would be too long. Fixed-label webhook rules and existing instances keep their ids, so nothing is recreated. An existing over-long instance needs a redeploy under a new label: `fleet instance:list` warns about them. The 20-character budget covers `typesense-dashboard` (19), the longest add-on service Fleet ships.
+
+- Routing parity with 0.x (FLE-218): instance sites and named ports send `X-Robots-Tag: noindex, nofollow` again, and an unknown host name on a named port (for example `bogus.<domain>:9108`) answers `404` instead of Caddy's empty `200`, from one shared catch-all file `instances/ports-fallback.sites`. Rollout: takes effect at the next site render (a redeploy, or `fleet port:refresh`); a host upgrade re-renders the main Caddyfile.
+
+#### Rollout
+- One migration adds nullable columns and two defaulted host columns; it runs with the normal upgrade and changes no data.
+- No migration and no new unit; the status watcher picks the sampler up at the next restart of `fleet-status.service`.
+- The new helper and sudoers line arrive with the installer (`ddev push-product`). Afterwards run `fleet host:slices` once to create the slices of the existing projects and templates.
+- Instances deployed before this release have no slice until they are redeployed or restarted; `fleet:host:capacity` lists them as `not_under_slice`.
+- Run `fleet host:slices` once after the installer has upgraded the host (FLE-201), before redeploying instances, so the slices exist when their containers start.
+- The default is 1 (today's one-after-another behaviour). To use it, set the value per host: `fleet fleet:host:job-concurrency 3` or the Jobs tab. No restart: the worker reads it on its next job.
+- The upgrade adds a column to `host_settings` (migration `Version20261105120000`).
+- Jobs started as child processes survive a worker restart, the hourly time-limit exit and an upgrade (the worker unit has `KillMode=process`); a new worker counts them from the `running` job rows. A child that dies before claiming its job gets the job re-queued at once. A reboot still interrupts running jobs.
+- Nothing changes on upgrade. Hardening is applied per host by the operator, with the owner's OK (the shared dev host has colleagues).
+- To test a host: open a second SSH session, run the installer with `--dry-run --harden --trusted-ip=<your ip>`, then without `--dry-run`, then run `sudo /usr/local/sbin/fleet-firewall-confirm` from the second session within 10 minutes.
+- No migration; the status watcher is unchanged.
+- The upgrade adds a column to `job` (migration `Version20261105130000`).
+- Upgrade at an idle moment: a job still running when the installer replaces the code runs on against the new code and may fail (retry it). The installer waits up to five minutes for running jobs first.
+- The upgrade adds `named_port.access`, sets the existing `typesense` port to public (migration `Version20261105160000`)
+  and then runs `fleet:port:refresh`, which rewrites the instance Caddy sites: nothing to do by hand. `fleet:port:update`
+  also rewrites them.
+- Check: `curl -X OPTIONS -H 'Origin: https://resources-<host>' -H 'Access-Control-Request-Method: POST' https://<host>:9108/multi_search` answers 200, `:9111` and `:9325` still redirect to the login.
+
+## [1.3.1] - 2026-11-05
+
+### Fixed
+- **FLE-195: `fleet:instance:start --all` (and `stop --all`) exits 0 with "nothing to start" on a host with no instance at all**, so `fleet-boot.service` no longer ends `failed` on a fresh install. An explicit id, a project or a state matching nothing still fails.
+- **FLE-196: `fleet-boot.service` no longer blocks Authelia after a reboot (regression of FLE-4)**: the unit is now `Type=exec` instead of `Type=oneshot`, so `multi-user.target` does not wait for the sequential start of all instances and Authelia (and every public URL behind it) comes up within about a minute of boot.
+
+#### Rollout
+- Existing hosts pick up the new unit at the next installer run (`ddev push-product`). Until then a reboot still delays Authelia until every instance is started.
+
 ## [1.3.0] - 2026-11-05
 
 ### Added
@@ -1078,7 +1158,9 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/rcuny/ddev-fleet/compare/v1.3.1...v1.4.0
+[1.3.1]: https://github.com/rcuny/ddev-fleet/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/rcuny/ddev-fleet/compare/v1.2.2...v1.3.0
 [1.2.2]: https://github.com/rcuny/ddev-fleet/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/rcuny/ddev-fleet/compare/v1.2.0...v1.2.1

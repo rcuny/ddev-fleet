@@ -15,6 +15,10 @@ step_main() {
 
   fleet_console doctrine:migrations:migrate --no-interaction
   fleet_console messenger:setup-transports --no-interaction
+  # FLE-216: a migration can change what the instance Caddy sites contain (named-port access), so rewrite them on every
+  # run; it only touches instances that already have a site. A failure must not stop the upgrade: `fleet:port:refresh`
+  # retries it.
+  fleet_console fleet:port:refresh --no-interaction || log_warn "fleet:port:refresh failed; run it by hand once the cause is fixed"
   init_out=$(fleet_console fleet:host:init "${args[@]}")
   printf '%s\n' "$init_out"
   if [[ $init_out == *'Setup is complete.'* ]]; then

@@ -82,6 +82,10 @@ class Job
     #[ORM\Column(type: UtcDateTimeImmutableType::NAME, nullable: true)]
     private ?\DateTimeImmutable $finishedAt = null;
 
+    /** FLE-213: when the worker handed this queued job to a child process; the child has not claimed it until `running`. */
+    #[ORM\Column(type: UtcDateTimeImmutableType::NAME, nullable: true)]
+    private ?\DateTimeImmutable $spawnedAt = null;
+
     /**
      * @param array<string, mixed> $params
      */
@@ -181,6 +185,11 @@ class Job
     public function createdAt(): \DateTimeImmutable
     {
         return $this->createdAt;
+    }
+
+    public function spawnedAt(): ?\DateTimeImmutable
+    {
+        return $this->spawnedAt;
     }
 
     public function startedAt(): ?\DateTimeImmutable

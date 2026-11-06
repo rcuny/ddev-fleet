@@ -9,6 +9,7 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Instances\SliceMembership;
 use Psr\Clock\ClockInterface;
 
 /**
@@ -20,10 +21,23 @@ use Psr\Clock\ClockInterface;
  *   effective project  = min(project.cpuThreads ?? allocatable, allocatable)
  *   effective template = min(template.cpuThreads ?? effective project, effective project)
  *   committed          = the sum of the effective project limits (unlimited counts as allocatable)
+ *
+ * `busy` of a pool (FLE-212) = the larger of (a) the lock files held right now (SlotLocks) and (b) 1 when the pool's
+ * slice used at least ACTIVE_CORES threads over the last sample, so an agent that holds no slot lock still counts. The
+ * template pool reads its own slice; the `_project` pool reads the project slice minus its template slices (a cgroup
+ * slice includes its children). `unreadable_locks` (additive) counts lock files/directories that could not be read.
+ *
+ * `instances.not_under_slice` (additive) lists the instances without the cgroup override (SliceMembership).
+ *
+ * `used_cores` is null = unknown: no sample yet, a sample older than UsageSampler::STALE_SECONDS (the status watcher is
+ * down), or the slice does not exist (nothing ran in it). After a watcher restart the first reading needs two samples,
+ * about 10 to 20 seconds. Zero is a real reading: the slice exists and was idle.
  */
 final readonly class HostCapacity
 {
     public const int SCHEMA = 1;
+    /** A slice using at least this many threads over the last sample counts as one busy slot. */
+    public const float ACTIVE_CORES = 0.2;
 
     public function __construct(
         private HostHardwareProbe $hardware,
@@ -34,6 +48,7 @@ final readonly class HostCapacity
         private UsageSampler $sampler,
         private SlotLocks $locks,
         private ClockInterface $clock,
+        private ?SliceMembership $membership = null,
     ) {
     }
 
@@ -60,17 +75,25 @@ final readonly class HostCapacity
             $unit = $usage[SliceName::project($project->name())] ?? null;
 
             $templates = [];
+            $templatesUsed = 0.0;
+            $unreadable = 0;
             foreach ($this->templates->forProject($project) as $template) {
                 $tUnit = $usage[SliceName::template($project->name(), $template->name())] ?? null;
+                $tLocks = $this->locks->inspect($project->name(), $template->name());
+                $unreadable += $tLocks['unreadable'];
+                $templatesUsed += $tUnit['used_cores'] ?? 0.0;
                 $templates[] = [
                     'name' => $template->name(),
                     'cpu_threads' => $template->cpuThreads(),
                     'effective_threads' => min($template->cpuThreads() ?? $effective, $effective),
                     'slots' => $template->slots(),
-                    'busy' => $this->locks->busy($project->name(), $template->name()),
+                    'busy' => max($tLocks['busy'], ($tUnit['used_cores'] ?? 0.0) >= self::ACTIVE_CORES ? 1 : 0),
                     'used_cores' => $tUnit['used_cores'] ?? null,
                 ];
             }
+            $pLocks = $this->locks->inspect($project->name(), null);
+            $unreadable += $pLocks['unreadable'];
+            $ownUse = ($unit['used_cores'] ?? 0.0) - $templatesUsed;
 
             $projects[] = [
                 'name' => $project->name(),
@@ -79,7 +102,8 @@ final readonly class HostCapacity
                 'used_cores' => $unit['used_cores'] ?? null,
                 'throttled' => $unit['throttled'] ?? null,
                 'slots' => $project->slots(),
-                'busy' => $this->locks->busy($project->name(), null),
+                'busy' => max($pLocks['busy'], $ownUse >= self::ACTIVE_CORES ? 1 : 0),
+                'unreadable_locks' => $unreadable,
                 'templates' => $templates,
             ];
         }
@@ -94,7 +118,7 @@ final readonly class HostCapacity
             'allocatable_threads' => $allocatable,
             'committed_threads' => $committed,
             'overcommitted' => $committed > $allocatable,
-            'instances' => ['count' => \count($this->instances->ids()), 'max' => $maxInstances],
+            'instances' => ['count' => \count($this->instances->ids()), 'max' => $maxInstances, 'not_under_slice' => $this->membership?->outside() ?? []],
             'projects' => $projects,
         ];
     }

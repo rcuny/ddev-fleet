@@ -57,6 +57,7 @@ final class InstanceSiteRefresherTest extends KernelTestCase
             new InstanceHostnames($host),
             new LockFactory(new FlockStore($this->paths->locksDir())),
             new AdminGroup('fleet-admins'),
+            new ProjectRepository($this->em),
         );
         $this->refresher = new InstanceSiteRefresher(new InstanceRepository($this->em), $this->writer, $this->paths);
         $this->service = new ProjectService(new ProjectRepository($this->em), new NamedPortRepository($this->em), new FakeInstanceGuard(), null, null, $this->refresher);

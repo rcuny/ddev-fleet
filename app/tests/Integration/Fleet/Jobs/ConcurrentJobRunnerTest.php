@@ -55,6 +55,21 @@ final class ConcurrentJobRunnerTest extends JobTestCase
         self::assertSame([], $spawned, 'no child at concurrency 1');
     }
 
+    public function testConcurrencyOneIgnoresARunningJobOfAnotherProcess(): void
+    {
+        // FLE-214: with a sync:// transport every request is its own "worker"; a neighbour's running job must not make this one wait.
+        $other = $this->queuedJob('deploy', 'a--main');
+        self::assertTrue($this->jobs->claim((int) $other->id(), $this->clock->now()));
+        $job = $this->queuedJob('deploy', 'b--main');
+        $spawned = [];
+        $runner = $this->runner($this->jobType('deploy', static fn () => null), $spawned);
+
+        $runner->handle((int) $job->id(), null);
+
+        self::assertSame(JobStatus::Succeeded, $this->fresh($job)->status());
+        self::assertSame([], $this->bus->delays(), 'not re-queued');
+    }
+
     public function testDifferentInstancesGetOneChildEachUpToTheLimitAndTheRestWaits(): void
     {
         $this->setLimit(2);
@@ -202,7 +217,7 @@ final class ConcurrentJobRunnerTest extends JobTestCase
     {
         $this->setLimit(2);
         $job = $this->queuedJob('deploy', 'a--main');
-        $runner = new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new ProcessCommandRunner(), \dirname(__DIR__, 4));
+        $runner = new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new ProcessCommandRunner(), \dirname(__DIR__, 4), $this->clock);
         $runner->useSpawner(static fn (): BackgroundProcess => new class implements BackgroundProcess {
             private Process $process;
 
@@ -235,9 +250,68 @@ final class ConcurrentJobRunnerTest extends JobTestCase
         self::assertSame([1000], $this->bus->delays(), 'the dead child\'s job is back on the queue, not left for the reaper');
     }
 
+    public function testAStartedButUnclaimedChildCountsForARestartedWorkerAndIsRecoveredWhenLost(): void
+    {
+        $this->setLimit(2);
+        $job = $this->queuedJob('deploy', 'a--main');
+        $spawned = [];
+        $first = new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new RecordingCommandRunner(), \dirname(__DIR__, 4), $this->clock);
+        $first->useSpawner(static function (int $id) use (&$spawned): BackgroundProcess {
+            $spawned[] = $id;
+
+            return new class implements BackgroundProcess {
+                public function isRunning(): bool
+                {
+                    return true;
+                }
+
+                public function exitCode(): ?int
+                {
+                    return null;
+                }
+
+                public function wait(): void
+                {
+                }
+            };
+        });
+        $first->handle((int) $job->id(), null);
+        self::assertSame([(int) $job->id()], $spawned);
+        self::assertNotNull($this->fresh($job)->spawnedAt(), 'the job is stamped before the child starts');
+
+        // The worker restarts: the new one knows no children, but the stamp keeps the slot (and the instance) taken.
+        $fresh = $this->realRunner();
+        self::assertSame(1, $fresh->running(), 'a spawned, unclaimed child is visible');
+        $fresh->useSpawner(static fn (): BackgroundProcess => new class implements BackgroundProcess {
+            public function isRunning(): bool
+            {
+                return true;
+            }
+
+            public function exitCode(): ?int
+            {
+                return null;
+            }
+
+            public function wait(): void
+            {
+            }
+        });
+        $fresh->handle((int) $this->queuedJob('deploy', 'b--main')->id(), null);
+        self::assertSame(2, $fresh->running());
+        $fresh->handle((int) $this->queuedJob('deploy', 'c--main')->id(), null);
+        self::assertSame([ConcurrentJobRunner::WAIT_DELAY_MS], $this->bus->delays(), 'the limit does not overshoot');
+
+        // Its child never claims the job: after the grace period it is queued again at once.
+        $this->clock->sleep(ConcurrentJobRunner::SPAWN_GRACE_SECONDS + 1);
+        $fresh->running();
+        self::assertNull($this->fresh($job)->spawnedAt());
+        self::assertContains(1000, $this->bus->delays(), 'the lost child\'s job is back on the queue');
+    }
+
     private function realRunner(): ConcurrentJobRunner
     {
-        return new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new ProcessCommandRunner(), \dirname(__DIR__, 4));
+        return new ConcurrentJobRunner($this->executor([]), $this->jobs, $this->settings, new ProcessCommandRunner(), \dirname(__DIR__, 4), $this->clock);
     }
 
     private function gateFile(): string
@@ -295,7 +369,7 @@ final class ConcurrentJobRunnerTest extends JobTestCase
     private function runner(\App\Tests\Support\CountingJobType $type, array &$spawned): ConcurrentJobRunner
     {
         $this->settings->getOrCreate('fleet.test', $this->clock->now());
-        $runner = new ConcurrentJobRunner($this->executor([$type]), $this->jobs, $this->settings, new RecordingCommandRunner(), \dirname(__DIR__, 4));
+        $runner = new ConcurrentJobRunner($this->executor([$type]), $this->jobs, $this->settings, new RecordingCommandRunner(), \dirname(__DIR__, 4), $this->clock);
         $runner->useSpawner(static function (int $id) use (&$spawned): BackgroundProcess {
             $spawned[] = $id;
             $process = new Process(['sleep', '0.3']);

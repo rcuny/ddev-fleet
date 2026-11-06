@@ -95,6 +95,26 @@ final class UninstallTest extends TestCase
         self::assertStringNotContainsString('apt-get -y -q purge', $out, 'packages stay without --purge-packages');
     }
 
+    public function testTheManagedCpuSlicesAreStoppedAndTheirFilesRemoved(): void
+    {
+        $stubs = $this->stubs(['systemctl' => 'if [ "$1" = list-unit-files ]; then echo "fleet-blog.slice static -"; echo "fleet.slice static -"; echo "fleet-evil;x.slice static -"; fi']);
+
+        [$status, $out, $err] = $this->bash([self::installDir().'/uninstall.sh', '--yes', '--dry-run'], [], null, $stubs);
+
+        self::assertSame(0, $status, $err);
+        foreach ([
+            '+ systemctl stop fleet-blog.slice',
+            '+ rm -f -- /etc/systemd/system/fleet-blog.slice.d/10-fleet-quota.conf',
+            '+ rm -f -- /etc/systemd/system/fleet-blog.slice',
+            '+ systemctl stop fleet.slice',
+            '+ rm -f -- /etc/systemd/system/fleet.slice',
+        ] as $line) {
+            self::assertStringContainsString($line, $out);
+        }
+        self::assertStringNotContainsString('evil', $out, 'a name outside the slice grammar is never touched');
+        self::assertLessThan((int) strpos($out, '+ systemctl stop fleet.slice'), (int) strpos($out, '+ systemctl stop fleet-blog.slice'), 'children are stopped before their parent');
+    }
+
     public function testRemovesTheNewUnits(): void
     {
         [$status, $out, $err] = $this->uninstall(['--yes', '--dry-run']);

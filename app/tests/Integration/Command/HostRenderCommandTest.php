@@ -270,6 +270,7 @@ final class HostRenderCommandTest extends KernelTestCase
             new InstanceHostnames($this->fx->settings),
             new LockFactory(new FlockStore($this->fx->paths->locksDir())),
             $this->fx->admins,
+            new \App\Domain\Project\ProjectRepository($this->em),
         );
 
         return new AccessModelUpgrade(

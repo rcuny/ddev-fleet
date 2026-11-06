@@ -22,6 +22,7 @@ final readonly class SystemRenderer
     private const array FILES = [
         'caddy' => ['Caddyfile', 'env'],
         'authelia' => ['configuration.yml'],
+        'slices' => ['slices.json'],
     ];
 
     public function __construct(
@@ -94,6 +95,22 @@ final readonly class SystemRenderer
         } finally {
             $this->discardStaging($target);
         }
+    }
+
+    /**
+     * Writes one file into a target's staging directory (owner only), for a target whose content is rendered elsewhere
+     * (the slice list). The caller applies and discards.
+     *
+     * @throws \RuntimeException when the file cannot be written
+     */
+    public function stageFile(ApplyTarget $target, string $name, string $contents): void
+    {
+        if (!\in_array($name, self::FILES[$target->value], true)) {
+            throw new \LogicException('Unknown staging file.');
+        }
+        $path = $this->paths->stagingFile($target->value, $name);
+        $this->ensureDir(\dirname($path));
+        AtomicFile::write($path, $contents, self::CONFIG_MODE);
     }
 
     /**

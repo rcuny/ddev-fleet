@@ -75,6 +75,10 @@ final readonly class NamedPortService
             $errors['router'] = $error;
         }
 
+        if (null !== $input->access && !\in_array($input->access, [NamedPort::GATED, NamedPort::PUBLIC], true)) {
+            $errors['access'] = 'Access must be "gated" or "public".';
+        }
+
         return $errors + $this->collisions($input, $errors, $pending);
     }
 
@@ -87,7 +91,7 @@ final readonly class NamedPortService
         }
 
         \assert(\is_int($input->public) && \is_int($input->router));
-        $port = new NamedPort($input->name, $input->public, $input->router);
+        $port = new NamedPort($input->name, $input->public, $input->router, null, $input->access ?? (NamedPort::PUBLIC_BY_DEFAULT === $input->name ? NamedPort::PUBLIC : NamedPort::GATED));
 
         try {
             $this->ports->save($port);
@@ -95,6 +99,25 @@ final readonly class NamedPortService
             // Two creates raced past the checks. The entity manager is closed now: touch nothing else.
             throw new ValidationFailed([self::collidingField($e->getMessage()) => 'Another port was created with this value just now.']);
         }
+
+        return $port;
+    }
+
+    /**
+     * Changes who may reach the port. The Caddy sites follow with `fleet:port:refresh`.
+     *
+     * @throws NotFound
+     * @throws ValidationFailed
+     */
+    public function setAccess(string $name, string $access): NamedPort
+    {
+        $access = strtolower(trim($access));
+        if (!\in_array($access, [NamedPort::GATED, NamedPort::PUBLIC], true)) {
+            throw new ValidationFailed(['access' => 'Access must be "gated" or "public".']);
+        }
+        $port = $this->get($name);
+        $port->changeAccess($access);
+        $this->ports->save($port);
 
         return $port;
     }
