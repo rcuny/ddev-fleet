@@ -125,6 +125,19 @@ export async function openDialog(page: Page, trigger: Locator): Promise<Locator>
   return dialog;
 }
 
+/**
+ * Opens the collapsed delivery log of a project's Integrations tab (a no-op when it is open already or the page has
+ * none, like the cross-project overview).
+ */
+export async function openDeliveryLog(page: Page): Promise<void> {
+  const details = page.getByTestId('webhook-log-details');
+  if ((await details.count()) === 0 || (await details.getAttribute('open')) !== null) {
+    return;
+  }
+  await details.locator('summary').click();
+  await expect(details).toHaveAttribute('open', '');
+}
+
 /** The ten project sections, in tab order. */
 export type ProjectSection =
   | 'Overview'

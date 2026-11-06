@@ -1,7 +1,7 @@
 {# The delivery log. Needs: deliveries, hideIgnored, filterUrl (the page without the filter query), showProject (bool), filter ({source, result}), results (the result names). #}
 <section class="grid gap-4" aria-labelledby="deliveries-title" data-testid="webhook-deliveries">
     <div class="flex flex-wrap items-center justify-between gap-2">
-        <h2 id="deliveries-title" class="text-lg">Deliveries</h2>
+        <{{ nested|default(false) ? 'h3' : 'h2' }} id="deliveries-title" class="text-lg">Deliveries</{{ nested|default(false) ? 'h3' : 'h2' }}>
         <a href="{{ hideIgnored ? filterUrl : filterUrl ~ '?hide-ignored=1' }}" class="inline-flex min-h-11 items-center text-sm" data-testid="webhook-filter">{{ hideIgnored ? 'Show ignored' : 'Hide ignored' }}</a>
     </div>
     <form method="get" action="{{ filterUrl }}" class="flex flex-wrap items-end gap-3" data-testid="delivery-filters" aria-label="Filter deliveries">
