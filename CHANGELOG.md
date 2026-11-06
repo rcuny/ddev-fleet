@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.1] - 2026-11-06
+
+### Added
+- **FLE-208: documentation page for CPU allotments, slots and slices.** `docs/capacity.md` describes the allotment
+  model, slots at project and template level, the slice tree, the slot environment variables, the web UI and the
+  CLI options (`--cpu-threads`, `--slots`, `fleet host:capacity`, `fleet host:slices`).
+
+### Changed
+- **FLE-223:** Renovate updates the PHP dev tooling group with `--with-all-dependencies`, so a tool needing newer Symfony components gets a consistent `composer.lock` (#189 failed on a stale lock).
+
+### Fixed
+- `install --harden`: on the first run the named-port sync (Typesense 9108 and others) now runs again right after `ufw --force enable`, so the ports are open at once instead of about a minute later. The false "named-port sync failed" warning before the enable is gone.
+- `fleet-firewall-sync` no longer fails when `/etc/ddev-fleet/hardening.conf` does not exist yet (the installer's first sync runs before that file is written); this was the cause of the first-run failure.
+
+### Dependencies
+- `phpstan/phpstan-doctrine` ^2.1.0 -> ^2.1.1 (#214)
+- `ansible-lint` >=26.10.1 -> >=26.11.0 for the CI tooling (#194)
+- Ansible collection `community.general` >=13.5.1 -> >=14.0.0 (#148)
+- Symfony UX (`stimulus-bundle`, `ux-icons`, `ux-live-component`, `ux-turbo`, `ux-twig-component`, `ux-toolkit`) 3.6 -> 3.7, with the `symfony/*` components at v8.1.11 (#190)
+- `friendsofphp/php-cs-fixer` ^3.95.27 -> ^3.95.28, with `symfony/console`, `symfony/process`, `symfony/stopwatch` at v8.1.11 and `ergebnis/agent-detector` 2.0.0 (dev) (#189)
+
 ## [1.5.0] - 2026-11-06
 
 ### Added
@@ -1176,7 +1197,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.1...HEAD
+[1.5.1]: https://github.com/rcuny/ddev-fleet/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/rcuny/ddev-fleet/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/rcuny/ddev-fleet/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/rcuny/ddev-fleet/compare/v1.3.0...v1.3.1
