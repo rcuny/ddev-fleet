@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **FLE-234: the project Transfer & danger tab holds Export and Delete.** The Export card (optional passphrase, masked, with the minimum length shown; a passphrase still needs the recent password check) and the Danger zone moved there from the Source tab. Deleting a project now asks you to type its name; a wrong or missing name leaves the project untouched, and the delete is still refused while the project has instances.
 
 ### Security
+- **FLE-232: the project Keys & secrets tab (restricted, lock icon).** It holds the project's secrets (names only; values are write-only, masked, and Reveal needs a recent password check) and **Git SSH**: turning *git over SSH in the container* on needs the confirmation and a recent password check, both checked on the server, and is written to the audit log; turning it off needs neither. The setting left the Source tab; the templates' extra SSH key names are listed read-only with a link to the template form.
 - **FLE-227: a Git URL with a user name or token (`https://user:token@host/...`) is refused with a message that says so**; the URL is never written to a log or an audit entry.
 - **FLE-228: Reveal secret and the sealed Export need a recent password check.** A 5 minute re-auth window
   (`/admin/reauth`: CSRF, 5 attempts per 15 minutes per user) gates revealing a secret value and exporting a project with a
