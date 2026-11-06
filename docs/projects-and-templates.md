@@ -95,11 +95,11 @@ follow the design system. A refused value shows an error under its field and not
 | Projects | `/admin/projects` | The list: name, git URL, default branch and the number of templates. **New project** opens the create form. |
 | New project | `/admin/projects/new` | Name, git URL, default branch, hostnames (one per line), git identity, issue id pattern, submodule, Typesense, git over SSH in the container, **CPU threads** and **Slots** (empty = unlimited; the help text quotes the threads the host can allocate). |
 | Project, Overview tab | `/admin/projects/<project>` | A read-only summary: git URL, default branch and template, the counts of instances, templates, ports and secrets, the webhook state, the effective capacity, and a link to each tab. The project settings have ten tabs: Overview, Source, Templates, Assets, Network, Access, Capacity, Keys & secrets, Integrations, Transfer & danger. Below the `sm` breakpoint they are one select. Access, Capacity and Transfer & danger are placeholders until their content moves there. |
-| Project, Source tab | `/admin/projects/<project>/source` | The same fields (the name is fixed) plus the default template. Below the form: the **issue id tester** (type a pattern, a sample instance label and a sample branch, and see the id a deploy would extract; nothing typed there is saved) and the **Danger zone** with the delete button and its confirmation dialog. |
+| Project, Source tab | `/admin/projects/<project>/source` | The same fields as the create form (the name is fixed) plus the default template, except the hostnames and Typesense, which moved to the Network tab. Below the form: the **issue id tester** (type a pattern, a sample instance label and a sample branch, and see the id a deploy would extract; nothing typed there is saved) and the **Danger zone** with the delete button and its confirmation dialog. |
 | Project, Templates tab | `/admin/projects/<project>/templates` | The project's templates with their counts of commands; the default one carries a badge. **New template**, edit and delete. |
 | Template form | `.../templates/new`, `.../templates/<template>` | Name, Drupal environment, three text boxes with one command per line, extra SSH keys, and **CPU threads** and **Slots** (empty = inherit the project's CPU threads, shown as "inherits project: N", and no slots of its own; a value above the project's is refused). The host's **Capacity** tab (`/admin/host?tab=capacity`) shows threads, cores, RAM, the reserve and instance cap (both editable), what is committed with an overcommit warning, live use per project and template, and the instances not under a CPU slice yet. |
 | Project, Keys & secrets tab | `/admin/projects/<project>/keys` (the old `/secrets` address redirects) | The project's secrets (names only), add or replace, reveal, delete, and a warning for a secret no asset file uses. See [`secrets.md`](secrets.md). |
-| Project, Network tab | `/admin/projects/<project>/network` (the old `/ports` address redirects) | Read-only: the catalogue, with the ports this project uses marked. Assigning ports in the browser arrives with the networking milestone (M0.07); until then use `fleet project:update --port`. |
+| Project, Network tab | `/admin/projects/<project>/network` (the old `/ports` address redirects) | Additional hostnames, the Typesense toggle and the named ports table, saved together without touching the other project fields. Tick the ports the project uses. For a port the project already has, the **Access** column offers *Login required* (gated) or *Public (no login)*, with the same rules as `fleet port:update`; the Public badge is drawn in the warning colour. Access belongs to the port, so a change applies to every project that uses it. A **confirmation dialog** (keyboard operable, Escape cancels) comes first when the save adds a hostname, assigns or unassigns a public port, or changes any access. Access changes, added or removed hostnames and port assignments that needed the confirmation are written to the audit log (actor, project, name, old and new value). |
 
 ## The command line
 
@@ -286,9 +286,8 @@ code `2`).
 ## Named ports
 
 The catalogue is shared by the whole host and has no web page: add entries with `fleet port:create` and list them with
-`fleet port:list`. A project's *Ports* tab shows which of them it uses; assign them with `fleet project:update
---port=<name>` (the list replaces the old one). Assigning them from the browser arrives with the networking
-milestone (M0.07b).
+`fleet port:list`. A project's *Network* tab shows which of them it uses and lets an admin assign them and change their access; the command line does the same with `fleet project:update
+--port=<name>` (the list replaces the old one).
 
 **What is exposed.** For every instance of a project that has a port, Caddy also listens on
 `<instance host>:<public port>` (the primary host and every alias). The block is the same as the instance's own site:

@@ -74,13 +74,17 @@ final class ProjectType extends AbstractType
             ]);
         }
 
-        $builder
-            ->add('additionalHostnames', TextareaType::class, [
+        if ($create) {
+            // Edited later on the Network tab (NetworkType), which saves them without touching the other fields.
+            $builder->add('additionalHostnames', TextareaType::class, [
                 'label' => 'Additional hostnames',
                 'required' => false,
                 'help' => 'One label per line. Each instance also answers on <label>-<project>--<instance>.',
                 'attr' => $text + ['rows' => 3, 'maxlength' => TextBlock::MAX],
-            ])
+            ]);
+        }
+
+        $builder
             ->add('gitBotMode', EnumType::class, [
                 'class' => GitBotMode::class,
                 'label' => 'Git identity of the instances',
@@ -115,10 +119,6 @@ final class ProjectType extends AbstractType
                 'help' => 'A path inside the repository, for example web/modules/custom/blog.',
                 'attr' => $text + ['maxlength' => SubmodulePath::MAX],
             ])
-            ->add('typesense', CheckboxType::class, [
-                'label' => 'Run a Typesense search server for each instance',
-                'required' => false,
-            ])
             ->add('containerSsh', CheckboxType::class, [
                 'label' => 'Git over SSH inside the container: a dedicated ssh-agent with the push key for each instance',
                 'required' => false,
@@ -139,6 +139,13 @@ final class ProjectType extends AbstractType
                 'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
             ])
             ->add('save', SubmitType::class, ['label' => $create ? 'Create project' : 'Save']);
+
+        if ($create) {
+            $builder->add('typesense', CheckboxType::class, [
+                'label' => 'Run a Typesense search server for each instance',
+                'required' => false,
+            ]);
+        }
     }
 
     public function configureOptions(OptionsResolver $resolver): void
