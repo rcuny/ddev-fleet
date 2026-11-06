@@ -566,6 +566,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
     public function testASealedExportHasTheSealedBlockKeysAndNeitherNameNorValueNorPassphrase(): void
     {
+        $this->confirmPassword();
         $this->createProject('pwsec');
         $store = $this->container()->get(SecretStore::class);
         self::assertInstanceOf(SecretStore::class, $store);
@@ -593,6 +594,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
     #[DataProvider('badPassphrases')]
     public function testAnUnusablePassphraseIsRefusedWithAMessageAndNoDownload(string $passphrase, string $message): void
     {
+        $this->confirmPassword();
         $this->createProject('pwr');
 
         $this->post('/admin/projects/pwr/export', ['passphrase' => $passphrase]);
@@ -607,6 +609,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
     public function testExactlyEightCharactersAreAccepted(): void
     {
+        $this->confirmPassword();
         $this->createProject('pw8');
 
         $this->post('/admin/projects/pw8/export', ['passphrase' => '12345678']);

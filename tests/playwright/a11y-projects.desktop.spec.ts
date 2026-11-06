@@ -6,6 +6,7 @@ import { createDeployableProject, deployOne, uniqueLabel } from './support/insta
 import { createPort, deletePort } from './support/ports';
 import { fillProject, openNewProject, submitCreate, submitSave } from './support/projectForm';
 import { createProjectViaUi, deleteProjectViaUi, GIT_URL, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { openReauthWindow } from './support/secrets';
 import { createTemplateViaUi, editTemplate, fillTemplate, submitNewTemplate } from './support/templates';
 
 // Axe sweep of the project pages: every page state the feature specs used to check inline (list, forms, 422 refusals,
@@ -466,6 +467,7 @@ async function sealedExport(page: Page, project: string, secret: string, value: 
     await createProjectViaUi(page, project);
     await addProjectSecret(page, project, secret, value);
     await page.goto(`/admin/projects/${project}/source`);
+    await openReauthWindow(page);
     await page.getByTestId('export-passphrase').fill(passphrase);
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);
     return await readFile(await download.path(), 'utf8');
