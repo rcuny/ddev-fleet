@@ -57,7 +57,7 @@ final class GitUrl
     {
         [$authority, $path] = self::split($rest);
         if (str_contains($authority, '@')) {
-            return 'Do not put credentials in the URL: use the deploy key.';
+            return 'The URL contains a user name or token (user:token@). Remove it and use the deploy key instead.';
         }
         if (null !== $error = self::hostAndPort($authority)) {
             return $error;

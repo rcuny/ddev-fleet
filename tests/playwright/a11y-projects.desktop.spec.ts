@@ -274,11 +274,10 @@ test.describe('axe sweep: templates', () => {
       await createProjectViaUi(page, project);
       await createTemplateViaUi(page, project, { name: 'alpha' });
       await createTemplateViaUi(page, project, { name: 'beta' });
-      await openSection(page, 'General');
-      await page.getByLabel('Default template').selectOption('alpha');
-      await submitAndWait(page, page.getByRole('button', { name: 'Save', exact: true }));
-      await expect(page.getByTestId('flashes')).toContainText('Project saved.');
       await openSection(page, 'Templates');
+      await page.getByLabel('Default template').selectOption('alpha');
+      await submitAndWait(page, page.getByRole('button', { name: 'Save default' }));
+      await expect(page.getByTestId('flashes')).toContainText('Default template saved.');
       await editTemplate(page, project, 'alpha');
       const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete template' }));

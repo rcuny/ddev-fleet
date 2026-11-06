@@ -66,7 +66,7 @@ final class TemplateControllerAuthorizationTest extends AdminTestCase
         $templates = $this->seed();
 
         $actions = [
-            'index' => static fn (TemplateController $c): mixed => $c->index('blog'),
+            'index' => fn (TemplateController $c): mixed => $c->index($this->request(), 'blog'),
             'new' => fn (TemplateController $c): mixed => $c->new($this->request('POST'), 'blog'),
             'edit' => fn (TemplateController $c): mixed => $c->edit($this->request('POST'), 'blog', 'full'),
             'delete' => fn (TemplateController $c): mixed => $c->delete($this->request('POST'), 'blog', 'full'),
@@ -90,7 +90,7 @@ final class TemplateControllerAuthorizationTest extends AdminTestCase
 
         $this->signIn('fleet-admins');
         $this->request();
-        self::assertSame(200, $this->controller()->index('blog')->getStatusCode());
+        self::assertSame(200, $this->controller()->index($this->request(), 'blog')->getStatusCode());
         self::assertSame(200, $this->controller()->new($this->request(), 'blog')->getStatusCode());
         self::assertSame(200, $this->controller()->edit($this->request(), 'blog', 'full')->getStatusCode());
     }

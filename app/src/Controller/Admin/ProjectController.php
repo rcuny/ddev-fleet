@@ -24,6 +24,7 @@ use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Secrets\SecretStore;
 use App\Form\Project\ProjectType;
+use App\Form\Project\SourceType;
 use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
 use App\Security\CurrentActor;
@@ -79,7 +80,7 @@ final class ProjectController extends AbstractController
         $this->denyAccessUnlessGranted(ProjectVoter::SETTINGS);
 
         // The host default is preselected: a new project with no radio chosen showed an identity choice nobody had made.
-        $form = $this->createForm(ProjectType::class, ['gitBotMode' => GitBotMode::Inherit], ['mode' => ProjectType::CREATE, 'allocatable' => $this->allocatable->get()]);
+        $form = $this->createForm(ProjectType::class, ['gitBotMode' => GitBotMode::Inherit], ['allocatable' => $this->allocatable->get()]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -174,20 +175,18 @@ final class ProjectController extends AbstractController
     public function edit(Request $request, string $name): Response
     {
         $project = $this->load($name);
-        $templateNames = $this->templateNames($name);
 
-        $form = $this->createForm(ProjectType::class, $this->formDataOf($project), ['mode' => ProjectType::EDIT, 'templates' => $templateNames, 'allocatable' => $this->allocatable->get()]);
+        $form = $this->createForm(SourceType::class, $this->formDataOf($project), ['allocatable' => $this->allocatable->get()]);
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
             $data = $this->formData($form);
             $hostnames = TextLines::split($form, 'additionalHostnames', $data);
             if (null !== $hostnames) {
-                // Start from what is stored so the fields this tab does not show (port assignments) survive the save.
+                // Start from what is stored so the fields this tab does not show (port assignments, default template) survive the save.
                 $input = ProjectInput::fromProject($project)->with([
                     'git' => self::text($data['git'] ?? null),
                     'defaultBranch' => self::optionalText($data['defaultBranch'] ?? null),
-                    'defaultTemplate' => self::optionalText($data['defaultTemplate'] ?? null),
                     'additionalHostnames' => $hostnames,
                     'gitBotMode' => self::mode($data['gitBotMode'] ?? null),
                     'gitBotName' => self::optionalText($data['gitBotName'] ?? null),
@@ -216,7 +215,6 @@ final class ProjectController extends AbstractController
         return $this->render('admin/projects/edit.html.twig', [
             'project' => $project,
             'form' => $form,
-            'templateNames' => $templateNames,
         ]);
     }
 
@@ -366,7 +364,6 @@ final class ProjectController extends AbstractController
         return [
             'git' => $project->git(),
             'defaultBranch' => $project->defaultBranch(),
-            'defaultTemplate' => $project->defaultTemplate(),
             'additionalHostnames' => implode("\n", $project->additionalHostnames()),
             'gitBotMode' => $project->gitBotMode(),
             'gitBotName' => $project->gitBotName(),

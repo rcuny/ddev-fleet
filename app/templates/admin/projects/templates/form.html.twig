@@ -26,11 +26,26 @@
             {% if create %}
                 {{ form_row(form.name) }}
             {% endif %}
-            {{ form_row(form.drupalEnv) }}
-            {{ form_row(form.postDeploy) }}
-            {{ form_row(form.tty1) }}
-            {{ form_row(form.tty2) }}
-            {{ form_row(form.sshKeys) }}
+            <section class="grid gap-6" aria-labelledby="template-environment-heading" data-testid="template-section-environment">
+                <h3 id="template-environment-heading" class="text-base">Environment</h3>
+                {{ form_row(form.drupalEnv) }}
+                {{ form_row(form.sshKeys) }}
+            </section>
+
+            <twig:Separator />
+
+            <section class="grid gap-6" aria-labelledby="template-commands-heading" data-testid="template-section-commands">
+                <h3 id="template-commands-heading" class="text-base">Commands</h3>
+                {{ form_row(form.postDeploy) }}
+            </section>
+
+            <twig:Separator />
+
+            <section class="grid gap-6" aria-labelledby="template-terminals-heading" data-testid="template-section-terminals">
+                <h3 id="template-terminals-heading" class="text-base">Terminals</h3>
+                {{ form_row(form.tty1) }}
+                {{ form_row(form.tty2) }}
+            </section>
 
             <twig:Separator />
 

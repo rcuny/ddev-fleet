@@ -123,13 +123,13 @@ test.describe('projects and templates', () => {
         await expect(page.getByTestId('ports-note')).not.toContainText('M0.07');
       });
 
-      // Make web the default template (General tab).
+      // Make web the default template (Templates tab).
       await timed('make web the default', async () => {
-        await openSection(page, 'Source');
-        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
+        await openSection(page, 'Templates');
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/templates$`));
         await page.getByLabel('Default template').selectOption('web');
-        await page.getByRole('button', { name: 'Save', exact: true }).click();
-        await expect(page.getByTestId('flashes')).toContainText('Project saved.');
+        await page.getByRole('button', { name: 'Save default' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Default template saved.');
         await expect(page.getByLabel('Default template')).toHaveValue('web');
       });
 
@@ -147,11 +147,10 @@ test.describe('projects and templates', () => {
 
       // Clear the default, then the template can be deleted.
       await timed('clear default, delete template', async () => {
-        await openSection(page, 'General');
-        await page.getByLabel('Default template').selectOption({ label: 'None' });
-        await page.getByRole('button', { name: 'Save', exact: true }).click();
-        await expect(page.getByTestId('flashes')).toContainText('Project saved.');
         await openSection(page, 'Templates');
+        await page.getByLabel('Default template').selectOption({ label: 'None' });
+        await page.getByRole('button', { name: 'Save default' }).click();
+        await expect(page.getByTestId('flashes')).toContainText('Default template saved.');
         await expect(page.getByTestId('template-default')).toHaveCount(0);
         await follow(page, page.getByRole('link', { name: 'Edit web' }));
         const deleteDialog = await openDialog(page, page.getByRole('button', { name: 'Delete this template' }));
@@ -467,7 +466,7 @@ test.describe('phone layout of the project pages (390 px) @phone', () => {
   });
 
   test('the delete dialog fits, its buttons are 44 px, Cancel closes it', async ({ page }) => {
-    await page.goto(`/admin/projects/${NAME}`);
+    await page.goto(`/admin/projects/${NAME}/source`);
     const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
     await expect(dialog).toContainText(`Delete ${NAME}?`);
     await expectNoOverflow(page, 'the delete dialog');
