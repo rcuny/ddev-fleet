@@ -453,7 +453,9 @@ FLEETEOF
   if is_dry; then
     printf '+ %s/fleet-firewall-sync (named ports from `fleet:port:firewall --json`)\n' "$H_SBIN"
   else
-    "$H_SBIN/fleet-firewall-sync" || log_warn "the named-port sync failed; the timer retries every minute"
+    # May fail on a first run (Fleet not answering yet, or ufw still inactive): the real result is the sync after the
+    # enable below, so no warning here.
+    "$H_SBIN/fleet-firewall-sync" || log_info "the named-port sync before the firewall is enabled did not complete; it runs again right after the enable"
   fi
 
   # The switch is armed BEFORE "ufw --force enable": if the enable drops this SSH session the installer is killed, and
@@ -491,7 +493,11 @@ FLEETEOF
       run systemctl start fleet-firewall-deadman.timer
       add_final_note "FIREWALL ENABLED with a dead-man's switch: it turns the firewall OFF again in $H_GRACE minutes unless you confirm. From a SECOND, independent SSH session run:  sudo $H_SBIN/fleet-firewall-confirm"
     fi
-    [ "$enable_now" = 0 ] || run ufw --force enable
+    if [ "$enable_now" = 1 ]; then
+      run ufw --force enable
+      # Open the named ports right away instead of waiting up to a minute for the timer (for example Typesense on 9108).
+      "$H_SBIN/fleet-firewall-sync" || log_warn "the named-port sync failed; the timer retries every minute"
+    fi
   fi
   run systemctl enable --now fleet-firewall-sync.timer
 }

@@ -134,7 +134,10 @@
         "phpstan/**",
         "friendsofphp/php-cs-fixer"
       ],
-      "groupName": "php dev tooling"
+      "groupName": "php dev tooling",
+      "postUpdateOptions": [
+        "composerWithAll"
+      ]
     },
     {
       "description": "Playwright and its axe-core integration (tests/playwright) move together; the companion's DDEV image pins the same Playwright version, so a bump here needs the matching companion change",

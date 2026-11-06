@@ -50,25 +50,33 @@ export function consoleJson<T = Record<string, unknown>>(args: string[]): T {
   return JSON.parse(result.stdout) as T;
 }
 
-/** Inserts (or, with `delete`, removes) a Stopped instance (no Stop button for other specs to trip over) of an existing project, bypassing the application. */
-export function instanceRow(action: 'insert' | 'delete', project: string, label: string): void {
+/**
+ * Inserts (or, with `delete`, removes) an instance of an existing project, bypassing the application. Stopped by default
+ * (no Stop button for other specs to trip over); pass `state` for a spec that needs another one. The single place where
+ * a spec writes the SQLite database of the server under test directly.
+ */
+export function instanceRow(action: 'insert' | 'delete', project: string, label: string, state: 'stopped' | 'running' = 'stopped'): void {
+  // BEGIN IMMEDIATE takes the write lock up front, so busy_timeout applies. A deferred transaction that starts as a
+  // reader and upgrades to a writer gets "database is locked" at once when another writer committed in between.
   const script = `
     $pdo = new PDO('sqlite:' . $argv[1] . '/var/fleet.sqlite');
     $pdo->exec('PRAGMA busy_timeout=10000');
+    $pdo->exec('BEGIN IMMEDIATE');
     $id = $argv[3] . '--' . $argv[4];
-    if ($argv[2] === 'delete') { $pdo->prepare('DELETE FROM instance WHERE id = ?')->execute([$id]); exit(0); }
+    if ($argv[2] === 'delete') { $pdo->prepare('DELETE FROM instance WHERE id = ?')->execute([$id]); $pdo->exec('COMMIT'); exit(0); }
     $p = $pdo->prepare('SELECT id FROM project WHERE name = ?'); $p->execute([$argv[3]]);
     $projectId = $p->fetchColumn();
     $now = gmdate('Y-m-d H:i:s');
-    $pdo->prepare("INSERT INTO instance (id, label, template_name, branch, state, requested_by, created_at, updated_at, project_id) VALUES (?, ?, 'full', 'develop', 'stopped', 'admin', ?, ?, ?)")
-        ->execute([$id, $argv[4], $now, $now, $projectId]);
+    $pdo->prepare("INSERT INTO instance (id, label, template_name, branch, state, requested_by, created_at, updated_at, project_id) VALUES (?, ?, 'full', 'develop', ?, 'admin', ?, ?, ?)")
+        ->execute([$id, $argv[4], $argv[5], $now, $now, $projectId]);
+    $pdo->exec('COMMIT');
   `;
-  // SQLite answers "database is locked" at once (busy_timeout does not apply) when a reader upgrades to a writer under
-  // load, for example while the app starts: try a few times.
-  let result = spawnSync(php(), ['-r', script, fleetHome(), action, project, label], { encoding: 'utf8' });
+  const run = () => spawnSync(php(), ['-r', script, fleetHome(), action, project, label, state], { encoding: 'utf8' });
+  // Belt and braces: a few retries if the lock is still reported.
+  let result = run();
   for (let attempt = 0; attempt < 5 && result.status !== 0 && /database is locked/.test(result.stderr + result.stdout); attempt++) {
     spawnSync('sleep', ['1']);
-    result = spawnSync(php(), ['-r', script, fleetHome(), action, project, label], { encoding: 'utf8' });
+    result = run();
   }
   expect(result.status, `instance ${action}: ${result.stderr}${result.stdout}`).toBe(0);
 }
