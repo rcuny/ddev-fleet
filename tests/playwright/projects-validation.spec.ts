@@ -45,7 +45,7 @@ test.describe('long values', () => {
     created = name;
     await createProjectViaUi(page, name, git);
     expect(await hasHorizontalOverflow(page), 'overflow after create').toBe(false);
-    await page.goto(`/admin/projects/${name}`);
+    await page.goto(`/admin/projects/${name}/source`);
     expect(await hasHorizontalOverflow(page), 'overflow on the edit page').toBe(false);
     await page.goto('/admin/projects');
     await expect(page.getByTestId('project-row').filter({ hasText: name })).toContainText(git);

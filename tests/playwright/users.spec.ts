@@ -106,7 +106,7 @@ test.describe('users and project access', () => {
     const username = uniqueName('usr');
 
     try {
-      await createProjectViaUi(page, project);
+      await createProjectViaUi(page, project, undefined, 'overview');
       await expect(page.getByTestId('flashes')).toContainText('Project created.');
       await expect(page.getByRole('heading', { level: 1 })).toContainText(project);
 

@@ -147,7 +147,7 @@ test.describe('secrets', () => {
     try {
       await createProjectViaUi(page, project);
       await openSection(page, 'Secrets');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/secrets$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/keys$`));
       await expect(page.getByRole('heading', { level: 1, name: project })).toBeVisible();
       await expect(page.getByTestId('secrets-empty')).toBeVisible();
       await expect(page.getByTestId('secrets-no-assets')).toContainText('No asset files yet');
@@ -165,7 +165,7 @@ test.describe('secrets', () => {
       await page.goto('/admin/secrets');
       await expect(rowOf(page, name)).toHaveCount(0);
 
-      await deleteSecret(page, `/admin/projects/${project}/secrets`, name);
+      await deleteSecret(page, `/admin/projects/${project}/keys`, name);
       await expect(page.getByTestId('secrets-empty')).toBeVisible();
     } finally {
       await deleteProjectViaUi(page, project);

@@ -1,18 +1,39 @@
-{#- The project's sections. Needs: project, active ('general' | 'templates' | 'secrets' | 'ports' | 'assets' | 'webhooks'). One tab strip at every width: no script needed, links of at least 44 px, scrolls inside its own container if it ever outgrows the screen. -#}
+{#- The project's sections. Needs: project, active ('overview' | 'source' | 'templates' | 'assets' | 'network' | 'access' | 'capacity' | 'keys' | 'integrations' | 'transfer'). From the sm breakpoint a strip of links (aria-current on the open one, 44 px targets, scrolls inside its own container); below it a labelled <select> that goes to the chosen tab, with a plain list of links for a browser without script. `restricted` marks the tab that holds keys and secrets with a lock that has an accessible name. -#}
 {% set sections = [
-    {key: 'general', label: 'General', url: path('project_edit', {name: project.name})},
+    {key: 'overview', label: 'Overview', url: path('project_overview', {name: project.name})},
+    {key: 'source', label: 'Source', url: path('project_source', {name: project.name})},
     {key: 'templates', label: 'Templates', url: path('project_templates', {name: project.name})},
-    {key: 'secrets', label: 'Secrets', url: path('project_secrets', {name: project.name})},
-    {key: 'ports', label: 'Ports', url: path('project_ports', {name: project.name})},
     {key: 'assets', label: 'Assets', url: path('project_assets', {name: project.name})},
-    {key: 'webhooks', label: 'Webhooks', url: path('project_webhooks', {name: project.name})},
+    {key: 'network', label: 'Network', url: path('project_network', {name: project.name})},
+    {key: 'access', label: 'Access', url: path('project_access', {name: project.name})},
+    {key: 'capacity', label: 'Capacity', url: path('project_capacity', {name: project.name})},
+    {key: 'keys', label: 'Keys & secrets', url: path('project_keys', {name: project.name}), restricted: true},
+    {key: 'integrations', label: 'Integrations', url: path('project_integrations', {name: project.name})},
+    {key: 'transfer', label: 'Transfer & danger', url: path('project_transfer', {name: project.name})},
 ] %}
-<nav aria-label="Project sections" class="flex items-center gap-6 overflow-x-auto border-b border-hairline">
-    {% for section in sections %}
-        {% if section.key == active %}
-            <a href="{{ section.url }}" aria-current="page" class="-mb-px shrink-0 whitespace-nowrap border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand">{{ section.label }}</a>
-        {% else %}
-            <a href="{{ section.url }}" class="-mb-px shrink-0 whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">{{ section.label }}</a>
-        {% endif %}
-    {% endfor %}
+<nav aria-label="Project sections" class="border-b border-hairline">
+    <div class="py-3 sm:hidden" data-testid="project-sections-select">
+        <twig:Label for="project-section-select" class="sr-only">Project section</twig:Label>
+        <twig:NativeSelect id="project-section-select" class="w-full" data-controller="tab-select" data-action="change->tab-select#go">
+            {% for section in sections %}
+                <option value="{{ section.url }}"{{ section.key == active ? ' selected' }}>{{ section.label }}{{ section.restricted is defined ? ' (restricted)' }}</option>
+            {% endfor %}
+        </twig:NativeSelect>
+        <noscript>
+            <ul class="mt-2 grid gap-1">
+                {% for section in sections %}
+                    <li><a href="{{ section.url }}" class="inline-flex min-h-11 items-center"{{ section.key == active ? ' aria-current="page"' }}>{{ section.label }}</a></li>
+                {% endfor %}
+            </ul>
+        </noscript>
+    </div>
+    <div class="hidden items-center gap-6 overflow-x-auto sm:flex" data-testid="project-sections-strip">
+        {% for section in sections %}
+            {% if section.key == active %}
+                <a href="{{ section.url }}" aria-current="page" class="-mb-px inline-flex min-h-11 shrink-0 items-center gap-1 whitespace-nowrap border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand">{{ section.label }}{% if section.restricted is defined %}<twig:ux:icon name="lucide:lock" class="size-3.5" aria-hidden="true" /><span class="sr-only"> (restricted)</span>{% endif %}</a>
+            {% else %}
+                <a href="{{ section.url }}" class="-mb-px inline-flex min-h-11 shrink-0 items-center gap-1 whitespace-nowrap border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline">{{ section.label }}{% if section.restricted is defined %}<twig:ux:icon name="lucide:lock" class="size-3.5" aria-hidden="true" /><span class="sr-only"> (restricted)</span>{% endif %}</a>
+            {% endif %}
+        {% endfor %}
+    </div>
 </nav>

@@ -146,7 +146,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
 
         self::assertCount(1, $crawler->filter('[data-testid=issue-id-preview]'));
         self::assertCount(1, $crawler->filter('[data-testid=export-project]'));
@@ -158,9 +158,9 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('typesense', 9108, 8108);
         $this->makeProject('blog', new ProjectInput('blog', self::GIT, 'main', additionalHostnames: ['www'], typesense: true));
 
-        $this->submit($this->open('/admin/projects/blog'), 'Save', []);
+        $this->submit($this->open('/admin/projects/blog/source'), 'Save', []);
 
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         self::assertStringContainsString('Project saved.', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame(self::GIT, $project->git());
@@ -224,7 +224,7 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertStringContainsString('Project created.', $crawler->filter('[data-testid=flashes]')->text());
 
         // The flash is shown once.
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         self::assertCount(0, $crawler->filter('[data-testid=flashes]'));
     }
 
@@ -268,7 +268,7 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertNotNull($crawler->filter('main form[data-testid=project-form]')->attr('novalidate'));
 
         $this->makeProject();
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         self::assertNotNull($crawler->filter('main form[data-testid=project-form]')->attr('novalidate'));
 
         // An empty submit reaches the server and comes back as field errors.
@@ -302,7 +302,7 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeTemplate('blog', 'full');
         $this->makeTemplate('blog', 'light');
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         self::assertResponseStatusCodeSame(200);
         self::assertSame('blog', trim($crawler->filter('main h1')->text()));
         self::assertStringContainsString(self::GIT, $crawler->filter('main header')->text());
@@ -321,7 +321,7 @@ final class ProjectPagesTest extends AdminTestCase
             'project[typesense]' => true,
         ]);
 
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame('git@git.example.com:acme/blog.git', $project->git());
         self::assertSame('develop', $project->defaultBranch());
@@ -357,7 +357,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $crawler = $this->submit($crawler, 'Save', [
             'project[git]' => self::GIT,
             'project[issueIdRegexp]' => '(a+)+$',
@@ -379,9 +379,9 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('typesense', 9108, 8108);
         $this->makeProject('blog', new ProjectInput('blog', self::GIT, ports: ['typesense']));
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $this->submit($crawler, 'Save', ['project[defaultBranch]' => 'develop']);
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
 
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame(['typesense'], array_map(static fn ($p): string => $p->name(), $project->ports()));
@@ -392,13 +392,13 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         self::assertCount(0, $crawler->filter('[name="project[name]"]'));
 
         // A crafted request that adds a name is refused as an extra field; nothing is renamed or created.
         $values = $crawler->selectButton('Save')->form()->getPhpValues();
         $values['project']['name'] = 'other';
-        $this->client->request('POST', self::BASE.'/admin/projects/blog', $values, [], $this->browserServer());
+        $this->client->request('POST', self::BASE.'/admin/projects/blog/source', $values, [], $this->browserServer());
 
         self::assertResponseStatusCodeSame(422);
         self::assertNull($this->stored('other'));
@@ -409,7 +409,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $crawler = $this->submit($crawler, 'Save', ['project[additionalHostnames]' => str_repeat("a\n", 500_000)]);
 
         self::assertResponseStatusCodeSame(422);
@@ -421,7 +421,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $crawler = $this->submit($crawler, 'Save', ['project[additionalHostnames]' => implode("\n", array_map(static fn (int $i): string => 'h'.$i, range(1, 51)))]);
 
         self::assertResponseStatusCodeSame(422);
@@ -435,36 +435,56 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject();
         $this->makeTemplate('blog', 'full');
 
-        foreach (['/admin/projects', '/admin/projects/new', '/admin/projects/blog', '/admin/projects/blog/ports', '/admin/projects/blog/templates'] as $path) {
+        foreach (['/admin/projects', '/admin/projects/new', '/admin/projects/blog/source', '/admin/projects/blog/network', '/admin/projects/blog/templates'] as $path) {
             $crawler = $this->open($path);
             self::assertResponseStatusCodeSame(200, $path);
             self::assertCount(1, $crawler->filter('h1'), $path);
             self::assertCount(1, $crawler->filter('main#main'), $path);
         }
 
-        foreach (['/admin/projects/blog' => 'General', '/admin/projects/blog/templates' => 'Templates', '/admin/projects/blog/ports' => 'Ports', '/admin/projects/blog/assets' => 'Assets', '/admin/projects/blog/webhooks' => 'Webhooks'] as $path => $active) {
+        $labels = ['Overview', 'Source', 'Templates', 'Assets', 'Network', 'Access', 'Capacity', 'Keys & secrets (restricted)', 'Integrations', 'Transfer & danger'];
+        $hrefs = ['', '/source', '/templates', '/assets', '/network', '/access', '/capacity', '/keys', '/integrations', '/transfer'];
+        $hrefs = array_map(static fn (string $suffix): string => '/admin/projects/blog'.$suffix, $hrefs);
+        $active = [
+            '/admin/projects/blog' => 'Overview',
+            '/admin/projects/blog/source' => 'Source',
+            '/admin/projects/blog/templates' => 'Templates',
+            '/admin/projects/blog/assets' => 'Assets',
+            '/admin/projects/blog/network' => 'Network',
+            '/admin/projects/blog/access' => 'Access',
+            '/admin/projects/blog/capacity' => 'Capacity',
+            '/admin/projects/blog/keys' => 'Keys & secrets (restricted)',
+            '/admin/projects/blog/integrations' => 'Integrations',
+            '/admin/projects/blog/transfer' => 'Transfer & danger',
+        ];
+        foreach ($active as $path => $current) {
             $crawler = $this->open($path);
+            self::assertResponseStatusCodeSame(200, $path);
             $tabs = $crawler->filter('nav[aria-label="Project sections"]');
             self::assertCount(1, $tabs, $path);
-            self::assertSame(['General', 'Templates', 'Secrets', 'Ports', 'Assets', 'Webhooks'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
-            self::assertSame(
-                ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/secrets', '/admin/projects/blog/ports', '/admin/projects/blog/assets', '/admin/projects/blog/webhooks'],
-                $tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('href')),
-            );
-            self::assertSame($active, trim($tabs->filter('a[aria-current="page"]')->text()), $path);
+            $links = $tabs->filter('[data-testid=project-sections-strip] a');
+            self::assertCount(1, $links->filter('a[aria-current="page"]'), $path);
+            self::assertSame($hrefs, $links->each(static fn (Crawler $a): string => (string) $a->attr('href')), $path);
+            self::assertCount(1, $links->reduce(static fn (Crawler $a): bool => 'page' === $a->attr('aria-current')), $path);
+            self::assertSame($current, trim(preg_replace('/\s+/', ' ', $links->filter('a[aria-current="page"]')->text()) ?? ''), $path);
 
-            // One tab strip at every width: no phone select that waits for a script.
-            self::assertCount(0, $crawler->filter('select[aria-label="Section"]'), $path);
-            self::assertCount(0, $crawler->filter('[data-controller~="select-nav"]'), $path);
-            self::assertStringNotContainsString('hidden', (string) $tabs->attr('class'), $path);
+            // Below sm the same ten tabs are one labelled select (script goes to the chosen one), plus links without script.
+            $select = $tabs->filter('select#project-section-select');
+            self::assertCount(1, $select, $path);
+            self::assertCount(10, $select->filter('option'), $path);
+            self::assertCount(1, $select->filter('option[selected]'), $path);
+            self::assertSame('project-section-select', $tabs->filter('label')->attr('for'), $path);
+            self::assertStringContainsString('sm:hidden', (string) $tabs->filter('[data-testid=project-sections-select]')->attr('class'), $path);
         }
+        // The lock on the restricted tab has an accessible name.
+        self::assertStringContainsString('(restricted)', $this->open('/admin/projects/blog')->filter('a[href="/admin/projects/blog/keys"] .sr-only')->text());
     }
 
     public function testNavigationMarksProjectsAsCurrentOnEveryProjectPage(): void
     {
         $this->makeProject();
 
-        foreach (['/admin/projects', '/admin/projects/new', '/admin/projects/blog', '/admin/projects/blog/ports'] as $path) {
+        foreach (['/admin/projects', '/admin/projects/new', '/admin/projects/blog/source', '/admin/projects/blog/network'] as $path) {
             $current = $this->open($path)->filter('nav[aria-label="Main"] a[aria-current="page"]');
             self::assertCount(1, $current, $path);
             self::assertSame('Projects', trim($current->text()), $path);
@@ -489,28 +509,30 @@ final class ProjectPagesTest extends AdminTestCase
     {
         yield 'list' => ['/admin/projects'];
         yield 'new' => ['/admin/projects/new'];
-        yield 'edit' => ['/admin/projects/blog'];
-        yield 'ports' => ['/admin/projects/blog/ports'];
+        yield 'edit' => ['/admin/projects/blog/source'];
+        yield 'ports' => ['/admin/projects/blog/network'];
     }
 
     public function testTheSectionTabsAreFullTapTargetsAtEveryWidth(): void
     {
         $this->makeProject();
 
-        $tabs = $this->open('/admin/projects/blog')->filter('nav[aria-label="Project sections"]');
-        // py-3 around a text-sm line is 44 px; the strip scrolls inside itself instead of the page.
-        self::assertStringContainsString('overflow-x-auto', (string) $tabs->attr('class'));
-        foreach ($tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('class')) as $class) {
-            self::assertStringContainsString('py-3', $class);
+        $crawler = $this->open('/admin/projects/blog/source');
+        // The strip scrolls inside itself instead of the page; every link is at least 44 px tall.
+        self::assertStringContainsString('overflow-x-auto', (string) $crawler->filter('[data-testid=project-sections-strip]')->attr('class'));
+        foreach ($crawler->filter('[data-testid=project-sections-strip] a')->each(static fn (Crawler $a): string => (string) $a->attr('class')) as $class) {
+            self::assertStringContainsString('min-h-11', $class);
             self::assertStringContainsString('whitespace-nowrap', $class);
         }
+        // The phone select is a full-height native select.
+        self::assertStringContainsString('h-11', (string) $crawler->filter('select#project-section-select')->attr('class'));
     }
 
     public function testRowsOfChoicesAreClickableAcrossTheRow(): void
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         foreach (['radio-row', 'checkbox-row'] as $slot) {
             $rows = $crawler->filter('[data-slot='.$slot.']');
             self::assertGreaterThan(0, $rows->count(), $slot);
@@ -529,7 +551,7 @@ final class ProjectPagesTest extends AdminTestCase
         $url = 'https://git.example.com/'.str_repeat('a', 180).'/blog.git';
         $this->makeProject('blog', new ProjectInput('blog', $url));
 
-        foreach (['/admin/projects/blog', '/admin/projects/blog/ports'] as $path) {
+        foreach (['/admin/projects/blog/source', '/admin/projects/blog/network'] as $path) {
             $header = $this->open($path)->filter('main header');
             self::assertStringContainsString($url, $header->text(), $path);
             self::assertStringContainsString('[overflow-wrap:anywhere]', (string) $header->filter('h1')->attr('class'), $path);
@@ -585,7 +607,7 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('mail', 8025, 18025);
         $this->makeProject('blog', new ProjectInput('blog', self::GIT, ports: ['typesense']));
 
-        $crawler = $this->open('/admin/projects/blog/ports');
+        $crawler = $this->open('/admin/projects/blog/network');
         self::assertResponseStatusCodeSame(200);
 
         $main = $crawler->filter('main');
@@ -610,18 +632,18 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('mail', 8025, 18025);
         $this->makeProject();
 
-        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
-        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        $this->post('/admin/projects/blog/network', ['ports' => ['mail']]);
+        self::assertResponseRedirects('/admin/projects/blog/network', 303);
         self::assertSame(['mail'], $this->assignedPorts());
         self::assertStringContainsString('Ports saved', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
 
-        $this->post('/admin/projects/blog/ports', ['ports' => ['mail', 'typesense']]);
-        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        $this->post('/admin/projects/blog/network', ['ports' => ['mail', 'typesense']]);
+        self::assertResponseRedirects('/admin/projects/blog/network', 303);
         self::assertSame(['mail', 'typesense'], $this->assignedPorts());
         self::assertTrue(($this->stored('blog') ?? self::fail())->typesense(), 'assigning the port sets the flag');
 
-        $this->post('/admin/projects/blog/ports', []);
-        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        $this->post('/admin/projects/blog/network', []);
+        self::assertResponseRedirects('/admin/projects/blog/network', 303);
         self::assertSame([], $this->assignedPorts());
         self::assertFalse(($this->stored('blog') ?? self::fail())->typesense(), 'unassigning the port clears the flag');
     }
@@ -631,9 +653,9 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('mail', 8025, 18025);
         $this->makeProject();
 
-        $this->post('/admin/projects/blog/ports', []);
+        $this->post('/admin/projects/blog/network', []);
 
-        self::assertResponseRedirects('/admin/projects/blog/ports', 303);
+        self::assertResponseRedirects('/admin/projects/blog/network', 303);
         self::assertStringContainsString('No change', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
     }
 
@@ -642,7 +664,7 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('mail', 8025, 18025);
         $this->makeProject();
 
-        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['mail', 'ghost']]);
+        $crawler = $this->post('/admin/projects/blog/network', ['ports' => ['mail', 'ghost']]);
 
         self::assertResponseStatusCodeSame(422);
         self::assertStringContainsString('Unknown port(s): ghost', $crawler->filter('[data-testid=ports-errors]')->text());
@@ -655,7 +677,7 @@ final class ProjectPagesTest extends AdminTestCase
         // Assigning the "typesense" port needs the catalogue entry; the service rejects the unknown name.
         $this->makeProject();
 
-        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['typesense']]);
+        $crawler = $this->post('/admin/projects/blog/network', ['ports' => ['typesense']]);
 
         self::assertResponseStatusCodeSame(422);
         self::assertCount(1, $crawler->filter('[data-testid=ports-errors]'));
@@ -667,10 +689,10 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('mail', 8025, 18025);
         $this->makeProject();
 
-        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']], fetchSite: 'cross-site');
+        $this->post('/admin/projects/blog/network', ['ports' => ['mail']], fetchSite: 'cross-site');
         self::assertResponseStatusCodeSame(403);
 
-        $this->client->request('POST', self::BASE.'/admin/projects/blog/ports', ['ports' => ['mail']], [], $this->browserServer());
+        $this->client->request('POST', self::BASE.'/admin/projects/blog/network', ['ports' => ['mail']], [], $this->browserServer());
         self::assertResponseStatusCodeSame(403, 'no token');
         self::assertSame([], $this->assignedPorts());
     }
@@ -681,11 +703,11 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject();
 
         $this->as('member');
-        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
+        $this->post('/admin/projects/blog/network', ['ports' => ['mail']]);
         self::assertResponseStatusCodeSame(403);
 
         $this->as('none');
-        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
+        $this->post('/admin/projects/blog/network', ['ports' => ['mail']]);
         self::assertResponseStatusCodeSame(401);
 
         self::assertSame([], $this->assignedPorts());
@@ -696,13 +718,13 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('mail', 8025, 18025);
         $this->makeProject();
 
-        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['<b>x</b>', 'UPPER']]);
+        $crawler = $this->post('/admin/projects/blog/network', ['ports' => ['<b>x</b>', 'UPPER']]);
         self::assertResponseStatusCodeSame(422);
         $text = $crawler->filter('[data-testid=ports-errors]')->text();
         self::assertStringContainsString('Unknown port(s): (invalid name), (invalid name).', $text);
         self::assertStringNotContainsString('<b>', $text);
 
-        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7']]);
+        $crawler = $this->post('/admin/projects/blog/network', ['ports' => ['u1', 'u2', 'u3', 'u4', 'u5', 'u6', 'u7']]);
         $text = $crawler->filter('[data-testid=ports-errors]')->text();
         self::assertStringContainsString('Unknown port(s): u1, u2, u3, u4, u5.', $text);
         self::assertStringNotContainsString('u6', $text);
@@ -713,7 +735,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => array_map(static fn (int $i): string => 'p'.$i, range(0, 50))]);
+        $crawler = $this->post('/admin/projects/blog/network', ['ports' => array_map(static fn (int $i): string => 'p'.$i, range(0, 50))]);
 
         self::assertResponseStatusCodeSame(422);
         self::assertStringContainsString('At most 50 ports can be assigned.', $crawler->filter('[data-testid=ports-errors]')->text());
@@ -725,9 +747,9 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makePort('mail', 8025, 18025);
         $this->makeProject();
 
-        self::assertSame('false', $this->open('/admin/projects/blog/ports')->filter('input[value=mail]')->attr('aria-invalid'));
+        self::assertSame('false', $this->open('/admin/projects/blog/network')->filter('input[value=mail]')->attr('aria-invalid'));
 
-        $crawler = $this->post('/admin/projects/blog/ports', ['ports' => ['mail', 'ghost']]);
+        $crawler = $this->post('/admin/projects/blog/network', ['ports' => ['mail', 'ghost']]);
         self::assertSame('true', $crawler->filter('input[value=mail]')->attr('aria-invalid'));
         self::assertCount(0, $crawler->filter('input[value=ghost]'), 'a name the catalogue does not know is not offered as a checkbox');
     }
@@ -738,25 +760,25 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject();
         $this->makeProject('shop');
 
-        $this->post('/admin/projects/blog/ports', ['ports' => ['mail']]);
+        $this->post('/admin/projects/blog/network', ['ports' => ['mail']]);
         self::assertSame(['mail'], $this->assignedPorts('blog'));
         self::assertSame([], $this->assignedPorts('shop'));
-        self::assertNull($this->open('/admin/projects/shop/ports')->filter('input[value=mail]')->attr('checked'));
+        self::assertNull($this->open('/admin/projects/shop/network')->filter('input[value=mail]')->attr('checked'));
 
-        $this->post('/admin/projects/shop/ports', ['ports' => ['mail']]);
+        $this->post('/admin/projects/shop/network', ['ports' => ['mail']]);
         self::assertSame(['mail'], $this->assignedPorts('shop'), 'two projects may share a port');
     }
 
     public function testPortsTabGetForAnUnknownProjectIs404(): void
     {
-        $this->open('/admin/projects/nope/ports');
+        $this->open('/admin/projects/nope/network');
 
         self::assertResponseStatusCodeSame(404);
     }
 
     public function testPortsTabPostToAnUnknownProjectIs404(): void
     {
-        $this->post('/admin/projects/nope/ports', []);
+        $this->post('/admin/projects/nope/network', []);
 
         self::assertResponseStatusCodeSame(404);
     }
@@ -765,7 +787,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $this->submit($crawler, 'Save', ['project[typesense]' => true]);
 
         self::assertResponseStatusCodeSame(422);
@@ -777,7 +799,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog/ports');
+        $crawler = $this->open('/admin/projects/blog/network');
         self::assertResponseStatusCodeSame(200);
         self::assertCount(0, $crawler->filter('[data-testid=port-row]'));
         self::assertCount(1, $crawler->filter('[data-testid=ports-empty]'));
@@ -791,7 +813,7 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject('shop');
         $this->makeTemplate('blog', 'full');
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $form = $crawler->filter('form[action="/admin/projects/blog/delete"]');
         self::assertCount(1, $form);
         self::assertSame('post', strtolower((string) $form->attr('method')));
@@ -813,7 +835,7 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject();
         $this->completeSetupWithFailingInstall();
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $this->client->submit($crawler->filter('form[action="/admin/projects/blog/delete"]')->selectButton('Delete project')->form());
         $crawler = $this->client->followRedirect();
 
@@ -830,7 +852,7 @@ final class ProjectPagesTest extends AdminTestCase
 
         $this->post('/admin/projects/blog/delete', []);
 
-        self::assertResponseRedirects('/admin/projects/blog', 303);
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
         self::assertNotNull($this->stored('blog'));
         $crawler = $this->client->followRedirect();
         $flash = $crawler->filter('[data-testid=flashes]')->text();
@@ -883,11 +905,11 @@ final class ProjectPagesTest extends AdminTestCase
     public function testCrossSiteSaveChangesNothing(): void
     {
         $this->makeProject();
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $values = $crawler->selectButton('Save')->form()->getPhpValues();
         $values['project']['defaultBranch'] = 'evil';
 
-        $this->client->request('POST', self::BASE.'/admin/projects/blog', $values, [], $this->browserServer('cross-site'));
+        $this->client->request('POST', self::BASE.'/admin/projects/blog/source', $values, [], $this->browserServer('cross-site'));
 
         self::assertResponseStatusCodeSame(422);
         self::assertNull(($this->stored('blog') ?? self::fail())->defaultBranch());
@@ -910,10 +932,10 @@ final class ProjectPagesTest extends AdminTestCase
      */
     public static function oddPaths(): iterable
     {
-        yield 'unknown' => ['/admin/projects/nope'];
+        yield 'unknown' => ['/admin/projects/nope/source'];
         yield 'uppercase' => ['/admin/projects/Nope'];
         yield 'encoded dots' => ['/admin/projects/a%2e%2e'];
-        yield 'unknown ports' => ['/admin/projects/nope/ports'];
+        yield 'unknown ports' => ['/admin/projects/nope/network'];
         yield 'unknown sub page' => ['/admin/projects/blog/nope'];
         yield 'trailing slash' => ['/admin/projects/blog/ports/x'];
     }
@@ -923,7 +945,7 @@ final class ProjectPagesTest extends AdminTestCase
         $this->post('/admin/projects/nope/delete', []);
         self::assertResponseStatusCodeSame(404);
 
-        $this->post('/admin/projects/nope', []);
+        $this->post('/admin/projects/nope/source', []);
         self::assertResponseStatusCodeSame(404);
     }
 
@@ -937,10 +959,10 @@ final class ProjectPagesTest extends AdminTestCase
         yield 'list' => ['GET', '/admin/projects'];
         yield 'new' => ['GET', '/admin/projects/new'];
         yield 'create' => ['POST', '/admin/projects/new'];
-        yield 'edit' => ['GET', '/admin/projects/blog'];
-        yield 'save' => ['POST', '/admin/projects/blog'];
-        yield 'ports' => ['GET', '/admin/projects/blog/ports'];
-        yield 'ports save' => ['POST', '/admin/projects/blog/ports'];
+        yield 'edit' => ['GET', '/admin/projects/blog/source'];
+        yield 'save' => ['POST', '/admin/projects/blog/source'];
+        yield 'ports' => ['GET', '/admin/projects/blog/network'];
+        yield 'ports save' => ['POST', '/admin/projects/blog/network'];
         yield 'delete' => ['POST', '/admin/projects/blog/delete'];
     }
 

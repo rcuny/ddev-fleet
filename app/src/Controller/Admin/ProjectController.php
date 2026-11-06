@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Controller\Admin;
 
+use App\Domain\Instance\InstanceRepository;
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
+use App\Domain\Webhook\WebhookRepository;
 use App\Fleet\Auth\ProjectAccessRefresher;
 use App\Fleet\Host\Capacity\AllocatableThreads;
 use App\Fleet\Instances\InstanceSiteRefresher;
@@ -19,6 +21,7 @@ use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
+use App\Fleet\Secrets\SecretService;
 use App\Form\Project\ProjectType;
 use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
@@ -32,7 +35,7 @@ use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 
 /**
- * The admin project pages: list, create, the General tab (edit), the Ports tab (assignment) and delete. All rules live
+ * The admin project pages: list, create, the Overview and the Source tab (the former General form), the Network tab (port assignment), thin pages for the tabs still to come and delete. All rules live
  * in ProjectService; this class maps forms to inputs and service errors to field errors. Every action is behind the
  * `^/admin` access rule and asks ProjectVoter::SETTINGS as well (defence in depth).
  *
@@ -52,6 +55,9 @@ final class ProjectController extends AbstractController
         private readonly InstanceSiteRefresher $sites,
         private readonly PortMirrorSwitch $mirror,
         private readonly AllocatableThreads $allocatable,
+        private readonly InstanceRepository $instances,
+        private readonly SecretService $secrets,
+        private readonly WebhookRepository $webhookEndpoints,
     ) {
     }
 
@@ -98,7 +104,7 @@ final class ProjectController extends AbstractController
                     $this->addFlash('success', 'Project created.');
                     $this->flashAccessWarning();
 
-                    return $this->redirectToRoute('project_edit', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
+                    return $this->redirectToRoute('project_overview', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
                 } catch (ValidationFailed $failed) {
                     ValidationErrorMapper::add($form, $failed);
                 }
@@ -108,7 +114,63 @@ final class ProjectController extends AbstractController
         return $this->render('admin/projects/new.html.twig', ['form' => $form]);
     }
 
-    #[Route('/admin/projects/{name}', name: 'project_edit', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
+    /**
+     * The landing page of a project: a read-only summary with a link to every tab.
+     */
+    #[Route('/admin/projects/{name}', name: 'project_overview', requirements: ['name' => self::NAME], methods: ['GET'])]
+    public function overview(Request $request, string $name): Response
+    {
+        $project = $this->load($name);
+        $allocatable = $this->allocatable->get();
+        $secrets = $this->secrets->overview($name)->secrets;
+        $webhooks = [];
+        foreach ($this->webhookEndpoints->endpoints() as $endpoint) {
+            if ($endpoint->project()->name() === $name) {
+                $webhooks[$endpoint->source()->value] = true;
+            }
+        }
+
+        return $this->render('admin/projects/overview.html.twig', [
+            'project' => $project,
+            'counts' => [
+                'instances' => \count($this->instances->byProject($project)),
+                'templates' => \count($this->templateNames($name)),
+                'ports' => \count($project->ports()),
+                'secrets' => \count($secrets),
+            ],
+            'webhooks' => $webhooks,
+            'allocatable' => $allocatable,
+            'effectiveThreads' => min($project->cpuThreads() ?? $allocatable, $allocatable),
+        ]);
+    }
+
+    #[Route('/admin/projects/{name}/access', name: 'project_access', requirements: ['name' => self::NAME], methods: ['GET'])]
+    public function access(string $name): Response
+    {
+        return $this->section($name, 'access');
+    }
+
+    #[Route('/admin/projects/{name}/capacity', name: 'project_capacity', requirements: ['name' => self::NAME], methods: ['GET'])]
+    public function capacity(string $name): Response
+    {
+        $project = $this->load($name);
+        $allocatable = $this->allocatable->get();
+
+        return $this->render('admin/projects/section.html.twig', [
+            'project' => $project,
+            'active' => 'capacity',
+            'allocatable' => $allocatable,
+            'effectiveThreads' => min($project->cpuThreads() ?? $allocatable, $allocatable),
+        ]);
+    }
+
+    #[Route('/admin/projects/{name}/transfer', name: 'project_transfer', requirements: ['name' => self::NAME], methods: ['GET'])]
+    public function transfer(string $name): Response
+    {
+        return $this->section($name, 'transfer');
+    }
+
+    #[Route('/admin/projects/{name}/source', name: 'project_source', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
     public function edit(Request $request, string $name): Response
     {
         $project = $this->load($name);
@@ -142,7 +204,7 @@ final class ProjectController extends AbstractController
                     $this->addFlash('success', 'Project saved.');
                     $this->flashSitesWarning();
 
-                    return $this->redirectToRoute('project_edit', ['name' => $name], Response::HTTP_SEE_OTHER);
+                    return $this->redirectToRoute('project_source', ['name' => $name], Response::HTTP_SEE_OTHER);
                 } catch (ValidationFailed $failed) {
                     ValidationErrorMapper::add($form, $failed);
                 } catch (NotFound) {
@@ -158,7 +220,16 @@ final class ProjectController extends AbstractController
         ]);
     }
 
+    /**
+     * The old Ports address: GET and POST both go to the Network tab (308 keeps the method and the body).
+     */
     #[Route('/admin/projects/{name}/ports', name: 'project_ports', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
+    public function legacyPorts(string $name): Response
+    {
+        return $this->redirectToRoute('project_network', ['name' => $name], Response::HTTP_PERMANENTLY_REDIRECT);
+    }
+
+    #[Route('/admin/projects/{name}/network', name: 'project_network', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
     public function ports(Request $request, string $name): Response
     {
         $project = $this->load($name);
@@ -188,7 +259,7 @@ final class ProjectController extends AbstractController
                     $this->flashMirrorWarning();
                 }
 
-                return $this->redirectToRoute('project_ports', ['name' => $name], Response::HTTP_SEE_OTHER);
+                return $this->redirectToRoute('project_network', ['name' => $name], Response::HTTP_SEE_OTHER);
             } catch (ValidationFailed $failed) {
                 $errors = array_values($failed->errors);
                 $assigned = $selected;
@@ -219,7 +290,7 @@ final class ProjectController extends AbstractController
         } catch (Refused $refusal) {
             $this->addFlash('warning', 'The project was not deleted. '.$refusal->getMessage());
 
-            return $this->redirectToRoute('project_edit', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
+            return $this->redirectToRoute('project_source', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
         } catch (NotFound) {
             throw new NotFoundHttpException();
         }
@@ -261,6 +332,11 @@ final class ProjectController extends AbstractController
         if (null !== $warning) {
             $this->addFlash('warning', $warning);
         }
+    }
+
+    private function section(string $name, string $active): Response
+    {
+        return $this->render('admin/projects/section.html.twig', ['project' => $this->load($name), 'active' => $active]);
     }
 
     private function load(string $name): Project

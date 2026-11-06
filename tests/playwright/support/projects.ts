@@ -15,13 +15,17 @@ export function uniqueName(prefix = 'pw'): string {
 }
 
 /** Creates a project through the browser (New project form) and waits for the confirmation. */
-export async function createProjectViaUi(page: Page, name: string, git: string = GIT_URL): Promise<void> {
+export async function createProjectViaUi(page: Page, name: string, git: string = GIT_URL, landOn: 'source' | 'overview' = 'source'): Promise<void> {
   await page.goto('/admin/projects/new');
   await page.getByLabel('Name', { exact: true }).fill(name);
   await page.getByLabel('Git URL').fill(git);
   await page.getByRole('button', { name: 'Create project' }).click();
   await expect(page.getByTestId('flashes')).toContainText('Project created.');
+  // A new project lands on its Overview; most callers want the form, which is on the Source tab.
   await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
+  if (landOn === 'source') {
+    await openSection(page, 'Source');
+  }
 }
 
 /**
@@ -29,7 +33,7 @@ export async function createProjectViaUi(page: Page, name: string, git: string =
  * must not throw when the test failed before the project existed).
  */
 export async function deleteProjectViaUi(page: Page, name: string): Promise<void> {
-  const response = await page.goto(`/admin/projects/${name}`);
+  const response = await page.goto(`/admin/projects/${name}/source`);
   if (!response || response.status() === 404) {
     return;
   }
@@ -121,7 +125,37 @@ export async function openDialog(page: Page, trigger: Locator): Promise<Locator>
   return dialog;
 }
 
-/** Opens one of the project sections through the tab strip (the same links at every width, no script involved). */
-export async function openSection(page: Page, section: 'General' | 'Templates' | 'Secrets' | 'Ports' | 'Assets'): Promise<void> {
-  await follow(page, page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: section }));
+/** The ten project sections, in tab order. */
+export type ProjectSection =
+  | 'Overview'
+  | 'Source'
+  | 'Templates'
+  | 'Assets'
+  | 'Network'
+  | 'Access'
+  | 'Capacity'
+  | 'Keys & secrets'
+  | 'Integrations'
+  | 'Transfer & danger';
+
+/** The names the sections had before the ten tabs (FLE-226): still accepted by openSection(). */
+const SECTION_ALIASES = { General: 'Source', Ports: 'Network', Secrets: 'Keys & secrets', Webhooks: 'Integrations' } as const;
+
+/**
+ * Opens one of the project sections. From the sm breakpoint the tab strip is a row of links; below it the same
+ * navigation is a labelled <select> that goes to the chosen tab. Old section names (General, Ports, Secrets, Webhooks)
+ * map to the tab that took them over.
+ */
+export async function openSection(page: Page, section: ProjectSection | keyof typeof SECTION_ALIASES): Promise<void> {
+  const target: ProjectSection = section in SECTION_ALIASES ? SECTION_ALIASES[section as keyof typeof SECTION_ALIASES] : (section as ProjectSection);
+  const link = page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: target });
+  if (await link.isVisible()) {
+    await follow(page, link);
+    return;
+  }
+  const select = page.getByRole('combobox', { name: 'Project section' });
+  const option = select.locator('option', { hasText: target });
+  const value = await option.getAttribute('value');
+  await Promise.all([page.waitForURL((url) => url.pathname === value || url.href.endsWith(value ?? '')), select.selectOption({ label: (await option.textContent())?.trim() ?? target })]);
+  await page.waitForLoadState('networkidle');
 }

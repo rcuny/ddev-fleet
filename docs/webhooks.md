@@ -187,7 +187,7 @@ again; the signature proves who signed, not when.
 Every authenticated request is one row: when, source, event, delivery id, subject (issue key or branch), the change
 ("To Do -> Dispatched"), the rule that matched, the decision and the result (`accepted`, `ignored`, `duplicate`,
 `failed`) and, for an accepted one, the **outcome**: the job (plain text `job #12` until the job pages land) and the note of
-what the action did or why it did not. See it per project (the Webhooks tab, paged) or across projects (`/admin/webhooks`,
+what the action did or why it did not. See it per project (the Integrations tab, paged) or across projects (`/admin/webhooks`,
 the latest 25); both have **Hide ignored** and filters for the source and the outcome (`?source=jira&result=failed`), or on
 the host:
 
@@ -208,7 +208,7 @@ secret, with the events your rules name.
 - A receiver exists as soon as it has a secret; a project with no rules answers 200 `ignored` (and logs it) instead of 404,
   so a freshly configured sender can be tested.
 - Secrets live in the database, sealed, not in `secrets.env`; the delivery log is a table, not `jira.jsonl`.
-- The Bitbucket pipeline token (`pipeline:write`) is stored per project, sealed, in the database, set on the Webhooks tab or
+- The Bitbucket pipeline token (`pipeline:write`) is stored per project, sealed, in the database, set on the Integrations tab or
   with `fleet webhook:token` (0.x: `secrets.env`, `fleet webhook bitbucket-token`).
 - A derived Bitbucket label does not need `label_prefix` (0.x required one so a deploy could not replace a hand-deployed
   instance). Here only a rule with a fixed `label` ever replaces; every other deploy allocates a free label.

@@ -29,7 +29,7 @@ async function expectTall(target: Locator, what: string): Promise<void> {
 }
 
 /** Creates a secret with the button of the card and returns it (read from the page that shows it once). */
-async function createSecret(page: Page, source: 'jira' | 'bitbucket', project: string, from = `/admin/projects/${project}/webhooks`): Promise<string> {
+async function createSecret(page: Page, source: 'jira' | 'bitbucket', project: string, from = `/admin/projects/${project}/integrations`): Promise<string> {
   await page.goto(from);
   await submitAndWait(page, endpoint(page, source, project).getByTestId('webhook-create'));
   await expect(page.getByTestId('webhook-secret-once')).toBeVisible();
@@ -115,13 +115,13 @@ test.describe('webhooks, full coverage', () => {
 
       // The card title leads to the project's tab, which has just that project's two cards and an empty log.
       await follow(page, jira.getByRole('link', { name: project }));
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/webhooks$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/integrations$`));
       await expect(page).toHaveTitle(new RegExp(`Webhooks · ${project}`));
       await expect(page.getByTestId('webhook-endpoint')).toHaveCount(2);
       await expect(page.getByTestId('deliveries-empty')).toHaveText('No delivery has arrived yet.');
       await expect(page.getByTestId('delivery-row')).toHaveCount(0);
       await expect(page.getByRole('navigation', { name: 'Delivery pages' })).toHaveCount(0);
-      await expect(page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Webhooks' })).toHaveAttribute('aria-current', 'page');
+      await expect(page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Integrations' })).toHaveAttribute('aria-current', 'page');
       await expectClean(page, 'the project tab');
 
       // Hide ignored is a link that toggles the filter and its own label.
@@ -133,7 +133,7 @@ test.describe('webhooks, full coverage', () => {
       await expect(page).not.toHaveURL(/hide-ignored/);
 
       // A project that does not exist has no tab.
-      expect((await page.goto('/admin/projects/no-such-project/webhooks'))?.status()).toBe(404);
+      expect((await page.goto('/admin/projects/no-such-project/integrations'))?.status()).toBe(404);
       expect(errors.filter((e) => !e.includes('status of 404'))).toEqual([]);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -167,7 +167,7 @@ test.describe('webhooks, full coverage', () => {
         await expectTall(page.getByTestId('webhook-secret-done'), 'Done');
       }
       await follow(page, page.getByTestId('webhook-secret-done'));
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/webhooks$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/integrations$`));
       const card = endpoint(page, 'bitbucket', project);
       await expect(card.getByTestId('webhook-secret-state')).toHaveText('Secret set');
       await expect(card.getByTestId('webhook-rotated')).toContainText(/Secret created or rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\. It cannot be shown again\./);
@@ -187,7 +187,7 @@ test.describe('webhooks, full coverage', () => {
 
       // Rotation: the details open and close without doing anything, the old secret works until "Rotate now".
       const body = jiraMove('PW-1', 'Done');
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       const jira = endpoint(page, 'jira', project);
       await expect(jira.getByTestId('webhook-rotate')).toBeHidden();
       await jira.getByText('Rotate secret').click();
@@ -238,7 +238,7 @@ test.describe('webhooks, full coverage', () => {
       expect((await deliver(page, 'jira', project, jira, jiraMove('PW-11', 'Done'), jiraId())).body.result).toBe('ignored');
       expect((await deliver(page, 'bitbucket', project, bitbucket, { repository: { full_name: 'acme/blog' } }, bitbucketId('pullrequest:approved'))).body.result).toBe('failed');
 
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       const rows = page.getByTestId('delivery-row');
       const count = (result: string): Locator => page.locator(`[data-testid=delivery-row][data-result=${result}]`);
       await expect(rows).toHaveCount(4);
@@ -293,7 +293,7 @@ test.describe('webhooks, full coverage', () => {
       const pager = page.getByRole('navigation', { name: 'Delivery pages' });
 
       // Fifty to a page, the paging maths and the overview's latest twenty-five are asserted in WebhookPagesTest.
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       await expect(rows).toHaveCount(50);
       await follow(page, pager.getByRole('link', { name: 'Older' }));
       await expect(page).toHaveURL(/page=2/);
@@ -316,7 +316,7 @@ test.describe('webhooks, full coverage', () => {
     try {
       await createProjectViaUi(page, project);
       await createSecret(page, 'bitbucket', project);
-      await page.goto(`/admin/projects/${project}/webhooks`);
+      await page.goto(`/admin/projects/${project}/integrations`);
       const card = endpoint(page, 'bitbucket', project);
       const state = card.getByTestId('webhook-token-state');
       const open = async (): Promise<void> => {
@@ -403,7 +403,7 @@ test.describe('webhooks, full coverage', () => {
       expect((await deliver(page, 'jira', project, jira, jiraMove(key, 'Another status that is quite long indeed'), jiraId())).body.result).toBe('ignored');
       expect((await deliver(page, 'bitbucket', project, bitbucket, { repository: { full_name: 'very-long-workspace-name/very-long-repository-slug-name' }, comment: { content: { raw: '/merge '.repeat(28).trimEnd() } }, pullrequest: { source: { branch: { name: `${'feature/'.repeat(24)}x` } } } }, bitbucketId('pullrequest:comment_created'))).body.result).toMatch(/^(failed|ignored)$/);
 
-      for (const path of [`/admin/projects/${project}/webhooks`, '/admin/webhooks']) {
+      for (const path of [`/admin/projects/${project}/integrations`, '/admin/webhooks']) {
         await page.goto(path);
         await expect(page.getByTestId('delivery-row').first()).toBeVisible();
         await expect(endpoint(page, 'jira', project).getByTestId('webhook-rules')).toContainText(status.slice(0, 40));

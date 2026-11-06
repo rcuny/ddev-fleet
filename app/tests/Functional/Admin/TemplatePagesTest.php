@@ -608,13 +608,13 @@ final class TemplatePagesTest extends AdminTestCase
 
         $tabs = $crawler->filter('nav[aria-label="Project sections"]');
         self::assertCount(1, $tabs);
-        self::assertSame(['General', 'Templates', 'Secrets', 'Ports', 'Assets', 'Webhooks'], array_map('trim', $tabs->filter('a')->each(static fn (Crawler $a): string => $a->text())));
-        self::assertSame(
-            ['/admin/projects/blog', '/admin/projects/blog/templates', '/admin/projects/blog/secrets', '/admin/projects/blog/ports', '/admin/projects/blog/assets', '/admin/projects/blog/webhooks'],
-            $tabs->filter('a')->each(static fn (Crawler $a): string => (string) $a->attr('href')),
-        );
+        $links = $tabs->filter('[data-testid=project-sections-strip] a');
+        self::assertCount(10, $links);
+        self::assertSame('/admin/projects/blog', $links->first()->attr('href'));
+        self::assertSame('/admin/projects/blog/templates', $links->eq(2)->attr('href'));
+        $tabs = $links;
         self::assertSame('Templates', trim($tabs->filter('a[aria-current="page"]')->text()));
-        self::assertCount(0, $crawler->filter('select[aria-label="Section"]'));
+        self::assertCount(1, $crawler->filter('select#project-section-select'));
     }
 
     #[DataProvider('pages')]

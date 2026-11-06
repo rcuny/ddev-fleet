@@ -163,7 +163,7 @@ test.describe('capacity', () => {
       await expect(page.getByLabel('Slots')).toHaveValue('1');
 
       // The project may not drop below the template's explicit value.
-      await page.goto(`/admin/projects/${name}`);
+      await page.goto(`/admin/projects/${name}/source`);
       await page.getByLabel('CPU threads').fill('2');
       await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
       await expect(page.getByTestId('project-capacity-fields')).toContainText('big');

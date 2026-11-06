@@ -5,7 +5,7 @@
 {% block content %}
     <twig:PageHeader :title="project.name" :description="project.git">
         <twig:block name="tabs">
-            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'general'}) }}
+            {{ include('admin/projects/_tabs.html.twig', {project: project, active: 'source'}) }}
         </twig:block>
     </twig:PageHeader>
 

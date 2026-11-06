@@ -49,7 +49,7 @@ Everything here is administrator-only. A member of a project cannot list, set, r
 - **Secrets** (`/admin/secrets`): the fleet-wide secrets, a form to add or replace one, and the host secrets
   (names only). **Reveal**, **Replace** (opens the form with the name filled in) and **Delete** (with a
   confirmation) are on each row.
-- **Secrets tab** of a project: the same for that project, plus a check that each secret is used.
+- **Keys & secrets tab** of a project: the same for that project, plus a check that each secret is used.
 - **Audit log** (`/admin/audit`, linked from the Secrets page): the latest 200 entries, newest first, optionally
   of one action. Every put, delete and reveal of a secret is an entry with who, when, the action
   (`secret.put`, `secret.delete`, `secret.reveal`, `secret.reveal-refused`) and the subject (`fleet/NAME` or
@@ -70,7 +70,7 @@ All pages work at 390 px: the rows stack, the buttons are 44 px high.
 ### The "No placeholder" warning
 
 In 0.x a secret that no asset file mentioned was silently inert: it was stored, never delivered, and nobody noticed.
-The Secrets tab scans the text files of the project's assets directory (`assets/<project>/` under the fleet home)
+The Keys & secrets tab scans the text files of the project's assets directory (`assets/<project>/` under the fleet home)
 for `[[token]]` placeholders and flags every project secret whose placeholder no file mentions:
 
 > No file in this project's assets mentions `[[lonely-key]]`, so instances never receive this value.
@@ -167,6 +167,6 @@ Refused values are described by field (`<name>`, `<value>`) and never echoed.
 |---|---|
 | `$FLEET_HOME/.secrets` and `secrets/<project>.env` files edited by hand | Encrypted rows, set in the browser or with `fleet secret:set` |
 | A quoted value had one pair of quotes stripped when read | A quoted value is refused with an explanation; values are inserted verbatim |
-| A secret without a placeholder was silently inert | Flagged on the project's Secrets tab and in `fleet secret:list --project` |
+| A secret without a placeholder was silently inert | Flagged on the project's Keys & secrets tab and in `fleet secret:list --project` |
 | Names such as `jira_claude_token` | `JIRA_CLAUDE_TOKEN`; the placeholder is unchanged (`[[jira-claude-token]]`) |
 | No record of who read a secret | Every reveal is in the audit log |

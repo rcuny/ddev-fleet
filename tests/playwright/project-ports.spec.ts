@@ -20,7 +20,7 @@ test.describe('project ports tab', () => {
     try {
       await createProjectViaUi(page, name);
       await openSection(page, 'Ports');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/ports$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/network$`));
       await expect(page.getByTestId('ports-note')).not.toContainText('M0.07');
 
       const row = page.getByTestId('port-row').filter({ hasText: PORT });

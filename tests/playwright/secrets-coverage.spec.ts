@@ -250,7 +250,7 @@ test.describe('secrets: in a project', () => {
       // Replacing a value does not change the verdict; deleting the unused secret removes the warning.
       await saveSecret(page, unused, uniqueValue());
       await expect(page.getByTestId('secret-no-placeholder')).toHaveCount(1);
-      await removeSecret(page, `/admin/projects/${project}/secrets`, unused);
+      await removeSecret(page, `/admin/projects/${project}/keys`, unused);
       await expect(page.getByTestId('secret-no-placeholder')).toHaveCount(0);
     } finally {
       await deleteProjectViaUi(page, project);

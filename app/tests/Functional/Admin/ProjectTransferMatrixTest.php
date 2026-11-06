@@ -435,7 +435,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
         $this->confirm($changed);
         self::assertResponseRedirects('/admin/projects/pwu', 303);
-        $this->open('/admin/projects/pwu');
+        $this->open('/admin/projects/pwu/source');
         self::assertStringContainsString($other, $this->body());
 
         $this->upload($changed);
@@ -537,7 +537,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
     {
         $this->createProject('pwe');
 
-        $crawler = $this->open('/admin/projects/pwe');
+        $crawler = $this->open('/admin/projects/pwe/source');
 
         $field = $crawler->filter('[data-testid=export-passphrase]');
         self::assertSame('password', $field->attr('type'));
@@ -597,7 +597,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
         $this->post('/admin/projects/pwr/export', ['passphrase' => $passphrase]);
 
-        self::assertResponseRedirects('/admin/projects/pwr', 303);
+        self::assertResponseRedirects('/admin/projects/pwr/source', 303);
         self::assertNull($this->client->getResponse()->headers->get('Content-Disposition'));
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString($message, $crawler->filter('[data-testid=flashes]')->text());
@@ -673,7 +673,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
         self::assertResponseRedirects('/admin/projects/pwq', 303);
         $this->client->followRedirect();
         self::assertStringNotContainsString('no passphrase was given', $this->body());
-        $crawler = $this->open('/admin/projects/pwq/secrets');
+        $crawler = $this->open('/admin/projects/pwq/keys');
         self::assertStringContainsString('PW_SEAL_AB12', $crawler->filter('[data-testid=secret-row]')->text());
         self::assertStringNotContainsString(self::SEALED_VALUE, $this->body());
     }

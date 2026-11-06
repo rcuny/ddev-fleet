@@ -115,7 +115,7 @@ final class HostCapacityPageTest extends HostPageTestCase
         $this->projects()->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git'));
         $this->templates()->create('blog', new TemplateInput('web', cpuThreads: 8, slots: 2));
 
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         self::assertStringContainsString('This host can allocate 46.', $crawler->filter('[data-testid=project-capacity-fields]')->text());
         $form = $crawler->selectButton('Save')->form(['project[cpuThreads]' => '12', 'project[slots]' => '4']);
         $this->client->submit($form);
@@ -124,17 +124,17 @@ final class HostCapacityPageTest extends HostPageTestCase
         self::assertSame([12, 4], [$project->cpuThreads(), $project->slots()]);
 
         // Below the template's explicit value: refused, naming the template.
-        $crawler = $this->open('/admin/projects/blog');
+        $crawler = $this->open('/admin/projects/blog/source');
         $this->client->submit($crawler->selectButton('Save')->form(['project[cpuThreads]' => '4', 'project[slots]' => '1']));
         self::assertResponseStatusCodeSame(422);
         self::assertStringContainsString('web', $this->text(new Crawler($this->body()), 'project-capacity-fields'));
 
-        $this->client->submit($this->client->request('GET', '/admin/projects/blog')->selectButton('Save')->form(['project[cpuThreads]' => '0', 'project[slots]' => '']));
+        $this->client->submit($this->client->request('GET', '/admin/projects/blog/source')->selectButton('Save')->form(['project[cpuThreads]' => '0', 'project[slots]' => '']));
         self::assertResponseStatusCodeSame(422);
         self::assertStringContainsString('at least 1', $this->body());
 
         // Emptied: unlimited again.
-        $this->client->submit($this->client->request('GET', '/admin/projects/blog')->selectButton('Save')->form(['project[cpuThreads]' => '', 'project[slots]' => '']));
+        $this->client->submit($this->client->request('GET', '/admin/projects/blog/source')->selectButton('Save')->form(['project[cpuThreads]' => '', 'project[slots]' => '']));
         self::assertResponseRedirects();
         $project = new \App\Domain\Project\ProjectRepository($this->em())->findByName('blog') ?? self::fail('project');
         self::assertSame([null, null], [$project->cpuThreads(), $project->slots()]);
