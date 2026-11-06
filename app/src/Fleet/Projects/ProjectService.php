@@ -20,6 +20,7 @@ use App\Fleet\Projects\Rule\IssueIdPattern;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\Rule\SubmodulePath;
 use App\Fleet\Secrets\SecretService;
+use App\Fleet\System\SlicesApplier;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 
 /**
@@ -42,6 +43,7 @@ final readonly class ProjectService
         private ?ProjectAccessRefresher $accessRefresher = null,
         private ?SecretService $secrets = null,
         private ?InstanceSiteRefresher $sites = null,
+        private ?SlicesApplier $slices = null,
     ) {
     }
 
@@ -88,6 +90,8 @@ final readonly class ProjectService
         if ($refresh) {
             $this->accessRefresher?->refresh();
         }
+        // The project's slice (and its limit) must exist before its first instance starts. A failure is a warning.
+        $this->slices?->sync();
 
         return $project;
     }
@@ -108,12 +112,17 @@ final readonly class ProjectService
         }
 
         $before = self::portNames($project->ports());
+        $limitBefore = $project->cpuThreads();
         $this->apply($project, $input, $ports, new \DateTimeImmutable());
         $this->projects->save($project);
         // Each port is a site block of every instance: the sites follow an assignment (a failure is a warning,
         // takeWarning() on the refresher). A named port that is created or deleted is assigned to no project.
         if ($refresh && $before !== self::portNames($project->ports())) {
             $this->sites?->refresh($project);
+        }
+        // A new limit reaches the running slice at once (no restart of the instances).
+        if ($limitBefore !== $project->cpuThreads()) {
+            $this->slices?->sync();
         }
 
         return $project;
@@ -139,6 +148,7 @@ final readonly class ProjectService
         $this->secrets?->removeAllOfProject($name, $by);
         $this->projects->remove($project);
         $this->accessRefresher?->refresh();
+        $this->slices?->sync();
     }
 
     /**

@@ -50,6 +50,7 @@ final class Shapes
             'name' => $port->name(),
             'public' => $port->publicPort(),
             'router' => $port->routerPort(),
+            'access' => $port->access(),
             'projects' => $projects,
         ];
     }

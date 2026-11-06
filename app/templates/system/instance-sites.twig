@@ -13,6 +13,7 @@
 {{ port.hosts|join(', ') }} {
     header {
         Strict-Transport-Security "max-age=31536000"
+        X-Robots-Tag "noindex, nofollow"
         -Server
     }
 
@@ -21,6 +22,10 @@
         request_header -{{ header }}
 {% endfor %}
 
+{% if port.public_access %}
+        # Public port: no login. A browser calls it cross-origin and its preflight carries no cookie, so the service
+        # is protected by its own key, not by Authelia (FLE-216). The identity headers above are still stripped.
+{% else %}
         forward_auth {{ authelia }} {
             uri /api/authz/forward-auth
             copy_headers Remote-Groups
@@ -30,6 +35,7 @@
         @forbidden not header_regexp Remote-Groups `{{ groups_pattern }}`
         respond @forbidden "Forbidden" 403
         request_header -Remote-Groups
+{% endif %}
 
         reverse_proxy {{ router_host }}:{{ port.router }}
     }

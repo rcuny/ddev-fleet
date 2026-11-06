@@ -30,6 +30,7 @@ use App\Fleet\Secrets\SecretName;
 use App\Fleet\Secrets\SecretService;
 use App\Fleet\Secrets\SecretStore;
 use App\Fleet\Secrets\SecretValue;
+use App\Fleet\System\SlicesApplier;
 use App\Fleet\Webhooks\WebhookSecrets;
 use App\Fleet\Webhooks\WebhookService;
 use Doctrine\ORM\EntityManagerInterface;
@@ -66,6 +67,7 @@ final readonly class ProjectImporter
         private EntityManagerInterface $em,
         private ProjectAccessRefresher $access,
         private InstanceSiteRefresher $sites,
+        private ?SlicesApplier $slices = null,
     ) {
     }
 
@@ -157,6 +159,9 @@ final readonly class ProjectImporter
         if (!$existed) {
             $this->access->refresh();
             $warning = $this->access->takeWarning();
+            // A new project has a slice (the templates it brought are synced by the template service).
+            $this->slices?->sync();
+            $warning ??= $this->slices?->takeWarning();
         } elseif (ImportItem::UPDATE === $this->actionOf($plan, 'project', $name) && $this->portsChanged($plan, $name)) {
             $project = $this->projects->findByName($name);
             if (null !== $project) {
@@ -206,7 +211,7 @@ final readonly class ProjectImporter
     {
         $pending = [];
         foreach ($document['ports'] as $i => $port) {
-            $input = new NamedPortInput($port['name'], $port['public'], $port['router']);
+            $input = new NamedPortInput($port['name'], $port['public'], $port['router'], $port['access'] ?? null);
             $numbers = \sprintf('public %d, router %d', $port['public'], $port['router']);
             $found = $this->ports->findByName($port['name']);
             if (null === $found) {
@@ -400,7 +405,7 @@ final readonly class ProjectImporter
 
         foreach ($document['ports'] as $port) {
             if (ImportItem::CREATE === $this->actionOf($plan, 'port', $port['name'])) {
-                $this->portService->create(new NamedPortInput($port['name'], $port['public'], $port['router']));
+                $this->portService->create(new NamedPortInput($port['name'], $port['public'], $port['router'], $port['access'] ?? null));
             }
         }
 

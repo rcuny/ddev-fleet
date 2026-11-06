@@ -218,9 +218,10 @@ final class InstanceService
     {
         $project = $this->projects->findByName($in->project) ?? throw NotFound::project($in->project);
         $taken = $this->takenIds();
+        $budget = InstanceNaming::serviceBudgetFor($project->typesense());
         $labels = 1 === $in->count
-            ? [InstanceNaming::allocateFree($taken, $project->name(), $base)]
-            : InstanceNaming::allocateBatch($taken, $project->name(), $base, $in->count);
+            ? [InstanceNaming::allocateFree($taken, $project->name(), $base, $budget)]
+            : InstanceNaming::allocateBatch($taken, $project->name(), $base, $in->count, $budget);
 
         $batch = $in->count > 1;
         $batchId = $batch ? bin2hex(random_bytes(8)) : null;
@@ -230,7 +231,7 @@ final class InstanceService
         $instances = [];
         $jobs = [];
         foreach ($labels as $label) {
-            $id = InstanceNaming::compose($project->name(), $label);
+            $id = InstanceNaming::composeNew($project->name(), $label, $budget);
             $this->hostnames->aliasesIfSetUp($project, $id);
             $instances[] = new Instance($project, $label, $template, $branch, $by, $now);
             $jobs[] = new Job('deploy', $id, $project->name(), $trigger, $by, [

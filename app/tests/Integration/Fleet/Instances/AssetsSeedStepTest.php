@@ -67,6 +67,26 @@ final class AssetsSeedStepTest extends InstanceJobTestCase
         self::assertSame(InstanceState::Running, $this->instances->find('acme--main')?->state());
     }
 
+    public function testLegacyCpuCapComposeFilesAreNotSeeded(): void
+    {
+        mkdir($this->assets.'/.ddev/nested', 0o750, true);
+        file_put_contents($this->assets.'/.ddev/docker-compose.fleet-cpu.yaml', "services:\n  web:\n    cpus: 2.0\n");
+        file_put_contents($this->assets.'/.ddev/docker-compose.cpu-limit.yaml', "services:\n  web:\n    cpus: 6.0\n");
+        file_put_contents($this->assets.'/.ddev/nested/docker-compose.x-cpu-y.yaml', "services: {}\n");
+        file_put_contents($this->assets.'/.ddev/docker-compose.extra.yaml', "services: {}\n");
+        file_put_contents($this->assets.'/docker-compose.cpu.yaml', "outside .ddev\n");
+
+        $job = $this->deploy();
+
+        $ddev = $this->dir().'/.ddev';
+        self::assertFileDoesNotExist($ddev.'/docker-compose.fleet-cpu.yaml');
+        self::assertFileDoesNotExist($ddev.'/docker-compose.cpu-limit.yaml');
+        self::assertFileDoesNotExist($ddev.'/nested/docker-compose.x-cpu-y.yaml');
+        self::assertFileExists($ddev.'/docker-compose.extra.yaml');
+        self::assertFileExists($this->dir().'/docker-compose.cpu.yaml', 'only files under .ddev/ are legacy caps');
+        self::assertStringContainsString('assets: skipped ".ddev/docker-compose.fleet-cpu.yaml" (a legacy CPU cap', $this->logText($job));
+    }
+
     public function testSecretTokensInAssetsAreSubstitutedAndMasked(): void
     {
         $this->secretStore->putManaged('acme', 'DB_PASS', 'asset-s3cret-value', 'test');

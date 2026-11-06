@@ -1,0 +1,7 @@
+# Installed by ddev-fleet host hardening (install --harden). Run by fleet-firewall-sync.timer.
+[Unit]
+Description=ddev-fleet firewall: open the ports of Fleet's named ports, close the ones no project uses any more
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/fleet-firewall-sync

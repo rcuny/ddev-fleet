@@ -208,6 +208,24 @@ main() {
   remove_file "${caddy_etc:?}/fleet.env"
   remove_path "${caddy_etc:?}/ovh"
   remove_file "${authelia_etc:?}/configuration.yml"
+  # The CPU slices `apply slices` wrote: only units carrying the helper's marker line (a hand-made fleet*.slice stays),
+  # stopped (children first) and removed with their quota drop-in.
+  local slice_mark='# Managed by ddev-fleet (apply slices). Hand edits are overwritten.'
+  local slice_re='^fleet(-[a-z0-9_]+){0,2}\.slice$' slice slices
+  slices=$(systemctl list-unit-files --plain --no-legend 'fleet*.slice' 2>/dev/null | awk '{print length($1), $1}' | sort -rn | cut -d' ' -f2 || true)
+  for slice in $slices; do
+    [[ $slice =~ $slice_re ]] || continue
+    if [ "$dry" != 1 ]; then
+      [ -f "${systemd_dir:?}/${slice:?}" ] && [ ! -L "${systemd_dir:?}/${slice:?}" ] || continue
+      grep -qxF -- "$slice_mark" "${systemd_dir:?}/${slice:?}" || continue
+    fi
+    do_cmd systemctl stop "$slice"
+    if [ "$dry" = 1 ] || { [ -f "${systemd_dir:?}/${slice:?}.d/10-fleet-quota.conf" ] && grep -qxF -- "$slice_mark" "${systemd_dir:?}/${slice:?}.d/10-fleet-quota.conf"; }; then
+      remove_file "${systemd_dir:?}/${slice:?}.d/10-fleet-quota.conf"
+    fi
+    do_cmd rmdir --ignore-fail-on-non-empty "${systemd_dir:?}/${slice:?}.d"
+    remove_file "${systemd_dir:?}/${slice:?}"
+  done
   do_cmd systemctl daemon-reload
 
   # --- 3. php-fpm: back to the stock pool ----------------------------------------------------------------------------
