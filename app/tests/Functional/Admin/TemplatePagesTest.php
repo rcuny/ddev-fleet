@@ -54,6 +54,16 @@ final class TemplatePagesTest extends AdminTestCase
         return (int) $this->em()->getConnection()->fetchOne('SELECT COUNT(*) FROM template');
     }
 
+    /**
+     * @param array<string, mixed> $changes
+     */
+    private function updateProject(array $changes): void
+    {
+        $service = $this->container()->get(ProjectService::class);
+        self::assertInstanceOf(ProjectService::class, $service);
+        $service->update('blog', ProjectInput::fromProject($service->get('blog'))->with($changes));
+    }
+
     private function setDefault(string $name): void
     {
         $service = $this->container()->get(ProjectService::class);
@@ -474,6 +484,58 @@ final class TemplatePagesTest extends AdminTestCase
         $this->post(self::LIST.'/full/delete', []);
         self::assertResponseRedirects(self::LIST, 303);
         self::assertNull($this->stored('full'));
+    }
+
+    public function testTheDefaultTemplateIsChosenOnTheTemplatesTab(): void
+    {
+        $this->makeTemplate('full');
+        $this->makeTemplate('light');
+        $this->updateProject(['defaultBranch' => 'develop', 'typesense' => false, 'cpuThreads' => 3, 'additionalHostnames' => ['www']]);
+
+        $crawler = $this->open(self::LIST);
+        self::assertSame(['', 'full', 'light'], $crawler->filter('[data-testid=default-template] select[name="project[defaultTemplate]"] option')->each(static fn (Crawler $o): string => (string) $o->attr('value')));
+
+        $this->submit($crawler, 'Save default', ['project[defaultTemplate]' => 'light']);
+
+        self::assertResponseRedirects(self::LIST, 303);
+        $crawler = $this->client->followRedirect();
+        self::assertStringContainsString('Default template saved.', $crawler->filter('[data-testid=flashes]')->text());
+        self::assertSame('light', $crawler->filter('#project_defaultTemplate option[selected]')->attr('value'));
+        $project = $this->project();
+        self::assertSame('light', $project->defaultTemplate());
+        // Nothing else of the project changed.
+        self::assertSame('develop', $project->defaultBranch());
+        self::assertSame(3, $project->cpuThreads());
+        self::assertSame(['www'], $project->additionalHostnames());
+
+        $this->submit($crawler, 'Save default', ['project[defaultTemplate]' => '']);
+        self::assertNull($this->project()->defaultTemplate());
+        self::assertSame('develop', $this->project()->defaultBranch());
+    }
+
+    public function testTheDefaultTemplateFormIsAbsentWithoutTemplatesAndRefusesAnUnknownName(): void
+    {
+        $crawler = $this->open(self::LIST);
+        self::assertCount(0, $crawler->filter('[data-testid=default-template]'));
+
+        $this->makeTemplate('full');
+        $crawler = $this->open(self::LIST);
+        $values = $crawler->selectButton('Save default')->form()->getPhpValues();
+        $values['project']['defaultTemplate'] = 'missing';
+        $crawler = $this->client->request('POST', self::BASE.self::LIST, $values, server: $this->browserServer());
+
+        self::assertStringContainsString('This project has no template with this name.', $crawler->filter('[data-testid=default-template]')->text());
+        self::assertNull($this->project()->defaultTemplate());
+    }
+
+    public function testTheTemplateFormHasEnvironmentCommandsAndTerminalsSections(): void
+    {
+        $crawler = $this->open(self::LIST.'/new');
+
+        self::assertSame(['Environment', 'Commands', 'Terminals'], $crawler->filter('main form h3')->each(static fn (Crawler $h): string => trim($h->text())));
+        self::assertCount(2, $crawler->filter('[data-testid=template-section-terminals] textarea'));
+        self::assertCount(1, $crawler->filter('[data-testid=template-section-commands] textarea'));
+        self::assertCount(1, $crawler->filter('[data-testid=template-section-environment] [name="template[drupalEnv]"]'));
     }
 
     public function testDeleteRemovesATemplate(): void

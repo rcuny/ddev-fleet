@@ -61,5 +61,18 @@
                 </twig:Table:Body>
             </twig:Table>
         {% endif %}
+
+        {% if templates|length > 0 %}
+            <div class="max-w-xl" data-testid="default-template">
+                <h2 class="mb-4 text-base">Choose the default</h2>
+                {{ form_start(defaultForm, {attr: {class: 'grid gap-4'}}) }}
+                    {{ form_errors(defaultForm) }}
+                    {{ form_row(defaultForm.defaultTemplate) }}
+                    <div class="flex flex-col gap-2 md:flex-row">
+                        {{ form_widget(defaultForm.save, {attr: {class: 'w-full md:w-auto'}}) }}
+                    </div>
+                {{ form_end(defaultForm) }}
+            </div>
+        {% endif %}
     </div>
 {% endblock %}

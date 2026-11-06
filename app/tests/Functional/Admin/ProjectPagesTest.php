@@ -306,12 +306,11 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertResponseStatusCodeSame(200);
         self::assertSame('blog', trim($crawler->filter('main h1')->text()));
         self::assertStringContainsString(self::GIT, $crawler->filter('main header')->text());
-        self::assertSame(['', 'full', 'light'], $crawler->filter('select[name="project[defaultTemplate]"] option')->each(static fn (Crawler $o): string => (string) $o->attr('value')));
+        self::assertCount(0, $crawler->filter('select[name="project[defaultTemplate]"]'), 'the default template moved to the Templates tab');
 
         $this->submit($crawler, 'Save', [
             'project[git]' => 'git@git.example.com:acme/blog.git',
             'project[defaultBranch]' => 'develop',
-            'project[defaultTemplate]' => 'light',
             'project[gitBotMode]' => 'override',
             'project[gitBotName]' => 'Fleet Bot',
             'project[gitBotEmail]' => 'bot@example.com',
@@ -323,7 +322,7 @@ final class ProjectPagesTest extends AdminTestCase
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame('git@git.example.com:acme/blog.git', $project->git());
         self::assertSame('develop', $project->defaultBranch());
-        self::assertSame('light', $project->defaultTemplate());
+        self::assertNull($project->defaultTemplate(), 'saving Source does not touch the default template');
         self::assertSame([], $project->additionalHostnames(), 'the Source tab leaves the hostnames alone');
         self::assertSame(GitBotMode::Override, $project->gitBotMode());
         self::assertSame('Fleet Bot', $project->gitBotName());
@@ -336,16 +335,47 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertStringContainsString('Project saved.', $crawler->filter('[data-testid=flashes]')->text());
         // The saved values come back in the form.
         self::assertSame('develop', $crawler->filter('#project_defaultBranch')->attr('value'));
-        self::assertSame('light', $crawler->filter('#project_defaultTemplate option[selected]')->attr('value'));
         self::assertSame('Fleet Bot', $crawler->filter('#project_gitBotName')->attr('value'));
 
         // Choosing the host default again drops the identity.
-        $this->submit($crawler, 'Save', ['project[gitBotMode]' => 'inherit', 'project[defaultTemplate]' => '']);
+        $this->submit($crawler, 'Save', ['project[gitBotMode]' => 'inherit']);
         $project = $this->stored('blog') ?? self::fail();
         self::assertSame(GitBotMode::Inherit, $project->gitBotMode());
         self::assertNull($project->gitBotName());
-        self::assertNull($project->defaultTemplate());
         self::assertFalse($project->typesense());
+    }
+
+    public function testSavingSourceKeepsTheDefaultTemplateAndThePorts(): void
+    {
+        $this->makePort('typesense', 9108, 8108);
+        $this->makeProject();
+        $this->makeTemplate('blog', 'full');
+        $service = $this->container()->get(ProjectService::class);
+        self::assertInstanceOf(ProjectService::class, $service);
+        $service->update('blog', ProjectInput::fromProject($service->get('blog'))->with(['defaultTemplate' => 'full', 'ports' => ['typesense'], 'typesense' => true, 'additionalHostnames' => ['www'], 'cpuThreads' => 2]));
+
+        $this->submit($this->open('/admin/projects/blog/source'), 'Save', ['project[defaultBranch]' => 'release', 'project[issueIdRegexp]' => 'ABC-[0-9]+']);
+
+        self::assertResponseRedirects('/admin/projects/blog/source', 303);
+        $project = $this->stored('blog') ?? self::fail();
+        self::assertSame('release', $project->defaultBranch());
+        self::assertSame('ABC-[0-9]+', $project->issueIdRegexp());
+        self::assertSame('full', $project->defaultTemplate());
+        self::assertSame(['typesense'], $this->assignedPorts());
+        self::assertSame(['www'], $project->additionalHostnames());
+        self::assertTrue($project->typesense());
+        self::assertSame(2, $project->cpuThreads());
+    }
+
+    public function testTheSourceTabHasRepositoryIdentityAndIssueIdSections(): void
+    {
+        $this->makeProject();
+
+        $crawler = $this->open('/admin/projects/blog/source');
+
+        self::assertSame(['Repository', 'Git identity', 'Issue ids', 'Other settings'], $crawler->filter('[data-testid=project-form] h2')->each(static fn (Crawler $h): string => trim($h->text())));
+        self::assertCount(1, $crawler->filter('[data-testid=issue-id-preview]'));
+        self::assertCount(0, $crawler->filter('[data-testid=project-capacity-fields]'), 'capacity moved to its own tab');
     }
 
     public function testEditShowsFieldErrorsAndKeepsTheStoredProject(): void
