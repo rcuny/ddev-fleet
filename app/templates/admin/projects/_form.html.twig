@@ -26,6 +26,13 @@
     {{ form_row(form.typesense) }}
     {{ form_row(form.containerSsh) }}
 
+    <twig:Separator />
+
+    <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
+        {{ form_row(form.cpuThreads) }}
+        {{ form_row(form.slots) }}
+    </div>
+
     <div class="flex flex-col gap-2 md:flex-row">
         {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
         {% if create %}

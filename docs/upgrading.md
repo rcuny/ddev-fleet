@@ -247,6 +247,22 @@ a `#### Rollout` subsection at the end of the version section, one bullet per no
 - Release authors write the notes in the change's fragment (`changelog.d/README.md`) and the release step assembles them
   (`RELEASING.md`).
 
+## Docker network pool
+
+Each instance has its own Docker bridge network and Docker's built-in address pools hold about 30, so a host without
+the pool cannot run more than about 29 instances. The installer adds a large pool (`10.64.0.0/10` in `/24`s, about
+16000 networks), `live-restore` and log rotation to `/etc/docker/daemon.json`. Docker reads that file only at start:
+
+- **Fresh install:** nothing to do, the file is written before Docker first starts.
+- **Existing host:** the installer or upgrade never restarts Docker (that stops every instance). It prints a note until
+  you do. At a quiet moment: `fleet instance:stop --all`, `sudo systemctl restart docker`, `fleet instance:start --all`.
+  Existing networks keep their subnets. With `live-restore` on, later Docker restarts leave containers running.
+- **Check:** `fleet host:capacity --json` shows `docker_networks` (`used`, `max`); `max` is 31 until the restart.
+  `instances.max` is the smaller of the configured cap and the room the networks leave.
+- The pool is skipped (with a warning) when the host routes `10.64.0.0/10` (routes over Docker's own `br-*` bridges and `docker0` do not count), and an existing `default-address-pools`
+  you set yourself is never changed; add `{"base":"10.64.0.0/10","size":24}` to yours to get the room.
+- The uninstaller purges Docker but leaves `/etc/docker/daemon.json` in place (harmless; delete it by hand if you want).
+
 ## Offline hosts and mirrors
 
 The check and the upgrade need the release source (the public mirror by default): the check lists tags with

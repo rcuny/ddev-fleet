@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-11-06
+
+### Added
+- **FLE-203: capacity in the web UI.** The host settings page has a **Capacity** tab: threads, cores, RAM, the reserved
+  threads and the instance cap (both editable), the allocatable and committed threads with a warning when the project
+  allotments add up to more than the host can allocate, the job concurrency setting, a table of every project and its
+  templates (allotment, inherited marker, slots with the number busy, live use, throttling) and the instances that do
+  not run under a CPU slice yet. The project and template forms gain **CPU threads** and **Slots** fields (empty =
+  unlimited for a project, inherit for a template), with the refusals of the capacity rules shown under the field.
+- **FLE-215: webhook deploy rules can redeploy in place (`fleet:webhook:rule:add --reuse`)**: a Bitbucket deploy rule with `--reuse` redeploys the instance of the branch when it already exists, instead of creating `<label>-1`, `-2`, ... on every push (the duplicate CI instances seen on ddev5). Rules without the flag and Jira dispatch rules behave as before.
+
+- **FLE-219: Docker network pools, live-restore and log rotation (installer step 20).** Every instance makes a Docker bridge network and Docker's built-in pools hold about 30 of them, so a host could not run more than about 29 instances (`ddev start` failed with "all predefined address pools have been fully subnetted"). The installer now merges `/etc/docker/daemon.json` (operator keys and already-set values are kept): Docker's built-in pools first, then one pool of `/24`s in `10.64.0.0/10` (about 16000 networks; skipped with a warning when the host routes that range), `live-restore: true` and `json-file` log rotation (10 MB x 3). On a fresh install the file is written before Docker first starts. On a host that already runs Docker the installer never restarts it; it prints a note until Docker has been restarted.
+- `fleet host:capacity` reports `docker_networks` `{used, max}` (schema 1, additive), and `instances.max` is now the smaller of the configured cap and the networks left plus the ones the instances hold.
+
+#### Rollout
+- Re-add the Fleet CI rules (`feature/`, `release/`, `hotfix/`, `renovate/`) on ddev5 with `--reuse` (the orchestrator does it).
+- ACTION: on an existing host, restart Docker once at a quiet moment so it reads `/etc/docker/daemon.json`: `fleet instance:stop --all`, `sudo systemctl restart docker`, `fleet instance:start --all` (see docs/upgrading.md, "Docker network pool"). Until then the host holds about 30 instances and `fleet host:capacity` shows `docker_networks.max` 31.
+
 ## [1.4.0] - 2026-11-05
 
 ### Added
@@ -1158,7 +1176,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/rcuny/ddev-fleet/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/rcuny/ddev-fleet/compare/v1.3.1...v1.4.0
 [1.3.1]: https://github.com/rcuny/ddev-fleet/compare/v1.3.0...v1.3.1
 [1.3.0]: https://github.com/rcuny/ddev-fleet/compare/v1.2.2...v1.3.0

@@ -44,6 +44,7 @@ final class WebhookRuleAddCommand extends Command
         $this->addOption('label', null, InputOption::VALUE_REQUIRED, 'deploy (Bitbucket): a fixed instance label, default derived from the branch');
         $this->addOption('label-prefix', null, InputOption::VALUE_REQUIRED, 'deploy (Bitbucket): put this in front of the branch to form the label; never overwrites an instance');
         $this->addOption('strip-suffix', null, InputOption::VALUE_REQUIRED, 'deploy (Bitbucket): text removed from the end of the branch first; needs --label-prefix, and the branch glob must end with it');
+        $this->addOption('reuse', null, InputOption::VALUE_NONE, 'deploy (Bitbucket): a push to a branch whose instance already exists redeploys it in place instead of allocating -1, -2... (use with --label-prefix or the default label)');
         $this->addOption('pattern', null, InputOption::VALUE_REQUIRED, 'run-pipeline: the custom pipeline name');
         $this->addOption('ref', null, InputOption::VALUE_REQUIRED, 'run-pipeline: the branch to run it on');
         JsonOutput::addOptions($this);
@@ -60,7 +61,7 @@ final class WebhookRuleAddCommand extends Command
                 $source,
                 (string) $input->getOption('action'),
                 self::collect($input, self::MATCH),
-                self::collect($input, self::PARAMS),
+                self::collect($input, self::PARAMS) + ($input->getOption('reuse') ? ['reuse' => '1'] : []),
             );
             $out->emit(['id' => $rule->id(), 'source' => $source->value, 'action' => $rule->action(), 'match' => $rule->match(), 'params' => $rule->params()], static function (JsonOutput $out) use ($rule, $source): void {
                 $out->success(\sprintf('Rule %d added to %s: %s -> %s.', $rule->id(), WebhookSource::Jira === $source ? 'Jira' : 'Bitbucket', $rule->summary(), $rule->action()));

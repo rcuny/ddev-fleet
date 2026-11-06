@@ -24,6 +24,9 @@ class HostSettings
     public const int DEFAULT_MAX_CONCURRENT_JOBS = 1;
     public const int MAX_MAX_CONCURRENT_JOBS = 8;
 
+    /** The largest instance cap the host page accepts (FLE-203). */
+    public const int MAX_MAX_INSTANCES = 10000;
+
     /** Threads kept for the OS, Docker, Caddy, php-fpm and the Fleet workers (capacity allotments, FLE-197). */
     public const int DEFAULT_CPU_RESERVE_THREADS = 2;
     /** Instances that may exist on the host at once (the dispatch gate's cap). */

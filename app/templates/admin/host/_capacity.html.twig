@@ -1,0 +1,106 @@
+{% set form = forms.capacity %}
+<div class="grid gap-4" data-testid="host-tab-capacity">
+    <twig:Card>
+        <twig:Card:Header>
+            <twig:Card:Title>This host</twig:Card:Title>
+            <twig:Card:Description>Detected when the page loads, never stored. Allotments are ceilings enforced by the kernel through CPU slices, not reservations, so their sum may exceed the host.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-6">
+            <dl class="grid grid-cols-2 gap-4 text-sm md:grid-cols-4">
+                <div><dt class="text-ink-muted">Threads</dt><dd class="font-medium text-ink-display" data-testid="capacity-threads">{{ capacity.threads }}</dd></div>
+                <div><dt class="text-ink-muted">Cores</dt><dd class="font-medium text-ink-display" data-testid="capacity-cores">{{ capacity.cores }}</dd></div>
+                <div><dt class="text-ink-muted">RAM</dt><dd class="font-medium text-ink-display" data-testid="capacity-ram">{{ (capacity.ram_mb * 1048576)|bytes }}</dd></div>
+                <div><dt class="text-ink-muted">Allocatable threads</dt><dd class="font-medium text-ink-display" data-testid="capacity-allocatable">{{ capacity.allocatable_threads }}</dd></div>
+                <div><dt class="text-ink-muted">Reserved threads</dt><dd class="font-medium text-ink-display" data-testid="capacity-reserve">{{ capacity.reserve_threads }}</dd></div>
+                <div><dt class="text-ink-muted">Committed</dt><dd class="font-medium text-ink-display" data-testid="capacity-committed">{{ capacity.committed_threads }} / {{ capacity.allocatable_threads }}</dd></div>
+                <div><dt class="text-ink-muted">Instances</dt><dd class="font-medium text-ink-display" data-testid="capacity-instances">{{ capacity.instances.count }} / {{ capacity.instances.max }}</dd></div>
+                <div><dt class="text-ink-muted">Jobs at the same time</dt><dd class="font-medium text-ink-display" data-testid="capacity-jobs">{{ host.maxConcurrentJobs }} <a class="inline-flex min-h-11 items-center text-sm md:min-h-0" href="{{ path('settings', {tab: 'jobs'}) }}">Change</a></dd></div>
+            </dl>
+
+            {% if capacity.overcommitted %}
+                <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="capacity-overcommit">
+                    <twig:ux:icon name="lucide:triangle-alert" />
+                    <twig:Alert:Title>Overcommitted: {{ capacity.committed_threads }} of {{ capacity.allocatable_threads }} threads</twig:Alert:Title>
+                    <twig:Alert:Description class="text-ink-body">The project allotments add up to more than this host can allocate. That is allowed: projects rarely peak together and the host-wide fence keeps the total at {{ capacity.allocatable_threads }} threads. Lower an allotment if you need a guarantee.</twig:Alert:Description>
+                </twig:Alert>
+            {% endif %}
+            {% if capacity.instances.count >= capacity.instances.max %}
+                <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="capacity-instances-full">
+                    <twig:ux:icon name="lucide:triangle-alert" />
+                    <twig:Alert:Title>The instance cap is reached</twig:Alert:Title>
+                    <twig:Alert:Description class="text-ink-body">{{ capacity.instances.count }} of {{ capacity.instances.max }} instances exist. Destroy finished ones or raise the cap.</twig:Alert:Description>
+                </twig:Alert>
+            {% endif %}
+
+            {{ form_start(form, {attr: {class: 'grid max-w-md gap-4', 'data-testid': 'host-capacity-form'}}) }}
+                {{ form_errors(form) }}
+                {{ form_row(form.reserve) }}
+                {{ form_row(form.maxInstances) }}
+                {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
+            {{ form_end(form) }}
+        </twig:Card:Content>
+    </twig:Card>
+
+    <twig:Card>
+        <twig:Card:Header>
+            <twig:Card:Title>Allotments</twig:Card:Title>
+            <twig:Card:Description>CPU threads and slots per project, with its templates below. Use is read from the cgroup counters; n/a means no sample yet. Edit the values on the project and template pages.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            {% if capacity.projects|length == 0 %}
+                <p class="text-sm text-ink-muted" data-testid="capacity-no-projects">No projects yet.</p>
+            {% else %}
+                <twig:Table>
+                    <twig:Table:Caption class="sr-only">CPU allotments and slots by project and template</twig:Table:Caption>
+                    <twig:Table:Header>
+                        <twig:Table:Row>
+                            <twig:Table:Head>Project / template</twig:Table:Head>
+                            <twig:Table:Head>Allotment</twig:Table:Head>
+                            <twig:Table:Head>Slots (busy)</twig:Table:Head>
+                            <twig:Table:Head>Live use</twig:Table:Head>
+                            <twig:Table:Head>Throttled</twig:Table:Head>
+                        </twig:Table:Row>
+                    </twig:Table:Header>
+                    <twig:Table:Body>
+                        {% for project in capacity.projects %}
+                            <twig:Table:Row data-testid="capacity-project-row" data-project="{{ project.name }}">
+                                <twig:Table:Cell class="font-medium"><a class="inline-flex min-h-11 items-center md:min-h-0" href="{{ path('project_edit', {name: project.name}) }}">{{ project.name }}</a></twig:Table:Cell>
+                                <twig:Table:Cell data-testid="capacity-project-limit">{% if project.cpu_threads is null %}unlimited ({{ project.effective_threads }}){% else %}{{ project.cpu_threads }}{% if project.effective_threads < project.cpu_threads %} (capped at {{ project.effective_threads }}){% endif %}{% endif %}</twig:Table:Cell>
+                                <twig:Table:Cell>{% if project.slots is null %}unlimited{% else %}{{ project.slots }}{% endif %} ({{ project.busy }})</twig:Table:Cell>
+                                <twig:Table:Cell>{{ project.used_cores is null ? 'n/a' : project.used_cores|number_format(1) }}</twig:Table:Cell>
+                                <twig:Table:Cell>{% if project.throttled is null %}n/a{% elseif project.throttled %}<twig:Badge class="bg-signal-faded text-signal-darker dark:text-signal">yes</twig:Badge>{% else %}no{% endif %}</twig:Table:Cell>
+                            </twig:Table:Row>
+                            {% for template in project.templates %}
+                                <twig:Table:Row data-testid="capacity-template-row" data-project="{{ project.name }}" data-template="{{ template.name }}">
+                                    <twig:Table:Cell class="pl-6"><a class="inline-flex min-h-11 items-center md:min-h-0" href="{{ path('template_edit', {name: project.name, template: template.name}) }}">{{ template.name }}</a></twig:Table:Cell>
+                                    <twig:Table:Cell>{% if template.cpu_threads is null %}{{ template.effective_threads }} <span class="text-ink-muted">(inherited)</span>{% else %}{{ template.cpu_threads }}{% if template.effective_threads < template.cpu_threads %} (capped at {{ template.effective_threads }}){% endif %}{% endif %}</twig:Table:Cell>
+                                    <twig:Table:Cell>{% if template.slots is null %}unlimited{% else %}{{ template.slots }}{% endif %} ({{ template.busy }})</twig:Table:Cell>
+                                    <twig:Table:Cell>{{ template.used_cores is null ? 'n/a' : template.used_cores|number_format(1) }}</twig:Table:Cell>
+                                    <twig:Table:Cell><span class="text-ink-muted">n/a</span></twig:Table:Cell>
+                                </twig:Table:Row>
+                            {% endfor %}
+                        {% endfor %}
+                    </twig:Table:Body>
+                </twig:Table>
+            {% endif %}
+        </twig:Card:Content>
+    </twig:Card>
+
+    <twig:Card data-testid="capacity-unsliced">
+        <twig:Card:Header>
+            <twig:Card:Title>Instances not under a slice</twig:Card:Title>
+            <twig:Card:Description>Deployed before allotments existed, these run without a CPU limit until they are redeployed or restarted.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content>
+            {% if unsliced|length == 0 %}
+                <p class="text-sm text-ink-muted" data-testid="capacity-unsliced-none">Every instance runs under its slice.</p>
+            {% else %}
+                <ul class="grid gap-1 text-sm" data-testid="capacity-unsliced-list">
+                    {% for row in unsliced %}
+                        <li class="[overflow-wrap:anywhere]"><span class="font-mono">{{ row.id }}</span> <span class="text-ink-muted">({{ row.state }})</span></li>
+                    {% endfor %}
+                </ul>
+            {% endif %}
+        </twig:Card:Content>
+    </twig:Card>
+</div>

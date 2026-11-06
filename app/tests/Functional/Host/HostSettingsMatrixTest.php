@@ -29,6 +29,7 @@ final class HostSettingsMatrixTest extends HostPageTestCase
         'certificates' => 'Certificates',
         'uploads' => 'Uploads',
         'jobs' => 'Jobs',
+        'capacity' => 'Capacity',
         'backups' => 'Backups',
     ];
 

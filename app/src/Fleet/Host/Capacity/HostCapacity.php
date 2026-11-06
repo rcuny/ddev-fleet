@@ -22,6 +22,9 @@ use Psr\Clock\ClockInterface;
  *   effective template = min(template.cpuThreads ?? effective project, effective project)
  *   committed          = the sum of the effective project limits (unlimited counts as allocatable)
  *
+ * `docker_networks` (additive, FLE-219) = {used, max}: bridge networks now and what the running daemon's address pools
+ * hold (null = unknown); `instances.max` is the smaller of the configured cap and that room.
+ *
  * `busy` of a pool (FLE-212) = the larger of (a) the lock files held right now (SlotLocks) and (b) 1 when the pool's
  * slice used at least ACTIVE_CORES threads over the last sample, so an agent that holds no slot lock still counts. The
  * template pool reads its own slice; the `_project` pool reads the project slice minus its template slices (a cgroup
@@ -46,6 +49,7 @@ final readonly class HostCapacity
         private TemplateRepository $templates,
         private InstanceRepository $instances,
         private UsageSampler $sampler,
+        private DockerNetworkProbe $networks,
         private SlotLocks $locks,
         private ClockInterface $clock,
         private ?SliceMembership $membership = null,
@@ -108,6 +112,12 @@ final readonly class HostCapacity
             ];
         }
 
+        // Every instance holds one Docker bridge network. Room for instances = the free networks plus the ones the
+        // instances already hold; the cap is the smaller of that and the configured one (FLE-219).
+        $count = \count($this->instances->ids());
+        $docker = $this->networks->read();
+        $instanceMax = null === $docker ? $maxInstances : min($maxInstances, max(0, $docker['max'] - $docker['used']) + $count);
+
         return [
             'schema' => self::SCHEMA,
             'host' => $host ?? $settings?->domain() ?? '',
@@ -118,7 +128,8 @@ final readonly class HostCapacity
             'allocatable_threads' => $allocatable,
             'committed_threads' => $committed,
             'overcommitted' => $committed > $allocatable,
-            'instances' => ['count' => \count($this->instances->ids()), 'max' => $maxInstances, 'not_under_slice' => $this->membership?->outside() ?? []],
+            'instances' => ['count' => $count, 'max' => $instanceMax, 'not_under_slice' => $this->membership?->outside() ?? []],
+            'docker_networks' => $docker,
             'projects' => $projects,
         ];
     }

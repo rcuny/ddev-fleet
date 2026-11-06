@@ -33,6 +33,7 @@ INSTALL_LOG=/var/log/ddev-fleet-install.log
 HELPER_DIR=/usr/local/libexec/fleet
 SUDOERS_DIR=/etc/sudoers.d
 MERCURE_ETC_DIR=/etc/fleet-mercure
+DOCKER_ETC_DIR=/etc/docker
 # Test harness (FLEET_ROOT_PREFIX): an unprivileged, non-dry run of the helpers against a scratch tree. Root never reads
 # it (as FLEET_APPLY_TEST_ROOT in libexec/apply), so a stray variable cannot redirect a real install. With it the
 # layout paths above live under the prefix and nothing is chowned to another account (SUDO_OWN stays empty).
@@ -46,7 +47,7 @@ if [ -n "${FLEET_ROOT_PREFIX:-}" ] && [ "$(id -u)" -ne 0 ]; then
       ;;
   esac
   for _v in FLEET_HOME_DIR FLEET_OPT_DIR FLEET_SRV_DIR FLEET_ETC_DIR CADDY_ETC_DIR CADDY_FLEET_DIR SYSTEMD_DIR KEYRING_DIR \
-    APT_SOURCES_DIR INSTALL_LOG HELPER_DIR SUDOERS_DIR MERCURE_ETC_DIR; do
+    APT_SOURCES_DIR INSTALL_LOG HELPER_DIR SUDOERS_DIR MERCURE_ETC_DIR DOCKER_ETC_DIR; do
     printf -v "$_v" '%s%s' "${FLEET_ROOT_PREFIX%/}" "${!_v}"
   done
   unset _v

@@ -56,6 +56,7 @@ export const TAB_LABELS: Record<string, string> = {
   certificates: 'Certificates',
   uploads: 'Uploads',
   jobs: 'Jobs',
+  capacity: 'Capacity',
   backups: 'Backups',
 };
 

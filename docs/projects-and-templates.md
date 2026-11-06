@@ -93,10 +93,10 @@ follow the design system. A refused value shows an error under its field and not
 | Page | URL | What it does |
 |---|---|---|
 | Projects | `/admin/projects` | The list: name, git URL, default branch and the number of templates. **New project** opens the create form. |
-| New project | `/admin/projects/new` | Name, git URL, default branch, hostnames (one per line), git identity, issue id pattern, submodule, Typesense, git over SSH in the container. |
+| New project | `/admin/projects/new` | Name, git URL, default branch, hostnames (one per line), git identity, issue id pattern, submodule, Typesense, git over SSH in the container, **CPU threads** and **Slots** (empty = unlimited; the help text quotes the threads the host can allocate). |
 | Project, General tab | `/admin/projects/<project>` | The same fields (the name is fixed) plus the default template. Below the form: the **issue id tester** (type a pattern, a sample instance label and a sample branch, and see the id a deploy would extract; nothing typed there is saved) and the **Danger zone** with the delete button and its confirmation dialog. |
 | Project, Templates tab | `/admin/projects/<project>/templates` | The project's templates with their counts of commands; the default one carries a badge. **New template**, edit and delete. |
-| Template form | `.../templates/new`, `.../templates/<template>` | Name, Drupal environment, and three text boxes with one command per line. |
+| Template form | `.../templates/new`, `.../templates/<template>` | Name, Drupal environment, three text boxes with one command per line, extra SSH keys, and **CPU threads** and **Slots** (empty = inherit the project's CPU threads, shown as "inherits project: N", and no slots of its own; a value above the project's is refused). The host's **Capacity** tab (`/admin/host?tab=capacity`) shows threads, cores, RAM, the reserve and instance cap (both editable), what is committed with an overcommit warning, live use per project and template, and the instances not under a CPU slice yet. |
 | Project, Secrets tab | `/admin/projects/<project>/secrets` | The project's secrets (names only), add or replace, reveal, delete, and a warning for a secret no asset file uses. See [`secrets.md`](secrets.md). |
 | Project, Ports tab | `/admin/projects/<project>/ports` | Read-only: the catalogue, with the ports this project uses marked. Assigning ports in the browser arrives with the networking milestone (M0.07); until then use `fleet project:update --port`. |
 
