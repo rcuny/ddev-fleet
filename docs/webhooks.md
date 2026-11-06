@@ -19,7 +19,7 @@ the answer sent back to Jira or Bitbucket. The action behind a rule is `App\Flee
 ## The addresses
 
 Every project has two receivers, shown with copy buttons on **Webhooks** (`/admin/webhooks`, all projects) and on the
-project's **Webhooks** tab:
+project's **Integrations** tab (`/admin/projects/<name>/integrations`; the old `/webhooks` address redirects there):
 
 ```
 https://<fleet-domain>/hooks/jira/<project>
@@ -41,7 +41,7 @@ fleet webhook:secret <project> [--source=jira|bitbucket]
 ```
 
 The secret is **shown once**, in the answer to that request, and can never be read again: not in the pages, the commands,
-the logs or the database (it is stored sealed with the host's secret key). `--rotate` (or **Rotate secret** on the page)
+the logs or the database (it is stored sealed with the host's secret key). `--rotate` (or **Rotate secret** on the page, which asks to confirm in a dialog)
 replaces it, and the old one stops working at once, so update the sender straight after. The command prints `url:` and
 `secret:` on labelled lines (`--json` for scripts): read the field by name, never by line number.
 
@@ -49,7 +49,7 @@ Jira and Bitbucket have separate secrets, so a Jira secret does not open the Bit
 
 ## Rules
 
-A rule says what an event means. They are added on the host for now (editing them in the browser follows); the page lists them.
+A rule says what an event means. Add and remove them on the project's **Integrations** tab (**Add a rule**, **Remove**) or with the commands below. The form takes the same fields as `webhook:rule:add` (including `reuse`, `label` and `label-prefix`) and goes through the same validation, so a rule is accepted or refused identically in both. Each change is audited (`webhook.rule.add`, `webhook.rule.remove`; the CLI actor is `cli`).
 
 ```bash
 # Jira: an issue moving INTO a status (the changelog transition, not the issue's current status) deploys a template
@@ -128,7 +128,7 @@ printf '%s' "$TOKEN" | fleet webhook:token blog
 fleet webhook:token blog --clear
 ```
 
-or on the project's **Webhooks** tab (Bitbucket card: *Set the pipeline token*, *Remove token*). The Bitbucket secret must
+or on the project's **Integrations** tab (Bitbucket card: *Set the pipeline token*, *Remove token*). The Bitbucket secret must
 exist first. The token is sealed like the HMAC secret and **shown nowhere afterwards**: not in the page, the commands, a
 delivery row, a log line or an exception message. Without a token nothing is called and the delivery says
 `no pipeline started: this project has no pipeline token yet`.

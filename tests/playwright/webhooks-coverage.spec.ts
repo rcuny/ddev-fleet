@@ -124,7 +124,12 @@ test.describe('webhooks, full coverage', () => {
       await expect(page.getByTestId('deliveries-empty')).toHaveText('No delivery has arrived yet.');
       await expect(page.getByTestId('delivery-row')).toHaveCount(0);
       await expect(page.getByRole('navigation', { name: 'Delivery pages' })).toHaveCount(0);
-      await expect(page.getByRole('navigation', { name: 'Project sections' }).getByRole('link', { name: 'Integrations' })).toHaveAttribute('aria-current', 'page');
+      const sections = page.getByRole('navigation', { name: 'Project sections' });
+      if (isPhone()) {
+        await expect(sections.getByRole('combobox', { name: 'Project section' })).toHaveValue(new RegExp(`/admin/projects/${project}/integrations$`));
+      } else {
+        await expect(sections.getByRole('link', { name: 'Integrations' })).toHaveAttribute('aria-current', 'page');
+      }
       await expectClean(page, 'the project tab');
 
       // Hide ignored is a link that toggles the filter and its own label.
@@ -193,7 +198,7 @@ test.describe('webhooks, full coverage', () => {
       const body = jiraMove('PW-1', 'Done');
       await page.goto(`/admin/projects/${project}/integrations`);
       const jira = endpoint(page, 'jira', project);
-      await expect(page.getByTestId('webhook-rotate')).toBeHidden();
+      await expect(jira.getByTestId('webhook-rotate')).toBeHidden();
       const rotateDialog = await openDialog(page, jira.getByTestId('webhook-rotate-open'));
       await expect(rotateDialog.getByTestId('webhook-rotate')).toBeVisible();
       await expect(rotateDialog).toContainText('The old secret stops working at once.');
@@ -375,7 +380,8 @@ test.describe('webhooks, full coverage', () => {
       await save('ATCTT-replacement-token');
       await expect(page.getByTestId('flashes')).toContainText('The pipeline token is saved.');
       await expect(state).toContainText('Pipeline token set');
-      await submitAndWait(page, card.getByTestId('webhook-token-clear'));
+      const clearDialog = await openDialog(page, card.getByTestId('webhook-token-clear'));
+      await submitAndWait(page, clearDialog.getByTestId('webhook-token-clear-confirm'));
       await expect(page.getByTestId('flashes')).toContainText('The pipeline token was removed.');
       await expect(state).toContainText('No pipeline token');
       await expect(card.getByTestId('webhook-token-clear')).toHaveCount(0);
