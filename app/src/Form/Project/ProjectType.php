@@ -29,7 +29,8 @@ final class ProjectType extends AbstractType
             'attr' => ProjectFields::textAttr() + ['maxlength' => ResourceName::MAX],
         ]);
         ProjectFields::source($builder);
-        ProjectFields::other($builder, $options['allocatable']);
+        ProjectFields::other($builder);
+        CapacityType::addCapFields($builder, $options['allocatable']);
         $builder->add('save', SubmitType::class, ['label' => 'Create project']);
     }
 

@@ -377,7 +377,7 @@ final class ProjectPagesTest extends AdminTestCase
 
         self::assertSame(['Repository', 'Git identity', 'Issue ids', 'Other settings'], $crawler->filter('[data-testid=project-form] h2')->each(static fn (Crawler $h): string => trim($h->text())));
         self::assertCount(1, $crawler->filter('[data-testid=issue-id-preview]'));
-        self::assertCount(1, $crawler->filter('[data-testid=project-capacity-fields]'));
+        self::assertCount(0, $crawler->filter('[data-testid=project-capacity-fields]'), 'capacity moved to its own tab');
     }
 
     public function testEditShowsFieldErrorsAndKeepsTheStoredProject(): void

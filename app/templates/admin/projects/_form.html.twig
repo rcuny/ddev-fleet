@@ -37,10 +37,12 @@
         {{ form_row(form.additionalHostnames) }}
         {{ form_row(form.typesense) }}
         {{ form_row(form.containerSsh) }}
-        <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
-            {{ form_row(form.cpuThreads) }}
-            {{ form_row(form.slots) }}
-        </div>
+        {% if create %}
+            <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
+                {{ form_row(form.cpuThreads) }}
+                {{ form_row(form.slots) }}
+            </div>
+        {% endif %}
     </section>
 
     <div class="flex flex-col gap-2 md:flex-row">

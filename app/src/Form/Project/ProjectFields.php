@@ -13,7 +13,6 @@ use App\Fleet\Projects\Rule\SubmodulePath;
 use App\Fleet\Projects\Rule\TextBlock;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\EnumType;
-use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
 use Symfony\Component\Form\FormBuilderInterface;
@@ -84,12 +83,12 @@ final class ProjectFields
     }
 
     /**
-     * Fields that have not moved to their own tab yet (Network and Capacity tickets): they stay in the form so it still
+     * Fields that have not moved to their own tab yet (Network and Keys tickets): they stay in the form so it still
      * saves everything.
      *
      * @param FormBuilderInterface<mixed> $builder
      */
-    public static function other(FormBuilderInterface $builder, ?int $allocatable): void
+    public static function other(FormBuilderInterface $builder): void
     {
         $builder
             ->add('additionalHostnames', TextareaType::class, [
@@ -106,20 +105,6 @@ final class ProjectFields
                 'label' => 'Git over SSH inside the container: a dedicated ssh-agent with the push key for each instance',
                 'required' => false,
                 'help' => 'Only for projects whose agents push from the web container. The key is usable by every process in that instance\'s container while the agent runs.',
-            ])
-            ->add('cpuThreads', IntegerType::class, [
-                'label' => 'CPU threads',
-                'required' => false,
-                'help' => null === $allocatable
-                    ? 'The most CPU threads all instances of this project may use together. Leave empty for no limit.'
-                    : \sprintf('The most CPU threads all instances of this project may use together. Leave empty for no limit. This host can allocate %d.', $allocatable),
-                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
-            ])
-            ->add('slots', IntegerType::class, [
-                'label' => 'Slots',
-                'required' => false,
-                'help' => 'The most runs (CI suites, working agents) of this project at the same time, across its templates. Leave empty for no limit.',
-                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
             ]);
     }
 

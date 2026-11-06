@@ -22,7 +22,7 @@ final class SourceType extends AbstractType
     public function buildForm(FormBuilderInterface $builder, array $options): void
     {
         ProjectFields::source($builder);
-        ProjectFields::other($builder, $options['allocatable']);
+        ProjectFields::other($builder);
         $builder->add('save', SubmitType::class, ['label' => 'Save']);
     }
 
@@ -35,9 +35,7 @@ final class SourceType extends AbstractType
     {
         $resolver->setDefaults([
             'data_class' => null,
-            'allocatable' => null,
             'attr' => ['novalidate' => 'novalidate', 'data-testid' => 'project-form'],
         ]);
-        $resolver->setAllowedTypes('allocatable', ['null', 'int']);
     }
 }
