@@ -17,6 +17,7 @@ use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\EnumType;
+use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
 use Symfony\Component\Form\Extension\Core\Type\TextareaType;
 use Symfony\Component\Form\Extension\Core\Type\TextType;
@@ -123,6 +124,20 @@ final class ProjectType extends AbstractType
                 'required' => false,
                 'help' => 'Only for projects whose agents push from the web container. The key is usable by every process in that instance\'s container while the agent runs.',
             ])
+            ->add('cpuThreads', IntegerType::class, [
+                'label' => 'CPU threads',
+                'required' => false,
+                'help' => null === $options['allocatable']
+                    ? 'The most CPU threads all instances of this project may use together. Leave empty for no limit.'
+                    : \sprintf('The most CPU threads all instances of this project may use together. Leave empty for no limit. This host can allocate %d.', $options['allocatable']),
+                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
+            ])
+            ->add('slots', IntegerType::class, [
+                'label' => 'Slots',
+                'required' => false,
+                'help' => 'The most runs (CI suites, working agents) of this project at the same time, across its templates. Leave empty for no limit.',
+                'attr' => ['inputmode' => 'numeric', 'min' => 1, 'placeholder' => 'unlimited'],
+            ])
             ->add('save', SubmitType::class, ['label' => $create ? 'Create project' : 'Save']);
     }
 
@@ -132,10 +147,12 @@ final class ProjectType extends AbstractType
             'data_class' => null,
             'mode' => self::EDIT,
             'templates' => [],
+            'allocatable' => null,
             // Every message comes from the service; a stray HTML5 attribute would hide it.
             'attr' => ['novalidate' => 'novalidate', 'data-testid' => 'project-form'],
         ]);
         $resolver->setAllowedValues('mode', [self::CREATE, self::EDIT]);
         $resolver->setAllowedTypes('templates', 'array');
+        $resolver->setAllowedTypes('allocatable', ['null', 'int']);
     }
 }

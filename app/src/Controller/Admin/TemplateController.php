@@ -56,7 +56,7 @@ final class TemplateController extends AbstractController
     {
         $project = $this->project($name);
 
-        $form = $this->createForm(TemplateType::class, null, ['mode' => TemplateType::CREATE]);
+        $form = $this->createForm(TemplateType::class, null, ['mode' => TemplateType::CREATE] + $this->projectLimits($project));
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -71,6 +71,8 @@ final class TemplateController extends AbstractController
                         tty1: $lists['tty1'],
                         tty2: $lists['tty2'],
                         sshKeys: $lists['sshKeys'],
+                        cpuThreads: self::optionalInt($data['cpuThreads'] ?? null),
+                        slots: self::optionalInt($data['slots'] ?? null),
                     ));
                     $this->addFlash('success', 'Template created.');
 
@@ -98,7 +100,9 @@ final class TemplateController extends AbstractController
             'tty1' => implode("\n", $stored->tty1()),
             'tty2' => implode("\n", $stored->tty2()),
             'sshKeys' => implode("\n", $stored->sshKeys()),
-        ], ['mode' => TemplateType::EDIT]);
+            'cpuThreads' => $stored->cpuThreads(),
+            'slots' => $stored->slots(),
+        ], ['mode' => TemplateType::EDIT] + $this->projectLimits($project));
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -112,6 +116,8 @@ final class TemplateController extends AbstractController
                         'tty1' => $lists['tty1'],
                         'tty2' => $lists['tty2'],
                         'sshKeys' => $lists['sshKeys'],
+                        'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
+                        'slots' => self::optionalInt($data['slots'] ?? null),
                     ]));
                     $this->addFlash('success', 'Template saved.');
 
@@ -213,6 +219,21 @@ final class TemplateController extends AbstractController
         }
 
         return ['postDeploy' => $postDeploy, 'tty1' => $tty1, 'tty2' => $tty2, 'sshKeys' => $sshKeys];
+    }
+
+    /**
+     * The project's own limits, quoted in the template form's help text ("inherits project: N").
+     *
+     * @return array{projectCpuThreads: int|null, projectSlots: int|null}
+     */
+    private function projectLimits(Project $project): array
+    {
+        return ['projectCpuThreads' => $project->cpuThreads(), 'projectSlots' => $project->slots()];
+    }
+
+    private static function optionalInt(mixed $value): ?int
+    {
+        return \is_int($value) ? $value : null;
     }
 
     private static function text(mixed $value): string

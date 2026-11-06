@@ -12,6 +12,9 @@ use App\Fleet\Backup\BackupKind;
 use App\Fleet\Backup\BackupNotFound;
 use App\Fleet\Backup\BackupService;
 use App\Fleet\Backup\BackupTooLarge;
+use App\Fleet\Host\Capacity\HostCapacity;
+use App\Fleet\Host\Capacity\HostHardwareProbe;
+use App\Fleet\Host\Capacity\UnslicedInstances;
 use App\Fleet\Host\ClaudeTokenRule;
 use App\Fleet\Host\GitIdentityRule;
 use App\Fleet\Host\HostSecrets;
@@ -26,6 +29,7 @@ use App\Fleet\Tls\TlsStatusFile;
 use App\Fleet\Workspace\ClaudeTokenRotation;
 use App\Fleet\Workspace\WorkspaceCheck;
 use App\Form\Host\HostBackupRetentionType;
+use App\Form\Host\HostCapacityType;
 use App\Form\Host\HostClaudeTokenType;
 use App\Form\Host\HostGeneralType;
 use App\Form\Host\HostGitIdentityType;
@@ -62,6 +66,7 @@ final class HostSettingsController extends AbstractController
         'certificates' => 'Certificates',
         'uploads' => 'Uploads',
         'jobs' => 'Jobs',
+        'capacity' => 'Capacity',
         'backups' => 'Backups',
     ];
 
@@ -74,6 +79,9 @@ final class HostSettingsController extends AbstractController
         private readonly PortMirror $portMirror,
         private readonly PortMirrorSwitch $portMirrorSwitch,
         private readonly TlsStatusFile $tlsStatus,
+        private readonly HostCapacity $capacity,
+        private readonly HostHardwareProbe $hardware,
+        private readonly UnslicedInstances $unsliced,
         private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
         private readonly ClockInterface $clock,
@@ -337,6 +345,37 @@ final class HostSettingsController extends AbstractController
         return $this->show('jobs', $host, $form);
     }
 
+    #[Route('/admin/host/capacity', name: 'settings_capacity', methods: ['POST'])]
+    public function capacitySave(Request $request): Response
+    {
+        if (null === $host = $this->settings->get()) {
+            return $this->notInitialised();
+        }
+        $form = $this->form('capacity', $host);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $reserve = $form->get('reserve')->getData();
+            $max = $form->get('maxInstances')->getData();
+            $threads = $this->hardware->read()->threads;
+            if (!\is_int($reserve) || $reserve < 0 || $reserve >= $threads) {
+                $form->get('reserve')->addError(new FormError(\sprintf('Enter a number from 0 to %d: this host has %d threads and at least one must stay allocatable.', $threads - 1, $threads)));
+            }
+            if (!\is_int($max) || $max < 1 || $max > HostSettings::MAX_MAX_INSTANCES) {
+                $form->get('maxInstances')->addError(new FormError(\sprintf('Enter a number from 1 to %d.', HostSettings::MAX_MAX_INSTANCES)));
+            }
+            if (\is_int($reserve) && \is_int($max) && 0 === $form->get('reserve')->getErrors()->count() && 0 === $form->get('maxInstances')->getErrors()->count()) {
+                $host->changeCapacity($reserve, $max, $this->clock->now());
+                $this->settings->save($host);
+                $this->addFlash('success', 'Capacity settings saved.');
+
+                return $this->back('capacity');
+            }
+        }
+
+        return $this->show('capacity', $host, $form);
+    }
+
     #[Route('/admin/host/backups/retention', name: 'settings_backup_retention', methods: ['POST'])]
     public function retention(Request $request): Response
     {
@@ -408,6 +447,7 @@ final class HostSettingsController extends AbstractController
             ]),
             'network' => $this->createForm(HostPortMirrorType::class, ['enabled' => $host->portMirror()], ['action' => $this->generateUrl('settings_network')]),
             'uploads' => $this->createForm(HostUploadLimitType::class, ['megabytes' => intdiv($host->assetUploadMaxBytes(), 1_048_576)], ['action' => $this->generateUrl('settings_uploads')]),
+            'capacity' => $this->createForm(HostCapacityType::class, ['reserve' => $host->cpuReserveThreads(), 'maxInstances' => $host->maxInstances()], ['action' => $this->generateUrl('settings_capacity')]),
             'jobs' => $this->createForm(HostJobConcurrencyType::class, ['jobs' => $host->maxConcurrentJobs()], ['action' => $this->generateUrl('settings_jobs')]),
             default => $this->createForm(HostBackupRetentionType::class, ['days' => $host->backupRetentionDays()], ['action' => $this->generateUrl('settings_backup_retention')]),
         };
@@ -445,6 +485,8 @@ final class HostSettingsController extends AbstractController
             'workspace' => $this->workspace->run()->toArray(),
             'tls' => 'certificates' === $tab ? $this->tlsStatus->read() : null,
             'mirror' => 'network' === $tab ? $this->mirrorView() : null,
+            'capacity' => 'capacity' === $tab ? $this->capacity->report() : null,
+            'unsliced' => 'capacity' === $tab ? $this->unsliced->list() : [],
             'secrets' => [
                 'claude' => $this->rotation->lastRotated(),
                 'smtp' => $this->secrets->fleetWideUpdatedAt(HostSecrets::SMTP_PASSWORD),
