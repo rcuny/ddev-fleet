@@ -7,11 +7,13 @@ namespace App\Controller\Admin;
 use App\Domain\Project\Project;
 use App\Domain\Template\Template;
 use App\Fleet\Projects\NotFound;
+use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\TemplateInput;
 use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
+use App\Form\Project\DefaultTemplateType;
 use App\Form\Project\TemplateType;
 use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
@@ -40,14 +42,40 @@ final class TemplateController extends AbstractController
     ) {
     }
 
-    #[Route('/admin/projects/{name}/templates', name: 'project_templates', requirements: ['name' => self::NAME], methods: ['GET'])]
-    public function index(string $name): Response
+    #[Route('/admin/projects/{name}/templates', name: 'project_templates', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
+    public function index(Request $request, string $name): Response
     {
         $project = $this->project($name);
+        $templates = $this->templates->list($name);
+
+        // The default template choice sits next to the list. Saving it starts from the stored project, so every other field survives.
+        $form = $this->createForm(
+            DefaultTemplateType::class,
+            ['defaultTemplate' => $project->defaultTemplate()],
+            ['templates' => array_map(static fn (Template $template): string => $template->name(), $templates)],
+        );
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $data = $this->formData($form);
+            try {
+                $this->projects->update($name, ProjectInput::fromProject($project)->with([
+                    'defaultTemplate' => self::optionalText($data['defaultTemplate'] ?? null),
+                ]));
+                $this->addFlash('success', 'Default template saved.');
+
+                return $this->redirectToRoute('project_templates', ['name' => $name], Response::HTTP_SEE_OTHER);
+            } catch (ValidationFailed $failed) {
+                ValidationErrorMapper::add($form, $failed);
+            } catch (NotFound) {
+                throw new NotFoundHttpException();
+            }
+        }
 
         return $this->render('admin/projects/templates/index.html.twig', [
             'project' => $project,
-            'templates' => $this->templates->list($name),
+            'templates' => $templates,
+            'defaultForm' => $form,
         ]);
     }
 

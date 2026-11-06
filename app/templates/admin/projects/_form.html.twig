@@ -1,39 +1,49 @@
-{#- The General tab's fields. Needs: form, create (bool). -#}
+{#- The project fields, in sections: the Source tab's (repository, git identity, issue ids) and, until they move to their own tab, the other settings. Needs: form, create (bool). -#}
 {{ form_start(form, {attr: {class: 'grid gap-6'}}) }}
     {{ form_errors(form) }}
-    {% if create %}
-        {{ form_row(form.name) }}
-    {% endif %}
-    {{ form_row(form.git) }}
-    {{ form_row(form.defaultBranch) }}
-    {% if not create %}
-        {{ form_row(form.defaultTemplate) }}
-    {% endif %}
-    {% if create %}{{ form_row(form.additionalHostnames) }}{% endif %}
+    <section class="grid gap-6" aria-labelledby="project-repository-heading" data-testid="source-repository">
+        <h2 id="project-repository-heading" class="text-base">Repository</h2>
+        {% if create %}
+            {{ form_row(form.name) }}
+        {% endif %}
+        {{ form_row(form.git) }}
+        {{ form_row(form.defaultBranch) }}
+        {{ form_row(form.displaySubmoduleBranch) }}
+    </section>
 
     <twig:Separator />
 
-    {{ form_row(form.gitBotMode) }}
-    <div class="grid gap-6 md:grid-cols-2">
-        {{ form_row(form.gitBotName) }}
-        {{ form_row(form.gitBotEmail) }}
-    </div>
+    <section class="grid gap-6" aria-labelledby="project-identity-heading" data-testid="source-identity">
+        <h2 id="project-identity-heading" class="text-base">Git identity</h2>
+        {{ form_row(form.gitBotMode) }}
+        <div class="grid gap-6 md:grid-cols-2">
+            {{ form_row(form.gitBotName) }}
+            {{ form_row(form.gitBotEmail) }}
+        </div>
+    </section>
 
     <twig:Separator />
 
-    {{ form_row(form.issueIdRegexp) }}
-    {{ form_row(form.displaySubmoduleBranch) }}
-    {% if create %}{{ form_row(form.typesense) }}{% endif %}
-    {% if create %}{{ form_row(form.containerSsh) }}{% endif %}
+    <section class="grid gap-6" aria-labelledby="project-issue-heading" data-testid="source-issue-id">
+        <h2 id="project-issue-heading" class="text-base">Issue ids</h2>
+        {{ form_row(form.issueIdRegexp) }}
+    </section>
 
+{% if create %}
     <twig:Separator />
 
-    {% if create %}
+    {#- Container SSH is changed on the Keys & secrets tab after creation; hostnames, Typesense and the caps are create-only (Network and Capacity tabs). -#}
+    <section class="grid gap-6" aria-labelledby="project-other-heading" data-testid="source-other">
+        <h2 id="project-other-heading" class="text-base">Other settings</h2>
+        {{ form_row(form.containerSsh) }}
+        {{ form_row(form.additionalHostnames) }}
+        {{ form_row(form.typesense) }}
         <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
             {{ form_row(form.cpuThreads) }}
             {{ form_row(form.slots) }}
         </div>
-    {% endif %}
+    </section>
+{% endif %}
 
     <div class="flex flex-col gap-2 md:flex-row">
         {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto'}}) }}
