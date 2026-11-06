@@ -31,6 +31,7 @@ use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Secrets\SecretStore;
+use App\Form\Project\CapacityType;
 use App\Form\Project\ProjectType;
 use App\Form\Project\TextLines;
 use App\Form\Project\ValidationErrorMapper;
@@ -249,16 +250,66 @@ final class ProjectController extends AbstractController
         return $this->redirectToRoute('project_access', ['name' => $name], Response::HTTP_SEE_OTHER);
     }
 
-    #[Route('/admin/projects/{name}/capacity', name: 'project_capacity', requirements: ['name' => self::NAME], methods: ['GET'])]
-    public function capacity(string $name): Response
+    #[Route('/admin/projects/{name}/capacity', name: 'project_capacity', requirements: ['name' => self::NAME], methods: ['GET', 'POST'])]
+    public function capacity(Request $request, string $name): Response
     {
         $project = $this->load($name);
         $allocatable = $this->allocatable->get();
+        $form = $this->createForm(CapacityType::class, ['cpuThreads' => $project->cpuThreads(), 'slots' => $project->slots()], ['allocatable' => $allocatable]);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $data = $this->formData($form);
+            // Start from what is stored so only the two caps change.
+            $input = ProjectInput::fromProject($project)->with([
+                'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
+                'slots' => self::optionalInt($data['slots'] ?? null),
+            ]);
+            try {
+                $this->projects->update($name, $input);
+                $this->addFlash('success', 'Project saved.');
+
+                return $this->redirectToRoute('project_capacity', ['name' => $name], Response::HTTP_SEE_OTHER);
+            } catch (ValidationFailed $failed) {
+                ValidationErrorMapper::add($form, $failed);
+            } catch (NotFound) {
+                throw new NotFoundHttpException();
+            }
+        }
+
+        // Effective values as the host capacity report computes them (HostCapacity): a template inherits the project's
+        // cap and is clamped by it.
+        $effective = min($project->cpuThreads() ?? $allocatable, $allocatable);
+        $rows = [];
+        $explicitThreads = 0;
+        $explicitSlots = 0;
+        try {
+            $templates = $this->templates->list($name);
+        } catch (NotFound) {
+            throw new NotFoundHttpException();
+        }
+        foreach ($templates as $template) {
+            $explicitThreads += $template->cpuThreads() ?? 0;
+            $explicitSlots += $template->slots() ?? 0;
+            $rows[] = [
+                'name' => $template->name(),
+                'threads' => $template->cpuThreads(),
+                'slots' => $template->slots(),
+                'effectiveThreads' => min($template->cpuThreads() ?? $effective, $effective),
+                'effectiveSlots' => null === $template->slots() ? $project->slots() : (null === $project->slots() ? $template->slots() : min($template->slots(), $project->slots())),
+            ];
+        }
 
         return $this->render('admin/projects/capacity.html.twig', [
             'project' => $project,
+            'form' => $form,
             'allocatable' => $allocatable,
-            'effectiveThreads' => min($project->cpuThreads() ?? $allocatable, $allocatable),
+            'effectiveThreads' => $effective,
+            'rows' => $rows,
+            'threadsOver' => $explicitThreads > $effective && (null !== $project->cpuThreads()),
+            'slotsOver' => null !== $project->slots() && $explicitSlots > $project->slots(),
+            'explicitThreads' => $explicitThreads,
+            'explicitSlots' => $explicitSlots,
         ]);
     }
 
@@ -294,8 +345,6 @@ final class ProjectController extends AbstractController
                     'displaySubmoduleBranch' => self::optionalText($data['displaySubmoduleBranch'] ?? null),
                     'typesense' => true === ($data['typesense'] ?? false),
                     'containerSsh' => true === ($data['containerSsh'] ?? false),
-                    'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
-                    'slots' => self::optionalInt($data['slots'] ?? null),
                 ]);
                 try {
                     $this->projects->update($name, $input);
@@ -473,8 +522,6 @@ final class ProjectController extends AbstractController
             'displaySubmoduleBranch' => $project->displaySubmoduleBranch(),
             'typesense' => $project->typesense(),
             'containerSsh' => $project->containerSsh(),
-            'cpuThreads' => $project->cpuThreads(),
-            'slots' => $project->slots(),
         ];
     }
 
