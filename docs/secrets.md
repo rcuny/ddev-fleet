@@ -62,10 +62,17 @@ Everything here is administrator-only. A member of a project cannot list, set, r
   `fleet/smtp_password`), and so is a Claude token rotation (`claude.token.rotate`). The log never contains a value. A field longer than its column is cut on a character
   boundary and ends in `…`, so a cut shows.
 - **Re-auth window.** Reveal needs a recent password check. With the window closed, Reveal sends you to
-  `/admin/reauth` (the password of the account you are signed in with, CSRF, at most 5 attempts per 15 minutes per user)
+  `/admin/reauth` (the password of the account you are signed in with, CSRF, at most 5 *failed* attempts per 15 minutes per user and client address; a right password never uses an attempt)
   and back to the list; the window then stays open for 5 minutes (`ReauthWindow::SECONDS`), only for that user and
   that session. Audit actions: `reauth.success`, `reauth.failure` (a wrong password or `throttled`) and
   `reauth.required` (the stopped action and its subject). They never carry a password or a value.
+  The window is one-shot for the destructive actions: a sealed export, turning on Git over SSH in the container and
+  deleting a project close it, so the next gated action asks for the password again. Revealing keeps the window open
+  for its 5 minutes.
+- **Signed in through Authelia only.** The re-auth page checks the password against the fleet user store. An Authelia
+  user who has no account there (for example an identity that exists only in Authelia's own users file) can never
+  re-authenticate: Reveal, the sealed export and Git over SSH stay refused for them. Give them a fleet account
+  (`fleet user:create`) or let an administrator who has one do the action.
 - **Reveal** is a POST with a CSRF token. The response shows the value once in a dialog; the response is never
   cached (`Cache-Control: no-store, private`), the reveal is recorded before the value is handed out (if the audit
   entry cannot be written, nothing is shown) and reloading the page shows nothing. A value that cannot be opened (the

@@ -134,6 +134,9 @@ final class SecretController extends AbstractController
             throw new NotFoundHttpException();
         }
 
+        if ($enable) {
+            $this->reauth->close();
+        }
         $this->audit->record($this->actor->name(), AuditLog::PROJECT_CONTAINER_SSH, $name.'/'.($enable ? 'on' : 'off'));
         $this->addFlash('success', 'Git over SSH in the container is now '.($enable ? 'on' : 'off').'.');
 

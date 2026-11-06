@@ -61,6 +61,10 @@ final class ProjectTransferController extends AbstractController
             return $this->redirectToRoute('project_transfer', ['name' => $name], Response::HTTP_SEE_OTHER);
         }
 
+        if (null !== $passphrase) {
+            // One-shot: a sealed export uses up the window.
+            $this->reauth->close();
+        }
         $response = new Response($text);
         $response->headers->set('Content-Type', 'application/json; charset=utf-8');
         $response->headers->set('Content-Disposition', \sprintf('attachment; filename="%s.fleet-project.json"', $name));
