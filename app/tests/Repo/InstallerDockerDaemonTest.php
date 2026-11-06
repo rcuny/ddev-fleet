@@ -94,6 +94,16 @@ final class InstallerDockerDaemonTest extends TestCase
         self::assertStringContainsString('routes 10.64.0.0/10', $err);
     }
 
+    public function testDockerBridgeRoutesAreNotAConflict(): void
+    {
+        $routes = "10.64.1.0/24 dev br-0123456789ab proto kernel scope link src 10.64.1.1\n10.64.2.0/24 dev br-abcdef012345 linkdown\n172.17.0.0/16 dev docker0";
+        [$status, , $err] = $this->configure($routes);
+
+        self::assertSame(0, $status, $err);
+        self::assertSame('10.64.0.0/10', $this->daemon()['default-address-pools'][16]['base']);
+        self::assertStringNotContainsString('NOT added', $err);
+    }
+
     public function testASecondRunChangesNothing(): void
     {
         $this->configure();

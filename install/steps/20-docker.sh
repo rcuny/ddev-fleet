@@ -23,11 +23,16 @@ docker_ip_to_int() {
 }
 
 # True when a route of this host overlaps the fleet pool (the pool would then hand out subnets that are in use).
+# Routes over Docker's own bridges (br-*, docker0) are ignored.
 docker_pool_routed() {
   local dest ip len mask pool_start pool_mask r_start
   pool_mask=$(((0xFFFFFFFF << (32 - DOCKER_FLEET_POOL_PREFIX)) & 0xFFFFFFFF))
   pool_start=$(docker_ip_to_int "$DOCKER_FLEET_POOL_BASE")
-  while read -r dest _; do
+  while read -r dest rest; do
+    # Docker's own bridges (instance networks live in the pool after the restart) are not a conflict.
+    case " $rest " in
+      *" dev br-"* | *" dev docker0 "*) continue ;;
+    esac
     case $dest in
       [0-9]*) ;;
       *) continue ;;

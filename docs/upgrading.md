@@ -259,8 +259,9 @@ the pool cannot run more than about 29 instances. The installer adds a large poo
   Existing networks keep their subnets. With `live-restore` on, later Docker restarts leave containers running.
 - **Check:** `fleet host:capacity --json` shows `docker_networks` (`used`, `max`); `max` is 31 until the restart.
   `instances.max` is the smaller of the configured cap and the room the networks leave.
-- The pool is skipped (with a warning) when the host routes `10.64.0.0/10`, and an existing `default-address-pools`
+- The pool is skipped (with a warning) when the host routes `10.64.0.0/10` (routes over Docker's own `br-*` bridges and `docker0` do not count), and an existing `default-address-pools`
   you set yourself is never changed; add `{"base":"10.64.0.0/10","size":24}` to yours to get the room.
+- The uninstaller purges Docker but leaves `/etc/docker/daemon.json` in place (harmless; delete it by hand if you want).
 
 ## Offline hosts and mirrors
 
