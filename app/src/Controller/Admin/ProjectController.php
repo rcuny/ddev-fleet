@@ -463,12 +463,20 @@ final class ProjectController extends AbstractController
             throw $this->createAccessDeniedException('Invalid CSRF token.');
         }
 
+        // Destroying a project asks for its name, typed: a stray click or a replayed form is not enough.
+        $typed = $request->request->get('confirm_name');
+        if (!\is_string($typed) || !hash_equals($name, trim($typed))) {
+            $this->addFlash('warning', 'The project was not deleted. Type the project name exactly to confirm.');
+
+            return $this->redirectToRoute('project_transfer', ['name' => $name], Response::HTTP_SEE_OTHER);
+        }
+
         try {
             $this->projects->delete($name, $this->actor->name());
         } catch (Refused $refusal) {
             $this->addFlash('warning', 'The project was not deleted. '.$refusal->getMessage());
 
-            return $this->redirectToRoute('project_source', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
+            return $this->redirectToRoute('project_transfer', ['name' => $project->name()], Response::HTTP_SEE_OTHER);
         } catch (NotFound) {
             throw new NotFoundHttpException();
         }

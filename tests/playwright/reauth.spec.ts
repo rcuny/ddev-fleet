@@ -50,7 +50,7 @@ test.describe('re-auth window', () => {
     const project = uniqueName('reauth');
     await createProjectViaUi(page, project);
     try {
-      await page.goto(`/admin/projects/${project}/source`);
+      await page.goto(`/admin/projects/${project}/transfer`);
       await expect(page.locator('#export-passphrase-help')).toContainText('At least 8 characters');
 
       const [plain] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);
@@ -58,9 +58,9 @@ test.describe('re-auth window', () => {
 
       await page.getByTestId('export-passphrase').fill('correct horse battery');
       await page.getByTestId('export-download').click();
-      await expect(page).toHaveURL(new RegExp(`/admin/reauth\\?next=/admin/projects/${project}/source$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/reauth\\?next=/admin/projects/${project}/transfer$`));
       await confirmPassword(page);
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/source$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${project}/transfer$`));
 
       await page.getByTestId('export-passphrase').fill('correct horse battery');
       const [sealed] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);

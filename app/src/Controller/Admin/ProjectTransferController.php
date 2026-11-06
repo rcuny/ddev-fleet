@@ -49,7 +49,7 @@ final class ProjectTransferController extends AbstractController
         // A passphrase seals the secrets into the file: that export needs a recent password check. Without one the file
         // carries no secrets and stays open.
         if (null !== $passphrase && !$this->reauth->requireRecentAuth()) {
-            return $this->reauth->challenge('export', $name, '/admin/projects/'.$name.'/source');
+            return $this->reauth->challenge('export', $name, '/admin/projects/'.$name.'/transfer');
         }
         try {
             $text = $this->exporter->export($name, $passphrase, $this->actor->name());
@@ -58,7 +58,7 @@ final class ProjectTransferController extends AbstractController
         } catch (InvalidExport $e) {
             $this->addFlash('error', $e->getMessage());
 
-            return $this->redirectToRoute('project_source', ['name' => $name], Response::HTTP_SEE_OTHER);
+            return $this->redirectToRoute('project_transfer', ['name' => $name], Response::HTTP_SEE_OTHER);
         }
 
         $response = new Response($text);

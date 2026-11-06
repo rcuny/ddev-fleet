@@ -171,7 +171,7 @@ final class ReauthTest extends AdminTestCase
         self::assertStringContainsString('attachment', (string) $this->client->getResponse()->headers->get('Content-Disposition'));
 
         $this->post('/admin/projects/blog/export', ['passphrase' => self::PASSPHRASE]);
-        self::assertResponseRedirects('/admin/reauth?next=/admin/projects/blog/source', 303);
+        self::assertResponseRedirects('/admin/reauth?next=/admin/projects/blog/transfer', 303);
         self::assertSame(['dev-admin', 'reauth.required', 'export blog'], $this->audit()[0]);
         self::assertStringNotContainsString(self::PASSPHRASE, json_encode($this->audit(), \JSON_THROW_ON_ERROR));
 
@@ -188,7 +188,7 @@ final class ReauthTest extends AdminTestCase
         self::assertSame('current-password', $crawler->filter('[data-testid=reauth-password]')->attr('autocomplete'));
 
         $this->seed();
-        $page = $this->open('/admin/projects/blog/source');
+        $page = $this->open('/admin/projects/blog/transfer');
         self::assertStringContainsString('At least 8 characters', $page->filter('#export-passphrase-help')->text());
         self::assertSame('export-passphrase-help', $page->filter('[data-testid=export-passphrase]')->attr('aria-describedby'));
     }
