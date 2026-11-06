@@ -1,12 +1,12 @@
 ---
 # Scoped playbook: the hardening roles only (network_hardening UFW + DOCKER-USER
-# guard + dead-man's switch, security_hardening, security_probe).
+# guard + dead-man's switch, security_hardening).
 #
 # Use this instead of site.yml to harden an EXISTING server with live DDEV
 # instances. site.yml's fleet_service role rewrites /opt/ddev-fleet's git remote
 # to https, which breaks the SSH-key `git pull` the whole rollout flow depends
 # on, so it must never be run against a live host. This playbook touches only
-# the three hardening roles.
+# the two hardening roles.
 #
 # Before the first run, edit /etc/ddev-fleet/local-vars.yml:
 #   fleet_network_hardening_enabled: true
@@ -14,8 +14,7 @@
 #   fleet_ssh_allow_users: [debian, root]    # PIN it: must include the account
 #                                            # you are logged in with, or sshd
 #                                            # AllowUsers locks you out
-# Each role is a no-op unless its *_enabled variable is true (the probe unless
-# fleet_security_probe_authorized_keys is set).
+# Each role is a no-op unless its *_enabled variable is true.
 #
 # Safe on a live host: Docker is RELOADED (live-restore applies on SIGHUP),
 # never restarted, so running containers survive; the registry's named ports
@@ -52,4 +51,3 @@
   roles:
     - network_hardening   # no-op unless fleet_network_hardening_enabled
     - security_hardening  # no-op unless fleet_security_hardening_enabled
-    - security_probe      # no-op unless fleet_security_probe_authorized_keys is set

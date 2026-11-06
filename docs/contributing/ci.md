@@ -45,22 +45,37 @@ If it says "not on origin/main", the tag reached the remote before `main` did: p
 
 ## Systemd security check
 
-`systemd-analyze security` scores a unit's sandbox from 0 (locked down) to 10. The check renders the sandboxed units offline, scores them with `--offline=yes` and compares them with the committed baseline `ci/systemd-security-baseline.json`. The offline mode scores `fleet.service`, `fleet-boot.service`, `fleet-reboot-notify.service` and `caddy.service` (rendered as Fleet's sandbox drop-in over a stand-in vendor unit). `authelia.service` has no template, and the plain install units `fleet-tmux.service` and `fleet-mercure.service` are deliberately unscored offline (their measured scores are recorded under `install_units` in the baseline).
+`systemd-analyze security` scores a unit's sandbox from 0 (locked down) to 10 (no sandbox). The check scores, offline (`--offline=yes`), the units **the installer ships** and fails when a score goes up against the committed baseline `ci/systemd-security-baseline.json`. No host is involved. The current scores are in [`SYSTEMD-SECURITY-REPORT.md`](../../SYSTEMD-SECURITY-REPORT.md), which the check regenerates.
+
+What is scored:
+
+- every `install/etc/*.service` (`fleet-backup`, `fleet-boot`, `fleet-mercure`, `fleet-scheduler`, `fleet-status`, `fleet-tls-check`, `fleet-tmux`, `fleet-upgrade-check`, `fleet-worker@`);
+- every `install/harden/etc/*.service` (`firewall-deadman`, `firewall-deadman-bootcheck`, `firewall-sync`);
+- `caddy.service`: `install/etc/caddy-sandbox.conf` layered over a stand-in for the Debian package's unit.
+
+A new `*.service` in those directories is picked up by name and shows as NEW until the baseline is updated. Timers have no sandbox and are not scored; Authelia and php-fpm ship no sandbox drop-in. High scores (for example `fleet-tmux`, whose panes are operator shells) are recorded as they are: the check guards against regressions, it does not demand a score.
+
+`ci/run-gates.sh` runs it as the gate `systemd-security`; `tests/pytest/repo/test_systemd_security_ci.py` also removes a directive from a unit and asserts the check fails. Reports are written to `reports/systemd-security-offline.md` and `.json`.
 
 | Status | Meaning | Fails the run |
 |---|---|---|
-| OK | within 0.1 of the baseline | no |
-| REGRESSION | more than 0.1 worse | **yes**; the report lists the weakened directives |
-| IMPROVED, NEW, GONE | better, not in the baseline, missing from the report | no |
+| OK | within the tolerance (0.1) of the baseline | no |
+| REGRESSION | more than 0.1 worse | **yes**; the report lists the weakened directives per unit |
+| IMPROVED | more than 0.1 better | no (the report suggests updating the baseline) |
+| NEW, GONE | not in the baseline, missing from the report | no |
 
-Fix the unit rather than raise the baseline. If the change is intended, re-record it in the same pull request, on Debian 13 (systemd 257), and say why:
+The report also warns when the systemd major version differs from the baseline's, because scores can move with a systemd upgrade alone.
+
+**When it fails:** your change removed or weakened a sandbox directive. Read the unit and directives named in the report and fix the unit; do not raise the baseline to hide it. If the weakening is intended (a directive that breaks the daemon), re-record the baseline in the same pull request, on Debian 13 (systemd 257) with `umask 022`, and say why:
 
 ```bash
 python ci/systemd_security.py offline --out reports/offline.json
-python ci/systemd_security.py update-baseline --env offline --current reports/offline.json
+python ci/systemd_security.py update-baseline --current reports/offline.json
+python ci/systemd_security.py compare --current reports/offline.json --report-json reports/systemd-security-offline.json
+python ci/systemd_security.py report --compare reports/systemd-security-offline.json
 ```
 
-A weekly live probe (`ci/systemd-security-live.sh`, targets in `SECURITY_PROBE_TARGETS`) compares real hosts; unset, it skips and succeeds.
+Commit `ci/systemd-security-baseline.json` and `SYSTEMD-SECURITY-REPORT.md` (scores only, no host names).
 
 ## Renovate
 

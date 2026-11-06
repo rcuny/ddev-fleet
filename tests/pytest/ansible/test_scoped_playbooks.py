@@ -59,10 +59,10 @@ def _assert_scoped_play_shape(play: dict) -> None:
     assert any("include_vars" in t and "_fleet_local_vars.stat.exists" in t for t in pre)
 
 
-def test_hardening_playbook_runs_exactly_the_three_hardening_roles_in_site_order():
+def test_hardening_playbook_runs_exactly_the_two_hardening_roles_in_site_order():
     play = _play("hardening.yml")
     _assert_scoped_play_shape(play)
-    assert play["roles"] == ["network_hardening", "security_hardening", "security_probe"]
+    assert play["roles"] == ["network_hardening", "security_hardening"]
     site_roles = _load(ANSIBLE / "site.yml")[0]["roles"]
     assert [r for r in site_roles if r in play["roles"]] == play["roles"]
 

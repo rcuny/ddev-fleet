@@ -28,35 +28,16 @@
 #                                 develop, custom: renovate, daily) or by a
 #                                 manual run; renovate-config.json has no
 #                                 schedule of its own.
-#   custom: systemd-security-live
-#                              -> reads each host's systemd-analyze security
-#                                 scores over SSH (forced-command user, see the
-#                                 security_probe Ansible role) and fails on a
-#                                 regression against ci/systemd-security-baseline.json.
-#                                 Scheduled weekly (Pipelines -> Schedules:
-#                                 branch develop, custom: systemd-security-live,
-#                                 weekly); the failure email is the alert.
-#                                 FLE-16: it also builds SYSTEMD-SECURITY-REPORT.md
-#                                 (live + offline) and, on develop or with the
-#                                 pipeline variable PUBLISH_REPORT=1, commits it
-#                                 to the branch it runs on (a push-back over the
-#                                 default clone origin; never forced, one rebase
-#                                 retry). That push starts the normal develop
-#                                 pipeline (gates, GitHub mirror); there is no
-#                                 loop, because the develop push pipeline does
-#                                 not run the live check. A regression, or a host
-#                                 that cannot be fetched, also posts a Jira
-#                                 comment with an @mention (JIRA_ALERT_*).
 #
 # The gates run on Debian 13 (trixie) with PHP 8.4 from the distribution and
 # Node 22 from NodeSource (@axe-core/playwright needs Node >= 22.12; Debian's
 # own Node is 20). Playwright drives headless Chromium that the step installs
 # with its system libraries. The infra step uses a Debian 13 Python image with
-# systemd installed on purpose: the systemd sandbox tests and
-# `ci/systemd_security.py offline` score the rendered units with
+# systemd installed on purpose: the systemd security tests and
+# `ci/systemd_security.py offline` score the 1.x unit files under install/ with
 # systemd-analyze (same systemd 257 as the servers) and must not be skipped
 # (FLEET_REQUIRE_SYSTEMD_ANALYZE=1). Reports land in reports/** as artifacts.
-# Procedure and baseline updates: docs/README-ci.md.
+# Procedure and baseline updates: docs/contributing/ci.md.
 #   custom: renovate-merge     -> merges ONE approved, green, up-to-date Renovate
 #                                 PR into develop (scripts/renovate_merge.py),
 #                                 then runs Renovate again so the remaining PRs
@@ -80,37 +61,10 @@
 #                      optional: comma-separated Bitbucket account ids whose
 #                      Approve or "/merge" comment lets a PR merge. Default:
 #                      the account behind RENOVATE_PASSWORD.
-#   SECURITY_PROBE_TARGETS
-#                      Space-separated name=user@host entries for the live
-#                      systemd check, e.g. server1=fleet-probe@fleet.example.com.
-#                      Unset/empty = the live pipeline skips.
-#   SECURITY_CHECK_GIT_EMAIL
-#                      optional: author e-mail of the SYSTEMD-SECURITY-REPORT.md
-#                      commit. Default security-check@noreply.example.com.
-#   JIRA_ALERT_SITE    Jira Cloud site name (your-site for your-site.atlassian.net).
-#   JIRA_ALERT_EMAIL   e-mail of the Jira account that POSTS the comment. Not the
-#                      mentioned person: Jira never notifies you of your own actions.
-#   JIRA_ALERT_TOKEN   (secured) API token of that account (a scoped token needs
-#                      only write:jira-work).
-#   JIRA_ALERT_CLOUD_ID
-#                      optional: the site's cloud id. Set = the comment goes to
-#                      https://api.atlassian.com/ex/jira/<id> (required by a scoped
-#                      token); unset = https://<site>.atlassian.net (classic token).
-#   JIRA_ALERT_ISSUE   issue to comment on (FLE-17).
-#   JIRA_ALERT_MENTION Atlassian account id of the person to @mention.
-#                      Any JIRA_ALERT_* of SITE/EMAIL/TOKEN/ISSUE/MENTION unset =
-#                      no alert ("Jira alert not configured, skipping").
-# Pipeline variable (set when starting a run, not stored):
-#   PUBLISH_REPORT=1   commit SYSTEMD-SECURITY-REPORT.md on a branch other than
-#                      develop too (testing the live check on a feature branch).
 # Plus, under Repository settings -> Pipelines -> SSH keys: a key pair whose
 # public half is a GitHub deploy key WITH WRITE ACCESS on the mirror repo.
 # (github.com's host key is managed by Bitbucket itself: no "Known hosts"
 # entry is needed, and adding one is refused.)
-# The same key pair is what the live systemd check logs in with: its public
-# half goes into fleet_security_probe_authorized_keys on the server (forced
-# command, it can only print the report), and the server's host key must be
-# added under Repository settings -> Pipelines -> SSH keys -> Known hosts.
 #
 # Mirror pushes are never forced: if GitHub has diverged, the step fails
 # loudly instead of rewriting public history.
@@ -306,25 +260,3 @@ pipelines:
               fi
               echo "Renovate requested ($(cat renovate-requested.flag)); running it to recreate the PRs on the current develop"
               RENOVATE_CONFIG_FILE="$BITBUCKET_CLONE_DIR/renovate-config.json" RENOVATE_REPOSITORIES="$BITBUCKET_REPO_FULL_NAME" renovate
-
-    # Live check of the servers' real units (weekly schedule, see the header).
-    # The logic lives in ci/systemd-security-live.sh; it skips when
-    # SECURITY_PROBE_TARGETS is unset and checks every target before failing.
-    # The full image has git (the report is committed) and, with systemd, scores
-    # the shipped units offline for the report; jinja2 renders their templates.
-    # ci/systemd_security.py is standard-library Python except that jinja2 import.
-    systemd-security-live:
-      - step:
-          name: Live systemd security check
-          image: python:3.11-trixie
-          caches:
-            - pip
-          script:
-            # systemd-analyze warns about world-writable unit files (Bitbucket's
-            # default umask is 000), see the infra tests.
-            - umask 022
-            - apt-get update -qq && apt-get install -y -qq --no-install-recommends openssh-client systemd > /dev/null
-            - pip install -q jinja2 PyYAML
-            - bash ci/systemd-security-live.sh
-          artifacts:
-            - reports/**
