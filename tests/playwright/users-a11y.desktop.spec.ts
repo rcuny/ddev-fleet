@@ -122,6 +122,12 @@ test.describe('axe sweep: users', () => {
       await createUserViaUi(page, { username, projects: [project] });
       await clean(page, 'user edit page');
 
+      // The same membership on the project's Access tab (FLE-230).
+      await page.goto(`/admin/projects/${project}/access`);
+      await expect(page.getByTestId('member-row').filter({ hasText: username })).toHaveCount(1);
+      await clean(page, 'project access tab with a member');
+      await page.goto(`/admin/users/${username}/edit`);
+
       await setValue(page.getByLabel('Email'), 'nope');
       await submitAndWait(page, saveButton(page));
       await expect(page.locator('#user_edit_email_errors')).toBeVisible();
