@@ -78,7 +78,7 @@ runs the steps in `install/steps/` in numeric order; every step is idempotent:
 | Step | Does |
 |---|---|
 | 10 packages | PHP 8.4 from Debian (php-fpm, cli and extensions, no third-party PHP repository), Composer, `openssh-client`, `acl`, `sudo` and a few tools. |
-| 20 docker | Docker CE from Docker's repository; the daemon is enabled and started. |
+| 20 docker | Docker CE from Docker's repository; the daemon is enabled and started. `/etc/docker/daemon.json` is merged (never replaced): a Docker address pool of `/24`s in `10.64.0.0/10` after the built-in pools (Docker's defaults hold about 30 instance networks), `live-restore` and log rotation. Docker is never restarted on a host that already runs it; see [Docker network pool](upgrading.md#docker-network-pool). |
 | 30 fleet user | The `fleet` system user (member of `docker`), `/srv/fleet`, `/etc/ddev-fleet`, `/opt/ddev-fleet`. |
 | 35 shell | The interactive shell profile `/etc/profile.d/10-fleet-shell.sh` (coloured prompt that names the host, `ls` colours, `l` alias, `EDITOR=nano`; interactive shells only) and one guarded hook block at the end of `/etc/bash.bashrc` and of the `~/.bashrc` of root, `fleet` and the user that ran `sudo` (added once, only to files that exist). Skipped with `--no-shell-profile`. |
 | 40 ddev | DDEV from its repository, configured for `fleet` (router on ports 8080 and 8443), mkcert's CA for the NSS store only. |
