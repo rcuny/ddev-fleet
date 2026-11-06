@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { randomBytes } from 'node:crypto';
-import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, openSection, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, GIT_URL, openDialog, openDeleteDialog, fillDeleteName, openSection, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 import { setStandInRole } from './support/standIn';
 
@@ -72,7 +72,7 @@ test.describe('projects and templates', () => {
       // The edit page offers the other sections, the danger zone and the issue id tester.
       await timed('edit page parts', async () => {
         await expect(page.getByTestId('issue-id-preview')).toBeVisible();
-        await expect(page.getByTestId('danger-zone')).toBeVisible();
+        await expect(page.getByTestId('danger-zone')).toHaveCount(0);
       });
 
       // Templates: none yet, then one with two post-deploy lines, one tty1 and one tty2 line.
@@ -163,12 +163,13 @@ test.describe('projects and templates', () => {
       // Delete the project through its dialog: Cancel keeps it, the confirmation removes it.
       await timed('delete the project', async () => {
         await openSection(page, 'Source');
-        const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+        const dialog = await openDeleteDialog(page);
         await expect(dialog).toContainText(`Delete ${name}?`);
         await dialog.getByRole('button', { name: 'Cancel' }).click();
         await expect(dialog).toBeHidden();
-        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
-        const confirm = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+        await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
+        const confirm = await openDeleteDialog(page);
+        await fillDeleteName(confirm);
         await confirm.getByRole('button', { name: 'Delete project' }).click();
         await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
         await expect(page).toHaveURL(/\/admin\/projects$/);
@@ -420,7 +421,9 @@ test.describe('phone layout of the project pages (390 px) @phone', () => {
   test('primary buttons are 44 px tall and the section tabs switch pages', async ({ page }) => {
     await page.goto(`/admin/projects/${NAME}/source`);
     await expectTall(page.getByRole('button', { name: 'Save', exact: true }));
+    await page.goto(`/admin/projects/${NAME}/transfer`);
     await expectTall(page.getByRole('button', { name: 'Delete this project' }));
+    await page.goto(`/admin/projects/${NAME}/source`);
     // Below the sm breakpoint the ten tabs are one labelled select, not a strip of links.
     const tabs = page.getByRole('navigation', { name: 'Project sections' });
     const select = tabs.getByRole('combobox', { name: 'Project section' });
@@ -468,7 +471,7 @@ test.describe('phone layout of the project pages (390 px) @phone', () => {
 
   test('the delete dialog fits, its buttons are 44 px, Cancel closes it', async ({ page }) => {
     await page.goto(`/admin/projects/${NAME}`);
-    const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+    const dialog = await openDeleteDialog(page);
     await expect(dialog).toContainText(`Delete ${NAME}?`);
     await expectNoOverflow(page, 'the delete dialog');
     const box = (await dialog.boundingBox())!;

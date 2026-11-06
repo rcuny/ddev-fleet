@@ -9,14 +9,60 @@
         </twig:block>
     </twig:PageHeader>
 
-    <div class="mt-6 grid max-w-2xl gap-4" data-testid="project-section-transfer">
-        <twig:Card>
+    <div class="mt-6 grid max-w-2xl gap-8" data-testid="project-section-transfer">
+        <twig:Card data-testid="export-project">
             <twig:Card:Header>
-                <twig:Card:Title>Transfer & danger</twig:Card:Title>
-                <twig:Card:Description>Export and Delete are on the Source tab for now.</twig:Card:Description>
+                <twig:Card:Title>Export</twig:Card:Title>
+                <twig:Card:Description>Download this project as one file to import it on another host: settings, templates, ports, webhook rules and schedules. Secrets are left out unless you give a passphrase to seal them. Assets are not included: copy them with rsync.</twig:Card:Description>
             </twig:Card:Header>
             <twig:Card:Content>
-                <twig:Button as="a" variant="outline" href="{{ path('project_source', {name: project.name}) }}#danger-zone" class="h-11 md:h-8">Go to Source</twig:Button>
+                <form method="post" action="{{ path('project_export', {name: project.name}) }}" data-turbo="false" novalidate autocomplete="off" class="grid gap-4">
+                    {{ include('setup/_csrf.html.twig') }}
+                    <div class="grid gap-2" data-slot="form-row">
+                        <twig:Label for="export-passphrase">Passphrase for the secrets (optional)</twig:Label>
+                        <twig:Input id="export-passphrase" type="password" name="passphrase" class="h-11 md:h-8" autocomplete="new-password" data-lpignore="true" minlength="{{ constant('App\\Fleet\\Export\\PassphraseSealer::MIN_PASSPHRASE') }}" aria-describedby="export-passphrase-help" data-testid="export-passphrase" />
+                        <p id="export-passphrase-help" class="text-xs text-ink-muted">At least {{ constant('App\\Fleet\\Export\\PassphraseSealer::MIN_PASSPHRASE') }} characters. With a passphrase the export needs your password again (a check that stays valid for {{ constant('App\\Security\\Reauth\\ReauthWindow::SECONDS') // 60 }} minutes).</p>
+                    </div>
+                    <div class="flex flex-col gap-2 md:flex-row">
+                        <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="export-download">
+                            <twig:ux:icon name="lucide:download" />
+                            Export
+                        </twig:Button>
+                    </div>
+                </form>
+            </twig:Card:Content>
+        </twig:Card>
+
+        <twig:Card data-testid="danger-zone">
+            <twig:Card:Header>
+                <twig:Card:Title>Danger zone</twig:Card:Title>
+                <twig:Card:Description>Deleting a project also deletes its templates and port assignments. It is refused while the project has instances. You confirm by typing the project name.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <twig:Dialog id="delete-project">
+                    <twig:Dialog:Trigger>
+                        <twig:Button variant="destructive" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_trigger_attrs }}>Delete this project</twig:Button>
+                    </twig:Dialog:Trigger>
+                    <twig:Dialog:Content>
+                        <twig:Dialog:Header>
+                            <twig:Dialog:Title>Delete {{ project.name }}?</twig:Dialog:Title>
+                            <twig:Dialog:Description>This removes the project, its templates and its port assignments. It cannot be undone.</twig:Dialog:Description>
+                        </twig:Dialog:Header>
+                        <form method="post" action="{{ path('project_delete', {name: project.name}) }}" autocomplete="off" novalidate class="grid gap-4" data-testid="delete-project-form">
+                            {{ include('setup/_csrf.html.twig') }}
+                            <div class="grid gap-2" data-slot="form-row">
+                                <twig:Label for="delete-confirm-name">Type <strong class="font-mono">{{ project.name }}</strong> to confirm</twig:Label>
+                                <twig:Input id="delete-confirm-name" name="confirm_name" class="h-11 md:h-8" autocomplete="off" autocapitalize="off" spellcheck="false" required data-lpignore="true" data-testid="delete-confirm-name" />
+                            </div>
+                            <twig:Dialog:Footer>
+                                <twig:Dialog:Close>
+                                    <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                </twig:Dialog:Close>
+                                <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="delete-project-confirm">Delete project</twig:Button>
+                            </twig:Dialog:Footer>
+                        </form>
+                    </twig:Dialog:Content>
+                </twig:Dialog>
             </twig:Card:Content>
         </twig:Card>
     </div>

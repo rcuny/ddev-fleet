@@ -2,7 +2,7 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { baseURL, externalBaseURL } from './support/env';
-import { follow, openDialog, openSection } from './support/projects';
+import { follow, openDialog, openDeleteDialog, fillDeleteName, openSection } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // Projects and templates on a real installation, in a real browser over HTTPS (no ignoreHTTPSErrors: the certificate
@@ -213,10 +213,11 @@ test.describe('clean', () => {
     await expect(page.getByTestId('flashes')).toContainText('Template deleted.');
 
     await openSection(page, 'General');
-    const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+    const dialog = await openDeleteDialog(page);
     await expect(dialog).toContainText(`Delete ${PROJECT}?`);
     await shot('12-delete-project-dialog');
     await expectNoOverflow('the delete dialog');
+    await fillDeleteName(dialog);
     await dialog.getByRole('button', { name: 'Delete project' }).click();
     await expect(page.getByTestId('flashes')).toContainText(`Project "${PROJECT}" deleted.`);
     await expect(page).toHaveURL(/\/admin\/projects$/);

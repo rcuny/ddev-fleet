@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { fillProject, openNewProject, readProject, submitCreate, submitSave } from './support/projectForm';
 import { createDeployableProject, deployOne, uniqueLabel } from './support/instances';
-import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, follow, openDialog, openDeleteDialog, fillDeleteName, openSection, submitAndWait, uniqueName } from './support/projects';
 import { collectBrowserErrors, hasHorizontalOverflow } from './support/shell';
 
 // The project pages end to end: list, create, edit, delete and what each one shows afterwards. Every test owns a
@@ -35,7 +35,7 @@ test.describe('create', () => {
       await expect(page.getByText(fields.git).first()).toBeVisible();
       await openSection(page, 'Source');
       expect(await readProject(page)).toEqual({ ...fields, mode: 'Custom identity', typesense: true });
-      await expect(page.getByTestId('danger-zone')).toBeVisible();
+      await expect(page.getByTestId('danger-zone')).toHaveCount(0);
 
       // The same state after a fresh load.
       await page.goto(`/admin/projects/${name}/source`);
@@ -113,12 +113,35 @@ test.describe('edit', () => {
 });
 
 test.describe('delete', () => {
+  test('the delete button stays inert until the exact project name is typed; a wrong name keeps the project @phone', async ({ page }) => {
+    const name = uniqueName();
+    try {
+      await createProjectViaUi(page, name);
+      const dialog = await openDeleteDialog(page);
+      await expect(dialog.getByTestId('delete-confirm-name')).toHaveAttribute('required', '');
+      await expect(dialog.locator('label')).toContainText(`Type ${name} to confirm`);
+      if (isPhone()) {
+        expect(await hasHorizontalOverflow(page), 'overflow with the typed-name dialog open').toBe(false);
+      }
+      // A wrong name is refused by the server and leaves the project (the browser's own check is bypassed on purpose).
+      await dialog.getByTestId('delete-confirm-name').fill(`${name}x`);
+      await dialog.locator('form').evaluate((form: HTMLFormElement) => form.setAttribute('novalidate', ''));
+      await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));
+      await expect(page.getByTestId('flashes')).toContainText('The project was not deleted. Type the project name exactly to confirm.');
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
+      await page.goto('/admin/projects');
+      await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(1);
+    } finally {
+      await deleteProjectViaUi(page, name);
+    }
+  });
+
   test('the dialog names the project, Cancel and Escape keep it, the confirmation removes it everywhere @phone', async ({ page }) => {
     const name = uniqueName();
     try {
       await createProjectViaUi(page, name);
 
-      let dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      let dialog = await openDeleteDialog(page);
       await expect(dialog).toContainText(`Delete ${name}?`);
       await expect(dialog).toContainText('This removes the project, its templates and its port assignments. It cannot be undone.');
       if (isPhone()) {
@@ -126,10 +149,10 @@ test.describe('delete', () => {
       }
       await dialog.getByRole('button', { name: 'Cancel' }).click();
       await expect(dialog).toBeHidden();
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
       await expect(page.getByTestId('flashes')).toHaveCount(0);
 
-      dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      dialog = await openDeleteDialog(page);
       await page.keyboard.press('Escape');
       await expect(dialog).toBeHidden();
       await page.goto('/admin/projects');
@@ -137,7 +160,8 @@ test.describe('delete', () => {
 
       await follow(page, page.getByTestId('project-row').filter({ hasText: name }).getByRole('link'));
       await openSection(page, 'Source');
-      dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      dialog = await openDeleteDialog(page);
+      await fillDeleteName(dialog);
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
       await expect(page).toHaveURL(/\/admin\/projects$/);
@@ -160,12 +184,13 @@ test.describe('delete', () => {
       instance = await deployOne(page, name, label);
 
       await page.goto(`/admin/projects/${name}/source`);
-      const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      const dialog = await openDeleteDialog(page);
+      await fillDeleteName(dialog);
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText('The project was not deleted.');
       await expect(page.getByTestId('flashes')).toContainText('instance(s) exist: destroy them first');
       await expect(page.getByTestId('flashes')).toContainText(instance);
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
 
       await page.goto('/admin/projects');
       await expect(page.getByTestId('project-row').filter({ hasText: name })).toHaveCount(1);
@@ -178,7 +203,8 @@ test.describe('delete', () => {
       await expect(page.getByTestId('job-log')).toContainText('destroy');
       instance = '';
       await page.goto(`/admin/projects/${name}/source`);
-      const confirm = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      const confirm = await openDeleteDialog(page);
+      await fillDeleteName(confirm);
       await submitAndWait(page, confirm.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
     } finally {
@@ -195,8 +221,9 @@ test.describe('phone and long values', () => {
       expect(await hasHorizontalOverflow(page), 'overflow after create').toBe(false);
       await expect(page.getByTestId('flashes')).toContainText('Project created.');
       await openSection(page, 'Source');
-      const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      const dialog = await openDeleteDialog(page);
       expect(await hasHorizontalOverflow(page), 'overflow with the delete dialog').toBe(false);
+      await fillDeleteName(dialog);
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText(`Project "${name}" deleted.`);
       expect(await hasHorizontalOverflow(page), 'overflow after delete').toBe(false);

@@ -142,13 +142,13 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertCount(1, $crawler->selectButton('Create project'));
     }
 
-    public function testTheEditPageOffersTheTesterTheExportCardAndTheDangerZone(): void
+    public function testTheEditPageOffersTheTesterAndTheTransferPageTheExportCardAndTheDangerZone(): void
     {
         $this->makeProject();
 
-        $crawler = $this->open('/admin/projects/blog/source');
+        self::assertCount(1, $this->open('/admin/projects/blog/source')->filter('[data-testid=issue-id-preview]'));
+        $crawler = $this->open('/admin/projects/blog/transfer');
 
-        self::assertCount(1, $crawler->filter('[data-testid=issue-id-preview]'));
         self::assertCount(1, $crawler->filter('[data-testid=export-project]'));
         self::assertStringContainsString('It is refused while the project has instances.', $crawler->filter('[data-testid=danger-zone]')->text());
     }
@@ -173,7 +173,7 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makePort('typesense', 9108, 8108);
         $this->makeProject('blog', new ProjectInput('blog', self::GIT, 'old', additionalHostnames: ['www'], typesense: true));
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
         self::assertResponseRedirects('/admin/projects', 303);
 
         $this->makeProject('blog', new ProjectInput('blog', 'https://git.example.com/acme/second.git'));
@@ -190,7 +190,7 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject();
         $this->guard()->set('blog', 1);
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
         $flash = $this->client->followRedirect()->filter('[data-testid=flashes]')->text();
         self::assertStringContainsString('The project was not deleted.', $flash);
         self::assertStringContainsString('instance(s) exist: destroy them first', $flash);
@@ -198,7 +198,7 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertNotNull($this->stored('blog'));
 
         $this->guard()->set('blog', 0);
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
         self::assertResponseRedirects('/admin/projects', 303);
         self::assertNull($this->stored('blog'));
     }
@@ -813,12 +813,13 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeProject('shop');
         $this->makeTemplate('blog', 'full');
 
-        $crawler = $this->open('/admin/projects/blog/source');
-        $form = $crawler->filter('form[action="/admin/projects/blog/delete"]');
+        $crawler = $this->open('/admin/projects/blog/transfer');
+        $form = $crawler->filter('[data-testid=danger-zone] form[action="/admin/projects/blog/delete"]');
         self::assertCount(1, $form);
         self::assertSame('post', strtolower((string) $form->attr('method')));
         self::assertCount(1, $form->filter('input[name=_token]'));
-        $this->client->submit($form->selectButton('Delete project')->form());
+        self::assertCount(1, $form->filter('input[name=confirm_name][required]'));
+        $this->client->submit($form->selectButton('Delete project')->form(['confirm_name' => 'blog']));
 
         self::assertResponseRedirects('/admin/projects', 303);
         self::assertNull($this->stored('blog'));
@@ -830,13 +831,55 @@ final class ProjectPagesTest extends AdminTestCase
         self::assertStringContainsString('deleted', $crawler->filter('[data-testid=flashes]')->text());
     }
 
+    #[DataProvider('wrongNames')]
+    public function testDeleteNeedsTheTypedProjectName(?string $typed): void
+    {
+        $this->makeProject();
+        $this->makeTemplate('blog', 'full');
+
+        $this->post('/admin/projects/blog/delete', null === $typed ? [] : ['confirm_name' => $typed]);
+
+        self::assertResponseRedirects('/admin/projects/blog/transfer', 303);
+        self::assertNotNull($this->stored('blog'));
+        self::assertSame(1, (int) $this->em()->getConnection()->fetchOne('SELECT COUNT(*) FROM template'));
+        self::assertStringContainsString('Type the project name', $this->client->followRedirect()->filter('[data-testid=flashes]')->text());
+    }
+
+    /**
+     * @return iterable<string, array{?string}>
+     */
+    public static function wrongNames(): iterable
+    {
+        yield 'missing' => [null];
+        yield 'empty' => [''];
+        yield 'another name' => ['shop'];
+        yield 'wrong case' => ['Blog'];
+        yield 'a prefix' => ['blo'];
+    }
+
+    public function testTheTransferTabHoldsTheExportAndTheDangerZoneAndTheSourceTabNoLonger(): void
+    {
+        $this->makeProject();
+
+        $crawler = $this->open('/admin/projects/blog/transfer');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $crawler->filter('[data-testid=export-project]'));
+        self::assertCount(1, $crawler->filter('[data-testid=danger-zone]'));
+        self::assertCount(1, $crawler->filter('[data-testid=danger-zone] label[for=delete-confirm-name]'));
+
+        $crawler = $this->open('/admin/projects/blog/source');
+        self::assertCount(0, $crawler->filter('[data-testid=export-project]'));
+        self::assertCount(0, $crawler->filter('[data-testid=danger-zone]'));
+        self::assertCount(1, $crawler->filter('[data-testid=project-form]'));
+    }
+
     public function testDeleteShowsTheAccessWarningLeftByTheRefresh(): void
     {
         $this->makeProject();
         $this->completeSetupWithFailingInstall();
 
-        $crawler = $this->open('/admin/projects/blog/source');
-        $this->client->submit($crawler->filter('form[action="/admin/projects/blog/delete"]')->selectButton('Delete project')->form());
+        $crawler = $this->open('/admin/projects/blog/transfer');
+        $this->client->submit($crawler->filter('form[action="/admin/projects/blog/delete"]')->selectButton('Delete project')->form(['confirm_name' => 'blog']));
         $crawler = $this->client->followRedirect();
 
         $flashes = $crawler->filter('[data-testid=flashes]')->text();
@@ -850,9 +893,9 @@ final class ProjectPagesTest extends AdminTestCase
         $this->makeTemplate('blog', 'full');
         $this->guard()->set('blog', 2);
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
 
-        self::assertResponseRedirects('/admin/projects/blog/source', 303);
+        self::assertResponseRedirects('/admin/projects/blog/transfer', 303);
         self::assertNotNull($this->stored('blog'));
         $crawler = $this->client->followRedirect();
         $flash = $crawler->filter('[data-testid=flashes]')->text();
@@ -866,10 +909,10 @@ final class ProjectPagesTest extends AdminTestCase
     {
         $this->makeProject();
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
         self::assertResponseRedirects('/admin/projects', 303);
 
-        $this->post('/admin/projects/blog/delete', []);
+        $this->post('/admin/projects/blog/delete', ['confirm_name' => 'blog']);
         self::assertResponseStatusCodeSame(404);
     }
 

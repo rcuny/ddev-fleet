@@ -5,7 +5,7 @@ import { expectNoBlockingViolations } from './support/axe';
 import { createDeployableProject, deployOne, uniqueLabel } from './support/instances';
 import { createPort, deletePort } from './support/ports';
 import { fillProject, openNewProject, submitCreate, submitSave } from './support/projectForm';
-import { createProjectViaUi, deleteProjectViaUi, GIT_URL, openDialog, openSection, submitAndWait, uniqueName } from './support/projects';
+import { createProjectViaUi, deleteProjectViaUi, GIT_URL, openDialog, openDeleteDialog, fillDeleteName, openSection, submitAndWait, uniqueName } from './support/projects';
 import { openReauthWindow } from './support/secrets';
 import { createTemplateViaUi, editTemplate, fillTemplate, submitNewTemplate } from './support/templates';
 
@@ -38,26 +38,30 @@ test.describe('axe sweep: projects', () => {
     await expectNoBlockingViolations(page, 'the create form');
   });
 
-  test('the edit page right after create', async ({ page }) => {
+  test('the overview right after create', async ({ page }) => {
     const name = uniqueName();
     try {
       await createProjectViaUi(page, name);
-      await expect(page.getByTestId('danger-zone')).toBeVisible();
-      await expectNoBlockingViolations(page, 'the edit page right after create');
+      await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
+      await expectNoBlockingViolations(page, 'the overview right after create');
     } finally {
       await deleteProjectViaUi(page, name);
     }
   });
 
-  test('the edit page, with the export card, the tester and the danger zone', async ({ page }) => {
+  test('the edit page and the Transfer & danger tab, with the export card, the tester and the danger zone', async ({ page }) => {
     const name = uniqueName();
     try {
       await createProjectViaUi(page, name);
       await page.goto(`/admin/projects/${name}/source`);
       await expect(page.getByTestId('issue-id-preview')).toBeVisible();
+      await expect(page.getByTestId('export-project')).toHaveCount(0);
+      await expect(page.getByTestId('danger-zone')).toHaveCount(0);
+      await expectNoBlockingViolations(page, 'the edit page');
+      await page.goto(`/admin/projects/${name}/transfer`);
       await expect(page.getByTestId('export-project')).toBeVisible();
       await expect(page.getByTestId('danger-zone')).toBeVisible();
-      await expectNoBlockingViolations(page, 'the edit page');
+      await expectNoBlockingViolations(page, 'the Transfer & danger tab');
     } finally {
       await deleteProjectViaUi(page, name);
     }
@@ -67,7 +71,7 @@ test.describe('axe sweep: projects', () => {
     const name = uniqueName();
     try {
       await createProjectViaUi(page, name);
-      const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      const dialog = await openDeleteDialog(page);
       await expect(dialog).toContainText(`Delete ${name}?`);
       await expectNoBlockingViolations(page, 'the delete dialog');
     } finally {
@@ -97,10 +101,11 @@ test.describe('axe sweep: projects', () => {
       instance = await deployOne(page, name, uniqueLabel());
 
       await page.goto(`/admin/projects/${name}/source`);
-      const dialog = await openDialog(page, page.getByRole('button', { name: 'Delete this project' }));
+      const dialog = await openDeleteDialog(page);
+      await fillDeleteName(dialog);
       await submitAndWait(page, dialog.getByRole('button', { name: 'Delete project' }));
       await expect(page.getByTestId('flashes')).toContainText('The project was not deleted.');
-      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/source$`));
+      await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}/transfer$`));
       await expectNoBlockingViolations(page, 'the refused delete');
 
       // Destroy the instance so the project can be removed.
@@ -466,7 +471,7 @@ async function sealedExport(page: Page, project: string, secret: string, value: 
   try {
     await createProjectViaUi(page, project);
     await addProjectSecret(page, project, secret, value);
-    await page.goto(`/admin/projects/${project}/source`);
+    await page.goto(`/admin/projects/${project}/transfer`);
     await openReauthWindow(page);
     await page.getByTestId('export-passphrase').fill(passphrase);
     const [download] = await Promise.all([page.waitForEvent('download'), page.getByTestId('export-download').click()]);

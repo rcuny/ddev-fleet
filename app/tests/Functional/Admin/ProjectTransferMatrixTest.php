@@ -537,7 +537,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
     {
         $this->createProject('pwe');
 
-        $crawler = $this->open('/admin/projects/pwe/source');
+        $crawler = $this->open('/admin/projects/pwe/transfer');
 
         $field = $crawler->filter('[data-testid=export-passphrase]');
         self::assertSame('password', $field->attr('type'));
@@ -599,7 +599,7 @@ final class ProjectTransferMatrixTest extends AdminTestCase
 
         $this->post('/admin/projects/pwr/export', ['passphrase' => $passphrase]);
 
-        self::assertResponseRedirects('/admin/projects/pwr/source', 303);
+        self::assertResponseRedirects('/admin/projects/pwr/transfer', 303);
         self::assertNull($this->client->getResponse()->headers->get('Content-Disposition'));
         $crawler = $this->client->followRedirect();
         self::assertStringContainsString($message, $crawler->filter('[data-testid=flashes]')->text());
