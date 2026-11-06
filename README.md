@@ -8,7 +8,7 @@ Type: documentation
 # ddev-fleet
 
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
-[![systemd security: weekly report](https://img.shields.io/badge/systemd%20security-weekly%20report-blue)](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md)
+[![systemd security: report](https://img.shields.io/badge/systemd%20security-report-blue)](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md)
 
 A fleet manager for running many independent DDEV-based projects (mainly Drupal, not
 exclusively) in parallel on one bare-metal host, with minimal human interaction: it
@@ -118,7 +118,7 @@ executed. The merge gate is `composer run gates` in `app/`, plus the Playwright 
 | [`docs/RELEASING.md`](docs/RELEASING.md) | Versioning, CHANGELOG conventions, release and hotfix procedure (1.x releases from `main`, 1.x and 0.x hotfixes) |
 | [`docs/README-ci.md`](docs/README-ci.md) | Bitbucket Pipelines, the tag guard, the systemd security check |
 | [`docs/v0/`](docs/v0/) | The 0.x (Python) installation, operations, CLI, configuration and feature documentation |
-| [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md) | The weekly systemd security report |
+| [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md) | The offline systemd security report of the shipped units |
 | [`CHANGELOG.md`](CHANGELOG.md) | Release history |
 
 Licence: [MIT](LICENSE).

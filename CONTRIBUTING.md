@@ -70,7 +70,7 @@ request with a red suite. Suites and how to run them: [`tests/README-tests.md`](
 - **Bitbucket Pipelines is the canonical, and only, CI** (`bitbucket-pipelines.yml`): the PHP gates
   and the Playwright suite on every pull request, on `develop`, on `feature/**` and `release/**`
   pushes and on `v*` tags, plus the Python infra tests and a non-blocking ansible-lint/yamllint
-  step. If your change makes a unit's `systemd-analyze security` score worse the pipeline fails;
+  step. If your change makes the `systemd-analyze security` score of a unit the installer ships (`install/etc`, `install/harden/etc`) worse, the check fails;
   an intended change means re-recording the baseline ([`docs/README-ci.md`](docs/README-ci.md)).
   There is no GitHub Actions workflow.
 - **GitHub is a read-only mirror**, published by the pipeline: `develop` after each green push,

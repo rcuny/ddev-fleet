@@ -23,7 +23,6 @@ same release as the servers; Python steps use `python:*-trixie` images.
 | Tag `v*` | **gates** and **infra tests**, then **publish to the mirror** through `ci/tag-guard.sh` |
 | Custom `renovate` | Renovate (daily schedule): dependency-update PRs against `develop` |
 | Custom `renovate-merge` | merges one approved, green Renovate PR, then runs Renovate (`docs/README-renovate.md`) |
-| Custom `systemd-security-live` | the live systemd security check, the published report and the Jira alert (weekly schedule) |
 
 - **Gates** (`Gates (php-cs-fixer, phpstan, lint, phpunit, Playwright)`): installs PHP 8.4
   and Composer from Debian, Node 22 from NodeSource (`@axe-core/playwright` needs Node
@@ -37,7 +36,7 @@ same release as the servers; Python steps use `python:*-trixie` images.
   `FLEET_HOME`). A missing browser fails the step. Artifacts: the Playwright report and traces.
 - **Infra tests** (`python:3.11-trixie` with `systemd`): `pip install -r
   ci/requirements-dev.txt`, `FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest`
-  (Ansible role templates, systemd sandbox scoring, the Renovate merge helper), then the
+  (Ansible role templates, the systemd security tests, the Renovate merge helper), then the
   offline systemd security check below. Artifacts: `reports/**`.
 - **Ansible lint (non-blocking)** (`python:3.13-trixie`, `ci/requirements-infra.txt`):
   `ansible-lint ansible/` and `yamllint ansible/`. Findings are printed but never fail the
@@ -49,8 +48,7 @@ same release as the servers; Python steps use `python:*-trixie` images.
   collections). Bumps of the `debian` and `python` pipeline images and of the `php` platform
   constraint are disabled on purpose. See `CONTRIBUTING.md`.
 
-Alerts are Bitbucket's built-in "pipeline failed" email and, for the live check, a Jira comment
-(see "The published report and the Jira alert" below).
+Alerts are Bitbucket's built-in "pipeline failed" email.
 
 ## Tag guard (`ci/tag-guard.sh`)
 
@@ -71,39 +69,37 @@ carries the Python pipeline, so the `v0.*` branch is a documented safety net, no
 this pipeline reaches. The CI host's publish script (`publish-github.sh`) calls the same guard. `app/tests/Repo/TagGuardTest.php` runs the script against throw-away
 repositories.
 
-## The systemd security check (FLE-8)
+## The systemd security check (FLE-8, 1.x since FLE-238)
 
 `systemd-analyze security` scores a unit's sandbox from 0 (locked down) to 10
-(no sandbox). FLE-1 brought fleet, fleet-boot, fleet-reboot-notify and caddy to
-1.6-1.8. This check keeps them there: it records the scores in a committed
-baseline and fails when one goes up.
+(no sandbox). The check scores the units **the 1.x installer ships**, offline,
+and fails when a score goes up against a committed baseline. No host is
+involved and nothing needs Ansible.
 
-### Offline (every PR, `develop` push and release tag)
+### What is scored
 
-`python ci/systemd_security.py offline --out reports/offline.json` renders the
-sandboxed units from the Ansible templates exactly like
-`tests/pytest/ansible/test_systemd_sandbox.py` does (`fleet.service`, `fleet-boot.service`,
-`fleet-reboot-notify.service`, and `caddy.service` = a stand-in for the Debian
-vendor unit plus the `caddy` role's drop-in), scores them with
-`systemd-analyze security --offline=yes`, prints a table and writes the report.
-`authelia.service` is not rendered: it ships with the Debian package and the
-repo has no unit or drop-in for it, so only the live check covers it.
+`python ci/systemd_security.py offline --out reports/offline.json` runs
+`systemd-analyze security --offline=yes` on:
 
-Then `compare --env offline` checks the report against the baseline and writes
-`reports/systemd-security-offline.md` and `.json`. The `reports/**` files are
-pipeline artifacts.
+- every `install/etc/*.service` (`fleet-backup`, `fleet-boot`, `fleet-mercure`,
+  `fleet-scheduler`, `fleet-status`, `fleet-tls-check`, `fleet-tmux`,
+  `fleet-upgrade-check`, `fleet-worker@`);
+- every `install/harden/etc/*.service` (`firewall-deadman`,
+  `firewall-deadman-bootcheck`, `firewall-sync`);
+- `caddy.service`: `install/etc/caddy-sandbox.conf` layered over a stand-in for
+  the Debian package's unit.
 
-### Live (weekly)
+A new `*.service` in those directories is picked up by name and shows as NEW until
+the baseline is updated. Timers have no sandbox and are not scored. Authelia and
+php-fpm ship no sandbox drop-in, so there is nothing to score. High scores
+(for example `fleet-tmux`, whose panes are operator shells) are recorded as they
+are: the check guards against regressions, it does not demand a score.
 
-The `systemd-security-live` custom pipeline logs in to each server listed in the
-repository variable `SECURITY_PROBE_TARGETS` as the `fleet-probe` user. That
-user has no shell access, no sudo and no group memberships: every key in its
-`authorized_keys` is `restrict,command="/usr/local/bin/fleet-security-report
-..."`, so whatever the client asks for, sshd runs that one read-only script and
-returns a JSON report (the score of each watched unit with per-directive
-exposure, plus the `systemd-analyze security` overview of every service on the
-host). The pipeline compares the report with the baseline of that server (its `SECURITY_PROBE_TARGETS` name). Every target
-is checked before the pipeline fails. Logic: `ci/systemd-security-live.sh`.
+`compare` then checks the report against the baseline and writes
+`reports/systemd-security-offline.md` and `.json` (pipeline artifacts). It runs
+in Fleet CI through `ci/run-gates.sh` (gate `systemd-security`) and in the
+pipeline's infra step; `tests/pytest/repo/test_systemd_security_ci.py` also
+removes a sandbox directive from a unit and asserts the check fails.
 
 ### The baseline
 
@@ -111,214 +107,49 @@ is checked before the pipeline fails. Logic: `ci/systemd-security-live.sh`.
 
 ```json
 { "tolerance": 0.1,
-  "environments": { "offline": { "systemd": "257", "recorded": "2026-10-06",
-                                 "overview": {"fleet.service": 1.8},
-                                 "units": {"fleet.service": {"score": 1.8, "directives": {"...": 0.1}}} },
-                    "server1": { "...": "recorded from the first live run" } } }
+  "environments": { "offline": { "systemd": "257", "recorded": "2026-11-06",
+                                 "overview": {"fleet-backup.service": 1.4},
+                                 "units": {"fleet-backup.service": {"score": 1.4, "directives": {"...": 0.1}}} } } }
 ```
 
-Per environment, `compare` looks at the score of every unit in the report (the
-watched units, and for the live host every service in the overview):
+`compare` looks at the score of every unit in the report:
 
 | Status | Meaning | Fails the run |
 |---|---|---|
 | OK | within the tolerance (+/- 0.1) of the baseline | no |
 | REGRESSION | current is more than 0.1 above the baseline | **yes** |
 | IMPROVED | current is more than 0.1 below the baseline | no (the report suggests updating the baseline) |
-| NEW | not in the baseline (new unit, or no baseline recorded for the environment yet) | no |
+| NEW | not in the baseline | no |
 | GONE | in the baseline, not in the report | no |
 
-Every REGRESSION lists, next to the table, the per-directive exposure changes
-(baseline vs current, a directive that is not listed counts 0), and stderr gets
-one line per unit: `REGRESSION fleet.service (offline): 1.8 -> 2.6 (+0.8)`. The
-report also warns when the systemd major version differs from the one the
-baseline was recorded with, because scores can move with a systemd upgrade
-without any change here.
+Every REGRESSION lists the per-directive exposure changes, and stderr gets one
+line per unit: `REGRESSION fleet-backup.service (offline): 1.4 -> 2.6 (+1.2)`.
+The report also warns when the systemd major version differs from the baseline's,
+because scores can move with a systemd upgrade without any change here.
 
 ### When it fails
 
-1. Open the failed step's `reports/systemd-security-<env>.md` artifact (or the
-   log): it names the unit and the directives whose exposure went up.
-2. Offline failure: your change removed or weakened a sandbox directive (or
-   changed the unit in a way that exposes more). Fix the template; do not raise
-   the baseline to hide it. If the weakening is intended (e.g. a directive that
-   breaks the daemon), record the new baseline in the same pull request and say
-   why in the description.
-3. Live failure: the unit on the server is weaker than recorded. Look at
-   `systemctl cat <unit>` on the host: a drop-in that stopped applying, the
-   sandbox toggle (`fleet_systemd_sandbox_enabled: false`) or a package upgrade
-   that changed a vendor unit. Fix the host, or, for an accepted change,
-   re-record the baseline.
+Your change removed or weakened a sandbox directive, or changed a unit so it
+exposes more. Read the unit and directives named in
+`reports/systemd-security-offline.md`, fix the unit, do not raise the baseline to
+hide it. If the weakening is intended (a directive that breaks the daemon),
+record the new baseline in the same pull request and say why in the description.
 
-### Updating the baseline
+### Updating the baseline and the report
 
-Always on a feature branch and in a pull request, so the change is reviewed.
-
-- **offline**: run in a Debian 13 / systemd 257 environment (the pipeline image,
-  or a container with `apt-get install systemd`):
-
-  ```bash
-  python ci/systemd_security.py offline --out reports/offline.json
-  python ci/systemd_security.py update-baseline --env offline --current reports/offline.json
-  ```
-
-  or download `reports/offline.json` from the pipeline's artifacts and run the
-  second command on it. Commit `ci/systemd-security-baseline.json`.
-- **live (one environment per server)**: download `reports/<env>.json` from the artifacts of the
-  scheduled run (or of a manual run of the custom pipeline), then
-  `python ci/systemd_security.py update-baseline --env <env> --current <env>.json`
-  and commit. The first run, before any baseline of that server (its `SECURITY_PROBE_TARGETS` name) exists, reports every
-  unit as NEW and passes; record the baseline from that run.
-
-`update-baseline` replaces only the named environment and keeps the others and
-the tolerance. `compare --tolerance X` overrides the tolerance for a single run.
-
-## The published report and the Jira alert (FLE-16)
-
-After checking the hosts, `ci/systemd-security-live.sh` also scores the shipped
-unit files offline (informational only: the gates enforce that baseline) and
-builds the page [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md)
-with `python ci/systemd_security.py publish-report --hosts "server1 ..."`. The page
-has the explanation of the score, one status line per host (`OK`, `N
-regression(s)` or `could not be fetched`), the product's units first (fleet,
-fleet-boot, fleet-reboot-notify, caddy, authelia), the full host overview in a
-`<details>` block and the offline scores. The output is sorted, so the weekly
-diff is the date plus whatever moved. It also runs locally, without any
-Bitbucket variable. The file is called `SYSTEMD-SECURITY-REPORT.md`, not
-`SECURITY.md`, which GitHub reserves for the vulnerability-disclosure policy.
-The README links to the absolute `develop` URL: GitHub opens on `main`, which
-only moves on releases.
-
-### When it is committed
-
-`ci/systemd_security.py should-publish` says yes when `BITBUCKET_BRANCH` is
-`develop`, or when the pipeline variable `PUBLISH_REPORT=1` is set. Any other run
-(for example an acceptance check on a throwaway branch) builds the page as an
-artifact (`reports/SYSTEMD-SECURITY-REPORT.md`) and commits nothing.
-
-- The commit is `chore(security): systemd security report <YYYY-MM-DD>` by
-  `ddev-fleet security check <security-check@noreply.example.com>` (override the address with the repository variable `SECURITY_CHECK_GIT_EMAIL`), and only when
-  the file changed. There is no `[skip ci]`: the `develop` pipeline is what
-  mirrors the commit to GitHub. That cannot loop, because the `develop` push
-  pipeline does not run the live check (pinned by `app/tests/Repo/PipelineConfigTest.php`).
-- It is committed **even when a host regressed**; the step then still fails. A
-  host that cannot be fetched is listed as such and the other hosts are
-  published.
-- The push goes back to `origin` (Bitbucket's default clone origin) as
-  `HEAD:refs/heads/<branch>`. If it is rejected (the branch moved during the
-  run) the script fetches, rebases the one report commit onto the branch and
-  pushes once more. It never forces. A publish failure fails the step, but the
-  Jira alert is still sent.
-- **Branch restrictions on `develop` must allow the pipeline's push** (for
-  example "Write access" for Bitbucket Pipelines, or no "merge via pull request
-  only"). If they do not, the push fails and the step reports it; decide the
-  exception rather than loosening the rule silently.
-
-To test on a feature branch, push it and run the custom pipeline with the
-switch, either from the CLI:
+On a feature branch, in a Debian 13 / systemd 257 environment (the CI image, or a
+container with `apt-get install systemd`), with `umask 022`:
 
 ```bash
-bitbucket run systemd-security-live --branch=<branch> --var PUBLISH_REPORT=1
+python ci/systemd_security.py offline --out reports/offline.json
+python ci/systemd_security.py update-baseline --current reports/offline.json
+python ci/systemd_security.py compare --current reports/offline.json --report-json reports/systemd-security-offline.json
+python ci/systemd_security.py report --compare reports/systemd-security-offline.json
 ```
 
-or in Bitbucket's UI: Pipelines > Run pipeline > pick the branch > Custom:
-`systemd-security-live`, add the variable `PUBLISH_REPORT` with the value `1`.
-The report is committed to that branch.
-
-### The Jira alert
-
-When a host regressed or could not be fetched (on any branch, so a throwaway
-branch can prove it), `ci/systemd_security.py jira-alert` posts one comment on
-`JIRA_ALERT_ISSUE`. It starts with a real @mention (an Atlassian Document Format
-`mention` node: plain `@email` text notifies nobody), then names each affected
-host with its regressed units (baseline -> current, delta) and the directives
-that changed, the branch, and links to the pipeline run and the committed
-report. Repository variables (Repository settings > Pipelines > Repository
-variables); if any of the first five is unset or empty the script prints `Jira
-alert not configured, skipping` and carries on, so forks stay inert:
-
-| Variable | Value |
-|---|---|
-| `JIRA_ALERT_SITE` | the Jira Cloud site name, `your-site` for `your-site.atlassian.net` |
-| `JIRA_ALERT_EMAIL` | the e-mail of the Jira account that **posts** the comment |
-| `JIRA_ALERT_TOKEN` | **secured**; that account's API token |
-| `JIRA_ALERT_ISSUE` | the issue to comment on, e.g. `FLE-17` |
-| `JIRA_ALERT_MENTION` | the Atlassian account id of the person to mention |
-| `JIRA_ALERT_CLOUD_ID` | optional; the site's cloud id (see below) |
-
-- **Use a different account to post.** Jira does not notify anyone of their own
-  actions: if the token belonged to the mentioned person, the mention would send
-  no e-mail. Post with a bot account and mention the maintainer.
-- **Scoped token.** A scoped API token (only the classic scope
-  `write:jira-work` is needed) is not accepted by `<site>.atlassian.net`: it goes
-  through the gateway `https://api.atlassian.com/ex/jira/<cloudId>/rest/api/3/...`.
-  Set `JIRA_ALERT_CLOUD_ID` and the script uses that URL; unset, it uses
-  `https://<site>.atlassian.net/rest/api/3/...` (an unscoped token). Basic
-  authentication (e-mail and token) is the same either way. Symptom of a scoped
-  token without `JIRA_ALERT_CLOUD_ID`: `WARNING: Jira alert failed: HTTPError:
-  HTTP Error 404: Not Found` (seen in pipeline #61; the same token posted through
-  the gateway in #62).
-- **Another ticket.** Change `JIRA_ALERT_ISSUE`; nothing else refers to FLE-17.
-- A failed post (HTTP error, network error, timeout) prints `WARNING: Jira alert
-  failed: ...` on stderr and never changes the step's result: that stays the
-  regression result. The token is never printed.
-
-## Setting up the live check
-
-No credential is stored in the repository.
-
-1. **Key.** Use the repository SSH key (Repository settings > Pipelines > SSH
-   keys) that already exists for the GitHub mirror, or generate one there. Put
-   its public half in the server's `/etc/ddev-fleet/local-vars.yml`:
-
-   ```yaml
-   fleet_security_probe_authorized_keys:
-     - "ssh-ed25519 AAAA... bitbucket-pipelines"
-   ```
-
-   The role wraps it in `restrict,command=...`: the key can only print the
-   report, even though the same private key is also the mirror's deploy key.
-2. **Provision the probe** on the server. Never the full `site.yml` (see
-   `CLAUDE.md`); use the scoped playbook, which sits beside `site.yml` and loads
-   `local-vars.yml` itself:
-
-   ```bash
-   cd /opt/ddev-fleet/ansible
-   sudo ansible-playbook security-probe.yml --check --diff   # preview
-   sudo ansible-playbook security-probe.yml
-   ```
-
-   It creates `fleet-probe`, installs `/usr/local/bin/fleet-security-report`
-   and the forced-command `authorized_keys`, and finishes with a smoke test that
-   runs the report as `fleet-probe` (this proves a non-root user can read the
-   scores). When an `AllowUsers` list is already in effect (the
-   `security_hardening` role writes one), it adds `fleet-probe` to it with
-   `/etc/ssh/sshd_config.d/53fleet-security-probe.conf`: sshd accumulates
-   `AllowUsers` lines. The role never creates the first `AllowUsers` line, which
-   would lock everyone else out, and checks the effective `sshd -T` result
-   afterwards. Emptying `fleet_security_probe_authorized_keys` and re-running
-   the playbook removes the user, the key, the script and the snippet. The role
-   is also in `site.yml` (after `security_hardening`) and does nothing there
-   without keys.
-3. **Known hosts.** Repository settings > Pipelines > SSH keys > Known hosts:
-   add the server (e.g. `fleet.example.com`) and fetch its fingerprint. The check
-   uses `StrictHostKeyChecking=yes`, so an unknown host fails.
-4. **Repository variable** (Repository settings > Pipelines > Repository
-   variables): `SECURITY_PROBE_TARGETS`, space-separated `name=user@host`
-   entries, e.g. `server1=fleet-probe@fleet.example.com`. The name selects the
-   baseline environment. Unset or empty: the pipeline skips and succeeds.
-5. **Schedule** (Pipelines > Schedules): branch `develop`, custom pipeline
-   `systemd-security-live`, weekly.
-6. **Jira alert** (optional): the `JIRA_ALERT_*` variables in "The published
-   report and the Jira alert" above.
-
-Try it first with a manual run of the custom pipeline (Run pipeline > Custom:
-`systemd-security-live`). Test by hand, from a machine holding the key:
-`ssh -i key fleet-probe@fleet.example.com anything | python3 -m json.tool | head`.
-
-Other servers: add the key and run the playbook there too, then add
-`name=fleet-probe@host` to the variable. For a server other people use, get their
-explicit OK before touching it.
+Commit `ci/systemd-security-baseline.json` and `SYSTEMD-SECURITY-REPORT.md`
+(the page lists scores only and names no host). `update-baseline` keeps the
+tolerance; `compare --tolerance X` overrides it for a single run.
 
 ## One gates script (`ci/run-gates.sh`, FLE-120)
 
