@@ -99,6 +99,10 @@ services:
         arguments:
             $home: '%env(default::FLEET_USER_HOME)%'
 
+    App\Command\Docs\DocsCliCommand:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
+
     App\Fleet\Jobs\ConcurrentJobRunner:
         arguments:
             $projectDir: '%kernel.project_dir%'

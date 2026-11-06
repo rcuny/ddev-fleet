@@ -1,124 +1,105 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-19
+Last updated: 2026-11-06
 Type: documentation
 ---
 
-# ddev-fleet
+# Fleet
 
 [![Licence: MIT](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
-[![systemd security: report](https://img.shields.io/badge/systemd%20security-report-blue)](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md)
 
-A fleet manager for running many independent DDEV-based projects (mainly Drupal, not
-exclusively) in parallel on one bare-metal host, with minimal human interaction: it
-clones, configures, starts and tears down instances, keeps per-project secrets and assets
-in one place, and puts every instance under one wildcard domain with TLS and a login.
+**Run many DDEV projects on one server, with almost no human work.**
 
-## Status: two lines (since v1.1.0, `main` is 1.x)
+## The problem
 
-| Line | Branch | State |
+You have several projects, each with many branches, tickets and test runs. Every one of them deserves its own live site: a checkout, a database, a TLS certificate, a login, seed data. Doing that by hand means cloning, editing `.env` files, waiting for certificates and, later, remembering to clean up. So most teams share one staging site and queue up for it.
+
+## What Fleet does
+
+Fleet is a self-hosted manager for one Linux host. Give it a git repository and a template, and it clones, configures, starts and removes DDEV instances for you, each at `https://<project>--<branch>.fleet.example.com` behind a login and seeded with your database dump and settings. You create instances from the browser or the `fleet` command, or let a Jira ticket, a pushed branch or a schedule do it. Each instance also gets a terminal window where a coding agent such as Claude Code can work on the ticket.
+
+## Who it is for
+
+Agencies and teams with many Drupal/DDEV projects, teams dispatching coding agents on tickets, and people running demo copies for clients.
+
+## What you can do
+
+| Scenario | How it happens |
+|---|---|
+| A review environment per Jira ticket | The ticket moves to a status, a webhook fires, Fleet deploys `shop--shop-123`. |
+| A CI instance per pushed branch | A Bitbucket push deploys an instance that runs your tests. |
+| Demo copies for a client, fresh every night | A cron schedule redeploys `demo--main` at 03:00. |
+| An agent per ticket | The instance opens a terminal where Claude Code works the ticket. |
+
+## What you get
+
+| Feature | In one line |
+|---|---|
+| One-command install | Debian 13 to working HTTPS in about five minutes. |
+| Projects and templates | Describe a repository once, deploy many instances. |
+| Jobs with live logs | Every action is queued, watchable, retryable. |
+| Assets and secrets | Seed dumps and `.env` files; encrypted `[[token]]` secrets. |
+| Users and access | Admins, members, site-only clients; enforced at the proxy. |
+| Automation | Jira and Bitbucket webhooks, cron schedules. |
+| Capacity | CPU allotments and slots protect the host. |
+| Operations | Backups, export, `fleet upgrade` with rollback, hardening. |
+
+## By hand or with Fleet
+
+| Task | By hand | With Fleet |
 |---|---|---|
-| **0.x** (Python: FastAPI daemon, `fleet` CLI, `fleet.yml`) | `legacy` (tags `v0.1.0` to `v0.20.2`, later 0.20.x) | Frozen: hotfixes only. Install and operate it from the `legacy` branch or a `v0.*` tag; its documentation is kept in [`docs/v0/`](docs/v0/). |
-| **1.x** (Symfony 8, PHP 8.4, SQLite) | `main` (releases, tags `v1.*`); `develop` is the integration branch | The current line. It ships the foundation (app skeleton, command seam, the design system and app shell, tests and CI), the **installer and setup wizard** (one command turns a fresh Debian 13 host into a fleet with HTTPS, a sign-in portal and a setup wizard) and **projects and templates** (what the fleet can deploy, in the browser or with `fleet project\|template\|port`, see [`docs/projects-and-templates.md`](docs/projects-and-templates.md)) and **secrets** (credentials entered once and stored encrypted, delivered through `[[token]]` placeholders, see [`docs/secrets.md`](docs/secrets.md)). Later milestones bring back the rest of 0.x. |
+| Clone, configure | Many commands | One deploy |
+| TLS and login | Certificates and proxy rules | Automatic |
+| Seed data | Copy dump, edit `.env` | Seeded from assets |
+| Cleanup | Easy to forget | One destroy, or on ticket close |
+| Who clicks | You | Nobody |
 
-What each milestone brings back from 0.x (projects, instances and
-jobs, secrets, assets, networking, webhooks, schedules, users and access) is listed in the
-[documentation index](docs/README.md).
+## Quick start
 
-## Architecture (1.x)
-
-The fleet manager runs **natively on the host**, never inside DDEV or Docker, so it can keep
-managing, and recovering, other DDEV projects when one of them or Docker is unhealthy.
-
-```
-Bare-metal / VPS host
-├── Caddy (systemd) — public TLS, the only Internet-facing process
-│   ├── fleet.example.com      → login (Authelia) → PHP-FPM, the Symfony app
-│   └── *.fleet.example.com    → login per instance → ddev-router (loopback) → instance
-├── Authelia (systemd) — the login portal; asserts Remote-User / Remote-Groups
-├── PHP-FPM — the Symfony app: web UI (Twig, Turbo, Stimulus) and /health
-├── Messenger workers (systemd) — run ddev / git / docker for queued jobs
-├── Mercure hub — pushes live job output to the browser
-├── SQLite under FLEET_HOME — fleet.sqlite (domain data), queue.sqlite (job queue)
-└── Docker (DDEV)
-    ├── ddev-router (shared Traefik, loopback only)
-    └── demo--main, blog--feature-x, … one DDEV project per instance
-```
-
-The web request never runs `ddev`, `git` or `docker`: it stores a job, a worker picks it up
-through the `CommandRunner` seam and the browser follows the log live (Mercure). Of this
-picture, the app, the seams, header authentication, the SQLite wiring and the shell exist
-today, and so do Caddy, Authelia, the Mercure hub, the job worker and the instance jobs (deploy, redeploy, start,
-stop, destroy) with their pages and `fleet instance:*` / `fleet job:*` commands.
-
-## Install on a server (1.x)
-
-On a fresh **Debian 13** host, as root, with DNS records for the domain and for `auth.<domain>` already
-pointing at it and ports 80 and 443 open:
+On a fresh Debian 13 host, as root, with DNS for `fleet.example.com`, `auth.` and `*.` pointing at it and ports 80 and 443 open:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/install.sh \
   | sudo bash -s -- --domain=fleet.example.com --acme-email=you@example.com
 ```
 
-It installs PHP 8.4, Docker, DDEV, Caddy, Authelia and a Mercure hub, creates the `fleet` user and `/srv/fleet`,
-starts the services and prints a setup URL (a credential for 24 hours) for the browser wizard (administrator, certificates, SSH
-keys, optional Claude token). The default `--ref` is `main`; pin a release with `--ref=vX.Y.Z`. Re-running the command upgrades. Flags (`--ref`, `--repo-url`,
-`--skip-dns-check`, `--dry-run`), recovery (`fleet setup:reset`, `fleet user:reset-password`), the security
-model and uninstalling: [`docs/installation.md`](docs/installation.md).
-
-## Quickstart for contributors
-
-You need PHP 8.4 with the usual extensions (including `pdo_sqlite` and `sodium`), Composer 2,
-and Node 22 for the browser tests. No database server and no Node build for the app.
+The installer prints a setup URL for the browser wizard. Then:
 
 ```bash
-cd app
-composer install
-php bin/console importmap:install
-php bin/console tailwind:build
-php bin/console doctrine:migrations:migrate --no-interaction --allow-no-migration
-php -S 127.0.0.1:8000 -t public          # open http://127.0.0.1:8000
+fleet project:create shop --git=git@git.example.com:acme/shop.git
+fleet template:create shop web --post-deploy='composer install'
+fleet project:update shop --default-template=web
+fleet instance:deploy shop --branch=main
 ```
 
-In `dev` there is no proxy, so a stand-in user signs you in (admin by default; switch role
-from the app shell or at `/_dev/stand-in/member`), and host commands are recorded rather than
-executed. The merge gate is `composer run gates` in `app/`, plus the Playwright suite in
-`tests/playwright/`. Details, environment variables and troubleshooting:
-[`docs/development.md`](docs/development.md); how to contribute: [`CONTRIBUTING.md`](CONTRIBUTING.md).
+The deploy streams its log and prints `https://shop--main.fleet.example.com`; sign in and the site is there. Walk-through with assets, secrets and access: [your first project](docs/guides/first-project.md).
 
-## Repository layout
+## How it fits together
 
-- `app/` — the Symfony project: `src/` (namespaces in [`CLAUDE.md`](CLAUDE.md)), `templates/`,
-  `assets/`, `config/`, `migrations/`, `tests/` (PHPUnit: `Unit`, `Integration`, `Functional`, `Repo`)
-- `tests/playwright/` — browser end-to-end tests (TypeScript), at 1280 px and 390 px;
-  `tests/pytest/` — Python tests for the CI tooling and the Ansible roles; see
-  [`tests/README-tests.md`](tests/README-tests.md)
-- `ci/`, `bitbucket-pipelines.yml`, `renovate-config.json` — CI, the release-tag guard, dependency updates
-- `install/` — the 1.x installer (`install.sh`, `run.sh`, `steps/`, the root helper `libexec/apply`, `uninstall.sh`)
-- `ansible/` — provisioning for the 0.x host layout, kept as reference and not used by the 1.x installer
-  ([`ansible/LEGACY-0x.md`](ansible/LEGACY-0x.md))
-- `docs/` — documentation, indexed in [`docs/README.md`](docs/README.md); `docs/v0/` is the 0.x reference
-- `demo/` — a minimal DDEV project the 0.x installer seeds as the `demo` project
+Caddy is the only Internet-facing process; Authelia handles sign-in. The Fleet app queues jobs, a worker runs `ddev` and `git`, one DDEV project per instance. Fleet runs natively, not in Docker, so it can recover unhealthy instances. See [concepts](docs/concepts.md).
 
 ## Documentation
 
-| Doc | Covers |
-|---|---|
-| [`docs/README.md`](docs/README.md) | Index of every document with its status |
-| [`docs/installation.md`](docs/installation.md) | Installing 1.x: prerequisites, the installer and its flags, the setup wizard, what is installed where, recovery, upgrades, security model, uninstalling |
-| [`docs/moving-projects.md`](docs/moving-projects.md) | Moving a project between hosts: export and import with a preview, sealed secrets, assets over rsync, `fleet backup:verify` |
-| [`docs/assets.md`](docs/assets.md) | Assets: the project Assets tab, chunked browser upload and its cap, copying large files over SSH, path rules, the `fleet asset:*` commands |
-| [`docs/secrets.md`](docs/secrets.md) | Secrets: fleet-wide and project secrets, `[[token]]` placeholders, reveal and the audit log, the `fleet secret:list\|set\|unset` commands, the security model |
-| [`docs/instances-and-jobs.md`](docs/instances-and-jobs.md) | Instances and jobs: deploy, redeploy, start, stop, destroy, bulk work, the live log, the `fleet instance\|job` commands, exit codes, troubleshooting |
-| [`docs/projects-and-templates.md`](docs/projects-and-templates.md) | Projects and templates: the pages, every field and limit, the `fleet project\|template\|port` commands, exit codes and JSON, differences from 0.x |
-| [`docs/development.md`](docs/development.md) | Prerequisites, first run, environment variables, recording runner, stand-in, gates, adding a component |
-| [`CONTRIBUTING.md`](CONTRIBUTING.md) | Workflow, code style, pull requests, CI and mirror |
-| [`docs/RELEASING.md`](docs/RELEASING.md) | Versioning, CHANGELOG conventions, release and hotfix procedure (1.x releases from `main`, 1.x and 0.x hotfixes) |
-| [`docs/README-ci.md`](docs/README-ci.md) | Bitbucket Pipelines, the tag guard, the systemd security check |
-| [`docs/v0/`](docs/v0/) | The 0.x (Python) installation, operations, CLI, configuration and feature documentation |
-| [`SYSTEMD-SECURITY-REPORT.md`](https://github.com/rcuny/ddev-fleet/blob/develop/SYSTEMD-SECURITY-REPORT.md) | The offline systemd security report of the shipped units |
-| [`CHANGELOG.md`](CHANGELOG.md) | Release history |
+- [Start here: the doc map](docs/README.md)
+- [Ten concepts in one page](docs/concepts.md)
+- [Install](docs/guides/install.md) and [your first project](docs/guides/first-project.md)
+- [Automate deploys](docs/guides/automate-deploys.md)
+- [CLI reference](docs/reference/cli.md)
+- [Contributing](docs/contributing/README.md)
 
-Licence: [MIT](LICENSE).
+## Branches and releases
+
+`main` holds the releases (annotated tags `v1.*`, what the installer installs by default) and `develop` is the integration branch. The Python 0.x line of Fleet is frozen on the `legacy` git branch and is not covered here. Release history: `CHANGELOG.md`.
+
+## Repository layout
+
+| Path | Holds |
+|---|---|
+| `app/` | The Symfony project. |
+| `install/` | The installer and uninstaller. |
+| `tests/` | Playwright and CI-tool tests. |
+| `ci/`, `changelog.d/` | CI scripts, the tag guard, changelog fragments. |
+| `docs/` | This documentation. |
+
+Licence: MIT.

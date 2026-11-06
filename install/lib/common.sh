@@ -10,7 +10,7 @@
 
 : "${FLEET_DRY_RUN:=0}"
 
-# Exit codes (sysexits-style, plus 2 for DNS as documented in docs/installation.md).
+# Exit codes (sysexits-style, plus 2 for DNS as documented in docs/reference/installer.md).
 EX_DNS=2
 EX_PREFLIGHT=3
 EX_USAGE=64
@@ -264,7 +264,7 @@ Options:
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
   --harden              opt-in host hardening: key-only logins, login bans, a firewall with a dead-man's switch and more
-                        (off by default; docs/installation.md section 8). Once enabled, later runs re-apply it
+                        (off by default; docs/reference/hardening.md). Once enabled, later runs re-apply it
   --ssh-allow-user=<u>  with --harden: an account that may log in over SSH (repeatable; default: the account running sudo)
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
