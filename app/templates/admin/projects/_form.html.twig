@@ -24,7 +24,9 @@
     {{ form_row(form.issueIdRegexp) }}
     {{ form_row(form.displaySubmoduleBranch) }}
     {{ form_row(form.typesense) }}
-    {{ form_row(form.containerSsh) }}
+    {% if create %}
+        {{ form_row(form.containerSsh) }}
+    {% endif %}
 
     <twig:Separator />
 

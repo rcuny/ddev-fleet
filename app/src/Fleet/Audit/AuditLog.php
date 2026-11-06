@@ -37,6 +37,8 @@ final readonly class AuditLog
     public const string PROJECT_EXPORT = 'project.export';
     public const string PROJECT_IMPORT = 'project.import';
 
+    public const string PROJECT_CONTAINER_SSH = 'project.container-ssh';
+
     public const string PROJECT_MEMBER_ADD = 'project.member.add';
     public const string PROJECT_MEMBER_REMOVE = 'project.member.remove';
 

@@ -79,8 +79,8 @@ final class SecretPagesTest extends AdminTestCase
         self::assertCount(1, $crawler->filter('[data-testid=secrets-empty]'));
         self::assertCount(0, $crawler->filter('[data-testid=secret-row]'));
         self::assertCount(1, $crawler->filter('form[data-testid=secret-form] input[name=name]'));
-        self::assertCount(1, $crawler->filter('form[data-testid=secret-form] textarea[name=value]'));
-        self::assertSame('', trim($crawler->filter('textarea[name=value]')->text()));
+        self::assertCount(1, $crawler->filter('form[data-testid=secret-form] input[name=value]'));
+        self::assertSame('', trim($crawler->filter('input[name=value]')->text()));
         self::assertCount(0, $crawler->filter('[data-testid=host-secrets]'));
     }
 
@@ -120,7 +120,7 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame('/admin/secrets?name=API_KEY#set-secret', $replace);
         $crawler = $this->open('/admin/secrets?name=API_KEY');
         self::assertSame('API_KEY', $crawler->filter('input[name=name]')->attr('value'));
-        self::assertSame('', trim($crawler->filter('textarea[name=value]')->text()));
+        self::assertSame('', trim($crawler->filter('input[name=value]')->text()));
 
         self::assertSame(['secret.put', 'secret.put'], array_column($this->audit(), 1));
     }
@@ -226,9 +226,9 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame('Enter a name.', trim($crawler->filter('[data-testid=error-name]')->text()));
         self::assertSame('Enter a value.', trim($crawler->filter('[data-testid=error-value]')->text()));
         self::assertSame('true', $crawler->filter('input[name=name]')->attr('aria-invalid'));
-        self::assertSame('true', $crawler->filter('textarea[name=value]')->attr('aria-invalid'));
+        self::assertSame('true', $crawler->filter('input[name=value]')->attr('aria-invalid'));
         self::assertSame('secret-name-error', $crawler->filter('input[name=name]')->attr('aria-describedby'));
-        self::assertSame('secret-value-error', $crawler->filter('textarea[name=value]')->attr('aria-describedby'));
+        self::assertSame('secret-value-error', $crawler->filter('input[name=value]')->attr('aria-describedby'));
         self::assertCount(1, $crawler->filter('p#secret-name-error'));
         self::assertCount(1, $crawler->filter('p#secret-value-error'));
         self::assertSame([], $this->store()->listManaged('/admin/secrets' === $path ? null : 'blog'));
@@ -239,7 +239,7 @@ final class SecretPagesTest extends AdminTestCase
         $crawler = $this->open('/admin/secrets');
 
         self::assertNull($crawler->filter('input[name=name]')->attr('aria-invalid'));
-        self::assertNull($crawler->filter('textarea[name=value]')->attr('aria-invalid'));
+        self::assertNull($crawler->filter('input[name=value]')->attr('aria-invalid'));
         self::assertNull($crawler->filter('input[name=name]')->attr('aria-describedby'));
     }
 
@@ -266,7 +266,7 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame(self::NAME_FORMAT, trim($crawler->filter('[data-testid=error-name]')->text()));
         self::assertCount(0, $crawler->filter('[data-testid=error-value]'));
         self::assertSame($name, $crawler->filter('input[name=name]')->attr('value'));
-        self::assertSame('', trim($crawler->filter('textarea[name=value]')->text()));
+        self::assertSame('', trim($crawler->filter('input[name=value]')->text()));
         self::assertStringNotContainsString(self::VALUE, $this->body());
         self::assertSame([], $this->store()->listManaged(null));
     }
@@ -882,5 +882,57 @@ final class SecretPagesTest extends AdminTestCase
 
         self::assertCount(200, $crawler->filter('[data-testid=audit-row]'));
         self::assertStringContainsString('fleet/K204', $crawler->filter('[data-testid=audit-row]')->first()->text());
+    }
+
+    // --- Keys & secrets tab (FLE-232)
+
+    public function testTheKeysTabShowsTheRiskTheTemplateKeyNamesAndMaskedValueFields(): void
+    {
+        $this->makeProject();
+        $crawler = $this->open('/admin/projects/blog/keys');
+
+        self::assertStringContainsString('any process in the container can use the push key', $crawler->filter('[data-testid=container-ssh-risk]')->text());
+        self::assertCount(1, $crawler->filter('[data-testid=git-ssh-section]'));
+        self::assertSame('password', $crawler->filter('input[name=value]')->attr('type'));
+        self::assertCount(1, $crawler->filter('textarea[name=value_multiline]'));
+        self::assertCount(0, $crawler->filter('textarea[name=value]'));
+        self::assertCount(1, $crawler->filter('[data-testid=container-ssh-dialog] form[action$="/keys/ssh"]'));
+    }
+
+    public function testChangingGitOverSshIsAuditedAndARepeatIsNot(): void
+    {
+        $this->makeProject();
+        $this->open('/admin/projects/blog/keys');
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1']);
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '1']);
+
+        $actions = array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1]));
+        self::assertCount(1, $actions);
+        self::assertSame('blog/on', $actions[0][2]);
+        self::assertStringContainsString('is <strong>on</strong>', $this->open('/admin/projects/blog/keys')->filter('[data-testid=container-ssh-state]')->html());
+
+        $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '0']);
+        self::assertSame('blog/off', array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1]))[0][2]);
+    }
+
+    public function testGitOverSshNeedsAValidCsrfToken(): void
+    {
+        $this->makeProject();
+        $this->post('/admin/projects/blog/keys/ssh', ['_token' => 'wrong', 'container_ssh' => '1']);
+
+        self::assertResponseStatusCodeSame(403);
+    }
+
+    public function testAMultilineValueFromTheTextareaIsStoredAndNeverRenderedBack(): void
+    {
+        $this->makeProject();
+        $this->post('/admin/projects/blog/secrets', ['name' => 'TLS_KEY', 'value' => '', 'value_multiline' => "line-one\nline-two-".'zz9']);
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+
+        $this->open('/admin/projects/blog/keys');
+        $html = (string) $this->client->getResponse()->getContent();
+        self::assertStringContainsString('TLS_KEY', $html);
+        self::assertStringNotContainsString('line-two-zz9', $html);
     }
 }

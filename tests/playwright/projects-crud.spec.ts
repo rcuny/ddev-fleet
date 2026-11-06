@@ -58,12 +58,17 @@ test.describe('create', () => {
       await submitCreate(page);
       await expect(page.getByTestId('flashes')).toContainText('Project created.');
 
+      // After creation the setting lives on the Keys & secrets tab and changes only through its confirmation dialog.
+      await page.goto(`/admin/projects/${name}/keys`);
+      await expect(page.getByTestId('container-ssh-state')).toContainText('is on');
       await page.goto(`/admin/projects/${name}/source`);
-      await expect(box).toBeChecked();
-      await page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' }).click();
-      await submitSave(page);
-      await page.goto(`/admin/projects/${name}/source`);
-      await expect(box).not.toBeChecked();
+      await expect(box).toHaveCount(0);
+      await page.goto(`/admin/projects/${name}/keys`);
+      const dialog = await openDialog(page, page.getByTestId('container-ssh-change'));
+      await expect(dialog).toContainText('Turn off Git over SSH?');
+      await submitAndWait(page, dialog.getByTestId('container-ssh-confirm-button'));
+      await expect(page.getByTestId('flashes')).toContainText('Git over SSH in the container is now off.');
+      await expect(page.getByTestId('container-ssh-state')).toContainText('is off');
     } finally {
       await deleteProjectViaUi(page, name);
     }

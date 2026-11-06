@@ -38,11 +38,21 @@ export function secretRow(page: Page, name: string): Locator {
   return page.getByTestId('secret-row').filter({ has: page.getByTestId('secret-name').getByText(name, { exact: true }) });
 }
 
+/** Types the value: a single line into the masked field, several lines into the Multi-line textarea (opened first). */
+export async function fillSecretValue(form: Locator, value: string): Promise<void> {
+  if (value.includes('\n')) {
+    await form.getByTestId('secret-multiline').locator('summary').click();
+    await form.getByLabel('Multi-line value').fill(value);
+    return;
+  }
+  await form.getByLabel('Value', { exact: true }).fill(value);
+}
+
 /** Fills the add/replace form and presses Save, without waiting for the answer. */
 export async function submitSecret(page: Page, name: string, value: string): Promise<void> {
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await fillSecretValue(form, value);
   await form.getByTestId('secret-save').click();
 }
 
@@ -50,7 +60,7 @@ export async function submitSecret(page: Page, name: string, value: string): Pro
 export async function saveSecret(page: Page, name: string, value: string): Promise<void> {
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await fillSecretValue(form, value);
   const [response] = await Promise.all([
     page.waitForResponse((r) => r.request().method() === 'POST' && new URL(r.url()).pathname.endsWith('/secrets')),
     form.getByTestId('secret-save').click(),

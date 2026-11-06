@@ -445,7 +445,7 @@ async function addProjectSecret(page: Page, project: string, name: string, value
   await page.goto(`/admin/projects/${project}/keys`);
   const form = page.getByTestId('secret-form');
   await form.getByLabel('Name').fill(name);
-  await form.getByLabel('Value').fill(value);
+  await form.getByLabel('Value', { exact: true }).fill(value);
   await submitAndWait(page, form.getByTestId('secret-save'));
   await expect(page.getByTestId('flashes')).toContainText(`Secret "${name}" saved.`);
 }

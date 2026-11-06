@@ -118,12 +118,16 @@ final class ProjectType extends AbstractType
                 'label' => 'Run a Typesense search server for each instance',
                 'required' => false,
             ])
-            ->add('containerSsh', CheckboxType::class, [
+        ;
+
+        if ($create) {
+            // Editing a project changes this on its Keys & secrets tab (confirmed and audited).
+            $builder->add('containerSsh', CheckboxType::class, [
                 'label' => 'Git over SSH inside the container: a dedicated ssh-agent with the push key for each instance',
                 'required' => false,
                 'help' => 'Only for projects whose agents push from the web container. The key is usable by every process in that instance\'s container while the agent runs.',
-            ])
-        ;
+            ]);
+        }
 
         if ($create) {
             // Editing a project sets the caps on its Capacity tab (CapacityType).
