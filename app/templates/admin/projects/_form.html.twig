@@ -31,13 +31,13 @@
 
     <twig:Separator />
 
-    {#- Not moved yet: Network (hostnames, Typesense), Keys (container SSH) and Capacity get their own tabs in later tickets. -#}
+    {#- Container SSH moves to the Keys tab in a later ticket; hostnames, Typesense and the caps are create-only (Network and Capacity tabs). -#}
     <section class="grid gap-6" aria-labelledby="project-other-heading" data-testid="source-other">
         <h2 id="project-other-heading" class="text-base">Other settings</h2>
-        {{ form_row(form.additionalHostnames) }}
-        {{ form_row(form.typesense) }}
         {{ form_row(form.containerSsh) }}
         {% if create %}
+            {{ form_row(form.additionalHostnames) }}
+            {{ form_row(form.typesense) }}
             <div class="grid gap-6 md:grid-cols-2" data-testid="project-capacity-fields">
                 {{ form_row(form.cpuThreads) }}
                 {{ form_row(form.slots) }}

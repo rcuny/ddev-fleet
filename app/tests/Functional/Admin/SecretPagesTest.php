@@ -41,10 +41,11 @@ final class SecretPagesTest extends AdminTestCase
      */
     private function audit(): array
     {
-        return array_map(
+        // The re-auth entries (reauth.*) are not about secrets: tests of the secret trail leave them out.
+        return array_values(array_filter(array_map(
             static fn ($e): array => [$e->actor(), $e->action(), $e->subject()],
             new AuditEntryRepository($this->em())->latest(50),
-        );
+        ), static fn (array $e): bool => !str_starts_with($e[1], 'reauth.')));
     }
 
     private function addAssetFile(string $project, string $name, string $content): void
@@ -403,6 +404,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testAPageThatWentStaleAnswers404ToRevealAndDeleteAndASaveRecreatesTheSecret(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         $this->open('/admin/secrets');
         $this->post('/admin/secrets/API_KEY/delete', []);
@@ -423,6 +425,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheSameNameInTheFleetAndInAProjectAreTwoSecrets(): void
     {
+        $this->confirmPassword();
         $this->makeProject();
         $this->save('/admin/secrets', 'BOTH_KEY', 'fleet-value-1');
         $this->save('/admin/projects/blog/keys', 'BOTH_KEY', 'project-value-1');
@@ -455,6 +458,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheRevealThrottleAnswersTheAlertKeepsThePageUsableAndDoesNotBlockSaving(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         for ($i = 0; $i < 10; ++$i) {
             $this->post('/admin/secrets/API_KEY/reveal', []);
@@ -481,6 +485,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheRevealThrottleIsPerUser(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         for ($i = 0; $i < 10; ++$i) {
             $this->post('/admin/secrets/API_KEY/reveal', []);
@@ -490,6 +495,7 @@ final class SecretPagesTest extends AdminTestCase
         $first = $this->audit()[0][0];
 
         $this->client->getCookieJar()->set(new Cookie('fleet_stand_in_user', 'second-admin', null, '/', 'localhost', true));
+        $this->confirmPassword('second-admin');
         $crawler = $this->post('/admin/secrets/API_KEY/reveal', []);
 
         self::assertResponseStatusCodeSame(200);
@@ -515,6 +521,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testRevealShowsTheValueOnceInADialogAndIsAudited(): void
     {
+        $this->confirmPassword();
         $this->save('/admin/secrets', 'API_KEY', self::VALUE);
         $crawler = $this->client->followRedirect();
         self::assertStringNotContainsString(self::VALUE, $this->body());
@@ -546,6 +553,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testTheEleventhRevealInAMinuteIsRefusedAndAudited(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         for ($i = 0; $i < 10; ++$i) {
             $this->post('/admin/secrets/API_KEY/reveal', []);
@@ -564,6 +572,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testRevealOfAnUnknownSecretIsA404AndNotAudited(): void
     {
+        $this->confirmPassword();
         $this->post('/admin/secrets/NOPE/reveal', []);
 
         self::assertResponseStatusCodeSame(404);
@@ -594,6 +603,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testACorruptedSecretCannotBeRevealedAndSaysSo(): void
     {
+        $this->confirmPassword();
         $this->store()->putManaged(null, 'API_KEY', self::VALUE, 'admin');
         $this->em()->getConnection()->executeStatement('UPDATE secret SET ciphertext = zeroblob(40) WHERE name = ?', ['API_KEY']);
 
@@ -725,6 +735,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testProjectRevealAndDeleteWork(): void
     {
+        $this->confirmPassword();
         $this->makeProject();
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
 
@@ -741,6 +752,7 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testAProjectSecretCannotBeRevealedThroughAnotherProjectOrTheFleetRoute(): void
     {
+        $this->confirmPassword();
         $this->makeProject();
         $this->makeProject('shop');
         $this->store()->putManaged('blog', 'BLOG_KEY', self::VALUE, 'admin');
@@ -830,6 +842,8 @@ final class SecretPagesTest extends AdminTestCase
 
     public function testAuditPageListsEntriesAndFiltersByAction(): void
     {
+        $this->confirmPassword();
+        $this->forgetReauthAudit();
         $crawler = $this->open('/admin/audit');
         self::assertResponseStatusCodeSame(200);
         self::assertSame('Audit log', trim($crawler->filter('main h1')->text()));

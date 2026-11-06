@@ -15,6 +15,7 @@ use App\Fleet\Secrets\SecretOpenFailed;
 use App\Fleet\Secrets\SecretService;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
+use App\Security\Reauth\ReauthGuard;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
@@ -36,6 +37,7 @@ final class SecretController extends AbstractController
         private readonly SecretService $secrets,
         private readonly ProjectService $projects,
         private readonly CurrentActor $actor,
+        private readonly ReauthGuard $reauth,
     ) {
     }
 
@@ -155,6 +157,10 @@ final class SecretController extends AbstractController
     private function reveal(Request $request, ?Project $project, string $secret): Response
     {
         $this->requireCsrf($request);
+        if (!$this->reauth->requireRecentAuth()) {
+            // Before the throttle: a stopped attempt opens nothing and must not use up the reveal quota.
+            return $this->reauth->challenge('reveal', SecretService::subject($project?->name(), $secret), null === $project ? '/admin/secrets' : '/admin/projects/'.$project->name().'/keys');
+        }
 
         try {
             $value = $this->secrets->reveal($project?->name(), $secret, $this->actor->name());

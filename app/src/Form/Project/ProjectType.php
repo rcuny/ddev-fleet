@@ -30,6 +30,7 @@ final class ProjectType extends AbstractType
         ]);
         ProjectFields::source($builder);
         ProjectFields::other($builder);
+        ProjectFields::network($builder);
         CapacityType::addCapFields($builder, $options['allocatable']);
         $builder->add('save', SubmitType::class, ['label' => 'Create project']);
     }

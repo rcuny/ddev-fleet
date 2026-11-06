@@ -106,6 +106,16 @@ final class ProjectValidationTest extends AdminTestCase
     }
 
     /**
+     * @return string the hostnames textarea of the Network tab as the page shows it
+     */
+    private function shownHostnames(): string
+    {
+        $values = $this->open('/admin/projects/blog/network')->selectButton('Save network settings')->form()->getValues();
+
+        return (string) $values['network[additionalHostnames]'];
+    }
+
+    /**
      * @return array<string, mixed> the values of the form as the page now shows them
      */
     private function shown(Crawler $crawler, string $button = 'Save'): array
@@ -346,20 +356,21 @@ final class ProjectValidationTest extends AdminTestCase
     {
         $fifty = implode("\n", array_map(static fn (int $i): string => 'h'.$i, range(0, 49)));
 
-        $crawler = $this->createAndFollow(['additionalHostnames' => $fifty]);
+        $this->createAndFollow(['additionalHostnames' => $fifty]);
 
-        self::assertSame($fifty, str_replace("\r\n", "\n", $this->shown($crawler)['project[additionalHostnames]']));
+        self::assertSame($fifty, str_replace("\r\n", "\n", $this->shownHostnames()));
         self::assertCount(50, ($this->stored('blog') ?? self::fail())->additionalHostnames());
     }
 
     public function testBlankLinesAndPaddingAreDroppedAndLabelsKeepTheirOrder(): void
     {
-        $crawler = $this->createAndFollow(['additionalHostnames' => "\n  www  \n\n\tshop\n"]);
+        $this->createAndFollow(['additionalHostnames' => "\n  www  \n\n\tshop\n"]);
         self::assertSame(['www', 'shop'], ($this->stored('blog') ?? self::fail())->additionalHostnames());
-        self::assertSame("www\nshop", str_replace("\r\n", "\n", $this->shown($crawler)['project[additionalHostnames]']));
+        self::assertSame("www\nshop", str_replace("\r\n", "\n", $this->shownHostnames()));
 
-        $this->save($crawler, ['additionalHostnames' => '']);
-        self::assertResponseRedirects('/admin/projects/blog/source', 303);
+        // Removing names needs no confirmation.
+        $this->submit($this->open('/admin/projects/blog/network'), 'Save network settings', ['network[additionalHostnames]' => '']);
+        self::assertResponseRedirects('/admin/projects/blog/network', 303);
         self::assertSame([], ($this->stored('blog') ?? self::fail())->additionalHostnames());
     }
 
@@ -574,11 +585,10 @@ final class ProjectValidationTest extends AdminTestCase
 
         $shown = $this->shown($crawler);
         self::assertSame(self::GIT, $shown['project[git]']);
-        foreach (['defaultBranch', 'additionalHostnames', 'gitBotName', 'gitBotEmail', 'issueIdRegexp', 'displaySubmoduleBranch'] as $field) {
+        foreach (['defaultBranch', 'gitBotName', 'gitBotEmail', 'issueIdRegexp', 'displaySubmoduleBranch'] as $field) {
             self::assertSame('', $shown['project['.$field.']'], $field);
         }
         self::assertSame('inherit', $shown['project[gitBotMode]']);
-        self::assertArrayNotHasKey('project[typesense]', $shown, 'the Typesense box is unchecked');
         self::assertFalse(($this->stored('blog') ?? self::fail())->typesense());
     }
 
@@ -615,12 +625,11 @@ final class ProjectValidationTest extends AdminTestCase
     {
         $crawler = $this->createAndFollow(['defaultBranch' => 'main', 'additionalHostnames' => 'www']);
 
-        $crawler = $this->save($crawler, ['git' => 'http://x', 'defaultBranch' => 'dev', 'additionalHostnames' => 'bad.label']);
+        $crawler = $this->save($crawler, ['git' => 'http://x', 'defaultBranch' => 'dev']);
 
         self::assertResponseStatusCodeSame(422);
         $text = $crawler->filter(self::FORM)->text();
         self::assertStringContainsString(self::ONLY_SCHEMES, $text);
-        self::assertStringContainsString('Hostname 1:', $text);
         self::assertCount(0, $crawler->filter('[data-testid=flashes]'));
         $shown = $this->shown($crawler);
         self::assertSame('http://x', $shown['project[git]']);

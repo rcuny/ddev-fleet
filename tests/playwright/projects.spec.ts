@@ -57,8 +57,9 @@ test.describe('projects and templates', () => {
         await expect(page).toHaveURL(new RegExp(`/admin/projects/${name}$`));
         await expect(page.getByRole('heading', { level: 1, name })).toBeVisible();
         await expect(page.getByTestId('project-overview')).toBeVisible();
-        await openSection(page, 'Source');
+        await openSection(page, 'Network');
         await expect(page.getByLabel('Additional hostnames')).toHaveValue('www');
+        await openSection(page, 'Source');
       });
 
       // Edit: the default branch.
@@ -330,12 +331,12 @@ test.describe('projects and templates', () => {
       await expect(page.getByLabel('Do not set a git identity')).not.toBeChecked();
 
       // Checkbox row: same, bottom right corner.
-      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Typesense' });
+      const checkboxRow = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' });
       const checkboxBox = (await checkboxRow.boundingBox())!;
       if (isPhone()) {
         expect(checkboxBox.height).toBeGreaterThanOrEqual(43.5);
       }
-      const typesense = page.getByLabel('Run a Typesense search server for each instance');
+      const typesense = page.getByLabel(/Git over SSH inside the container/);
       await expect(typesense).not.toBeChecked();
       await checkboxRow.click({ position: { x: checkboxBox.width - 3, y: checkboxBox.height - 2 } });
       await expect(typesense).toBeChecked();

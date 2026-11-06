@@ -12,6 +12,7 @@ use App\Fleet\Export\ProjectImporter;
 use App\Fleet\Projects\NotFound;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
+use App\Security\Reauth\ReauthGuard;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\File\UploadedFile;
 use Symfony\Component\HttpFoundation\Request;
@@ -34,6 +35,7 @@ final class ProjectTransferController extends AbstractController
         private readonly ProjectExporter $exporter,
         private readonly ProjectImporter $importer,
         private readonly CurrentActor $actor,
+        private readonly ReauthGuard $reauth,
     ) {
     }
 
@@ -44,6 +46,11 @@ final class ProjectTransferController extends AbstractController
         $this->requireCsrf($request);
 
         $passphrase = self::passphrase($request);
+        // A passphrase seals the secrets into the file: that export needs a recent password check. Without one the file
+        // carries no secrets and stays open.
+        if (null !== $passphrase && !$this->reauth->requireRecentAuth()) {
+            return $this->reauth->challenge('export', $name, '/admin/projects/'.$name.'/source');
+        }
         try {
             $text = $this->exporter->export($name, $passphrase, $this->actor->name());
         } catch (NotFound) {
