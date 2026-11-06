@@ -8,6 +8,7 @@ use App\Command\Support\FieldErrors;
 use App\Command\Support\JsonOutput;
 use App\Domain\Webhook\WebhookRule;
 use App\Domain\Webhook\WebhookSource;
+use App\Fleet\Webhooks\RuleInput;
 use App\Fleet\Webhooks\WebhookService;
 use Symfony\Component\Console\Attribute\AsCommand;
 use Symfony\Component\Console\Command\Command;
@@ -19,10 +20,6 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'fleet:webhook:rule:add', description: 'Add a rule to a project webhook (the webhook needs a secret first)')]
 final class WebhookRuleAddCommand extends Command
 {
-    /** option name => [where it goes, key under its 0.x name] */
-    private const array MATCH = ['on-status' => 'on_status', 'on-event' => 'on_event', 'repo' => 'repo', 'match-branch' => 'branch', 'state' => 'state', 'comment' => 'comment'];
-    private const array PARAMS = ['template' => 'template', 'branch' => 'branch', 'label' => 'label', 'label-prefix' => 'label_prefix', 'strip-suffix' => 'strip_suffix', 'pattern' => 'pattern', 'ref' => 'ref'];
-
     public function __construct(private readonly WebhookService $webhooks)
     {
         parent::__construct();
@@ -56,13 +53,8 @@ final class WebhookRuleAddCommand extends Command
 
         return $out->run(function () use ($input, $out): void {
             $source = WebhookSourceOption::read($input);
-            $rule = $this->webhooks->addRule(
-                (string) $input->getArgument('project'),
-                $source,
-                (string) $input->getOption('action'),
-                self::collect($input, self::MATCH),
-                self::collect($input, self::PARAMS) + ($input->getOption('reuse') ? ['reuse' => '1'] : []),
-            );
+            [$match, $params] = RuleInput::split(self::fields($input), (bool) $input->getOption('reuse'));
+            $rule = $this->webhooks->addRule((string) $input->getArgument('project'), $source, (string) $input->getOption('action'), $match, $params);
             $out->emit(['id' => $rule->id(), 'source' => $source->value, 'action' => $rule->action(), 'match' => $rule->match(), 'params' => $rule->params()], static function (JsonOutput $out) use ($rule, $source): void {
                 $out->success(\sprintf('Rule %d added to %s: %s -> %s.', $rule->id(), WebhookSource::Jira === $source ? 'Jira' : 'Bitbucket', $rule->summary(), $rule->action()));
             });
@@ -70,20 +62,15 @@ final class WebhookRuleAddCommand extends Command
     }
 
     /**
-     * @param array<string, string> $map option name => key
-     *
-     * @return array<string, string>
+     * @return array<string, mixed> every text option, by name
      */
-    private static function collect(InputInterface $input, array $map): array
+    private static function fields(InputInterface $input): array
     {
-        $values = [];
-        foreach ($map as $option => $key) {
-            $value = $input->getOption($option);
-            if (\is_string($value)) {
-                $values[$key] = $value;
-            }
+        $fields = [];
+        foreach (RuleInput::fields() as $name) {
+            $fields[$name] = $input->getOption($name);
         }
 
-        return $values;
+        return $fields;
     }
 }

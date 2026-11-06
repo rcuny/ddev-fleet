@@ -39,6 +39,9 @@ final readonly class AuditLog
 
     public const string PROJECT_CONTAINER_SSH = 'project.container-ssh';
 
+    public const string WEBHOOK_RULE_ADD = 'webhook.rule.add';
+    public const string WEBHOOK_RULE_REMOVE = 'webhook.rule.remove';
+
     public const string PROJECT_MEMBER_ADD = 'project.member.add';
     public const string PROJECT_MEMBER_REMOVE = 'project.member.remove';
 

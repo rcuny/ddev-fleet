@@ -379,7 +379,7 @@ final class WebhookPagesTest extends AdminTestCase
         self::assertMatchesRegularExpression('/Secret created or rotated \d{4}-\d{2}-\d{2} \d{2}:\d{2} UTC\. It cannot be shown again\./', $card->filter('[data-testid=webhook-rotated]')->text());
         self::assertStringContainsString('No rules yet', $card->filter('[data-testid=webhook-no-rules]')->text());
         self::assertCount(0, $card->filter('[data-testid=webhook-create]'));
-        self::assertStringContainsString('The old secret stops working at once.', $card->filter('[data-testid=webhook-rotate-details]')->text());
+        self::assertStringContainsString('The old secret stops working at once.', $card->filter('[data-slot=dialog-content]')->last()->text());
         self::assertSame('No secret', trim($this->open('/admin/projects/blog/integrations')->filter('[data-source=jira] [data-testid=webhook-secret-state]')->text()));
     }
 

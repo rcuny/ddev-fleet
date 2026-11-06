@@ -1,4 +1,4 @@
-{# One card per project and source. Needs: rows (project, source, url, endpoint, latest). The secret is never rendered here: it is shown once, by the page the create / rotate POST answers with. #}
+{# One card per project and source. Needs: rows (project, source, url, endpoint, latest); editable (bool) shows the rule add / remove controls. The secret is never rendered here: it is shown once, by the page the create / rotate POST answers with. #}
 <ul class="grid gap-4 lg:grid-cols-2" data-testid="webhook-endpoints">
     {% for row in rows %}
         {% set id = row.project.name ~ '-' ~ row.source.value %}
@@ -29,13 +29,56 @@
                     {% if row.endpoint %}
                         <p class="text-xs text-ink-muted" data-testid="webhook-rotated">Secret created or rotated {{ row.endpoint.rotatedAt|date('Y-m-d H:i', 'UTC') }} UTC. It cannot be shown again.</p>
                         {% if row.endpoint.rules %}
-                            <ul class="grid gap-1 text-sm" data-testid="webhook-rules">
+                            <ul class="grid gap-2 text-sm" data-testid="webhook-rules">
                                 {% for rule in row.endpoint.rules %}
-                                    <li class="[overflow-wrap:anywhere]"><code>{{ rule.summary }}</code> → {{ rule.action }}{% if rule.params.template is defined %} <code>{{ rule.params.template }}</code>{% elseif rule.params.pattern is defined %} <code>{{ rule.params.pattern }}</code>{% endif %}</li>
+                                    <li class="flex flex-wrap items-center justify-between gap-2" data-rule-id="{{ rule.id }}">
+                                        <span class="min-w-0 [overflow-wrap:anywhere]"><code>{{ rule.summary }}</code> → {{ rule.action }}{% if rule.params.template is defined %} <code>{{ rule.params.template }}</code>{% elseif rule.params.pattern is defined %} <code>{{ rule.params.pattern }}</code>{% endif %}{% for key in ['branch', 'label', 'label_prefix', 'strip_suffix', 'reuse', 'ref'] %}{% if rule.params[key] is defined %} <code>{{ key }}={{ rule.params[key] }}</code>{% endif %}{% endfor %}</span>
+                                        {% if editable|default(false) %}
+                                            <twig:Dialog id="rule-remove-{{ rule.id }}">
+                                                <twig:Dialog:Trigger>
+                                                    <twig:Button variant="outline" class="h-11 md:h-8" aria-label="Remove rule {{ rule.id }}" data-testid="webhook-rule-remove" {{ ...dialog_trigger_attrs }}>Remove</twig:Button>
+                                                </twig:Dialog:Trigger>
+                                                <twig:Dialog:Content>
+                                                    <twig:Dialog:Header>
+                                                        <twig:Dialog:Title>Remove rule {{ rule.id }}?</twig:Dialog:Title>
+                                                        <twig:Dialog:Description>Events that matched <code>{{ rule.summary }}</code> are logged and ignored from now on.</twig:Dialog:Description>
+                                                    </twig:Dialog:Header>
+                                                    <twig:Dialog:Footer>
+                                                        <twig:Dialog:Close>
+                                                            <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                                        </twig:Dialog:Close>
+                                                        <form method="post" action="{{ path('webhook_rule_remove', {name: row.project.name, rule: rule.id}) }}" class="contents">
+                                                            {{ include('setup/_csrf.html.twig') }}
+                                                            <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-rule-remove-confirm">Remove rule</twig:Button>
+                                                        </form>
+                                                    </twig:Dialog:Footer>
+                                                </twig:Dialog:Content>
+                                            </twig:Dialog>
+                                        {% endif %}
+                                    </li>
                                 {% endfor %}
                             </ul>
                         {% else %}
-                            <p class="text-sm text-ink-muted" data-testid="webhook-no-rules">No rules yet: deliveries are logged and ignored. Add one with <code>fleet webhook:rule:add</code>.</p>
+                            <p class="text-sm text-ink-muted" data-testid="webhook-no-rules">No rules yet: deliveries are logged and ignored.{% if editable|default(false) %} Add one below.{% else %} Add one on the project's Integrations tab.{% endif %}</p>
+                        {% endif %}
+                        {% if editable|default(false) %}
+                            <twig:Dialog id="rule-add-{{ id }}">
+                                <twig:Dialog:Trigger>
+                                    <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-rule-add" {{ ...dialog_trigger_attrs }}>Add a rule</twig:Button>
+                                </twig:Dialog:Trigger>
+                                <twig:Dialog:Content class="max-h-[90vh] overflow-y-auto">
+                                    <twig:Dialog:Header>
+                                        <twig:Dialog:Title>Add a {{ row.source.label }} rule</twig:Dialog:Title>
+                                        <twig:Dialog:Description>The same checks as <code>fleet webhook:rule:add</code>.</twig:Dialog:Description>
+                                    </twig:Dialog:Header>
+                                    {{ include('admin/webhooks/_rule_form.html.twig', {row: row, id: id}) }}
+                                    <twig:Dialog:Footer>
+                                        <twig:Dialog:Close>
+                                            <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                        </twig:Dialog:Close>
+                                    </twig:Dialog:Footer>
+                                </twig:Dialog:Content>
+                            </twig:Dialog>
                         {% endif %}
                     {% endif %}
 
@@ -57,11 +100,27 @@
                                 </form>
                             </details>
                             {% if row.endpoint.hasToken %}
-                                <form method="post" action="{{ path('webhook_token', {name: row.project.name}) }}">
-                                    <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
-                                    <input type="hidden" name="clear" value="1">
-                                    <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-token-clear">Remove token</twig:Button>
-                                </form>
+                                <twig:Dialog id="token-clear-{{ id }}">
+                                    <twig:Dialog:Trigger>
+                                        <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-token-clear" {{ ...dialog_trigger_attrs }}>Remove token</twig:Button>
+                                    </twig:Dialog:Trigger>
+                                    <twig:Dialog:Content>
+                                        <twig:Dialog:Header>
+                                            <twig:Dialog:Title>Remove the pipeline token?</twig:Dialog:Title>
+                                            <twig:Dialog:Description>A <code>run-pipeline</code> rule starts nothing until a new token is set.</twig:Dialog:Description>
+                                        </twig:Dialog:Header>
+                                        <twig:Dialog:Footer>
+                                            <twig:Dialog:Close>
+                                                <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                            </twig:Dialog:Close>
+                                            <form method="post" action="{{ path('webhook_token', {name: row.project.name}) }}" class="contents">
+                                                {{ include('setup/_csrf.html.twig') }}
+                                                <input type="hidden" name="clear" value="1">
+                                                <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-token-clear-confirm">Remove token</twig:Button>
+                                            </form>
+                                        </twig:Dialog:Footer>
+                                    </twig:Dialog:Content>
+                                </twig:Dialog>
                             {% endif %}
                         </div>
                     {% endif %}
@@ -72,15 +131,27 @@
 
                     {# data-turbo="false": the answer is the page that shows the secret once, not a redirect. #}
                     {% if row.endpoint %}
-                        <details data-testid="webhook-rotate-details">
-                            <summary class="min-h-11 cursor-pointer py-2 text-sm">Rotate secret</summary>
-                            <form method="post" action="{{ path('webhook_secret', {name: row.project.name, source: row.source.value}) }}" data-turbo="false" class="grid gap-3">
-                                <p class="text-sm text-ink-body">The old secret stops working at once. Update {{ row.source.label }} with the new one, or every delivery is refused.</p>
-                                <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
-                                <input type="hidden" name="rotate" value="1">
-                                <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-rotate">Rotate now</twig:Button>
-                            </form>
-                        </details>
+                        <twig:Dialog id="rotate-{{ id }}">
+                            <twig:Dialog:Trigger>
+                                <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-rotate-open" {{ ...dialog_trigger_attrs }}>Rotate secret</twig:Button>
+                            </twig:Dialog:Trigger>
+                            <twig:Dialog:Content>
+                                <twig:Dialog:Header>
+                                    <twig:Dialog:Title>Rotate the {{ row.source.label }} secret?</twig:Dialog:Title>
+                                    <twig:Dialog:Description>The old secret stops working at once. Update {{ row.source.label }} with the new one, or every delivery is refused.</twig:Dialog:Description>
+                                </twig:Dialog:Header>
+                                <twig:Dialog:Footer>
+                                    <twig:Dialog:Close>
+                                        <twig:Button variant="outline" class="h-11 w-full md:h-8 md:w-auto" {{ ...dialog_close_attrs }}>Cancel</twig:Button>
+                                    </twig:Dialog:Close>
+                                    <form method="post" action="{{ path('webhook_secret', {name: row.project.name, source: row.source.value}) }}" data-turbo="false" class="contents">
+                                        {{ include('setup/_csrf.html.twig') }}
+                                        <input type="hidden" name="rotate" value="1">
+                                        <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="webhook-rotate">Rotate now</twig:Button>
+                                    </form>
+                                </twig:Dialog:Footer>
+                            </twig:Dialog:Content>
+                        </twig:Dialog>
                     {% else %}
                         <form method="post" action="{{ path('webhook_secret', {name: row.project.name, source: row.source.value}) }}" data-turbo="false" class="flex">
                             <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
