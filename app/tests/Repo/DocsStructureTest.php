@@ -120,7 +120,7 @@ final class DocsStructureTest extends TestCase
 
     public function testEveryPublicCommandIsMentionedOutsideTheReference(): void
     {
-        $cli = self::read('docs/reference/cli.md');
+        $cli = self::read('docs/reference/01-cli.md');
         preg_match_all('/^### (fleet [a-z]+:[a-z-]+)\s*$/m', $cli, $headings);
         self::assertGreaterThan(50, \count($headings[1]), 'cli.md headings were not found');
 
@@ -133,7 +133,7 @@ final class DocsStructureTest extends TestCase
         }
 
         $others = '';
-        foreach (['README.md', ...array_filter(self::pages(), static fn (string $p): bool => 'docs/reference/cli.md' !== $p)] as $page) {
+        foreach (['README.md', ...array_filter(self::pages(), static fn (string $p): bool => 'docs/reference/01-cli.md' !== $p)] as $page) {
             $others .= "\n".self::read($page);
         }
 

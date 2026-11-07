@@ -198,7 +198,7 @@ final readonly class BackupRestorer
         try {
             $active = $this->jobs->countActive();
         } catch (\Throwable) {
-            return ['Cannot read the jobs of the live database, so a running job cannot be ruled out. If the file is damaged, move it aside first (docs/reference/backup-and-restore.md).'];
+            return ['Cannot read the jobs of the live database, so a running job cannot be ruled out. If the file is damaged, move it aside first (docs/reference/06-backup-and-restore.md).'];
         }
 
         return 0 === $active ? [] : [\sprintf('%d job(s) are queued or running: wait for them (see "fleet job:list") before restoring.', $active)];

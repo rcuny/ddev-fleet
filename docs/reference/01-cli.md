@@ -28,7 +28,7 @@ This page is **generated** from the console definition by `fleet:docs:cli`; a re
 - [webhook](#webhook): Jira and Bitbucket receivers.
 - [schedule](#schedule): Cron schedules that redeploy.
 - [claude](#claude): The Claude Code token.
-- [tmux](#tmux): The agent workspace.
+- [tmux](#tmux): The tmux workspace.
 - [workspace](#workspace): Workspace checks.
 - [host](#host): Host settings, certificates, capacity.
 - [backup](#backup): Database backups.
@@ -1211,7 +1211,7 @@ fleet claude:token:set [--apply]
 
 ## tmux
 
-The agent workspace.
+The tmux workspace.
 
 ### fleet tmux:ensure
 
@@ -1548,7 +1548,7 @@ fleet upgrade:check [--to TO] [--json] [--no-cache]
 | Option | Shortcut | Description | Default |
 |---|---|---|---|
 | `--to=VALUE` |  | Check this release (vX.Y.Z) instead of the latest |  |
-| `--json` |  | Print one JSON document (schema in docs/reference/upgrade.md) |  |
+| `--json` |  | Print one JSON document (schema in docs/reference/05-upgrade.md) |  |
 | `--no-cache` |  | Ask the release source now instead of using a list younger than 6 hours |  |
 
 ### fleet upgrade:history
@@ -1647,15 +1647,15 @@ The `/usr/local/bin/fleet` wrapper switches to the `fleet` user, loads `/etc/dde
 |---|---|
 | `fleet` | Lists the `fleet:*` commands. |
 | `fleet <group> <verb>` | Same as `fleet <group>:<verb>`; a full `fleet:<group>:<verb>` name also works. |
-| `sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]` | **sudo.** Hands over to the root helper that runs the installer, with a backup and a verification. Refused (exit `3`) without root. Options: [upgrade reference](upgrade.md#upgrade). |
+| `sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]` | **sudo.** Hands over to the root helper that runs the installer, with a backup and a verification. Refused (exit `3`) without root. Options: [upgrade reference](05-upgrade.md#upgrade). |
 | `fleet upgrade --check [--to vX.Y.Z] [--json]` | Runs `fleet:upgrade:check` (read-only, no root). |
 | `fleet upgrade history`, `fleet upgrade verify` | Run `fleet:upgrade:history` and `fleet:upgrade:verify`. |
-| `fleet tmux [<instance-id>]` | Attaches your terminal to the agent workspace, optionally on one instance's window (also `fleet tmux attach [<instance-id>]` and `fleet tmux:attach`). Needs a terminal (`ssh -t`) and refuses to nest inside tmux (exit `2`). |
+| `fleet tmux [<instance-id>]` | Attaches your terminal to the tmux workspace, optionally on one instance's window (also `fleet tmux attach [<instance-id>]` and `fleet tmux:attach`). Needs a terminal (`ssh -t`) and refuses to nest inside tmux (exit `2`). |
 
 `fleet backup:*` and the other groups are ordinary console commands, documented above.
 
 ## Learn more
 
-- [Configuration](configuration.md)
-- [Installer](installer.md)
-- [Files on disk](files-on-disk.md)
+- [Configuration](02-configuration.md)
+- [Installer](04-installer.md)
+- [Files on disk](03-files-on-disk.md)

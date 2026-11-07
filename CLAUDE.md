@@ -27,7 +27,7 @@ merge commit, then merged back into `develop`; one push sends `main`, `develop` 
 `hotfix/<slug>` off `main`, merged into `main` (+ tag) and `develop`. A 0.x hotfix is `hotfix/<slug>` off `legacy`,
 merged into `legacy` with a `v0.20.N` tag, and never merged into `develop` or `main`. `ci/tag-guard.sh` decides what a
 tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `v0.*` tag the tip of
-`origin/legacy`). Procedure: `docs/contributing/releasing.md`. Never push to GitHub by hand and never rewrite `main`, `develop`,
+`origin/legacy`). Procedure: `docs/contributing/04-releasing.md`. Never push to GitHub by hand and never rewrite `main`, `develop`,
 `legacy` or a tag. The `v1.0.0` to `v1.0.6` tags were cut on `develop` before the cut-over (release `v1.1.0`).
 
 ## Hard facts
@@ -51,7 +51,7 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
 |---|---|
 | `app/` | The Symfony 8.1 project (PHP 8.4): `src/`, `templates/`, `assets/`, `config/`, `migrations/`, `tests/` |
 | `tests/playwright/` | TypeScript browser E2E (`@playwright/test`), its own npm package |
-| `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `docs/contributing/testing.md`) |
+| `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `docs/contributing/02-testing.md`) |
 | `ci/` | Tag guard (`tag-guard.sh`), the offline systemd security scorer for the installer's 1.x units and its baseline, requirements files for the Python CI steps |
 | `bitbucket-pipelines.yml`, `renovate-config.json` | CI and dependency updates |
 | `install/` | The 1.x installer (pure bash): `install.sh` (bootstrap), `run.sh`, `lib/common.sh`, `steps/NN-*.sh`, `etc/` (unit files, pool, sudoers line, env drop-ins), `libexec/apply` (the root helper), `bin/fleet` (the CLI wrapper), `uninstall.sh`. Tested by `app/tests/Repo/Installer*Test` and friends |
@@ -94,16 +94,16 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
 | `App\Form\Setup` | The wizard's Symfony forms |
 | `App\Form\Project` | The project and template forms (`ProjectType`, `TemplateType`; plain Symfony forms, `novalidate`, errors come from the services through `ValidationErrorMapper`) |
 | `App\Form\User` | The user forms (`UserCreateType`, `UserEditType`, `UserPasswordType`, the shared `UserProjectsField`; `novalidate`; messages come from `UserService`, whose `InvalidUserInput` names the field it refused). The form theme draws a multiple expanded choice as 44 px checkbox rows |
-| `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be named in `docs/reference/cli.md` (generated) and `InstallDocsTest` checks flags and `fleet.env` keys against `docs/reference/installer.md` and `docs/reference/configuration.md` |
-| `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`, and adds `port:refresh`, which rewrites the instance Caddy sites, and `port:firewall`, which lists the public ports to open). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliReferenceTest` (the generated `docs/reference/cli.md`). A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
-| `App\Command\Instance`, `App\Command\Job` | `fleet:instance:deploy\|redeploy\|start\|stop\|destroy\|list\|log\|watch` and `fleet:job:list\|show\|retry\|prune`. The changing commands run **attached**: the same `JobExecutor` runs the jobs inline in the CLI process, one after another (`AttachedJobs`; `--detach` only enqueues; SIGINT marks the job `interrupted`, exit 130; trigger `cli`). Covered by `CliReferenceTest` (`docs/reference/cli.md`) |
+| `App\Command` | The flat `fleet:*` console commands: `fleet:host:init`, `fleet:host:render`, `fleet:setup:token`, `fleet:setup:reset`, `fleet:user:reset-password` (run on a host as `fleet <group>:<verb>`). `InstallDocsTest` requires every command found by `glob(app/src/Command/*.php)` to be named in `docs/reference/01-cli.md` (generated) and `InstallDocsTest` checks flags and `fleet.env` keys against `docs/reference/04-installer.md` and `docs/reference/02-configuration.md` |
+| `App\Command\Project`, `App\Command\Template`, `App\Command\Port` | `fleet:project\|template\|port:list\|show\|create\|update\|delete` (`port` has no `show` or `update`, and adds `port:refresh`, which rewrites the instance Caddy sites, and `port:firewall`, which lists the public ports to open). **Sub-directories on purpose**: they stay out of `InstallDocsTest`'s flat glob and are covered by `CliReferenceTest` (the generated `docs/reference/01-cli.md`). A new command group goes in its own sub-directory, with a pattern in `install/bin/fleet` and `CliGroupsTest` |
+| `App\Command\Instance`, `App\Command\Job` | `fleet:instance:deploy\|redeploy\|start\|stop\|destroy\|list\|log\|watch` and `fleet:job:list\|show\|retry\|prune`. The changing commands run **attached**: the same `JobExecutor` runs the jobs inline in the CLI process, one after another (`AttachedJobs`; `--detach` only enqueues; SIGINT marks the job `interrupted`, exit 130; trigger `cli`). Covered by `CliReferenceTest` (`docs/reference/01-cli.md`) |
 | `App\Command\User` | `fleet:user:list\|create\|update\|delete\|grant\|revoke` (the same exit codes and `--format=json` as the project commands; every write goes through `IdentitySync::commit()`, a failed Authelia install after the commit is exit 0 with a `warning`; a password only from a hidden prompt or `--password-stdin`, never an option). `fleet:user:reset-password` stays flat in `App\Command` |
-| `App\Command\Asset` | `fleet:asset:list <project> [path]` and `fleet:asset:gc` (exit codes and `--format=table\|json` as the commands above). Own sub-directory, group `asset` in `install/bin/fleet`; covered by `AssetDocsTest` against `docs/reference/assets-and-secrets.md` |
+| `App\Command\Asset` | `fleet:asset:list <project> [path]` and `fleet:asset:gc` (exit codes and `--format=table\|json` as the commands above). Own sub-directory, group `asset` in `install/bin/fleet`; covered by `AssetDocsTest` against `docs/reference/08-assets-and-secrets.md` |
 | `App\Fleet\Export` | Moving a project between hosts: `ExportFormat` (the `fleet-project-export` v1 JSON, 2 MiB cap), `ExportParser` (shape check: known keys, types, list sizes, paths in the problems, never a value), `ProjectExporter` (project, its ports, templates, webhook endpoints with rules, schedules by instance label; no ids, timestamps, webhook secrets), `PassphraseSealer` (secrets sealed with `crypto_pwhash` + `secretbox`, parameters in the file), `ProjectImporter` (`preview()` builds an `ImportPlan` of create / update / unchanged / skipped items from the **services' own `validate()` rules** and `apply()` writes it in one transaction, after commit refreshes access rules and Caddy sites), `InvalidExport`. Audit actions `project.export`, `project.import`; secrets are excluded unless a passphrase seals them, and a passphrase is never an option or argument |
-| `App\Command\Export`, `App\Command\Import` | `fleet:export:project`, `fleet:import:preview`, `fleet:import:apply` (groups `export` and `import` in `install/bin/fleet`; exit codes as above; `PassphraseInput` reads the passphrase from a prompt, `FLEET_EXPORT_PASSPHRASE` or stdin). Covered by `ExportDocsTest` against `docs/reference/export-format.md`. The pages are `Controller\Admin\ProjectTransferController` (`/admin/projects/{name}/export`, `/admin/import`) |
-| `App\Fleet\Upgrade`, `App\Command\Upgrade` | The read side of `fleet upgrade`: `UpgradeAssessor` (installed + cached `ReleaseCatalog` + `ChangelogReader` + the `fleet.upgrade_check` registry in one call, never throws for an unreachable source) returns an `UpgradeAssessment` (`toArray()` is the documented JSON schema, `exitCode()` the R13 code); `fleet:upgrade:check` (`fleet upgrade --check`, text via `AssessmentPrinter`, `--json`, `--to`, `--no-cache`; exit 0 / 1 error / 2 usage / 3 blocked / 4 offline, **not** the `JsonOutput` codes) and the hidden `fleet:upgrade:plan` (JSON + `--force`); `fleet:upgrade:refresh` fills the cache. Read-only, no root, no sudoers line. The write side is the root helper `install/libexec/upgrade` (`sudo fleet upgrade [--to] [--yes] [--force=<id>] [--no-db-restore] [--repo-url=]`, handed over by `exec` from `install/bin/fleet`): plan and pre-flight, backup, the installer of the target commit, `fleet:upgrade:verify`, and a root-appended history file; `UpgradeRunner`, `UpgradeHistory`, `RollbackPlanner` and the hidden `fleet:upgrade:prepare\|backup\|restore` commands are its fleet-user steps. **Invariant: the upgrade has no sudoers entry and the application can never start it** (the installer restarts php-fpm and the workers, and "run any installer as root" would break "the app never runs as root"); the Upgrade page (`Controller\Admin\UpgradeController`) shows status and the command to copy, never a button. A new pre-flight check implements `UpgradeCheck` (tag `fleet.upgrade_check`, ids in `docs/reference/upgrade.md`). Covered by `UpgradeCheckDocsTest` and `UpgradeDocsTest` against `docs/reference/upgrade.md`; `ci/upgrade-rehearsal.sh` is the manual end-to-end rehearsal on a test host (never on a live one, never in CI) |
+| `App\Command\Export`, `App\Command\Import` | `fleet:export:project`, `fleet:import:preview`, `fleet:import:apply` (groups `export` and `import` in `install/bin/fleet`; exit codes as above; `PassphraseInput` reads the passphrase from a prompt, `FLEET_EXPORT_PASSPHRASE` or stdin). Covered by `ExportDocsTest` against `docs/reference/12-export-format.md`. The pages are `Controller\Admin\ProjectTransferController` (`/admin/projects/{name}/export`, `/admin/import`) |
+| `App\Fleet\Upgrade`, `App\Command\Upgrade` | The read side of `fleet upgrade`: `UpgradeAssessor` (installed + cached `ReleaseCatalog` + `ChangelogReader` + the `fleet.upgrade_check` registry in one call, never throws for an unreachable source) returns an `UpgradeAssessment` (`toArray()` is the documented JSON schema, `exitCode()` the R13 code); `fleet:upgrade:check` (`fleet upgrade --check`, text via `AssessmentPrinter`, `--json`, `--to`, `--no-cache`; exit 0 / 1 error / 2 usage / 3 blocked / 4 offline, **not** the `JsonOutput` codes) and the hidden `fleet:upgrade:plan` (JSON + `--force`); `fleet:upgrade:refresh` fills the cache. Read-only, no root, no sudoers line. The write side is the root helper `install/libexec/upgrade` (`sudo fleet upgrade [--to] [--yes] [--force=<id>] [--no-db-restore] [--repo-url=]`, handed over by `exec` from `install/bin/fleet`): plan and pre-flight, backup, the installer of the target commit, `fleet:upgrade:verify`, and a root-appended history file; `UpgradeRunner`, `UpgradeHistory`, `RollbackPlanner` and the hidden `fleet:upgrade:prepare\|backup\|restore` commands are its fleet-user steps. **Invariant: the upgrade has no sudoers entry and the application can never start it** (the installer restarts php-fpm and the workers, and "run any installer as root" would break "the app never runs as root"); the Upgrade page (`Controller\Admin\UpgradeController`) shows status and the command to copy, never a button. A new pre-flight check implements `UpgradeCheck` (tag `fleet.upgrade_check`, ids in `docs/reference/05-upgrade.md`). Covered by `UpgradeCheckDocsTest` and `UpgradeDocsTest` against `docs/reference/05-upgrade.md`; `ci/upgrade-rehearsal.sh` is the manual end-to-end rehearsal on a test host (never on a live one, never in CI) |
 | `App\Command\Ssh` | `fleet:ssh:trust <host>` (adds a server's host keys to `ssh/known_hosts` after the fingerprints were confirmed: prompt, `--fingerprint` or `--yes`); group `ssh` in `install/bin/fleet`, covered by `CliReferenceTest` |
-| `App\Command\Secret` | `fleet:secret:list\|set\|unset` (`--project=`; the value comes from a hidden prompt or standard input, never argv; actor `cli`), covered by `SecretsDocsTest` against `docs/reference/assets-and-secrets.md`; `SecretOptions` is not a command |
+| `App\Command\Secret` | `fleet:secret:list\|set\|unset` (`--project=`; the value comes from a hidden prompt or standard input, never argv; actor `cli`), covered by `SecretsDocsTest` against `docs/reference/08-assets-and-secrets.md`; `SecretOptions` is not a command |
 | `App\Command\Support` | What those commands share: `JsonOutput` (`--format=table\|json`, `--json`, exit codes 0 done / 1 refused value / 2 not allowed now / 3 not found, the `{"error", "fields"}` document), `FieldErrors` (field name to `--option` or `<argument>`), `Shapes` (JSON for templates and ports). Not commands |
 | `App\Twig` | `ByteSizeExtension` (the `bytes` filter: `1536\|bytes` is `1.5 KiB`) |
 | `App\Twig\Components` | Twig components with logic (`MainNav`, `BottomNav`, `UserMenu`, `HostHealthCard`, and `IssueIdPreview`, the one LiveComponent: admin-only through `#[IsGranted]`) |
@@ -164,9 +164,9 @@ New work follows these namespaces; add a new one only with a reason.
 - **All project data validation lives in `App\Fleet\Projects\Rule`.** The pages (forms), the `fleet project|template|port`
   commands and later milestones (webhooks, export) go through `ProjectService`, `TemplateService` and `NamedPortService`;
   controllers, forms and commands never validate on their own. A new limit or rule is a `Rule` class plus a unit test, then
-  the field table in `docs/reference/configuration.md`. Entities only store. Names are immutable. Git URLs, branches, command
+  the field table in `docs/reference/02-configuration.md`. Entities only store. Names are immutable. Git URLs, branches, command
   lines and issue id patterns are hostile input: the rules are allow-lists, and a consumer must still pass them as argv, never
-  through a shell. `docs/reference/cli.md` is generated and checked by `CliReferenceTest`: after changing a command's arguments or options run
+  through a shell. `docs/reference/01-cli.md` is generated and checked by `CliReferenceTest`: after changing a command's arguments or options run
   `composer run docs:cli` in `app/`.
 - **Console commands**: `fleet <group>:<verb>` for the groups in the `FLEET_GROUPS` array of `install/bin/fleet` (one group per
   line, sorted; a new group is one new line, checked by `CliGroupsTest`; `fleet project list` also works). Commands that read or write the database are tested with
@@ -216,7 +216,7 @@ php vendor/bin/phpunit --testsuite Repo   # one suite: Unit | Integration | Func
 `FLEET_PW_TIER=quick|full` (default `full`, so a bare `npx playwright test` and the gate above are unchanged). `quick`
 is the Fleet CI merge gate on `feature/*` and `renovate/*`: `desktop` without the `*-coverage` and the
 `projects-validation` / `templates-validation` specs, `phone` limited to `@smoke`. `release/*`, `develop` and the
-nightly run use `full`. Details: `docs/contributing/testing.md`.
+nightly run use `full`. Details: `docs/contributing/02-testing.md`.
 
 ### Playwright modes
 
@@ -243,12 +243,12 @@ runner seam), `Functional/` (HTTP through `WebTestCase`, the wizard included), `
 pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its bash
 steps, the root helper, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
 `FLEET_MERCURE_BIN`, `ssh-keygen`, `shellcheck`) or run only as an unprivileged user, and skip otherwise. Each PHPUnit
-process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `docs/contributing/testing.md`. Current counts:
+process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `docs/contributing/02-testing.md`. Current counts:
 `ci/test-counts.sh` (never write counts into the docs).
 
 ## Production trust and the installer
 
-`install/install.sh --domain=<fqdn>` turns a Debian 13 host into a fleet (`docs/guides/install.md` and `docs/reference/installer.md` are the user docs;
+`install/install.sh --domain=<fqdn>` turns a Debian 13 host into a fleet (`docs/guides/01-install.md` and `docs/reference/04-installer.md` are the user docs;
 keep it and `README.md` in step with the code, `InstallDocsTest` checks flags, commands and `fleet.env` keys).
 Facts to keep true when editing it:
 
@@ -273,7 +273,7 @@ Facts to keep true when editing it:
 - **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
   workers when the code or env changed.
 - Not shipped yet (do not assume it exists): `fleet-tmux`, named ports and Typesense exposure, the branch picker and
-  live-branch indicator. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/reference/hardening.md`; recovery: `fleet user:reset-password`).
+  live-branch indicator. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/reference/07-hardening.md`; recovery: `fleet user:reset-password`).
 - Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
   install/bin/fleet` before committing a script.
 
@@ -298,10 +298,21 @@ remote). Apply individual roles through the scoped playbooks beside it (`caddy-o
 | `caddy` | Caddy apt repo + package, fleet-owned Caddy snippet dirs, seeded admin-auth default credentials, the rendered Caddyfile, the `50-fleet-sandbox.conf` systemd sandbox drop-in (FLE-1) |
 | `fleet_service` | Clones/updates the product repo into `{{ fleet_opt_dir }}`, installs the editable venv, deploys `fleet.service` + `fleet-boot.service` (both sandboxed via the shared `fleet-sandbox.inc.j2`, FLE-1; toggle `fleet_systemd_sandbox_enabled`) + `fleet-tmux.service` (owns the `fleet` tmux session in its own cgroup, deliberately unsandboxed; tag `fleet_tmux`) + the `fleet` CLI wrapper |
 | `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443 allows, plus the registry's named ports staged via `fleet-ufw-sync` before `ufw enable`), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
-| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/reference/hardening.md`) |
+| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/reference/07-hardening.md`) |
 
 `network_hardening` and `security_hardening` are independently optional: every task in both gates
 on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays inert for both.
+
+## Working principles for agents (owner, 2026-11-07, FLE-253)
+
+- Spend tokens only where needed: the main (expensive) model coordinates complex tasks; delegate narrow work
+  (pattern search, changelog reading, web lookups) to dedicated agents on Haiku, Sonnet only when Haiku is too limited.
+- Write commands in forms RTK intercepts (`git status`, `git diff`, `ls`, `grep`, test runners; `rtk gain` shows savings) in
+  docs, skills and hand-off notes.
+- Web research (drupal.org, docs.ddev.com, and the like) is pre-authorised for every skill and agent; do not ask first.
+- Documentation tone: Fleet lets the team choose what to automate and where to keep a human in the loop. Never
+  write that Fleet removes human work or runs "on its own"; say what is optional and who decides. Fleet is stack-neutral
+  (Drupal or anything else, Claude or no agent). Example project name in docs: `website`, never `shop`.
 
 ## Cross-references
 

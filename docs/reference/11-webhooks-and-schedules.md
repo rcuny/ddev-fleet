@@ -7,7 +7,7 @@ Type: documentation
 
 # Webhooks and schedules
 
-Instances can appear on their own: a Jira issue enters a status, a branch is pushed, or a clock strikes 03:00. This page is the lookup for how Fleet authenticates, matches and deduplicates those events and how schedules fire. To set one up, follow [automate deploys](../guides/automate-deploys.md); for CI pipelines see [run CI](../guides/run-ci.md). Both features are for administrators and queue the same jobs a person would.
+Instances can be created by events you choose: a Jira issue enters a status, a branch is pushed, or a clock strikes 03:00. This page is the lookup for how Fleet authenticates, matches and deduplicates those events and how schedules fire. To set one up, follow [automate deploys](../guides/03-automate-deploys.md); for CI pipelines see [run CI](../guides/04-run-ci.md). Both features are for administrators and queue the same jobs a person would.
 
 ## Webhooks
 
@@ -25,7 +25,7 @@ POST https://<fleet-domain>/hooks/bitbucket/<project>
 | Secrets | Jira and Bitbucket have separate ones. `fleet webhook:secret` creates one; it is shown once. `--rotate` replaces it and the old one stops at once. |
 | Pipeline token | `fleet webhook:token` stores a Bitbucket repository token (scope **Pipelines: Write** only) for `run-pipeline` rules. |
 
-Commands: `fleet webhook:secret`, `webhook:rule:add`, `webhook:rule:remove`, `webhook:token`, `webhook:list`, `webhook:log` ([cli.md](cli.md)).
+Commands: `fleet webhook:secret`, `webhook:rule:add`, `webhook:rule:remove`, `webhook:token`, `webhook:list`, `webhook:log` ([01-cli.md](01-cli.md)).
 
 ### Rules and actions
 
@@ -38,7 +38,7 @@ Every field is validated when the rule is added. The first matching rule wins.
 
 | Action | What it does |
 |---|---|
-| `deploy` | Queues a deploy of the rule's template, trigger `webhook`. Jira: the lowercased issue key is the label (`SHOP-3` gives `shop--shop-3`), the branch is `--branch` or the project default. Moving the ticket in again allocates `shop-3-1`. Bitbucket: the label comes from the pushed branch. |
+| `deploy` | Queues a deploy of the rule's template, trigger `webhook`. Jira: the lowercased issue key is the label (`WEBSITE-3` gives `website--website-3`), the branch is `--branch` or the project default. Moving the ticket in again allocates `website-3-1`. Bitbucket: the label comes from the pushed branch. |
 | `run-pipeline` | Bitbucket only. Starts the custom pipeline `--pattern` on `--ref` (default: project default branch). |
 
 ### Label options (Bitbucket deploy rules)
@@ -77,12 +77,12 @@ After a delivery is claimed the sender always gets 200, so a refusal is never re
 
 ### Sender setup
 
-- **Jira Cloud:** Settings, System, WebHooks, Create a WebHook. URL = the Jira address, Secret = the secret, Events = Issue updated, JQL e.g. `project = SHOP`.
+- **Jira Cloud:** Settings, System, WebHooks, Create a WebHook. URL = the Jira address, Secret = the secret, Events = Issue updated, JQL e.g. `project = WEBSITE`.
 - **Bitbucket:** Repository settings, Webhooks. The Bitbucket address, the secret, and the events your rules name.
 
 ## Schedules
 
-A schedule is a cron expression, an action (`redeploy` is the only one) and a target instance. Manage them on **Schedules** (`/admin/schedules`) or with `fleet schedule:list`, `create`, `update`, `delete`, `pause`, `resume`, `run`, `history` ([cli.md](cli.md)).
+A schedule is a cron expression, an action (`redeploy` is the only one) and a target instance. Manage them on **Schedules** (`/admin/schedules`) or with `fleet schedule:list`, `create`, `update`, `delete`, `pause`, `resume`, `run`, `history` ([01-cli.md](01-cli.md)).
 
 | Rule | Detail |
 |---|---|
@@ -109,6 +109,6 @@ A schedule is a cron expression, an action (`redeploy` is the only one) and a ta
 
 ## Learn more
 
-- [Automate deploys](../guides/automate-deploys.md)
-- [Run CI](../guides/run-ci.md)
-- [Troubleshooting](troubleshooting.md)
+- [Automate deploys](../guides/03-automate-deploys.md)
+- [Run CI](../guides/04-run-ci.md)
+- [Troubleshooting](13-troubleshooting.md)

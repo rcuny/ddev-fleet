@@ -27,7 +27,7 @@ pytest -q tests/pytest            # after: pip install -r ci/requirements-dev.tx
 | `lint` | Twig, YAML, container, `doctrine:schema:validate --skip-sync` |
 | `test` | PHPUnit, all four suites |
 
-Repair formatting with `php vendor/bin/php-cs-fixer fix`. `ci/run-gates.sh` runs everything in one go ([ci.md](ci.md)). Counts: `ci/test-counts.sh`.
+Repair formatting with `php vendor/bin/php-cs-fixer fix`. `ci/run-gates.sh` runs everything in one go ([03-ci.md](03-ci.md)). Counts: `ci/test-counts.sh`.
 
 ## Suites
 
@@ -60,9 +60,9 @@ In CI, `ci/pw_select.py --base origin/develop` extends the quick tier from the c
 
 ## Docs tests
 
-The `app/tests/Repo/*DocsTest.php` tests read the docs and pin command names, options, flags, env keys and check ids against the code: `InstallDocsTest`, `CliDocsTest`, `AssetDocsTest`, `SecretsDocsTest`, `ExportDocsTest`, `UpgradeDocsTest`, `UpgradeCheckDocsTest`. If you rename a command or option, update its doc or the test fails. `docs/reference/cli.md` is generated, and a test checking that it is fresh is planned.
+The `app/tests/Repo/*DocsTest.php` tests read the docs and pin command names, options, flags, env keys and check ids against the code: `InstallDocsTest`, `CliDocsTest`, `AssetDocsTest`, `SecretsDocsTest`, `ExportDocsTest`, `UpgradeDocsTest`, `UpgradeCheckDocsTest`. If you rename a command or option, update its doc or the test fails. `docs/reference/01-cli.md` is generated, and a test checking that it is fresh is planned.
 
 ## Learn more
 
-- [ci.md](ci.md): the same gates in CI
-- [development.md](development.md): setup and environment variables
+- [03-ci.md](03-ci.md): the same gates in CI
+- [01-development.md](01-development.md): setup and environment variables

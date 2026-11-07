@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """FLE-238: offline systemd exposure scores for the 1.x units, a committed baseline and regression detection.
 
-Subcommands (see docs/contributing/ci.md):
+Subcommands (see docs/contributing/03-ci.md):
 
   offline          score the unit files the installer ships (install/etc/*.service,
                    install/harden/etc/*.service, the Caddy sandbox drop-in) with
@@ -381,7 +381,7 @@ def render_markdown(
     if improved:
         out += [
             f"{improved} unit(s) improved: consider `update-baseline --env {env_name}` "
-            "so the new, lower scores become the reference (see docs/contributing/ci.md).",
+            "so the new, lower scores become the reference (see docs/contributing/03-ci.md).",
             "",
         ]
     counts = {s: sum(1 for r in rows if r["status"] == s) for s in CAT_ORDER}
@@ -450,7 +450,7 @@ def render_report(data: dict, *, when: str) -> str:
         "`ci/systemd-security-baseline.json`. A unit counts as a regression only when its score "
         f"rises by more than the tolerance (+{data['tolerance']:g}) over that baseline. "
         "Regenerate this page with `python ci/systemd_security.py report` (see "
-        "[docs/contributing/ci.md](docs/contributing/ci.md)).",
+        "[docs/contributing/03-ci.md](docs/contributing/03-ci.md)).",
         "",
         f"**Generated:** {when}, systemd {data.get('current_systemd') or '?'}. Status: {status}.",
         "",

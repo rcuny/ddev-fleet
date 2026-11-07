@@ -7,7 +7,7 @@ Type: documentation
 
 # Networking
 
-One public entry point keeps the host small to defend: Caddy terminates TLS for every hostname, gates access with Authelia, and forwards to instances, which never listen on the Internet. This page lists every port, how certificates behave, and how named ports and the in-network mirror work. The installer does not touch the firewall; [secure the host](../guides/secure-the-host.md) covers the opt-in hardening and [files on disk](files-on-disk.md) the units.
+One public entry point keeps the host small to defend: Caddy terminates TLS for every hostname, gates access with Authelia, and forwards to instances, which never listen on the Internet. This page lists every port, how certificates behave, and how named ports and the in-network mirror work. The installer does not touch the firewall; [secure the host](../guides/08-secure-the-host.md) covers the opt-in hardening and [files on disk](03-files-on-disk.md) the units.
 
 ## Every port
 
@@ -48,7 +48,7 @@ Administrators see the same status as a banner and on the Host page's Certificat
 
 For each instance of a project with a named port, Caddy serves one more site, `<instance host>:<public port>` (primary host and every alias): identity headers stripped, Authelia first, then the router port, which picks the instance by `Host`. Ports are **gated** by default. A **public** port skips the login and group check (the `typesense` default, protected by its search-only key), so cross-origin browser calls work: the CORS preflight carries no cookie and would otherwise get a 302.
 
-Commands: `fleet port:create`, `fleet port:update <name> --access=gated|public`, `fleet port:refresh` (rewrites the sites), and `fleet project:update <project> --port=<name>` to assign one ([cli.md](cli.md)). Port fields: [configuration](configuration.md). Open each public port in the firewall.
+Commands: `fleet port:create`, `fleet port:update <name> --access=gated|public`, `fleet port:refresh` (rewrites the sites), and `fleet project:update <project> --port=<name>` to assign one ([01-cli.md](01-cli.md)). Port fields: [configuration](02-configuration.md). Open each public port in the firewall.
 
 ## `:443` passthrough
 
@@ -72,7 +72,7 @@ DDEV's router HTTPS port is `8443` because Caddy owns `443`. Inside the network 
 
 ## Typesense
 
-Fleet installs no Typesense server: each instance runs its own container from the project's `.ddev/docker-compose.typesense.yaml`. On a project's first deploy Fleet generates an admin and a search-only key as project secrets ([assets and secrets](assets-and-secrets.md)), shared by its instances and never rotated.
+Fleet installs no Typesense server: each instance runs its own container from the project's `.ddev/docker-compose.typesense.yaml`. On a project's first deploy Fleet generates an admin and a search-only key as project secrets ([assets and secrets](08-assets-and-secrets.md)), shared by its instances and never rotated.
 
 | Variable | Where | Content |
 |---|---|---|
@@ -95,6 +95,6 @@ fleet host:tls-status
 
 ## Learn more
 
-- [Secure the host](../guides/secure-the-host.md)
-- [Configuration](configuration.md)
-- [Troubleshooting](troubleshooting.md)
+- [Secure the host](../guides/08-secure-the-host.md)
+- [Configuration](02-configuration.md)
+- [Troubleshooting](13-troubleshooting.md)

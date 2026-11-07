@@ -7,15 +7,15 @@ Type: documentation
 
 # Assets and secrets
 
-Every new instance needs a database dump, a `.env`, local settings and API keys, and none of that belongs in git. This page is the lookup for the rules Fleet applies when it stores and delivers them. For the walk-through, see [first project](../guides/first-project.md).
+Every new instance needs a database dump, a `.env`, local settings and API keys, and none of that belongs in git. This page is the lookup for the rules Fleet applies when it stores and delivers them. For the walk-through, see [first project](../guides/02-first-project.md).
 
 - **Assets** are plain files in `/srv/fleet/assets/<project>/`. Fleet copies them into every new checkout.
 - **Secrets** are encrypted values. Instances receive them through `[[placeholder]]` tokens inside asset files.
-- Both are administrator-only ([share and access](../guides/share-and-access.md)).
+- Both are administrator-only ([share and access](../guides/06-share-and-access.md)).
 
 ## Assets
 
-There is no index: the **Assets** tab (`/admin/projects/<project>/assets`) shows what is on disk. **Upload files** and **Create folder** (up to 8 levels) act on the current folder. **Rescan** reloads the list after you copy files in over SSH. A folder is deleted only when empty. Commands: `fleet asset:list`, `fleet asset:gc`, `fleet asset:snapshot` ([cli.md](cli.md)). Files are created with mode 0640 (folders 0750); a symbolic link in the way is refused with exit code 2.
+There is no index: the **Assets** tab (`/admin/projects/<project>/assets`) shows what is on disk. **Upload files** and **Create folder** (up to 8 levels) act on the current folder. **Rescan** reloads the list after you copy files in over SSH. A folder is deleted only when empty. Commands: `fleet asset:list`, `fleet asset:gc`, `fleet asset:snapshot` ([01-cli.md](01-cli.md)). Files are created with mode 0640 (folders 0750); a symbolic link in the way is refused with exit code 2.
 
 ### How a deploy seeds
 
@@ -77,7 +77,7 @@ Dumps can hold personal data: Caddy never serves these files.
 | Project | **Keys & secrets** tab (`/admin/projects/<name>/keys`) | One project's value. Wins over a fleet-wide one of the same name. |
 | Host | **Host settings** tabs (Claude token, Notifications) and the wizard or `fleet host:ovh-credentials` (OVH credentials) | Used by Fleet itself. Never given to an instance, never substituted. |
 
-Commands: `fleet secret:list`, `fleet secret:set`, `fleet secret:unset` (see [cli.md](cli.md)). Changes from the command line are audited as actor `cli`.
+Commands: `fleet secret:list`, `fleet secret:set`, `fleet secret:unset` (see [01-cli.md](01-cli.md)). Changes from the command line are audited as actor `cli`.
 
 ### Names and values
 
@@ -89,7 +89,7 @@ Commands: `fleet secret:list`, `fleet secret:set`, `fleet secret:unset` (see [cl
 | Value | UTF-8, 1 byte to 64 KiB, multi-line allowed. Trailing line breaks are dropped. |
 | Write-only | Never pre-filled, listed or echoed. |
 
-The value is never an argument or an option (it would land in shell history). Use the hidden prompt or standard input: `printf '%s' "$TOKEN" | fleet secret:set JIRA_TOKEN --project=shop`.
+The value is never an argument or an option (it would land in shell history). Use the hidden prompt or standard input: `printf '%s' "$TOKEN" | fleet secret:set JIRA_TOKEN --project=website`.
 
 **Do not wrap the value in quotes.** Asset files usually quote the placeholder (`TOKEN="[[my-token]]"`), so a quoted value lands as `""abc""` and fails silently. Fleet refuses a value wrapped in one pair of quotes.
 
@@ -134,9 +134,9 @@ A placeholder resolves to the project secret, else the fleet-wide one. Built-in 
 - Values are sealed with libsodium XChaCha20-Poly1305. The key is `keys/secret.key` under the fleet home (mode 0600, created once, never in the database).
 - Each value is bound to its scope and name, so a copied row fails to open.
 - Deploy-time values are shown as `[masked]` in job logs, the live tail and error text.
-- Back up the database together with `keys/secret.key`, or every secret is lost. There is no key rotation ([backup and restore](backup-and-restore.md)).
+- Back up the database together with `keys/secret.key`, or every secret is lost. There is no key rotation ([backup and restore](06-backup-and-restore.md)).
 
 ## Learn more
 
-- [First project](../guides/first-project.md): assets and secrets in practice.
-- [Troubleshooting](troubleshooting.md): upload and symlink problems.
+- [First project](../guides/02-first-project.md): assets and secrets in practice.
+- [Troubleshooting](13-troubleshooting.md): upload and symlink problems.

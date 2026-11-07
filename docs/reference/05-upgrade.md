@@ -7,11 +7,11 @@ Type: documentation
 
 # Upgrade reference
 
-Check what the next release changes, install it with a backup and a verification, and go back if you must. This page lists the exit codes, the pre-flight checks, the JSON and history formats, and how to rehearse. For the short version see [operate](../guides/operate.md).
+Check what the next release changes, install it with a backup and a verification, and go back if you must. This page lists the exit codes, the pre-flight checks, the JSON and history formats, and how to rehearse. For the short version see [operate](../guides/07-operate.md).
 
 Upgrading is **command line only**: the installer restarts php-fpm, Caddy and Authelia, which would kill a web request that started it. The Upgrade page shows status, changelog, checks and history, plus the command to copy.
 
-`fleet upgrade --check` is read-only and needs no root; `sudo fleet upgrade` upgrades or rolls back; `fleet upgrade history` and `verify` need no root. Every option: [cli.md](cli.md).
+`fleet upgrade --check` is read-only and needs no root; `sudo fleet upgrade` upgrades or rolls back; `fleet upgrade history` and `verify` need no root. Every option: [01-cli.md](01-cli.md).
 
 ## Check
 
@@ -163,10 +163,10 @@ Never run it on a host people use (restarts, sign-outs, one database restore). E
 
 ## Hosts installed before v1.2.0
 
-They have no `fleet upgrade`: re-run the installer once with `--ref=vX.Y.Z` ([installer.md](installer.md)), then use `fleet upgrade`.
+They have no `fleet upgrade`: re-run the installer once with `--ref=vX.Y.Z` ([04-installer.md](04-installer.md)), then use `fleet upgrade`.
 
 ## Learn more
 
-- [Operate](../guides/operate.md): the short day-2 view.
-- [Backup and restore](backup-and-restore.md): the backup an upgrade takes.
-- [Troubleshooting](troubleshooting.md): upgrade problems.
+- [Operate](../guides/07-operate.md): the short day-2 view.
+- [Backup and restore](06-backup-and-restore.md): the backup an upgrade takes.
+- [Troubleshooting](13-troubleshooting.md): upgrade problems.

@@ -18,7 +18,7 @@ sudo fleet backup:create
 sudo fleet backup:verify /srv/fleet/backups/<file>
 ```
 
-Restore steps and refusals: [backup and restore](../reference/backup-and-restore.md).
+Restore steps and refusals: [backup and restore](../reference/06-backup-and-restore.md).
 
 ## Upgrading
 
@@ -27,19 +27,19 @@ fleet upgrade --check
 sudo fleet upgrade
 ```
 
-The check is read-only: it shows the changelog, rollout notes marked `ACTION:` and any blockers. The upgrade backs up the database, runs the new installer, then verifies. **Everyone is signed out** and running jobs are cut off, so pick a quiet moment. Rollback restores the database from the backup taken at the start, so later data is lost. Check ids, exit codes and rollback rules: [upgrade](../reference/upgrade.md).
+The check is read-only: it shows the changelog, rollout notes marked `ACTION:` and any blockers. The upgrade backs up the database, runs the new installer, then verifies. **Everyone is signed out** and running jobs are cut off, so pick a quiet moment. Rollback restores the database from the backup taken at the start, so later data is lost. Check ids, exit codes and rollback rules: [upgrade](../reference/05-upgrade.md).
 
 ## Moving a project
 
-1. Export it on the old host: `fleet export:project shop --output=shop.json` (add a passphrase to include secrets).
-2. On the new host: `fleet import:preview shop.json`, read the preview, then `fleet import:apply shop.json`.
-3. Copy assets: `sudo -u fleet rsync -av old-host.example.com:/srv/fleet/assets/shop/ /srv/fleet/assets/shop/`.
+1. Export it on the old host: `fleet export:project website --output=website.json` (add a passphrase to include secrets).
+2. On the new host: `fleet import:preview website.json`, read the preview, then `fleet import:apply website.json`.
+3. Copy assets: `sudo -u fleet rsync -av old-host.example.com:/srv/fleet/assets/website/ /srv/fleet/assets/website/`.
 
-Assets, users and SSH keys are not in the file. Format and limits: [export format](../reference/export-format.md).
+Assets, users and SSH keys are not in the file. Format and limits: [export format](../reference/12-export-format.md).
 
 ## Capacity
 
-Fleet reserves some CPU threads for the system, caps the number of instances, and limits each project and template with an allotment. See the numbers with `fleet host:capacity`; change the reserve and instance cap on **Host settings, Capacity**. Model: [capacity](../reference/capacity.md).
+Fleet reserves some CPU threads for the system, caps the number of instances, and limits each project and template with an allotment. See the numbers with `fleet host:capacity`; change the reserve and instance cap on **Host settings, Capacity**. Model: [capacity](../reference/10-capacity.md).
 
 ## Routine checks
 
@@ -54,7 +54,7 @@ Fleet reserves some CPU threads for the system, caps the number of instances, an
 
 ## Everyday commands
 
-The commands you reach for most, by task. Every option is in the [CLI reference](../reference/cli.md).
+The commands you reach for most, by task. Every option is in the [CLI reference](../reference/01-cli.md).
 
 | Task | Commands |
 |---|---|
@@ -66,11 +66,11 @@ The commands you reach for most, by task. Every option is in the [CLI reference]
 | Take access away | `fleet user:revoke <username> <project>` |
 | Webhook rules | `fleet webhook:list` |
 | Schedules | `fleet schedule:update`, `fleet schedule:pause`, `fleet schedule:delete` |
-| Agent workspace | `fleet tmux:list`, `fleet tmux:ensure`, `fleet tmux:reset`, `fleet tmux:sidebar` |
+| tmux workspace | `fleet tmux:list`, `fleet tmux:ensure`, `fleet tmux:reset`, `fleet tmux:sidebar` |
 | Upgrades | `fleet upgrade:check` (same as `fleet upgrade --check`), `fleet upgrade:history`, `fleet upgrade:verify` |
 
 ## Where to go next
 
-- [Secure the host](secure-the-host.md)
-- [Troubleshooting](../reference/troubleshooting.md)
-- [Files on disk](../reference/files-on-disk.md)
+- [Secure the host](08-secure-the-host.md)
+- [Troubleshooting](../reference/13-troubleshooting.md)
+- [Files on disk](../reference/03-files-on-disk.md)

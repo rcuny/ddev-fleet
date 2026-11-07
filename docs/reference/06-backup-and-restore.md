@@ -51,10 +51,10 @@ Before touching anything, `fleet backup:restore` exits 1 with a reason.
 | Wrong user. | Use `sudo fleet backup:restore`; a root `console` run leaves root-owned databases the services cannot open. |
 | The live database cannot be read. | Move it aside with `mv`, then restore into the empty place. |
 
-Moving one project between hosts is a different tool: [export-format.md](export-format.md).
+Moving one project between hosts is a different tool: [12-export-format.md](12-export-format.md).
 
 ## Learn more
 
-- [Operate](../guides/operate.md): backups in day-2 routine.
-- [Upgrade](upgrade.md): the backup an upgrade takes, and rollback.
-- [Files on disk](files-on-disk.md): paths and permissions.
+- [Operate](../guides/07-operate.md): backups in day-2 routine.
+- [Upgrade](05-upgrade.md): the backup an upgrade takes, and rollback.
+- [Files on disk](03-files-on-disk.md): paths and permissions.

@@ -7,7 +7,7 @@ Type: documentation
 
 # Capacity: allotments, slots and slices
 
-One noisy instance should not starve the host. Fleet puts a CPU ceiling on each project and template and a cap on concurrent heavy runs, so CI and agents get predictable CPU. This page is the lookup; the tuning advice is in [operate](../guides/operate.md) and the CI setup in [run CI](../guides/run-ci.md). Everything is stored per host.
+One noisy instance should not starve the host. Fleet puts a CPU ceiling on each project and template and a cap on concurrent heavy runs, so CI and agents get predictable CPU. This page is the lookup; the tuning advice is in [operate](../guides/07-operate.md) and the CI setup in [run CI](../guides/04-run-ci.md). Everything is stored per host.
 
 ## The model
 
@@ -59,7 +59,7 @@ Hierarchy: `fleet.slice` > `fleet-<project>.slice` > `fleet-<project>-<template>
 | `fleet host:capacity` | The report; `--reserve` and `--max-instances` compute a what-if without saving. |
 | `fleet host:slices` | (Re)install the slices from the database; `--print` only lists them. |
 
-Options are in [cli.md](cli.md). Limit changes reapply the slices by themselves. Run `fleet host:slices` once after an upgrade that introduces slices, or to repair a host ([upgrade](upgrade.md)). Instances created before slices existed are not under a slice until redeployed; the host page lists them.
+Options are in [01-cli.md](01-cli.md). Limit changes reapply the slices by themselves. Run `fleet host:slices` once after an upgrade that introduces slices, or to repair a host ([upgrade](05-upgrade.md)). Instances created before slices existed are not under a slice until redeployed; the host page lists them.
 
 ## What capacity does not cover
 
@@ -69,6 +69,6 @@ Options are in [cli.md](cli.md). Limit changes reapply the slices by themselves.
 
 ## Learn more
 
-- [Operate](../guides/operate.md)
-- [Run CI](../guides/run-ci.md)
-- [Configuration](configuration.md)
+- [Operate](../guides/07-operate.md)
+- [Run CI](../guides/04-run-ci.md)
+- [Configuration](02-configuration.md)

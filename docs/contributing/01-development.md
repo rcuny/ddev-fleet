@@ -47,7 +47,7 @@ PHPUnit forces `APP_ENV=test`, a temporary `FLEET_HOME` and the recording runner
 
 There is no proxy in dev and test, so a stand-in authenticator signs you in; it does not exist in `prod`. Pick the role with the `X-Fleet-Stand-In-Role` header (what browser tests use), the cookie set by visiting `/_dev/stand-in/admin|member|none`, or `FLEET_STAND_IN_ROLE`.
 
-In production the app trusts `Remote-User` and `Remote-Groups` only from a request that proves it came through the local Caddy: Caddy passes `FLEET_PROXY_SECRET` as a FastCGI parameter a client cannot set and strips every inbound `Remote-*` header. See [secure the host](../guides/secure-the-host.md).
+In production the app trusts `Remote-User` and `Remote-Groups` only from a request that proves it came through the local Caddy: Caddy passes `FLEET_PROXY_SECRET` as a FastCGI parameter a client cannot set and strips every inbound `Remote-*` header. See [secure the host](../guides/08-secure-the-host.md).
 
 ## Code style
 
@@ -58,8 +58,8 @@ In production the app trusts `Remote-User` and `Remote-Groups` only from a reque
 ## Pull requests
 
 - Branch `feature/<KEY>-<slug>` off `develop` (no `__` or `--` in the name); open the PR against `develop`.
-- Add `changelog.d/<KEY>.md` in the same branch, not a line in `CHANGELOG.md` ([releasing.md](releasing.md)).
-- Gates green ([testing.md](testing.md)). Never merge a red suite.
+- Add `changelog.d/<KEY>.md` in the same branch, not a line in `CHANGELOG.md` ([04-releasing.md](04-releasing.md)).
+- Gates green ([02-testing.md](02-testing.md)). Never merge a red suite.
 - The repository is public: no real hostnames or client names; `RepoHygieneTest` enforces it.
 - Docs tests pin guide names, command names and options, so changing a command means changing its doc.
 
@@ -74,6 +74,6 @@ In production the app trusts `Remote-User` and `Remote-Groups` only from a reque
 
 ## Learn more
 
-- [testing.md](testing.md): the gates and suites
-- [ci.md](ci.md): what CI runs on your push
+- [02-testing.md](02-testing.md): the gates and suites
+- [03-ci.md](03-ci.md): what CI runs on your push
 - `CLAUDE.md` in the repository (the architecture notes for contributors and agents)

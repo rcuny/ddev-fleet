@@ -7,7 +7,7 @@ namespace App\Tests\Repo;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/reference/upgrade.md against the code of `fleet upgrade --check`: every option, exit code, status and JSON key the
+ * docs/reference/05-upgrade.md against the code of `fleet upgrade --check`: every option, exit code, status and JSON key the
  * command has is documented.
  */
 final class UpgradeCheckDocsTest extends TestCase
@@ -19,7 +19,7 @@ final class UpgradeCheckDocsTest extends TestCase
 
     private static function doc(): string
     {
-        return (string) file_get_contents(self::root().'/docs/reference/upgrade.md');
+        return (string) file_get_contents(self::root().'/docs/reference/05-upgrade.md');
     }
 
     public function testEveryOptionOfTheCheckCommandIsDocumented(): void

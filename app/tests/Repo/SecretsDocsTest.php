@@ -7,12 +7,12 @@ namespace App\Tests\Repo;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/reference/assets-and-secrets.md must describe the secret commands as they are: every command is documented (options: CliReferenceTest), and
+ * docs/reference/08-assets-and-secrets.md must describe the secret commands as they are: every command is documented (options: CliReferenceTest), and
  * the guide names nothing the code does not have. The indexes, the CHANGELOG and CLAUDE.md point at it.
  */
 final class SecretsDocsTest extends TestCase
 {
-    private const string GUIDE = 'docs/reference/assets-and-secrets.md';
+    private const string GUIDE = 'docs/reference/08-assets-and-secrets.md';
 
     private static function root(): string
     {
@@ -152,7 +152,7 @@ final class SecretsDocsTest extends TestCase
 
     public function testTheIndexesAndAgentInstructionsPointAtTheGuide(): void
     {
-        foreach (['docs/README.md', 'docs/guides/first-project.md', 'CLAUDE.md'] as $file) {
+        foreach (['docs/README.md', 'docs/guides/02-first-project.md', 'CLAUDE.md'] as $file) {
             self::assertStringContainsString('assets-and-secrets.md', self::read($file), "$file should link the guide");
         }
         $claude = self::read('CLAUDE.md');
