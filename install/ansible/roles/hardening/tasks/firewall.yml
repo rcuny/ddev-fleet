@@ -1,0 +1,224 @@
+---
+# Part 5: UFW with the DOCKER-USER guard, the named-port sync timer and the dead-man's switch.
+- name: Read DDEV's global config (the guard assumes the router listens on loopback only)
+  ansible.builtin.slurp:
+    src: /home/fleet/.ddev/global_config.yaml
+  register: hardening_ddev_global
+  failed_when: false
+  check_mode: false
+
+- name: Refuse when DDEV's router listens on all interfaces
+  ansible.builtin.assert:
+    that: >-
+      hardening_ddev_global.content is not defined
+      or (hardening_ddev_global.content | b64decode) is not search('(?m)^router_bind_all_interfaces:\s*true')
+    fail_msg: >-
+      DDEV's router listens on all interfaces (router_bind_all_interfaces: true); the Docker guard assumes loopback
+      only. Not enabling the firewall
+
+- name: Directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+  loop: [/usr/local/sbin, /var/lib/ddev-fleet, /etc/ufw]
+
+- name: The firewall scripts
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "/usr/local/sbin/{{ item.dest }}"
+    mode: "0750"
+    owner: root
+    group: root
+  loop:
+    - {src: firewall-sync, dest: fleet-firewall-sync}
+    - {src: firewall-confirm, dest: fleet-firewall-confirm}
+    - {src: firewall-deadman-fire, dest: fleet-firewall-deadman-fire}
+
+- name: Is the firewall active, and what is staged?
+  ansible.builtin.shell: |
+    set -o pipefail
+    ufw status | grep -q '^Status: active' && echo active || echo inactive
+    echo ---
+    ufw show added
+  args:
+    executable: /bin/bash
+  register: hardening_ufw_state
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the staged rules
+  ansible.builtin.set_fact:
+    hardening_ufw_active: "{{ hardening_ufw_state.stdout_lines[0] | default('') == 'active' }}"
+    hardening_ufw_added: "{{ hardening_ufw_state.stdout_lines[2:] | default([]) }}"
+    hardening_ufw_rules: >-
+      {{ (hardening_ssh_ports | map('regex_replace', '$', '/tcp') | list) + ['80/tcp', '443/tcp']
+         + (fleet_hardening_trusted_ips | map('regex_replace', '^', 'from ') | list) }}
+
+# Allows first (SSH before anything): on an already active firewall `default deny incoming` would otherwise take
+# effect before the SSH allow exists.
+- name: Allow SSH, 80, 443 and the trusted addresses
+  ansible.builtin.command: "ufw allow {{ item }}"
+  loop: "{{ hardening_ufw_rules }}"
+  when: ('ufw allow ' ~ item) not in hardening_ufw_added
+  changed_when: true
+
+- name: Read the default policies
+  ansible.builtin.slurp:
+    src: /etc/default/ufw
+  register: hardening_ufw_default
+  check_mode: false
+
+- name: Default allow outgoing
+  ansible.builtin.command: ufw default allow outgoing
+  when: (hardening_ufw_default.content | b64decode) is not search('(?m)^DEFAULT_OUTPUT_POLICY="ACCEPT"')
+  changed_when: true
+
+- name: Default deny incoming
+  ansible.builtin.command: ufw default deny incoming
+  when: (hardening_ufw_default.content | b64decode) is not search('(?m)^DEFAULT_INPUT_POLICY="DROP"')
+  changed_when: true
+
+- name: The DOCKER-USER guard, first thing in after.rules
+  ansible.builtin.blockinfile:
+    path: /etc/ufw/after.rules
+    insertbefore: BOF
+    marker: "# {mark} ddev-fleet DOCKER-USER guard"
+    marker_begin: BEGIN
+    marker_end: END
+    mode: "0640"
+    owner: root
+    group: root
+    block: |
+      *filter
+      :DOCKER-USER - [0:0]
+      -A DOCKER-USER -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+      -A DOCKER-USER -i docker0 -o docker0 -j ACCEPT
+      -A DOCKER-USER -j RETURN
+      COMMIT
+  notify: Reload ufw
+
+- name: Staged rules after the allows
+  ansible.builtin.command: ufw show added
+  register: hardening_ufw_added_now
+  changed_when: false
+  check_mode: false
+
+- name: Refuse unless the SSH ports are staged
+  ansible.builtin.assert:
+    that: hardening_ufw_added_now.stdout is search('(^|[^0-9])' ~ item ~ '([^0-9]|$)')
+    fail_msg: the SSH port {{ item }} is not staged in the firewall rules; refusing to enable the firewall
+  loop: "{{ hardening_ssh_ports }}"
+  when: not ansible_check_mode
+
+- name: Systemd units of the dead-man's switch and the sync
+  ansible.builtin.copy:
+    src: "{{ item.src }}"
+    dest: "/etc/systemd/system/{{ item.dest }}"
+    mode: "0644"
+    owner: root
+    group: root
+  loop:
+    - {src: firewall-deadman.service, dest: fleet-firewall-deadman.service}
+    - {src: firewall-deadman-bootcheck.service, dest: fleet-firewall-deadman-bootcheck.service}
+    - {src: firewall-sync.service, dest: fleet-firewall-sync.service}
+    - {src: firewall-sync.timer, dest: fleet-firewall-sync.timer}
+  notify: Reload systemd
+
+- name: The dead-man's timer (grace period)
+  ansible.builtin.template:
+    src: firewall-deadman.timer.j2
+    dest: /etc/systemd/system/fleet-firewall-deadman.timer
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Reload systemd
+
+- name: Make the units known
+  ansible.builtin.meta: flush_handlers
+
+- name: Open the named ports before the enable (not fatal; the timer retries every minute)
+  ansible.builtin.command: /usr/local/sbin/fleet-firewall-sync
+  register: hardening_sync
+  changed_when: "'opened' in hardening_sync.stdout or 'closed' in hardening_sync.stdout"
+  failed_when: false
+
+- name: Is the switch confirmed, and what did the last run store?
+  ansible.builtin.stat:
+    path: "{{ fleet_etc_dir }}/firewall-confirmed"
+  register: hardening_marker
+
+- name: Read what the last run stored
+  ansible.builtin.slurp:
+    src: "{{ fleet_etc_dir }}/hardening.conf"
+  register: hardening_old_conf
+  failed_when: false
+  check_mode: false
+
+- name: Parse what the last run stored
+  ansible.builtin.set_fact:
+    hardening_old_ports: >-
+      {{ (hardening_old_conf.content | default('') | b64decode | regex_search('(?m)^SSH_PORTS=(.*)$', '\\1') | default([''], true) | first).split() | sort }}
+    hardening_old_ips: >-
+      {{ (hardening_old_conf.content | default('') | b64decode | regex_search('(?m)^TRUSTED_IPS=(.*)$', '\\1') | default([''], true) | first).split() | sort }}
+
+- name: Decide whether the switch must be armed
+  ansible.builtin.set_fact:
+    hardening_enable_now: "{{ not hardening_ufw_active }}"
+    hardening_changed: >-
+      {{ hardening_ufw_active and hardening_marker.stat.exists
+         and (hardening_ssh_ports | sort != hardening_old_ports or hardening_trusted_ips_sorted != hardening_old_ips) }}
+  vars:
+    hardening_trusted_ips_sorted: "{{ fleet_hardening_trusted_ips | sort }}"
+
+- name: Arm
+  ansible.builtin.set_fact:
+    hardening_armed: "{{ hardening_enable_now or not hardening_marker.stat.exists or hardening_changed }}"
+    hardening_marker_after: "{{ hardening_marker.stat.exists and not (hardening_enable_now or hardening_changed) }}"
+
+- name: A (re-)enable or a change proves another firewall state, so forget the confirmation
+  ansible.builtin.file:
+    path: "{{ fleet_etc_dir }}/firewall-confirmed"
+    state: absent
+  when: hardening_enable_now or hardening_changed
+
+- name: The boot check exists only while the switch is armed or confirmed
+  ansible.builtin.systemd_service:
+    name: fleet-firewall-deadman-bootcheck.service
+    enabled: "{{ hardening_armed or hardening_marker_after }}"
+
+# Armed BEFORE "ufw --force enable": if the enable drops this SSH session the timer and the boot check must already be
+# in place to turn the firewall off again.
+- name: Arm the dead-man's switch
+  ansible.builtin.systemd_service:
+    name: fleet-firewall-deadman.timer
+    state: restarted
+  when: hardening_armed
+
+- name: Tell the operator to confirm
+  ansible.builtin.debug:
+    msg: >-
+      FIREWALL ENABLED with a dead-man's switch: it turns the firewall OFF again in
+      {{ fleet_hardening_firewall_grace_minutes }} minutes unless you confirm. From a SECOND, independent SSH
+      session run:  sudo /usr/local/sbin/fleet-firewall-confirm
+  when: hardening_armed
+
+- name: Enable the firewall
+  ansible.builtin.command: ufw --force enable
+  when: hardening_enable_now
+  changed_when: true
+
+- name: Open the named ports right away
+  ansible.builtin.command: /usr/local/sbin/fleet-firewall-sync
+  when: hardening_enable_now
+  changed_when: false
+  failed_when: false
+
+- name: Keep the named ports in step every minute
+  ansible.builtin.systemd_service:
+    name: fleet-firewall-sync.timer
+    enabled: true
+    state: started

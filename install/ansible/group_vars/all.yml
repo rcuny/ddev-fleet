@@ -1,0 +1,67 @@
+---
+# Defaults only: nothing host-specific lives here (see host-vars.example.yml).
+fleet_packages:
+  - ca-certificates
+  - gnupg
+  - curl
+  - git
+  - sudo
+  - acl
+  - openssl
+  - unzip
+  - jq
+  - openssh-client
+  - libnss3-tools
+  - iproute2
+  - tmux
+  - composer
+  - php8.4-fpm
+  - php8.4-cli
+  - php8.4-opcache
+  - php8.4-sqlite3
+  - php8.4-intl
+  - php8.4-mbstring
+  - php8.4-xml
+  - php8.4-curl
+  - php8.4-zip
+
+fleet_etc_dir: /etc/ddev-fleet
+fleet_keyring_dir: /etc/apt/keyrings
+
+# docker
+fleet_docker_key_url: https://download.docker.com/linux/debian/gpg
+fleet_docker_key_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+fleet_docker_pool_base: 10.64.0.0
+fleet_docker_pool_prefix: 10
+# Docker's built-in pools first (so existing networks stay valid), then the fleet pool is appended.
+fleet_docker_builtin_pools:
+  - {base: 172.17.0.0/16, size: 16}
+  - {base: 172.18.0.0/16, size: 16}
+  - {base: 172.19.0.0/16, size: 16}
+  - {base: 172.20.0.0/16, size: 16}
+  - {base: 172.21.0.0/16, size: 16}
+  - {base: 172.22.0.0/16, size: 16}
+  - {base: 172.23.0.0/16, size: 16}
+  - {base: 172.24.0.0/16, size: 16}
+  - {base: 172.25.0.0/16, size: 16}
+  - {base: 172.26.0.0/16, size: 16}
+  - {base: 172.27.0.0/16, size: 16}
+  - {base: 172.28.0.0/16, size: 16}
+  - {base: 172.29.0.0/16, size: 16}
+  - {base: 172.30.0.0/16, size: 16}
+  - {base: 172.31.0.0/16, size: 16}
+  - {base: 192.168.0.0/16, size: 20}
+
+# hardening (opt-in)
+fleet_hardening_enabled: false
+fleet_hardening_ssh_allow_users: []
+fleet_hardening_trusted_ips: []
+fleet_hardening_firewall_grace_minutes: 10
+fleet_hardening_tmp: false
+# Empty = ask sshd / ssh.socket. Set only to override.
+fleet_hardening_ssh_ports: []
+# true: refuse a lock-out (the account running this must have a key, nobody else with a key may be shut out).
+# false: only warn (an unattended re-run such as an upgrade).
+fleet_hardening_strict: true
+# The account whose access must survive; empty = the user who called sudo, else the connecting user.
+fleet_hardening_invoking_user: ""

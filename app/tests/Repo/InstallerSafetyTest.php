@@ -45,7 +45,7 @@ final class InstallerSafetyTest extends TestCase
         self::assertStringContainsString('return 0', $step);
         $callers = [];
         foreach (self::installFiles() as $file) {
-            if (!str_starts_with($file, self::installDir().'/harden/') && str_contains((string) file_get_contents($file), 'harden/harden.sh')) {
+            if (!str_starts_with($file, self::installDir().'/harden/') && !str_starts_with($file, self::installDir().'/ansible/') && str_contains((string) file_get_contents($file), 'harden/harden.sh')) {
                 $callers[] = basename($file);
             }
         }
@@ -299,7 +299,8 @@ final class InstallerSafetyTest extends TestCase
         $hits = [];
         foreach (self::installFiles() as $file) {
             // FLE-211: the opt-in hardening lives in install/harden/ and nowhere else (see testHardeningStaysInItsOwnDirectory).
-            if (str_starts_with($file, self::installDir().'/harden/')) {
+            // FLE-241 (spike): the Ansible port of the hardening lives in install/ansible/roles/hardening/ and is not run by the installer.
+            if (str_starts_with($file, self::installDir().'/harden/') || str_starts_with($file, self::installDir().'/ansible/')) {
                 continue;
             }
             foreach (self::codeLines($file) as $number => $line) {

@@ -1,0 +1,12 @@
+# Installed by ddev-fleet host hardening (install --harden), enabled while the firewall is managed.
+# A named port added or removed in Fleet reaches the firewall within a minute.
+[Unit]
+Description=ddev-fleet firewall named-port sync every minute
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=1min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Installed by ddev-fleet host hardening (install --harden) as /usr/local/sbin/fleet-firewall-confirm.
+# Run it as root from a SECOND, INDEPENDENT SSH session (never the one that enabled the firewall) to prove the host is
+# still reachable before the dead-man's switch's grace period ends.
+set -euo pipefail
+
+MARKER=${FLEET_FIREWALL_MARKER:-/etc/ddev-fleet/firewall-confirmed}
+
+# Marker FIRST, then stop the timer: if the timer fires between the two, the fire script sees the marker and keeps the
+# firewall on. Stopping first would leave a window where it sees no marker and turns the firewall off.
+mkdir -p "$(dirname "$MARKER")"
+touch "$MARKER"
+systemctl stop fleet-firewall-deadman.timer 2>/dev/null || true
+echo "fleet-firewall-confirm: marker written at $MARKER; the dead-man's switch timer is stopped"

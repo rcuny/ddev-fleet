@@ -1,0 +1,6 @@
+# Managed by ddev-fleet host hardening (install --harden); edits are overwritten on the next run.
+PasswordAuthentication no
+KbdInteractiveAuthentication no
+PermitRootLogin prohibit-password
+MaxAuthTries 3
+AllowUsers {{ hardening_users | join(' ') }}

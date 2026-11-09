@@ -1,0 +1,7 @@
+# Managed by ddev-fleet host hardening (install --harden). Fires once, {{ fleet_hardening_firewall_grace_minutes }} minutes after it is started.
+[Unit]
+Description=ddev-fleet firewall dead-man's switch timer ({{ fleet_hardening_firewall_grace_minutes }} minutes)
+
+[Timer]
+OnActiveSec={{ fleet_hardening_firewall_grace_minutes }}min
+Unit=fleet-firewall-deadman.service

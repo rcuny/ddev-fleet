@@ -1,0 +1,4 @@
+# Installed by ddev-fleet host hardening (install --harden --harden-tmp). Takes effect at the next boot.
+# Undo: delete this file and reboot (or systemctl daemon-reload and remount /tmp).
+[Mount]
+Options={{ hardening_tmp_opts }}
