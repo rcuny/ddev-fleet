@@ -158,12 +158,17 @@
   failed_when: false
   check_mode: false
 
-- name: Parse what the last run stored
+- name: Parse what the last run stored (KEY=value lines, comments ignored)
   ansible.builtin.set_fact:
-    hardening_old_ports: >-
-      {{ (hardening_old_conf.content | default('') | b64decode | regex_search('(?m)^SSH_PORTS=(.*)$', '\\1') | default([''], true) | first).split() | sort }}
-    hardening_old_ips: >-
-      {{ (hardening_old_conf.content | default('') | b64decode | regex_search('(?m)^TRUSTED_IPS=(.*)$', '\\1') | default([''], true) | first).split() | sort }}
+    hardening_old: >-
+      {{ dict((hardening_old_conf.content | default('') | b64decode).splitlines()
+              | select('match', '^[A-Z_]+=')
+              | map('split', '=', 1) | list) }}
+
+- name: Take the stored ports and addresses
+  ansible.builtin.set_fact:
+    hardening_old_ports: "{{ (hardening_old['SSH_PORTS'] | default('')).split() | sort }}"
+    hardening_old_ips: "{{ (hardening_old['TRUSTED_IPS'] | default('')).split() | sort }}"
 
 - name: Decide whether the switch must be armed
   ansible.builtin.set_fact:

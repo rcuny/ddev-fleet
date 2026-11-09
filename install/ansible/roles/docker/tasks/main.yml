@@ -108,17 +108,25 @@
         owner: root
         group: root
 
-    - name: Fetch the signing key
+    - name: Private temporary file for the key
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .asc
+      register: docker_key_tmp
+      changed_when: false
+      check_mode: false
+
+    - name: Fetch the signing key into a temporary file (read-only, so a check run stays quiet)
       ansible.builtin.get_url:
         url: "{{ fleet_docker_key_url }}"
-        dest: "{{ fleet_keyring_dir }}/docker.asc"
-        mode: "0644"
-        owner: root
-        group: root
+        dest: "{{ docker_key_tmp.path }}"
+        mode: "0600"
         force: true
+      changed_when: false
+      check_mode: false
 
     - name: Read its primary fingerprint
-      ansible.builtin.command: gpg --show-keys --with-colons --fingerprint "{{ fleet_keyring_dir }}/docker.asc"
+      ansible.builtin.command: gpg --show-keys --with-colons --fingerprint "{{ docker_key_tmp.path }}"
       register: docker_gpg
       changed_when: false
       check_mode: false
@@ -127,6 +135,23 @@
       ansible.builtin.assert:
         that: (docker_gpg.stdout_lines | select('match', '^fpr:') | first) is search(fleet_docker_key_fingerprint)
         fail_msg: the signing key from {{ fleet_docker_key_url }} does not have the pinned fingerprint; refusing to trust it
+
+    - name: Install the verified key (changes only when the content differs)
+      ansible.builtin.copy:
+        src: "{{ docker_key_tmp.path }}"
+        dest: "{{ fleet_keyring_dir }}/docker.asc"
+        remote_src: true
+        mode: "0644"
+        owner: root
+        group: root
+      notify: Refresh the apt cache
+
+    - name: Remove the temporary key
+      ansible.builtin.file:
+        path: "{{ docker_key_tmp.path }}"
+        state: absent
+      changed_when: false
+      check_mode: false
 
 - name: Docker apt source
   ansible.builtin.copy:
