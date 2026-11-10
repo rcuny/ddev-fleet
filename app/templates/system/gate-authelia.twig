@@ -1,7 +1,8 @@
 {% autoescape false %}
 # Fleet gate, normal mode. Written by the app (GateWriter); imported from the main Caddyfile inside the identity route.
-# Everything except /health and the signed webhooks (/hooks/*) needs an Authelia session.
-@fleet_gated not path /health /hooks/*
+# Everything except /health, the signed webhooks (/hooks/*) and the bearer-token API (/api/v1/*) needs an Authelia session.
+# /api/v1/* authenticates in the app (own firewall, no proxy identity); the Caddyfile strips Remote-* before this gate.
+@fleet_gated not path /health /hooks/* /api/v1/*
 forward_auth @fleet_gated {{ authelia }} {
     uri /api/authz/forward-auth
     copy_headers {{ copy_headers|join(' ') }}

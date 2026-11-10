@@ -70,12 +70,21 @@ final class GateWriterTest extends TestCase
         self::assertSame(['validate', 'reload'], $verbs);
     }
 
+    public function testSetupGateClosesTheApiToo(): void
+    {
+        $this->writer()->write(GateMode::Setup);
+
+        $gate = (string) file_get_contents($this->gate($this->root.'/srv/caddy'));
+        // The closed matcher is "not one of the wizard paths": /api/v1/* is not listed, so it is redirected like any path.
+        self::assertStringNotContainsString('/api', $gate);
+    }
+
     public function testAutheliaGateExemptsHealthAndHooks(): void
     {
         $this->writer()->write(GateMode::Authelia);
 
         $gate = (string) file_get_contents($this->gate($this->root.'/srv/caddy'));
-        self::assertStringContainsString("@fleet_gated not path /health /hooks/*\n", $gate);
+        self::assertStringContainsString("@fleet_gated not path /health /hooks/* /api/v1/*\n", $gate);
         self::assertStringContainsString("forward_auth @fleet_gated 127.0.0.1:9091 {\n    uri /api/authz/forward-auth\n    copy_headers Remote-User Remote-Groups Remote-Name Remote-Email\n}\n", $gate);
         self::assertStringNotContainsString('redir', $gate);
     }

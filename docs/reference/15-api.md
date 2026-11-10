@@ -2,7 +2,16 @@
 
 The API lives under `/api/v1/` on the same host name as the web interface and answers JSON. This page covers the foundation: how a caller authenticates and what a token may do. The endpoints are added release by release: the read endpoints are below (`GET` only, scope `read`) and so are the write endpoints.
 
-> **Status:** the firewall, the token store and the checks described here are in the app. Reaching `/api/v1/` from outside additionally needs the Caddy route that bypasses the login gate for that path only (a separate change). Until then the login portal answers first.
+> **Status:** the firewall, the token store and the checks described here are in the app, and Caddy lets `/api/v1/*` through the login gate (see "Network path" below).
+
+## Network path
+
+Caddy skips the Authelia login for `/api/v1/*` and for nothing else under `/api/`, because the callers are machines. The route is the same host name and certificate as the web interface:
+
+- **Identity headers are stripped first.** Every `Remote-*` and `Remote_*` request header is removed on every path before the gate and before the app, so a forged `Remote-User: admin` never reaches PHP. On the straight `/api/v1/` path the `api` firewall also has no proxy-identity authenticator, a second guard; on odd spellings (upper case, doubled slash) the Caddy strip is the only layer, and a test sends them through a real Caddy. A test runs the rendered Caddyfile against a real Caddy (`app/tests/Repo/RenderedCaddyApiRouteTest.php`, needs `FLEET_CADDY_STOCK_BIN`).
+- **TLS only.** The site address is HTTPS; Caddy redirects plain HTTP itself and no extra listener or firewall rule is added.
+- **Limits.** Request bodies are capped at 1 MB (`413` above), the upstream read and write timeout is 30 seconds, and responses carry `Cache-Control: no-store`. No CORS header is sent: the API is not called from a browser.
+- During setup (before the wizard is finished) the setup gate redirects everything but the wizard, so the API is closed until then (a test pins that the setup gate does not list `/api`).
 
 ## Authenticating
 
