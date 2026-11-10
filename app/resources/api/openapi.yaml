@@ -27,6 +27,9 @@ paths:
       tags: [host]
       x-scope: read
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The OpenAPI 3.1 document, content: {application/json: {schema: {type: object}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/tokens/self:
@@ -36,6 +39,9 @@ paths:
       tags: [host]
       x-scope: any
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The token, content: {application/json: {schema: {$ref: "#/components/schemas/TokenSelf"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/host:
@@ -45,6 +51,9 @@ paths:
       tags: [host]
       x-scope: read
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The host, content: {application/json: {schema: {$ref: "#/components/schemas/Host"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/host/capacity:
@@ -57,6 +66,10 @@ paths:
         - {name: project, in: query, schema: {type: string}}
         - {name: template, in: query, description: Needs `project`. Defaults to the project's default template., schema: {type: string}}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The capacity report, content: {application/json: {schema: {$ref: "#/components/schemas/Capacity"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/upgrade:
@@ -66,6 +79,9 @@ paths:
       tags: [host]
       x-scope: read
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The upgrade state, content: {application/json: {schema: {$ref: "#/components/schemas/Upgrade"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/webhooks/log:
@@ -81,6 +97,9 @@ paths:
         - {$ref: "#/components/parameters/Limit"}
         - {$ref: "#/components/parameters/Cursor"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200":
           description: A page of deliveries
           content:
@@ -102,6 +121,9 @@ paths:
         - {$ref: "#/components/parameters/Limit"}
         - {$ref: "#/components/parameters/Cursor"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200":
           description: A page of projects
           content:
@@ -122,6 +144,10 @@ paths:
       parameters:
         - {name: project, in: path, required: true, schema: {type: string}}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The project, content: {application/json: {schema: {$ref: "#/components/schemas/Object"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/projects/{project}/templates:
@@ -135,6 +161,10 @@ paths:
         - {$ref: "#/components/parameters/Limit"}
         - {$ref: "#/components/parameters/Cursor"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200":
           description: A page of templates
           content:
@@ -156,6 +186,10 @@ paths:
         - {name: project, in: path, required: true, schema: {type: string}}
         - {name: template, in: path, required: true, schema: {type: string}}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The template, content: {application/json: {schema: {$ref: "#/components/schemas/Object"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances:
@@ -172,6 +206,9 @@ paths:
         - {$ref: "#/components/parameters/Limit"}
         - {$ref: "#/components/parameters/Cursor"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200":
           description: A page of instances
           content:
@@ -201,6 +238,12 @@ paths:
                 branch: {type: string}
                 label: {type: string}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances/{id}:
@@ -212,6 +255,10 @@ paths:
       parameters:
         - {$ref: "#/components/parameters/InstanceId"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200":
           description: The instance
           content:
@@ -228,11 +275,18 @@ paths:
       operationId: destroyInstance
       summary: Destroy an instance. `If-Match` (the instance's `created_at`) is mandatory; protected instances are refused.
       tags: [operations]
-      x-scope: lifecycle:destroy
+      x-scope: [lifecycle, "lifecycle:destroy"]
       parameters:
         - {$ref: "#/components/parameters/InstanceId"}
         - {name: If-Match, in: header, required: true, schema: {type: string}}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/PreconditionFailed"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances/{id}/redeploy:
@@ -253,6 +307,12 @@ paths:
                 branch: {type: string}
                 force: {type: boolean}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances/{id}/start:
@@ -264,6 +324,11 @@ paths:
       parameters:
         - {$ref: "#/components/parameters/InstanceId"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances/{id}/stop:
@@ -275,6 +340,11 @@ paths:
       parameters:
         - {$ref: "#/components/parameters/InstanceId"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances:destroy-batch:
@@ -282,7 +352,7 @@ paths:
       operationId: destroyInstancesBatch
       summary: Destroy up to 20 instances in one call; one job per id, partial results.
       tags: [operations]
-      x-scope: lifecycle:destroy
+      x-scope: [lifecycle, "lifecycle:destroy"]
       requestBody:
         required: true
         content:
@@ -297,6 +367,10 @@ paths:
                   description: Per-id `created_at`, required for protected-instance checks.
                   additionalProperties: {type: string}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "207":
           description: One result per id
           content:
@@ -333,6 +407,9 @@ paths:
         - {$ref: "#/components/parameters/Limit"}
         - {$ref: "#/components/parameters/Cursor"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200":
           description: A page of jobs
           content:
@@ -353,6 +430,10 @@ paths:
       parameters:
         - {$ref: "#/components/parameters/JobId"}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200": {description: The job, content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/jobs/{id}/log:
@@ -365,6 +446,10 @@ paths:
         - {$ref: "#/components/parameters/JobId"}
         - {name: offset, in: query, description: Byte offset, 0 or more., schema: {type: integer, minimum: 0, default: 0}}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "200":
           description: Log text
           headers:
@@ -379,11 +464,19 @@ paths:
       operationId: retryJob
       summary: Retry a job. A retried destroy needs `If-Match` like a new one.
       tags: [operations]
-      x-scope: deploy or lifecycle
+      x-scope: [deploy, lifecycle, "lifecycle:destroy"]
+      x-scope-note: Depends on the retried job. deploy for a deploy or redeploy, lifecycle for start and stop, lifecycle and lifecycle:destroy for a destroy.
       parameters:
         - {$ref: "#/components/parameters/JobId"}
         - {name: If-Match, in: header, schema: {type: string}}
       responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/PreconditionFailed"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+        "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
         default: {$ref: "#/components/responses/Problem"}
 components:
@@ -406,6 +499,50 @@ components:
             required: [job]
             properties:
               job: {$ref: "#/components/schemas/JobRef"}
+    Unauthorized:
+      description: No valid token. The body never says why (missing, unknown, expired, revoked or wrong address).
+      headers:
+        WWW-Authenticate: {required: true, schema: {type: string}}
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Forbidden:
+      description: The token lacks the operation's scope (`scope_missing`), cannot reach the project (`project_not_allowed`) or is limited to some projects on a host-wide read (`host_wide_not_allowed`).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    RateLimited:
+      description: Too many requests (`rate_limited`), or on deploy no capacity for another run (`capacity_full`, with `verdict`). Wait `Retry-After` seconds.
+      headers:
+        Retry-After: {required: true, schema: {type: integer}}
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    NotFound:
+      description: The project, template, instance or job does not exist, or is not visible to the token (`not_found`).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Conflict:
+      description: The instance is busy with another job (`instance_busy`), or it is protected and cannot be destroyed (`protected_instance`).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    PreconditionFailed:
+      description: "`stale_if_match`: the instance was recreated since the `If-Match` value was read; nothing was done."
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    PreconditionRequired:
+      description: "`if_match_required`: destroying needs an `If-Match` header with the instance's `created_at`."
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    ValidationFailed:
+      description: "`validation_failed`: the body was refused; `errors` maps field to reason."
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
     Problem:
       description: An error (RFC 9457). 401 never says why; 403 names the missing scope; 429 carries `Retry-After`.
       content:

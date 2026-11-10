@@ -56,6 +56,7 @@ final class ApiTokenIssuerTest extends KernelTestCase
     public static function invalid(): iterable
     {
         yield 'upper-case name' => ['CI', '192.0.2.1'];
+        yield 'name with a colon (the audit actor token:<id>:<name> must split)' => ['ci:prod', '192.0.2.1'];
         yield 'name with a space' => ['my token', '192.0.2.1'];
         yield 'empty name' => ['', '192.0.2.1'];
         yield 'long name' => [str_repeat('a', 33), '192.0.2.1'];

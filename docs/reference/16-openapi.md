@@ -11,7 +11,7 @@ The HTTP API ([api.md](15-api.md)) is described by an OpenAPI 3.1 document, so a
 curl -fsS -H "Authorization: Bearer $FLEET_TOKEN" https://fleet.example.com/api/v1/openapi.json
 ```
 
-Each operation carries `x-scope`, the scope the token needs (`read`, `deploy`, `lifecycle`, `lifecycle:destroy`, or `any`). Every error response is `application/problem+json` (the `Problem` schema).
+Each operation carries `x-scope`, the scope the token needs (`read`, `deploy`, `lifecycle`, `lifecycle:destroy`, or `any`; a list when the operation needs several, and for `retry` the scope of the retried job). A functional test checks the scopes against the code: a token without one of them gets 403. Every operation declares its error responses (401, 403 and 429 with `Retry-After` on all, 404, 409, 412, 422 and 428 where they apply), each as a reusable `components/responses` entry. Every error response is `application/problem+json` (the `Problem` schema).
 
 ## How it is kept true
 

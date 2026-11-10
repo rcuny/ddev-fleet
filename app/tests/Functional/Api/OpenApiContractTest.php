@@ -47,7 +47,11 @@ final class OpenApiContractTest extends AdminTestCase
         new TemplateRepository($em)->save(new Template($project, 'full'));
         $instance = new Instance($project, 'i1', 'full', 'develop', 'admin');
         $instance->changeState(InstanceState::Running);
-        new InstanceRepository($em)->createMany([$instance]);
+        $extra = [new Instance($project, 'i2', 'full', 'develop', 'admin'), new Instance($project, 'i3', 'full', 'develop', 'admin'), new Instance($project, 'main', 'full', 'develop', 'admin')];
+        foreach ($extra as $other) {
+            $other->changeState(InstanceState::Running);
+        }
+        new InstanceRepository($em)->createMany([$instance, ...$extra]);
         $repo = new WebhookRepository($em);
         $repo->saveDelivery(new WebhookDelivery(new \DateTimeImmutable(), 'acme', WebhookSource::Jira, 'jira:issue_updated', 'd-1', WebhookDelivery::ACCEPTED, null, 'FLE-1', null, null, 'deploy'));
         $repo->flush();
@@ -145,6 +149,8 @@ final class OpenApiContractTest extends AdminTestCase
         new JobRepository($em)->add($job);
         $created = new InstanceRepository($em)->find('acme--i1')?->createdAt()->format(\DATE_ATOM) ?? '';
         $jid = (string) $job->id();
+        $i3Created = new InstanceRepository($em)->find('acme--i3')?->createdAt()->format(\DATE_ATOM) ?? '';
+        $readOnly = $this->token->secret;
 
         $calls = [
             ['GET', '/api/v1/openapi.json', ''],
@@ -169,12 +175,28 @@ final class OpenApiContractTest extends AdminTestCase
             ['POST', '/api/v1/instances/acme--i1/start', ''],
             ['POST', '/api/v1/jobs/'.$jid.'/retry', ''],
             ['POST', '/api/v1/instances:destroy-batch', '{"ids":["acme--i1"],"if_match":{"acme--i1":"'.$created.'"}}'],
+            // Error and conflict responses: each must be declared by its operation and fit the Problem schema.
+            ['GET', '/api/v1/host', '', 'flt_nope', [], 401],
+            ['POST', '/api/v1/instances/acme--i2/stop', '', $readOnly, [], 403],
+            ['GET', '/api/v1/jobs/999999', '', null, [], 404],
+            ['POST', '/api/v1/instances', '{}', null, [], 422],
+            ['POST', '/api/v1/instances:destroy-batch', '{}', null, [], 422],
+            ['POST', '/api/v1/instances/acme--i2/redeploy', '{}', null, [], 202],
+            ['DELETE', '/api/v1/instances/acme--main', '', null, [], 409],
+            ['DELETE', '/api/v1/instances/acme--i3', '', null, [], 428],
+            ['DELETE', '/api/v1/instances/acme--i3', '', null, ['HTTP_IF_MATCH' => '2000-01-01T00:00:00+00:00'], 412],
+            ['DELETE', '/api/v1/instances/acme--i3', '', null, ['HTTP_IF_MATCH' => $i3Created], 202],
+            ['DELETE', '/api/v1/instances/nope', '', null, [], 404],
         ];
         $seen = [];
-        foreach ($calls as [$method, $uri, $body]) {
-            $decoded = $this->call($method, $uri, $body);
+        foreach ($calls as $call) {
+            [$method, $uri, $body, $bearer, $headers, $expected] = $call + [3 => null, 4 => [], 5 => null];
+            $decoded = $this->call($method, $uri, $body, $bearer, $headers);
             $response = $this->client->getResponse();
             $status = (string) $response->getStatusCode();
+            if (null !== $expected) {
+                self::assertSame($expected, $response->getStatusCode(), "$method $uri");
+            }
             $path = $this->specPath($spec, $method, $uri);
             $operation = $spec['paths'][$path][strtolower($method)];
             $declared = $schema->resolve($operation['responses'][$status] ?? $operation['responses']['default']);
@@ -191,9 +213,71 @@ final class OpenApiContractTest extends AdminTestCase
             }
             $seen[$operation['operationId']] = true;
         }
-        foreach (['getInstance', 'listJobs', 'getJobLog', 'stopInstance', 'destroyInstancesBatch', 'retryJob', 'getUpgrade'] as $id) {
+        foreach (['getInstance', 'listJobs', 'getJobLog', 'stopInstance', 'destroyInstancesBatch', 'retryJob', 'getUpgrade', 'redeployInstance', 'destroyInstance'] as $id) {
             self::assertArrayHasKey($id, $seen);
         }
+    }
+
+    /**
+     * Every operation's `x-scope` is what the code enforces: a token holding all but one of the listed scopes gets 403,
+     * a token holding all of them does not.
+     */
+    public function testScopesDeclaredInTheSpecAreTheOnesEnforced(): void
+    {
+        $spec = $this->spec();
+        $issuer = self::getContainer()->get(ApiTokenIssuer::class);
+        self::assertInstanceOf(ApiTokenIssuer::class, $issuer);
+        $em = $this->em();
+        $job = new Job('start', 'acme--i1', 'acme', JobTrigger::Cli, 'admin', []);
+        $job->markRunning(new \DateTimeImmutable());
+        $job->finish(JobStatus::Failed, 1, 'boom', new \DateTimeImmutable());
+        new JobRepository($em)->add($job);
+        $uris = ['{project}' => 'acme', '{template}' => 'full', '{id}' => 'acme--i1'];
+        $n = 0;
+        $checked = 0;
+        foreach ($spec['paths'] as $path => $operations) {
+            foreach ($operations as $method => $operation) {
+                $scopes = (array) $operation['x-scope'];
+                if (['any'] === $scopes) {
+                    continue;
+                }
+                // Retry needs the scope of the retried job; the job here is a start.
+                if ('retryJob' === $operation['operationId']) {
+                    $scopes = ['lifecycle'];
+                }
+                $uri = strtr((string) $path, $uris);
+                if (str_contains($uri, '/jobs/')) {
+                    $uri = str_replace('acme--i1', (string) $job->id(), $uri);
+                }
+                $needed = array_map(static fn (string $s): ApiScope => ApiScope::from($s), $scopes);
+                $read = ['read'] === $scopes;
+                $variants = ['all' => $needed];
+                foreach ($needed as $i => $_) {
+                    $variants['without '.$scopes[$i]] = array_values(array_filter($needed, static fn (ApiScope $s): bool => $s !== $needed[$i]));
+                }
+                foreach ($variants as $label => $held) {
+                    $isAll = 'all' === $label;
+                    $held = [] === $held ? [ApiScope::Read] : array_values($held);
+                    // A token without the base scope cannot carry the flag alone: add an unrelated one.
+                    if (!$isAll && \in_array(ApiScope::LifecycleDestroy, $held, true) && !\in_array(ApiScope::Lifecycle, $held, true)) {
+                        $held = [ApiScope::Deploy];
+                    }
+                    if ($read && !$isAll) {
+                        $held = [ApiScope::Deploy];
+                    }
+                    $token = $issuer->issue('sc'.++$n, 'test', $held, $read && $isAll ? ['*'] : ['acme'], [], [], new \DateTimeImmutable('+30 days'), 'cli');
+                    $this->call(strtoupper((string) $method), $uri, 'POST' === strtoupper((string) $method) ? '{}' : '', $token->secret, 'DELETE' === strtoupper((string) $method) ? ['HTTP_IF_MATCH' => 'x'] : []);
+                    $status = $this->client->getResponse()->getStatusCode();
+                    if ($isAll) {
+                        self::assertNotSame(403, $status, "$method $path with $label");
+                    } else {
+                        self::assertSame(403, $status, "$method $path $label");
+                    }
+                    ++$checked;
+                }
+            }
+        }
+        self::assertGreaterThan(40, $checked);
     }
 
     /**
