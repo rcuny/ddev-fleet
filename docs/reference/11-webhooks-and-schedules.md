@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Webhooks and schedules
 
 Instances can be created by events you choose: a Jira issue enters a status, a branch is pushed, or a clock strikes 03:00. This page is the lookup for how Fleet authenticates, matches and deduplicates those events and how schedules fire. To set one up, follow [automate deploys](../guides/03-automate-deploys.md); for CI pipelines see [run CI](../guides/04-run-ci.md). Both features are for administrators and queue the same jobs a person would.

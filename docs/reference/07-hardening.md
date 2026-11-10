@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Hardening reference
 
 Hardening locks down SSH and the firewall on a host exposed to the Internet. It is opt-in, because a mistake locks you out of a remote machine. This page lists what each part does and, more important, how to get back in and how to undo it. Overview: [secure-the-host](../guides/08-secure-the-host.md).

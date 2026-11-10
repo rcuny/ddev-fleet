@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Upgrade reference
 
 Check what the next release changes, install it with a backup and a verification, and go back if you must. This page lists the exit codes, the pre-flight checks, the JSON and history formats, and how to rehearse. For the short version see [operate](../guides/07-operate.md).

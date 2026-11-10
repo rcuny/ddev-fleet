@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Operate Fleet
 
 Day 2 is four jobs: keep backups, upgrade safely, move a project, and keep the host from overload. Each is a few commands.

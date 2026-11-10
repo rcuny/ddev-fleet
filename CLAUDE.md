@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-10-19
-Type: documentation
----
-
 # CLAUDE.md — working on the ddev-fleet product repo (1.x)
 
 This file is for Claude (or any agent) editing code in this repository. It is the
@@ -113,6 +106,8 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
 New work follows these namespaces; add a new one only with a reason.
 
 ## Conventions
+
+- **Product Markdown has no front matter.** Docs, `README.md` and this file start with their `# Title`; do not add an `Author`/`Reviewer`/`Last updated`/`Type` block (git history is the record). Kept on purpose: `.github/ISSUE_TEMPLATE/*.md` and the Claude `SKILL.md` files, whose front matter is functional. `DocsStructureTest` enforces it. (The companion and config repos keep theirs.)
 
 - **`CommandRunner` is the only way to run a host command.**
   `App\Fleet\Shell\CommandRunner::run(list<string> $argv, ?string $cwd = null, array $env = [], ?callable $onOutput = null, ?float $timeout = null): CommandResult`.

@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Configuration reference
 
 Every setting you can change, in one place: the host file, the Settings page, the fields and limits of projects, templates and ports, and the variables Fleet writes into each instance. Look things up here; the guides tell you when you need them.

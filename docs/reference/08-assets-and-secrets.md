@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Assets and secrets
 
 Every new instance needs a database dump, a `.env`, local settings and API keys, and none of that belongs in git. This page is the lookup for the rules Fleet applies when it stores and delivers them. For the walk-through, see [first project](../guides/02-first-project.md).

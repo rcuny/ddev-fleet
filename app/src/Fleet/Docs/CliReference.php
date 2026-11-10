@@ -87,7 +87,6 @@ final class CliReference
         }
 
         $out = [];
-        $out[] = "---\nAuthor: Claude Code\nReviewer: none\nType: documentation\n---\n";
         $out[] = "# CLI reference\n";
         $out[] = 'Every public `fleet` command ('.$count.'), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; '
             .'`fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. '

@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Deploy your first project
 
 A project is a git repository plus what Fleet needs to run it. Here you register one called `website`, give it a recipe (a template), its files and a secret, deploy it, and let a colleague in. You end with a working site at `https://website--main.fleet.example.com`.

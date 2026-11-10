@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Export format
 
 Moving a project to another host should take minutes, not an afternoon. Export writes one JSON file with the project's setup; import shows what would change before it writes anything. When to use it: [operate](../guides/07-operate.md). Administrators only.

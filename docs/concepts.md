@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Ten things to know
 
 Learn these ten words and the rest of the documentation reads easily. Each concept gets a short paragraph and a link to the full story.

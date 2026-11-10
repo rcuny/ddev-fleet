@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Files on disk, services and ports
 
 When something misbehaves, you need to know where Fleet keeps things and what runs. This page lists the paths, the systemd units, the ports and the logs.

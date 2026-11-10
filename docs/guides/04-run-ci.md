@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Run CI per branch
 
 Fleet can give every branch its own CI instance with a CPU ceiling, so test runs stay predictable and do not starve the host. Be clear on the split: Fleet supplies the instance and the limits; your own scripts run the suite.
