@@ -204,6 +204,31 @@ final readonly class JobRepository
     }
 
     /**
+     * The newest queued or running job of each given instance.
+     *
+     * @param list<string> $instanceIds
+     *
+     * @return array<string, int> instance id => job id
+     */
+    public function activeJobIds(array $instanceIds): array
+    {
+        $found = [];
+        foreach (array_chunk($instanceIds, self::CHUNK) as $chunk) {
+            /** @var list<array{instance_id: string, id: int|string}> $rows */
+            $rows = $this->em->getConnection()->fetchAllAssociative(
+                'SELECT instance_id, MAX(id) AS id FROM job WHERE instance_id IN (:ids) AND status IN (:queued, :running) GROUP BY instance_id',
+                ['ids' => $chunk, 'queued' => JobStatus::Queued->value, 'running' => JobStatus::Running->value],
+                ['ids' => ArrayParameterType::STRING],
+            );
+            foreach ($rows as $row) {
+                $found[$row['instance_id']] = (int) $row['id'];
+            }
+        }
+
+        return $found;
+    }
+
+    /**
      * How many jobs are queued or running (a restore of the databases must wait until there are none).
      */
     public function countActive(): int
@@ -265,7 +290,7 @@ final readonly class JobRepository
     }
 
     /**
-     * @param array{status?: ?JobStatus, trigger?: ?JobTrigger, type?: ?string, project?: ?string, instance?: ?string, q?: ?string} $filters
+     * @param array{status?: ?JobStatus, trigger?: ?JobTrigger, type?: ?string, project?: ?string, projects?: list<string>, before?: ?int, instance?: ?string, q?: ?string} $filters
      *
      * @return array{rows: list<Job>, total: int} newest first; `q` matches the job number, the instance or the project
      */
@@ -289,6 +314,17 @@ final readonly class JobRepository
         if (null !== ($filters['project'] ?? null)) {
             $where[] = 'j.projectName = :project';
             $params['project'] = $filters['project'];
+        }
+        if (null !== ($filters['projects'] ?? null)) {
+            // An empty list matches nothing (a token with no visible project).
+            $where[] = [] === $filters['projects'] ? '1 = 0' : 'j.projectName IN (:projects)';
+            if ([] !== $filters['projects']) {
+                $params['projects'] = $filters['projects'];
+            }
+        }
+        if (null !== ($filters['before'] ?? null)) {
+            $where[] = 'j.id < :before';
+            $params['before'] = $filters['before'];
         }
         if (null !== ($filters['instance'] ?? null)) {
             $where[] = 'j.instanceId = :instance';

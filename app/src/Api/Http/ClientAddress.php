@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Api\Http;
 
+use App\Security\TrustedProxyChecker;
 use Symfony\Component\HttpFoundation\Request;
 
 /**
@@ -21,6 +22,8 @@ final class ClientAddress
     {
         $address = $request->server->get('REMOTE_ADDR');
 
-        return \is_string($address) && '' !== $address ? $address : 'unknown';
+        // An IPv4 peer on a dual-stack socket arrives as ::ffff:a.b.c.d: judge it as the IPv4 address, so an IPv4
+        // allow-list entry matches it and the throttle and audit key do not split one client in two.
+        return \is_string($address) && '' !== $address ? TrustedProxyChecker::unmap($address) : 'unknown';
     }
 }

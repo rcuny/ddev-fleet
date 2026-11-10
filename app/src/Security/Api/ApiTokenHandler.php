@@ -8,6 +8,7 @@ use App\Api\Http\ClientAddress;
 use App\Api\Token\TokenFormat;
 use App\Domain\ApiToken\ApiTokenRepository;
 use Psr\Clock\ClockInterface;
+use Psr\Log\LoggerInterface;
 use Symfony\Component\HttpFoundation\IpUtils;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Security\Http\AccessToken\AccessTokenHandlerInterface;
@@ -29,6 +30,7 @@ final class ApiTokenHandler implements AccessTokenHandlerInterface
         private readonly ClockInterface $clock,
         private readonly RequestStack $requests,
         private readonly ApiAuthFailureThrottle $throttle,
+        private readonly LoggerInterface $logger,
     ) {
     }
 
@@ -63,8 +65,13 @@ final class ApiTokenHandler implements AccessTokenHandlerInterface
 
         $last = $token->lastUsedAt();
         if (null === $last || $token->lastUsedIp() !== $address || $now->getTimestamp() - $last->getTimestamp() >= self::LAST_USED_GRANULARITY) {
-            $token->recordUse($now, $address);
-            $this->tokens->save($token);
+            // Bookkeeping only: a failed write (locked database, full disk) must not turn a valid request into a 500.
+            try {
+                $token->recordUse($now, $address);
+                $this->tokens->save($token);
+            } catch (\Throwable $e) {
+                $this->logger->warning('Could not record the use of an API token.', ['token' => $token->id(), 'exception' => $e]);
+            }
         }
 
         $user = ApiTokenUser::fromToken($token);
