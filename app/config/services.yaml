@@ -66,6 +66,7 @@ services:
             - '../src/Domain/Host/HostSettings.php'
             - '../src/Domain/Instance/Instance.php'
             - '../src/Domain/Job/Job.php'
+            - '../src/Domain/Job/PendingRedeploy.php'
             - '../src/Domain/Port/NamedPort.php'
             - '../src/Domain/Project/Project.php'
             - '../src/Domain/Project/ProjectAccess.php'
@@ -98,6 +99,10 @@ services:
     App\Fleet\PortMirror\TraefikDirectory:
         arguments:
             $home: '%env(default::FLEET_USER_HOME)%'
+
+    App\Command\Docs\DocsCliCommand:
+        arguments:
+            $projectDir: '%kernel.project_dir%'
 
     App\Fleet\Jobs\ConcurrentJobRunner:
         arguments:

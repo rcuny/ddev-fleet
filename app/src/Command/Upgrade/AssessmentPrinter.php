@@ -54,7 +54,7 @@ final class AssessmentPrinter
         match ($plan->direction) {
             Direction::Same => $line('Already up to date.'),
             Direction::Unknown => $line('This host does not run a release, so there is nothing to compare with. Target: '.$plan->target->tag().'.'),
-            Direction::Down => $line('This is a downgrade: '.$plan->from.' -> '.$plan->target->tag().'. See docs/upgrading.md before running it.'),
+            Direction::Down => $line('This is a downgrade: '.$plan->from.' -> '.$plan->target->tag().'. See docs/reference/05-upgrade.md before running it.'),
             Direction::Up => $line(\sprintf('Update available: %s -> %s (%d release%s).', $plan->from, $plan->target->tag(), \count($a->releases), 1 === \count($a->releases) ? '' : 's')),
         };
 

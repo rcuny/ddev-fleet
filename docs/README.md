@@ -1,71 +1,62 @@
 ---
 Author: Claude Code
 Reviewer: none
-Last updated: 2026-10-19
+Last updated: 2026-11-06
 Type: documentation
 ---
 
-# Documentation index
+# Start here
 
-`main` is the **1.x** line (Symfony 8; `develop` is its integration branch), rewritten milestone by milestone from the **0.x**
-(Python) product, which is frozen on the `legacy` branch. Every document below carries a status:
+Find the shortest path to what you want to do. Pick a journey below, or scan the full map.
 
-- **Current** - describes what `main` does today.
-- **0.x, valid** - describes tooling or process that applies unchanged to both lines.
-- **0.x reference** - describes the 0.x product. It is kept as history and as the specification the
-  port re-implements; each one is rewritten in the milestone named in its banner.
+## Journeys
 
-## Current
+**I want to try Fleet**
+[Concepts](concepts.md) -> [Install](guides/01-install.md) -> [First project](guides/02-first-project.md)
 
-| Document | Status | Covers |
-|---|---|---|
-| [`installation.md`](installation.md) | Current | Installing 1.x on a Debian 13 host: prerequisites, `install.sh` and its flags, the setup wizard, what is installed where, recovery (`fleet setup:reset`, `fleet user:reset-password`), upgrades, the security model, uninstalling, troubleshooting |
-| [`upgrading.md`](upgrading.md) | Current | `fleet upgrade`: check what the next release changes, the pre-flight checks, `sudo fleet upgrade` and its rollback, history, rollout notes, offline hosts, the rehearsal script, FAQ |
-| [`schedules.md`](schedules.md) | Current | Schedules (1.x): cron and timezone rules, the 60-minute catch-up, run history, `fleet schedule:*`, running the ticker unit |
-| [`projects-and-templates.md`](projects-and-templates.md) | Current | Projects and templates in the browser and with `fleet project\|template\|port`: concepts, every field and limit, the screens, CLI reference (exit codes, `--json`), permissions, deleting, named ports, differences from 0.x |
-| [`capacity.md`](capacity.md) | Current | CPU allotments per project and template, slots (two levels), the systemd slices that enforce them, the `FLEET_*` slot variables, the web UI and `fleet host:capacity\|slices`, the `--cpu-threads` and `--slots` options |
-| [`instances-and-jobs.md`](instances-and-jobs.md) | Current | Instances and jobs: states, deploy (auto-suffix, count, disk check), redeploy, start, stop, destroy and root-owned leftovers, bulk work, roles, the pages and the live log, `fleet instance:*` and `fleet job:*` (exit codes, `--json`), retention, differences from 0.x, troubleshooting |
-| [`assets.md`](assets.md) | Current | A project's assets: the Assets tab (browser, upload, download, delete, folders, rescan), chunked resumable upload and its 2 GiB cap, copying large files over SSH, path and symbolic-link rules, `fleet asset:list` and `fleet asset:gc` (exit codes, `--json`), limits |
-| [`secrets.md`](secrets.md) | Current | Secrets in the browser and with `fleet secret:list\|set\|unset`: fleet-wide and project secrets, names and values, `[[token]]` placeholders and the "no placeholder" warning, reveal and the audit log, exit codes and JSON, the security model, differences from 0.x |
-| [`networking.md`](networking.md) | Current | Every port the host uses, the named-port sites and their certificates, the in-network port mirror and the `:443` site mirror, `fleet port:firewall` (the installer does not change the firewall), the checks that need a live host |
-| [`moving-projects.md`](moving-projects.md) | Current | Moving a project between hosts: the versioned export file, the passphrase-sealed secrets, the import preview and confirm, copying assets with rsync, `fleet export:project`, `fleet import:preview\|apply`, and checking a backup with `fleet backup:verify` before a restore |
-| [`development.md`](development.md) | Current | Prerequisites, first run, environment variables, recording runner, stand-in login, gates, Playwright modes, adding a UI component |
-| [`README-ci.md`](README-ci.md) | Current | Bitbucket Pipelines, the tag guard, the systemd security check and baseline |
-| [`RELEASING.md`](RELEASING.md) | Current | Branch model, versioning, CHANGELOG conventions, the 1.x release procedure, the tag guard, 1.x and 0.x hotfixes |
-| [`../tests/README-tests.md`](../tests/README-tests.md) | Current | Test suites and how to run them (counts: `ci/test-counts.sh`) |
-| [`../CLAUDE.md`](../CLAUDE.md) | Current | Agent-facing guide: branches, namespaces, seams, commands |
-| [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Current | Contribution workflow, CI, mirror, dependency updates |
+**I run a Fleet host**
+[Install](guides/01-install.md) -> [Operate](guides/07-operate.md) -> [Secure the host](guides/08-secure-the-host.md) -> reference: [upgrade](reference/05-upgrade.md), [backup and restore](reference/06-backup-and-restore.md), [hardening](reference/07-hardening.md), [troubleshooting](reference/13-troubleshooting.md)
 
-## 0.x, valid (shared tooling)
+**I want to automate what suits my workflow**
+[Automate deploys](guides/03-automate-deploys.md) -> [Run CI](guides/04-run-ci.md) -> [The tmux workspace and agents](guides/05-work-with-agents.md) -> reference: [webhooks and schedules](reference/11-webhooks-and-schedules.md)
 
-| Document | Status | Covers |
-|---|---|---|
-| [`README-renovate.md`](README-renovate.md) | 0.x, valid | Hands-off merge of approved Renovate PRs (the pipeline is unchanged by the 1.x line; the automatic webhook trigger returns in M0.08) |
+**I share sites with others**
+[Share and access](guides/06-share-and-access.md)
 
-## 0.x reference (`v0/`)
+## Full map
 
-Each file starts with a banner naming the milestone that re-implements it. The files, commands and
-configuration they describe (`src/fleet/`, the `fleet` CLI, `fleet.yml`, `bootstrap.sh`) exist on
-`legacy` (and the `v0.*` tags), not on `main` or `develop`.
+**Concepts**
+- [Concepts](concepts.md): the ten things to know.
 
-| Document | Covers | Rewritten in |
-|---|---|---|
-| [`v0/installation.md`](v0/installation.md) | First-run checklist: DNS, installer, deploy key, `fleet init`, first deploy | M0.02 (done: [`installation.md`](installation.md); the first deploy: [`instances-and-jobs.md`](instances-and-jobs.md)) |
-| [`v0/README-authelia.md`](v0/README-authelia.md) | Authelia auth mode: login portal, users, rollout | M0.10 (the portal itself is installed by M0.02, see [`installation.md`](installation.md)) |
-| [`v0/configuration.md`](v0/configuration.md) | The `fleet.yml` registry schema | M0.03 (done for projects and templates: [`projects-and-templates.md`](projects-and-templates.md); secrets: [`secrets.md`](secrets.md); the rest returns with M0.06 to M0.10) |
-| [`v0/cli.md`](v0/cli.md) | The `fleet` command reference | M0.04 (done for instances and jobs: [`instances-and-jobs.md`](instances-and-jobs.md); the other groups are in their own guides) |
-| [`v0/networking.md`](v0/networking.md) | Topology, every port, exposing a new one | M0.07 (1.x: [`networking.md`](networking.md)) |
-| [`v0/README-typesense.md`](v0/README-typesense.md) | Typesense browser-search exposure | M0.07 |
-| [`webhooks.md`](webhooks.md) | 1.x, valid (endpoints, secrets, rules, the deploy and run-pipeline actions, the pipeline token, delivery log) | M0.08a, M0.08b |
-| [`v0/README-webhooks.md`](v0/README-webhooks.md) | Jira and Bitbucket webhooks, the 0.x reference | M0.08 |
-| [`v0/README-schedules.md`](v0/README-schedules.md) | Scheduled jobs | M0.09 |
-| [`v0/srv-fleet-CLAUDE.md`](v0/srv-fleet-CLAUDE.md) | Registry and CLI context for the host's Claude session | M0.11 |
-| [`v0/architecture.md`](v0/architecture.md) | Module map and the daemon/CLI split | M0.12 |
-| [`v0/operations.md`](v0/operations.md) | Updates, rollback, credential rotation, verification checklist | M0.12 |
-| [`v0/runbook-server-rollout.md`](v0/runbook-server-rollout.md) | Routine rollout and domain-change procedure | M0.12 |
-| [`v0/README-reboot-notifications.md`](v0/README-reboot-notifications.md) | Reboot-required notices | M0.12 |
+**Guides** ([index](guides/README.md))
+- [Install](guides/01-install.md): installer, wizard, first sign-in.
+- [First project](guides/02-first-project.md): project to open site.
+- [Automate deploys](guides/03-automate-deploys.md): per ticket, per branch, nightly.
+- [Run CI](guides/04-run-ci.md): a CI instance per branch.
+- [The tmux workspace and agents](guides/05-work-with-agents.md): the tmux workspace, with or without an agent.
+- [Share and access](guides/06-share-and-access.md): users and roles.
+- [Operate](guides/07-operate.md): backups, upgrades, moving projects, capacity.
+- [Secure the host](guides/08-secure-the-host.md): security model and hardening.
 
-The milestone numbers refer to the port plan (M0.01 foundation, M0.02 installer and setup wizard,
-M0.03 projects and templates, M0.04 instances and jobs, M0.05 secrets, M0.06 assets, M0.07 networking,
-M0.08 webhooks, M0.09 schedules, M0.10 users and access, M0.11 agent workspace, M0.12 host
-operations and parity).
+**Reference** ([index](reference/README.md))
+- [CLI](reference/01-cli.md): every command.
+- [Configuration](reference/02-configuration.md): settings and fields.
+- [Files on disk](reference/03-files-on-disk.md): paths, units, ports.
+- [Installer](reference/04-installer.md): flags, steps, recovery.
+- [Upgrade](reference/05-upgrade.md): checks, rollback.
+- [Backup and restore](reference/06-backup-and-restore.md)
+- [Hardening](reference/07-hardening.md)
+- [Assets and secrets](reference/08-assets-and-secrets.md)
+- [Networking](reference/09-networking.md)
+- [Capacity](reference/10-capacity.md)
+- [Webhooks and schedules](reference/11-webhooks-and-schedules.md)
+- [Export format](reference/12-export-format.md)
+- [Troubleshooting](reference/13-troubleshooting.md)
+
+**Contributing** ([index](contributing/README.md))
+- [development](contributing/01-development.md)
+- [testing](contributing/02-testing.md)
+- [CI](contributing/03-ci.md)
+- [releasing](contributing/04-releasing.md).
+
+Every page starts with why you care and what you get; the reference pages hold the details.

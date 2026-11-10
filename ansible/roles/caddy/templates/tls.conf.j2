@@ -17,7 +17,7 @@
    block instead, so an un-migrated on_demand server never ends up
    importing a file that doesn't exist yet. Once this role HAS run and
    created this file, the next `fleet refresh-ports` (or daemon restart)
-   flips existing snippets over to the import — see docs/installation.md
+   flips existing snippets over to the import — see docs/installation.md (`legacy` branch)
    "Switching TLS mode".
 
    Rendered per `fleet_tls_mode` (group_vars/all.yml; asserted to be

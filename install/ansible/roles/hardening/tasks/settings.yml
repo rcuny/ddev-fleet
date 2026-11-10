@@ -1,0 +1,73 @@
+---
+- name: Work out who runs this
+  ansible.builtin.set_fact:
+    hardening_invoking: >-
+      {{ fleet_hardening_invoking_user
+         | default('', true)
+         | default(lookup('ansible.builtin.env', 'SUDO_USER'), true)
+         | default(lookup('ansible.builtin.env', 'USER'), true)
+         | default('root', true) }}
+
+- name: Resolve the allow list and the SSH ports
+  ansible.builtin.set_fact:
+    hardening_users: "{{ fleet_hardening_ssh_allow_users if fleet_hardening_ssh_allow_users | length > 0 else [hardening_invoking] }}"
+
+- name: Validate the settings (the same rules as the installer)
+  vars:
+    ip_pattern: '^([0-9]{1,3}(\.[0-9]{1,3}){3}(/[0-9]{1,2})?|[0-9a-fA-F:]{2,39}(/[0-9]{1,3})?)$'
+  ansible.builtin.assert:
+    that:
+      - hardening_users | select('match', '^[a-z_][a-z0-9_-]{0,31}$') | list | length == hardening_users | length
+      - fleet_hardening_trusted_ips | reject('match', ip_pattern) | list | length == 0
+      - fleet_hardening_firewall_grace_minutes | int >= 2
+      - fleet_hardening_firewall_grace_minutes | int <= 120
+    fail_msg: hardening settings are not valid (user names, trusted addresses or the grace period of 2 to 120 minutes)
+
+- name: Session safety, the account running this must stay able to log in
+  ansible.builtin.assert:
+    that: hardening_invoking in hardening_users
+    fail_msg: >-
+      hardening would lock you out: the account you are using ({{ hardening_invoking }}) is not in the SSH allow list
+      ({{ hardening_users | join(' ') }})
+  when: fleet_hardening_strict | bool
+
+- name: Ask sshd for its ports
+  ansible.builtin.script: ssh-ports.sh
+  register: hardening_ports_raw
+  changed_when: false
+  check_mode: false
+  when: fleet_hardening_ssh_ports | length == 0
+
+- name: Take the SSH ports
+  ansible.builtin.set_fact:
+    hardening_ssh_ports: >-
+      {{ fleet_hardening_ssh_ports | map('string') | list if fleet_hardening_ssh_ports | length > 0
+         else hardening_ports_raw.stdout.split() }}
+
+- name: Lock-out preflight, read-only
+  ansible.builtin.script: "ssh-preflight.sh scan {{ hardening_users | join(' ') }}"
+  register: hardening_scan
+  changed_when: false
+  check_mode: false
+
+- name: Does the invoking account have a usable key?
+  ansible.builtin.script: "ssh-preflight.sh has-key {{ hardening_invoking }}"
+  register: hardening_invoking_key
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse a lock-out (strict) or only say so
+  ansible.builtin.assert:
+    that:
+      - hardening_invoking_key.rc == 0
+      - hardening_scan.stdout_lines | select('match', '^shut:') | list | length == 0
+    fail_msg: >-
+      key-only SSH / AllowUsers would lock someone out. Account in use without a key: {{ hardening_invoking_key.rc != 0 }};
+      other accounts with keys that the allow list excludes: {{ hardening_scan.stdout_lines | select('match', '^shut:') | join(' ') }}
+  when: fleet_hardening_strict | bool
+
+- name: Say what the allow list excludes (not strict)
+  ansible.builtin.debug:
+    msg: "{{ hardening_scan.stdout_lines }}"
+  when: not (fleet_hardening_strict | bool) and hardening_scan.stdout_lines | length > 0

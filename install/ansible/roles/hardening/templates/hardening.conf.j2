@@ -1,0 +1,8 @@
+# Written by the installer (install --harden). Read back as plain KEY=value lines on every run: while ENABLED=1 an
+# upgrade re-applies these settings. Change them by re-running the installer with --harden and the flags you want.
+ENABLED=1
+SSH_ALLOW_USERS={{ hardening_users | join(' ') }}
+TRUSTED_IPS={{ fleet_hardening_trusted_ips | join(' ') }}
+FIREWALL_GRACE_MINUTES={{ fleet_hardening_firewall_grace_minutes }}
+SSH_PORTS={{ hardening_ssh_ports | join(' ') }}
+HARDEN_TMP={{ 1 if fleet_hardening_tmp | bool else 0 }}

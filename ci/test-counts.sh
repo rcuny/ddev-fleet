@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Print the current test count of every suite (PHPUnit x4, Playwright, pytest).
-# The counts are generated, never written into tests/README-tests.md (FLE-65).
+# The counts are generated, never written into docs/contributing/02-testing.md (FLE-65).
 # Run from anywhere. A suite whose tool is not installed prints "n/a".
 set -u
 root=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)

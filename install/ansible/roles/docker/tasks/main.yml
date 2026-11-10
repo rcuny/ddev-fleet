@@ -1,0 +1,203 @@
+---
+# Port of install/steps/20-docker.sh. The daemon is enabled and started every run; daemon.json is MERGED, never
+# replaced (an operator's keys stay); Docker is never restarted here.
+- name: Look for an installed Docker
+  ansible.builtin.stat:
+    path: /usr/bin/dockerd
+  register: docker_bin
+
+- name: Map the CPU architecture to Debian's
+  ansible.builtin.set_fact:
+    docker_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+
+- name: Read the current daemon.json
+  ansible.builtin.slurp:
+    src: /etc/docker/daemon.json
+  register: docker_current_raw
+  failed_when: false
+  check_mode: false
+
+- name: Parse it
+  ansible.builtin.set_fact:
+    docker_current: "{{ (docker_current_raw.content | b64decode | from_json) if docker_current_raw.content is defined else {} }}"
+  ignore_errors: true
+  register: docker_parse
+
+- name: Warn about a daemon.json that is not a JSON object (left untouched)
+  ansible.builtin.debug:
+    msg: /etc/docker/daemon.json is not a JSON object; left untouched
+  when: docker_parse is failed or docker_current is not mapping
+
+- name: Does a route of this host overlap the fleet pool? (routes over Docker's own bridges are ignored)
+  ansible.builtin.command:
+    argv:
+      - python3
+      - -c
+      - |
+        import ipaddress, json, subprocess, sys
+        pool = ipaddress.ip_network(sys.argv[1])
+        for r in json.loads(subprocess.check_output(["ip", "-4", "-j", "route", "show"])):
+            dev = r.get("dev", "")
+            if dev.startswith("br-") or dev == "docker0" or r.get("dst") == "default":
+                continue
+            if ipaddress.ip_network(r["dst"], strict=False).overlaps(pool):
+                print("overlap")
+                break
+      - "{{ fleet_docker_pool_base }}/{{ fleet_docker_pool_prefix }}"
+  register: docker_overlap
+  changed_when: false
+  check_mode: false
+
+- name: Warn that the pool is not added
+  ansible.builtin.debug:
+    msg: >-
+      this host routes {{ fleet_docker_pool_base }}/{{ fleet_docker_pool_prefix }}; the Docker address pool for
+      instance networks was NOT added (Docker allows about 30 instance networks)
+  when: docker_overlap.stdout | length > 0
+
+- name: Merge the daemon settings (an operator's keys stay, a key already set is left alone)
+  when: docker_parse is succeeded and docker_current is mapping
+  block:
+    - name: Compute the merged document
+      ansible.builtin.set_fact:
+        docker_merged: >-
+          {{ docker_current
+             | combine({} if 'live-restore' in docker_current else {'live-restore': true})
+             | combine({} if ('log-driver' in docker_current or 'log-opts' in docker_current)
+                       else {'log-driver': 'json-file', 'log-opts': {'max-size': '10m', 'max-file': '3'}})
+             | combine({'default-address-pools': fleet_docker_builtin_pools
+                        + [{'base': fleet_docker_pool_base ~ '/' ~ fleet_docker_pool_prefix, 'size': 24}]}
+                       if (docker_overlap.stdout | length == 0
+                           and 'default-address-pools' not in docker_current) else {}) }}
+
+    - name: Write daemon.json
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: "0644"
+        content: "{{ lookup('ansible.builtin.template', 'daemon.json.j2') }}\n"
+        # the directory exists only after the package on a fresh host
+      when: docker_bin.stat.exists
+      register: docker_daemon_json
+
+    - name: Create /etc/docker before the package (a fresh host reads the file at its very first start)
+      ansible.builtin.file:
+        path: /etc/docker
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Write daemon.json on a fresh host
+      ansible.builtin.copy:
+        dest: /etc/docker/daemon.json
+        owner: root
+        group: root
+        mode: "0644"
+        content: "{{ lookup('ansible.builtin.template', 'daemon.json.j2') }}\n"
+      when: not docker_bin.stat.exists
+
+- name: Docker repository key (the fingerprint is pinned)
+  block:
+    - name: Create the keyring directory
+      ansible.builtin.file:
+        path: "{{ fleet_keyring_dir }}"
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Private temporary file for the key
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .asc
+      register: docker_key_tmp
+      changed_when: false
+      check_mode: false
+
+    - name: Fetch the signing key into a temporary file (read-only, so a check run stays quiet)
+      ansible.builtin.get_url:
+        url: "{{ fleet_docker_key_url }}"
+        dest: "{{ docker_key_tmp.path }}"
+        mode: "0600"
+        force: true
+      changed_when: false
+      check_mode: false
+
+    - name: Read its primary fingerprint
+      ansible.builtin.command: gpg --show-keys --with-colons --fingerprint "{{ docker_key_tmp.path }}"
+      register: docker_gpg
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse a key with another fingerprint
+      ansible.builtin.assert:
+        that: (docker_gpg.stdout_lines | select('match', '^fpr:') | first) is search(fleet_docker_key_fingerprint)
+        fail_msg: the signing key from {{ fleet_docker_key_url }} does not have the pinned fingerprint; refusing to trust it
+
+    - name: Install the verified key (changes only when the content differs)
+      ansible.builtin.copy:
+        src: "{{ docker_key_tmp.path }}"
+        dest: "{{ fleet_keyring_dir }}/docker.asc"
+        remote_src: true
+        mode: "0644"
+        owner: root
+        group: root
+      notify: Refresh the apt cache
+
+    - name: Remove the temporary key
+      ansible.builtin.file:
+        path: "{{ docker_key_tmp.path }}"
+        state: absent
+      changed_when: false
+      check_mode: false
+
+- name: Docker apt source
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/docker.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: >
+      deb [arch={{ docker_arch }} signed-by={{ fleet_keyring_dir }}/docker.asc]
+      https://download.docker.com/linux/debian trixie stable
+  notify: Refresh the apt cache
+
+- name: Apply the new apt source now
+  ansible.builtin.meta: flush_handlers
+
+- name: Install Docker CE
+  ansible.builtin.apt:
+    name:
+      - docker-ce
+      - docker-ce-cli
+      - containerd.io
+      - docker-buildx-plugin
+      - docker-compose-plugin
+    state: present
+
+- name: Enable and start Docker
+  ansible.builtin.systemd_service:
+    name: docker.service
+    enabled: true
+    state: started
+
+- name: Ask the running daemon for its address pools
+  ansible.builtin.command: docker info --format '{% raw %}{{json .DefaultAddressPools}}{% endraw %}'
+  register: docker_live
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Say that Docker must be restarted once to read the pool (never done here)
+  ansible.builtin.debug:
+    msg: >-
+      NOTE: Docker must be restarted once, at a quiet moment, to read /etc/docker/daemon.json. Until then the host
+      holds about 30 instances. See docs/reference/upgrade.md, Docker network pool.
+  when:
+    - docker_bin.stat.exists
+    - docker_live.rc == 0
+    - docker_merged is defined
+    - docker_merged['default-address-pools'] is defined
+    - fleet_docker_pool_base not in docker_live.stdout

@@ -10,7 +10,7 @@
 
 : "${FLEET_DRY_RUN:=0}"
 
-# Exit codes (sysexits-style, plus 2 for DNS as documented in docs/installation.md).
+# Exit codes (sysexits-style, plus 2 for DNS as documented in docs/reference/04-installer.md).
 EX_DNS=2
 EX_PREFLIGHT=3
 EX_USAGE=64
@@ -75,6 +75,8 @@ HARDEN_SSH_USERS=()
 HARDEN_TRUSTED_IPS=()
 HARDEN_GRACE=
 HARDEN_TMP=0
+# --engine: bash (the numbered steps, default) or ansible (install/ansible/site.yml, lib/host-vars.sh).
+ENGINE=bash
 # --preflight: run only the pre-flight checks (lib/preflight.sh), change nothing.
 PREFLIGHT_ONLY=0
 
@@ -264,11 +266,12 @@ Options:
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
   --harden              opt-in host hardening: key-only logins, login bans, a firewall with a dead-man's switch and more
-                        (off by default; docs/installation.md section 8). Once enabled, later runs re-apply it
+                        (off by default; docs/reference/07-hardening.md). Once enabled, later runs re-apply it
   --ssh-allow-user=<u>  with --harden: an account that may log in over SSH (repeatable; default: the account running sudo)
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
   --harden-tmp          with --harden: also mount /tmp nosuid,nodev,noexec at the next boot (can break builds that run files from /tmp)
+  --engine=<bash|ansible> how the host is provisioned: the bash steps (default) or the Ansible playbook (see docs)
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -338,6 +341,10 @@ parse_args() {
         HARDEN_GRACE=${arg#--firewall-grace=}
         ;;
       --harden-tmp) HARDEN_TMP=1 ;;
+      --engine=*)
+        ENGINE=${arg#--engine=}
+        case $ENGINE in bash | ansible) ;; *) die "$EX_USAGE" "--engine must be bash or ansible" ;; esac
+        ;;
       --preflight) PREFLIGHT_ONLY=1 ;;
       --dry-run) FLEET_DRY_RUN=1 ;;
       *)
@@ -769,14 +776,17 @@ version_lt() {
   [ "$a" != "$b" ] && [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" = "$a" ]
 }
 
-# What /etc/ddev-fleet/installed-version holds: the tag when --ref is one (and exists), else <ref>@<sha7>. The sha is the
-# checkout's HEAD. Printed on stdout; empty when it cannot be determined.
+# What /etc/ddev-fleet/installed-version holds: the tag when --ref is one (and exists) or when the checkout's HEAD is
+# exactly a v* release tag (a re-run without --ref), else <ref>@<sha7>. The sha is the checkout's HEAD. Printed on stdout; empty when it cannot be determined.
 installed_version_label() {
-  local sha=${CODE_REVISION:-}
+  local exact sha=${CODE_REVISION:-}
   [ -n "$sha" ] || sha=$(run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse HEAD 2>/dev/null || true)
   if [[ $REF =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
     && run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse -q --verify "refs/tags/$REF^{commit}" >/dev/null 2>&1; then
     printf '%s\n' "$REF"
+  elif exact=$(run_as_fleet git -C "$FLEET_SRC_DIR" describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null) \
+    && [[ $exact =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+    printf '%s\n' "$exact"
   elif [ -n "$sha" ]; then
     printf '%s@%s\n' "$REF" "${sha:0:7}"
   fi

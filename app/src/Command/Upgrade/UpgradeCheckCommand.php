@@ -36,7 +36,7 @@ final class UpgradeCheckCommand extends Command
     {
         $this
             ->addOption('to', null, InputOption::VALUE_REQUIRED, 'Check this release (vX.Y.Z) instead of the latest')
-            ->addOption('json', null, InputOption::VALUE_NONE, 'Print one JSON document (schema in docs/upgrading.md)')
+            ->addOption('json', null, InputOption::VALUE_NONE, 'Print one JSON document (schema in docs/reference/05-upgrade.md)')
             ->addOption('no-cache', null, InputOption::VALUE_NONE, 'Ask the release source now instead of using a list younger than 6 hours')
         ;
     }

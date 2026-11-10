@@ -1,0 +1,71 @@
+---
+# Port of install/steps/35-shell.sh (skipped with fleet_shell_profile: false, the old --no-shell-profile).
+# The profile file is the installer's own install/etc/profile.d/10-fleet-shell.sh (one source of truth).
+- name: Install the interactive shell profile
+  when: fleet_shell_profile | bool
+  block:
+    - name: Read the profile file already on the host
+      ansible.builtin.slurp:
+        src: "{{ fleet_shell_profile_file }}"
+      register: shell_current
+      failed_when: false
+      check_mode: false
+
+    - name: Warn before replacing a profile this installer did not write
+      ansible.builtin.debug:
+        msg: replacing {{ fleet_shell_profile_file }}, which this installer did not write
+      when:
+        - shell_current.content is defined
+        - (shell_current.content | b64decode) != lookup('ansible.builtin.file', fleet_shell_profile_src)
+        - not ((shell_current.content | b64decode).split('\n')[0] is match('# Copied from |# Managed by the ddev-fleet installer'))
+
+    - name: The profile file
+      ansible.builtin.copy:
+        src: "{{ fleet_shell_profile_src }}"
+        dest: "{{ fleet_shell_profile_file }}"
+        mode: "0644"
+        owner: root
+        group: root
+
+    - name: Who is the user that ran the installer?
+      ansible.builtin.getent:
+        database: passwd
+        key: "{{ fleet_shell_sudo_user }}"
+        fail_key: false
+      when: fleet_shell_sudo_user | length > 0 and fleet_shell_sudo_user not in ['root', fleet_user]
+
+    - name: The sudo user's home (empty when there is none to hook)
+      ansible.builtin.set_fact:
+        shell_sudo_home: >-
+          {{ getent_passwd[fleet_shell_sudo_user][4]
+             if (getent_passwd is defined and fleet_shell_sudo_user in getent_passwd
+                 and getent_passwd[fleet_shell_sudo_user] is not none) else '' }}
+
+    - name: List the files to hook (root, the fleet user and the sudo user, once each)
+      ansible.builtin.set_fact:
+        shell_hook_files: >-
+          {{ ([fleet_shell_bashrc, '/root/.bashrc', fleet_home_dir ~ '/.bashrc']
+              + ([shell_sudo_home ~ '/.bashrc'] if shell_sudo_home not in ['', '/'] else [])) | unique }}
+
+    - name: Does a file already source the profile (this block, the 0.x block, a hand-added one)?
+      ansible.builtin.command: grep -sqF -- {{ fleet_shell_profile_file | basename | quote }} {{ item | quote }}
+      loop: "{{ shell_hook_files }}"
+      register: shell_hooked
+      changed_when: false
+      failed_when: shell_hooked.rc not in [0, 1, 2]
+      check_mode: false
+
+    - name: Hook the profile (only an existing file without it; a second block would source it twice)
+      ansible.builtin.blockinfile:
+        path: "{{ item.item }}"
+        marker: "# {mark} ddev-fleet shell profile"
+        marker_begin: BEGIN
+        marker_end: END
+        block: |
+          if [ -f {{ fleet_shell_profile_file }} ]; then
+            . {{ fleet_shell_profile_file }}
+          fi
+      loop: "{{ shell_hooked.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+      when: item.rc == 1

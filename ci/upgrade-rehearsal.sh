@@ -5,7 +5,7 @@
 #   ci/upgrade-rehearsal.sh --build-only [--base-tag=vX.Y.Z] [--workdir=DIR]    (no root, changes nothing on a host)
 #   ci/upgrade-rehearsal.sh --dry-run                                           (prints the plan, runs nothing)
 #
-# What it does (docs/upgrading.md, "Rehearse on a test host"):
+# What it does (docs/reference/05-upgrade.md, "Rehearse on a test host"):
 #   1. builds a local bare git repository from the host's own checkout: the installed release's commit, then two
 #      throwaway annotated tags on top of it (default v1.9.1 and v1.9.2, newer than any real release) on `main`, the
 #      second with a CHANGELOG section that carries a rollout note and an ACTION: line;

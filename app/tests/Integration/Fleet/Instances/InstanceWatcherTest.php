@@ -32,7 +32,7 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         });
         $feed = new \App\Fleet\Jobs\JobFeed($hub, new \Psr\Log\NullLogger());
         $jobs = new \App\Domain\Job\JobRepository($this->em);
-        $service = new \App\Fleet\Jobs\JobService($jobs, new \App\Tests\Support\RecordingMessageBus(), $feed, new \App\Fleet\Jobs\LogReader($this->paths), $this->clock, new \Psr\Log\NullLogger());
+        $service = new \App\Fleet\Jobs\JobService($jobs, new \App\Tests\Support\RecordingMessageBus(), $feed, new \App\Fleet\Jobs\LogReader($this->paths), $this->clock, new \Psr\Log\NullLogger(), new \Symfony\Component\EventDispatcher\EventDispatcher());
         $locks = new LockFactory(new FlockStore($this->paths->locksDir()));
 
         return new InstanceWatcher(

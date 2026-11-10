@@ -1,0 +1,117 @@
+---
+- name: The sshd drop-in directory
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Is there a drop-in already?
+  ansible.builtin.stat:
+    path: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+  register: hardening_ssh_existing
+
+- name: Back the existing drop-in up first (a separate step, so the rescue below has a copy that exists)
+  when: hardening_ssh_existing.stat.exists
+  block:
+    - name: Private temporary file for the backup
+      ansible.builtin.tempfile:
+        state: file
+        prefix: sshd-dropin-
+      register: hardening_ssh_backup
+      changed_when: false
+      check_mode: false
+
+    - name: Copy it
+      ansible.builtin.copy:
+        src: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+        dest: "{{ hardening_ssh_backup.path }}"
+        remote_src: true
+        mode: "0600"
+      changed_when: false
+      check_mode: false
+
+- name: Write the drop-in, checked and rolled back on failure
+  block:
+    - name: Drop-in (sshd -t on the new file alone before it is written)
+      ansible.builtin.template:
+        src: ssh-dropin.conf.j2
+        dest: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+        mode: "0644"
+        owner: root
+        group: root
+        validate: sshd -t -f %s
+      register: hardening_ssh_dropin
+      notify: Reload sshd
+
+    - name: The whole configuration must pass sshd -t
+      ansible.builtin.command: sshd -t
+      changed_when: false
+      check_mode: false
+  rescue:
+    # A failed validation never wrote the new file (hardening_ssh_dropin is not changed): the existing drop-in is
+    # good and is left alone. Only a drop-in that WAS written and then broke the whole configuration is undone.
+    - name: Put the previous drop-in back
+      ansible.builtin.copy:
+        src: "{{ hardening_ssh_backup.path }}"
+        dest: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+        remote_src: true
+        mode: "0644"
+      when:
+        - hardening_ssh_dropin is changed
+        - hardening_ssh_backup.path is defined
+    - name: Or remove the new one when there was none
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+        state: absent
+      when:
+        - hardening_ssh_dropin is changed
+        - hardening_ssh_backup.path is not defined
+    - name: Stop
+      ansible.builtin.fail:
+        msg: >-
+          the SSH configuration does not pass sshd -t with the new drop-in; the previous state was kept or restored
+          (an existing good drop-in is never deleted)
+  always:
+    - name: Remove the backup
+      ansible.builtin.file:
+        path: "{{ hardening_ssh_backup.path }}"
+        state: absent
+      when: hardening_ssh_backup.path is defined
+      changed_when: false
+      check_mode: false
+
+- name: Reload sshd now, before checking what it uses
+  ansible.builtin.meta: flush_handlers
+
+- name: Which ports does sshd listen on after the reload?
+  ansible.builtin.script: ssh-ports.sh
+  register: hardening_ports_after
+  changed_when: false
+  check_mode: false
+
+- name: Sshd must still listen on the ports the firewall is opened for
+  ansible.builtin.assert:
+    that: hardening_ports_after.stdout.split() | sort == hardening_ssh_ports | map('string') | sort
+    fail_msg: >-
+      after the reload sshd listens on {{ hardening_ports_after.stdout | trim }}, not on {{ hardening_ssh_ports | join(' ') }};
+      stopping before the firewall is touched
+  when: not ansible_check_mode
+
+- name: What sshd really uses
+  ansible.builtin.command: "sshd -T -C user={{ hardening_invoking }},host=localhost,addr=127.0.0.1"
+  register: hardening_sshd_t
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Warn when the drop-in is not the effective configuration
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: the SSH hardening drop-in is not the effective configuration (sshd -T). Check that
+      /etc/ssh/sshd_config includes sshd_config.d and that no earlier file overrides 10-fleet-hardening.conf
+  when: >-
+    'passwordauthentication no' not in hardening_sshd_t.stdout_lines
+    or 'maxauthtries 3' not in hardening_sshd_t.stdout_lines
+    or (hardening_sshd_t.stdout_lines | select('match', '^allowusers ') | list | length == 0)

@@ -262,7 +262,7 @@ final class UninstallTest extends TestCase
         self::assertStringNotContainsString('sudo bash /opt/ddev-fleet', $out, 'the checkout belongs to the unprivileged fleet user');
         $source = (string) file_get_contents(self::installDir().'/uninstall.sh');
         self::assertStringNotContainsString('sudo bash /opt/ddev-fleet', $source);
-        self::assertStringContainsString('sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh', (string) file_get_contents(self::installDir().'/../docs/installation.md'));
+        self::assertStringContainsString('sudo bash /usr/local/lib/ddev-fleet-installer/install/uninstall.sh', (string) file_get_contents(self::installDir().'/../docs/reference/04-installer.md'));
     }
 
     public function testARealRunRefusesAScriptThatIsNotRootOwned(): void

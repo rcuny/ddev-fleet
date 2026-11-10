@@ -8,7 +8,7 @@ use App\Fleet\Upgrade\Check\CheckReport;
 
 /**
  * Everything `fleet upgrade --check` reports, as data: the same object feeds the text output, `--json` and the internal
- * `fleet:upgrade:plan` document. toArray() is the documented JSON schema (docs/upgrading.md), versioned by `schema`.
+ * `fleet:upgrade:plan` document. toArray() is the documented JSON schema (docs/reference/05-upgrade.md), versioned by `schema`.
  */
 final readonly class UpgradeAssessment
 {

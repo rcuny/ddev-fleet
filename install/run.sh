@@ -24,6 +24,8 @@ main() {
 
   # shellcheck source=lib/preflight.sh
   . "$INSTALL_DIR/lib/preflight.sh"
+  # shellcheck source=lib/host-vars.sh
+  . "$INSTALL_DIR/lib/host-vars.sh"
 
   parse_args "$@"
   check_root
@@ -65,8 +67,13 @@ main() {
   check_dns "$DOMAIN"
 
   local step name
+  if [ "$ENGINE" = ansible ]; then
+    # The numbered steps are replaced by the playbook; the checks above and the finish below are shared.
+    ansible_engine_main
+  fi
   for step in "$INSTALL_DIR"/steps/[0-9][0-9]-*.sh; do
     [ -f "$step" ] || continue
+    [ "$ENGINE" = bash ] || break
     name=$(basename "$step" .sh)
     # shellcheck disable=SC1090  # the steps are discovered at run time
     . "$step"

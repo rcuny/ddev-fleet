@@ -1,0 +1,69 @@
+---
+# One third-party apt repository, as lib/common.sh apt_repo does it: the signing key is fetched into a temporary file,
+# its primary fingerprint is checked against the pinned one, and only then installed (changed only when the content
+# differs). The one-line source is written next to it. The cache is refreshed at the end only if one of them changed.
+# Inputs: apt_repo_name, apt_repo_key_url, apt_repo_key_file, apt_repo_fingerprint, apt_repo_line.
+- name: Create the keyring directory
+  ansible.builtin.file:
+    path: "{{ fleet_keyring_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Private temporary file for the key
+  ansible.builtin.tempfile:
+    state: file
+    suffix: .key
+  register: apt_repo_key_tmp
+  changed_when: false
+  check_mode: false
+
+- name: Fetch the signing key into a temporary file (read-only, so a check run stays quiet)
+  ansible.builtin.get_url:
+    url: "{{ apt_repo_key_url }}"
+    dest: "{{ apt_repo_key_tmp.path }}"
+    mode: "0600"
+    force: true
+  changed_when: false
+  check_mode: false
+
+- name: Read its primary fingerprint
+  ansible.builtin.command: gpg --batch --show-keys --with-colons --fingerprint "{{ apt_repo_key_tmp.path }}"
+  register: apt_repo_gpg
+  changed_when: false
+  check_mode: false
+
+- name: Refuse a key with another fingerprint
+  ansible.builtin.assert:
+    that: (apt_repo_gpg.stdout_lines | select('match', '^fpr:') | first) is search(apt_repo_fingerprint)
+    fail_msg: the signing key from {{ apt_repo_key_url }} does not have the pinned fingerprint; refusing to trust it
+
+- name: Install the verified key (changes only when the content differs)
+  ansible.builtin.copy:
+    src: "{{ apt_repo_key_tmp.path }}"
+    dest: "{{ apt_repo_key_file }}"
+    remote_src: true
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Refresh the apt cache
+
+- name: Remove the temporary key
+  ansible.builtin.file:
+    path: "{{ apt_repo_key_tmp.path }}"
+    state: absent
+  changed_when: false
+  check_mode: false
+
+- name: Apt source
+  ansible.builtin.copy:
+    dest: "/etc/apt/sources.list.d/{{ apt_repo_name }}.list"
+    owner: root
+    group: root
+    mode: "0644"
+    content: "{{ apt_repo_line }}\n"
+  notify: Refresh the apt cache
+
+- name: Refresh the apt cache if the key or the source changed
+  ansible.builtin.meta: flush_handlers

@@ -7,13 +7,13 @@ namespace App\Tests\Repo;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/assets.md must describe the asset commands as they are, and the indexes, the installation guide, CLAUDE.md and the
+ * docs/reference/08-assets-and-secrets.md must describe the asset commands as they are, and the indexes, the installation guide, CLAUDE.md and the
  * CHANGELOG must point at the feature. The commands live in App\Command\Asset (a sub-directory, so InstallDocsTest's flat
- * glob does not apply; this test is their guard, as CliDocsTest is for the project commands).
+ * glob does not apply; the full option list is pinned by CliReferenceTest).
  */
 final class AssetDocsTest extends TestCase
 {
-    private const string GUIDE = 'docs/assets.md';
+    private const string GUIDE = 'docs/reference/08-assets-and-secrets.md';
 
     private static function root(): string
     {
@@ -53,25 +53,17 @@ final class AssetDocsTest extends TestCase
         return ['commands' => $commands, 'options' => $options, 'arguments' => array_values(array_unique($arguments))];
     }
 
-    public function testEveryCommandOptionAndArgumentIsDocumented(): void
+    public function testEveryCommandIsDocumented(): void
     {
         $guide = self::read(self::GUIDE);
-        $cli = self::cli();
 
-        foreach ($cli['commands'] as $command) {
+        foreach (self::cli()['commands'] as $command) {
             self::assertStringContainsString('fleet '.substr($command, \strlen('fleet:')), $guide, "$command is not documented");
         }
-        foreach ($cli['options'] as $option) {
-            self::assertStringContainsString($option, $guide, "$option is not documented");
-        }
-        foreach ($cli['arguments'] as $argument) {
-            self::assertStringContainsString('<'.$argument.'>', $guide, "the <$argument> argument is not documented");
-        }
-        self::assertStringContainsString('--format=table|json', $guide);
         self::assertStringContainsString('"error"', $guide);
     }
 
-    public function testTheGuideNamesNoCommandThatDoesNotExist(): void
+    public function testTheGuideNamesNoAssetCommandThatDoesNotExist(): void
     {
         $guide = self::read(self::GUIDE);
         $commands = array_map(static fn (string $command): string => substr($command, \strlen('fleet:')), self::cli()['commands']);
@@ -80,11 +72,6 @@ final class AssetDocsTest extends TestCase
         foreach (array_unique($found[1]) as $command) {
             self::assertContains($command, $commands, "the guide shows `fleet $command`, which is not a command");
         }
-
-        preg_match_all('/(?<![\w-])(--[a-z][a-z0-9-]*)/', $guide, $flags);
-        // Flags of other programs the guide shows: rsync.
-        $foreign = ['--rsync-path', '--chown', '--chmod', '--no-links'];
-        self::assertSame([], array_values(array_diff(array_unique($flags[1]), self::cli()['options'], $foreign)), 'the guide names options nothing implements');
     }
 
     public function testEveryExitCodeIsInTheTable(): void
@@ -134,16 +121,16 @@ final class AssetDocsTest extends TestCase
 
     public function testTheIndexesAndInstructionsPointAtTheGuide(): void
     {
-        foreach (['README.md', 'docs/README.md', 'CLAUDE.md', 'docs/installation.md'] as $file) {
-            self::assertStringContainsString('assets.md', self::read($file), "$file should link the guide");
+        foreach (['docs/README.md', 'docs/guides/02-first-project.md', 'CLAUDE.md'] as $file) {
+            self::assertStringContainsString('assets-and-secrets.md', self::read($file), "$file should link the guide");
         }
         $claude = self::read('CLAUDE.md');
         foreach (['App\Fleet\Assets', 'App\Command\Asset', 'AssetStore', 'AssetPath', 'UploadService', 'never follows'] as $needle) {
             self::assertStringContainsString($needle, $claude, "CLAUDE.md should list $needle");
         }
-        $installation = self::read('docs/installation.md');
-        self::assertStringContainsString('/srv/fleet/uploads', $installation);
-        self::assertStringContainsString('/srv/fleet/assets/<project>', $installation);
+        $files = self::read('docs/reference/03-files-on-disk.md');
+        self::assertStringContainsString('/srv/fleet/uploads', $files);
+        self::assertStringContainsString('assets/<project>/', $files);
     }
 
     public function testChangelogHasAnUnreleasedEntry(): void

@@ -1,0 +1,112 @@
+---
+- name: Fail2ban sshd jail
+  ansible.builtin.template:
+    src: fail2ban-sshd.conf.j2
+    dest: /etc/fail2ban/jail.d/fleet-sshd.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Restart fail2ban
+
+- name: Enable and start fail2ban
+  ansible.builtin.systemd_service:
+    name: fail2ban
+    enabled: true
+    state: started
+
+- name: Gather service states (for the resolved handler)
+  ansible.builtin.service_facts:
+
+- name: LLMNR off
+  ansible.builtin.copy:
+    src: resolved-llmnr.conf
+    dest: /etc/systemd/resolved.conf.d/fleet-llmnr.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Restart systemd-resolved
+
+- name: Directories for the drop-ins
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+    owner: root
+    group: root
+  loop:
+    - {path: /etc/systemd/resolved.conf.d, mode: "0755"}
+    - {path: /etc/sysctl.d, mode: "0755"}
+    - {path: /etc/audit/rules.d, mode: "0750"}
+
+- name: Sysctl drop-in
+  ansible.builtin.copy:
+    src: sysctl.conf
+    dest: /etc/sysctl.d/60-fleet-hardening.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Load sysctl
+
+- name: Scoped auditd rules
+  ansible.builtin.copy:
+    src: audit.rules
+    dest: /etc/audit/rules.d/50-fleet.rules
+    mode: "0640"
+    owner: root
+    group: root
+  notify: Load audit rules
+
+- name: Enable and start auditd
+  ansible.builtin.systemd_service:
+    name: auditd
+    enabled: true
+    state: started
+
+- name: /tmp nosuid,nodev,noexec (opt-in, next boot, only when /tmp is its own mount)
+  when: fleet_hardening_tmp | bool
+  block:
+    - name: Is /tmp its own mount point?
+      ansible.builtin.command: findmnt -no TARGET /tmp
+      register: hardening_tmp_target
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: The options systemd has now
+      ansible.builtin.command: systemctl show tmp.mount -p Options --value  # noqa: command-instead-of-module
+      register: hardening_tmp_now
+      changed_when: false
+      failed_when: false
+      check_mode: false
+
+    - name: Add the missing options
+      ansible.builtin.set_fact:
+        hardening_tmp_opts: >-
+          {{ (hardening_tmp_now.stdout | trim | split(',') | select | list
+              + (['nosuid', 'nodev', 'noexec'] | difference(hardening_tmp_now.stdout | trim | split(','))))
+             | join(',') }}
+      when: hardening_tmp_target.stdout | trim == '/tmp' and hardening_tmp_now.stdout | trim | length > 0
+
+    - name: Say when /tmp is left alone
+      ansible.builtin.debug:
+        msg: /tmp is not its own mount point or its options cannot be read; leaving it alone
+      when: hardening_tmp_opts is not defined
+
+    - name: Mount override
+      when: hardening_tmp_opts is defined
+      block:
+        - name: Directory
+          ansible.builtin.file:
+            path: /etc/systemd/system/tmp.mount.d
+            state: directory
+            mode: "0755"
+            owner: root
+            group: root
+        - name: Override
+          ansible.builtin.template:
+            src: tmp-mount-override.conf.j2
+            dest: /etc/systemd/system/tmp.mount.d/override.conf
+            mode: "0644"
+            owner: root
+            group: root
+          notify: Reload systemd

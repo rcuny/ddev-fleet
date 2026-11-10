@@ -63,7 +63,7 @@ final class NightlyRedeployTest extends InstanceJobTestCase
         self::assertInstanceOf(ManagerRegistry::class, $registry);
         $this->bus = new RecordingMessageBus();
         $this->jobRepository = new JobRepository($this->em);
-        $this->jobService = new JobService($this->jobRepository, $this->bus, $this->feed, new LogReader($this->paths), $this->clock, new NullLogger());
+        $this->jobService = new JobService($this->jobRepository, $this->bus, $this->feed, new LogReader($this->paths), $this->clock, new NullLogger(), new \Symfony\Component\EventDispatcher\EventDispatcher());
         $instanceService = new InstanceService(
             new ProjectRepository($this->em),
             $this->templates,

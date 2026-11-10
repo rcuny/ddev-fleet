@@ -58,11 +58,12 @@ Options:
   --skip-dns-check      do not compare the DNS records with this host's addresses
   --no-shell-profile    do not install the fleet shell prompt, colours and aliases (/etc/profile.d, bashrc hooks)
   --harden              opt-in host hardening: key-only logins, login bans, a firewall with a dead-man's switch and more
-                        (off by default; docs/installation.md section 8). Once enabled, later runs re-apply it
+                        (off by default; docs/reference/07-hardening.md). Once enabled, later runs re-apply it
   --ssh-allow-user=<u>  with --harden: an account that may log in over SSH (repeatable; default: the account running sudo)
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
   --harden-tmp          with --harden: also mount /tmp nosuid,nodev,noexec at the next boot (can break builds that run files from /tmp)
+  --engine=<bash|ansible> how the host is provisioned: the bash steps (default) or the Ansible playbook (see docs)
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -122,6 +123,7 @@ USAGE
       --skip-dns-check) ;;
       --no-shell-profile) ;;
       --harden | --ssh-allow-user=* | --trusted-ip=* | --firewall-grace=* | --harden-tmp) ;; # validated by stage 2 (lib/common.sh)
+      --engine=bash | --engine=ansible) ;; # used by stage 2
       --preflight) preflight=1 ;;
       --dry-run) dry_run=1 ;;
       *)

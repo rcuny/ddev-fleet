@@ -75,7 +75,6 @@ final class PipelineConfigTest extends TestCase
     {
         $texts = [
             'bitbucket-pipelines.yml' => (string) file_get_contents(self::root().'/bitbucket-pipelines.yml'),
-            'ci/systemd-security-live.sh' => (string) file_get_contents(self::root().'/ci/systemd-security-live.sh'),
         ];
         $pushLines = 0;
         foreach ($texts as $file => $text) {
@@ -216,10 +215,9 @@ final class PipelineConfigTest extends TestCase
     public function testCustomPipelinesDoNotNeedThePythonApp(): void
     {
         self::assertArrayHasKey('renovate', $this->pipelines['pipelines']['custom']);
-        $live = $this->flatSteps($this->pipelines['pipelines']['custom']['systemd-security-live']);
-        self::assertStringNotContainsString('pip install -e', $this->script($live[0]));
-        self::assertStringContainsString('pip install -q jinja2 PyYAML', $this->script($live[0]));
-        self::assertFileExists(self::root().'/ci/systemd-security-live.sh');
+        // FLE-238: the live systemd check (SSH to the hosts, security_probe role) is gone; only the offline check remains.
+        self::assertArrayNotHasKey('systemd-security-live', $this->pipelines['pipelines']['custom']);
+        self::assertFileDoesNotExist(self::root().'/ci/systemd-security-live.sh');
     }
 
     public function testPipelineHasNoStalePythonAppReferences(): void
@@ -294,14 +292,6 @@ final class PipelineConfigTest extends TestCase
         self::assertLessThan(strpos($script, 'git push'), strpos($script, 'rev-parse origin/develop'));
     }
 
-    public function testTheReportCommitCannotLoopBackIntoTheLiveCheck(): void
-    {
-        // The live check commits SYSTEMD-SECURITY-REPORT.md to develop without [skip ci]: no push pipeline may run it.
-        foreach (['branches', 'tags', 'pull-requests'] as $kind) {
-            self::assertStringNotContainsString('systemd-security-live', json_encode($this->pipelines['pipelines'][$kind], \JSON_THROW_ON_ERROR));
-        }
-    }
-
     public function testAnsibleLintIsNonBlockingAndNotPartOfReleases(): void
     {
         $lint = null;
@@ -328,7 +318,6 @@ final class PipelineConfigTest extends TestCase
 
         $text = (string) file_get_contents(self::root().'/bitbucket-pipelines.yml');
         $section = substr($text, (int) strpos($text, "    renovate-merge:\n"));
-        $section = substr($section, 0, (int) strpos($section, 'systemd-security-live:'));
         self::assertStringNotContainsString('RENOVATE_PASSWORD', $section);
         self::assertStringNotContainsString('Authorization', $section);
 

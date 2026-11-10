@@ -10,7 +10,7 @@ use Symfony\Component\Process\Process;
 /**
  * The upgrade documentation against the code (FLE-155): the options of the root helper, the pre-flight check ids of the
  * app and of the installer, the helper's exit codes, the history events, and the places that must point at the feature
- * (installation guide, release guide, CLAUDE.md, changelog fragment, rehearsal script). UpgradeCheckDocsTest covers the
+ * (operate guide, release guide, CLAUDE.md, changelog fragment, rehearsal script). UpgradeCheckDocsTest covers the
  * `--check` options, statuses and JSON keys.
  */
 final class UpgradeDocsTest extends TestCase
@@ -38,7 +38,7 @@ final class UpgradeDocsTest extends TestCase
         self::assertContains('force', $options);
         self::assertContains('no-db-restore', $options);
         self::assertContains('repo-url', $options);
-        $doc = self::read('docs/upgrading.md');
+        $doc = self::read('docs/reference/05-upgrade.md');
         foreach ($options as $option) {
             if ('help' === $option) {
                 continue;
@@ -56,7 +56,7 @@ final class UpgradeDocsTest extends TestCase
         }
         $ids = array_values(array_unique(array_filter($ids, static fn (string $id): bool => !str_starts_with($id, 'installer.'))));
         self::assertGreaterThanOrEqual(15, \count($ids), 'the check ids were not found in the code');
-        $doc = self::read('docs/upgrading.md');
+        $doc = self::read('docs/reference/05-upgrade.md');
         foreach ($ids as $id) {
             self::assertStringContainsString('| `'.$id.'` |', $doc, 'undocumented pre-flight check '.$id);
         }
@@ -78,7 +78,7 @@ final class UpgradeDocsTest extends TestCase
         self::assertContains('disk.var', $ids);
         self::assertContains('docker.answer', $ids);
         self::assertContains('network.repo', $ids);
-        $doc = self::read('docs/upgrading.md');
+        $doc = self::read('docs/reference/05-upgrade.md');
         foreach ($ids as $id) {
             self::assertStringContainsString('`'.$id.'`', $doc, 'undocumented installer pre-flight id '.$id);
         }
@@ -86,7 +86,7 @@ final class UpgradeDocsTest extends TestCase
 
     public function testTheHelperExitCodesAndHistoryEventsAreDocumented(): void
     {
-        $doc = self::read('docs/upgrading.md');
+        $doc = self::read('docs/reference/05-upgrade.md');
         foreach ([0, 1, 2, 3, 5] as $code) {
             self::assertStringContainsString('| '.$code.' |', $doc);
         }
@@ -105,27 +105,26 @@ final class UpgradeDocsTest extends TestCase
         foreach (glob(self::root().'/install/etc/sudoers-*') ?: [] as $file) {
             self::assertStringNotContainsString('upgrade', (string) file_get_contents($file), basename($file).' must not grant the upgrade');
         }
-        self::assertStringContainsString('no sudoers entry for the upgrade helper', self::read('docs/upgrading.md'));
         self::assertStringContainsString('the upgrade has no sudoers entry', self::read('CLAUDE.md'));
     }
 
     public function testTheGuidesPointAtFleetUpgrade(): void
     {
-        $installation = self::read('docs/installation.md');
-        self::assertSame(1, preg_match('/## 6\. Upgrading and re-running\R+(?<body>.*?)\R## 7\./s', $installation, $section));
-        $body = $section['body'] ?? '';
-        self::assertStringContainsString('sudo fleet upgrade', $body);
-        self::assertStringContainsString('upgrading.md', $body);
-        self::assertLessThan(strpos($body, 'installer is the upgrade'), strpos($body, 'sudo fleet upgrade'), 'fleet upgrade comes first, the installer is the fallback');
-        self::assertStringContainsString('--ref=vX.Y.Z', $body);
+        $operate = self::read('docs/guides/07-operate.md');
+        self::assertStringContainsString('reference/05-upgrade.md', $operate);
+        self::assertStringContainsString('fleet upgrade --check', $operate);
+        self::assertStringContainsString('sudo fleet upgrade', $operate);
+        self::assertLessThan(strpos($operate, 'sudo fleet upgrade'), strpos($operate, 'fleet upgrade --check'), 'the read-only check comes before the upgrade');
 
-        $releasing = self::read('docs/RELEASING.md');
+        $installer = self::read('docs/reference/04-installer.md');
+        self::assertStringContainsString('--ref=vX.Y.Z', $installer);
+
+        $releasing = self::read('docs/contributing/04-releasing.md');
         self::assertStringContainsString('### Rollout notes and ACTION lines', $releasing);
         self::assertStringContainsString('ACTION:', $releasing);
-        self::assertStringContainsString('upgrading.md', $releasing);
 
-        self::assertStringContainsString('upgrading.md', self::read('docs/README.md'));
-        self::assertStringContainsString('docs/upgrading.md', self::read('CLAUDE.md'));
+        self::assertStringContainsString('upgrade.md', self::read('docs/README.md'));
+        self::assertStringContainsString('docs/reference/05-upgrade.md', self::read('CLAUDE.md'));
     }
 
     public function testTheRehearsalScriptIsDocumentedAndSafe(): void
@@ -141,7 +140,7 @@ final class UpgradeDocsTest extends TestCase
         }
         self::assertStringContainsString('run it as root', $script);
 
-        $doc = self::read('docs/upgrading.md');
+        $doc = self::read('docs/reference/05-upgrade.md');
         self::assertStringContainsString('## Rehearse on a test host', $doc);
         self::assertStringContainsString('ci/upgrade-rehearsal.sh', $doc);
         foreach (['--yes-this-is-a-test-host', '--build-only', '--dry-run'] as $flag) {
@@ -241,6 +240,5 @@ final class UpgradeDocsTest extends TestCase
             self::assertMatchesRegularExpression('/^#### Rollout$/m', $fragment);
         }
         self::assertStringContainsString('fleet upgrade', $fragment);
-        self::assertStringContainsString('docs/upgrading.md', $fragment);
     }
 }

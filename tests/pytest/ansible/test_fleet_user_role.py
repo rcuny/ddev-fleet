@@ -1,6 +1,5 @@
 """FLE-21: the fleet_user role creates the encrypted-secret-store directories.
-Checked at YAML level (the suite does not run Ansible), like the
-security_probe role test."""
+Checked at YAML level (the suite does not run Ansible)."""
 
 from pathlib import Path
 

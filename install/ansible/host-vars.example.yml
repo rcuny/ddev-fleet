@@ -1,0 +1,16 @@
+---
+# The installer writes /etc/ddev-fleet/host-vars.yml (--engine=ansible; docs/reference/04-installer.md). Or copy this and edit. Documentation addresses only.
+fleet_hardening_enabled: true
+fleet_hardening_ssh_allow_users:
+  - admin
+fleet_hardening_trusted_ips:
+  - 203.0.113.10
+  - 2001:db8::/32
+fleet_hardening_firewall_grace_minutes: 10
+fleet_hardening_tmp: false
+# Optional: false = no interactive shell profile (the old --no-shell-profile).
+# fleet_shell_profile: true
+
+# The application layer. fleet_ref is normally passed by the bootstrap (-e fleet_ref=v1.2.3).
+fleet_domain: fleet.example.com
+fleet_acme_email: admin@example.com
