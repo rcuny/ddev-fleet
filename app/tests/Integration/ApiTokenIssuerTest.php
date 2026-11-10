@@ -113,4 +113,52 @@ final class ApiTokenIssuerTest extends KernelTestCase
         self::assertTrue($old->token->isUsable(new \DateTimeImmutable()));
         self::assertFalse($old->token->isUsable(new \DateTimeImmutable('+61 minutes')));
     }
+
+    public function testRotationAuditsTheRevocationOfTheOldToken(): void
+    {
+        $old = $this->issue();
+
+        $this->issuer->rotate($old->token, 'alice');
+
+        $revokes = self::getContainer()->get(AuditLog::class)->latest(10, AuditLog::API_TOKEN_REVOKE);
+        self::assertCount(1, $revokes);
+        self::assertStringContainsString('token:'.$old->token->id().':ci', $revokes[0]->subject());
+        self::assertSame('alice', $revokes[0]->actor());
+    }
+
+    public function testRotationWithAGraceAuditsTheExpiryOfTheOldToken(): void
+    {
+        $old = $this->issue();
+
+        $this->issuer->rotate($old->token, 'alice', graceSeconds: 600);
+
+        $expires = self::getContainer()->get(AuditLog::class)->latest(10, AuditLog::API_TOKEN_EXPIRE);
+        self::assertCount(1, $expires);
+        self::assertStringContainsString('grace 600s', $expires[0]->subject());
+    }
+
+    public function testARevokedTokenCannotBeRotated(): void
+    {
+        $old = $this->issue();
+        $this->issuer->revoke($old->token, 'alice');
+
+        $this->expectException(InvalidApiTokenRequest::class);
+        $this->expectExceptionMessage('revoked');
+        $this->issuer->rotate($old->token, 'alice');
+    }
+
+    public function testAnExpiredTokenCannotBeRotatedAndLeavesNoSuccessor(): void
+    {
+        $old = $this->issue();
+        $old->token->expireNoLaterThan(new \DateTimeImmutable('-1 minute'));
+        $before = \count($this->tokens->all());
+
+        try {
+            $this->issuer->rotate($old->token, 'alice');
+            self::fail('Rotating an expired token must be refused.');
+        } catch (InvalidApiTokenRequest $e) {
+            self::assertStringContainsString('expired', $e->getMessage());
+        }
+        self::assertCount($before, $this->tokens->all());
+    }
 }

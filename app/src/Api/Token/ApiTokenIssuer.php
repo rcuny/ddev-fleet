@@ -16,6 +16,8 @@ use Symfony\Component\HttpFoundation\IpUtils;
  */
 final readonly class ApiTokenIssuer
 {
+    public const int MAX_GRACE_SECONDS = 3600;
+
     private const string NAME_PATTERN = '/^[a-z0-9][a-z0-9._-]{0,31}$/D';
     private const string PROJECT_PATTERN = '/^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/D';
     private const string GLOB_PATTERN = '/^[A-Za-z0-9._*?-]{1,64}$/D';
@@ -99,6 +101,12 @@ final readonly class ApiTokenIssuer
     public function rotate(ApiToken $old, string $actor, int $graceSeconds = 0, ?\DateTimeImmutable $expiresAt = null): IssuedToken
     {
         $now = $this->clock->now();
+        if ($old->isRevoked()) {
+            throw new InvalidApiTokenRequest('A revoked token cannot be rotated; issue a new one.');
+        }
+        if ($old->isExpired($now)) {
+            throw new InvalidApiTokenRequest('An expired token cannot be rotated; issue a new one.');
+        }
         $scopes = array_values(array_filter(array_map(ApiScope::tryFrom(...), $old->scopes())));
         $successor = $this->issue(
             $old->name(),
@@ -112,13 +120,17 @@ final readonly class ApiTokenIssuer
             $old->id(),
         );
 
-        $grace = max(0, min(3600, $graceSeconds));
+        $grace = max(0, min(self::MAX_GRACE_SECONDS, $graceSeconds));
+        $subject = 'token:'.$old->id().':'.$old->name();
         if (0 === $grace) {
             $old->revoke($now);
+            $this->tokens->save($old);
+            $this->audit->record($actor, AuditLog::API_TOKEN_REVOKE, $subject.' (rotated)');
         } else {
             $old->expireNoLaterThan($now->modify('+'.$grace.' seconds'));
+            $this->tokens->save($old);
+            $this->audit->record($actor, AuditLog::API_TOKEN_EXPIRE, $subject.' (rotated, grace '.$grace.'s)');
         }
-        $this->tokens->save($old);
 
         return $successor;
     }

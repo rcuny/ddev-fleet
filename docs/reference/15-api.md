@@ -41,6 +41,27 @@ The prefix and the checksum let secret scanners find a leaked token and let the 
 
 There is no wildcard scope and no scope implies another. Settings, secrets, users and tokens are never reachable with a token.
 
+## Managing tokens
+
+Tokens are service tokens: they belong to no person and outlive anyone's access. Only an admin makes them, from the CLI on the host or from **API tokens** in the web interface. Nothing in the API itself can create, change or list tokens.
+
+### CLI
+
+```
+sudo fleet token:create orchestrator --scope=read --scope=lifecycle --project=blog --ip=203.0.113.0/24 [--expires-in=DAYS]
+sudo fleet token:list [--all] [--json]
+sudo fleet token:rotate <id> [--grace=SECONDS] [--expires-in=DAYS]
+sudo fleet token:revoke <id>
+```
+
+`create` and `rotate` print the secret as the only line on stdout (or the `secret` field with `--json`); everything else goes to stderr. It is shown once. Store it as a secret, never in a repository. The audit actor of CLI changes is `cli`.
+
+`rotate` makes a successor with the same scopes and restrictions and a new default lifetime (or `--expires-in`). The old token is revoked at once; with `--grace` (at most 3600 seconds) it keeps working that long, so a client can switch without downtime. A revoked or expired token cannot be rotated: issue a new one. `token:list` hides revoked and expired tokens unless you pass `--all`, and flags tokens that **expire within 14 days** (`EXPIRING`) or were **not used for 60 days** (`UNUSED`, counted from creation for a token never used).
+
+### Web interface
+
+**API tokens** (`/admin/api-tokens`, admins only) lists the tokens (prefix hint, scopes, projects, state, expiry, last use time and address; never the secret), the "Needs attention" panel with the expiring and unused tokens, and the create, rotate and revoke forms. Every change asks for your password again (re-auth) and is audited. The new secret appears once, in the page that the change returns, with a copy button.
+
 ## Limits
 
 | Limit | Value |
@@ -48,6 +69,8 @@ There is no wildcard scope and no scope implies another. Settings, secrets, user
 | Reads | 120 per minute per token |
 | Writes | 30 per minute per token |
 | Failed authentications | 10 per 15 minutes per client address; beyond that the address gets `429` before its token is looked at |
+
+The failed-authentication limit is **per client address**, not per token. Callers behind one shared address (a NAT, an office or a CI runner pool) share the same 10 attempts: one misconfigured client can lock out the others on that address for up to 15 minutes. Give each calling host its own address, or its own token with an `--ip` allow-list so a wrong token fails fast and is easy to find in the `api.denied` rows.
 
 A `429` carries `Retry-After`.
 
@@ -61,4 +84,4 @@ Any valid token. Returns its own `id`, `name`, `description`, `prefix_hint`, `sc
 
 ## Audit
 
-`api_token.create`, `api_token.rotate`, `api_token.revoke` and `api_token.expire` record token changes; `api.denied` records refused calls (authentication, scope, project, address). The actor of a token's calls is `token:<id>:<name>`. A secret is never written to the log.
+`api_token.create` and `api_token.revoke` record a new and a revoked token. `api_token.rotate` records the successor, and the old token's end is audited too: `api_token.revoke` when it dies at once, `api_token.expire` (with the grace in seconds) when it gets a grace period; `api.denied` records refused calls (authentication, scope, project, address). The actor of a token's calls is `token:<id>:<name>`. A secret is never written to the log.
