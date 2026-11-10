@@ -14,6 +14,9 @@
 #   4. the history line "start" (versions, shas, time, actor from SUDO_USER, backup file name);
 #   5. the target's install/ tree is fetched by the commit sha the plan resolved into a root-owned temp directory and its
 #      install.sh is run with --ref=<tag> (the tag must still point at that sha, or nothing runs);
+#      On a host installed with the Ansible engine (/etc/ddev-fleet/installed-engine says so; no record = bash) the same
+#      install.sh gets --engine=ansible, so the playbook of the target tag runs again. A target without that flag is refused
+#      before any service is stopped;
 #   6. the history line "installer"; then `fleet upgrade:verify` (the NEW code) and the line "verify".
 # Rollback (`--to` an older release): same shape, but step 3 is replaced by stopping the fleet services and restoring the
 # pre-upgrade backup the history names (`fleet upgrade:restore`, no migration: the installer of the older release runs the
@@ -198,6 +201,13 @@ main() {
     return 3
   fi
 
+  # --- the engine that installed the host (installed-engine; absent or anything else = bash) -----------------------
+  local engine=bash
+  if [ -r "$root/etc/ddev-fleet/installed-engine" ] && [ "$(head -n 1 "$root/etc/ddev-fleet/installed-engine" | tr -d '[:space:]')" = ansible ]; then
+    engine=ansible
+  fi
+  say "Install engine: $engine"
+
   # --- the tag must still point at the planned commit (a moved tag is refused before anything changes) -------------
   local peeled
   # The same --repo-url the plan was made from (the unprivileged plan reads it from FLEET_UPGRADE_REPO_URL, the root
@@ -263,6 +273,17 @@ main() {
     return 1
   fi
 
+  # The engine that installed this host runs again (the playbook of the target tag on an Ansible host). A host without
+  # the record is bash, and bash is the installer's default, so it gets no flag (releases before the flag do not know it).
+  local -a engine_args=()
+  if [ "$engine" = ansible ]; then
+    if ! grep -q -e '--engine=' "$work/export/install/install.sh" 2>/dev/null; then
+      history_line installer failed
+      err "this host was installed with the Ansible engine, and $target does not have it. Nothing was stopped or restored."
+      return 1
+    fi
+    engine_args=(--engine=ansible)
+  fi
 
   if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
     # The older installer was fetched and unpacked above, so an unreachable source costs nothing: the services are only
@@ -291,7 +312,7 @@ main() {
 
   say "Running the installer (log: $install_log) ..."
   local rc=0
-  bash "$work/export/install/install.sh" "--domain=$domain" "--ref=$target" "--repo-url=$repo_url" --skip-dns-check || rc=$?
+  bash "$work/export/install/install.sh" "--domain=$domain" "--ref=$target" "--repo-url=$repo_url" --skip-dns-check ${engine_args[@]+"${engine_args[@]}"} || rc=$?
   if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
     # Whatever the installer did, the services stopped for the restore must not stay down.
     systemctl start "${units[@]}" || true

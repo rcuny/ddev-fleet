@@ -30,6 +30,10 @@
                         <dd><strong data-testid="upgrade-installed" class="[overflow-wrap:anywhere]">{{ status.installed }}</strong></dd>
                     </div>
                     <div>
+                        <dt class="text-sm text-ink-muted">Install engine</dt>
+                        <dd><strong data-testid="upgrade-engine">{{ status.engine }}</strong></dd>
+                    </div>
+                    <div>
                         <dt class="text-sm text-ink-muted">Latest release</dt>
                         <dd>
                             {% if latest is not null %}

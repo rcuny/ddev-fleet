@@ -91,6 +91,14 @@ sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restor
 | 3 | Refused, nothing changed: block, no `--yes`, not root, moved tag, another upgrade running. |
 | 5 | The installer finished but the verification failed. |
 
+### Install engine
+
+The installer records the engine that provisioned the host in `/etc/ddev-fleet/installed-engine` (`bash` or `ansible`;
+a host without the file is `bash`). `fleet upgrade`, and a rollback, run the target release's `install.sh` with the same
+engine: on an `ansible` host that is `--engine=ansible`, so the playbook of the target tag runs again and writes
+`installed-version`. A target release that does not have the Ansible engine is refused before any service is stopped.
+The Upgrade page shows the engine.
+
 ## Roll back
 
 ```

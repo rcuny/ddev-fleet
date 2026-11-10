@@ -7,7 +7,7 @@ namespace App\Fleet\Upgrade;
 /** Builds the UpgradeStatus from the version file and the cached catalog. Never touches the network. */
 final readonly class UpgradeStatusReader
 {
-    public function __construct(private InstalledVersion $installed, private ReleaseCatalog $catalog)
+    public function __construct(private InstalledVersion $installed, private ReleaseCatalog $catalog, private InstalledEngine $engine)
     {
     }
 
@@ -15,6 +15,6 @@ final readonly class UpgradeStatusReader
     {
         $raw = $this->installed->raw();
 
-        return new UpgradeStatus($raw, Version::tryParse($raw), $this->catalog->state());
+        return new UpgradeStatus($raw, Version::tryParse($raw), $this->catalog->state(), $this->engine->name());
     }
 }

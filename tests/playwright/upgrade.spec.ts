@@ -74,6 +74,7 @@ test.describe('upgrade notice and page', () => {
     await expect(page.getByRole('heading', { level: 1, name: 'Upgrade' })).toBeVisible();
     await expect(page.getByTestId('upgrade-installed')).toHaveText('v1.98.0');
     await expect(page.getByTestId('upgrade-latest')).toHaveText('v1.99.0');
+    await expect(page.getByTestId('upgrade-engine')).toHaveText('bash');
     await expect(page.getByTestId('upgrade-cmd-to')).toHaveValue('sudo fleet upgrade --to v1.99.0');
     await expect(page.getByTestId('upgrade-section')).toContainText('A new thing');
     expect(await hasHorizontalOverflow(page)).toBe(false);
