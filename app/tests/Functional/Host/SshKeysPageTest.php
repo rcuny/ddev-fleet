@@ -185,4 +185,12 @@ final class SshKeysPageTest extends AdminTestCase
 
         return (string) $this->em()->getConnection()->fetchOne('SELECT fingerprint FROM ssh_key WHERE role = ?', [$role]);
     }
+
+    public function testThePushKeyCheckRefusesAHostThatIsNotAProjectRemote(): void
+    {
+        $this->post('/admin/host/ssh-keys/check-push', ['host' => 'evil.example.com']);
+
+        self::assertResponseRedirects('/admin/host/ssh-keys', 303);
+        self::assertStringContainsString('registered projects', $this->open('/admin/host/ssh-keys')->filter('[data-testid=flashes]')->text());
+    }
 }

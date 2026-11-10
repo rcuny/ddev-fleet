@@ -95,6 +95,7 @@ final class HostSettingsController extends AbstractController
         private readonly HostHardwareProbe $hardware,
         private readonly UnslicedInstances $unsliced,
         private readonly SshKeyCatalog $sshCatalog,
+        private readonly \App\Domain\Project\ProjectRepository $projectRepository,
         private readonly ProvisionService $provision,
         private readonly DriftService $drift,
         private readonly HostVarsReader $hostVars,
@@ -578,6 +579,7 @@ final class HostSettingsController extends AbstractController
             'mirror' => 'network' === $tab ? $this->mirrorView() : null,
             'capacity' => 'capacity' === $tab ? $this->capacity->report() : null,
             'sshKeys' => 'ssh' === $tab ? $this->sshCatalog->entries() : [],
+            'gitHosts' => 'ssh' === $tab ? $this->gitHosts() : [],
             'unsliced' => 'capacity' === $tab ? $this->unsliced->list() : [],
             'provision' => 'hardening' === $tab ? [
                 'unavailable' => $this->provision->unavailable(),
@@ -685,5 +687,21 @@ final class HostSettingsController extends AbstractController
         $name = mb_strcut($this->getUser()?->getUserIdentifier() ?? '', 0, 64, 'UTF-8');
 
         return '' === $name ? 'admin' : $name;
+    }
+
+    /**
+     * @return list<string> the git hosts of the registered projects' remotes (FLE-271: the push-key check takes no free-form host)
+     */
+    private function gitHosts(): array
+    {
+        $hosts = [];
+        foreach ($this->projectRepository->all() as $project) {
+            try {
+                $hosts[] = \App\Fleet\Ssh\PushKeyCheck::hostFromRemote($project->git());
+            } catch (\InvalidArgumentException) {
+            }
+        }
+
+        return array_values(array_unique($hosts));
     }
 }

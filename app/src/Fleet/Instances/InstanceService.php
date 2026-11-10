@@ -95,6 +95,10 @@ final class InstanceService
             throw new \InvalidArgumentException('Unknown operation.');
         }
 
+        if ('redeploy' === $op && null !== $options->branch && null !== ($error = BranchName::error($options->branch))) {
+            throw new ValidationFailed(['branch' => $error]);
+        }
+
         $instances = $this->resolve($selector);
         $template = 'redeploy' === $op ? $this->redeployTemplate($instances, $options) : null;
         $this->refuseIfBusy($instances);

@@ -349,4 +349,20 @@ final class TemplateServiceTest extends KernelTestCase
         $this->expectException(\InvalidArgumentException::class);
         new TemplateInput('full')->with(['nope' => 1]);
     }
+
+    public function testPushKeyWarningOnlyForContainerSshAndAnUnregisteredKey(): void
+    {
+        mkdir($this->home.'/ssh', 0o700, true);
+        touch($this->home.'/ssh/push_ed25519');
+        $runner = new \App\Fleet\Shell\RecordingCommandRunner();
+        $runner->expect(['ssh'], new \App\Fleet\Shell\CommandResult(255, '', 'Permission denied (publickey).'));
+        $service = new TemplateService($this->projects, $this->templates, new \App\Fleet\Ssh\ExtraSshKey(new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy')), null, new \App\Fleet\Ssh\PushKeyCheck(new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy'), $runner));
+
+        self::assertNull($service->pushKeyWarning('blog'));
+        self::assertSame([], $runner->calls());
+
+        $this->blog->changeContainerSsh(true);
+        $this->projects->save($this->blog);
+        self::assertStringContainsString('not registered on the git host git.example.com', (string) $service->pushKeyWarning('blog'));
+    }
 }

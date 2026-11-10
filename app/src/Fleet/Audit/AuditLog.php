@@ -55,6 +55,8 @@ final readonly class AuditLog
     public const string API_TOKEN_EXPIRE = 'api_token.expire';
     /** A refused API call: bad, expired or revoked token, scope or project refusal, IP refusal, rate limit. */
     public const string API_DENIED = 'api.denied';
+    /** A write the API accepted (deploy, redeploy, start, stop, destroy, retry); the subject names the target and the job. */
+    public const string API_WRITE = 'api.write';
 
     public const string PROJECT_MEMBER_ADD = 'project.member.add';
     public const string PROJECT_MEMBER_REMOVE = 'project.member.remove';
