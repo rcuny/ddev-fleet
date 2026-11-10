@@ -145,5 +145,9 @@ step_main() {
       write_file "$FLEET_ETC_DIR/installed-version" 0644 root:root <<<"$version"
     fi
   fi
+  # Which engine installed the host: `fleet upgrade` runs the same one again. A host without the file counts as bash.
+  if ! is_dry; then
+    write_file "$FLEET_ETC_DIR/installed-engine" 0644 root:root <<<"bash"
+  fi
   announce_setup
 }

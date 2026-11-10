@@ -12,6 +12,8 @@ final readonly class UpgradeStatus
         public string $installed,
         public ?Version $installedVersion,
         public CatalogState $catalog,
+        /** The engine that installed the host: `bash` or `ansible` (InstalledEngine). */
+        public string $engine = InstalledEngine::BASH,
     ) {
     }
 

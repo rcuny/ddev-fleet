@@ -21,7 +21,7 @@ When something misbehaves, you need to know where Fleet keeps things and what ru
 | `/srv/fleet/uploads`, `/srv/fleet/staging` | `fleet` 0700 | Browser-upload chunks; rendered config waiting for the root helper. Empty at rest; leave out of backups. |
 | `/srv/fleet/cache/tailwind` | `fleet` | Cached Tailwind binary. Safe to delete. |
 | `/srv/fleet/authelia/users.yml` | `fleet:authelia` 0640 | The user file Authelia reads, written by the app. |
-| `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640), `mercure.env` (0600), `installed-version`, `installed-revision`, `hardening.conf`. |
+| `/etc/ddev-fleet` | `root:fleet` 0750 | `fleet.env` (0640), `mercure.env` (0600), `installed-version`, `installed-revision`, `installed-engine` (`bash` or `ansible`), `hardening.conf`. |
 | `/etc/caddy/Caddyfile`, `/etc/caddy/fleet/` | `root`; `fleet:caddy` | Caddy configuration, the sign-in gate, per-instance snippets and `ports/`. |
 | `/etc/caddy/ovh/` | `root:caddy` 0750 | `ovh_dns` mode only: three credential files in clear text (0640), because Caddy needs them. |
 | `/etc/authelia/` | `authelia` | Configuration and generated secrets (`secrets/`). |
