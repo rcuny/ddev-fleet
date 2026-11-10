@@ -7,6 +7,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.5.3] - 2026-11-10
+
+### Added
+- **FLE-241: Ansible provisioning spike (PR #235).** Ansible roles `packages`, `docker` and `hardening` under `install/ansible/`, verified to describe a bash-installed, hardened host with zero changes. The installer does not run them unless asked (see FLE-258).
+- **FLE-255: Ansible roles `fleet_user`, `shell` and `ddev`.** Ports of install steps 30, 35 and 40 under
+  `install/ansible/`, run after `docker` and not yet called by the installer. The `hardening` SSH drop-in no longer
+  deletes a good existing drop-in when validation fails, and sshd's ports are re-checked after the reload.
+- A tag-limited Ansible run of another role (`--tags ddev`) no longer reaches the `hardening` role's settings validation.
+- Ansible roles `caddy` and `authelia` (plus the helper role `apt_repo`) in `install/ansible/`, ports of `50-caddy.sh` and `60-authelia.sh`. Not run by the installer yet. (FLE-256)
+- **FLE-257: Ansible roles for the application layer** (inert, the bash installer is unchanged). `php_app`, `app_code`,
+  `privileged` and `units` under `install/ansible/` port `install/steps/70`, `80`, `85`, `90`, `95` and `98`: the
+  environment files (secrets generated once), the php-fpm pool, the build and migrations, the root helpers and sudoers
+  (validated with `visudo -cf`), the unit files and pinned Mercure hub, and the start with a health check. They write
+  `installed-version` and `installed-revision` from `fleet_ref`. Services restart only when their code, environment or
+  unit changed.
+- **FLE-258: `install.sh --engine=ansible`** (opt-in; the bash steps stay the default). Stage 2 installs `ansible-core` and
+  `python3-apt`, writes `/etc/ddev-fleet/host-vars.yml` from the flags (`install/lib/host-vars.sh`) and runs
+  `install/ansible/site.yml`. `App\Fleet\System\HostVarsRenderer` renders the same file for the app. The schema is in
+  `docs/reference/04-installer.md`; `--preflight` works with both engines.
+- **FLE-264: AI usage policy.** `AI_POLICY.md` explains how Fleet is built (AI agents directed and reviewed by one maintainer), how AI involvement is marked (commit trailers, pull request notes), what contributors who use AI tools must disclose, and the licensing and security stance. The README's AI disclaimer now links to it, and so does `CONTRIBUTING.md`.
+
+### Changed
+- **FLE-237: the documentation is rewritten in layers.** The README now pitches Fleet with a three-command quick start, `docs/concepts.md` and eight task guides come first (why and what before how), and the exact behaviour moved to `docs/reference/`. Contributor pages live in `docs/contributing/`; `CONTRIBUTING.md` is a short pointer. The Python 0.x documentation (`docs/v0/`) and the legacy Ansible note are removed; the `legacy` branch holds that line.
+- **FLE-237: generated CLI reference.** `docs/reference/01-cli.md` is generated from the console definition by the new `fleet:docs:cli` command (`composer run docs:cli`), and `CliReferenceTest` fails when it is stale.
+- **FLE-238: the systemd security check scores the 1.x units.** `ci/systemd_security.py offline` now runs
+  `systemd-analyze security --offline=yes` on the unit files the installer ships (`install/etc/*.service`,
+  `install/harden/etc/*.service`, the Caddy sandbox drop-in) and compares them with a new baseline
+  (`ci/systemd-security-baseline.json`, same regression threshold). `SYSTEMD-SECURITY-REPORT.md` is regenerated
+  from it and names no host (`python ci/systemd_security.py report`).
+- **FLE-253: documentation polish.** The files in `docs/guides/`, `docs/reference/` and `docs/contributing/` are numbered (`01-`, `02-`, ...) so they sort in reading order, and `guides/` and `reference/` have a `README.md` index. The example project is `website` instead of `shop`. The tone no longer promises to remove human work: Fleet lets you choose what to automate. The tmux workspace has its own highlighted section in the README and the guide `docs/guides/05-work-with-agents.md`.
+
+### Removed
+- **FLE-238: the Python-era scoring paths.** The live check over SSH (`ci/systemd-security-live.sh`, the
+  `systemd-security-live` custom pipeline, the `security_probe` Ansible role and `security-probe.yml`), the Jira
+  alert, the weekly report commit and the scoring of the 0.x Ansible templates are gone; they stay on `legacy`.
+
+### Fixed
+- **FLE-220: a webhook push that arrives while its instance is busy is no longer dropped.** A fixed-label or `--reuse`
+  rule used to record `Busy` and start nothing, so a second merge during a CI run left the newest commit without a
+  `fleet-gates` status. The redeploy is now kept as a pending request per instance (the latest push wins) and one
+  follow-up redeploy is queued when the active job ends. See `docs/reference/11-webhooks-and-schedules.md`.
+- **FLE-236: the installer records the release tag when HEAD is exactly one.** Re-running `install.sh` without `--ref`
+  (for example to change `--harden` options) wrote `main@<sha7>` to `installed-version` even when the checkout was exactly
+  `v1.5.0`, so `fleet upgrade --check` said "not a release". It now records the tag (`git describe --exact-match`).
+- **FLE-239: stale documentation paths re-pointed**: the 0.x Ansible comments and `bitbucket-pipelines.yml` now cite the current pages (`docs/reference/09-networking.md`, `docs/contributing/03-ci.md`) or the `legacy` branch for 0.x-only docs; the generated `docs/reference/01-cli.md` no longer carries a hardcoded `Last updated` date, so its output is deterministic.
+
+### Dependencies
+- PHP dev tooling: `friendsofphp/php-cs-fixer` 3.95.28 -> 3.95.29 (#232); `phpstan/phpstan-doctrine` 2.1.1 -> 2.1.2 (#233).
+
 ## [1.5.2] - 2026-11-06
 
 ### Added
@@ -1231,7 +1280,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.3...HEAD
+[1.5.3]: https://github.com/rcuny/ddev-fleet/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/rcuny/ddev-fleet/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/rcuny/ddev-fleet/compare/v1.5.0...v1.5.1
 [1.5.0]: https://github.com/rcuny/ddev-fleet/compare/v1.4.0...v1.5.0
