@@ -8,6 +8,7 @@ use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Ssh\SshKey;
 use App\Domain\Ssh\SshKeyRepository;
 use App\Domain\Ssh\SshKeyRole;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\FleetPaths;
 use App\Fleet\Shell\CommandRunner;
 use App\Fleet\Shell\CommandRunnerException;
@@ -30,6 +31,8 @@ final readonly class SshKeyService
         private HostSettingsRepository $settings,
         private Ed25519KeyGenerator $generator,
         private CommandRunner $runner,
+        private SshKeysLock $lock,
+        private AuditLog $audit,
     ) {
     }
 
@@ -61,7 +64,7 @@ final readonly class SshKeyService
     /**
      * Replaces the role's key pair with a freshly generated one. The old private key is gone afterwards.
      *
-     * @param string $by who asked (reserved for the audit trail)
+     * @param string $by who asked; recorded as `ssh.key.rotate` for every caller (UI, wizard)
      */
     public function regenerate(SshKeyRole $role, string $by): void
     {
@@ -72,6 +75,7 @@ final readonly class SshKeyService
             $this->install($role, $key->privatePem(), $key->publicLine);
             $this->saveRow($role, $key->publicLine, $key->fingerprint);
         });
+        $this->audit->record($by, AuditLog::SSH_KEY_ROTATE, $role->value);
     }
 
     /**
@@ -229,36 +233,11 @@ final readonly class SshKeyService
     }
 
     /**
-     * Runs $work holding an exclusive lock on `<ssh dir>/.keys.lock`.
-     *
      * @param callable(): void $work
      */
     private function locked(callable $work): void
     {
-        $this->ensureSshDir();
-        $lock = @fopen($this->paths->sshDir().'/.keys.lock', 'c');
-        if (false === $lock || !flock($lock, \LOCK_EX)) {
-            false !== $lock && fclose($lock);
-
-            throw new \RuntimeException('Cannot lock the SSH key directory.');
-        }
-        try {
-            $work();
-        } finally {
-            flock($lock, \LOCK_UN);
-            fclose($lock);
-        }
-    }
-
-    private function ensureSshDir(): void
-    {
-        $dir = $this->paths->sshDir();
-        if (!is_dir($dir) && !@mkdir($dir, 0o700, true) && !is_dir($dir)) {
-            throw new \RuntimeException(\sprintf('Cannot create directory "%s".', $dir));
-        }
-        if ((@fileperms($dir) & 0o777) !== 0o700 && !@chmod($dir, 0o700)) {
-            throw new \RuntimeException(\sprintf('Cannot set mode 0700 on "%s".', $dir));
-        }
+        $this->lock->run($work);
     }
 
     private static function assertBy(string $by): void

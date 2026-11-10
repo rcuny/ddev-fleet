@@ -15,6 +15,7 @@ use App\Fleet\Projects\Rule\DrupalEnv;
 use App\Fleet\Projects\Rule\ResourceName;
 use App\Fleet\Projects\Rule\SshKeyNames;
 use App\Fleet\Ssh\ExtraSshKey;
+use App\Fleet\Ssh\SshKeysLock;
 use App\Fleet\System\SlicesApplier;
 use Doctrine\DBAL\Exception\UniqueConstraintViolationException;
 
@@ -30,6 +31,7 @@ final readonly class TemplateService
         private ProjectRepository $projects,
         private TemplateRepository $templates,
         private ExtraSshKey $sshKeys,
+        private SshKeysLock $keysLock,
         private ?SlicesApplier $slices = null,
         private ?\App\Fleet\Ssh\PushKeyCheck $pushCheck = null,
     ) {
@@ -81,33 +83,40 @@ final readonly class TemplateService
     {
         $owner = $this->project($project);
         $input = $input->normalised();
-        $errors = $this->check($input, $owner->containerSsh(), $owner);
 
-        if (!isset($errors['name'])) {
-            if (null !== $this->templates->find($owner, $input->name)) {
-                $errors['name'] = 'A template with this name already exists in this project.';
-            } elseif ($this->templates->count($owner) >= self::MAX_PER_PROJECT) {
-                $errors['name'] = \sprintf('A project has at most %d templates.', self::MAX_PER_PROJECT);
+        // Key check and save under the keys lock: a key cannot be deleted in between (FLE-270).
+        $template = $this->withKeys($input, function () use ($owner, $input): Template {
+            $errors = $this->check($input, $owner->containerSsh(), $owner);
+
+            if (!isset($errors['name'])) {
+                if (null !== $this->templates->find($owner, $input->name)) {
+                    $errors['name'] = 'A template with this name already exists in this project.';
+                } elseif ($this->templates->count($owner) >= self::MAX_PER_PROJECT) {
+                    $errors['name'] = \sprintf('A project has at most %d templates.', self::MAX_PER_PROJECT);
+                }
             }
-        }
-        if ([] !== $errors) {
-            throw new ValidationFailed($errors);
-        }
+            if ([] !== $errors) {
+                throw new ValidationFailed($errors);
+            }
 
-        $now = new \DateTimeImmutable();
-        $template = new Template($owner, $input->name, $now);
-        $template->changeDrupalEnv($input->drupalEnv, $now);
-        $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
-        $template->changeSshKeys($input->sshKeys, $now);
-        $template->changeSshIdentities($input->sshIdentities, $now);
-        $template->changeCapacity($input->cpuThreads, $input->slots, $now);
+            $now = new \DateTimeImmutable();
+            $template = new Template($owner, $input->name, $now);
+            $template->changeDrupalEnv($input->drupalEnv, $now);
+            $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
+            $template->changeSshKeys($input->sshKeys, $now);
+            $template->changeSshIdentities($input->sshIdentities, $now);
+            $template->changeCapacity($input->cpuThreads, $input->slots, $now);
 
-        try {
-            $this->templates->save($template);
-        } catch (UniqueConstraintViolationException) {
-            // Two creates raced past the existence check. The entity manager is closed now: touch nothing else.
-            throw new ValidationFailed(['name' => 'A template with this name already exists in this project.']);
-        }
+            try {
+                $this->templates->save($template);
+            } catch (UniqueConstraintViolationException) {
+                // Two creates raced past the existence check. The entity manager is closed now: touch nothing else.
+                throw new ValidationFailed(['name' => 'A template with this name already exists in this project.']);
+            }
+
+            return $template;
+        });
+
         // The template's slice must exist before its first instance starts. A failure is a warning.
         $this->slices?->sync();
 
@@ -122,22 +131,28 @@ final readonly class TemplateService
     {
         $template = $this->get($project, $name);
         $input = $input->normalised();
-        $errors = $this->check($input, $template->project()->containerSsh(), $template->project());
-        if ($input->name !== $template->name()) {
-            $errors = ['name' => 'The name cannot be changed.'] + $errors;
-        }
-        if ([] !== $errors) {
-            throw new ValidationFailed($errors);
-        }
 
-        $now = new \DateTimeImmutable();
-        $limitBefore = $template->cpuThreads();
-        $template->changeDrupalEnv($input->drupalEnv, $now);
-        $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
-        $template->changeSshKeys($input->sshKeys, $now);
-        $template->changeSshIdentities($input->sshIdentities, $now);
-        $template->changeCapacity($input->cpuThreads, $input->slots, $now);
-        $this->templates->save($template);
+        // Key check and save under the keys lock: two saves editing keys, or a key delete, cannot interleave (FLE-270).
+        $limitBefore = $this->withKeys($input, function () use ($template, $input): ?int {
+            $errors = $this->check($input, $template->project()->containerSsh(), $template->project());
+            if ($input->name !== $template->name()) {
+                $errors = ['name' => 'The name cannot be changed.'] + $errors;
+            }
+            if ([] !== $errors) {
+                throw new ValidationFailed($errors);
+            }
+
+            $now = new \DateTimeImmutable();
+            $limitBefore = $template->cpuThreads();
+            $template->changeDrupalEnv($input->drupalEnv, $now);
+            $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
+            $template->changeSshKeys($input->sshKeys, $now);
+            $template->changeSshIdentities($input->sshIdentities, $now);
+            $template->changeCapacity($input->cpuThreads, $input->slots, $now);
+            $this->templates->save($template);
+
+            return $limitBefore;
+        });
         // A new limit reaches the running slice at once (no restart of the instances).
         if ($limitBefore !== $template->cpuThreads()) {
             $this->slices?->sync();
@@ -235,6 +250,18 @@ final readonly class TemplateService
         }
 
         return null;
+    }
+
+    /**
+     * @template T
+     *
+     * @param callable(): T $work
+     *
+     * @return T
+     */
+    private function withKeys(TemplateInput $input, callable $work): mixed
+    {
+        return [] === $input->sshKeys ? $work() : $this->keysLock->run($work);
     }
 
     private function project(string $name): Project

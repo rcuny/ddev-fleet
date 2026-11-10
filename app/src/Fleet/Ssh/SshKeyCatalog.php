@@ -127,19 +127,21 @@ final readonly class SshKeyCatalog
     }
 
     /**
-     * @return list<string> names of `ssh/<name>_ed25519` files that are valid extra key names
+     * @return list<string> names of `ssh/<name>_(ed25519|ecdsa|rsa)` files that are valid extra key names
      */
     private function externalNames(): array
     {
         $names = [];
-        foreach (glob($this->paths->sshDir().'/*_ed25519') ?: [] as $file) {
-            $name = substr(basename($file), 0, -\strlen('_ed25519'));
-            if (null === SshKeyNames::error([$name])) {
-                $names[] = $name;
+        foreach (FleetPaths::sshExtraKeySuffixes() as $suffix) {
+            foreach (glob($this->paths->sshDir().'/*_'.$suffix) ?: [] as $file) {
+                $name = substr(basename($file), 0, -\strlen('_'.$suffix));
+                if (null === SshKeyNames::error([$name])) {
+                    $names[] = $name;
+                }
             }
         }
 
-        return $names;
+        return array_values(array_unique($names));
     }
 
     /**
