@@ -93,6 +93,8 @@ final class InstallerHostVarsTest extends TestCase
         self::assertSame(0, $process->getExitCode(), $out.$process->getErrorOutput());
         self::assertStringContainsString('install ansible-core python3-apt', $out);
         self::assertStringContainsString('+ write /etc/ddev-fleet/host-vars.yml 0644 root:root', $out);
+        // FLE-258: run.sh sets LC_ALL=C, and Ansible refuses a non-UTF-8 locale.
+        self::assertStringContainsString('env LC_ALL=C.UTF-8 LANG=C.UTF-8 ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 ansible-playbook', $out);
         self::assertMatchesRegularExpression('~ansible-playbook -i localhost\\\\, -c local \S+/ansible/site\.yml -e fleet_ref=main -e fleet_hardening_strict=false~', $out);
         self::assertStringNotContainsString('==> 10-packages', $out);
     }

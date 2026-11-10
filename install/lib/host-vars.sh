@@ -128,7 +128,8 @@ ansible_engine_main() {
   # An explicit --harden refuses a lock-out; a stored re-run (an upgrade) only warns, as in the bash installer.
   local strict=false
   [ "$HARDEN" != 1 ] || strict=true
-  local -a cmd=(ansible-playbook -i localhost, -c local "$INSTALL_DIR/ansible/site.yml"
+  # The installer runs with LC_ALL=C; Ansible refuses anything but a UTF-8 locale, and C.UTF-8 always exists on Debian 13.
+  local -a cmd=(env LC_ALL=C.UTF-8 LANG=C.UTF-8 ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 ansible-playbook -i localhost, -c local "$INSTALL_DIR/ansible/site.yml"
     -e "fleet_ref=$REF" -e "fleet_hardening_strict=$strict")
   # The playbook reads the host answers and the roles from the root-owned export; ansible.cfg sits beside site.yml.
   if is_dry; then
@@ -137,5 +138,5 @@ ansible_engine_main() {
     printf ')\n'
     return 0
   fi
-  (cd "$INSTALL_DIR/ansible" && ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 "${cmd[@]}" </dev/null)
+  (cd "$INSTALL_DIR/ansible" && "${cmd[@]}" </dev/null)
 }
