@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Backup and restore reference
 
 Fleet backs up its own databases every day, so a broken disk or a bad upgrade is not the end. This page says what is and is not covered, and how to restore without surprises.

@@ -62,7 +62,7 @@ final readonly class StartJob implements JobType
                 $log->line('removed the ssh-agent and its compose override: this project no longer uses container_ssh');
             }
         } else {
-            if (!$this->agent->hasKey()) {
+            if (!$this->agent->hasKeyFor($instance)) {
                 $log->line('warning: the host has no push key; no ssh-agent for this instance');
             } else {
                 try {

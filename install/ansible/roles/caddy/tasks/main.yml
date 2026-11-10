@@ -156,7 +156,7 @@
 
 - name: Report a custom build that is missing or too old (a check run cannot download one)
   ansible.builtin.debug:
-    msg: the custom Caddy would be refreshed to {{ caddy_wanted_version }} (installed {{ caddy_custom_version | default('none', true) }})
+    msg: "DRIFT: the custom Caddy would be refreshed to {{ caddy_wanted_version }} (installed {{ caddy_custom_version | default('none', true) }})"
   when: not caddy_custom_current | bool and ansible_check_mode
 
 - name: Read the alternatives for caddy

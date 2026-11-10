@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-07
-Type: documentation
----
-
 # Guides
 
 Task-oriented pages, in the order you will most likely need them: install Fleet, deploy a first project, then choose how much of the rest you want to automate. Each guide stands on its own, and the reference pages hold the details.

@@ -27,14 +27,14 @@ final class HostPageTest extends HostPageTestCase
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-general]'));
 
         $tabs = $crawler->filter('[data-testid=host-tabs] a');
-        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Networking', 'Certificates', 'Uploads', 'Jobs', 'Capacity', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
+        self::assertSame(['General', 'Git identity', 'Claude token', 'Notifications', 'Networking', 'Certificates', 'Uploads', 'Jobs', 'Capacity', 'SSH keys', 'Hardening', 'Drift', 'Backups'], $tabs->each(static fn (Crawler $a): string => trim($a->text())));
         self::assertSame('page', $crawler->filter('[data-testid=host-tabs] a[aria-current]')->attr('aria-current'));
         // The phone version of the tabs: a native select with a Go button, no script needed.
-        self::assertCount(10, $crawler->filter('[data-testid=host-tab-select] option'));
+        self::assertCount(13, $crawler->filter('[data-testid=host-tab-select] option'));
         self::assertCount(1, $crawler->filter('[data-testid=host-tab-select] button[type=submit]'));
         self::assertCount(0, $crawler->filter('main script'));
 
-        foreach (['git', 'claude', 'notifications', 'network', 'uploads', 'jobs', 'capacity', 'backups'] as $tab) {
+        foreach (['git', 'claude', 'notifications', 'network', 'uploads', 'jobs', 'capacity', 'hardening', 'backups'] as $tab) {
             $crawler = $this->open('/admin/host?tab='.$tab);
             self::assertResponseStatusCodeSame(200, $tab);
             self::assertCount(1, $crawler->filter('[data-testid=host-tab-'.$tab.']'), $tab);

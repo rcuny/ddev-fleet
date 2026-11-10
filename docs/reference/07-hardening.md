@@ -1,15 +1,19 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Hardening reference
 
 Hardening locks down SSH and the firewall on a host exposed to the Internet. It is opt-in, because a mistake locks you out of a remote machine. This page lists what each part does and, more important, how to get back in and how to undo it. Overview: [secure-the-host](../guides/08-secure-the-host.md).
 
 A plain install or upgrade never touches `sshd`, `ufw`, fail2ban or unattended-upgrades. Docker's `daemon.json` and mail relays are never part of it.
+
+## From the web page (Hardening tab)
+
+On a host installed with the Ansible engine (`install.sh --engine=ansible`), an administrator can turn hardening on, off or change it from **Settings → Hardening** instead of re-running the installer. The tab edits the same answers as the flags above: the allowed SSH accounts, the trusted addresses, the firewall grace period and the `/tmp` option. It also asks for **the SSH account you log in with**, which must be in the allow list; the run refuses a change that would lock that account out, as `--harden` does.
+
+- Saving asks for your password again (once per change), then queues a job and opens its live log. The job writes the answers to `/etc/ddev-fleet/host-vars.yml` and runs the installed release's own playbook through the root helper `apply provision`. The page chooses no playbook, role or argument.
+- If the run fails, the previous answers file is put back (only when that run installed new answers), so the next upgrade does not apply a half-accepted change. The rollback restores the answers file only: it does not undo a half-applied playbook run.
+- With hardening on, the helper refuses answers that lack the SSH account you log in with, or whose allow list does not contain it (exit 65), so a change cannot lock you out.
+- Switching hardening off here stops the host managing it; it does not undo what was changed (use the steps in [Undo on purpose](#undo-on-purpose) for that).
+- The tab shows the state of the firewall dead-man's switch. While it is armed, the page tells you to run `sudo fleet-firewall-confirm` **from a second SSH session**. The page never confirms for you: logging in again is the proof that you can still reach the host.
+- Unavailable on a host whose root helper predates `apply provision` (upgrade it) and on a host installed with the bash steps (no installed playbook); the tab says which.
 
 ## Turn it on
 
@@ -88,3 +92,9 @@ Fleet then adopts a password hash Authelia changed (a user's reset) before rewri
 - [Secure the host](../guides/08-secure-the-host.md): the security model.
 - [Installer](04-installer.md): flags, recovery and uninstall.
 - [Files on disk](03-files-on-disk.md): units and timers.
+
+## Drift check
+
+`sudo fleet host:drift` (and **Settings → Drift**, button "Run drift check") compares the host with what the installed release's playbook would set up, in check mode, through the root helper `apply drift`. It changes nothing. The report lists, per role, what is unchanged, what would change (with the diff; values that look like secrets are masked) and what could not be checked. `--json` prints the same report (schema 1). Exit code: 0 no drift, 1 drift found, 2 a task could not be checked, 3 no report.
+
+Steps that run a command, such as firewall rules, are not visible in check mode: the host can differ there without the report saying so. The check does not run on a schedule and sends no alert. Roles mark drift that a check run cannot show as a changed task with a `DRIFT:` debug message (see `install/ansible/README.md`).

@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Share and access
 
 Fleet owns the people who may sign in, so one place decides who sees what. Administrators add users on the **Users** page (`/admin/users`) or with `fleet user:*`. You get three kinds of user, and a clean way to show a staging site to a client.

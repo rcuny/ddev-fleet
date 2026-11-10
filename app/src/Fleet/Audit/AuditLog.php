@@ -29,6 +29,8 @@ final readonly class AuditLog
     public const string SCHEDULE_RUN = 'schedule.run';
 
     public const string HOST_UPGRADE = 'host.upgrade';
+    public const string HOST_PROVISION = 'host.provision';
+    public const string HOST_DRIFT = 'host.drift';
 
     public const string REAUTH_SUCCESS = 'reauth.success';
     public const string REAUTH_FAILURE = 'reauth.failure';
@@ -38,6 +40,11 @@ final readonly class AuditLog
     public const string PROJECT_IMPORT = 'project.import';
 
     public const string PROJECT_CONTAINER_SSH = 'project.container-ssh';
+
+    public const string SSH_KEY_CREATE = 'ssh.key.create';
+    public const string SSH_KEY_IMPORT = 'ssh.key.import';
+    public const string SSH_KEY_DELETE = 'ssh.key.delete';
+    public const string SSH_KEY_ROTATE = 'ssh.key.rotate';
 
     public const string WEBHOOK_RULE_ADD = 'webhook.rule.add';
     public const string WEBHOOK_RULE_REMOVE = 'webhook.rule.remove';

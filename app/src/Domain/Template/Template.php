@@ -49,6 +49,10 @@ class Template
     #[ORM\Column(type: Types::JSON, options: ['default' => '[]'])]
     private array $sshKeys = [];
 
+    /** Which identities the instance's ssh-agent holds (FLE-266). */
+    #[ORM\Column(type: Types::STRING, length: 16, enumType: SshIdentities::class, options: ['default' => 'push_and_extras'])]
+    private SshIdentities $sshIdentities = SshIdentities::PushAndExtras;
+
     /** CPU threads all instances of the template may use together; null = inherits the project's (FLE-197). */
     #[ORM\Column(type: Types::INTEGER, nullable: true)]
     private ?int $cpuThreads = null;
@@ -122,6 +126,17 @@ class Template
     public function sshKeys(): array
     {
         return $this->sshKeys;
+    }
+
+    public function sshIdentities(): SshIdentities
+    {
+        return $this->sshIdentities;
+    }
+
+    public function changeSshIdentities(SshIdentities $sshIdentities, ?\DateTimeImmutable $now = null): void
+    {
+        $this->sshIdentities = $sshIdentities;
+        $this->touch($now);
     }
 
     public function createdAt(): \DateTimeImmutable

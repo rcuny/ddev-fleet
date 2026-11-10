@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Developing Fleet
 
 This page gets Fleet running on your machine and tells you the rules a pull request must follow. Fleet is a Symfony 8.x app in `app/` (PHP 8.4, SQLite, Twig + Symfony UX, Tailwind v4 via AssetMapper, no JavaScript build). Conventions that apply to every change are in the repository's `CLAUDE.md`.
@@ -62,6 +55,7 @@ In production the app trusts `Remote-User` and `Remote-Groups` only from a reque
 - Gates green ([02-testing.md](02-testing.md)). Never merge a red suite.
 - The repository is public: no real hostnames or client names; `RepoHygieneTest` enforces it.
 - Docs tests pin guide names, command names and options, so changing a command means changing its doc.
+- Product Markdown has no front matter (no `Author`, `Reviewer`, `Last updated` or `Type` block): a page starts with its `# Title`, and git history is the record. The only front matter kept is functional: `.github/ISSUE_TEMPLATE/*.md` (GitHub reads it) and the Claude skill files `ansible/roles/*/files/claude/skills/*/SKILL.md`. `DocsStructureTest` enforces it.
 
 ## Troubleshooting
 
