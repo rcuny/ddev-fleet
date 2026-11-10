@@ -38,7 +38,7 @@ When something misbehaves, you need to know where Fleet keeps things and what ru
 | `fleet-scheduler` | Schedule ticker (every 30 seconds): fires due schedules. |
 | `fleet-status` | Status watcher (every 10 seconds): keeps instance states true, reaps dead jobs, prunes old ones. |
 | `fleet-boot` | Oneshot after a reboot: `fleet:instance:start --all --sequential`, so instances start one at a time. |
-| `fleet-tmux` | Owns the `fleet` tmux session (the agent workspace) in its own cgroup. |
+| `fleet-tmux` | Owns the `fleet` tmux session (the tmux workspace) in its own cgroup. |
 | `fleet-mercure` | The Mercure hub for live updates (loopback). |
 | `fleet-backup.timer` | Daily database backup (`fleet:backup:create`). |
 | `fleet-tls-check.timer` | Certificate health check, 3 minutes after boot and every 10 minutes. |
@@ -72,6 +72,6 @@ The installer does not touch the firewall; `fleet port:firewall` lists what to o
 
 ## Learn more
 
-- [Installer](installer.md)
-- [Configuration](configuration.md)
-- [Networking](networking.md)
+- [Installer](04-installer.md)
+- [Configuration](02-configuration.md)
+- [Networking](09-networking.md)

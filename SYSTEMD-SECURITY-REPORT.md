@@ -2,7 +2,7 @@
 
 `systemd-analyze security` scores how much of the system a service's sandbox leaves exposed to it, on a scale from 0 (best: locked down) to 10 (worst: no sandbox at all). The offline check scores the unit files the installer ships (`install/etc`, `install/harden/etc`, and the Caddy sandbox drop-in); no host is involved.
 
-Every score is compared with the committed baseline `ci/systemd-security-baseline.json`. A unit counts as a regression only when its score rises by more than the tolerance (+0.1) over that baseline. Regenerate this page with `python ci/systemd_security.py report` (see [docs/contributing/ci.md](docs/contributing/ci.md)).
+Every score is compared with the committed baseline `ci/systemd-security-baseline.json`. A unit counts as a regression only when its score rises by more than the tolerance (+0.1) over that baseline. Regenerate this page with `python ci/systemd_security.py report` (see [docs/contributing/03-ci.md](docs/contributing/03-ci.md)).
 
 **Generated:** 2026-11-06, systemd 257. Status: OK.
 

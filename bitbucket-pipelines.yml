@@ -37,7 +37,7 @@
 # `ci/systemd_security.py offline` score the 1.x unit files under install/ with
 # systemd-analyze (same systemd 257 as the servers) and must not be skipped
 # (FLEET_REQUIRE_SYSTEMD_ANALYZE=1). Reports land in reports/** as artifacts.
-# Procedure and baseline updates: docs/contributing/ci.md.
+# Procedure and baseline updates: docs/contributing/03-ci.md.
 #   custom: renovate-merge     -> merges ONE approved, green, up-to-date Renovate
 #                                 PR into develop (scripts/renovate_merge.py),
 #                                 then runs Renovate again so the remaining PRs

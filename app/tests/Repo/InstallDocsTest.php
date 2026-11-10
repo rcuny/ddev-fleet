@@ -74,24 +74,24 @@ final class InstallDocsTest extends TestCase
 
     public function testInstallationDocNamesEveryInstallerFlag(): void
     {
-        $doc = self::read('docs/reference/installer.md');
+        $doc = self::read('docs/reference/04-installer.md');
 
         foreach (self::installerFlags() as $flag) {
-            self::assertStringContainsString($flag, $doc, "docs/reference/installer.md does not document install.sh $flag");
+            self::assertStringContainsString($flag, $doc, "docs/reference/04-installer.md does not document install.sh $flag");
         }
         // The uninstaller's flags are documented in the same guide.
         $uninstall = self::read('install/uninstall.sh');
         preg_match_all('/^\s+(--(?:yes|keep-data|purge-packages|dry-run))\)/m', $uninstall, $matches);
         self::assertCount(4, array_unique($matches[1]));
         foreach (array_unique($matches[1]) as $flag) {
-            self::assertStringContainsString($flag, $doc, "docs/reference/installer.md does not document uninstall.sh $flag");
+            self::assertStringContainsString($flag, $doc, "docs/reference/04-installer.md does not document uninstall.sh $flag");
         }
     }
 
     public function testTheReferencesNameEveryConsoleCommandAndEveryEnvironmentKey(): void
     {
-        $cli = self::read('docs/reference/cli.md');
-        $configuration = self::read('docs/reference/configuration.md');
+        $cli = self::read('docs/reference/01-cli.md');
+        $configuration = self::read('docs/reference/02-configuration.md');
 
         $commands = glob(self::root().'/app/src/Command/*.php') ?: [];
         self::assertNotEmpty($commands);
@@ -99,7 +99,7 @@ final class InstallDocsTest extends TestCase
             if (1 !== preg_match("/name: '(fleet:[a-z:-]+)'/", (string) file_get_contents($file), $name)) {
                 self::fail("no command name in $file");
             }
-            self::assertStringContainsString('fleet '.substr($name[1], \strlen('fleet:')), $cli, "docs/reference/cli.md does not mention {$name[1]}");
+            self::assertStringContainsString('fleet '.substr($name[1], \strlen('fleet:')), $cli, "docs/reference/01-cli.md does not mention {$name[1]}");
         }
 
         // Every KEY=VALUE the installer writes to fleet.env is explained.
@@ -110,7 +110,7 @@ final class InstallDocsTest extends TestCase
         preg_match_all('/^\s*"?([A-Z][A-Z_]+)=/m', $block[1], $keys);
         self::assertGreaterThanOrEqual(10, \count($keys[1]));
         foreach ($keys[1] as $key) {
-            self::assertStringContainsString($key, $configuration, "docs/reference/configuration.md does not explain $key in fleet.env");
+            self::assertStringContainsString($key, $configuration, "docs/reference/02-configuration.md does not explain $key in fleet.env");
         }
     }
 
@@ -119,18 +119,18 @@ final class InstallDocsTest extends TestCase
      */
     public function testInstallationDocDescribesTheUnitsAndTheRetentionSetting(): void
     {
-        $files = self::read('docs/reference/files-on-disk.md');
+        $files = self::read('docs/reference/03-files-on-disk.md');
 
         foreach (['fleet-status', 'fleet-boot', 'fleet-worker@2'] as $needle) {
             self::assertStringContainsString($needle, $files);
         }
         self::assertStringContainsString('fleet:instance:start --all --sequential', $files);
-        self::assertStringContainsString('FLEET_JOB_RETENTION_DAYS', self::read('docs/reference/configuration.md'));
+        self::assertStringContainsString('FLEET_JOB_RETENTION_DAYS', self::read('docs/reference/02-configuration.md'));
     }
 
     public function testInstallerReferenceNamesNoFlagOrCommandThatDoesNotExist(): void
     {
-        $doc = self::read('docs/reference/installer.md');
+        $doc = self::read('docs/reference/04-installer.md');
 
         $known = self::installerFlags();
         preg_match_all('/^\s+(--[a-z][a-z-]*)\)/m', self::read('install/uninstall.sh'), $uninstallFlags);
@@ -151,11 +151,11 @@ final class InstallDocsTest extends TestCase
 
         // A flag is "--name" not glued to a word or a colon (`authelia:--x` is an ACL, not a flag).
         preg_match_all('/(?<![\w:-])(--[a-z][a-z-]*)/', $doc, $flags);
-        self::assertSame([], array_values(array_diff(array_unique($flags[1]), $known)), 'docs/reference/installer.md names flags nothing implements');
+        self::assertSame([], array_values(array_diff(array_unique($flags[1]), $known)), 'docs/reference/04-installer.md names flags nothing implements');
 
         // `fleet:group:verb` is a console command; `fleet:fleet` and `fleet:caddy` are owner:group pairs.
         preg_match_all('/\bfleet:[a-z]+:[a-z-]+/', $doc, $commands);
-        self::assertSame([], array_values(array_diff(array_unique($commands[0]), $commandNames)), 'docs/reference/installer.md names commands that do not exist');
+        self::assertSame([], array_values(array_diff(array_unique($commands[0]), $commandNames)), 'docs/reference/04-installer.md names commands that do not exist');
     }
 
     public function testInstallationDocRecordsTheOperatorFacingLimits(): void
@@ -184,7 +184,7 @@ final class InstallDocsTest extends TestCase
         ] as $needle) {
             self::assertStringContainsString($needle, $doc, "the docs should mention '$needle'");
         }
-        foreach (['docs/reference/installer.md', 'docs/guides/install.md'] as $page) {
+        foreach (['docs/reference/04-installer.md', 'docs/guides/01-install.md'] as $page) {
             self::assertStringNotContainsString('one-time', self::read($page), 'the setup URL is a 24 hour credential, not one-time');
         }
         self::assertStringNotContainsString('/opt/ddev-fleet/install/uninstall.sh', $doc, 'root must run the uninstaller from the root-owned copy');
@@ -196,7 +196,7 @@ final class InstallDocsTest extends TestCase
 
         self::assertStringContainsString('install/install.sh', $readme);
         self::assertStringContainsString('--domain=fleet.example.com', $readme);
-        self::assertStringContainsString('docs/guides/install.md', $readme);
+        self::assertStringContainsString('docs/guides/01-install.md', $readme);
         self::assertStringNotContainsString('not ready to deploy', $readme, 'README status text predates the installer');
     }
 

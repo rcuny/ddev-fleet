@@ -7,14 +7,14 @@ namespace App\Tests\Repo;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/reference/export-format.md must describe the export, import and backup:verify commands as they are, and the indexes,
+ * docs/reference/12-export-format.md must describe the export, import and backup:verify commands as they are, and the indexes,
  * CLAUDE.md, the installation guide and the changelog fragment must point at the feature. The commands live in
  * App\Command\Export and App\Command\Import (sub-directories, so InstallDocsTest's flat glob does not apply) and
  * App\Command\BackupVerifyCommand; this test is their guard, as AssetDocsTest is for the asset commands.
  */
 final class ExportDocsTest extends TestCase
 {
-    private const string GUIDE = 'docs/reference/export-format.md';
+    private const string GUIDE = 'docs/reference/12-export-format.md';
 
     private static function root(): string
     {
@@ -95,7 +95,7 @@ final class ExportDocsTest extends TestCase
         self::assertStringContainsString('FLEET_EXPORT_PASSPHRASE', $guide);
         self::assertStringContainsString('crypto_pwhash', $guide);
         self::assertStringContainsString('rsync', $guide);
-        self::assertStringContainsString('backup:verify', self::read('docs/reference/backup-and-restore.md'));
+        self::assertStringContainsString('backup:verify', self::read('docs/reference/06-backup-and-restore.md'));
 
         $format = (string) file_get_contents(self::root().'/app/src/Fleet/Export/ExportFormat.php');
         self::assertStringContainsString("NAME = 'fleet-project-export'", $format);
@@ -122,10 +122,10 @@ final class ExportDocsTest extends TestCase
 
     public function testTheIndexesAndInstructionsPointAtTheGuide(): void
     {
-        foreach (['docs/README.md', 'docs/guides/operate.md'] as $file) {
+        foreach (['docs/README.md', 'docs/guides/07-operate.md'] as $file) {
             self::assertStringContainsString('export-format.md', self::read($file), "$file should link the guide");
         }
-        self::assertStringContainsString('fleet backup:verify', self::read('docs/reference/backup-and-restore.md'));
+        self::assertStringContainsString('fleet backup:verify', self::read('docs/reference/06-backup-and-restore.md'));
         $claude = self::read('CLAUDE.md');
         self::assertStringContainsString('App\Fleet\Export', $claude);
         self::assertStringContainsString('ExportDocsTest', $claude);

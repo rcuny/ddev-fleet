@@ -26,14 +26,14 @@ Fleet owns the people who may sign in, so one place decides who sees what. Admin
 ```bash
 fleet user:create carol
 fleet user:update carol --site-only
-fleet user:grant carol shop
+fleet user:grant carol website
 ```
 
-Carol can open `https://shop--main.fleet.example.com` after signing in at the portal, and nothing else.
+Carol can open `https://website--main.fleet.example.com` after signing in at the portal, and nothing else.
 
 ## How a site is protected
 
-The login portal (Authelia) lets any signed-in user through `*.fleet.example.com`. Each instance's Caddy site then answers 403 unless the user is an administrator or in the group `fleet-project-shop`. Changes apply at once: no restart, nobody is signed out. A named port with access `public` skips sign-in for that port only ([networking](../reference/networking.md)).
+The login portal (Authelia) lets any signed-in user through `*.fleet.example.com`. Each instance's Caddy site then answers 403 unless the user is an administrator or in the group `fleet-project-website`. Changes apply at once: no restart, nobody is signed out. A named port with access `public` skips sign-in for that port only ([networking](../reference/09-networking.md)).
 
 ## Commands
 
@@ -46,10 +46,10 @@ The login portal (Authelia) lets any signed-in user through `*.fleet.example.com
 | `fleet user:delete` | Delete a user. |
 | `fleet user:reset-password` | New password; needs a terminal: `ssh -t admin@fleet.example.com sudo fleet user:reset-password alice`. |
 
-Options: [cli](../reference/cli.md).
+Options: [cli](../reference/01-cli.md).
 
 ## Where to go next
 
-- [Secure the host](secure-the-host.md)
-- [First project](first-project.md)
-- [Troubleshooting](../reference/troubleshooting.md)
+- [Secure the host](08-secure-the-host.md)
+- [First project](02-first-project.md)
+- [Troubleshooting](../reference/13-troubleshooting.md)

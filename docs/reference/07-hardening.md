@@ -7,7 +7,7 @@ Type: documentation
 
 # Hardening reference
 
-Hardening locks down SSH and the firewall on a host exposed to the Internet. It is opt-in, because a mistake locks you out of a remote machine. This page lists what each part does and, more important, how to get back in and how to undo it. Overview: [secure-the-host](../guides/secure-the-host.md).
+Hardening locks down SSH and the firewall on a host exposed to the Internet. It is opt-in, because a mistake locks you out of a remote machine. This page lists what each part does and, more important, how to get back in and how to undo it. Overview: [secure-the-host](../guides/08-secure-the-host.md).
 
 A plain install or upgrade never touches `sshd`, `ufw`, fail2ban or unattended-upgrades. Docker's `daemon.json` and mail relays are never part of it.
 
@@ -74,7 +74,7 @@ Wait for the grace period: the firewall turns itself off. For an SSH lock-out or
 
 ## Authelia "Forgot password?" by e-mail
 
-Authelia's `one_factor` (password) sign-in has a self-service reset, **off until an SMTP server is configured** (its link could not be delivered otherwise). Until then use `fleet user:reset-password` ([installer.md](installer.md)). To switch it on:
+Authelia's `one_factor` (password) sign-in has a self-service reset, **off until an SMTP server is configured** (its link could not be delivered otherwise). Until then use `fleet user:reset-password` ([04-installer.md](04-installer.md)). To switch it on:
 
 1. In `/etc/ddev-fleet/fleet.env` set `FLEET_AUTHELIA_SMTP_ADDRESS` (`smtp://host`, `submission://host:587` or `submissions://host:465`), `FLEET_AUTHELIA_SMTP_SENDER` (the From address) and, if the server needs a login, `FLEET_AUTHELIA_SMTP_USERNAME`.
 2. Fleet never writes the SMTP password. Put it in a file (`root:authelia`, 0640), e.g. `/etc/authelia/secrets/smtp_password`, and point Authelia at it with a systemd drop-in for `authelia.service`: `Environment=AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE=/etc/authelia/secrets/smtp_password`. Then `sudo systemctl daemon-reload`.
@@ -84,6 +84,6 @@ Fleet then adopts a password hash Authelia changed (a user's reset) before rewri
 
 ## Learn more
 
-- [Secure the host](../guides/secure-the-host.md): the security model.
-- [Installer](installer.md): flags, recovery and uninstall.
-- [Files on disk](files-on-disk.md): units and timers.
+- [Secure the host](../guides/08-secure-the-host.md): the security model.
+- [Installer](04-installer.md): flags, recovery and uninstall.
+- [Files on disk](03-files-on-disk.md): units and timers.

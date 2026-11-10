@@ -40,7 +40,7 @@ final class RollbackPlanner
         }
         if (null === $entry) {
             return new RollbackPlan([\sprintf(
-                'No pre-upgrade backup of %s was found in the upgrade history (or its file is gone), so the database cannot be put back. Options: restore a backup by hand first (`fleet backup:restore <file>`, see docs/reference/upgrade.md), then re-run with --no-db-restore if the schema allows it; or stay on the installed version.',
+                'No pre-upgrade backup of %s was found in the upgrade history (or its file is gone), so the database cannot be put back. Options: restore a backup by hand first (`fleet backup:restore <file>`, see docs/reference/05-upgrade.md), then re-run with --no-db-restore if the schema allows it; or stay on the installed version.',
                 $target->tag(),
             )]);
         }

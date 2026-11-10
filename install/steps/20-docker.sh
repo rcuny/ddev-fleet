@@ -118,6 +118,6 @@ step_main() {
 
   if [ "$fresh" = 0 ] && ! is_dry && docker_pool_pending; then
     log_warn "Docker has not read the new network pool yet (an installer never restarts Docker by itself)"
-    add_final_note "NOTE: Docker must be restarted once, at a quiet moment, to read /etc/docker/daemon.json (more than about 30 instance networks, live-restore). Until then the host holds about 30 instances. Procedure: stop the instances (fleet instance:stop --all, or 'sudo -u fleet ddev poweroff'), 'sudo systemctl restart docker', start them again (fleet instance:start). See docs/reference/upgrade.md, Docker network pool."
+    add_final_note "NOTE: Docker must be restarted once, at a quiet moment, to read /etc/docker/daemon.json (more than about 30 instance networks, live-restore). Until then the host holds about 30 instances. Procedure: stop the instances (fleet instance:stop --all, or 'sudo -u fleet ddev poweroff'), 'sudo systemctl restart docker', start them again (fleet instance:start). See docs/reference/05-upgrade.md, Docker network pool."
   fi
 }

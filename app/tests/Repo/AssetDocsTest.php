@@ -7,13 +7,13 @@ namespace App\Tests\Repo;
 use PHPUnit\Framework\TestCase;
 
 /**
- * docs/reference/assets-and-secrets.md must describe the asset commands as they are, and the indexes, the installation guide, CLAUDE.md and the
+ * docs/reference/08-assets-and-secrets.md must describe the asset commands as they are, and the indexes, the installation guide, CLAUDE.md and the
  * CHANGELOG must point at the feature. The commands live in App\Command\Asset (a sub-directory, so InstallDocsTest's flat
  * glob does not apply; the full option list is pinned by CliReferenceTest).
  */
 final class AssetDocsTest extends TestCase
 {
-    private const string GUIDE = 'docs/reference/assets-and-secrets.md';
+    private const string GUIDE = 'docs/reference/08-assets-and-secrets.md';
 
     private static function root(): string
     {
@@ -121,14 +121,14 @@ final class AssetDocsTest extends TestCase
 
     public function testTheIndexesAndInstructionsPointAtTheGuide(): void
     {
-        foreach (['docs/README.md', 'docs/guides/first-project.md', 'CLAUDE.md'] as $file) {
+        foreach (['docs/README.md', 'docs/guides/02-first-project.md', 'CLAUDE.md'] as $file) {
             self::assertStringContainsString('assets-and-secrets.md', self::read($file), "$file should link the guide");
         }
         $claude = self::read('CLAUDE.md');
         foreach (['App\Fleet\Assets', 'App\Command\Asset', 'AssetStore', 'AssetPath', 'UploadService', 'never follows'] as $needle) {
             self::assertStringContainsString($needle, $claude, "CLAUDE.md should list $needle");
         }
-        $files = self::read('docs/reference/files-on-disk.md');
+        $files = self::read('docs/reference/03-files-on-disk.md');
         self::assertStringContainsString('/srv/fleet/uploads', $files);
         self::assertStringContainsString('assets/<project>/', $files);
     }

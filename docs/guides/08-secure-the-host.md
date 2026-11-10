@@ -13,7 +13,7 @@ Fleet is built so one process faces the Internet and everything else sits behind
 
 - **One Internet-facing process.** Caddy terminates TLS for every name and forwards to everything else.
 - **A login portal.** Only `/health` and the signed `/hooks/*` receivers skip sign-in.
-- **A per-project gate.** Each instance's site checks the user's project group ([share and access](share-and-access.md)).
+- **A per-project gate.** Each instance's site checks the user's project group ([share and access](06-share-and-access.md)).
 - **A proxy secret.** The app trusts an identity only when Caddy presents it.
 - **The app never runs as root.** Writing the rendered configuration goes through a root helper with one sudoers line.
 - **Loopback only.** The login portal, the app socket, the Mercure hub and the DDEV router do not listen on the Internet.
@@ -40,11 +40,11 @@ Success: SSH still works from a new session, `https://fleet.example.com` loads, 
 
 | Symptom | Fix |
 |---|---|
-| Locked out of SSH | Wait for the grace period: the firewall turns itself off. Other recovery paths are in [hardening](../reference/hardening.md). |
+| Locked out of SSH | Wait for the grace period: the firewall turns itself off. Other recovery paths are in [hardening](../reference/07-hardening.md). |
 | Run refused | Your account has no SSH key, or another account with keys is not in the allow list. |
 
 ## Where to go next
 
-- [Hardening reference](../reference/hardening.md): each part, undo, lock-out recovery
-- [Networking reference](../reference/networking.md)
-- [Operate](operate.md)
+- [Hardening reference](../reference/07-hardening.md): each part, undo, lock-out recovery
+- [Networking reference](../reference/09-networking.md)
+- [Operate](07-operate.md)

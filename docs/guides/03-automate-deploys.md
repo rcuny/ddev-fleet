@@ -7,27 +7,27 @@ Type: documentation
 
 # Automate deploys
 
-Instances can appear on their own: when a Jira issue changes status, when a branch is pushed, or every night. Nobody clicks; Fleet queues the same jobs a person would. This page gives three recipes for project `shop`. Setting them up is for administrators.
+You choose what to automate. Instances can be created when a Jira issue changes status, when a branch is pushed, or every night, and each trigger is optional: Fleet queues the same jobs a person would, and you can keep any step manual. This page gives three recipes for project `website`. Setting them up is for administrators.
 
 | Recipe | Trigger | Result |
 |---|---|---|
-| Jira | Issue moves to `Dispatched` | Instance `shop--shop-3` |
+| Jira | Issue moves to `Dispatched` | Instance `website--website-3` |
 | Bitbucket | Push to `feature/*` | One instance per branch, redeployed on each push |
 | Schedule | Cron, 03:00 | Redeploy of `demo--main` |
 
 ## Recipe 1: an instance per Jira ticket
 
-The issue key becomes the label: `SHOP-3` gives `shop--shop-3`.
+The issue key becomes the label: `WEBSITE-3` gives `website--website-3`.
 
-1. Set the project's **issue id pattern** (Source tab), for example `SHOP-\d{1,6}`.
+1. Set the project's **issue id pattern** (Source tab), for example `WEBSITE-\d{1,6}`.
 2. On the project's **Integrations** tab, **Create secret** for Jira. It is **shown once**; copy it now.
 3. Add a rule:
 
    ```bash
-   fleet webhook:rule:add shop --on-status=Dispatched --template=work
+   fleet webhook:rule:add website --on-status=Dispatched --template=work
    ```
 
-4. In Jira Cloud: Settings, System, WebHooks, Create a WebHook. URL `https://fleet.example.com/hooks/jira/shop`, Secret the one you copied, Events Issue updated, JQL `project = SHOP`.
+4. In Jira Cloud: Settings, System, WebHooks, Create a WebHook. URL `https://fleet.example.com/hooks/jira/website`, Secret the one you copied, Events Issue updated, JQL `project = WEBSITE`.
 
 Move an issue to `Dispatched`: a deploy job appears within seconds.
 
@@ -36,12 +36,12 @@ Move an issue to `Dispatched`: a deploy job appears within seconds.
 The label comes from the pushed branch. `--reuse` redeploys the same instance on each push instead of creating a new one.
 
 ```bash
-fleet webhook:secret shop --source=bitbucket
-fleet webhook:rule:add shop --source=bitbucket --action=deploy --on-event=repo:push \
-  --repo=acme/shop --match-branch='feature/*' --template=work --reuse
+fleet webhook:secret website --source=bitbucket
+fleet webhook:rule:add website --source=bitbucket --action=deploy --on-event=repo:push \
+  --repo=acme/website --match-branch='feature/*' --template=work --reuse
 ```
 
-In Bitbucket: Repository settings, Webhooks, URL `https://fleet.example.com/hooks/bitbucket/shop`, the secret, and the event `repo:push`.
+In Bitbucket: Repository settings, Webhooks, URL `https://fleet.example.com/hooks/bitbucket/website`, the secret, and the event `repo:push`.
 
 ## Recipe 3: redeploy every night
 
@@ -63,10 +63,10 @@ Every authenticated delivery is one row in the **delivery log** (Integrations ta
 | The sender shows 401 | Wrong or rotated secret; rotating stops the old one at once. |
 | Schedule runs are `skipped` | The target instance is missing or busy. |
 
-More: [troubleshooting](../reference/troubleshooting.md).
+More: [troubleshooting](../reference/13-troubleshooting.md).
 
 ## Where to go next
 
-- [Webhooks and schedules reference](../reference/webhooks-and-schedules.md): HTTP answers, deduplication, label options
-- [Run CI](run-ci.md) with a pipeline trigger
-- [Work with agents](work-with-agents.md)
+- [Webhooks and schedules reference](../reference/11-webhooks-and-schedules.md): HTTP answers, deduplication, label options
+- [Run CI](04-run-ci.md) with a pipeline trigger
+- [The tmux workspace and agents](05-work-with-agents.md)

@@ -42,12 +42,12 @@ Replace `1.X.Y`. Run from a checkout of the Bitbucket repo.
 1. **Preflight:** clean tree, `git fetch origin --tags`, local `develop` and `main` equal their `origin/` twins, the latest full `develop` run green, `php ci/changelog-assemble.php` non-empty.
 2. **Branch:** `git switch -c release/1.X.Y develop`.
 3. **Assemble:** `php ci/changelog-assemble.php 1.X.Y`, then `git commit -am "chore(release): 1.X.Y"`.
-4. **Gates:** [testing.md](testing.md), plus `FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest`.
+4. **Gates:** [02-testing.md](02-testing.md), plus `FLEET_REQUIRE_SYSTEMD_ANALYZE=1 pytest -q tests/pytest`.
 5. **Merge:** `git switch main && git merge --no-ff release/1.X.Y`.
 6. **Tag:** `git tag -a v1.X.Y -m "v1.X.Y - <headline>"` on that merge commit (annotated).
 7. **Back-merge:** `git switch develop && git merge --no-ff release/1.X.Y`, then delete the release branch.
 8. **Push in one command**, so `origin/main` is at the tagged commit before the tag is published: `git push origin main develop v1.X.Y`.
-9. **Publish the GitHub mirror** with the maintainers' publish step (it runs the tag guard, [ci.md](ci.md)), then check that `main` and the tag on GitHub carry the tagged sha.
+9. **Publish the GitHub mirror** with the maintainers' publish step (it runs the tag guard, [03-ci.md](03-ci.md)), then check that `main` and the tag on GitHub carry the tagged sha.
 10. Optionally comment "Released in v1.X.Y" on the shipped tickets.
 
 ## Hotfixes
@@ -56,9 +56,9 @@ Replace `1.X.Y`. Run from a checkout of the Bitbucket repo.
 
 ## Releasing is not deploying
 
-Each host updates when its operator runs `sudo fleet upgrade`; `fleet upgrade --check` shows the changelog and rollout notes first. See [upgrade reference](../reference/upgrade.md).
+Each host updates when its operator runs `sudo fleet upgrade`; `fleet upgrade --check` shows the changelog and rollout notes first. See [upgrade reference](../reference/05-upgrade.md).
 
 ## Learn more
 
-- [ci.md](ci.md): the tag guard and gates
+- [03-ci.md](03-ci.md): the tag guard and gates
 - `changelog.d/README.md` and `CHANGELOG.md` in the repository

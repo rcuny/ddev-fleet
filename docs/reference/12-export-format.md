@@ -7,7 +7,7 @@ Type: documentation
 
 # Export format
 
-Moving a project to another host should take minutes, not an afternoon. Export writes one JSON file with the project's setup; import shows what would change before it writes anything. When to use it: [operate](../guides/operate.md). Administrators only.
+Moving a project to another host should take minutes, not an afternoon. Export writes one JSON file with the project's setup; import shows what would change before it writes anything. When to use it: [operate](../guides/07-operate.md). Administrators only.
 
 ## What the file contains
 
@@ -24,9 +24,9 @@ The file starts with `"format": "fleet-project-export"` and `"version": 1`. A ho
 | `fleet export:project` | Writes the file (mode 0600; an existing file needs `--force`). The same file downloads from the project's **Transfer & danger** tab. |
 | `fleet import:preview` | Shows what importing would do; writes nothing. |
 | `fleet import:apply` | Previews, asks, then imports. |
-| `fleet backup:verify` | Checks a backup file read-only (integrity and schema). A whole host moves by [backup and restore](backup-and-restore.md), not by export. |
+| `fleet backup:verify` | Checks a backup file read-only (integrity and schema). A whole host moves by [backup and restore](06-backup-and-restore.md), not by export. |
 
-Options are in [cli.md](cli.md).
+Options are in [01-cli.md](01-cli.md).
 
 | Exit code | Meaning |
 |---|---|
@@ -65,10 +65,10 @@ Matching rules:
 Assets are too big for the file. After the import, on the new host:
 
 ```bash
-sudo -u fleet rsync -av old-host.example.com:/srv/fleet/assets/shop/ /srv/fleet/assets/shop/
+sudo -u fleet rsync -av old-host.example.com:/srv/fleet/assets/website/ /srv/fleet/assets/website/
 ```
 
-Then press **Rescan** on the Assets tab ([assets and secrets](assets-and-secrets.md)).
+Then press **Rescan** on the Assets tab ([assets and secrets](08-assets-and-secrets.md)).
 
 ## Limits
 
@@ -80,5 +80,5 @@ Then press **Rescan** on the Assets tab ([assets and secrets](assets-and-secrets
 
 ## Learn more
 
-- [Operate](../guides/operate.md)
-- [Backup and restore](backup-and-restore.md)
+- [Operate](../guides/07-operate.md)
+- [Backup and restore](06-backup-and-restore.md)

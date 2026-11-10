@@ -4,7 +4,7 @@
 #   upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restore] [--repo-url=<url|path>]
 #
 # Installed by install/steps/90-privileged.sh as root:root 0755 from the root-owned export of install/. There is NO
-# sudoers entry for it: the application can never start an upgrade (docs/reference/upgrade.md).
+# sudoers entry for it: the application can never start an upgrade (docs/reference/05-upgrade.md).
 #
 # The flow (every step before the installer changes nothing but the backup directory):
 #   1. plan + pre-flight, as the `fleet` user (`fleet upgrade:prepare`): a Block, a downgrade, an unreachable release
@@ -299,7 +299,7 @@ main() {
   if [ "$rc" -ne 0 ]; then
     history_line installer failed
     err "the installer failed (exit $rc). Log: $install_log"
-    err "It is idempotent: run the same command again, or go back with: sudo fleet upgrade --to $from --yes (a rollback: it restores the pre-upgrade backup, see docs/reference/upgrade.md)"
+    err "It is idempotent: run the same command again, or go back with: sudo fleet upgrade --to $from --yes (a rollback: it restores the pre-upgrade backup, see docs/reference/05-upgrade.md)"
     return 1
   fi
   history_line installer ok

@@ -39,7 +39,7 @@ The installer generates it once; a re-run only adds missing keys and never chang
 | `FLEET_AUTHELIA_SMTP_USERNAME` | Optional. Only when the relay wants a login. |
 | `FLEET_UPGRADE_REPO_URL` | Optional. Where `fleet upgrade` fetches releases from instead of the public GitHub mirror (mirrors, rehearsals). `--repo-url` on the command line wins. |
 
-After editing the SMTP keys run `sudo fleet host:render --apply`. The SMTP password recipe is in [hardening.md](hardening.md).
+After editing the SMTP keys run `sudo fleet host:render --apply`. The SMTP password recipe is in [07-hardening.md](07-hardening.md).
 
 ## Host settings tabs
 
@@ -55,8 +55,8 @@ Administrators open **Settings** at `/admin/host`.
 | Backups | List, download, "Back up now", retention in days. |
 | Jobs | How many jobs run at once (`fleet host:job-concurrency`). |
 | Uploads | Per-file cap for browser uploads (`asset_upload_max_bytes`, default 2 GiB). |
-| Capacity | CPU reserve and instance cap ([capacity.md](capacity.md)). |
-| Networking | In-network port mirror ([networking.md](networking.md)). |
+| Capacity | CPU reserve and instance cap ([10-capacity.md](10-capacity.md)). |
+| Networking | In-network port mirror ([09-networking.md](09-networking.md)). |
 
 ## Fields and limits
 
@@ -77,8 +77,8 @@ The browser and the commands apply the same rules and refuse a bad value with th
 | Ports | Max 50 names from the catalogue. |
 | Git identity | `inherit` (host default), `disabled`, or `override` with a name and/or email (a blank one falls back to the host default). Name: at most 100 characters, no control characters, `<`, `>`, `"`, `$` or `\` (DDEV cannot carry them). Email: a plain address. |
 | Submodule branch | Optional relative path (such as `web/modules/custom/blog`) whose branch the UI shows. |
-| Typesense, git over SSH in the container | Yes/no switches ([networking.md](networking.md#typesense-keys-and-environment), [agents guide](../guides/work-with-agents.md)). |
-| CPU threads, slots | Whole numbers of at least 1, or `none` ([capacity.md](capacity.md)). |
+| Typesense, git over SSH in the container | Yes/no switches ([09-networking.md](09-networking.md#typesense-keys-and-environment), [agents guide](../guides/05-work-with-agents.md)). |
+| CPU threads, slots | Whole numbers of at least 1, or `none` ([10-capacity.md](10-capacity.md)). |
 | Issue id pattern | See below. |
 
 ### Template
@@ -138,7 +138,7 @@ Fleet writes these on each deploy and restart. A changed value reaches a running
 
 `[[project]]`, `[[instance]]`, `[[instance-id]]`, `[[instance-fqdn]]`, `[[branch]]`, `[[fleet-domain]]`, `[[issue-id]]`
 
-These cannot be used as secret names. Any other placeholder resolves to a project secret, else a fleet-wide one: [assets-and-secrets.md](assets-and-secrets.md).
+These cannot be used as secret names. Any other placeholder resolves to a project secret, else a fleet-wide one: [08-assets-and-secrets.md](08-assets-and-secrets.md).
 
 ## Retention
 
@@ -151,6 +151,6 @@ These cannot be used as secret names. Any other placeholder resolves to a projec
 
 ## Learn more
 
-- [Files on disk](files-on-disk.md)
-- [CLI reference](cli.md)
-- [Capacity](capacity.md)
+- [Files on disk](03-files-on-disk.md)
+- [CLI reference](01-cli.md)
+- [Capacity](10-capacity.md)

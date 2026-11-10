@@ -9,7 +9,7 @@ use Symfony\Component\Console\Command\Command;
 use Symfony\Component\Console\Input\InputOption;
 
 /**
- * Renders docs/reference/cli.md from the live console definition. The output is deterministic (fixed group order, commands
+ * Renders docs/reference/01-cli.md from the live console definition. The output is deterministic (fixed group order, commands
  * sorted by name, no version, no date), so a repo test can compare the committed page with a fresh rendering and fail with
  * the command that regenerates it. Hand-written text lives in the constants below; everything per command comes from the
  * Application.
@@ -30,7 +30,7 @@ final class CliReference
         'webhook' => 'Jira and Bitbucket receivers.',
         'schedule' => 'Cron schedules that redeploy.',
         'claude' => 'The Claude Code token.',
-        'tmux' => 'The agent workspace.',
+        'tmux' => 'The tmux workspace.',
         'workspace' => 'Workspace checks.',
         'host' => 'Host settings, certificates, capacity.',
         'backup' => 'Database backups.',
@@ -130,14 +130,14 @@ final class CliReference
         $out[] = "| Command | What the wrapper does |\n|---|---|";
         $out[] = '| `fleet` | Lists the `fleet:*` commands. |';
         $out[] = '| `fleet <group> <verb>` | Same as `fleet <group>:<verb>`; a full `fleet:<group>:<verb>` name also works. |';
-        $out[] = '| `sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]` | **sudo.** Hands over to the root helper that runs the installer, with a backup and a verification. Refused (exit `3`) without root. Options: [upgrade reference](upgrade.md#upgrade). |';
+        $out[] = '| `sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]` | **sudo.** Hands over to the root helper that runs the installer, with a backup and a verification. Refused (exit `3`) without root. Options: [upgrade reference](05-upgrade.md#upgrade). |';
         $out[] = '| `fleet upgrade --check [--to vX.Y.Z] [--json]` | Runs `fleet:upgrade:check` (read-only, no root). |';
         $out[] = '| `fleet upgrade history`, `fleet upgrade verify` | Run `fleet:upgrade:history` and `fleet:upgrade:verify`. |';
-        $out[] = '| `fleet tmux [<instance-id>]` | Attaches your terminal to the agent workspace, optionally on one instance\'s window (also `fleet tmux attach [<instance-id>]` and `fleet tmux:attach`). Needs a terminal (`ssh -t`) and refuses to nest inside tmux (exit `2`). |';
+        $out[] = '| `fleet tmux [<instance-id>]` | Attaches your terminal to the tmux workspace, optionally on one instance\'s window (also `fleet tmux attach [<instance-id>]` and `fleet tmux:attach`). Needs a terminal (`ssh -t`) and refuses to nest inside tmux (exit `2`). |';
         $out[] = '';
         $out[] = "`fleet backup:*` and the other groups are ordinary console commands, documented above.\n";
         $out[] = "## Learn more\n";
-        $out[] = "- [Configuration](configuration.md)\n- [Installer](installer.md)\n- [Files on disk](files-on-disk.md)";
+        $out[] = "- [Configuration](02-configuration.md)\n- [Installer](04-installer.md)\n- [Files on disk](03-files-on-disk.md)";
 
         return implode("\n", $out)."\n";
     }

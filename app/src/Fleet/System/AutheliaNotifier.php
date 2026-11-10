@@ -14,7 +14,7 @@ use Symfony\Component\DependencyInjection\Attribute\Autowire;
  * An operator opts in with `FLEET_AUTHELIA_SMTP_ADDRESS` (`smtp://`, `submission://` or `submissions://` host and
  * optional port) and `FLEET_AUTHELIA_SMTP_SENDER` in fleet.env, and `FLEET_AUTHELIA_SMTP_USERNAME` when the server wants
  * a login. The SMTP password is never rendered: Authelia reads it from the file named by
- * `AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE` in its service environment (see docs/reference/hardening.md).
+ * `AUTHELIA_NOTIFIER_SMTP_PASSWORD_FILE` in its service environment (see docs/reference/07-hardening.md).
  */
 final readonly class AutheliaNotifier
 {

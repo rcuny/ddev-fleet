@@ -28,7 +28,7 @@ One command turns a fresh Debian 13 host into a working Fleet with real HTTPS, a
      | sudo bash -s -- --domain=fleet.example.com --acme-email=you@example.com
    ```
 
-   Add `--preflight` to check the host and change nothing, or `--dry-run` to print the plan. All flags and exit codes: [installer reference](../reference/installer.md).
+   Add `--preflight` to check the host and change nothing, or `--dry-run` to print the plan. All flags and exit codes: [installer reference](../reference/04-installer.md).
 
 2. The installer prints a **setup URL**. It is a credential for 24 hours (or until Finish): whoever opens it can create the administrator. Open it yourself; never paste it into a chat or ticket.
 
@@ -56,10 +56,10 @@ Open `https://fleet.example.com/`. It redirects to the login portal at `https://
 | No certificate, the browser warns | Ports 80 and 443 closed or DNS wrong: `journalctl -u caddy -n 100 --no-pager`. |
 | Lost the setup URL | `sudo fleet setup:token` prints a new one; the old one stops working. |
 
-More rows: [troubleshooting](../reference/troubleshooting.md).
+More rows: [troubleshooting](../reference/13-troubleshooting.md).
 
 ## Where to go next
 
-- [Deploy your first project](first-project.md)
-- [Secure the host](secure-the-host.md) (the installer never touches ssh or the firewall)
-- [Installer reference](../reference/installer.md) and [files on disk](../reference/files-on-disk.md)
+- [Deploy your first project](02-first-project.md)
+- [Secure the host](08-secure-the-host.md) (the installer never touches ssh or the firewall)
+- [Installer reference](../reference/04-installer.md) and [files on disk](../reference/03-files-on-disk.md)

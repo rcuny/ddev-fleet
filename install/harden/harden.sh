@@ -323,7 +323,7 @@ harden_kernel_and_audit() {
 harden_tmp() {
   local target= opts= o
   if [ "$H_TMP" != 1 ]; then
-    log_info "/tmp: left alone (opt in with --harden-tmp; docs/reference/hardening.md)"
+    log_info "/tmp: left alone (opt in with --harden-tmp; docs/reference/07-hardening.md)"
     return 0
   fi
   if is_dry; then
@@ -353,7 +353,7 @@ Options=${opts:-<current options>}
 FLEETEOF
   if [ "$FILE_CHANGED" = 1 ]; then
     run systemctl daemon-reload
-    log_info "/tmp gets nosuid,nodev,noexec at the next boot (no dead-man protection: see docs/reference/hardening.md)"
+    log_info "/tmp gets nosuid,nodev,noexec at the next boot (no dead-man protection: see docs/reference/07-hardening.md)"
   fi
 }
 

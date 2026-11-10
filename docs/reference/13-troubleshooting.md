@@ -31,7 +31,7 @@ Find your symptom, read the likely cause, apply the fix. Tables are grouped by w
 | `user:reset-password` says it needs a terminal | Run without a TTY. | Use `ssh -t`. |
 | Sign-in refused after a reset ("... they are banned") | Authelia bans a user for 5 minutes after 3 failed attempts in 2 minutes; each attempt while banned extends it. | Wait 5 minutes without trying, then sign in. |
 | After a reboot the portal answers 502 | Authelia's tmpfiles rule stripped the execute bit of `/etc/authelia/secrets`. | Check `/etc/tmpfiles.d/authelia.conf` exists and `stat -c %a /etc/authelia/secrets` prints `750`; re-run the installer. |
-| "Forgot password?" is missing | No SMTP server is configured. | [hardening.md](hardening.md#authelia-forgot-password-by-e-mail). |
+| "Forgot password?" is missing | No SMTP server is configured. | [07-hardening.md](07-hardening.md#authelia-forgot-password-by-e-mail). |
 
 ## Deploying and jobs
 
@@ -86,7 +86,7 @@ Find your symptom, read the likely cause, apply the fix. Tables are grouped by w
 | Verification failed (exit 5) | The new release does not start cleanly. | Run the rollback command it prints. |
 | Check exits 4 | The release source is unreachable. | Restore the connection or use `--repo-url`. |
 
-Page-by-page detail: [upgrade.md](upgrade.md), [backup-and-restore.md](backup-and-restore.md).
+Page-by-page detail: [05-upgrade.md](05-upgrade.md), [06-backup-and-restore.md](06-backup-and-restore.md).
 
 ## After a reboot
 

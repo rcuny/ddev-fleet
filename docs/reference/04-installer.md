@@ -7,7 +7,7 @@ Type: documentation
 
 # Installer reference
 
-The installer turns a fresh Debian 13 host into a working Fleet, and the same command upgrades or repairs it. This page lists its flags, exit codes, steps, checks and recovery commands. For the walk-through, see the [install guide](../guides/install.md).
+The installer turns a fresh Debian 13 host into a working Fleet, and the same command upgrades or repairs it. This page lists its flags, exit codes, steps, checks and recovery commands. For the walk-through, see the [install guide](../guides/01-install.md).
 
 ## Flags
 
@@ -24,7 +24,7 @@ curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/insta
 | `--repo-url=<url\|path>` | Install from another git remote or path instead of the public mirror. |
 | `--skip-dns-check` | Do not compare DNS with the host's addresses (NAT, CDN). |
 | `--no-shell-profile` | Skip the shell prompt and alias profile. |
-| `--harden` | Opt-in host hardening ([hardening.md](hardening.md)). |
+| `--harden` | Opt-in host hardening ([07-hardening.md](07-hardening.md)). |
 | `--ssh-allow-user=<name>` | With `--harden`, repeatable: account allowed to log in over SSH (default: the `sudo` caller). |
 | `--trusted-ip=<ip\|cidr>` | With `--harden`, repeatable: address never banned, always allowed through the firewall. |
 | `--harden-tmp` | With `--harden`: mount `/tmp` `nosuid,nodev,noexec` at next boot (can break builds). |
@@ -117,6 +117,6 @@ It never touches `sshd` or the firewall, so hardening stays. A failed install ne
 
 ## Learn more
 
-- [Install guide](../guides/install.md)
-- [Troubleshooting](troubleshooting.md)
-- [Upgrade reference](upgrade.md)
+- [Install guide](../guides/01-install.md)
+- [Troubleshooting](13-troubleshooting.md)
+- [Upgrade reference](05-upgrade.md)
