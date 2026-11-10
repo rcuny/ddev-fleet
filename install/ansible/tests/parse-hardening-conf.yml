@@ -1,0 +1,30 @@
+---
+# Parses a hardening.conf fixture the way roles/hardening/tasks/firewall.yml does. Run by InstallerAnsibleTest.
+- name: Parse the stored hardening settings
+  hosts: localhost
+  connection: local
+  gather_facts: false
+  vars:
+    conf: |
+      # Written by the installer (install --harden). Read back as plain KEY=value lines on every run: while ENABLED=1 an
+      # upgrade re-applies these settings.
+      # Change them by re-running the installer.
+      ENABLED=1
+      SSH_ALLOW_USERS=admin
+      TRUSTED_IPS=203.0.113.10
+      FIREWALL_GRACE_MINUTES=30
+      SSH_PORTS=22
+      HARDEN_TMP=0
+  tasks:
+    - name: Parse exactly as the role does
+      ansible.builtin.set_fact:
+        hardening_old: >-
+          {{ dict((conf | b64encode | b64decode).splitlines()
+                  | select('match', '^[A-Z_]+=')
+                  | map('split', '=', 1) | list) }}
+    - name: Check
+      ansible.builtin.assert:
+        that:
+          - (hardening_old['SSH_PORTS'] | default('')).split() == ['22']
+          - (hardening_old['TRUSTED_IPS'] | default('')).split() == ['203.0.113.10']
+          - hardening_old['MISSING'] | default('') == ''

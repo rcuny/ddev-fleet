@@ -1,0 +1,28 @@
+---
+# Port of install/harden/harden.sh (five parts). Gated in site.yml by fleet_hardening_enabled.
+- name: Resolve and validate the settings
+  ansible.builtin.import_tasks: settings.yml
+- name: Install the hardening packages
+  ansible.builtin.apt:
+    name: [ufw, fail2ban, python3-systemd, auditd]
+    state: present
+- name: The settings directory
+  ansible.builtin.file:
+    path: "{{ fleet_etc_dir }}"
+    state: directory
+    mode: "0750"
+    owner: root
+    group: fleet
+- name: SSH
+  ansible.builtin.import_tasks: ssh.yml
+- name: Login bans, LLMNR, kernel, audit, /tmp
+  ansible.builtin.import_tasks: system.yml
+- name: Firewall with the dead-man's switch
+  ansible.builtin.import_tasks: firewall.yml
+- name: Persist the settings last, because ENABLED=1 makes upgrades re-apply them
+  ansible.builtin.template:
+    src: hardening.conf.j2
+    dest: "{{ fleet_etc_dir }}/hardening.conf"
+    mode: "0644"
+    owner: root
+    group: root

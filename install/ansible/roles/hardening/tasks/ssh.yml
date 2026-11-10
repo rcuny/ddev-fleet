@@ -1,0 +1,63 @@
+---
+- name: The sshd drop-in directory
+  ansible.builtin.file:
+    path: /etc/ssh/sshd_config.d
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Write the drop-in, checked and rolled back on failure
+  block:
+    - name: Drop-in (sshd -t on the new file alone before it is written)
+      ansible.builtin.template:
+        src: ssh-dropin.conf.j2
+        dest: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+        mode: "0644"
+        owner: root
+        group: root
+        backup: true
+        validate: sshd -t -f %s
+      register: hardening_ssh_dropin
+      notify: Reload sshd
+
+    - name: The whole configuration must pass sshd -t
+      ansible.builtin.command: sshd -t
+      changed_when: false
+      check_mode: false
+  rescue:
+    - name: Put the previous drop-in back
+      ansible.builtin.copy:
+        src: "{{ hardening_ssh_dropin.backup_file }}"
+        dest: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+        remote_src: true
+        mode: "0644"
+      when: hardening_ssh_dropin.backup_file is defined
+    - name: Or remove the new one when there was none
+      ansible.builtin.file:
+        path: /etc/ssh/sshd_config.d/10-fleet-hardening.conf
+        state: absent
+      when: hardening_ssh_dropin.backup_file is not defined
+    - name: Stop
+      ansible.builtin.fail:
+        msg: the SSH configuration does not pass sshd -t with the new drop-in; the previous state was restored
+
+- name: Reload sshd now, before checking what it uses
+  ansible.builtin.meta: flush_handlers
+
+- name: What sshd really uses
+  ansible.builtin.command: "sshd -T -C user={{ hardening_invoking }},host=localhost,addr=127.0.0.1"
+  register: hardening_sshd_t
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Warn when the drop-in is not the effective configuration
+  ansible.builtin.debug:
+    msg: >-
+      WARNING: the SSH hardening drop-in is not the effective configuration (sshd -T). Check that
+      /etc/ssh/sshd_config includes sshd_config.d and that no earlier file overrides 10-fleet-hardening.conf
+  when: >-
+    'passwordauthentication no' not in hardening_sshd_t.stdout_lines
+    or 'maxauthtries 3' not in hardening_sshd_t.stdout_lines
+    or (hardening_sshd_t.stdout_lines | select('match', '^allowusers ') | list | length == 0)

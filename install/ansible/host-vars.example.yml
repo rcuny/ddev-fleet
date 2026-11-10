@@ -1,0 +1,10 @@
+---
+# Copy to /etc/ddev-fleet/host-vars.yml and edit. Documentation addresses only.
+fleet_hardening_enabled: true
+fleet_hardening_ssh_allow_users:
+  - admin
+fleet_hardening_trusted_ips:
+  - 203.0.113.10
+  - 2001:db8::/32
+fleet_hardening_firewall_grace_minutes: 10
+fleet_hardening_tmp: false
