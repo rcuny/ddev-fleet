@@ -108,13 +108,15 @@ Every write answers `202 Accepted` with `{"job": {"id", "state", "url"}}` and a 
 | Request | Scope | Notes |
 |---|---|---|
 | `POST /api/v1/instances` | `deploy` | Body `{project, template?, branch?, label?}`; defaults come from the project. Refused with `429 capacity_full` (and the verdict in `verdict`) while the server-side capacity gate says the host or project is full; nothing is gated when the host reports no CPU allotment. |
-| `POST /api/v1/instances/{id}/redeploy` | `deploy` | Optional body `{template?, branch?, force?}`. `409 instance_busy` while a job is queued or running on it. |
+| `POST /api/v1/instances/{id}/redeploy` | `deploy` | Optional body `{template?, branch?, force?}`; a `branch` is checked with the same rule as a deploy (`422` on `-x`, spaces, `..`). `409 instance_busy` while a job is queued or running on it. |
 | `POST /api/v1/instances/{id}/start`, `/stop` | `lifecycle` | `409 instance_busy` as above. |
-| `DELETE /api/v1/instances/{id}` | `lifecycle` and `lifecycle:destroy` | `409 protected_instance` for a project's `main` instance. Optional `If-Match: "<created_at>"` (the instance's `created_at`); a different value answers `412 stale_if_match` and destroys nothing, so a stale id never removes a newer instance that reused it. |
-| `POST /api/v1/instances:destroy-batch` | `lifecycle` and `lifecycle:destroy` | Body `{ids: [...], if_match?: {"<id>": "<created_at>"}}`, at most 20 ids. One job per id; the answer is `207` with a `results` entry per id: `{id, accepted: true, job}` or `{id, accepted: false, status, code, detail}`. A refused id does not stop the others. |
-| `POST /api/v1/jobs/{id}/retry` | the scope the repeated work needs | `deploy` for a deploy or redeploy (a failed deploy is retried as a redeploy), `lifecycle` for start and stop, `lifecycle` and `lifecycle:destroy` for a destroy. Only a failed or interrupted job. |
+| `DELETE /api/v1/instances/{id}` | `lifecycle` and `lifecycle:destroy` | `409 protected_instance` for a project's `main` instance. `If-Match: "<created_at>"` (the instance's `created_at`) is required: without it `428 if_match_required`, with a different value `412 stale_if_match`, and nothing is destroyed, so a stale id never removes a newer instance that reused it. |
+| `POST /api/v1/instances:destroy-batch` | `lifecycle` and `lifecycle:destroy` | Body `{ids: [...], if_match: {"<id>": "<created_at>"}}`, at most 20 ids; an id without its `if_match` entry is refused with `428` in its result. One job per id; the answer is `207` with a `results` entry per id: `{id, accepted: true, job}` or `{id, accepted: false, status, code, detail}`. A refused id does not stop the others. |
+| `POST /api/v1/jobs/{id}/retry` | the scope the repeated work needs | `deploy` for a deploy or redeploy (a failed deploy is retried as a redeploy), `lifecycle` for start and stop, `lifecycle` and `lifecycle:destroy` for a destroy. Only a failed or interrupted job. Retrying a destroy applies the destroy rules again: the `main` protection and the required `If-Match` header. |
 
-Each accepted write is audited as `api.write` (actor `token:<id>:<name>`, subject: the operation, the target, the job and the client address). The jobs record the trigger `api`.
+Each accepted write is audited as `api.write` (actor `token:<id>:<name>`, subject: the operation, the target, the job and the client address). The jobs record the trigger `api`. The token id is the stable identifier; the name is informational and can be reused.
+
+**Replays.** There is no idempotency key. Repeating a write while the first job is queued or running answers `409 instance_busy`; after it finished, the write runs again (a repeated destroy of a gone instance answers `404`).
 
 ### Pagination
 

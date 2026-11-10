@@ -6,10 +6,10 @@ namespace App\Controller\Api;
 
 use App\Api\Http\ApiProblem;
 use App\Api\Read\CapacityVerdict;
+use App\Api\Write\DestroyGuard;
 use App\Api\Write\JsonBody;
 use App\Api\Write\WriteSupport;
 use App\Domain\ApiToken\ApiScope;
-use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Job\JobTrigger;
 use App\Domain\Project\ProjectRepository;
@@ -29,13 +29,12 @@ use Symfony\Component\Routing\Attribute\Route;
  * The instance write endpoints (design section 6.1): deploy and redeploy need `deploy`; start and stop need
  * `lifecycle`; destroy needs `lifecycle` and the `lifecycle:destroy` flag. Every one is limited to the token's
  * projects, answers `202` with the job to poll, and is audited. Destroy refuses the protected `*--main` instances and
- * honours `If-Match` on the instance's `created_at`, so a stale id never destroys a newer instance that reused it.
+ * requires `If-Match` (428 when missing) on the instance's `created_at`, so a stale id never destroys a newer instance that reused it.
  * There is no dispatch endpoint: dispatch stays the Jira webhook.
  */
 final readonly class InstanceWriteController
 {
     private const int BATCH_MAX = 20;
-    private const string PROTECTED_LABEL = 'main';
 
     public function __construct(
         private ApiAuthorizer $authorizer,
@@ -99,7 +98,7 @@ final readonly class InstanceWriteController
     {
         $token = $this->authorizeInstance(ApiScope::LifecycleDestroy, $id, ApiScope::Lifecycle);
         $instance = $this->instances->find($id) ?? throw ApiProblem::notFound('No such instance.');
-        self::checkDestroyable($instance, $request->headers->get('If-Match'));
+        DestroyGuard::check($instance, $request->headers->get('If-Match'));
 
         return $this->operate('destroy', $token, $id, new OperationOptions());
     }
@@ -135,7 +134,7 @@ final readonly class InstanceWriteController
                 }
                 $this->authorizer->require(ApiScope::Lifecycle, $instance->project()->name());
                 $this->authorizer->require(ApiScope::LifecycleDestroy, $instance->project()->name());
-                self::checkDestroyable($instance, \is_string($ifMatch) ? $ifMatch : null);
+                DestroyGuard::check($instance, \is_string($ifMatch) ? $ifMatch : null);
                 $job = $this->support->run(fn (): array => $this->service->request('destroy', new Selector([$id]), new OperationOptions(), JobTrigger::Api, $token->getUserIdentifier()))[0];
                 $this->support->audit($token, 'destroy', $id, $job);
                 $results[] = ['id' => $id, 'accepted' => true, 'job' => WriteSupport::jobRef($job)];
@@ -174,15 +173,5 @@ final readonly class InstanceWriteController
         $this->support->audit($token, $op, $id, $job);
 
         return $this->support->accepted($job);
-    }
-
-    private static function checkDestroyable(Instance $instance, ?string $ifMatch): void
-    {
-        if (self::PROTECTED_LABEL === $instance->label()) {
-            throw ApiProblem::conflict('protected_instance', 'The main instance of a project is protected and cannot be destroyed over the API.');
-        }
-        if (null !== $ifMatch && trim($ifMatch, ' "') !== $instance->createdAt()->format(\DATE_ATOM)) {
-            throw ApiProblem::staleIfMatch();
-        }
     }
 }

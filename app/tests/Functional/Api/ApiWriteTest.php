@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Api;
 
 use App\Api\Token\ApiTokenIssuer;
+use App\Api\Token\InvalidApiTokenRequest;
 use App\Api\Token\IssuedToken;
 use App\Domain\ApiToken\ApiScope;
+use App\Domain\ApiToken\ApiToken;
 use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
@@ -36,7 +38,7 @@ final class ApiWriteTest extends AdminTestCase
         'start' => ['POST', '/api/v1/instances/%p--i1/start', '', [ApiScope::Lifecycle]],
         'stop' => ['POST', '/api/v1/instances/%p--i1/stop', '', [ApiScope::Lifecycle]],
         'destroy' => ['DELETE', '/api/v1/instances/%p--i1', '', [ApiScope::Lifecycle, ApiScope::LifecycleDestroy]],
-        'batch' => ['POST', '/api/v1/instances:destroy-batch', '{"ids":["%p--i1"]}', [ApiScope::Lifecycle, ApiScope::LifecycleDestroy]],
+        'batch' => ['POST', '/api/v1/instances:destroy-batch', '{"ids":["%p--i1"],"if_match":{"%p--i1":"%c"}}', [ApiScope::Lifecycle, ApiScope::LifecycleDestroy]],
         'retry' => ['POST', '/api/v1/jobs/%j/retry', '', [ApiScope::Lifecycle]],
     ];
 
@@ -125,7 +127,8 @@ final class ApiWriteTest extends AdminTestCase
 
         $send = function (IssuedToken $token, string $project) use ($method, $template, $body): int {
             $job = $this->failedJob($project);
-            $this->call($method, $this->expand($template, $project, $job), $token, $this->expand($body, $project, $job));
+            $created = new InstanceRepository($this->em())->find($project.'--i1')?->createdAt()->format(\DATE_ATOM) ?? '';
+            $this->call($method, $this->expand($template, $project, $job), $token, str_replace('%c', $created, $this->expand($body, $project, $job)), ['HTTP_IF_MATCH' => '"'.$created.'"']);
 
             return $this->client->getResponse()->getStatusCode();
         };
@@ -246,7 +249,8 @@ final class ApiWriteTest extends AdminTestCase
     {
         $token = $this->issue([ApiScope::Lifecycle, ApiScope::LifecycleDestroy]);
 
-        $body = $this->call('POST', '/api/v1/instances:destroy-batch', $token, json_encode(['ids' => ['acme--i1', 'acme--main', 'acme--ghost', 'demo--i1'], 'if_match' => []], \JSON_THROW_ON_ERROR));
+        $created = new InstanceRepository($this->em())->find('acme--i1')?->createdAt()->format(\DATE_ATOM);
+        $body = $this->call('POST', '/api/v1/instances:destroy-batch', $token, json_encode(['ids' => ['acme--i1', 'acme--main', 'acme--ghost', 'demo--i1'], 'if_match' => ['acme--i1' => $created]], \JSON_THROW_ON_ERROR));
 
         self::assertResponseStatusCodeSame(207);
         $by = array_column($body['results'], null, 'id');
@@ -304,5 +308,97 @@ final class ApiWriteTest extends AdminTestCase
     {
         $this->call('POST', '/api/v1/dispatches', $this->issue([ApiScope::Deploy]), '{"project":"acme"}');
         self::assertResponseStatusCodeSame(404);
+    }
+
+    public function testRedeployBranchIsValidated(): void
+    {
+        $token = $this->issue([ApiScope::Deploy]);
+        foreach (['--upload-pack=x', '-x', 'a b', 'a..b', 'refs/heads/x', 'HEAD'] as $branch) {
+            $body = $this->call('POST', '/api/v1/instances/acme--i1/redeploy', $token, json_encode(['branch' => $branch], \JSON_THROW_ON_ERROR));
+            self::assertResponseStatusCodeSame(422, $branch);
+            self::assertArrayHasKey('branch', $body['errors']);
+        }
+        $this->call('POST', '/api/v1/instances/acme--i1/redeploy', $token, '{"branch":"feature/ok"}');
+        self::assertResponseStatusCodeSame(202);
+    }
+
+    public function testDestroyWithoutIfMatchIs428(): void
+    {
+        $token = $this->issue([ApiScope::Lifecycle, ApiScope::LifecycleDestroy]);
+
+        $body = $this->call('DELETE', '/api/v1/instances/acme--i1', $token);
+        self::assertResponseStatusCodeSame(428);
+        self::assertSame('if_match_required', $body['code']);
+
+        $body = $this->call('POST', '/api/v1/instances:destroy-batch', $token, '{"ids":["acme--i1"]}');
+        self::assertResponseStatusCodeSame(207);
+        self::assertSame(428, $body['results'][0]['status']);
+        self::assertFalse($body['results'][0]['accepted']);
+    }
+
+    public function testRetryOfADestroyKeepsTheDestroyProtections(): void
+    {
+        $token = $this->issue([ApiScope::Lifecycle, ApiScope::LifecycleDestroy]);
+        $main = new Job('destroy', 'acme--main', 'acme', JobTrigger::Cli, 'admin', []);
+        $main->markRunning(new \DateTimeImmutable());
+        $main->finish(JobStatus::Failed, 1, 'boom', new \DateTimeImmutable());
+        new JobRepository($this->em())->add($main);
+        $created = new InstanceRepository($this->em())->find('acme--main')?->createdAt()->format(\DATE_ATOM);
+
+        $body = $this->call('POST', '/api/v1/jobs/'.$main->id().'/retry', $token, '', ['HTTP_IF_MATCH' => '"'.$created.'"']);
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame('protected_instance', $body['code']);
+
+        $failed = $this->failedJob('acme', 'destroy');
+        $body = $this->call('POST', '/api/v1/jobs/'.$failed->id().'/retry', $token);
+        self::assertResponseStatusCodeSame(428);
+
+        $this->call('POST', '/api/v1/jobs/'.$failed->id().'/retry', $token, '', ['HTTP_IF_MATCH' => '"2001-01-01T00:00:00+00:00"']);
+        self::assertResponseStatusCodeSame(412);
+
+        $created = new InstanceRepository($this->em())->find('acme--i1')?->createdAt()->format(\DATE_ATOM);
+        $this->call('POST', '/api/v1/jobs/'.$failed->id().'/retry', $token, '', ['HTTP_IF_MATCH' => '"'.$created.'"']);
+        self::assertResponseStatusCodeSame(202);
+    }
+
+    /**
+     * SR3, wildcard tokens: a `*` project list is read-only. It cannot be issued with write scopes, and a read-only
+     * wildcard token is refused on every write endpoint.
+     */
+    public function testWildcardTokensCannotBeIssuedWithWriteScopes(): void
+    {
+        foreach ([[ApiScope::Deploy], [ApiScope::Lifecycle], [ApiScope::Lifecycle, ApiScope::LifecycleDestroy], [ApiScope::Read, ApiScope::Deploy]] as $scopes) {
+            try {
+                $this->issue($scopes, ['*']);
+                self::fail('A wildcard token with write scopes was issued.');
+            } catch (InvalidApiTokenRequest) {
+                $this->addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testWildcardTokenWithWriteScopesInTheStoreIsStillRefused(): void
+    {
+        // Defence in depth: even if such a row existed, allowsProject() refuses it.
+        foreach (['deploy' => [ApiScope::Deploy], 'lifecycle' => [ApiScope::Lifecycle, ApiScope::LifecycleDestroy]] as $name => $scopes) {
+            $token = $this->issue($scopes, ['acme']);
+            $em = $this->em();
+            $row = $em->getRepository(ApiToken::class)->findOneBy([], ['id' => 'DESC']);
+            self::assertInstanceOf(ApiToken::class, $row);
+            $prop = new \ReflectionProperty(ApiToken::class, 'projects');
+            $prop->setValue($row, ['*']);
+            $em->flush();
+            $job = $this->failedJob('acme');
+            $created = new InstanceRepository($this->em())->find('acme--i1')?->createdAt()->format(\DATE_ATOM) ?? '';
+            foreach (self::ENDPOINTS as $endpoint => [$method, $uri, $body]) {
+                $this->call($method, $this->expand($uri, 'acme', $job), $token, str_replace('%c', $created, $this->expand($body, 'acme', $job)), ['HTTP_IF_MATCH' => '"'.$created.'"']);
+                $status = $this->client->getResponse()->getStatusCode();
+                if ('batch' === $endpoint && 207 === $status) {
+                    self::assertFalse($this->decoded()['results'][0]['accepted'], $name.' '.$endpoint);
+                } else {
+                    self::assertContains($status, [403], $name.' '.$endpoint);
+                }
+            }
+        }
     }
 }

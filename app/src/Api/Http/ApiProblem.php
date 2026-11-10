@@ -76,6 +76,11 @@ final class ApiProblem extends \RuntimeException implements HttpExceptionInterfa
         return new self(409, $code, $detail);
     }
 
+    public static function ifMatchRequired(): self
+    {
+        return new self(428, 'if_match_required', 'Destroying needs an If-Match header with the instance\'s created_at, so a stale id never removes a newer instance.');
+    }
+
     public static function staleIfMatch(): self
     {
         return new self(412, 'stale_if_match', 'The instance changed since the If-Match value was read (it was recreated); nothing was done.');
