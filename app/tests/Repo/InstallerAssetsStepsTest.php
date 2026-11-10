@@ -414,6 +414,26 @@ final class InstallerAssetsStepsTest extends TestCase
         self::assertSame("v1.2.3\n", file_get_contents($etc.'/installed-version'));
     }
 
+    public function testTheInstalledVersionIsTheTagWhenHeadIsExactlyOneAndNoRefIsGiven(): void
+    {
+        $etc = $this->scratch().'/etc';
+        $repo = $this->scratch().'/src';
+        mkdir($repo);
+        $git = 'git -c user.name=t -c user.email=t@example.com -C '.escapeshellarg($repo);
+        shell_exec('git init -q '.escapeshellarg($repo).' && '.$git.' commit -q --allow-empty -m x && '.$git.' tag -a v1.5.0 -m v1.5.0');
+
+        $extra = 'REF=main; CODE_REVISION=; FLEET_SRC_DIR='.escapeshellarg($repo).'; run_as_fleet() { if [ "$1" = git ]; then "$@"; else runuser "$@"; fi; };';
+        [$status, , $err] = $this->runRenderStart([], extra: $extra, etc: $etc);
+        self::assertSame(0, $status, $err);
+        self::assertSame("v1.5.0\n", file_get_contents($etc.'/installed-version'));
+
+        // One commit past the tag: no longer a release.
+        shell_exec($git.' commit -q --allow-empty -m y');
+        [$status, , $err] = $this->runRenderStart([], extra: $extra, etc: $etc);
+        self::assertSame(0, $status, $err);
+        self::assertMatchesRegularExpression('/^main@[0-9a-f]{7}\n$/', (string) file_get_contents($etc.'/installed-version'));
+    }
+
     public function testAnUnhealthyInstallFailsWithAJournalHint(): void
     {
         [$status, , $err] = $this->runRenderStart([], curlExit: 22, timeout: '0');
