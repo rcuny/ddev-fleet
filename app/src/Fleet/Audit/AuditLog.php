@@ -39,6 +39,11 @@ final readonly class AuditLog
 
     public const string PROJECT_CONTAINER_SSH = 'project.container-ssh';
 
+    public const string SSH_KEY_CREATE = 'ssh.key.create';
+    public const string SSH_KEY_IMPORT = 'ssh.key.import';
+    public const string SSH_KEY_DELETE = 'ssh.key.delete';
+    public const string SSH_KEY_ROTATE = 'ssh.key.rotate';
+
     public const string WEBHOOK_RULE_ADD = 'webhook.rule.add';
     public const string WEBHOOK_RULE_REMOVE = 'webhook.rule.remove';
 

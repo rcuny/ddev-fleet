@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Command\Template;
 
 use App\Command\Support\CapacityOption;
+use App\Domain\Template\SshIdentities;
 use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\ValidationFailed;
 use Symfony\Component\Console\Command\Command;
@@ -34,6 +35,7 @@ final class TemplateOptions
             ->addOption('tty1', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the first instance terminal (repeat for several; replaces the old list)')
             ->addOption('tty2', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the second instance terminal (repeat for several; replaces the old list)')
             ->addOption('ssh-key', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Name of an extra SSH key (the file ssh/<name>_ed25519 in the fleet home) loaded into the instance\'s ssh-agent; the project needs container_ssh (repeat for several; replaces the old list)')
+            ->addOption('ssh-identities', null, InputOption::VALUE_REQUIRED, 'Which keys the instance\'s ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key)')
             ->addOption('cpu-threads', null, InputOption::VALUE_REQUIRED, 'CPU threads all instances of the template may use together, at most the project\'s: a number, or none to inherit the project\'s')
             ->addOption('slots', null, InputOption::VALUE_REQUIRED, 'Concurrent heavy runs of the template, at most the project\'s slots: a number, or none for unlimited')
         ;
@@ -77,6 +79,14 @@ final class TemplateOptions
         $keys = array_map(static fn (mixed $name): string => (string) $name, (array) $input->getOption('ssh-key'));
         if ([] !== $keys) {
             $changes['sshKeys'] = $keys;
+        }
+        if (null !== $identities = $input->getOption('ssh-identities')) {
+            $parsed = SshIdentities::tryFrom(str_replace('-', '_', (string) $identities));
+            if (null === $parsed) {
+                $errors['sshIdentities'] = 'Choose push-and-extras or extras-only.';
+            } else {
+                $changes['sshIdentities'] = $parsed;
+            }
         }
         $errors += CapacityOption::collect($input, $changes);
         if ($update) {

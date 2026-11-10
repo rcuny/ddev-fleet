@@ -70,7 +70,7 @@ Pair it with the Jira rule from [automate deploys](03-automate-deploys.md): movi
 
 ## Git over SSH in the container
 
-Opt-in per project (on the **Keys & secrets** tab, or `--container-ssh`). The instance gets its own ssh-agent holding the push key for 24 hours; no key file enters a container. Anyone with a process in that container can use the key while the agent runs, so enable it only where agents need to push. Trust a new git server with `fleet ssh:trust git.example.com`.
+Opt-in per project (on the **Keys & secrets** tab, or `--container-ssh`). The instance gets its own ssh-agent holding the push key for 24 hours; no key file enters a container. Anyone with a process in that container can use the key while the agent runs, so enable it only where agents need to push. Trust a new git server with `fleet ssh:trust git.example.com`. Which key does what, extra keys and the "extras only" template option: [SSH keys](../reference/14-ssh-keys.md). Never put `ddev auth ssh` in a template: it loads keys into DDEV's shared agent.
 
 Check it all with `fleet workspace:check` (push key, git identity, token). Success: it reports every check true.
 

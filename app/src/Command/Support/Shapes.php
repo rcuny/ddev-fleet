@@ -32,6 +32,7 @@ final class Shapes
                 'tty2' => $template->tty2(),
             ],
             'ssh_keys' => $template->sshKeys(),
+            'ssh_identities' => $template->sshIdentities()->value,
             'cpu_threads' => $template->cpuThreads(),
             'slots' => $template->slots(),
             'created_at' => $template->createdAt()->setTimezone($utc)->format(self::TIME),

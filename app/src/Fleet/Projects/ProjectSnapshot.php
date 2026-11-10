@@ -57,6 +57,7 @@ final readonly class ProjectSnapshot
                     'tty2' => $template->tty2(),
                 ],
                 'ssh_keys' => $template->sshKeys(),
+                'ssh_identities' => $template->sshIdentities()->value,
                 'cpu_threads' => $template->cpuThreads(),
                 'slots' => $template->slots(),
             ], $project->templates()),

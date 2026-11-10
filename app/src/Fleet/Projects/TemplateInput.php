@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Fleet\Projects;
 
+use App\Domain\Template\SshIdentities;
 use App\Domain\Template\Template;
 
 /**
@@ -12,10 +13,11 @@ use App\Domain\Template\Template;
 final readonly class TemplateInput
 {
     /**
-     * @param list<string> $postDeploy command lines run inside the web container with `ddev exec` after a deploy
-     * @param list<string> $tty1       command lines typed into the first instance terminal
-     * @param list<string> $tty2       command lines typed into the second instance terminal
-     * @param list<string> $sshKeys    names of extra SSH keys (ssh/<name>_ed25519) loaded into the instance's agent (FLE-190)
+     * @param list<string>  $postDeploy    command lines run inside the web container with `ddev exec` after a deploy
+     * @param list<string>  $tty1          command lines typed into the first instance terminal
+     * @param list<string>  $tty2          command lines typed into the second instance terminal
+     * @param list<string>  $sshKeys       names of extra SSH keys (ssh/<name>_ed25519) loaded into the instance's agent (FLE-190)
+     * @param SshIdentities $sshIdentities whether the agent also holds the host's push key (FLE-266)
      */
     public function __construct(
         public string $name,
@@ -26,6 +28,7 @@ final readonly class TemplateInput
         public array $sshKeys = [],
         public ?int $cpuThreads = null,
         public ?int $slots = null,
+        public SshIdentities $sshIdentities = SshIdentities::PushAndExtras,
     ) {
     }
 
@@ -40,6 +43,7 @@ final readonly class TemplateInput
             $template->sshKeys(),
             $template->cpuThreads(),
             $template->slots(),
+            $template->sshIdentities(),
         );
     }
 
@@ -72,6 +76,7 @@ final readonly class TemplateInput
             self::lines($this->sshKeys),
             $this->cpuThreads,
             $this->slots,
+            $this->sshIdentities,
         );
     }
 
