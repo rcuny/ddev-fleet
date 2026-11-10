@@ -32,6 +32,12 @@
       tags: [packages]
     - role: docker
       tags: [docker]
+    - role: fleet_user
+      tags: [fleet_user]
+    - role: shell
+      tags: [shell]
+    - role: ddev
+      tags: [ddev]
     - role: hardening
       when: fleet_hardening_enabled | bool
       tags: [hardening]

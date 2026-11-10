@@ -8,3 +8,5 @@ fleet_hardening_trusted_ips:
   - 2001:db8::/32
 fleet_hardening_firewall_grace_minutes: 10
 fleet_hardening_tmp: false
+# Optional: false = no interactive shell profile (the old --no-shell-profile).
+# fleet_shell_profile: true
