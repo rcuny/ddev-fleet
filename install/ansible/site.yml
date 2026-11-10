@@ -32,6 +32,10 @@
       tags: [packages]
     - role: docker
       tags: [docker]
+    - role: caddy
+      tags: [caddy]
+    - role: authelia
+      tags: [authelia]
     # The application layer, always on (replaces install/steps/70, 80, 85, 90, 95 and 98).
     - role: php_app
       tags: [php_app, app]
