@@ -20,7 +20,7 @@
 # Switching to ovh_dns mode: edit /etc/ddev-fleet/local-vars.yml
 # (fleet_tls_mode: "ovh_dns"), create /etc/caddy/ovh.env (0600 root:root,
 # OVH_ENDPOINT/OVH_APPLICATION_KEY/OVH_APPLICATION_SECRET/OVH_CONSUMER_KEY),
-# then run this playbook — see docs/installation.md.
+# then run this playbook — see docs/installation.md (`legacy` branch).
 #
 # pre_tasks mirror site.yml/ddev-only.yml so /etc/ddev-fleet/local-vars.yml
 # still overrides the committed group_vars.

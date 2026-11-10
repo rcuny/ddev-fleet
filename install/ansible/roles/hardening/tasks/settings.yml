@@ -22,7 +22,6 @@
       - fleet_hardening_firewall_grace_minutes | int >= 2
       - fleet_hardening_firewall_grace_minutes | int <= 120
     fail_msg: hardening settings are not valid (user names, trusted addresses or the grace period of 2 to 120 minutes)
-  tags: [always]
 
 - name: Session safety, the account running this must stay able to log in
   ansible.builtin.assert:

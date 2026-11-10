@@ -92,7 +92,7 @@ final class RepoHygieneTest extends TestCase
     {
         // Not scanned: ansible/ (reshaped in M0.02), CHANGELOG.md (release history keeps what it recorded; its
         // [Unreleased] section and changelog.d/ are scanned by testChangelogUnreleasedSectionIsClean), LICENSE (the copyright holder)
-        // docs/v0 is scanned too, and so is SYSTEMD-SECURITY-REPORT.md (offline scores, FLE-238: no host names).
+        // docs/v0 (now only on the `legacy` branch) no longer exists here. SYSTEMD-SECURITY-REPORT.md is scanned (offline scores, FLE-238: no host names).
         $roots = [
             'app', 'ci', 'install', 'bitbucket-pipelines.yml', 'renovate-config.json', 'tests/playwright', 'tests/pytest',
             'CLAUDE.md', 'README.md', 'SYSTEMD-SECURITY-REPORT.md', 'CONTRIBUTING.md', 'docs',

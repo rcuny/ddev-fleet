@@ -167,7 +167,7 @@
       fleet_admin_default_password is not set. There is no public-safe
       default for the dashboard admin password — bootstrap.sh's
       value-collection phase generates or prompts for one and writes it to
-      /etc/ddev-fleet/local-vars.yml (see docs/installation.md). For a
+      /etc/ddev-fleet/local-vars.yml (see docs/installation.md (`legacy` branch)). For a
       manual/dev run, pass -e fleet_admin_default_password=<value>.
   when:
     - not caddy_admin_auth_snippet_stat.stat.exists
@@ -220,7 +220,7 @@
       values: 'on_demand' (default — per-hostname Let's Encrypt via HTTP-01,
       no setup) or 'ovh_dns' (wildcard cert via the OVH DNS-01 challenge,
       needs /etc/caddy/ovh.env). See ansible/group_vars/all.yml and
-      docs/installation.md.
+      docs/installation.md (`legacy` branch).
     success_msg: "fleet_tls_mode='{{ fleet_tls_mode }}' is valid"
 
 # --- ovh_dns mode: OVH API credentials -------------------------------------
@@ -244,7 +244,7 @@
           secrets) — create it first: bootstrap.sh's TLS-mode prompt does
           this interactively, or write it by hand (0600 root:root) with
           OVH_ENDPOINT, OVH_APPLICATION_KEY, OVH_APPLICATION_SECRET,
-          OVH_CONSUMER_KEY — see docs/installation.md.
+          OVH_CONSUMER_KEY — see docs/installation.md (`legacy` branch).
       when: not fleet_ovh_env_stat.stat.exists
 
     - name: Read the OVH credentials file to check for required keys
@@ -269,7 +269,7 @@
         msg: >-
           {{ fleet_ovh_env_file }} is missing required key(s):
           {{ fleet_ovh_env_missing_keys | join(', ') }}. Not printing file
-          contents. See docs/installation.md.
+          contents. See docs/installation.md (`legacy` branch).
       when: fleet_ovh_env_missing_keys | length > 0
 
     - name: Fix ownership/permissions of the OVH credentials file
@@ -353,7 +353,7 @@
 # and any PRE-EXISTING divert/alternatives from a prior ovh_dns install is
 # left untouched (switching a server back to on_demand only needs
 # tls.conf.j2 to stop emitting the ovh directive; the custom binary is
-# harmless to leave in place — see docs/installation.md "switching mode").
+# harmless to leave in place — see docs/installation.md (`legacy` branch) "switching mode").
 - name: Determine the caddy-dns/ovh download architecture from ansible_architecture
   ansible.builtin.set_fact:
     fleet_caddy_arch_map:

@@ -1,0 +1,51 @@
+---
+# Port of install/steps/30-fleet-user.sh. The user is created once and never modified afterwards (an existing account's
+# shell and home stay as they are); /opt/ddev-fleet stays fleet:fleet, the app is a fleet-owned git checkout.
+- name: The docker group
+  ansible.builtin.group:
+    name: docker
+    system: true
+
+- name: Look for the fleet user
+  ansible.builtin.getent:
+    database: passwd
+    key: "{{ fleet_user }}"
+    fail_key: false
+
+- name: Create the fleet user (only when it does not exist)
+  ansible.builtin.user:
+    name: "{{ fleet_user }}"
+    system: true
+    create_home: true
+    home: "{{ fleet_home_dir }}"
+    shell: /bin/bash
+    group: "{{ fleet_user }}"
+  when: getent_passwd[fleet_user] is none
+
+- name: Let the fleet user talk to Docker
+  ansible.builtin.user:
+    name: "{{ fleet_user }}"
+    groups: docker
+    append: true
+
+- name: The directories the fleet user owns
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    state: directory
+    mode: "{{ item.mode }}"
+    owner: "{{ item.owner }}"
+    group: "{{ item.group }}"
+  loop:
+    - {path: "{{ fleet_srv_dir }}", mode: "0750", owner: "{{ fleet_user }}", group: "{{ fleet_user }}"}
+    - {path: "{{ fleet_srv_dir }}/var", mode: "0750", owner: "{{ fleet_user }}", group: "{{ fleet_user }}"}
+    - {path: "{{ fleet_srv_dir }}/staging", mode: "0700", owner: "{{ fleet_user }}", group: "{{ fleet_user }}"}
+    - {path: "{{ fleet_etc_dir }}", mode: "0750", owner: root, group: "{{ fleet_user }}"}
+    - {path: "{{ fleet_opt_dir }}", mode: "0755", owner: "{{ fleet_user }}", group: "{{ fleet_user }}"}
+
+- name: The checkout belongs to the fleet user, all of it (modes are left as they are)
+  ansible.builtin.file:
+    path: "{{ fleet_opt_dir }}"
+    state: directory
+    recurse: true
+    owner: "{{ fleet_user }}"
+    group: "{{ fleet_user }}"

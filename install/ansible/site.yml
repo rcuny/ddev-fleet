@@ -32,6 +32,12 @@
       tags: [packages]
     - role: docker
       tags: [docker]
+    - role: fleet_user
+      tags: [fleet_user]
+    - role: shell
+      tags: [shell]
+    - role: ddev
+      tags: [ddev]
     - role: caddy
       tags: [caddy]
     - role: authelia
