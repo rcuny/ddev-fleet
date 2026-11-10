@@ -80,7 +80,7 @@ final class InstallerAnsibleTest extends TestCase
 
     public function testNoHardeningTaskIsTaggedAlways(): void
     {
-        $files = glob(\dirname(__DIR__, 3).'/install/ansible/roles/hardening/{tasks,handlers}/*.yml', \GLOB_BRACE);
+        $files = glob(\dirname(__DIR__, 3).'/install/ansible/roles/hardening/{tasks,handlers}/*.yml', \GLOB_BRACE) ?: [];
         self::assertNotEmpty($files);
         foreach ($files as $file) {
             self::assertStringNotContainsString('always]', (string) file_get_contents($file), basename($file));
