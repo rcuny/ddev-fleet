@@ -1,0 +1,42 @@
+---
+# Port of install/steps/80-code.sh and 85-app-init.sh, as the fleet user with fleet.env loaded (APP_ENV=prod).
+# The checkout in fleet_src_dir is made by the bootstrap. The build runs when the code or the environment changed, when
+# the build is incomplete or when fleet_force_build is set (the bash step rebuilt on every run).
+- name: Wait for running jobs (bounded) before the code and the database change under them
+  ansible.builtin.import_tasks: wait-jobs.yml
+
+- name: The checkout's revision
+  ansible.builtin.command:
+    argv: "{{ fleet_run_as + ['git', '-C', fleet_src_dir, 'rev-parse', 'HEAD'] }}"
+  register: app_code_head
+  changed_when: false
+  check_mode: false
+
+- name: The revision of the last successful install
+  ansible.builtin.slurp:
+    src: "{{ fleet_etc_dir }}/installed-revision"
+  register: app_code_installed
+  failed_when: false
+
+- name: Look for the finished build
+  ansible.builtin.stat:
+    path: "{{ item }}"
+  loop:
+    - "{{ fleet_src_dir }}/app/vendor/autoload_runtime.php"
+    - "{{ fleet_src_dir }}/app/public/assets/manifest.json"
+  register: app_code_build
+
+- name: Note whether the code changed (php-fpm and the workers only see new code after a reload)
+  ansible.builtin.set_fact:
+    fleet_code_revision: "{{ app_code_head.stdout | trim }}"
+    fleet_code_changed: "{{ (app_code_installed.content | default('') | b64decode | trim) != (app_code_head.stdout | trim) }}"
+    app_code_build_needed: >-
+      {{ fleet_force_build | bool or fleet_env_changed | bool or
+      (app_code_build.results | rejectattr('stat.exists') | list | length > 0) }}
+
+- name: Build the application
+  ansible.builtin.include_tasks: build.yml
+  when: fleet_code_changed | bool or app_code_build_needed | bool
+
+- name: Database, queue and host settings
+  ansible.builtin.import_tasks: init.yml

@@ -1,0 +1,68 @@
+---
+# Port of install/steps/90-privileged.sh: the only things that give the fleet user a root-side effect, installed from
+# the ROOT-OWNED export of install/ (fleet_install_dir), never from the fleet-writable checkout.
+- name: The helper directory
+  ansible.builtin.file:
+    path: "{{ fleet_helper_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: The root helpers (apply, and upgrade which has no sudoers entry)
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/libexec/{{ item }}"
+    dest: "{{ fleet_helper_dir }}/{{ item }}"
+    remote_src: true
+    mode: "0755"
+    owner: root
+    group: root
+  loop: [apply, upgrade]
+
+- name: The tmpfiles.d directory
+  ansible.builtin.file:
+    path: /etc/tmpfiles.d
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: The upgrade history directory and file
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/etc/fleet-tmpfiles.conf"
+    dest: /etc/tmpfiles.d/ddev-fleet.conf
+    remote_src: true
+    mode: "0644"
+    owner: root
+    group: root
+  register: privileged_tmpfiles
+
+- name: Look for the upgrade history file
+  ansible.builtin.stat:
+    path: /var/log/ddev-fleet/upgrade-history.jsonl
+  register: privileged_history
+
+- name: Create it now
+  ansible.builtin.command: systemd-tmpfiles --create /etc/tmpfiles.d/ddev-fleet.conf
+  changed_when: true
+  when: privileged_tmpfiles is changed or not privileged_history.stat.exists
+
+# A broken sudoers can lock everybody out of sudo: the file is checked before it lands.
+- name: The sudoers line (apply caddy, apply authelia, apply slices, nothing else)
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/etc/sudoers-fleet-apply"
+    dest: "{{ fleet_sudoers_dir }}/fleet-apply"
+    remote_src: true
+    mode: "0440"
+    owner: root
+    group: root
+    validate: visudo -cf %s
+
+- name: The command-line wrapper
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/bin/fleet"
+    dest: /usr/local/bin/fleet
+    remote_src: true
+    mode: "0755"
+    owner: root
+    group: root

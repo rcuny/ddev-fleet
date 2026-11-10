@@ -1,0 +1,51 @@
+---
+- name: The worker and status units
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/etc/{{ item }}"
+    dest: "{{ fleet_systemd_dir }}/{{ item }}"
+    remote_src: true
+    mode: "0644"
+    owner: root
+    group: root
+  loop: "{{ units_worker }}"
+  register: units_worker_copy
+  notify: Reload systemd units (app)
+
+- name: The schedule ticker unit
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/etc/{{ item }}"
+    dest: "{{ fleet_systemd_dir }}/{{ item }}"
+    remote_src: true
+    mode: "0644"
+    owner: root
+    group: root
+  loop: "{{ units_scheduler }}"
+  register: units_scheduler_copy
+  notify: Reload systemd units (app)
+
+- name: The boot start, backup, release check, certificate check and agent workspace units
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/etc/{{ item }}"
+    dest: "{{ fleet_systemd_dir }}/{{ item }}"
+    remote_src: true
+    mode: "0644"
+    owner: root
+    group: root
+  loop: "{{ units_plain }}"
+  notify: Reload systemd units (app)
+
+- name: The Mercure hub unit
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/etc/{{ units_mercure[0] }}"
+    dest: "{{ fleet_systemd_dir }}/{{ units_mercure[0] }}"
+    remote_src: true
+    mode: "0644"
+    owner: root
+    group: root
+  register: units_mercure_copy
+  notify: Reload systemd units (app)
+
+- name: Note which units changed
+  ansible.builtin.set_fact:
+    fleet_worker_unit_changed: "{{ units_worker_copy.results | selectattr('changed') | list | length > 0 }}"
+    fleet_scheduler_unit_changed: "{{ units_scheduler_copy.results | selectattr('changed') | list | length > 0 }}"
