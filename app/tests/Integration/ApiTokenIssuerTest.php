@@ -137,6 +137,16 @@ final class ApiTokenIssuerTest extends KernelTestCase
         self::assertStringContainsString('grace 600s', $expires[0]->subject());
     }
 
+    public function testATokenAlreadyInItsGracePeriodCannotBeRotatedAgain(): void
+    {
+        $old = $this->issue();
+        $this->issuer->rotate($old->token, 'alice', graceSeconds: 600);
+
+        $this->expectException(InvalidApiTokenRequest::class);
+        $this->expectExceptionMessage('already rotated');
+        $this->issuer->rotate($old->token, 'alice');
+    }
+
     public function testARevokedTokenCannotBeRotated(): void
     {
         $old = $this->issue();

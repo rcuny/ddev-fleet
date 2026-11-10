@@ -30,6 +30,12 @@ final readonly class ApiTokenRepository
         return $this->em->getRepository(ApiToken::class)->findBy([], ['id' => 'DESC']);
     }
 
+    /** Whether a rotation already produced a successor of this token (so it is in, or past, its grace period). */
+    public function hasSuccessor(int $id): bool
+    {
+        return null !== $this->em->getRepository(ApiToken::class)->findOneBy(['rotatedFrom' => $id]);
+    }
+
     public function save(ApiToken $token): void
     {
         $this->em->persist($token);

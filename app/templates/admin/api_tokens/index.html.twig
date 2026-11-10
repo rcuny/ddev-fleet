@@ -88,6 +88,8 @@
                                         {{ include('setup/_csrf.html.twig') }}
                                         <twig:Label for="grace-{{ t.id }}" class="text-xs">Old token still works for (seconds, 0 to {{ max_grace }})</twig:Label>
                                         <twig:Input id="grace-{{ t.id }}" name="grace" value="0" inputmode="numeric" pattern="\d{1,4}" class="h-11 md:h-8" />
+                                        <twig:Label for="rotate-days-{{ t.id }}" class="text-xs">Successor lifetime (days, empty = default)</twig:Label>
+                                        <twig:Input id="rotate-days-{{ t.id }}" name="expires_in" inputmode="numeric" pattern="[1-9]\d{0,3}" class="h-11 md:h-8" autocomplete="off" />
                                         <twig:Button type="submit" variant="outline" class="h-11 md:h-8" data-testid="api-token-rotate">Rotate</twig:Button>
                                     </form>
                                     <form method="post" action="{{ path('api_token_revoke', {id: t.id}) }}" data-testid="api-token-revoke-form">

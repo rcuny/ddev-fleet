@@ -107,6 +107,9 @@ final readonly class ApiTokenIssuer
         if ($old->isExpired($now)) {
             throw new InvalidApiTokenRequest('An expired token cannot be rotated; issue a new one.');
         }
+        if ($this->tokens->hasSuccessor((int) $old->id())) {
+            throw new InvalidApiTokenRequest('This token was already rotated and is in its grace period; rotate its successor, or revoke it.');
+        }
         $scopes = array_values(array_filter(array_map(ApiScope::tryFrom(...), $old->scopes())));
         $successor = $this->issue(
             $old->name(),

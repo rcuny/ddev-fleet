@@ -108,6 +108,39 @@ final class ApiTokenPageTest extends AdminTestCase
         self::assertCount(2, $this->tokens()->all());
     }
 
+    public function testRotatingATokenAlreadyInItsGracePeriodIsRefused(): void
+    {
+        $this->confirmPassword();
+        $this->post('/admin/api-tokens/create', self::FORM);
+        $this->confirmPassword();
+        $this->post('/admin/api-tokens/1/rotate', ['grace' => '600', 'expires_in' => '7']);
+        self::assertResponseStatusCodeSame(200);
+        $successor = $this->tokens()->find(2);
+        self::assertNotNull($successor);
+        self::assertLessThan(new \DateTimeImmutable('+8 days'), $successor->expiresAt());
+        self::assertGreaterThan(new \DateTimeImmutable('+6 days'), $successor->expiresAt());
+
+        $this->confirmPassword();
+        $this->post('/admin/api-tokens/1/rotate', ['grace' => '600']);
+        self::assertResponseRedirects('/admin/api-tokens', 303);
+        self::assertCount(2, $this->tokens()->all());
+        self::assertStringContainsString('already rotated', $this->client->followRedirect()->text());
+    }
+
+    public function testEveryChangeRefusesAnInvalidCsrfToken(): void
+    {
+        $this->confirmPassword();
+        $this->post('/admin/api-tokens/create', self::FORM);
+        $this->confirmPassword();
+
+        foreach (['/admin/api-tokens/create' => self::FORM, '/admin/api-tokens/1/rotate' => ['grace' => '0'], '/admin/api-tokens/1/revoke' => []] as $path => $form) {
+            $this->post($path, ['_token' => 'forged'] + $form);
+            self::assertResponseStatusCodeSame(403, $path);
+        }
+        self::assertCount(1, $this->tokens()->all());
+        self::assertFalse($this->tokens()->find(1)?->isRevoked());
+    }
+
     public function testAnUnknownTokenIs404AndAMemberCannotChangeAnything(): void
     {
         $this->confirmPassword();
