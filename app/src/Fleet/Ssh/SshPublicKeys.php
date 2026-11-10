@@ -27,6 +27,21 @@ final class SshPublicKeys
     }
 
     /**
+     * The file-name suffix for a key type: `ed25519`, `ecdsa` or `rsa` (FLE-270: `ssh/<name>_<suffix>`).
+     *
+     * @throws \InvalidArgumentException for a type that is not allow-listed
+     */
+    public static function fileSuffix(string $type): string
+    {
+        return match (true) {
+            'ssh-ed25519' === $type => 'ed25519',
+            'ssh-rsa' === $type => 'rsa',
+            \in_array($type, self::TYPES, true) => 'ecdsa',
+            default => throw new \InvalidArgumentException('Unsupported SSH key type.'),
+        };
+    }
+
+    /**
      * Returns the decoded key blob.
      *
      * @throws \InvalidArgumentException unless $type is allow-listed and $base64 is canonical base64 of a blob that
