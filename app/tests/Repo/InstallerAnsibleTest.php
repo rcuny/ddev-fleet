@@ -58,4 +58,32 @@ final class InstallerAnsibleTest extends TestCase
         self::assertStringContainsString('hardening_ssh_dropin is changed', $ssh);
         self::assertStringContainsString('ssh-ports.sh', $ssh);
     }
+
+    public function testATagLimitedRunOfAnotherRoleReachesNoHardeningTask(): void
+    {
+        $bin = new ExecutableFinder()->find('ansible-playbook');
+        if (null === $bin) {
+            self::markTestSkipped('ansible-playbook is not installed');
+        }
+        $dir = \dirname(__DIR__, 3).'/install/ansible';
+        $env = ['ANSIBLE_LOCALHOST_WARNING' => 'False', 'HOME' => sys_get_temp_dir()];
+        foreach (['ddev', 'docker', 'shell'] as $tag) {
+            $process = new Process([$bin, 'site.yml', '--list-tasks', '--tags', $tag], $dir, $env);
+            $process->run();
+            self::assertSame(0, $process->getExitCode(), $process->getOutput().$process->getErrorOutput());
+            self::assertStringNotContainsString('hardening :', $process->getOutput(), '--tags '.$tag);
+        }
+        $process = new Process([$bin, 'site.yml', '--list-tasks', '--tags', 'hardening'], $dir, $env);
+        $process->run();
+        self::assertStringContainsString('hardening : Validate the settings', $process->getOutput());
+    }
+
+    public function testNoHardeningTaskIsTaggedAlways(): void
+    {
+        $files = glob(\dirname(__DIR__, 3).'/install/ansible/roles/hardening/{tasks,handlers}/*.yml', \GLOB_BRACE);
+        self::assertNotEmpty($files);
+        foreach ($files as $file) {
+            self::assertStringNotContainsString('always]', (string) file_get_contents($file), basename($file));
+        }
+    }
 }
