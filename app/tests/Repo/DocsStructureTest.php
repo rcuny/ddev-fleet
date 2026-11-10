@@ -44,8 +44,10 @@ final class DocsStructureTest extends TestCase
     #[DataProvider('docsPages')]
     public function testEveryPageHasFrontmatter(string $page): void
     {
+        // The generated CLI reference carries no date (FLE-239): it must stay byte-for-byte deterministic.
+        $updated = 'docs/reference/01-cli.md' === $page ? '' : '\nLast updated: \d{4}-\d{2}-\d{2}';
         self::assertMatchesRegularExpression(
-            '/\A---\nAuthor: [^\n]+\nReviewer: [^\n]+\nLast updated: \d{4}-\d{2}-\d{2}\nType: [^\n]+\n---\n/',
+            '/\A---\nAuthor: [^\n]+\nReviewer: [^\n]+'.$updated.'\nType: [^\n]+\n---\n/',
             self::read($page),
             "$page needs the Author, Reviewer, Last updated and Type frontmatter",
         );

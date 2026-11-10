@@ -15,7 +15,7 @@
     # /hooks/* is exempted because Jira's and Bitbucket's servers cannot log in
     # interactively (neither basic auth nor an Authelia session); the daemon
     # authenticates each request with a per-project HMAC signature instead
-    # (see docs/README-webhooks.md). Being unauthenticated at this layer, it
+    # (see docs/README-webhooks.md (`legacy` branch)). Being unauthenticated at this layer, it
     # also gets a body cap below, applied before the daemon reads anything.
 {% if fleet_auth_mode == 'authelia' %}
     # Authelia mode: the dashboard requires the `admins` group only (spec

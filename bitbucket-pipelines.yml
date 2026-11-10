@@ -46,7 +46,7 @@
 #                                 behind develop (FLE-11).
 #                                 Started by hand or by the fleet daemon's
 #                                 Bitbucket webhook relay; see
-#                                 docs/README-renovate.md.
+#                                 docs/contributing/03-ci.md.
 #
 # Repository variables to configure (Repository settings -> Pipelines):
 #   GITHUB_MIRROR_URL  SSH URL of the GitHub mirror repo (git@github.com:...).
