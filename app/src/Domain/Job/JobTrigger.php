@@ -10,4 +10,5 @@ enum JobTrigger: string
     case Cli = 'cli';
     case Webhook = 'webhook';
     case Schedule = 'schedule';
+    case Api = 'api';
 }

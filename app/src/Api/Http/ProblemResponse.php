@@ -19,10 +19,11 @@ final class ProblemResponse
 
     /**
      * @param array<string, string> $headers
+     * @param array<string, mixed>  $extra
      */
-    public static function create(Request $request, int $status, string $code, string $detail, array $headers = []): JsonResponse
+    public static function create(Request $request, int $status, string $code, string $detail, array $headers = [], array $extra = []): JsonResponse
     {
-        $response = new JsonResponse([
+        $response = new JsonResponse($extra + [
             'type' => 'about:blank',
             'title' => Response::$statusTexts[$status] ?? 'Error',
             'status' => $status,
@@ -38,6 +39,6 @@ final class ProblemResponse
 
     public static function fromProblem(Request $request, ApiProblem $problem): JsonResponse
     {
-        return self::create($request, $problem->getStatusCode(), $problem->problemCode(), $problem->getMessage(), $problem->getHeaders());
+        return self::create($request, $problem->getStatusCode(), $problem->problemCode(), $problem->getMessage(), $problem->getHeaders(), $problem->extra());
     }
 }
