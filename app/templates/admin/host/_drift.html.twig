@@ -1,0 +1,69 @@
+{% set d = drift %}
+{% set report = d.report %}
+<div class="grid gap-4" data-testid="host-tab-drift">
+    {% if d.unavailable %}
+        <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="drift-unavailable">
+            <twig:ux:icon name="lucide:triangle-alert" />
+            <twig:Alert:Title>Not available on this host</twig:Alert:Title>
+            <twig:Alert:Description class="text-ink-body">{{ d.unavailable }}</twig:Alert:Description>
+        </twig:Alert>
+    {% endif %}
+
+    <twig:Card>
+        <twig:Card:Header>
+            <twig:Card:Title>Drift check</twig:Card:Title>
+            <twig:Card:Description>Compares the host with what the installed release would set up, without changing anything. It runs the release's playbook in check mode as a job and takes a few minutes.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-3 text-sm">
+            <form method="post" action="{{ path('settings_drift_run') }}" data-testid="drift-run-form">
+                <input type="hidden" name="_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+                <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" disabled="{{ (d.unavailable or d.active) ? 'disabled' : null }}">Run drift check</twig:Button>
+            </form>
+            {% if d.active %}
+                <p data-testid="drift-running">A check is {{ d.active.status.value }}: <a href="{{ path('job_show', {id: d.active.id}) }}" class="inline-flex min-h-11 items-center underline md:min-h-0">job #{{ d.active.id }}</a> shows its log.</p>
+            {% elseif d.latest %}
+                <p class="text-ink-muted" data-testid="drift-last-job">Last check: <a href="{{ path('job_show', {id: d.latest.id}) }}" class="inline-flex min-h-11 items-center underline md:min-h-0">job #{{ d.latest.id }}</a>, {{ d.latest.status.value }}, {{ d.latest.createdAt|date('Y-m-d H:i') }} UTC.</p>
+            {% endif %}
+            <p class="text-ink-muted" data-testid="drift-limits">Not visible here: steps that run a command, such as firewall rules. A check run cannot show them, so the host can differ there without this report saying so.</p>
+        </twig:Card:Content>
+    </twig:Card>
+
+    {% if report is null %}
+        <p class="text-sm text-ink-muted" data-testid="drift-none">No drift check has been run on this host yet.</p>
+    {% else %}
+        <twig:Card data-testid="drift-report" data-drift="{{ report.hasDrift ? 'yes' : 'no' }}" data-failed="{{ report.hasFailures ? 'yes' : 'no' }}">
+            <twig:Card:Header>
+                <twig:Card:Title>
+                    {% if report.hasFailures %}Some tasks could not be checked{% elseif report.hasDrift %}Drift found{% else %}No drift{% endif %}
+                </twig:Card:Title>
+                <twig:Card:Description>Checked {{ report.checkedAt|date('Y-m-d H:i', 'UTC') }} UTC against release {{ report.ref ?: 'unknown' }}.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content class="grid gap-4 text-sm">
+                {% if report.warning %}
+                    <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="drift-engine-warning">
+                        <twig:ux:icon name="lucide:triangle-alert" />
+                        <twig:Alert:Title>Not installed with the Ansible engine</twig:Alert:Title>
+                        <twig:Alert:Description class="text-ink-body">{{ report.warning }}</twig:Alert:Description>
+                    </twig:Alert>
+                {% endif %}
+                {% for role in report.roles %}
+                    <section data-testid="drift-role" data-role="{{ role.role }}" data-status="{{ role.status }}" class="grid gap-2">
+                        <h3><code>{{ role.role }}</code>: {{ role.status }}</h3>
+                        {% for message in role.drift %}
+                            <p data-testid="drift-message">{{ message }}</p>
+                        {% endfor %}
+                        {% for entry in role.changed %}
+                            <details data-testid="drift-changed">
+                                <summary class="min-h-11 cursor-pointer md:min-h-0">Would change: {{ entry.task }}</summary>
+                                {% if entry.diff %}<pre class="mt-2 max-w-full overflow-x-auto rounded bg-muted p-3 text-xs">{{ entry.diff }}</pre>{% endif %}
+                            </details>
+                        {% endfor %}
+                        {% for entry in role.failed %}
+                            <p class="text-destructive" data-testid="drift-failed">Could not check: {{ entry.task }}: {{ entry.msg }}</p>
+                        {% endfor %}
+                    </section>
+                {% endfor %}
+            </twig:Card:Content>
+        </twig:Card>
+    {% endif %}
+</div>

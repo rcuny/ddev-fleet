@@ -1,7 +1,7 @@
 #!/bin/bash
 # Root helper of ddev-fleet: installs config that the app has rendered into its staging directory.
 #
-#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision>
+#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision|drift>
 #
 # Installed by install/steps/90-privileged.sh as root:root 0755, reachable by the `fleet` user through one sudoers
 # line (install/etc/sudoers-fleet-apply). The only input is the target name; the files come from a fixed place,
@@ -47,6 +47,9 @@
 # (the app streams it into the job log); the playbook's exit code is the helper's. The firewall dead-man's switch stays
 # armed until `sudo fleet-firewall-confirm` runs from a second SSH session: nothing here confirms it.
 #
+# `apply drift` (FLE-261) is the read-only twin of `provision`: the installed tag's playbook with --check --diff, nothing
+# staged, nothing installed, the report (JSON between marker lines) on stdout. See apply_drift below.
+#
 # Threat model, honestly: `fleet` is in the `docker` group, which is root-equivalent anyway. This helper keeps a
 # half-written or invalid config from reaching Caddy or Authelia; it is not a security boundary.
 #
@@ -55,7 +58,7 @@
 set -euo pipefail
 
 # The only targets. A repo test keeps this word list equal to App\Fleet\System\ApplyTarget and to the sudoers line.
-ALLOWED_TARGETS='caddy authelia slices provision'
+ALLOWED_TARGETS='caddy authelia slices provision drift'
 readonly ALLOWED_TARGETS
 readonly MAX_BYTES=262144
 readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
@@ -95,11 +98,11 @@ fail() {
 }
 
 # --- 1. arguments: exactly one known target -------------------------------------------------------------------
-[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices|provision>' 64
+[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices|provision|drift>' 64
 TARGET=$1
 case " $ALLOWED_TARGETS " in
   *" $TARGET "*) ;;
-  *) fail 'unknown target (usage: apply <caddy|authelia|slices|provision>)' 64 ;;
+  *) fail 'unknown target (usage: apply <caddy|authelia|slices|provision|drift>)' 64 ;;
 esac
 
 # --- 2. who may run this, and where the files are ---------------------------------------------------------------
@@ -146,6 +149,7 @@ case $TARGET in
   authelia) STAGED_NAMES='configuration.yml' ;;
   slices) STAGED_NAMES='slices.json' ;;
   provision) STAGED_NAMES='host-vars.yml' ;;
+  drift) STAGED_NAMES='' ;;
 esac
 readonly STAGED_NAMES
 
@@ -820,20 +824,10 @@ provision_check_host_vars() {
   fi
 }
 
-# apply_provision: install the staged host answers (when staged), then run the installed tag's playbook.
-# A failed run restores the answers file only (and only when this run installed one); it does not undo a half-applied run.
-apply_provision() {
+# provision_locate: finds the installed tag's playbook (refusing anything not root-owned) and the recorded ref. Sets
+# PLAYBOOK, INSTALL_ANSIBLE_DIR and REF. Shared by `provision` and `drift`.
+provision_locate() {
   local etc="$ROOT$PROVISION_ETC" install_dir="$ROOT$PROVISION_INSTALL_DIR" playbook ref version_file facts owner mode
-  local vars="$etc/host-vars.yml" cmd=() rc=0 installed=0
-
-  if stage_in host-vars.yml "$PRIV/host-vars.yml"; then
-    provision_check_host_vars "$PRIV/host-vars.yml"
-    keep_previous "$vars" host-vars
-    put_file "$PRIV/host-vars.yml" "$vars" 0644 root root || fail 'could not write the host vars'
-    installed=1
-    printf 'apply: host vars installed\n'
-  fi
-
   # The playbook comes from the root-owned export of the installed tag, never from the fleet-writable checkout.
   playbook="$install_dir/ansible/site.yml"
   [ -f "$playbook" ] && [ ! -L "$playbook" ] || fail 'the installed playbook is missing (this host was not installed with --engine=ansible?)' 66
@@ -844,21 +838,41 @@ apply_provision() {
     fi
     [ $((8#$mode & 8#022)) -eq 0 ] || fail 'the installed playbook tree is writable by group or others' 65
   done <<<"$facts"
-  [ -f "$vars" ] && [ ! -L "$vars" ] || fail 'there are no host vars (host-vars.yml)' 66
 
   version_file="$etc/installed-version"
   [ -r "$version_file" ] || fail 'the installed version is not recorded (installed-version)' 66
   ref=$(head -n 1 -- "$version_file" | tr -d '[:space:]')
   ref=${ref%%@*}
   [[ $ref =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fail 'the recorded version is not a valid ref' 65
+  PLAYBOOK=$playbook
+  INSTALL_ANSIBLE_DIR="$install_dir/ansible"
+  REF=$ref
+}
+
+# apply_provision: install the staged host answers (when staged), then run the installed tag's playbook.
+# A failed run restores the answers file only (and only when this run installed one); it does not undo a half-applied run.
+apply_provision() {
+  local etc="$ROOT$PROVISION_ETC"
+  local vars="$etc/host-vars.yml" cmd=() rc=0 installed=0
+
+  if stage_in host-vars.yml "$PRIV/host-vars.yml"; then
+    provision_check_host_vars "$PRIV/host-vars.yml"
+    keep_previous "$vars" host-vars
+    put_file "$PRIV/host-vars.yml" "$vars" 0644 root root || fail 'could not write the host vars'
+    installed=1
+    printf 'apply: host vars installed\n'
+  fi
+
+  provision_locate
+  [ -f "$vars" ] && [ ! -L "$vars" ] || fail 'there are no host vars (host-vars.yml)' 66
 
   # Fixed command line. LC_ALL: the helper runs with C, Ansible refuses anything but a UTF-8 locale.
   cmd=(env -i "PATH=$PATH" HOME=/root LC_ALL=C.UTF-8 LANG=C.UTF-8 ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 PYTHONUNBUFFERED=1
-    SUDO_USER=fleet ansible-playbook -i 'localhost,' -c local "$playbook"
-    -e "fleet_ref=$ref" -e fleet_hardening_strict=true -e fleet_job_wait=0)
-  printf 'apply: provision %s from %s\n' "$ref" "$PROVISION_INSTALL_DIR"
+    SUDO_USER=fleet ansible-playbook -i 'localhost,' -c local "$PLAYBOOK"
+    -e "fleet_ref=$REF" -e fleet_hardening_strict=true -e fleet_job_wait=0)
+  printf 'apply: provision %s from %s\n' "$REF" "$PROVISION_INSTALL_DIR"
   # Closed in the child: the staging directory (4), the staged file (3) and the lock (9, held by this process for the whole run).
-  (cd "$install_dir/ansible" && timeout "$T_PROVISION" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-) || rc=$?
+  (cd "$INSTALL_ANSIBLE_DIR" && timeout "$T_PROVISION" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-) || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf 'apply: provision failed (exit %d)\n' "$rc" >&2
     # Only when this run installed new answers: the previous answers go back, so the next run does not re-apply a
@@ -869,10 +883,37 @@ apply_provision() {
   printf 'apply: provision finished\n'
 }
 
+# apply_drift (FLE-261): a read-only check of the host against the installed tag's playbook. Same playbook, same fixed
+# extra variables as `provision`, but with --check --diff, so nothing on the host changes. Takes nothing staged and
+# installs nothing (the host vars are read, not written). The playbook's own stdout callback, fleet_drift (it sits in
+# install/ansible/callback_plugins/, next to the playbook), prints ONE JSON document between two marker lines on stdout;
+# diffs of no_log tasks are never in it. The app parses it, masks anything that looks like a secret and keeps the
+# last report. Our own messages go to stderr, so stdout is only that document. The exit code is ansible-playbook's
+# (2 = a task failed, the report still lists it). fleet_hardening_strict is false here: the lock-out guard compares the
+# account that RUNS the playbook with the SSH allow list, and a read-only check runs as `fleet`, not as the admin's account;
+# it must never fail on that (it only says what the allow list excludes).
+apply_drift() {
+  local vars="$ROOT$PROVISION_ETC/host-vars.yml" cmd=() rc=0
+  provision_locate
+  [ -f "$vars" ] && [ ! -L "$vars" ] || fail 'there are no host vars (host-vars.yml)' 66
+
+  cmd=(env -i "PATH=$PATH" HOME=/root LC_ALL=C.UTF-8 LANG=C.UTF-8 ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 PYTHONUNBUFFERED=1
+    ANSIBLE_STDOUT_CALLBACK=fleet_drift ANSIBLE_LOCALHOST_WARNING=False
+    SUDO_USER=fleet ansible-playbook -i 'localhost,' -c local "$PLAYBOOK" --check --diff
+    -e "fleet_ref=$REF" -e fleet_hardening_strict=false -e fleet_job_wait=0)
+  printf 'apply: drift check of %s from %s\n' "$REF" "$PROVISION_INSTALL_DIR" >&2
+  (cd "$INSTALL_ANSIBLE_DIR" && timeout "$T_PROVISION" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'apply: drift check ended with exit %d\n' "$rc" >&2
+    exit "$rc"
+  fi
+}
+
 pin_staging || true
 case $TARGET in
   caddy) apply_caddy ;;
   authelia) apply_authelia ;;
   slices) apply_slices ;;
   provision) apply_provision ;;
+  drift) apply_drift ;;
 esac

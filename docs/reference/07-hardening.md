@@ -92,3 +92,9 @@ Fleet then adopts a password hash Authelia changed (a user's reset) before rewri
 - [Secure the host](../guides/08-secure-the-host.md): the security model.
 - [Installer](04-installer.md): flags, recovery and uninstall.
 - [Files on disk](03-files-on-disk.md): units and timers.
+
+## Drift check
+
+`sudo fleet host:drift` (and **Settings → Drift**, button "Run drift check") compares the host with what the installed release's playbook would set up, in check mode, through the root helper `apply drift`. It changes nothing. The report lists, per role, what is unchanged, what would change (with the diff; values that look like secrets are masked) and what could not be checked. `--json` prints the same report (schema 1). Exit code: 0 no drift, 1 drift found, 2 a task could not be checked, 3 no report.
+
+Steps that run a command, such as firewall rules, are not visible in check mode: the host can differ there without the report saying so. The check does not run on a schedule and sends no alert. Roles mark drift that a check run cannot show as a changed task with a `DRIFT:` debug message (see `install/ansible/README.md`).

@@ -16,6 +16,7 @@ use App\Fleet\Host\Capacity\HostCapacity;
 use App\Fleet\Host\Capacity\HostHardwareProbe;
 use App\Fleet\Host\Capacity\UnslicedInstances;
 use App\Fleet\Host\ClaudeTokenRule;
+use App\Fleet\Host\Drift\DriftService;
 use App\Fleet\Host\GitIdentityRule;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Host\NotificationMailRule;
@@ -77,6 +78,7 @@ final class HostSettingsController extends AbstractController
         'capacity' => 'Capacity',
         'ssh' => 'SSH keys',
         'hardening' => 'Hardening',
+        'drift' => 'Drift',
         'backups' => 'Backups',
     ];
 
@@ -94,6 +96,7 @@ final class HostSettingsController extends AbstractController
         private readonly UnslicedInstances $unsliced,
         private readonly SshKeyCatalog $sshCatalog,
         private readonly ProvisionService $provision,
+        private readonly DriftService $drift,
         private readonly HostVarsReader $hostVars,
         private readonly FirewallSwitch $firewall,
         private readonly ReauthGuard $reauth,
@@ -441,6 +444,28 @@ final class HostSettingsController extends AbstractController
         return $this->show('hardening', $host, $form);
     }
 
+    #[Route('/admin/host/drift', name: 'settings_drift_run', methods: ['POST'])]
+    public function runDrift(Request $request): Response
+    {
+        if (null === $host = $this->settings->get()) {
+            return $this->notInitialised();
+        }
+        if (!$this->csrfValid($request)) {
+            $this->addFlash('error', 'The request could not be verified. Reload the page and try again.');
+
+            return $this->show('drift', $host)->setStatusCode(Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+        try {
+            $job = $this->drift->queue($this->actor());
+        } catch (Refused $refusal) {
+            $this->addFlash('error', $refusal->getMessage());
+
+            return $this->show('drift', $host)->setStatusCode(Response::HTTP_UNPROCESSABLE_ENTITY);
+        }
+
+        return $this->redirectToRoute('job_show', ['id' => $job->id()], Response::HTTP_SEE_OTHER);
+    }
+
     #[Route('/admin/host/backups/retention', name: 'settings_backup_retention', methods: ['POST'])]
     public function retention(Request $request): Response
     {
@@ -533,8 +558,8 @@ final class HostSettingsController extends AbstractController
 
         $forms = [];
         foreach (array_keys(self::TABS) as $key) {
-            // The certificates and SSH keys tabs have no Symfony form (the keys page posts to SshKeyController).
-            if (\in_array($key, ['certificates', 'ssh'], true)) {
+            // The certificates, SSH keys and drift tabs have no Symfony form (the keys page posts to SshKeyController).
+            if (\in_array($key, ['certificates', 'ssh', 'drift'], true)) {
                 continue;
             }
             $forms[$key] = ($key === $tab && null !== $submitted ? $submitted : $this->form($key, $host))->createView();
@@ -562,6 +587,12 @@ final class HostSettingsController extends AbstractController
                 'firesAt' => $this->firewall->firesAt(),
                 'confirmCommand' => FirewallSwitch::COMMAND,
                 'recentAuth' => $this->reauth->requireRecentAuth(),
+            ] : null,
+            'drift' => 'drift' === $tab ? [
+                'unavailable' => $this->drift->unavailable(),
+                'active' => $this->drift->activeJob(),
+                'latest' => $this->drift->latestJob(),
+                'report' => $this->drift->lastReport(),
             ] : null,
             'secrets' => [
                 'claude' => $this->rotation->lastRotated(),

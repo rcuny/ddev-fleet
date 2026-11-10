@@ -24,6 +24,7 @@ final readonly class SystemRenderer
         'authelia' => ['configuration.yml'],
         'slices' => ['slices.json'],
         'provision' => ['host-vars.yml'],
+        'drift' => [], // read-only: nothing is ever staged
     ];
 
     public function __construct(
@@ -119,6 +120,9 @@ final readonly class SystemRenderer
      */
     public function discardStaging(ApplyTarget $target): void
     {
+        if ([] === self::FILES[$target->value]) {
+            return;
+        }
         $dir = \dirname($this->paths->stagingFile($target->value, self::FILES[$target->value][0]));
         $entries = is_dir($dir) ? scandir($dir) : false;
         foreach (false === $entries ? [] : $entries as $entry) {
