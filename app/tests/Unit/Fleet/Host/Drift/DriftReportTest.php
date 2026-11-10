@@ -120,6 +120,13 @@ final class DriftReportTest extends TestCase
         self::assertSame('"apiKey": ***', DriftMask::text('"apiKey": "abc"'));
     }
 
+    public function testDoesNotMaskWordsThatMerelyContainKey(): void
+    {
+        foreach (['monkey: x', 'keys: 1', 'keyboard: us', 'turkey = roast'] as $line) {
+            self::assertSame($line, DriftMask::text($line));
+        }
+    }
+
     public function testMasksYamlBlockScalarValues(): void
     {
         $in = "+secret_key: |\n+  line1\n+  line2\n+\n+next: kept\n unrelated: kept";

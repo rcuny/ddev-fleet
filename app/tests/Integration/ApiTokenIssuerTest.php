@@ -115,6 +115,23 @@ final class ApiTokenIssuerTest extends KernelTestCase
         self::assertFalse($old->token->isUsable(new \DateTimeImmutable('+61 minutes')));
     }
 
+    public function testAuditActorIsParsedByIdAndNameWithAColonIsRefused(): void
+    {
+        $issued = $this->issue('ci-prod');
+        $actor = \App\Security\Api\ApiTokenUser::fromToken($issued->token)->getUserIdentifier();
+
+        // The id is the stable part: parse "token:<id>:<name>" by id, never by splitting on every colon.
+        if (1 !== preg_match('/^token:(\d+):(.+)$/', $actor, $m)) {
+            self::fail('Unexpected audit actor format: '.$actor);
+        }
+        self::assertSame((int) $issued->token->id(), (int) $m[1]);
+        self::assertSame('ci-prod', $m[2]);
+
+        // A name with ':' (ci:prod) would make the actor ambiguous, so the issuer refuses it.
+        $this->expectException(InvalidApiTokenRequest::class);
+        $this->issue('ci:prod');
+    }
+
     public function testRotationAuditsTheRevocationOfTheOldToken(): void
     {
         $old = $this->issue();

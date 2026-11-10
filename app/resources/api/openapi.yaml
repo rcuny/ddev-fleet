@@ -372,7 +372,7 @@ paths:
         "422": {$ref: "#/components/responses/ValidationFailed"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "207":
-          description: One result per id
+          description: "One result per id. A failed id is reported in its own item (`accepted: false` with `status` and `code`), not as a response error: 428 (precondition required, `if_match` missing for a protected instance) and 412 (precondition failed, `created_at` mismatch) appear per item, while the response stays 207."
           content:
             application/json:
               schema:
