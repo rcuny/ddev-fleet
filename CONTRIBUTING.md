@@ -6,4 +6,6 @@ Contributions are welcome. The full guide lives in [`docs/contributing/`](docs/c
 - [Testing and gates](docs/contributing/02-testing.md): the checks a change must pass.
 - [CI](docs/contributing/03-ci.md) and [releasing](docs/contributing/04-releasing.md).
 
+If you use AI tools, read the [AI usage policy](AI_POLICY.md) first: disclose their use and be able to explain every line you submit.
+
 Short version: cut `feature/<KEY>-<slug>` off `develop`, add a `changelog.d/<KEY>.md` fragment, run the gates, open the pull request against `develop`.

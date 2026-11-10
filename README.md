@@ -110,7 +110,7 @@ Caddy is the only Internet-facing process; Authelia handles sign-in. The Fleet a
 | `docs/` | This documentation. |
 
 ## 🤖 AI Disclaimer
-This project uses AI-assisted development tools. See the AI usage policy for details.
+This project uses AI-assisted development tools. See the [AI usage policy](AI_POLICY.md) for details.
 
 ## Licence
 
