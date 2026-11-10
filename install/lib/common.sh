@@ -686,10 +686,26 @@ apt_get() {
     -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold -o DPkg::Lock::Timeout=120 "$@"
 }
 
+# FLE-281: a vendor repository (pkg.ddev.com) answered 401 now and then; `apt-get update` fails on it, so retry a few
+# times (FLEET_APT_ATTEMPTS, default 3; FLEET_APT_RETRY_DELAY seconds, default 10) before giving up.
+apt_update_retry() {
+  local attempts=${FLEET_APT_ATTEMPTS:-3} delay=${FLEET_APT_RETRY_DELAY:-10} n=1
+  [[ $attempts =~ ^[0-9]+$ ]] && [ "$attempts" -ge 1 ] || attempts=3
+  [[ $delay =~ ^[0-9]+$ ]] || delay=10
+  until apt_get update; do
+    if [ "$n" -ge "$attempts" ]; then
+      return 1
+    fi
+    log_warn "apt-get update failed (attempt $n of $attempts): retrying in ${delay}s"
+    sleep "$delay"
+    n=$((n + 1))
+  done
+}
+
 apt_refresh() {
   dpkg_recover
   if [ "$APT_DIRTY" = 1 ]; then
-    apt_get update
+    apt_update_retry
     APT_DIRTY=0
   fi
 }
