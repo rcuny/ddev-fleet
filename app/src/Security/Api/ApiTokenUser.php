@@ -91,6 +91,15 @@ final readonly class ApiTokenUser implements UserInterface
     }
 
     /**
+     * Whether the token sees the whole host, not just listed projects: a read-only token with the wildcard. Host-wide
+     * data (capacity, jobs without a project) is for these tokens only.
+     */
+    public function unrestricted(): bool
+    {
+        return \in_array(ApiTokenPolicy::WILDCARD, $this->token->projects(), true) && $this->scopes === [ApiScope::Read];
+    }
+
+    /**
      * Whether $instanceId matches one of the token's instance patterns (`*` and `?` wildcards); none listed means none allowed.
      */
     public function allowsInstance(string $instanceId): bool
