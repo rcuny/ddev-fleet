@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-10
+
+### Added
+- **FLE-260: `apply provision` and the Hardening tab.** The root helper gains a fixed `apply provision` verb (one more sudoers
+  line): it validates a staged `host-vars.yml` against the installer's schema, installs it, and runs the installed release's
+  own `install/ansible/site.yml` with a fixed command line (no playbook, role or argument comes from the caller). **Settings →
+  Hardening** edits the hardening answers (SSH allow list, the account you log in with, trusted addresses, firewall grace
+  period, `/tmp`), asks for your password, and applies them as a job with a live log. The tab shows the firewall
+  dead-man's switch and tells you to run `sudo fleet-firewall-confirm` from a second SSH session; it never confirms itself.
+  Available on hosts installed with `--engine=ansible`.
+
+- **FLE-261: `fleet host:drift`, a read-only drift report.** `sudo fleet host:drift [--json]` runs the installed release's
+  playbook with `--check --diff` through a new fixed root-helper verb, `apply drift` (one more sudoers line; it installs and
+  stages nothing), and reports per role: unchanged, changed (the diff, secrets masked) or failed. Roles that a check run cannot
+  show as a changed task (for example a Caddy build that would be refreshed) say so with a `DRIFT:` debug message, which the
+  report counts as drift. Exit code 0 no drift, 1 drift, 2 a task failed, 3 no report. **Settings → Drift** shows the last
+  report and a "Run drift check" button (a job). The report says that steps which run a command, such as firewall rules,
+  are not visible in check mode. Nothing is scheduled and nothing alerts. Available on hosts installed with `--engine=ansible`.
+- **FLE-266: a clean SSH key model.** The host settings have an **SSH keys** tab (`/admin/host/ssh-keys`) and `fleet ssh:key:list [--json]` lists every key (deploy, push, extras) with its purpose, fingerprint, public key (copy button), where it is used and when it was created.
+- Extra keys are managed by Fleet: `fleet ssh:key:create|import|delete` and the same actions in the UI (password again; audited). A key file placed by hand keeps working and is listed as "external". A key a template names cannot be deleted.
+- A template option **SSH identities** (`--ssh-identities=push-and-extras|extras-only`, `ssh_identities` in the project export): "extras only" keeps the host's push key out of the instance's agent.
+- Saving a template whose post-deploy or terminal lines run `ddev auth ssh` or `ssh-add -D` warns that they use DDEV's shared agent.
+- Rotating the deploy or push key is available on the SSH keys tab, behind re-authentication.
+- New reference page `docs/reference/14-ssh-keys.md`.
+
+### Changed
+- **FLE-259: `fleet upgrade` re-runs the engine that installed the host.** Both installer engines now record
+  `bash` or `ansible` in `/etc/ddev-fleet/installed-engine` (a host without the file is `bash`). `sudo fleet upgrade`,
+  and a rollback with `--to`, read it and run the target tag's `install.sh` with `--engine=ansible` on an Ansible host,
+  so the playbook of that tag runs again; a target without the Ansible engine is refused before any service is stopped.
+  The pre-flight checks, the backup and the history are unchanged. The Upgrade page shows the install engine.
+- **FLE-267: the guides say where the Claude token comes from.** "Work with agents" and the install guide now start with `claude setup-token` (run on a machine with Claude Code and a browser; the installer does not install the Claude CLI on the host).
+- **FLE-269: the documentation no longer carries a front matter block.** The `Author` / `Reviewer` / `Last updated` / `Type` YAML header is gone from `README.md`, `CLAUDE.md` and every page under `docs/`, so GitHub no longer renders it as a table at the top of each page; the generated `docs/reference/01-cli.md` does not emit it either. `DocsStructureTest` now checks that no page starts with front matter. The GitHub issue templates and the Claude `SKILL.md` files keep theirs, because GitHub and Claude read it.
+
+#### Rollout
+- ACTION: run `sudo fleet upgrade` on the host before using the Hardening tab: the new `apply provision` verb and its sudoers line arrive with the upgrade.
+- Run the database migration (`fleet upgrade` does it): adds `ssh_extra_key` and `template.ssh_identities` (existing templates keep push key and extras).
+
 ## [1.5.3] - 2026-11-10
 
 ### Added
@@ -1280,7 +1318,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.5.3...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/rcuny/ddev-fleet/compare/v1.5.3...v1.6.0
 [1.5.3]: https://github.com/rcuny/ddev-fleet/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/rcuny/ddev-fleet/compare/v1.5.1...v1.5.2
 [1.5.1]: https://github.com/rcuny/ddev-fleet/compare/v1.5.0...v1.5.1
