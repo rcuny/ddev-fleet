@@ -75,6 +75,8 @@ HARDEN_SSH_USERS=()
 HARDEN_TRUSTED_IPS=()
 HARDEN_GRACE=
 HARDEN_TMP=0
+# --engine: bash (the numbered steps, default) or ansible (install/ansible/site.yml, lib/host-vars.sh).
+ENGINE=bash
 # --preflight: run only the pre-flight checks (lib/preflight.sh), change nothing.
 PREFLIGHT_ONLY=0
 
@@ -269,6 +271,7 @@ Options:
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
   --harden-tmp          with --harden: also mount /tmp nosuid,nodev,noexec at the next boot (can break builds that run files from /tmp)
+  --engine=<bash|ansible> how the host is provisioned: the bash steps (default) or the Ansible playbook (see docs)
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -338,6 +341,10 @@ parse_args() {
         HARDEN_GRACE=${arg#--firewall-grace=}
         ;;
       --harden-tmp) HARDEN_TMP=1 ;;
+      --engine=*)
+        ENGINE=${arg#--engine=}
+        case $ENGINE in bash | ansible) ;; *) die "$EX_USAGE" "--engine must be bash or ansible" ;; esac
+        ;;
       --preflight) PREFLIGHT_ONLY=1 ;;
       --dry-run) FLEET_DRY_RUN=1 ;;
       *)
