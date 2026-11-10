@@ -121,4 +121,19 @@ final class HostDriftCommandTest extends KernelTestCase
         self::assertStringContainsString('does not know "apply drift"', $run->getErrorOutput());
         self::assertSame([], $this->runner()->calls());
     }
+
+    public function testAHostNotInstalledByAnsibleGetsAWarningInTheTextAndTheJson(): void
+    {
+        $this->enable();
+        $this->answer([['role' => 'units', 'changed' => [['task' => 'Record the install', 'diff' => '+ansible']], 'drift' => [], 'failed' => []]]);
+
+        $text = $this->cli('fleet:host:drift');
+        self::assertStringContainsString('WARNING: This host was not installed with the Ansible engine', $text->getDisplay());
+
+        $this->answer([['role' => 'units', 'changed' => [], 'drift' => [], 'failed' => []]]);
+        file_put_contents($this->tempHome.'/test-installed-engine', "ansible\n");
+        $json = $this->json($this->cli('fleet:host:drift', ['--json' => true]));
+        self::assertNull($json['warning']);
+        self::assertSame('ansible', $json['engine']);
+    }
 }

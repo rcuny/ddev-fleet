@@ -13,6 +13,7 @@ use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\Type\DriftJob;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\System\PrivilegedApply;
+use App\Fleet\Upgrade\InstalledEngine;
 use App\Fleet\Upgrade\InstalledVersion;
 use App\Tests\Support\InstanceJobTestCase;
 
@@ -26,7 +27,7 @@ final class DriftJobTest extends InstanceJobTestCase
         file_put_contents($home.'/site.yml', "---\n");
         file_put_contents($home.'/version', "v1.7.0\n");
         $store = new DriftReportStore($home.'/drift-report.json');
-        $check = new DriftCheck($this->runner, new PrivilegedApply($this->runner, $home.'/helper'), $store, new InstalledVersion($this->runner, $home.'/version', $home), $this->clock, $home.'/site.yml');
+        $check = new DriftCheck($this->runner, new PrivilegedApply($this->runner, $home.'/helper'), $store, new InstalledVersion($this->runner, $home.'/version', $home), new InstalledEngine($home.'/engine'), $this->clock, $home.'/site.yml');
         $job = new Job('drift', null, null, JobTrigger::Ui, 'admin', [], null, false, null, $this->clock->now());
         $this->em->persist($job);
         $this->em->flush();

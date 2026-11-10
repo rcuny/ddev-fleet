@@ -49,7 +49,7 @@ final readonly class DriftJob implements JobType
      */
     public static function summary(DriftReport $report): array
     {
-        $lines = [];
+        $lines = null === $report->warning() ? [] : ['WARNING: '.$report->warning()];
         foreach ($report->roles as $role) {
             $lines[] = \sprintf('%s: %s (%d changed, %d drift message(s), %d failed)', $role['role'], $role['status'], \count($role['changed']), \count($role['drift']), \count($role['failed']));
         }

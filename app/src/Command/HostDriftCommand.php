@@ -67,6 +67,9 @@ final class HostDriftCommand extends Command
     {
         $w = static fn (string $line) => $output->writeln(OutputFormatter::escape($line));
         $w(\sprintf('Release %s, checked %s UTC', '' === $report->ref ? 'unknown' : $report->ref, $report->checkedAt->setTimezone(new \DateTimeZone('UTC'))->format('Y-m-d H:i')));
+        if (null !== $report->warning()) {
+            $w('WARNING: '.$report->warning());
+        }
         foreach ($report->roles as $role) {
             $w(\sprintf('%-14s %s', $role['role'], strtoupper($role['status'])));
             foreach ($role['drift'] as $message) {

@@ -889,7 +889,9 @@ apply_provision() {
 # install/ansible/callback_plugins/, next to the playbook), prints ONE JSON document between two marker lines on stdout;
 # diffs of no_log tasks are never in it. The app parses it, masks anything that looks like a secret and keeps the
 # last report. Our own messages go to stderr, so stdout is only that document. The exit code is ansible-playbook's
-# (2 = a task failed, the report still lists it).
+# (2 = a task failed, the report still lists it). fleet_hardening_strict is false here: the lock-out guard compares the
+# account that RUNS the playbook with the SSH allow list, and a read-only check runs as `fleet`, not as the admin's account;
+# it must never fail on that (it only says what the allow list excludes).
 apply_drift() {
   local vars="$ROOT$PROVISION_ETC/host-vars.yml" cmd=() rc=0
   provision_locate
@@ -898,7 +900,7 @@ apply_drift() {
   cmd=(env -i "PATH=$PATH" HOME=/root LC_ALL=C.UTF-8 LANG=C.UTF-8 ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 PYTHONUNBUFFERED=1
     ANSIBLE_STDOUT_CALLBACK=fleet_drift ANSIBLE_LOCALHOST_WARNING=False
     SUDO_USER=fleet ansible-playbook -i 'localhost,' -c local "$PLAYBOOK" --check --diff
-    -e "fleet_ref=$REF" -e fleet_hardening_strict=true -e fleet_job_wait=0)
+    -e "fleet_ref=$REF" -e fleet_hardening_strict=false -e fleet_job_wait=0)
   printf 'apply: drift check of %s from %s\n' "$REF" "$PROVISION_INSTALL_DIR" >&2
   (cd "$INSTALL_ANSIBLE_DIR" && timeout "$T_PROVISION" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-) || rc=$?
   if [ "$rc" -ne 0 ]; then

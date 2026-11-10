@@ -93,8 +93,6 @@ fleet_ref: ""
 # The host's public name and the ACME contact (host-vars.yml).
 fleet_domain: ""
 fleet_acme_email: ""
-fleet_user: fleet
-fleet_home_dir: /home/fleet
 fleet_src_dir: /opt/ddev-fleet
 fleet_caddy_etc_dir: /etc/caddy
 fleet_caddy_fleet_dir: /etc/caddy/fleet
@@ -139,7 +137,6 @@ fleet_app_exec:
 # Where the bash installer keeps the unit and config files that the caddy and authelia roles install unchanged.
 # One copy only: the roles read them from there (move them into the roles when install/steps/ goes away).
 fleet_install_etc_dir: "{{ playbook_dir }}/../etc"
-fleet_srv_dir: /srv/fleet
 
 # caddy
 fleet_caddy_key_url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key

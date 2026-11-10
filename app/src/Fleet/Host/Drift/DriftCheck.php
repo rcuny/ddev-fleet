@@ -10,6 +10,7 @@ use App\Fleet\Shell\CommandTimedOut;
 use App\Fleet\System\ApplyTarget;
 use App\Fleet\System\OutputTail;
 use App\Fleet\System\PrivilegedApply;
+use App\Fleet\Upgrade\InstalledEngine;
 use App\Fleet\Upgrade\InstalledVersion;
 use Psr\Clock\ClockInterface;
 
@@ -28,6 +29,7 @@ final readonly class DriftCheck
         private PrivilegedApply $helper,
         private DriftReportStore $store,
         private InstalledVersion $version,
+        private InstalledEngine $engine,
         private ClockInterface $clock,
         private string $playbookFile,
     ) {
@@ -66,7 +68,7 @@ final readonly class DriftCheck
 
         // The playbook exits 2 when a task failed; its report is still the answer, the failed tasks are in it.
         try {
-            $report = DriftReport::fromRunnerOutput($result->stdout, $this->version->raw(), $this->clock->now());
+            $report = DriftReport::fromRunnerOutput($result->stdout, $this->version->raw(), $this->clock->now(), $this->engine->name());
         } catch (DriftReportInvalid $e) {
             throw new DriftCheckFailed(\sprintf('%s The run ended with exit %d: %s', $e->getMessage(), $result->exitCode, OutputTail::of($result)));
         }

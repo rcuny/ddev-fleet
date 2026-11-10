@@ -18,6 +18,8 @@ final readonly class DriftReport
 
     public const string LIMITS = 'A check run cannot see steps that run a command, such as firewall rules: a host can differ there without this report saying so.';
 
+    public const string NOT_ANSIBLE = 'This host was not installed with the Ansible engine, so the playbook reports what it would set up on a host it has never run on (for example the install record). Treat the "changed" roles as expected, not as drift, until the host is on the Ansible engine.';
+
     private const int MAX_ROLES = 50;
     private const int MAX_ENTRIES = 200;
     private const int MAX_DIFF = 8000;
@@ -30,13 +32,14 @@ final readonly class DriftReport
         public \DateTimeImmutable $checkedAt,
         public string $ref,
         public array $roles,
+        public string $engine = 'ansible',
     ) {
     }
 
     /**
      * @throws DriftReportInvalid when the output holds no report
      */
-    public static function fromRunnerOutput(string $stdout, string $ref, \DateTimeImmutable $now): self
+    public static function fromRunnerOutput(string $stdout, string $ref, \DateTimeImmutable $now, string $engine = 'ansible'): self
     {
         $begin = strpos($stdout, self::BEGIN."\n");
         $end = false === $begin ? false : strpos($stdout, "\n".self::END, $begin);
@@ -53,7 +56,7 @@ final readonly class DriftReport
             throw new DriftReportInvalid('The drift report has an unknown shape.');
         }
 
-        return new self($now, self::clean($ref, 100), self::roles($data['roles']));
+        return new self($now, self::clean($ref, 100), self::roles($data['roles']), 'bash' === $engine ? 'bash' : 'ansible');
     }
 
     /**
@@ -68,11 +71,11 @@ final readonly class DriftReport
             throw new DriftReportInvalid('The stored drift report has an unknown shape.');
         }
 
-        return new self($at, self::clean($data['ref'] ?? '', 100), self::roles($data['roles']));
+        return new self($at, self::clean($data['ref'] ?? '', 100), self::roles($data['roles']), 'bash' === ($data['engine'] ?? null) ? 'bash' : 'ansible');
     }
 
     /**
-     * @return array{schema: int, checkedAt: string, ref: string, drift: bool, failed: bool, limits: string, roles: list<array{role: string, status: string, changed: list<array{task: string, diff: string}>, drift: list<string>, failed: list<array{task: string, msg: string}>}>}
+     * @return array{schema: int, checkedAt: string, ref: string, engine: string, warning: string|null, drift: bool, failed: bool, limits: string, roles: list<array{role: string, status: string, changed: list<array{task: string, diff: string}>, drift: list<string>, failed: list<array{task: string, msg: string}>}>}
      */
     public function toArray(): array
     {
@@ -80,11 +83,19 @@ final readonly class DriftReport
             'schema' => self::SCHEMA,
             'checkedAt' => $this->checkedAt->format(\DATE_ATOM),
             'ref' => $this->ref,
+            'engine' => $this->engine,
+            'warning' => $this->warning(),
             'drift' => $this->hasDrift(),
             'failed' => $this->hasFailures(),
             'limits' => self::LIMITS,
             'roles' => $this->roles,
         ];
+    }
+
+    /** Set when the host was not installed by the playbook: its "changed" roles are then expected. */
+    public function warning(): ?string
+    {
+        return 'bash' === $this->engine ? self::NOT_ANSIBLE : null;
     }
 
     public function hasDrift(): bool

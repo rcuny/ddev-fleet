@@ -39,6 +39,13 @@
                 <twig:Card:Description>Checked {{ report.checkedAt|date('Y-m-d H:i', 'UTC') }} UTC against release {{ report.ref ?: 'unknown' }}.</twig:Card:Description>
             </twig:Card:Header>
             <twig:Card:Content class="grid gap-4 text-sm">
+                {% if report.warning %}
+                    <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="drift-engine-warning">
+                        <twig:ux:icon name="lucide:triangle-alert" />
+                        <twig:Alert:Title>Not installed with the Ansible engine</twig:Alert:Title>
+                        <twig:Alert:Description class="text-ink-body">{{ report.warning }}</twig:Alert:Description>
+                    </twig:Alert>
+                {% endif %}
                 {% for role in report.roles %}
                     <section data-testid="drift-role" data-role="{{ role.role }}" data-status="{{ role.status }}" class="grid gap-2">
                         <h3><code>{{ role.role }}</code>: {{ role.status }}</h3>

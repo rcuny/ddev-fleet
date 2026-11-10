@@ -62,8 +62,27 @@ final class ApplyDriftHelperTest extends TestCase
         self::assertStringContainsString('drift check of v1.7.0', $err);
         $call = trim((string) file_get_contents($this->log));
         self::assertStringContainsString('-i localhost, -c local '.$this->root.'/usr/local/lib/ddev-fleet-installer/install/ansible/site.yml --check --diff', $call);
-        self::assertStringContainsString('-e fleet_ref=v1.7.0 -e fleet_hardening_strict=true -e fleet_job_wait=0 cb=fleet_drift', $call);
+        self::assertStringContainsString('-e fleet_ref=v1.7.0 -e fleet_hardening_strict=false -e fleet_job_wait=0 cb=fleet_drift', $call);
         self::assertSame(1, substr_count($call, 'ansible-playbook'));
+    }
+
+    public function testTheLockOutGuardIsOffBecauseTheCheckRunsAsFleet(): void
+    {
+        $this->drift();
+
+        self::assertStringNotContainsString('fleet_hardening_strict=true', (string) file_get_contents($this->log));
+    }
+
+    public function testGroupVarsDefineEachKeyOnce(): void
+    {
+        $keys = [];
+        foreach (file(self::installDir().'/ansible/group_vars/all.yml', \FILE_IGNORE_NEW_LINES) ?: [] as $line) {
+            if (1 === preg_match('/^([A-Za-z_][A-Za-z0-9_]*):/', $line, $m)) {
+                $keys[] = $m[1];
+            }
+        }
+
+        self::assertSame([], array_keys(array_filter(array_count_values($keys), static fn (int $n): bool => $n > 1)));
     }
 
     public function testNeverWritesTheHostVars(): void
