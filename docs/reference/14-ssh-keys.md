@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-10
-Type: documentation
----
-
 # SSH keys
 
 Fleet uses SSH keys for two different jobs: the host pulls your code, and an instance may push it. This page is the one place that says which key does what, where it lives and who decides when it is used. The list of every key, with fingerprints and public halves, is the **SSH keys** tab of the host settings (`/admin/host/ssh-keys`) and `fleet ssh:key:list`.
