@@ -50,8 +50,17 @@ wait_for_running_jobs() {
   done
 }
 
+# FLE-281: the compiled prod container of the previous release (app/var/cache/prod) is built for the old classes. Any
+# console command booting it against the new code can fail ("Too few arguments to ...::__construct()" when a service
+# constructor changed), and cache:clear boots it too, so the directory is removed, not cleared, before the first console
+# command. The next command rebuilds it.
+clear_stale_prod_cache() {
+  run_as_fleet rm -rf -- "$FLEET_SRC_DIR/app/var/cache/prod"
+}
+
 step_main() {
   wait_for_running_jobs
+  clear_stale_prod_cache
   if is_dry; then
     CODE_CHANGED=1
     run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse HEAD

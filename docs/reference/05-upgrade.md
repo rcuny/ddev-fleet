@@ -34,7 +34,7 @@ A `block` stops the upgrade (exit 3); `warn` and `info` only show. `--force=<id>
 | `network.source` | block | The release source does not answer. |
 | `checkout.missing` | block | No git checkout in `/opt/ddev-fleet`. |
 | `checkout.dirty` | block | Local changes would be discarded (cannot be forced). |
-| `checkout.moved` | block | Checkout is not at the installed commit. |
+| `checkout.moved` | block | Checkout is neither at the installed commit nor at the target commit (a checkout at the target is a resumed install and passes). |
 | `checkout.origin` | block | `origin` is not the release source. |
 | `checkout.revision-unknown` | warn | `installed-revision` is unreadable. |
 | `target.series` | block | The target is not a `v1.*` release. |
@@ -71,7 +71,7 @@ sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restor
 1. **Plan and pre-flight**, the same report as `--check`; a block refuses it.
 2. **Confirmation**: a terminal asks `[y/N]`; `--yes` confirms; no terminal without `--yes` is refused.
 3. **Backup** of the databases. If it fails, the upgrade stops.
-4. **Installer** of the target, fetched by the exact planned commit (a moved tag is refused). It is idempotent: after a failure, run the same command again.
+4. **Installer** of the target, fetched by the exact planned commit (a moved tag is refused). It is idempotent: after a failure, run the same command again (the checkout already at the target commit is accepted).
 5. **Verification**: `/health` and the Authelia portal answer, version and commit match, no migration is pending, `fleet-worker@1` and `fleet-status` run. Failure exits 5 and prints the rollback command.
 
 **Every signed-in user is signed out** (Authelia restarts) and running jobs are cut off. Secrets, users, SSH keys and wizard choices are kept. Docker, DDEV and the OS are upgraded by `apt`, not here. `--domain` cannot change after setup.

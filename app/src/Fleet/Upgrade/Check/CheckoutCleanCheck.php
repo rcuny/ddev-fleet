@@ -16,7 +16,8 @@ use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
  * Findings (all Block, not overridable):
  * - `checkout.missing`: the install directory is not a git checkout. Remedy: re-run the installer.
  * - `checkout.dirty`: `git status --porcelain` is not empty. Remedy: commit, stash or discard the local changes.
- * - `checkout.moved`: HEAD is not the commit in `installed-revision`. Remedy: check out that commit.
+ * - `checkout.moved`: HEAD is neither the commit in `installed-revision` nor the target release's commit (FLE-281: the
+ *   latter is a resumed install, the installer checked the target out and then failed). Remedy: check out the installed commit.
  * - `checkout.origin`: `origin` is not the release source. Remedy: `git remote set-url origin <source>`.
  * And `checkout.revision-unknown` (Warn): `installed-revision` is unreadable, so HEAD cannot be compared.
  */
@@ -53,7 +54,7 @@ final readonly class CheckoutCleanCheck implements UpgradeCheck
         $head = $this->git(['rev-parse', 'HEAD']);
         if (1 !== preg_match('/^[0-9a-f]{40}$/D', $expected)) {
             $results[] = CheckResult::warn(self::REVISION_UNKNOWN, 'The installed revision is unreadable, so the checkout cannot be compared with it.', 'Check that '.$this->revisionFile.' holds a commit sha.', false);
-        } elseif (null === $head || trim($head) !== $expected) {
+        } elseif (null === $head || (trim($head) !== $expected && trim($head) !== $plan->target?->sha)) {
             $results[] = CheckResult::block(self::MOVED, \sprintf('The checkout is at %s, not at the installed revision %s.', null === $head ? 'an unknown commit' : substr(trim($head), 0, 7), substr($expected, 0, 7)), 'Run `git -C '.$this->checkoutDir.' checkout '.substr($expected, 0, 7).'` to put it back.');
         }
 
