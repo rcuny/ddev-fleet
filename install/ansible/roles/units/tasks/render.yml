@@ -50,6 +50,7 @@
   ansible.builtin.file:
     path: "{{ fleet_srv_dir }}/staging/authelia/configuration.yml"
     state: absent
+  changed_when: false  # a leftover of the render, not a host change
   when: not ansible_check_mode and units_authelia_staged.stat.exists and units_authelia_cmp.rc == 0
 
 - name: Look for the staged Caddyfile
