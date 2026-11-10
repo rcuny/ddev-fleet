@@ -33,6 +33,7 @@ final class SshKeyController extends AbstractController
         private readonly ManagedSshKeys $extra,
         private readonly SshKeyService $hostKeys,
         private readonly PushKeyCheck $pushCheck,
+        private readonly \App\Domain\Project\ProjectRepository $projectRepository,
         private readonly ReauthGuard $reauth,
         private readonly CurrentActor $actor,
         private readonly AuditLog $audit,
@@ -45,7 +46,19 @@ final class SshKeyController extends AbstractController
     {
         // Read-only, so no re-auth: it only asks the git host whether the push key is registered (FLE-271).
         $this->requireCsrf($request);
-        $host = trim($request->request->getString('host')) ?: PushKeyCheck::DEFAULT_HOST;
+        $host = strtolower(trim($request->request->getString('host')));
+        $allowed = [];
+        foreach ($this->projectRepository->all() as $project) {
+            try {
+                $allowed[] = PushKeyCheck::hostFromRemote($project->git());
+            } catch (\InvalidArgumentException) {
+            }
+        }
+        if (!\in_array($host, $allowed, true)) {
+            $this->addFlash('warning', 'Pick the git host of one of the registered projects.');
+
+            return $this->back();
+        }
         try {
             $state = $this->pushCheck->run($host);
         } catch (\InvalidArgumentException $e) {

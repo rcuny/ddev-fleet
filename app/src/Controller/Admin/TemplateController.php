@@ -106,6 +106,7 @@ final class TemplateController extends AbstractController
                         slots: self::optionalInt($data['slots'] ?? null),
                     ));
                     $this->addFlash('success', 'Template created.');
+                    $this->flashPushKeyWarning($name);
                     $this->warnShared($created);
 
                     return $this->redirectToRoute('project_templates', ['name' => $name], Response::HTTP_SEE_OTHER);
@@ -154,6 +155,7 @@ final class TemplateController extends AbstractController
                         'slots' => self::optionalInt($data['slots'] ?? null),
                     ]));
                     $this->addFlash('success', 'Template saved.');
+                    $this->flashPushKeyWarning($name);
                     $this->warnShared($saved);
 
                     return $this->redirectToRoute('project_templates', ['name' => $name], Response::HTTP_SEE_OTHER);
@@ -286,5 +288,12 @@ final class TemplateController extends AbstractController
     private static function optionalText(mixed $value): ?string
     {
         return \is_string($value) ? $value : null;
+    }
+
+    private function flashPushKeyWarning(string $project): void
+    {
+        if (null !== $warning = $this->templates->pushKeyWarning($project)) {
+            $this->addFlash('warning', $warning);
+        }
     }
 }

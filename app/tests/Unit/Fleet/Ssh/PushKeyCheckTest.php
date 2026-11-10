@@ -89,4 +89,60 @@ final class PushKeyCheckTest extends TestCase
         }
         self::assertStringContainsString('push key is not registered on the git host bitbucket.org', PushKeyState::NotRegistered->message('bitbucket.org'));
     }
+
+    #[DataProvider('remotes')]
+    public function testHostFromRemote(string $remote, ?string $host): void
+    {
+        if (null === $host) {
+            $this->expectException(\InvalidArgumentException::class);
+        }
+        self::assertSame($host, PushKeyCheck::hostFromRemote($remote));
+    }
+
+    /**
+     * @return iterable<string, array{string, ?string}>
+     */
+    public static function remotes(): iterable
+    {
+        yield 'scp-style' => ['git@Bitbucket.org:team/repo.git', 'bitbucket.org'];
+        yield 'ssh url with port' => ['ssh://git@git.example.com:2222/team/repo.git', 'git.example.com'];
+        yield 'https' => ['https://github.com/team/repo.git', 'github.com'];
+        yield 'https with user' => ['https://user@github.com/team/repo.git', 'github.com'];
+        yield 'option injection' => ['-oProxyCommand=x:repo', null];
+        yield 'file path' => ['/srv/git/repo.git', null];
+        yield 'file url' => ['file:///srv/git/repo.git', null];
+        yield 'empty' => ['', null];
+    }
+
+    public function testTimeoutIsUnreachable(): void
+    {
+        touch($this->home.'/ssh/push_ed25519');
+        $this->runner->expect(['ssh'], new CommandResult(0, ''), static function (): never {
+            throw new \App\Fleet\Shell\CommandTimedOut('ssh timed out');
+        });
+
+        self::assertSame(PushKeyState::Unreachable, new PushKeyCheck($this->paths, $this->runner)->run());
+    }
+
+    public function testAnswersAreCachedPerHostAndKeyButUnreachableIsNot(): void
+    {
+        touch($this->home.'/ssh/push_ed25519');
+        $cache = new \Symfony\Component\Cache\Adapter\ArrayAdapter();
+        $this->runner->expect(['ssh'], new CommandResult(255, 'git@bitbucket.org: Permission denied (publickey).'));
+        $check = new PushKeyCheck($this->paths, $this->runner, $cache);
+
+        $first = $check->run();
+        $second = $check->run();
+        self::assertSame($first, $second);
+        self::assertSame(PushKeyState::NotRegistered, $first);
+        self::assertCount(1, $this->runner->calls());
+        $this->runner->expect(['ssh'], new CommandResult(255, 'Permission denied'));
+        $check->run('github.com');
+        self::assertCount(2, $this->runner->calls());
+    }
+
+    public function testItDoesNotTrustSystemKnownHosts(): void
+    {
+        self::assertContains('GlobalKnownHostsFile=/dev/null', PushKeyCheck::argv('/k', '/kh', 'bitbucket.org'));
+    }
 }

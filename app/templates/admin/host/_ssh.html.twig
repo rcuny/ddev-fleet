@@ -55,9 +55,16 @@
                         <form method="post" action="{{ path('ssh_key_check_push') }}" class="grid gap-2" data-testid="ssh-key-check-push-form">
                             {{ include('setup/_csrf.html.twig') }}
                             <twig:Label for="ssh-check-host">Git host</twig:Label>
-                            <twig:Input id="ssh-check-host" name="host" value="bitbucket.org" class="h-11 md:h-8" data-testid="ssh-key-check-host" />
+                            {% if gitHosts is empty %}
+                                <p class="text-xs text-ink-muted" data-testid="ssh-key-check-no-hosts">No project is registered yet, so there is no git host to test.</p>
+                            {% else %}
+                                <select id="ssh-check-host" name="host" class="h-11 rounded-md border border-line bg-surface px-2 md:h-8" data-testid="ssh-key-check-host">
+                                    {% for host in gitHosts %}<option value="{{ host }}">{{ host }}</option>{% endfor %}
+                                </select>
+                                <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-check-push">Check the push key</twig:Button>
+                            {% endif %}
                             <p class="text-xs text-ink-muted">Tests this key alone (not ~/.ssh/config, not an agent): is it registered on that git host?</p>
-                            <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-check-push">Check the push key</twig:Button>
+                            
                         </form>
                     {% endif %}
                     <form method="post" action="{{ path('ssh_key_rotate', {role: key.id}) }}" class="grid gap-2" data-testid="ssh-key-rotate-form">
