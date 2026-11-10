@@ -196,7 +196,7 @@ final class JobHistoryTest extends AdminTestCase
         $crawler = $this->open('/admin/jobs?project=acme&instance=acme--i1');
         $options = static fn (string $name): array => $crawler->filter('[data-testid=job-filters] select[name='.$name.'] option')->each(static fn (Crawler $o): string => trim($o->text()));
         self::assertSame(['Any status', 'Queued', 'Running', 'Succeeded', 'Failed', 'Interrupted'], $options('status'));
-        self::assertSame(['Any trigger', 'Ui', 'Cli', 'Webhook', 'Schedule'], $options('trigger'));
+        self::assertSame(['Any trigger', 'Ui', 'Cli', 'Webhook', 'Schedule', 'Api'], $options('trigger'));
         self::assertSame(['Any type', 'Deploy', 'Start', 'Stop', 'Redeploy', 'Destroy'], $options('type'));
         self::assertSame('acme', $crawler->filter('input[type=hidden][name=project]')->attr('value'));
         self::assertSame('acme--i1', $crawler->filter('input[type=hidden][name=instance]')->attr('value'));

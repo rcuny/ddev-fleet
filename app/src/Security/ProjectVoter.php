@@ -67,6 +67,7 @@ final class ProjectVoter extends Voter
 
     /**
      * An API token is never an admin or a member: it holds scopes on listed projects. Settings stay with people.
+     * Every attribute names a project: a null subject ("any project", e.g. the deploy form) is refused for a token.
      */
     private function voteForApiToken(string $attribute, mixed $subject, ApiTokenUser $user): bool
     {
@@ -74,7 +75,7 @@ final class ProjectVoter extends Voter
 
         return match ($attribute) {
             self::OPERATE => null !== $project && $user->hasScope(ApiScope::Lifecycle) && $user->allowsProject($project),
-            self::DEPLOY => $user->hasScope(ApiScope::Deploy) && (null === $project || $user->allowsProject($project)),
+            self::DEPLOY => null !== $project && $user->hasScope(ApiScope::Deploy) && $user->allowsProject($project),
             self::DESTROY => null !== $project && $user->hasScope(ApiScope::Lifecycle) && $user->hasScope(ApiScope::LifecycleDestroy) && $user->allowsProject($project),
             default => false,
         };

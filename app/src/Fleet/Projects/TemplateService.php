@@ -33,7 +33,28 @@ final readonly class TemplateService
         private ExtraSshKey $sshKeys,
         private SshKeysLock $keysLock,
         private ?SlicesApplier $slices = null,
+        private ?\App\Fleet\Ssh\PushKeyCheck $pushCheck = null,
     ) {
+    }
+
+    /**
+     * FLE-271: for a project with container_ssh on, a warning when its push key is not registered on the remote's git host
+     * (null when all is well, the check is off, or the host cannot be tested). Never blocks a save.
+     */
+    public function pushKeyWarning(string $project): ?string
+    {
+        $owner = $this->project($project);
+        if (null === $this->pushCheck || !$owner->containerSsh()) {
+            return null;
+        }
+        try {
+            $host = \App\Fleet\Ssh\PushKeyCheck::hostFromRemote($owner->git());
+            $state = $this->pushCheck->run($host);
+        } catch (\InvalidArgumentException) {
+            return null;
+        }
+
+        return \App\Fleet\Ssh\PushKeyState::NotRegistered === $state || \App\Fleet\Ssh\PushKeyState::HostNotTrusted === $state ? $state->message($host) : null;
     }
 
     /**

@@ -7,6 +7,8 @@ namespace App\Controller\Admin;
 use App\Domain\Ssh\SshKeyRole;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Ssh\ManagedSshKeys;
+use App\Fleet\Ssh\PushKeyCheck;
+use App\Fleet\Ssh\PushKeyState;
 use App\Fleet\Ssh\SshKeyService;
 use App\Security\CurrentActor;
 use App\Security\ProjectVoter;
@@ -29,10 +31,42 @@ final class SshKeyController extends AbstractController
     public function __construct(
         private readonly ManagedSshKeys $extra,
         private readonly SshKeyService $hostKeys,
+        private readonly PushKeyCheck $pushCheck,
+        private readonly \App\Domain\Project\ProjectRepository $projectRepository,
         private readonly ReauthGuard $reauth,
         private readonly CurrentActor $actor,
         private readonly LoggerInterface $logger,
     ) {
+    }
+
+    #[Route('/admin/host/ssh-keys/check-push', name: 'ssh_key_check_push', methods: ['POST'])]
+    public function checkPush(Request $request): Response
+    {
+        // Read-only, so no re-auth: it only asks the git host whether the push key is registered (FLE-271).
+        $this->requireCsrf($request);
+        $host = strtolower(trim($request->request->getString('host')));
+        $allowed = [];
+        foreach ($this->projectRepository->all() as $project) {
+            try {
+                $allowed[] = PushKeyCheck::hostFromRemote($project->git());
+            } catch (\InvalidArgumentException) {
+            }
+        }
+        if (!\in_array($host, $allowed, true)) {
+            $this->addFlash('warning', 'Pick the git host of one of the registered projects.');
+
+            return $this->back();
+        }
+        try {
+            $state = $this->pushCheck->run($host);
+        } catch (\InvalidArgumentException $e) {
+            $this->addFlash('warning', $e->getMessage());
+
+            return $this->back();
+        }
+        $this->addFlash(PushKeyState::Registered === $state ? 'success' : 'warning', $state->message(strtolower($host)));
+
+        return $this->back();
     }
 
     #[Route('/admin/host/ssh-keys/create', name: 'ssh_key_create', methods: ['POST'])]

@@ -68,6 +68,25 @@
         }
 
         root * {{ root }}
+
+        # The token API (FLE-274). The gate lets /api/v1/* through without a login because callers are machines; the app
+        # authenticates each call itself with a bearer token on a firewall that has no proxy-identity authenticator.
+        # The strip above already removed every Remote-*/Remote_* spelling, so a forged identity never reaches it.
+        # TLS only: this site address is HTTPS, plain HTTP is redirected before any handler runs. Same body cap as the
+        # hooks, a short upstream timeout, never cached (deferred set, so an upstream Cache-Control cannot override it), no CORS header (not called from a browser).
+        handle /api/v1/* {
+            request_body {
+                max_size 1MB
+            }
+            header >Cache-Control no-store
+            php_fastcgi unix/{{ php_socket }} {
+                env {{ proxy_param }} {env.FLEET_PROXY_SECRET}
+                dial_timeout 5s
+                read_timeout 30s
+                write_timeout 30s
+            }
+        }
+
         php_fastcgi unix/{{ php_socket }} {
             env {{ proxy_param }} {env.FLEET_PROXY_SECRET}
         }

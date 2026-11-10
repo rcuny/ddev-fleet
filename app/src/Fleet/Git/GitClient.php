@@ -24,6 +24,10 @@ final readonly class GitClient
     public const string CONTAINER_KNOWN_HOSTS = '.ddev/fleet_known_hosts';
 
     /**
+     * FLE-271 review: no change needed. Inside the container git offers only the instance's agent keys (no -i, so the push key
+     * reaches it via the agent, never via a host path); on the host core.sshCommand names -i push/deploy with IdentitiesOnly. Both
+     * are pinned by GitClientTest.
+     *
      * What git runs inside the web container (`GIT_SSH_COMMAND`, set in config.fleet.yaml; the environment wins over
      * `core.sshCommand`, which holds host paths). No identity option: the keys come from the instance's own ssh-agent (SSH_AUTH_SOCK points at its
      * socket, FLE-145; never DDEV's shared agent, see docs/reference/14-ssh-keys.md), and `IdentitiesOnly` would ignore them. Strict, pinned, never prompts. No quotes and no `$`: DDEV copies web_environment into a generated compose file and
