@@ -28,6 +28,26 @@ fleet_packages:
 fleet_etc_dir: /etc/ddev-fleet
 fleet_keyring_dir: /etc/apt/keyrings
 
+# fleet_user
+fleet_user: fleet
+fleet_home_dir: /home/fleet
+fleet_srv_dir: /srv/fleet
+fleet_opt_dir: /opt/ddev-fleet
+
+# shell (false = the old --no-shell-profile)
+fleet_shell_profile: true
+fleet_shell_profile_file: /etc/profile.d/10-fleet-shell.sh
+fleet_shell_profile_src: "{{ playbook_dir }}/../etc/profile.d/10-fleet-shell.sh"
+fleet_shell_bashrc: /etc/bash.bashrc
+# The user who ran sudo ansible-playbook; its ~/.bashrc is hooked too. Empty = none.
+fleet_shell_sudo_user: "{{ lookup('ansible.builtin.env', 'SUDO_USER') }}"
+
+# ddev
+fleet_ddev_key_url: https://pkg.ddev.com/apt/gpg.key
+fleet_ddev_key_fingerprint: DBD730A3A581BDAC98BAF17FC16711FC1179C7CA
+fleet_ddev_router_http_port: 8080
+fleet_ddev_router_https_port: 8443
+
 # docker
 fleet_docker_key_url: https://download.docker.com/linux/debian/gpg
 fleet_docker_key_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88

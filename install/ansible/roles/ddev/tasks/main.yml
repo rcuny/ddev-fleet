@@ -1,0 +1,124 @@
+---
+# Port of install/steps/40-ddev.sh. DDEV comes from its apt repository (no version pin, as in the bash step); the
+# repository key is checked against the pinned fingerprint before it is trusted.
+- name: DDEV repository key (the fingerprint is pinned)
+  block:
+    - name: Create the keyring directory
+      ansible.builtin.file:
+        path: "{{ fleet_keyring_dir }}"
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Private temporary file for the key
+      ansible.builtin.tempfile:
+        state: file
+        suffix: .asc
+      register: ddev_key_tmp
+      changed_when: false
+      check_mode: false
+
+    - name: Fetch the signing key into a temporary file (read-only, so a check run stays quiet)
+      ansible.builtin.get_url:
+        url: "{{ fleet_ddev_key_url }}"
+        dest: "{{ ddev_key_tmp.path }}"
+        mode: "0600"
+        force: true
+      changed_when: false
+      check_mode: false
+
+    - name: Read its primary fingerprint
+      ansible.builtin.command: gpg --batch --show-keys --with-colons --fingerprint "{{ ddev_key_tmp.path }}"
+      register: ddev_gpg
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse a key with another fingerprint
+      ansible.builtin.assert:
+        that: (ddev_gpg.stdout_lines | select('match', '^fpr:') | first) is search(fleet_ddev_key_fingerprint)
+        fail_msg: the signing key from {{ fleet_ddev_key_url }} does not have the pinned fingerprint; refusing to trust it
+
+    - name: Install the verified key (changes only when the content differs)
+      ansible.builtin.copy:
+        src: "{{ ddev_key_tmp.path }}"
+        dest: "{{ fleet_keyring_dir }}/ddev.asc"
+        remote_src: true
+        mode: "0644"
+        owner: root
+        group: root
+      notify: Refresh the apt cache
+
+    - name: Remove the temporary key
+      ansible.builtin.file:
+        path: "{{ ddev_key_tmp.path }}"
+        state: absent
+      changed_when: false
+      check_mode: false
+
+- name: DDEV apt source
+  ansible.builtin.copy:
+    dest: /etc/apt/sources.list.d/ddev.list
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      deb [signed-by={{ fleet_keyring_dir }}/ddev.asc] https://pkg.ddev.com/apt/ * *
+  notify: Refresh the apt cache
+
+- name: Apply the new apt source now
+  ansible.builtin.meta: flush_handlers
+
+- name: Install DDEV
+  ansible.builtin.apt:
+    name: ddev
+    state: present
+
+- name: Read the fleet user's global DDEV config
+  ansible.builtin.slurp:
+    src: "{{ fleet_home_dir }}/.ddev/global_config.yaml"
+  register: ddev_global_raw
+  failed_when: false
+  check_mode: false
+
+- name: Parse it
+  ansible.builtin.set_fact:
+    ddev_global: "{{ (ddev_global_raw.content | b64decode | from_yaml | default({}, true)) if ddev_global_raw.content is defined else {} }}"
+
+- name: Does it already hold the fleet settings?
+  ansible.builtin.set_fact:
+    ddev_global_ok: >-
+      {{ ddev_global is mapping
+         and ddev_global.get('router_http_port') | string == fleet_ddev_router_http_port | string
+         and ddev_global.get('router_https_port') | string == fleet_ddev_router_https_port | string
+         and not (ddev_global.get('router_bind_all_interfaces', false) | bool)
+         and not (ddev_global.get('instrumentation_opt_in', false) | bool) }}
+
+- name: The router listens on the loopback ports Caddy proxies to; no usage reporting
+  ansible.builtin.command:
+    argv:
+      - ddev
+      - config
+      - global
+      - --router-http-port={{ fleet_ddev_router_http_port }}
+      - --router-https-port={{ fleet_ddev_router_https_port }}
+      - --router-bind-all-interfaces=false
+      - --instrumentation-opt-in=false
+  become: true
+  become_user: "{{ fleet_user }}"
+  environment:
+    HOME: "{{ fleet_home_dir }}"
+    DDEV_NONINTERACTIVE: "true"
+  changed_when: true
+  when: not ddev_global_ok | bool
+
+- name: Install mkcert's local CA into the NSS store only (a headless host has no browser store)
+  ansible.builtin.command:
+    argv: [mkcert, -install]
+    creates: "{{ fleet_home_dir }}/.local/share/mkcert/rootCA.pem"
+  become: true
+  become_user: "{{ fleet_user }}"
+  environment:
+    HOME: "{{ fleet_home_dir }}"
+    DDEV_NONINTERACTIVE: "true"
+    TRUST_STORES: nss
