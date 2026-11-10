@@ -7,6 +7,7 @@ namespace App\Fleet\Webhooks;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Job\Job;
 use App\Domain\Job\JobTrigger;
+use App\Domain\Job\PendingRedeployRepository;
 use App\Fleet\Instances\DeployInput;
 use App\Fleet\Instances\InstanceNaming;
 use App\Fleet\Instances\InstanceService;
@@ -15,6 +16,7 @@ use App\Fleet\Instances\Selector;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Projects\ValidationFailed;
+use Psr\Clock\ClockInterface;
 
 /**
  * A deploy rule: queues the deploy job through the instance service, exactly as a person's deploy would (same guards,
@@ -23,14 +25,17 @@ use App\Fleet\Projects\ValidationFailed;
  * - A rule with a fixed label keeps one instance: when `<project>--<label>` exists, the job is a redeploy of it.
  * - Every other rule allocates a free label (`fle-3`, then `fle-3-1`, ...) and never overwrites.
  *
- * A refusal (project or template gone, the instance busy, the disk guard) is a result with a note, not an exception:
- * the sender has been told "accepted" and the delivery row says why nothing started.
+ * A refusal (project or template gone, the disk guard) is a result with a note, not an exception: the sender has
+ * been told "accepted" and the delivery row says why nothing started. A busy instance of a fixed-label rule is not
+ * a refusal: the redeploy is remembered as pending and starts when the active job ends (FLE-220).
  */
 final readonly class DeployWebhookAction
 {
     public function __construct(
         private InstanceService $instances,
         private InstanceRepository $repository,
+        private PendingRedeployRepository $pending,
+        private ClockInterface $clock,
     ) {
     }
 
@@ -54,7 +59,17 @@ final readonly class DeployWebhookAction
             }
         } catch (ValidationFailed $e) {
             return new WebhookActionResult(false, 'not deployed: '.implode(' ', $e->errors));
-        } catch (NotFound|Refused $e) {
+        } catch (Refused $e) {
+            // FLE-220: a fixed-label redeploy that meets a running job is remembered (latest wins) and started when
+            // that job ends, instead of being dropped: the newest commit must still get its fleet-gates status.
+            if (Refused::BUSY === $e->reason && null !== $existing && $request->replace && null !== $instance) {
+                $entry = $this->pending->remember($existing, $request->branch, \is_string($template) ? $template : null, $by, $this->clock->now());
+
+                return new WebhookActionResult(true, \sprintf('redeploy pending: %s is busy, it will redeploy when its job ends (%d request(s) folded)', $existing, $entry->requests()), null, $existing);
+            }
+
+            return new WebhookActionResult(false, 'not deployed: '.$e->getMessage());
+        } catch (NotFound $e) {
             return new WebhookActionResult(false, 'not deployed: '.$e->getMessage());
         }
 

@@ -5,12 +5,16 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Webhooks;
 
 use App\Domain\Job\Job;
+use App\Domain\Job\JobRepository;
+use App\Domain\Job\JobStatus;
 use App\Domain\Job\JobTrigger;
+use App\Domain\Job\PendingRedeployRepository;
 use App\Domain\Webhook\WebhookDelivery;
 use App\Domain\Webhook\WebhookEndpoint;
 use App\Domain\Webhook\WebhookRepository;
 use App\Domain\Webhook\WebhookRule;
 use App\Domain\Webhook\WebhookSource;
+use App\Fleet\Jobs\JobService;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\TemplateInput;
@@ -209,7 +213,15 @@ final class WebhookActionsTest extends AdminTestCase
         self::assertCount(1, $this->jobs());
     }
 
-    public function testAFixedLabelInstanceThatIsBusyRefusesTheReplaceInTheNote(): void
+    /** Ends the job the way the executor does (on the managed entity: the test kernel may have rebooted since). */
+    private function finish(Job $job): void
+    {
+        $managed = $this->get(JobRepository::class)->find((int) $job->id());
+        self::assertInstanceOf(Job::class, $managed);
+        $this->get(JobService::class)->finish($managed, JobStatus::Succeeded, 0, null);
+    }
+
+    public function testPushesWhileTheInstanceIsBusyGiveExactlyOneFollowUpRedeploy(): void
     {
         $this->pushRule(['branch' => 'develop'], ['label' => 'pw-regression']);
         $receiver = $this->receiver();
@@ -221,14 +233,45 @@ final class WebhookActionsTest extends AdminTestCase
 
         // A job of that instance is queued or running (the tests run jobs inline, so put one in the table).
         $em = $this->em();
-        $em->persist(new Job('redeploy', 'blog--pw-regression', 'blog', JobTrigger::Cli, 'admin', [], null, false, null, new \DateTimeImmutable()));
+        $running = new Job('redeploy', 'blog--pw-regression', 'blog', JobTrigger::Cli, 'admin', [], null, false, null, new \DateTimeImmutable());
+        $em->persist($running);
         $em->flush();
 
-        [$status, $second] = $this->send($receiver, WebhookSource::Bitbucket, self::push([self::branch('develop')], 'b'), $headers + ['x-request-uuid' => 'u2']);
-        self::assertSame(200, $status);
-        self::assertSame('failed', $second['result']);
-        self::assertStringContainsString('Busy', $second['note']);
+        foreach (['b', 'c'] as $n => $uuid) {
+            [$status, $body] = $this->send($receiver, WebhookSource::Bitbucket, self::push([self::branch('develop')], $uuid), $headers + ['x-request-uuid' => 'u'.($n + 2)]);
+            self::assertSame(200, $status);
+            self::assertSame('accepted', $body['result']);
+            self::assertStringStartsWith('redeploy pending', $body['note']);
+        }
         self::assertCount(2, $this->jobs(), 'nothing was queued on top of the running job');
+        $pending = $this->get(PendingRedeployRepository::class)->all();
+        self::assertCount(1, $pending);
+        self::assertSame(2, $pending[0]->requests(), 'the latest request replaced the first');
+
+        $this->finish($running);
+
+        $jobs = $this->jobs();
+        self::assertCount(3, $jobs, 'exactly one follow-up');
+        self::assertSame('redeploy', $jobs[2]->type());
+        self::assertSame(JobTrigger::Webhook, $jobs[2]->trigger());
+        self::assertSame('webhook:bitbucket', $jobs[2]->requestedBy());
+        self::assertSame([], $this->get(PendingRedeployRepository::class)->all());
+    }
+
+    public function testAPendingRedeployForAnInstanceThatIsGoneIsDropped(): void
+    {
+        $repository = $this->get(PendingRedeployRepository::class);
+        $em = $this->em();
+        $running = new Job('redeploy', 'blog--x', 'blog', JobTrigger::Cli, 'admin', [], null, false, null, new \DateTimeImmutable());
+        $em->persist($running);
+        $em->flush();
+        $repository->remember('blog--x', 'develop', null, 'webhook:bitbucket', new \DateTimeImmutable());
+
+        // The instance does not exist: the pending request is dropped, not retried for ever.
+        $this->finish($running);
+
+        self::assertCount(1, $this->jobs());
+        self::assertSame([], $repository->all());
     }
 
     public function testAFinishedFixedLabelInstanceIsRedeployedNotDuplicated(): void

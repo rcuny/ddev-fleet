@@ -13,6 +13,7 @@ use App\Message\RunJob;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\MessageBusInterface;
+use Symfony\Contracts\EventDispatcher\EventDispatcherInterface;
 
 /**
  * Creates and finishes jobs. A request never runs a process: enqueue() stores the job and hands its id to the queue.
@@ -26,6 +27,7 @@ final readonly class JobService
         private LogReader $logs,
         private ClockInterface $clock,
         private LoggerInterface $logger,
+        private ?EventDispatcherInterface $events = null,
     ) {
     }
 
@@ -55,6 +57,8 @@ final readonly class JobService
         $job->finish($status, $exitCode, $error, $this->clock->now());
         $this->jobs->save($job);
         $this->notify($job);
+        // FLE-220: a listener may queue the redeploy that was waiting for this instance.
+        $this->events?->dispatch(new JobFinished($job));
     }
 
     /**

@@ -10,6 +10,9 @@ namespace App\Fleet\Projects;
  */
 final class Refused extends \DomainException
 {
+    /** The `reason` of a refusal because the instance has a queued or running job. */
+    public const string BUSY = 'busy';
+
     /**
      * @param string|null $reason a machine-readable kind for callers that must tell refusals apart (the JSON endpoints
      *                            send it as `reason`); null for the common case

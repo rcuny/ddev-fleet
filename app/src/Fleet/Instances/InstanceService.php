@@ -166,7 +166,7 @@ final class InstanceService
 
     private static function busyAtTheSameTime(): Refused
     {
-        return new Refused('Busy: another request just queued a job for this instance. Nothing was started.');
+        return new Refused('Busy: another request just queued a job for this instance. Nothing was started.', 0, Refused::BUSY);
     }
 
     /**
@@ -347,7 +347,7 @@ final class InstanceService
     {
         $busy = $this->jobs->activeInstanceIds(array_map(static fn (Instance $i): string => $i->id(), $instances));
         if ([] !== $busy) {
-            throw new Refused(\sprintf('Busy: %s %s a job queued or running. Nothing was started.', implode(', ', \array_slice($busy, 0, 5)).(\count($busy) > 5 ? ' and more' : ''), 1 === \count($busy) ? 'has' : 'have'));
+            throw new Refused(\sprintf('Busy: %s %s a job queued or running. Nothing was started.', implode(', ', \array_slice($busy, 0, 5)).(\count($busy) > 5 ? ' and more' : ''), 1 === \count($busy) ? 'has' : 'have'), 0, Refused::BUSY);
         }
     }
 }
