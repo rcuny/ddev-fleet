@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Security;
 
+use App\Domain\ApiToken\ApiScope;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectMembership;
+use App\Security\Api\ApiTokenUser;
 use Symfony\Component\Security\Core\Authentication\Token\TokenInterface;
 use Symfony\Component\Security\Core\Authorization\Voter\Vote;
 use Symfony\Component\Security\Core\Authorization\Voter\Voter;
@@ -47,6 +49,9 @@ final class ProjectVoter extends Voter
     protected function voteOnAttribute(string $attribute, mixed $subject, TokenInterface $token, ?Vote $vote = null): bool
     {
         $user = $token->getUser();
+        if ($user instanceof ApiTokenUser) {
+            return $this->voteForApiToken($attribute, $subject, $user);
+        }
         if (!$user instanceof FleetUser) {
             return false;
         }
@@ -58,5 +63,20 @@ final class ProjectVoter extends Voter
         return self::OPERATE === $attribute
             && $subject instanceof Project
             && $this->membership->isMember($user, $subject);
+    }
+
+    /**
+     * An API token is never an admin or a member: it holds scopes on listed projects. Settings stay with people.
+     */
+    private function voteForApiToken(string $attribute, mixed $subject, ApiTokenUser $user): bool
+    {
+        $project = $subject instanceof Project ? $subject->name() : null;
+
+        return match ($attribute) {
+            self::OPERATE => null !== $project && $user->hasScope(ApiScope::Lifecycle) && $user->allowsProject($project),
+            self::DEPLOY => $user->hasScope(ApiScope::Deploy) && (null === $project || $user->allowsProject($project)),
+            self::DESTROY => null !== $project && $user->hasScope(ApiScope::Lifecycle) && $user->hasScope(ApiScope::LifecycleDestroy) && $user->allowsProject($project),
+            default => false,
+        };
     }
 }

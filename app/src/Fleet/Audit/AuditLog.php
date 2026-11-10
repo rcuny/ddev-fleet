@@ -49,6 +49,13 @@ final readonly class AuditLog
     public const string WEBHOOK_RULE_ADD = 'webhook.rule.add';
     public const string WEBHOOK_RULE_REMOVE = 'webhook.rule.remove';
 
+    public const string API_TOKEN_CREATE = 'api_token.create';
+    public const string API_TOKEN_ROTATE = 'api_token.rotate';
+    public const string API_TOKEN_REVOKE = 'api_token.revoke';
+    public const string API_TOKEN_EXPIRE = 'api_token.expire';
+    /** A refused API call: bad, expired or revoked token, scope or project refusal, IP refusal, rate limit. */
+    public const string API_DENIED = 'api.denied';
+
     public const string PROJECT_MEMBER_ADD = 'project.member.add';
     public const string PROJECT_MEMBER_REMOVE = 'project.member.remove';
 

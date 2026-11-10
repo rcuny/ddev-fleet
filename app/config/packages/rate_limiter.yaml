@@ -20,6 +20,25 @@ framework:
             policy: sliding_window
             limit: 1
             interval: '1 minute'
+        # The token API (App\Api\Http\ApiSubscriber), per token: reads and writes have their own pool.
+        api_read:
+            policy: sliding_window
+            limit: 120
+            interval: '1 minute'
+        api_write:
+            policy: sliding_window
+            limit: 30
+            interval: '1 minute'
+        # Terminal input (v1.8.0), per token, stricter than any other write.
+        api_terminal_write:
+            policy: sliding_window
+            limit: 6
+            interval: '1 minute'
+        # Failed token authentications (App\Security\Api\ApiAuthFailureThrottle), per client address.
+        api_auth_failure:
+            policy: sliding_window
+            limit: 10
+            interval: '15 minutes'
 
 when@test:
     services:
@@ -33,4 +52,12 @@ when@test:
                 storage_service: fleet.test.reveal_storage
             secret_reveal:
                 # In memory and without a reset between requests, so a test sees its own reveals and no other test's.
+                storage_service: fleet.test.reveal_storage
+            api_read:
+                storage_service: fleet.test.reveal_storage
+            api_write:
+                storage_service: fleet.test.reveal_storage
+            api_terminal_write:
+                storage_service: fleet.test.reveal_storage
+            api_auth_failure:
                 storage_service: fleet.test.reveal_storage
