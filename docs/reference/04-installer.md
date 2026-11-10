@@ -29,6 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/insta
 | `--trusted-ip=<ip\|cidr>` | With `--harden`, repeatable: address never banned, always allowed through the firewall. |
 | `--harden-tmp` | With `--harden`: mount `/tmp` `nosuid,nodev,noexec` at next boot (can break builds). |
 | `--firewall-grace=<minutes>` | With `--harden`: dead-man's switch delay, 2 to 120, default 10. |
+| `--engine=<bash\|ansible>` | How the host is provisioned: the numbered bash steps (default) or the Ansible playbook `install/ansible/site.yml`. See [the Ansible engine](#the-ansible-engine). |
 | `--preflight` | Check the host and change nothing; works without root. |
 | `--dry-run` | Print the plan, change nothing. |
 | `--help` | Usage text. |
@@ -56,6 +57,33 @@ Two stages. `install.sh` validates the flags, installs `ca-certificates`, `curl`
 Every step is idempotent: a re-run converges, adds only missing `fleet.env` keys and never changes existing ones. If a step fails, read the named step in `/var/log/ddev-fleet-install.log`, fix the cause and run the same command again.
 
 The installer waits (bounded) for running jobs to finish before it swaps code and database, because a job running on while the code changes can fail. `FLEET_INSTALL_JOB_WAIT=<seconds>` in the installer's environment sets the limit (default 300; `0` skips the wait). Jobs still running after that are left to finish. After a reboot or upgrade, start instances one at a time with `fleet:instance:start --all --sequential`.
+
+## The Ansible engine
+
+`--engine=ansible` replaces the numbered steps with the playbook in `install/ansible/` (the bash steps stay the default, and `--engine` is temporary). Stage 1 is unchanged. Stage 2 runs the same flag validation, pre-flight checks and DNS check, then:
+
+1. installs `ansible-core` and `python3-apt` from Debian's repository;
+2. writes `/etc/ddev-fleet/host-vars.yml` from the flags;
+3. runs `ansible-playbook -i localhost, -c local install/ansible/site.yml -e fleet_ref=<ref> -e fleet_hardening_strict=<true|false>` from the root-owned copy of `install/`.
+
+`--preflight` and `fleet upgrade` pre-flight work with either engine. `--dry-run` prints the three actions and changes nothing.
+
+### host-vars.yml
+
+The host's own answers, mode `0644` (no secret in it), rewritten on every run from the flags and, for hardening, from the settings an earlier run stored in `hardening.conf` (a list flag replaces that list; `--harden` alone keeps what was stored). The installer's bash writer (`install/lib/host-vars.sh`) and the app's `App\Fleet\System\HostVarsRenderer` produce the same bytes. The release ref and the lock-out check are per run, so they are passed with `-e`, not stored. There is no TLS-mode key: the TLS mode is chosen in the setup wizard, as with the bash engine.
+
+| Key | From | Meaning |
+|---|---|---|
+| `fleet_domain` | `--domain` | Public host name. |
+| `fleet_acme_email` | `--acme-email` | ACME contact; `""` when not given. |
+| `fleet_shell_profile` | `--no-shell-profile` | `false` skips the shell profile. |
+| `fleet_hardening_enabled` | `--harden` or stored `ENABLED=1` | When `false`, no hardening key follows. |
+| `fleet_hardening_ssh_allow_users` | `--ssh-allow-user` | List; empty means the account running `sudo`. |
+| `fleet_hardening_trusted_ips` | `--trusted-ip` | List of addresses or CIDRs. |
+| `fleet_hardening_firewall_grace_minutes` | `--firewall-grace` | 2 to 120, default 10. |
+| `fleet_hardening_tmp` | `--harden-tmp` | `true` mounts `/tmp` `nosuid,nodev,noexec` at the next boot. |
+
+An explicit `--harden` refuses a lock-out (`fleet_hardening_strict=true`); a stored re-run, such as an upgrade, only warns.
 
 ## Setup URL
 

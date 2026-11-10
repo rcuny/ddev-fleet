@@ -1,5 +1,5 @@
 ---
-# Copy to /etc/ddev-fleet/host-vars.yml and edit. Documentation addresses only.
+# The installer writes /etc/ddev-fleet/host-vars.yml (--engine=ansible; docs/reference/04-installer.md). Or copy this and edit. Documentation addresses only.
 fleet_hardening_enabled: true
 fleet_hardening_ssh_allow_users:
   - admin
