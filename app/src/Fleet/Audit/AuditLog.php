@@ -29,6 +29,7 @@ final readonly class AuditLog
     public const string SCHEDULE_RUN = 'schedule.run';
 
     public const string HOST_UPGRADE = 'host.upgrade';
+    public const string HOST_PROVISION = 'host.provision';
 
     public const string REAUTH_SUCCESS = 'reauth.success';
     public const string REAUTH_FAILURE = 'reauth.failure';

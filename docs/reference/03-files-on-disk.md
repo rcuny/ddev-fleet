@@ -19,7 +19,7 @@ When something misbehaves, you need to know where Fleet keeps things and what ru
 | `/etc/caddy/ovh/` | `root:caddy` 0750 | `ovh_dns` mode only: three credential files in clear text (0640), because Caddy needs them. |
 | `/etc/authelia/` | `authelia` | Configuration and generated secrets (`secrets/`). |
 | `/run/php/fleet.sock` | `fleet:caddy` 0660 | The only way into the app (php-fpm). |
-| `/usr/local/libexec/fleet/apply`, `/etc/sudoers.d/fleet-apply` | `root` | The root helper and its one sudoers line. |
+| `/usr/local/libexec/fleet/apply`, `/etc/sudoers.d/fleet-apply` | `root` | The root helper (`caddy`, `authelia`, `slices`, `provision`) and its one sudoers line. |
 | `/usr/local/bin/fleet` | `root` 0755 | The `fleet` command: switches to the `fleet` user and loads `fleet.env`. |
 | `/usr/local/lib/ddev-fleet-installer/` | `root` | Root-owned copy of `install/`; the uninstaller runs from here. |
 

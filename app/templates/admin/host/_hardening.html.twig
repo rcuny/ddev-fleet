@@ -1,0 +1,70 @@
+{% set form = forms.hardening %}
+{% set p = provision %}
+<div class="grid gap-4" data-testid="host-tab-hardening">
+    {% if p.unavailable %}
+        <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="hardening-unavailable">
+            <twig:ux:icon name="lucide:triangle-alert" />
+            <twig:Alert:Title>Not available on this host</twig:Alert:Title>
+            <twig:Alert:Description class="text-ink-body">{{ p.unavailable }}</twig:Alert:Description>
+        </twig:Alert>
+    {% endif %}
+
+    <twig:Card data-testid="hardening-firewall">
+        <twig:Card:Header>
+            <twig:Card:Title>Firewall dead-man's switch</twig:Card:Title>
+            <twig:Card:Description>Applying hardening enables a firewall. If it cuts you off, a timer turns it off again unless it is confirmed.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-3 text-sm">
+            <p data-testid="hardening-firewall-state" data-state="{{ p.firewall.value }}">
+                {% if p.firewall.value == 'armed' %}
+                    <strong>Armed.</strong> The firewall is on and unconfirmed{% if p.firesAt %}; the switch turns it off at <span data-testid="hardening-fires-at">{{ p.firesAt }}</span> unless you confirm{% endif %}.
+                {% elseif p.firewall.value == 'confirmed' %}
+                    <strong>Confirmed.</strong> Someone confirmed the firewall from a second session; it stays on.
+                {% elseif p.firewall.value == 'expired' %}
+                    <strong>Not confirmed in time.</strong> The grace period ended and the switch turned the firewall off. Apply again, then confirm.
+                {% else %}
+                    <strong>No firewall managed.</strong> Hardening is not on.
+                {% endif %}
+            </p>
+            {% if p.firewall.value == 'armed' %}
+                <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="hardening-confirm-hint">
+                    <twig:ux:icon name="lucide:triangle-alert" />
+                    <twig:Alert:Title>Confirm from a second SSH session</twig:Alert:Title>
+                    <twig:Alert:Description class="text-ink-body">Open a new SSH connection (not the one you already have) and run <code class="break-all" data-testid="hardening-confirm-command">{{ p.confirmCommand }}</code>. This page never confirms for you: logging in again is the proof that you can still reach the host.</twig:Alert:Description>
+                </twig:Alert>
+            {% endif %}
+        </twig:Card:Content>
+    </twig:Card>
+
+    {% if p.active %}
+        <twig:Alert data-testid="hardening-running">
+            <twig:ux:icon name="lucide:loader" />
+            <twig:Alert:Title>A run is {{ p.active.status.value }}</twig:Alert:Title>
+            <twig:Alert:Description class="text-ink-body"><a href="{{ path('job_show', {id: p.active.id}) }}" class="inline-flex min-h-11 items-center underline md:min-h-0">Job #{{ p.active.id }}</a> shows its live log. Changes are possible once it ends.</twig:Alert:Description>
+        </twig:Alert>
+    {% elseif p.latest %}
+        <p class="text-sm text-ink-muted" data-testid="hardening-last-run">Last run: <a href="{{ path('job_show', {id: p.latest.id}) }}" class="inline-flex min-h-11 items-center underline md:min-h-0">job #{{ p.latest.id }}</a>, {{ p.latest.status.value }}, {{ p.latest.createdAt|date('Y-m-d H:i') }} UTC.</p>
+    {% endif %}
+
+    <twig:Card>
+        <twig:Card:Header>
+            <twig:Card:Title>Hardening</twig:Card:Title>
+            <twig:Card:Description>Saved to the host's answers file and applied by the installed release's own playbook, as a job with a live log. You are asked for your password first.</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-6">
+            {% if not p.recentAuth and not p.unavailable %}
+                <p class="text-sm text-ink-muted" data-testid="hardening-reauth-note">Saving asks for your password again; you come back to the host settings, then open this tab again.</p>
+            {% endif %}
+            {{ form_start(form, {attr: {class: 'grid gap-4', 'data-testid': 'host-hardening-form'}}) }}
+                {{ form_errors(form) }}
+                {{ form_row(form.enabled) }}
+                {{ form_row(form.sshUsers) }}
+                {{ form_row(form.invokingUser) }}
+                {{ form_row(form.trustedIps) }}
+                {{ form_row(form.graceMinutes) }}
+                {{ form_row(form.hardenTmp) }}
+                {{ form_widget(form.save, {attr: {class: 'w-full md:w-auto', disabled: (p.unavailable or p.active) ? 'disabled' : null}}) }}
+            {{ form_end(form) }}
+        </twig:Card:Content>
+    </twig:Card>
+</div>

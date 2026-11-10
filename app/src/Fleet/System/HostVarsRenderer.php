@@ -15,6 +15,8 @@ final class HostVarsRenderer
      * @param list<string> $sshAllowUsers accounts allowed to log in over SSH (hardening only)
      * @param list<string> $trustedIps    addresses or CIDRs never banned or firewalled (hardening only)
      * @param int          $firewallGrace minutes before the dead-man's switch turns an unconfirmed firewall off, 2 to 120
+     * @param string|null  $invokingUser  the SSH account that must keep access; written only when given (the web UI does,
+     *                                    the installer's flags have no such key), so the installer's output is unchanged
      */
     public function render(
         string $domain,
@@ -25,6 +27,7 @@ final class HostVarsRenderer
         array $trustedIps = [],
         int $firewallGrace = 10,
         bool $hardenTmp = false,
+        ?string $invokingUser = null,
     ): string {
         $out = "---\n"
             ."# Written by the ddev-fleet installer from its flags. A re-run rewrites it; the hardening part follows the stored settings.\n"
@@ -43,7 +46,8 @@ final class HostVarsRenderer
             .self::list('fleet_hardening_ssh_allow_users', array_map(self::user(...), $sshAllowUsers))
             .self::list('fleet_hardening_trusted_ips', array_map(self::address(...), $trustedIps))
             .'fleet_hardening_firewall_grace_minutes: '.$firewallGrace."\n"
-            .'fleet_hardening_tmp: '.self::bool($hardenTmp)."\n";
+            .'fleet_hardening_tmp: '.self::bool($hardenTmp)."\n"
+            .(null === $invokingUser ? '' : \sprintf("fleet_hardening_invoking_user: \"%s\"\n", self::user($invokingUser)));
     }
 
     private static function bool(bool $value): string

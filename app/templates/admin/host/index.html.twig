@@ -7,7 +7,7 @@
         <twig:block name="tabs">
             {% if host is not null %}
                 {# md and up: the tab strip (sub navigation, see /admin/design-system). #}
-                <nav aria-label="Host settings sections" class="hidden items-center gap-4 border-b border-hairline md:flex" data-testid="host-tabs">
+                <nav aria-label="Host settings sections" class="hidden flex-wrap items-center gap-x-4 border-b border-hairline md:flex" data-testid="host-tabs">
                     {% for key, label in tabs %}
                         <a href="{{ path('settings', {tab: key}) }}" data-tab="{{ key }}"{% if key == tab %} aria-current="page" class="-mb-px border-b-2 border-brand px-1 py-3 text-sm font-medium text-brand-darker hover:no-underline dark:text-brand"{% else %} class="-mb-px border-b-2 border-transparent px-1 py-3 text-sm text-ink-body hover:text-ink-display hover:no-underline"{% endif %}>{{ label }}</a>
                     {% endfor %}

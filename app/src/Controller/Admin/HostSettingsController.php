@@ -19,8 +19,13 @@ use App\Fleet\Host\ClaudeTokenRule;
 use App\Fleet\Host\GitIdentityRule;
 use App\Fleet\Host\HostSecrets;
 use App\Fleet\Host\NotificationMailRule;
+use App\Fleet\Host\Provision\FirewallSwitch;
+use App\Fleet\Host\Provision\HardeningSettings;
+use App\Fleet\Host\Provision\HostVarsReader;
+use App\Fleet\Host\Provision\ProvisionService;
 use App\Fleet\PortMirror\PortMirror;
 use App\Fleet\PortMirror\PortMirrorSwitch;
+use App\Fleet\Projects\Refused;
 use App\Fleet\Secrets\SecretConflict;
 use App\Fleet\Secrets\SecretService;
 use App\Fleet\Secrets\SecretStore;
@@ -34,11 +39,13 @@ use App\Form\Host\HostCapacityType;
 use App\Form\Host\HostClaudeTokenType;
 use App\Form\Host\HostGeneralType;
 use App\Form\Host\HostGitIdentityType;
+use App\Form\Host\HostHardeningType;
 use App\Form\Host\HostJobConcurrencyType;
 use App\Form\Host\HostNotificationType;
 use App\Form\Host\HostPortMirrorType;
 use App\Form\Host\HostUploadLimitType;
 use App\Health\HostHealthReport;
+use App\Security\Reauth\ReauthGuard;
 use Psr\Clock\ClockInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -69,6 +76,7 @@ final class HostSettingsController extends AbstractController
         'jobs' => 'Jobs',
         'capacity' => 'Capacity',
         'ssh' => 'SSH keys',
+        'hardening' => 'Hardening',
         'backups' => 'Backups',
     ];
 
@@ -85,6 +93,10 @@ final class HostSettingsController extends AbstractController
         private readonly HostHardwareProbe $hardware,
         private readonly UnslicedInstances $unsliced,
         private readonly SshKeyCatalog $sshCatalog,
+        private readonly ProvisionService $provision,
+        private readonly HostVarsReader $hostVars,
+        private readonly FirewallSwitch $firewall,
+        private readonly ReauthGuard $reauth,
         private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
         private readonly ClockInterface $clock,
@@ -386,6 +398,49 @@ final class HostSettingsController extends AbstractController
         return $this->show('capacity', $host, $form);
     }
 
+    #[Route('/admin/host/hardening', name: 'settings_hardening', methods: ['POST'])]
+    public function hardeningSave(Request $request): Response
+    {
+        if (null === $host = $this->settings->get()) {
+            return $this->notInitialised();
+        }
+        $form = $this->form('hardening', $host);
+        $form->handleRequest($request);
+
+        if ($form->isSubmitted() && $form->isValid()) {
+            $settings = new HardeningSettings(
+                (bool) $form->get('enabled')->getData(),
+                HardeningSettings::splitList($this->text($form, 'sshUsers')),
+                HardeningSettings::splitList($this->text($form, 'trustedIps')),
+                \is_int($grace = $form->get('graceMinutes')->getData()) ? $grace : 0,
+                (bool) $form->get('hardenTmp')->getData(),
+                $this->nullIfBlank($this->text($form, 'invokingUser')),
+            );
+            $violations = $settings->violations();
+            $fields = ['sshUsers' => 'sshUsers', 'invokingUser' => 'invokingUser', 'trustedIps' => 'trustedIps', 'graceMinutes' => 'graceMinutes'];
+            foreach ($violations as $field => $message) {
+                $form->get($fields[$field])->addError(new FormError($message));
+            }
+
+            if ([] === $violations) {
+                // Saving changes the SSH and firewall rules of the host: the password again, once per change.
+                if (!$this->reauth->requireRecentAuth()) {
+                    return $this->reauth->challenge('host.hardening', 'host', '/admin/host');
+                }
+                try {
+                    $job = $this->provision->queue($settings, $this->actor());
+                    $this->reauth->close();
+
+                    return $this->redirectToRoute('job_show', ['id' => $job->id()], Response::HTTP_SEE_OTHER);
+                } catch (Refused $refusal) {
+                    $form->addError(new FormError($refusal->getMessage()));
+                }
+            }
+        }
+
+        return $this->show('hardening', $host, $form);
+    }
+
     #[Route('/admin/host/backups/retention', name: 'settings_backup_retention', methods: ['POST'])]
     public function retention(Request $request): Response
     {
@@ -458,6 +513,7 @@ final class HostSettingsController extends AbstractController
             'network' => $this->createForm(HostPortMirrorType::class, ['enabled' => $host->portMirror()], ['action' => $this->generateUrl('settings_network')]),
             'uploads' => $this->createForm(HostUploadLimitType::class, ['megabytes' => intdiv($host->assetUploadMaxBytes(), 1_048_576)], ['action' => $this->generateUrl('settings_uploads')]),
             'capacity' => $this->createForm(HostCapacityType::class, ['reserve' => $host->cpuReserveThreads(), 'maxInstances' => $host->maxInstances()], ['action' => $this->generateUrl('settings_capacity')]),
+            'hardening' => $this->createForm(HostHardeningType::class, $this->hardeningData(), ['action' => $this->generateUrl('settings_hardening')]),
             'jobs' => $this->createForm(HostJobConcurrencyType::class, ['jobs' => $host->maxConcurrentJobs()], ['action' => $this->generateUrl('settings_jobs')]),
             default => $this->createForm(HostBackupRetentionType::class, ['days' => $host->backupRetentionDays()], ['action' => $this->generateUrl('settings_backup_retention')]),
         };
@@ -498,11 +554,44 @@ final class HostSettingsController extends AbstractController
             'capacity' => 'capacity' === $tab ? $this->capacity->report() : null,
             'sshKeys' => 'ssh' === $tab ? $this->sshCatalog->entries() : [],
             'unsliced' => 'capacity' === $tab ? $this->unsliced->list() : [],
+            'provision' => 'hardening' === $tab ? [
+                'unavailable' => $this->provision->unavailable(),
+                'active' => $this->provision->activeJob(),
+                'latest' => $this->provision->latestJob(),
+                'firewall' => $this->firewall->state(),
+                'firesAt' => $this->firewall->firesAt(),
+                'confirmCommand' => FirewallSwitch::COMMAND,
+                'recentAuth' => $this->reauth->requireRecentAuth(),
+            ] : null,
             'secrets' => [
                 'claude' => $this->rotation->lastRotated(),
                 'smtp' => $this->secrets->fleetWideUpdatedAt(HostSecrets::SMTP_PASSWORD),
             ],
         ], new Response('', $status));
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function hardeningData(): array
+    {
+        $current = $this->hostVars->hardening();
+
+        return [
+            'enabled' => $current->enabled,
+            'sshUsers' => implode("\n", $current->sshAllowUsers),
+            'invokingUser' => $current->invokingUser,
+            'trustedIps' => implode("\n", $current->trustedIps),
+            'graceMinutes' => $current->graceMinutes,
+            'hardenTmp' => $current->hardenTmp,
+        ];
+    }
+
+    private function nullIfBlank(?string $value): ?string
+    {
+        $value = trim($value ?? '');
+
+        return '' === $value ? null : $value;
     }
 
     /**

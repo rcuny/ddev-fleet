@@ -13,4 +13,6 @@ enum ApplyTarget: string
     case Caddy = 'caddy';
     case Authelia = 'authelia';
     case Slices = 'slices';
+    /** The host's optional roles (hardening): installs the staged host-vars.yml, then runs the installed tag's playbook. */
+    case Provision = 'provision';
 }

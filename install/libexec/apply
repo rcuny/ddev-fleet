@@ -1,7 +1,7 @@
 #!/bin/bash
 # Root helper of ddev-fleet: installs config that the app has rendered into its staging directory.
 #
-#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices>
+#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision>
 #
 # Installed by install/steps/90-privileged.sh as root:root 0755, reachable by the `fleet` user through one sudoers
 # line (install/etc/sudoers-fleet-apply). The only input is the target name; the files come from a fixed place,
@@ -36,6 +36,17 @@
 # plus daemon-reload does not change a live cpu.max). A failure puts the previous files back and re-applies the previous
 # quotas.
 #
+# `apply provision` (FLE-260) differs again: it applies the host's optional roles (hardening first). The only input is the
+# host's own answers, /etc/ddev-fleet/host-vars.yml: the app may stage a new one as host-vars.yml, which the helper
+# validates line by line against the schema of App\Fleet\System\HostVarsRenderer (known keys only, each once, fixed value
+# charsets; nothing is sourced or copied unchecked) and installs (root:root 0644) before the run. The helper then runs the
+# INSTALLED tag's own playbook, /usr/local/lib/ddev-fleet-installer/install/ansible/site.yml (the root-owned export of
+# install/, refused unless root owns it and nobody else can write it), with a fixed command line: `fleet_ref` is read from
+# /etc/ddev-fleet/installed-version, fleet_hardening_strict is true and fleet_job_wait is 0 (the run is itself a job, and
+# the code does not change). No playbook path, role list or argument comes from the caller. Output goes to stdout/stderr
+# (the app streams it into the job log); the playbook's exit code is the helper's. The firewall dead-man's switch stays
+# armed until `sudo fleet-firewall-confirm` runs from a second SSH session: nothing here confirms it.
+#
 # Threat model, honestly: `fleet` is in the `docker` group, which is root-equivalent anyway. This helper keeps a
 # half-written or invalid config from reaching Caddy or Authelia; it is not a security boundary.
 #
@@ -44,7 +55,7 @@
 set -euo pipefail
 
 # The only targets. A repo test keeps this word list equal to App\Fleet\System\ApplyTarget and to the sudoers line.
-ALLOWED_TARGETS='caddy authelia slices'
+ALLOWED_TARGETS='caddy authelia slices provision'
 readonly ALLOWED_TARGETS
 readonly MAX_BYTES=262144
 readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
@@ -63,6 +74,11 @@ readonly T_SLICE=5 MAX_SLICES=500 SLICE_MAX_NAME=200 SLICES_BUDGET=40
 readonly SLICE_MARK='# Managed by ddev-fleet (apply slices). Hand edits are overwritten.'
 readonly SLICE_UNIT_RE='^fleet(-[a-z0-9_]+){0,2}\.slice$'
 readonly SLICE_DROPIN=10-fleet-quota.conf
+# provision: the root-owned export of install/ the installer leaves behind, the host's answers and the recorded tag.
+readonly PROVISION_INSTALL_DIR=/usr/local/lib/ddev-fleet-installer/install
+readonly PROVISION_ETC=/etc/ddev-fleet
+# A playbook run takes minutes; nothing else bounds it, so a hung run is ended after this many seconds.
+readonly T_PROVISION=3600
 
 umask 077
 IFS=$' \t\n'
@@ -79,11 +95,11 @@ fail() {
 }
 
 # --- 1. arguments: exactly one known target -------------------------------------------------------------------
-[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices>' 64
+[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices|provision>' 64
 TARGET=$1
 case " $ALLOWED_TARGETS " in
   *" $TARGET "*) ;;
-  *) fail 'unknown target (usage: apply <caddy|authelia|slices>)' 64 ;;
+  *) fail 'unknown target (usage: apply <caddy|authelia|slices|provision>)' 64 ;;
 esac
 
 # --- 2. who may run this, and where the files are ---------------------------------------------------------------
@@ -129,6 +145,7 @@ case $TARGET in
   caddy) STAGED_NAMES='Caddyfile env' ;;
   authelia) STAGED_NAMES='configuration.yml' ;;
   slices) STAGED_NAMES='slices.json' ;;
+  provision) STAGED_NAMES='host-vars.yml' ;;
 esac
 readonly STAGED_NAMES
 
@@ -728,9 +745,134 @@ apply_slices() {
   printf 'apply: slices installed (%d, %d removed)\n' "${#order[@]}" "${#stale[@]}"
 }
 
+# --- provision: the optional roles (hardening), from the host's own answers ---------------------------------------
+
+# provision_check_host_vars <file>: the schema of HostVarsRenderer, line by line. Only known keys, each once, with a value
+# of a fixed shape; a list item is one quoted value. Nothing is evaluated. Fails with 65 on anything else.
+provision_check_host_vars() {
+  local file=$1 line n=0 key list='' items=0
+  local -A seen=()
+  local invoking='' hardening='' allow=' ' item
+  local first=1 domain_re='^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$'
+  local user_re='^[a-z_][a-z0-9_-]{0,31}$' addr_re='^[0-9a-fA-F.:]{2,45}(/[0-9]{1,3})?$'
+  while IFS= read -r line || [ -n "$line" ]; do
+    n=$((n + 1))
+    if [ "$first" -eq 1 ]; then
+      first=0
+      [ "$line" = '---' ] || fail 'the staged host vars do not start with ---' 65
+      continue
+    fi
+    [ -n "$line" ] || continue
+    if [[ $line =~ ^#\ [A-Za-z0-9\ .,\;\'\(\)-]{0,240}$ ]]; then
+      continue
+    fi
+    if [[ $line =~ ^\ \ -\ \"([^\"]{1,64})\"$ ]]; then
+      [ -n "$list" ] || fail "the staged host vars have a list item without a list (line $n)" 65
+      case $list in
+        fleet_hardening_ssh_allow_users)
+          item=${BASH_REMATCH[1]}
+          [[ $item =~ $user_re ]] || fail "the staged host vars have an invalid SSH user (line $n)" 65
+          allow+="$item " ;;
+        fleet_hardening_trusted_ips) [[ ${BASH_REMATCH[1]} =~ $addr_re ]] || fail "the staged host vars have an invalid address (line $n)" 65 ;;
+      esac
+      items=$((items + 1))
+      [ "$items" -le 64 ] || fail 'the staged host vars list more than 64 entries' 65
+      continue
+    fi
+    list=''
+    items=0
+    if ! [[ $line =~ ^([a-z_]+):\ ?(.*)$ ]]; then
+      fail "the staged host vars have an unacceptable line ($n)" 65
+    fi
+    key=${BASH_REMATCH[1]}
+    local value=${BASH_REMATCH[2]}
+    [ -z "${seen[$key]:-}" ] || fail "the staged host vars repeat a key (line $n)" 65
+    seen[$key]=1
+    case $key in
+      fleet_domain)
+        [[ $value =~ ^\"([^\"]+)\"$ && ${BASH_REMATCH[1]} =~ $domain_re ]] || fail "the staged host vars have an invalid domain (line $n)" 65 ;;
+      fleet_acme_email)
+        [[ $value =~ ^\"([A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253})?\"$ ]] || fail "the staged host vars have an invalid ACME e-mail (line $n)" 65 ;;
+      fleet_shell_profile | fleet_hardening_enabled | fleet_hardening_tmp)
+        [[ $value = true || $value = false ]] || fail "the staged host vars have a non-boolean $key (line $n)" 65
+        [ "$key" != fleet_hardening_enabled ] || hardening=$value ;;
+      fleet_hardening_firewall_grace_minutes)
+        [[ $value =~ ^[0-9]{1,3}$ ]] && [ "$((10#$value))" -ge 2 ] && [ "$((10#$value))" -le 120 ] || fail "the firewall grace period must be 2 to 120 minutes (line $n)" 65 ;;
+      fleet_hardening_invoking_user)
+        [[ $value =~ ^\"([^\"]+)\"$ ]] && invoking=${BASH_REMATCH[1]} && [[ $invoking =~ $user_re ]] || fail "the staged host vars have an invalid SSH account (line $n)" 65 ;;
+      fleet_hardening_ssh_allow_users | fleet_hardening_trusted_ips)
+        if [ "$value" = '[]' ]; then
+          :
+        elif [ -z "$value" ]; then
+          list=$key
+        else
+          fail "the staged host vars have a malformed list $key (line $n)" 65
+        fi ;;
+      *) fail "the staged host vars have an unknown key (line $n)" 65 ;;
+    esac
+  done <"$file"
+  [ -n "${seen[fleet_domain]:-}" ] || fail 'the staged host vars have no fleet_domain' 65
+  [ -n "${seen[fleet_hardening_enabled]:-}" ] || fail 'the staged host vars do not say whether hardening is on' 65
+  # Lock-out safety: hardening on needs the account the admin logs in with, and that account must be allowed to log in.
+  if [ "$hardening" = true ]; then
+    [ -n "$invoking" ] || fail 'hardening needs fleet_hardening_invoking_user (the SSH account you log in with)' 65
+    [[ $allow == *" $invoking "* ]] || fail 'the SSH account you log in with is not in the SSH allow list' 65
+  fi
+}
+
+# apply_provision: install the staged host answers (when staged), then run the installed tag's playbook.
+# A failed run restores the answers file only (and only when this run installed one); it does not undo a half-applied run.
+apply_provision() {
+  local etc="$ROOT$PROVISION_ETC" install_dir="$ROOT$PROVISION_INSTALL_DIR" playbook ref version_file facts owner mode
+  local vars="$etc/host-vars.yml" cmd=() rc=0 installed=0
+
+  if stage_in host-vars.yml "$PRIV/host-vars.yml"; then
+    provision_check_host_vars "$PRIV/host-vars.yml"
+    keep_previous "$vars" host-vars
+    put_file "$PRIV/host-vars.yml" "$vars" 0644 root root || fail 'could not write the host vars'
+    installed=1
+    printf 'apply: host vars installed\n'
+  fi
+
+  # The playbook comes from the root-owned export of the installed tag, never from the fleet-writable checkout.
+  playbook="$install_dir/ansible/site.yml"
+  [ -f "$playbook" ] && [ ! -L "$playbook" ] || fail 'the installed playbook is missing (this host was not installed with --engine=ansible?)' 66
+  facts=$(stat -c '%U|%a' -- "$install_dir" "$install_dir/ansible" "$playbook") || fail 'cannot inspect the installed playbook' 65
+  while IFS='|' read -r owner mode; do
+    if [ "$AS_ROOT" -eq 1 ] && [ "$owner" != root ]; then
+      fail 'the installed playbook tree is not owned by root' 65
+    fi
+    [ $((8#$mode & 8#022)) -eq 0 ] || fail 'the installed playbook tree is writable by group or others' 65
+  done <<<"$facts"
+  [ -f "$vars" ] && [ ! -L "$vars" ] || fail 'there are no host vars (host-vars.yml)' 66
+
+  version_file="$etc/installed-version"
+  [ -r "$version_file" ] || fail 'the installed version is not recorded (installed-version)' 66
+  ref=$(head -n 1 -- "$version_file" | tr -d '[:space:]')
+  ref=${ref%%@*}
+  [[ $ref =~ ^[A-Za-z0-9][A-Za-z0-9._/-]{0,99}$ ]] || fail 'the recorded version is not a valid ref' 65
+
+  # Fixed command line. LC_ALL: the helper runs with C, Ansible refuses anything but a UTF-8 locale.
+  cmd=(env -i "PATH=$PATH" HOME=/root LC_ALL=C.UTF-8 LANG=C.UTF-8 ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 PYTHONUNBUFFERED=1
+    SUDO_USER=fleet ansible-playbook -i 'localhost,' -c local "$playbook"
+    -e "fleet_ref=$ref" -e fleet_hardening_strict=true -e fleet_job_wait=0)
+  printf 'apply: provision %s from %s\n' "$ref" "$PROVISION_INSTALL_DIR"
+  # Closed in the child: the staging directory (4), the staged file (3) and the lock (9, held by this process for the whole run).
+  (cd "$install_dir/ansible" && timeout "$T_PROVISION" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-) || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'apply: provision failed (exit %d)\n' "$rc" >&2
+    # Only when this run installed new answers: the previous answers go back, so the next run does not re-apply a
+    # half-accepted change. This restores the answers file ONLY; it does not undo a half-applied playbook run.
+    [ "$installed" -eq 0 ] || restore_previous "$vars" host-vars 0644 root root
+    exit 1
+  fi
+  printf 'apply: provision finished\n'
+}
+
 pin_staging || true
 case $TARGET in
   caddy) apply_caddy ;;
   authelia) apply_authelia ;;
   slices) apply_slices ;;
+  provision) apply_provision ;;
 esac

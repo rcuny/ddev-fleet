@@ -48,7 +48,7 @@
   when: privileged_tmpfiles is changed or not privileged_history.stat.exists
 
 # A broken sudoers can lock everybody out of sudo: the file is checked before it lands.
-- name: The sudoers line (apply caddy, apply authelia, apply slices, nothing else)
+- name: The sudoers line (apply caddy, apply authelia, apply slices, apply provision, nothing else)
   ansible.builtin.copy:
     src: "{{ fleet_install_dir }}/etc/sudoers-fleet-apply"
     dest: "{{ fleet_sudoers_dir }}/fleet-apply"
