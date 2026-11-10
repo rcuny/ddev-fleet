@@ -155,6 +155,19 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString('the host has no push key', $this->logText($job));
     }
 
+    public function testAnUnregisteredPushKeyIsWarnedAboutInTheDeployLog(): void
+    {
+        $this->project->changeContainerSsh(true);
+        $this->withPushKey();
+        $this->runner->expect(['ssh-agent'], new CommandResult(0, "SSH_AGENT_PID=4242; export SSH_AGENT_PID;\n"));
+        $this->runner->expect(['ssh', '-F', '/dev/null'], new CommandResult(255, '', 'git@git.example.com: Permission denied (publickey).'));
+        $this->workflow = $this->workflowWith(pushCheck: new \App\Fleet\Ssh\PushKeyCheck($this->paths, $this->runner));
+
+        $job = $this->deploy();
+
+        self::assertStringContainsString('warning: The push key is not registered on the git host git.example.com', $this->logText($job));
+    }
+
     public function testAnAgentThatCannotBeStartedFailsTheDeployBeforeDdevStart(): void
     {
         $this->withPushKey();

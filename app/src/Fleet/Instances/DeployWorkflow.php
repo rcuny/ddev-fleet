@@ -26,6 +26,8 @@ use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\CommandRunnerException;
 use App\Fleet\Ssh\AtomicFile;
 use App\Fleet\Ssh\InstanceSshAgent;
+use App\Fleet\Ssh\PushKeyCheck;
+use App\Fleet\Ssh\PushKeyState;
 use Psr\Clock\ClockInterface;
 use Symfony\Component\DependencyInjection\Attribute\AutowireIterator;
 
@@ -61,6 +63,7 @@ final class DeployWorkflow
         #[AutowireIterator('fleet.deploy_step')]
         private readonly iterable $steps = [],
         private readonly ?InstanceCgroupWriter $cgroup = null,
+        private readonly ?PushKeyCheck $pushCheck = null,
     ) {
     }
 
@@ -283,6 +286,26 @@ final class DeployWorkflow
     }
 
     /**
+     * FLE-271: an unregistered push key only shows up when the agent first pushes; say so in the deploy log now. A warning, not a
+     * failure (the instance may only read), and an unreadable remote or an unreachable host never blocks the deploy.
+     */
+    private function warnIfPushKeyNotRegistered(Project $project, JobLog $log): void
+    {
+        if (null === $this->pushCheck) {
+            return;
+        }
+        try {
+            $host = PushKeyCheck::hostFromRemote($project->git());
+            $state = $this->pushCheck->run($host);
+        } catch (\InvalidArgumentException) {
+            return;
+        }
+        if (PushKeyState::NotRegistered === $state || PushKeyState::HostNotTrusted === $state) {
+            $log->line('warning: '.$state->message($host));
+        }
+    }
+
+    /**
      * Ruling (FLE-145): only a project that opted in (`containerSsh`) gets an agent, and only that instance's container
      * mounts its socket; nothing is ever loaded into DDEV's host-wide agent. An agent that cannot be started fails the
      * deploy (an agent instance that cannot push would only find out after its work); a host without a push key only logs.
@@ -304,6 +327,7 @@ final class DeployWorkflow
 
             return [];
         }
+        $this->warnIfPushKeyNotRegistered($project, $log);
         try {
             $this->agent->startFor($instance);
             AtomicFile::write($dir.'/'.InstanceSshAgent::OVERRIDE_FILE, $this->agent->composeOverride($instance->id()), 0o640);
