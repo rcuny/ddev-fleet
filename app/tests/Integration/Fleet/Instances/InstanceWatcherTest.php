@@ -112,6 +112,27 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         self::assertCount(1, $this->runner->callsMatching(['ssh-add', '-t']), 'refreshed again when due');
     }
 
+    public function testTheWatcherKeepsRekeyingTheAgentOfAnUnknownInstanceThatHasOne(): void
+    {
+        mkdir($this->paths->sshDir(), 0o700, true);
+        touch($this->paths->sshPrivateKey(\App\Domain\Ssh\SshKeyRole::Push));
+        $this->project->changeContainerSsh(true);
+        $withAgent = $this->instance('a', 'develop', InstanceState::Unknown);
+        $this->instance('b', 'develop', InstanceState::Unknown);
+        mkdir($this->paths->agentSocketDir($withAgent->id()), 0o700, true);
+        touch($this->paths->agentSocket($withAgent->id()));
+        // ddev list omits both: they stay "unknown". Only the one whose agent answers (ssh-add -l exit 1: no keys) is re-keyed.
+        $this->runner->expect(['ddev', 'list'], $this->ddevList([]));
+        $this->runner->expect(['ssh-add', '-l'], new CommandResult(1, ''));
+
+        $this->watcher(true)->tick($this->clock->now());
+
+        $adds = $this->runner->callsMatching(['ssh-add', '-t']);
+        self::assertCount(1, $adds, 'the key of the unknown instance with an agent is renewed');
+        self::assertSame($this->paths->agentSocket($withAgent->id()), $adds[0]->env['SSH_AUTH_SOCK']);
+        self::assertSame([], $this->runner->callsMatching(['ssh-agent']), 'no agent is started for an unknown instance');
+    }
+
     public function testListFailureMakesThemUnknown(): void
     {
         $a = $this->instance('a', 'develop', InstanceState::Running);

@@ -99,7 +99,7 @@ final class InstanceWatcher
     }
 
     /**
-     * FLE-167: for every running instance of an opted-in project, start() revives a dead agent and renews the key
+     * FLE-167: for every running instance of an opted-in project (and every "unknown" one whose agent still answers), start() revives a dead agent and renews the key
      * lifetime (`ssh-add -t`), so a long-lived instance never loses push after KEY_LIFETIME. A failure is only logged.
      */
     private function superviseAgents(): void
@@ -108,7 +108,15 @@ final class InstanceWatcher
             return;
         }
         foreach ($this->instances->all() as $instance) {
-            if (InstanceState::Running !== $instance->state() || !$instance->project()->containerSsh()) {
+            if (!$instance->project()->containerSsh()) {
+                continue;
+            }
+            // FLE-272: an instance whose state is "unknown" (ddev list omitted it or reported a status Fleet does not map) may
+            // still have a live container and an agent whose key expires after KEY_LIFETIME; keep re-keying an agent that
+            // exists, but never start one for it. A stopped instance has no agent (StopJob stops it).
+            $live = InstanceState::Running === $instance->state()
+                || (InstanceState::Unknown === $instance->state() && $this->agent->isRunning($instance->id()));
+            if (!$live) {
                 continue;
             }
             if (!$this->agent->hasKeyFor($instance)) {
