@@ -53,7 +53,10 @@ Find the shortest path to what you want to do. Pick a journey below, or scan the
 - [Export format](reference/12-export-format.md)
 - [Troubleshooting](reference/13-troubleshooting.md)
 
-**Contributing**
-- [Contributing](contributing/README.md), [development](contributing/01-development.md), [testing](contributing/02-testing.md), [CI](contributing/03-ci.md), [releasing](contributing/04-releasing.md).
+**Contributing** ([index](contributing/README.md))
+- [development](contributing/01-development.md)
+- [testing](contributing/02-testing.md)
+- [CI](contributing/03-ci.md)
+- [releasing](contributing/04-releasing.md).
 
 Every page starts with why you care and what you get; the reference pages hold the details.
