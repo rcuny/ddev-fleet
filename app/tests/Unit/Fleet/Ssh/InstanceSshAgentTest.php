@@ -116,6 +116,18 @@ final class InstanceSshAgentTest extends TestCase
         $this->agent->start(self::ID, ['staging'], false);
     }
 
+    public function testExtrasOnlyAcceptsAFailedRemovalWhenThereIsNoPushKeyOnTheHost(): void
+    {
+        $this->agentIsUp();
+        $this->extraKey('staging');
+        // no push_ed25519.pub: ssh-add -d fails, the key cannot be loaded, the start must go on
+        $this->runner->expect(['ssh-add', '-d'], new CommandResult(1, '', 'No such file'));
+
+        $this->agent->start(self::ID, ['staging'], false);
+
+        $this->addToAssertionCount(1);
+    }
+
     public function testExtrasOnlyAcceptsAFailedRemovalWhenThePushKeyWasNeverLoaded(): void
     {
         $this->agentIsUp();

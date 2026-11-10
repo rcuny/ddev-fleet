@@ -38,7 +38,7 @@ final class TemplateServiceTest extends KernelTestCase
         $this->em = $this->setUpFleetDatabase();
         $this->projects = new ProjectRepository($this->em);
         $this->templates = new TemplateRepository($this->em);
-        $this->service = new TemplateService($this->projects, $this->templates, new \App\Fleet\Ssh\ExtraSshKey(new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy')));
+        $this->service = new TemplateService($this->projects, $this->templates, new \App\Fleet\Ssh\ExtraSshKey($paths = new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy')), new \App\Fleet\Ssh\SshKeysLock($paths));
         $this->blog = new Project('blog', 'https://git.example.com/acme/blog.git');
         $this->projects->save($this->blog);
         $this->projects->save(new Project('shop', 'https://git.example.com/acme/shop.git'));

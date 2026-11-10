@@ -31,8 +31,8 @@ final readonly class TemplateService
         private ProjectRepository $projects,
         private TemplateRepository $templates,
         private ExtraSshKey $sshKeys,
+        private SshKeysLock $keysLock,
         private ?SlicesApplier $slices = null,
-        private ?SshKeysLock $keysLock = null,
     ) {
     }
 
@@ -240,7 +240,7 @@ final readonly class TemplateService
      */
     private function withKeys(TemplateInput $input, callable $work): mixed
     {
-        return [] === $input->sshKeys || null === $this->keysLock ? $work() : $this->keysLock->run($work);
+        return [] === $input->sshKeys ? $work() : $this->keysLock->run($work);
     }
 
     private function project(string $name): Project

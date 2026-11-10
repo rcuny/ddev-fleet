@@ -153,11 +153,15 @@ final readonly class InstanceSshAgent
             return;
         }
 
-        $listed = $this->runner->run(['ssh-add', '-L'], null, $env, null, self::TIMEOUT);
         $line = is_file($public) ? (string) @file_get_contents($public) : '';
         $blob = explode(' ', trim($line))[1] ?? '';
+        if ('' === $blob) {
+            // No push key on this host (extras-only start): there is nothing that could be loaded.
+            return;
+        }
+        $listed = $this->runner->run(['ssh-add', '-L'], null, $env, null, self::TIMEOUT);
         // exit 1 = the agent holds no keys at all; anything else than 0 and 1 means the agent cannot be asked.
-        if (1 !== $listed->exitCode && (!$listed->isSuccess() || '' === $blob || str_contains($listed->stdout, $blob))) {
+        if (1 !== $listed->exitCode && (!$listed->isSuccess() || str_contains($listed->stdout, $blob))) {
             throw new \RuntimeException(\sprintf('The push key could not be removed from the instance\'s ssh-agent (exit %d).', $removed->exitCode));
         }
     }
