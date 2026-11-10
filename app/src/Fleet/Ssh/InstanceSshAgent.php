@@ -196,6 +196,15 @@ final readonly class InstanceSshAgent
             ]]], 5, 2);
     }
 
+    /**
+     * Whether this instance's agent answers on its socket (FLE-272). The status watcher uses it to keep re-keying the agent
+     * of an instance whose state is momentarily "unknown", without ever starting an agent for one that has none.
+     */
+    public function isRunning(string $instanceId): bool
+    {
+        return $this->alive($this->paths->agentSocket($instanceId));
+    }
+
     private function alive(string $socket): bool
     {
         if (!file_exists($socket)) {
