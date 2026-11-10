@@ -188,7 +188,7 @@ final class CaddyfileRendererTest extends TestCase
         self::assertNotFalse($api);
         $block = substr($out, $api, (int) strpos($out, "\n        }\n", $api) - $api + 10);
         self::assertStringContainsString("request_body {\n                max_size 1MB\n            }", $block);
-        self::assertStringContainsString('header ?Cache-Control no-store', $block);
+        self::assertStringContainsString('header >Cache-Control no-store', $block);
         self::assertStringContainsString('read_timeout 30s', $block);
         self::assertStringContainsString('env '.TrustedProxyChecker::PROXY_PARAM.' {env.FLEET_PROXY_SECRET}', $block);
         self::assertStringNotContainsString('Access-Control', $out, 'no CORS: the API is not called from a browser');
@@ -388,12 +388,12 @@ final class CaddyfileRendererTest extends TestCase
                     # authenticates each call itself with a bearer token on a firewall that has no proxy-identity authenticator.
                     # The strip above already removed every Remote-*/Remote_* spelling, so a forged identity never reaches it.
                     # TLS only: this site address is HTTPS, plain HTTP is redirected before any handler runs. Same body cap as the
-                    # hooks, a short upstream timeout, never cached, no CORS header (not called from a browser).
+                    # hooks, a short upstream timeout, never cached (deferred set, so an upstream Cache-Control cannot override it), no CORS header (not called from a browser).
                     handle /api/v1/* {
                         request_body {
                             max_size 1MB
                         }
-                        header ?Cache-Control no-store
+                        header >Cache-Control no-store
                         php_fastcgi unix//run/php/fleet.sock {
                             env FLEET_PROXY_AUTH {env.FLEET_PROXY_SECRET}
                             dial_timeout 5s

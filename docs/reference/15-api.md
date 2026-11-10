@@ -8,10 +8,10 @@ The API lives under `/api/v1/` on the same host name as the web interface and an
 
 Caddy skips the Authelia login for `/api/v1/*` and for nothing else under `/api/`, because the callers are machines. The route is the same host name and certificate as the web interface:
 
-- **Identity headers are stripped first.** Every `Remote-*` and `Remote_*` request header is removed on every path before the gate and before the app, so a forged `Remote-User: admin` never reaches PHP. The `api` firewall has no proxy-identity authenticator either (two independent guards). A test runs the rendered Caddyfile against a real Caddy (`app/tests/Repo/RenderedCaddyApiRouteTest.php`, needs `FLEET_CADDY_BIN`).
+- **Identity headers are stripped first.** Every `Remote-*` and `Remote_*` request header is removed on every path before the gate and before the app, so a forged `Remote-User: admin` never reaches PHP. On the straight `/api/v1/` path the `api` firewall also has no proxy-identity authenticator, a second guard; on odd spellings (upper case, doubled slash) the Caddy strip is the only layer, and a test sends them through a real Caddy. A test runs the rendered Caddyfile against a real Caddy (`app/tests/Repo/RenderedCaddyApiRouteTest.php`, needs `FLEET_CADDY_STOCK_BIN`).
 - **TLS only.** The site address is HTTPS; Caddy redirects plain HTTP itself and no extra listener or firewall rule is added.
 - **Limits.** Request bodies are capped at 1 MB (`413` above), the upstream read and write timeout is 30 seconds, and responses carry `Cache-Control: no-store`. No CORS header is sent: the API is not called from a browser.
-- During setup (before the wizard is finished) the setup gate redirects everything but the wizard, so the API is closed until then.
+- During setup (before the wizard is finished) the setup gate redirects everything but the wizard, so the API is closed until then (a test pins that the setup gate does not list `/api`).
 
 ## Authenticating
 

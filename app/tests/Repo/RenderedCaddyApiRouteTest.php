@@ -15,13 +15,14 @@ use App\Fleet\System\GateMode;
 use App\Fleet\System\GateWriter;
 use App\Tests\Support\FixedOvhEndpoint;
 use App\Tests\Support\SystemTemplates;
+use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
  * FLE-274 (SR2): the /api/v1/* bypass against a REAL Caddy. The rendered Caddyfile (Authelia gate) is adapted to JSON,
  * the PHP socket is pointed at a tiny FastCGI responder that echoes the parameters it received, the listener is moved
  * to a high loopback port without TLS, and requests are sent over a raw socket so the exact header spelling is ours.
- * Needs FLEET_CADDY_BIN (see RenderedCaddyfileValidatesTest) and skips without it.
+ * Needs FLEET_CADDY_STOCK_BIN (a stock Caddy, see ci/fetch-caddy.sh) or, failing that, FLEET_CADDY_BIN; skips without one.
  */
 final class RenderedCaddyApiRouteTest extends TestCase
 {
@@ -34,9 +35,9 @@ final class RenderedCaddyApiRouteTest extends TestCase
 
     protected function setUp(): void
     {
-        $bin = getenv('FLEET_CADDY_BIN');
+        $bin = getenv('FLEET_CADDY_STOCK_BIN') ?: getenv('FLEET_CADDY_BIN');
         if (false === $bin || '' === $bin || !is_executable($bin)) {
-            self::markTestSkipped('FLEET_CADDY_BIN is not set to an executable Caddy.');
+            self::markTestSkipped('Neither FLEET_CADDY_STOCK_BIN nor FLEET_CADDY_BIN is set to an executable Caddy.');
         }
         $this->tree = sys_get_temp_dir().'/fleet-caddy-api-'.bin2hex(random_bytes(6));
         mkdir($this->tree.'/etc/caddy/fleet', 0o700, true);
@@ -133,6 +134,7 @@ final class RenderedCaddyApiRouteTest extends TestCase
     {
         $response = $this->request('GET', '/api/v1/tokens/self', []);
 
+        // The test upstream answers with `Cache-Control: public, max-age=3600`; Caddy must replace it, not add to it.
         self::assertSame('no-store', $response['headers']['cache-control'] ?? null);
         self::assertArrayNotHasKey('access-control-allow-origin', $response['headers']);
     }
@@ -158,19 +160,42 @@ final class RenderedCaddyApiRouteTest extends TestCase
         self::assertSame(200, $this->request('GET', '/health', [])['status']);
     }
 
-    public function testPathTricksDoNotSmuggleAnIdentityPastTheGate(): void
+    /**
+     * Every path variant carries forged identity headers. The request either reaches PHP (200: then no HTTP_REMOTE_*
+     * parameter may be there, and the URI is the one we expect) or is stopped at the login gate (never a 200 from PHP
+     * for an authenticated UI path). The strip is the single layer on these paths.
+     */
+    #[DataProvider('pathTricks')]
+    public function testPathTricksDoNotSmuggleAnIdentityPastTheGate(string $path, bool $reachesPhp): void
     {
-        // Whatever Caddy matches as the API (case, doubled slashes, dot segments, encoded slash), the strip came first.
-        foreach (['/API/V1/tokens/self', '//api/v1/tokens/self', '/api/v1/../admin', '/api/v1/%2e%2e/admin', '/api/v1%2f..%2fadmin'] as $path) {
-            $response = $this->request('GET', $path, ['Remote-User: admin', 'Remote_Groups: fleet-admins']);
+        $response = $this->request('GET', $path, ['Remote-User: admin', 'Remote_Groups: fleet-admins', 'REMOTE-EMAIL: a@example.com']);
 
-            if (200 === $response['status']) {
-                foreach (array_keys($response['json']['params']) as $name) {
-                    self::assertDoesNotMatchRegularExpression('/^HTTP_REMOTE_/i', (string) $name, $path.' leaked '.$name);
-                }
-            }
+        if (!$reachesPhp) {
+            self::assertNotSame(200, $response['status'], $path.' must not reach PHP; the gate is closed to it');
+            self::assertSame([], $response['json']['params'], $path.' must not reach PHP');
+
+            return;
         }
-        $this->addToAssertionCount(1);
+        self::assertSame(200, $response['status'], $path.' is an API path and must reach the app');
+        $params = $response['json']['params'];
+        self::assertNotSame([], $params, $path.' must reach PHP');
+        foreach (array_keys($params) as $name) {
+            self::assertDoesNotMatchRegularExpression('/^HTTP_REMOTE_/i', (string) $name, $path.' leaked '.$name);
+        }
+        self::assertSame($path, $params['REQUEST_URI'] ?? null, $path.' reached PHP under a different URI');
+    }
+
+    /** @return iterable<string, array{string, bool}> */
+    public static function pathTricks(): iterable
+    {
+        yield 'plain' => ['/api/v1/tokens/self', true];
+        yield 'index.php under the API' => ['/api/v1/index.php/admin', true];
+        yield 'doubled slash' => ['//api/v1/tokens/self', true];
+        yield 'upper case' => ['/API/V1/tokens/self', true];
+        yield 'upper case short' => ['/API/V1/x', true];
+        yield 'dot segments' => ['/api/v1/../admin', false];
+        yield 'encoded dot segments' => ['/api/v1/%2e%2e/admin', false];
+        yield 'encoded slash' => ['/api/v1%2f..%2fadmin', false];
     }
 
     /**
@@ -274,7 +299,7 @@ final class RenderedCaddyApiRouteTest extends TestCase
                             };
                             while ($o < $n) { $nl = $len(); $vl = $len(); $params[substr($rawParams, $o, $nl)] = substr($rawParams, $o + $nl, $vl); $o += $nl + $vl; }
                             $payload = json_encode(['params' => $params, 'stdin' => $stdin]);
-                            fwrite($c, $record(6, $r['id'], "Status: 200 OK\r\nContent-Type: application/json\r\n\r\n".$payload));
+                            fwrite($c, $record(6, $r['id'], "Status: 200 OK\r\nContent-Type: application/json\r\nCache-Control: public, max-age=3600\r\n\r\n".$payload));
                             fwrite($c, $record(6, $r['id'], ''));
                             fwrite($c, $record(3, $r['id'], pack('NCCCCCC', 0, 0, 0, 0, 0, 0, 0)));
                             break;

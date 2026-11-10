@@ -70,6 +70,15 @@ final class GateWriterTest extends TestCase
         self::assertSame(['validate', 'reload'], $verbs);
     }
 
+    public function testSetupGateClosesTheApiToo(): void
+    {
+        $this->writer()->write(GateMode::Setup);
+
+        $gate = (string) file_get_contents($this->gate($this->root.'/srv/caddy'));
+        // The closed matcher is "not one of the wizard paths": /api/v1/* is not listed, so it is redirected like any path.
+        self::assertStringNotContainsString('/api', $gate);
+    }
+
     public function testAutheliaGateExemptsHealthAndHooks(): void
     {
         $this->writer()->write(GateMode::Authelia);
