@@ -1,0 +1,121 @@
+---
+# A re-run is an upgrade: php-fpm and the workers keep running the code and the environment they started with
+# (opcache.validate_timestamps=0; an EnvironmentFile is read at start), so they are reloaded or restarted here when the
+# environment, the code or a unit file changed, and only then. A run that changed nothing restarts nothing.
+# (Bash also restarted Caddy and Authelia on every run. Authelia now restarts with its configuration, in render.yml;
+# Caddy restarts when fleet_caddy_changed is set by the role that refreshes its binary.)
+- name: Decide what a change restarts
+  ansible.builtin.set_fact:
+    units_env: "{{ fleet_env_changed | default(false) | bool }}"
+    units_code: "{{ fleet_code_changed | default(false) | bool }}"
+    units_fpm: "{{ fleet_fpm_changed | default(false) | bool }}"
+    units_mercure_restart: "{{ fleet_mercure_changed | default(false) | bool }}"
+    units_worker_restart: >-
+      {{ fleet_code_changed | default(false) | bool or fleet_env_changed | default(false) | bool or
+      fleet_worker_unit_changed | default(false) | bool }}
+    units_scheduler_restart: >-
+      {{ fleet_code_changed | default(false) | bool or fleet_env_changed | default(false) | bool or
+      fleet_scheduler_unit_changed | default(false) | bool }}
+
+- name: Enable the services
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+  loop: "{{ units_enable }}"
+
+- name: Restart php-fpm (its pool, settings or environment changed)
+  ansible.builtin.systemd_service:
+    name: php8.4-fpm
+    state: restarted
+  when: units_fpm or units_env
+
+- name: Reload php-fpm (only the code changed; it starts the service when it is stopped)
+  ansible.builtin.command: systemctl reload-or-restart php8.4-fpm  # noqa: command-instead-of-module
+  changed_when: true
+  when: units_code and not (units_fpm or units_env)
+
+- name: Start php-fpm
+  ansible.builtin.systemd_service:
+    name: php8.4-fpm
+    state: started
+  when: not (units_fpm or units_env or units_code)
+
+- name: Restart the Mercure hub (binary, configuration, unit or keys changed)
+  ansible.builtin.systemd_service:
+    name: fleet-mercure
+    state: restarted
+  when: units_mercure_restart
+
+- name: Start the Mercure hub
+  ansible.builtin.systemd_service:
+    name: fleet-mercure
+    state: started
+  when: not units_mercure_restart
+
+- name: Start Authelia
+  ansible.builtin.systemd_service:
+    name: authelia
+    state: started
+
+- name: List the running workers
+  ansible.builtin.command: systemctl list-units --plain --no-legend --state=active 'fleet-worker@*.service'  # noqa: command-instead-of-module
+  register: units_workers
+  changed_when: false
+  check_mode: false
+
+- name: Restart the workers (fleet-worker@1 is always among them) and the status watcher
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: restarted
+  loop: >-
+    {{ ['fleet-worker@1.service'] +
+    (units_workers.stdout_lines | map('split', ' ') | map('first') | reject('equalto', 'fleet-worker@1.service') | list) +
+    ['fleet-status.service'] }}
+  when: units_worker_restart
+
+- name: Start the worker and the status watcher
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    state: started
+  loop: [fleet-worker@1.service, fleet-status.service]
+  when: not units_worker_restart
+
+# The schedule ticker runs the same code and environment as the workers.
+- name: Restart the schedule ticker
+  ansible.builtin.systemd_service:
+    name: fleet-scheduler
+    state: restarted
+  when: units_scheduler_restart
+
+- name: Start the schedule ticker
+  ansible.builtin.systemd_service:
+    name: fleet-scheduler
+    state: started
+  when: not units_scheduler_restart
+
+- name: Restart Caddy (its binary was refreshed)
+  ansible.builtin.systemd_service:
+    name: caddy
+    state: restarted
+  when: fleet_caddy_changed | bool
+
+- name: Start Caddy
+  ansible.builtin.systemd_service:
+    name: caddy
+    state: started
+  when: not (fleet_caddy_changed | bool)
+
+# The timers (units written above). enable + start is a no-op when they already run.
+- name: Enable and start the timers
+  ansible.builtin.systemd_service:
+    name: "{{ item }}"
+    enabled: true
+    state: started
+  loop: "{{ units_timers }}"
+
+# The agent workspace is never restarted: that would end the operators' panes.
+- name: Enable and start the agent workspace
+  ansible.builtin.systemd_service:
+    name: fleet-tmux.service
+    enabled: true
+    state: started

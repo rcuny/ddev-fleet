@@ -32,6 +32,15 @@
       tags: [packages]
     - role: docker
       tags: [docker]
+    # The application layer, always on (replaces install/steps/70, 80, 85, 90, 95 and 98).
+    - role: php_app
+      tags: [php_app, app]
+    - role: app_code
+      tags: [app_code, app]
+    - role: privileged
+      tags: [privileged, app]
+    - role: units
+      tags: [units, app]
     - role: hardening
       when: fleet_hardening_enabled | bool
       tags: [hardening]

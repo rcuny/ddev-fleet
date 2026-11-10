@@ -1,0 +1,7 @@
+---
+# Counts the jobs that are running, reading the database directly (run as: php8.4 -r <this> <database>).
+app_code_jobs_php: |-
+  try {
+    $p = new PDO("sqlite:".$argv[1]);
+    echo (int) $p->query("SELECT COUNT(*) FROM job WHERE status = \"running\"")->fetchColumn();
+  } catch (Throwable) { echo 0; }
