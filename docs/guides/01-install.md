@@ -39,7 +39,7 @@ One command turns a fresh Debian 13 host into a working Fleet with real HTTPS, a
    | Administrator | Username (fixed afterwards), name, email, a password of 12 to 128 characters. |
    | Domain and certificates | `http01` (default), or `ovh_dns` for a wildcard certificate through the OVH API. |
    | SSH keys | Copy the deploy and push public keys to your git server (push key with write access), or import your own. |
-   | Claude token | Optional: the output of `claude setup-token`. |
+   | Claude token | Optional: the output of `claude setup-token`, run on any machine with Claude Code and a browser (not needed on the host). You can set it later, see [work with agents](05-work-with-agents.md#the-claude-token). |
    | Finish | Writes the administrator into the login portal and switches Caddy to the sign-in gate. |
 
 4. Press **Finish**. It takes seconds to minutes; if it fails, fix the cause and press it again.
