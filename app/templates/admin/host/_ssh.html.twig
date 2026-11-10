@@ -51,6 +51,15 @@
                         <p class="text-xs text-ink-muted" data-testid="ssh-key-in-use">In use: take it out of the template(s) above before you delete it.</p>
                     {% endif %}
                 {% else %}
+                    {% if key.id == 'push' %}
+                        <form method="post" action="{{ path('ssh_key_check_push') }}" class="grid gap-2" data-testid="ssh-key-check-push-form">
+                            {{ include('setup/_csrf.html.twig') }}
+                            <twig:Label for="ssh-check-host">Git host</twig:Label>
+                            <twig:Input id="ssh-check-host" name="host" value="bitbucket.org" class="h-11 md:h-8" data-testid="ssh-key-check-host" />
+                            <p class="text-xs text-ink-muted">Tests this key alone (not ~/.ssh/config, not an agent): is it registered on that git host?</p>
+                            <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-check-push">Check the push key</twig:Button>
+                        </form>
+                    {% endif %}
                     <form method="post" action="{{ path('ssh_key_rotate', {role: key.id}) }}" class="grid gap-2" data-testid="ssh-key-rotate-form">
                         {{ include('setup/_csrf.html.twig') }}
                         <label class="flex items-start gap-2 font-normal text-ink-body">
