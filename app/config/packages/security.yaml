@@ -8,6 +8,19 @@ security:
         ROLE_ADMIN: [ROLE_MEMBER]
 
     firewalls:
+        api:
+            # The token API (FLE-273). Its own firewall, first match wins: it has NO RemoteUserAuthenticator and no
+            # stand-in, so a forged Remote-User header (or a session, or an Authelia identity) is never an identity
+            # here. Bearer header only: the query-string and body extractors are deliberately not enabled (logged URLs).
+            pattern: ^/api/
+            stateless: true
+            provider: users_in_memory
+            access_token:
+                token_handler: App\Security\Api\ApiTokenHandler
+                token_extractors: header
+                failure_handler: App\Security\Api\ApiEntryPoint
+            entry_point: App\Security\Api\ApiEntryPoint
+            access_denied_handler: App\Security\Api\ApiAccessDeniedHandler
         dev:
             # Dev tools and static assets are never authenticated.
             pattern: ^/(_profiler|_wdt|assets)/
@@ -31,6 +44,8 @@ security:
         - { path: ^/_dev/stand-in/(admin|member|none)$, roles: PUBLIC_ACCESS }
         # The setup wizard has its own gate (App\Setup\SetupAccessSubscriber: one-time token session, 404 once complete).
         - { path: ^/setup(/|$), roles: PUBLIC_ACCESS }
+        # The token API: only an ApiTokenUser (ROLE_API, which no person has) gets in; scopes are checked per endpoint.
+        - { path: ^/api/, roles: ROLE_API }
         - { path: ^/admin, roles: ROLE_ADMIN }
         # The live component endpoint serves any registered component by name. It only requires a signed-in user:
         # every #[AsLiveComponent] class declares its own #[IsGranted] (ComponentsAccessTest fails a component

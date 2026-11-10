@@ -63,6 +63,7 @@ services:
             # Doctrine builds the DBAL type itself (config/packages/doctrine.yaml); it is not a service.
             - '../src/Doctrine/UtcDateTimeImmutableType.php'
             # Entities are mapped, not services (DoctrineTypesAndEntitiesTest keeps this list complete).
+            - '../src/Domain/ApiToken/ApiToken.php'
             - '../src/Domain/Audit/AuditEntry.php'
             - '../src/Domain/Host/HostSettings.php'
             - '../src/Domain/Instance/Instance.php'
@@ -245,6 +246,14 @@ when@test:
         App\Fleet\PortMirror\TraefikDirectory:
             arguments:
                 $home: '%env(resolve:FLEET_HOME)%/user-home'
+
+        # Public so the API tests can issue tokens and read the audit log from the test container (FLE-273).
+        App\Api\Token\ApiTokenIssuer:
+            autowire: true
+            public: true
+        App\Fleet\Audit\AuditLog:
+            autowire: true
+            public: true
 
         # Public so functional tests can swap in a stub.
         App\Health\HealthChecker:
