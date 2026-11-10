@@ -25,6 +25,7 @@ final class UpgradePageTest extends AdminTestCase
     protected function tearDown(): void
     {
         $this->clearCaches();
+        @unlink($this->tempHomeDir().'/test-installed-engine');
         parent::tearDown();
     }
 
@@ -55,6 +56,20 @@ final class UpgradePageTest extends AdminTestCase
         self::assertCount(1, $page->filter('[data-testid=upgrade-history-empty]'));
         self::assertCount(1, $page->filter('[data-testid=upgrade-preflight]'));
         self::assertCount(0, $page->filter('[data-testid=upgrade-offline]'));
+    }
+
+    public function testThePageNamesTheInstallEngine(): void
+    {
+        $this->install('v1.1.0');
+        $this->seedCatalog(['v1.1.0'], '2026-11-03T10:00:00+00:00');
+
+        // No record: a host installed before the record existed is bash.
+        $page = $this->open(self::PAGE);
+        self::assertSame('bash', trim($page->filter('[data-testid=upgrade-engine]')->text()));
+
+        file_put_contents($this->tempHomeDir().'/test-installed-engine', "ansible\n");
+        $page = $this->open(self::PAGE);
+        self::assertSame('ansible', trim($page->filter('[data-testid=upgrade-engine]')->text()));
     }
 
     public function testNoBadgeWhenCurrent(): void

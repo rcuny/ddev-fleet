@@ -9,6 +9,7 @@ use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Schedule\ScheduleRepository;
+use App\Domain\Template\SshIdentities;
 use App\Domain\Webhook\WebhookRepository;
 use App\Domain\Webhook\WebhookSource;
 use App\Fleet\Audit\AuditLog;
@@ -534,6 +535,7 @@ final readonly class ProjectImporter
             $template['post_deploy']['tty1'],
             $template['post_deploy']['tty2'],
             $template['ssh_keys'],
+            sshIdentities: SshIdentities::from($template['ssh_identities']),
         );
     }
 

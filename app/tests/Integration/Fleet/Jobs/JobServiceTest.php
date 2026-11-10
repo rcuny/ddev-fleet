@@ -80,7 +80,7 @@ final class JobServiceTest extends JobTestCase
                 $this->records[] = [(string) $message, $context];
             }
         };
-        $service = new \App\Fleet\Jobs\JobService($this->jobs, $this->bus, $this->feed, $this->reader, $this->clock, $logger);
+        $service = new \App\Fleet\Jobs\JobService($this->jobs, $this->bus, $this->feed, $this->reader, $this->clock, $logger, new \Symfony\Component\EventDispatcher\EventDispatcher());
         $this->bus->failWith = new \RuntimeException('queue is down');
 
         $service->enqueue(new \App\Domain\Job\Job('deploy', 'acme--main', 'acme', JobTrigger::Ui, 'admin'));
@@ -107,7 +107,7 @@ final class JobServiceTest extends JobTestCase
                 throw new \RuntimeException('... and something later in the chain threw');
             }
         };
-        $service = new \App\Fleet\Jobs\JobService($this->jobs, $bus, $this->feed, $this->reader, $this->clock, new \Psr\Log\NullLogger());
+        $service = new \App\Fleet\Jobs\JobService($this->jobs, $bus, $this->feed, $this->reader, $this->clock, new \Psr\Log\NullLogger(), new \Symfony\Component\EventDispatcher\EventDispatcher());
 
         $service->enqueue($job);
 

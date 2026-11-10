@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # The tmux workspace and agents
 
 Fleet keeps one persistent tmux session on the host with a window for every instance. It is the place where you, a colleague or a coding agent such as Claude Code work inside an instance, and it is one of Fleet's most useful features. You can follow what happens in every instance at a glance, leave a long run or an agent working after you disconnect, and step in whenever you want to. An agent is optional: the workspace is just as useful for runners, logs and your own shell.
@@ -63,13 +56,14 @@ Pair it with the Jira rule from [automate deploys](03-automate-deploys.md): movi
 
 ## The Claude token
 
-1. Run `fleet claude:token:set` (hidden prompt; or **Host settings, Claude token**).
-2. Deploy. The token is exposed in the container as `CLAUDE_CODE_OAUTH_TOKEN`, so no command line or log holds it.
-3. To rotate, a running instance keeps its old token and a new one restarts its containers (ending a running agent), so it is manual: `fleet claude:token:apply --all --yes`.
+1. Mint a token with `claude setup-token` on any machine that has Claude Code and a browser (your workstation is fine; the installer does not put the Claude CLI on the host). It signs you in and prints a long-lived token (about a year).
+2. Store it with `fleet claude:token:set` (hidden prompt; or **Host settings, Claude token**).
+3. Deploy. The token is exposed in the container as `CLAUDE_CODE_OAUTH_TOKEN`, so no command line or log holds it.
+4. To rotate, mint and store a new token the same way. A running instance keeps its old token and a new one restarts its containers (ending a running agent), so it is manual: `fleet claude:token:apply --all --yes`.
 
 ## Git over SSH in the container
 
-Opt-in per project (on the **Keys & secrets** tab, or `--container-ssh`). The instance gets its own ssh-agent holding the push key for 24 hours; no key file enters a container. Anyone with a process in that container can use the key while the agent runs, so enable it only where agents need to push. Trust a new git server with `fleet ssh:trust git.example.com`.
+Opt-in per project (on the **Keys & secrets** tab, or `--container-ssh`). The instance gets its own ssh-agent holding the push key for 24 hours; no key file enters a container. Anyone with a process in that container can use the key while the agent runs, so enable it only where agents need to push. Trust a new git server with `fleet ssh:trust git.example.com`. Which key does what, extra keys and the "extras only" template option: [SSH keys](../reference/14-ssh-keys.md). Never put `ddev auth ssh` in a template: it loads keys into DDEV's shared agent.
 
 Check it all with `fleet workspace:check` (push key, git identity, token). Success: it reports every check true.
 

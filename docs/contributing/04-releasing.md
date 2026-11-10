@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Releasing
 
 A release is a tag on `main` with a changelog operators can trust. This page covers the branch model, how to write changelog fragments, and how to cut a release or a hotfix.

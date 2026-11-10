@@ -5,11 +5,13 @@ declare(strict_types=1);
 namespace App\Controller\Admin;
 
 use App\Domain\Project\Project;
+use App\Domain\Template\SshIdentities;
 use App\Domain\Template\Template;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Refused;
+use App\Fleet\Projects\Rule\SharedAgentCommands;
 use App\Fleet\Projects\TemplateInput;
 use App\Fleet\Projects\TemplateService;
 use App\Fleet\Projects\ValidationFailed;
@@ -92,17 +94,19 @@ final class TemplateController extends AbstractController
             $lists = $this->lists($form, $data);
             if (null !== $lists) {
                 try {
-                    $this->templates->create($name, new TemplateInput(
+                    $created = $this->templates->create($name, new TemplateInput(
                         name: self::text($data['name'] ?? null),
                         drupalEnv: self::optionalText($data['drupalEnv'] ?? null),
                         postDeploy: $lists['postDeploy'],
                         tty1: $lists['tty1'],
                         tty2: $lists['tty2'],
                         sshKeys: $lists['sshKeys'],
+                        sshIdentities: SshIdentities::tryFrom(self::text($data['sshIdentities'] ?? null)) ?? SshIdentities::PushAndExtras,
                         cpuThreads: self::optionalInt($data['cpuThreads'] ?? null),
                         slots: self::optionalInt($data['slots'] ?? null),
                     ));
                     $this->addFlash('success', 'Template created.');
+                    $this->warnShared($created);
 
                     return $this->redirectToRoute('project_templates', ['name' => $name], Response::HTTP_SEE_OTHER);
                 } catch (ValidationFailed $failed) {
@@ -128,6 +132,7 @@ final class TemplateController extends AbstractController
             'tty1' => implode("\n", $stored->tty1()),
             'tty2' => implode("\n", $stored->tty2()),
             'sshKeys' => implode("\n", $stored->sshKeys()),
+            'sshIdentities' => $stored->sshIdentities()->value,
             'cpuThreads' => $stored->cpuThreads(),
             'slots' => $stored->slots(),
         ], ['mode' => TemplateType::EDIT] + $this->projectLimits($project));
@@ -138,16 +143,18 @@ final class TemplateController extends AbstractController
             $lists = $this->lists($form, $data);
             if (null !== $lists) {
                 try {
-                    $this->templates->update($name, $template, TemplateInput::fromTemplate($stored)->with([
+                    $saved = $this->templates->update($name, $template, TemplateInput::fromTemplate($stored)->with([
                         'drupalEnv' => self::optionalText($data['drupalEnv'] ?? null),
                         'postDeploy' => $lists['postDeploy'],
                         'tty1' => $lists['tty1'],
                         'tty2' => $lists['tty2'],
                         'sshKeys' => $lists['sshKeys'],
+                        'sshIdentities' => SshIdentities::tryFrom(self::text($data['sshIdentities'] ?? null)) ?? SshIdentities::PushAndExtras,
                         'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
                         'slots' => self::optionalInt($data['slots'] ?? null),
                     ]));
                     $this->addFlash('success', 'Template saved.');
+                    $this->warnShared($saved);
 
                     return $this->redirectToRoute('project_templates', ['name' => $name], Response::HTTP_SEE_OTHER);
                 } catch (ValidationFailed $failed) {
@@ -262,6 +269,13 @@ final class TemplateController extends AbstractController
     private static function optionalInt(mixed $value): ?int
     {
         return \is_int($value) ? $value : null;
+    }
+
+    private function warnShared(Template $template): void
+    {
+        foreach (SharedAgentCommands::forTemplate($template) as $warning) {
+            $this->addFlash('warning', 'Saved, but: '.$warning);
+        }
     }
 
     private static function text(mixed $value): string

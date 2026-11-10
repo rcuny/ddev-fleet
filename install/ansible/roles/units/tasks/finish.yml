@@ -71,6 +71,15 @@
     group: root
   when: fleet_code_revision | default('') | length > 0
 
+# Which engine installed the host: `fleet upgrade` runs the same one again (the bash steps write "bash").
+- name: Record the install engine
+  ansible.builtin.copy:
+    content: "ansible\n"
+    dest: "{{ fleet_etc_dir }}/installed-engine"
+    mode: "0644"
+    owner: root
+    group: root
+
 # The one-time setup URL is a credential: the playbook never mints or prints it, so it cannot reach an Ansible log.
 # The bootstrap prints it in its final notes (`fleet setup:token`), as the bash installer does.
 - name: Say how to get the setup URL

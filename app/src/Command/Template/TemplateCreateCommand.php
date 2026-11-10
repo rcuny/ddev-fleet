@@ -7,6 +7,7 @@ namespace App\Command\Template;
 use App\Command\Support\FieldErrors;
 use App\Command\Support\JsonOutput;
 use App\Command\Support\Shapes;
+use App\Fleet\Projects\Rule\SharedAgentCommands;
 use App\Fleet\Projects\TemplateInput;
 use App\Fleet\Projects\TemplateService;
 use Symfony\Component\Console\Attribute\AsCommand;
@@ -38,7 +39,7 @@ final class TemplateCreateCommand extends Command
         return $out->run(function () use ($input, $out): void {
             $project = (string) $input->getArgument('project');
             $template = $this->templates->create($project, new TemplateInput((string) $input->getArgument('name'))->with(TemplateOptions::changes($input, false)));
-            $out->emit(Shapes::template($template), static function (JsonOutput $out) use ($template, $project): void {
+            $out->emit($out->withWarning(Shapes::template($template), [] === ($w = SharedAgentCommands::forTemplate($template)) ? null : implode(' ', $w)), static function (JsonOutput $out) use ($template, $project): void {
                 $out->success(\sprintf('Template "%s" created in project "%s".', $template->name(), $project));
             });
         });

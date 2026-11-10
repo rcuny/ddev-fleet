@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Export format
 
 Moving a project to another host should take minutes, not an afternoon. Export writes one JSON file with the project's setup; import shows what would change before it writes anything. When to use it: [operate](../guides/07-operate.md). Administrators only.
@@ -13,7 +6,7 @@ Moving a project to another host should take minutes, not an afternoon. Export w
 
 | Included | Not included |
 |---|---|
-| `project` settings and the names of its ports; `ports` (public and router numbers); every `templates` entry; `webhooks` rules; `schedules` of its instances (by label, e.g. `main`); `secrets` only with a passphrase. | Assets, users, SSH keys, host settings, instance state, webhook URLs and secrets (the new host issues its own: use **Rotate** on the Integrations tab). |
+| `project` settings and the names of its ports; `ports` (public and router numbers); every `templates` entry (including `ssh_keys` names and the optional `ssh_identities`, `push_and_extras` or `extras_only`); `webhooks` rules; `schedules` of its instances (by label, e.g. `main`); `secrets` only with a passphrase. | Assets, users, SSH keys, host settings, instance state, webhook URLs and secrets (the new host issues its own: use **Rotate** on the Integrations tab). |
 
 The file starts with `"format": "fleet-project-export"` and `"version": 1`. A host refuses a version it does not know.
 

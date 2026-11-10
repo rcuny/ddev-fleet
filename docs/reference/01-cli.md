@@ -1,12 +1,6 @@
----
-Author: Claude Code
-Reviewer: none
-Type: documentation
----
-
 # CLI reference
 
-Every public `fleet` command (89), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (93), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -177,7 +171,7 @@ Deploy recipes of a project.
 Create a template in a project.
 
 ```
-fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--format FORMAT] [--json] [--] <project> <name>
+fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--format FORMAT] [--json] [--] <project> <name>
 ```
 
 | Argument | Required | Description |
@@ -192,6 +186,7 @@ fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--t
 | `--tty1=VALUE (repeatable)` |  | Command line typed into the first instance terminal (repeat for several; replaces the old list) |  |
 | `--tty2=VALUE (repeatable)` |  | Command line typed into the second instance terminal (repeat for several; replaces the old list) |  |
 | `--ssh-key=VALUE (repeatable)` |  | Name of an extra SSH key (the file ssh/_ed25519 in the fleet home) loaded into the instance's ssh-agent; the project needs container_ssh (repeat for several; replaces the old list) |  |
+| `--ssh-identities=VALUE` |  | Which keys the instance's ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key) |  |
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the template may use together, at most the project's: a number, or none to inherit the project's |  |
 | `--slots=VALUE` |  | Concurrent heavy runs of the template, at most the project's slots: a number, or none for unlimited |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
@@ -256,7 +251,7 @@ fleet template:show [--format FORMAT] [--json] [--] <project> <name>
 Change a template (only the options you give).
 
 ```
-fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--unset UNSET] [--format FORMAT] [--json] [--] <project> <name>
+fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--unset UNSET] [--format FORMAT] [--json] [--] <project> <name>
 ```
 
 | Argument | Required | Description |
@@ -271,6 +266,7 @@ fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--t
 | `--tty1=VALUE (repeatable)` |  | Command line typed into the first instance terminal (repeat for several; replaces the old list) |  |
 | `--tty2=VALUE (repeatable)` |  | Command line typed into the second instance terminal (repeat for several; replaces the old list) |  |
 | `--ssh-key=VALUE (repeatable)` |  | Name of an extra SSH key (the file ssh/_ed25519 in the fleet home) loaded into the instance's ssh-agent; the project needs container_ssh (repeat for several; replaces the old list) |  |
+| `--ssh-identities=VALUE` |  | Which keys the instance's ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key) |  |
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the template may use together, at most the project's: a number, or none to inherit the project's |  |
 | `--slots=VALUE` |  | Concurrent heavy runs of the template, at most the project's slots: a number, or none for unlimited |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: drupal-env, post-deploy, tty1, tty2, ssh-keys (repeat for several) |  |
@@ -397,6 +393,71 @@ fleet port:update [--access ACCESS] [--format FORMAT] [--json] [--] <name>
 ## ssh
 
 Trusted git servers.
+
+### fleet ssh:key:create
+
+Generate an extra SSH key for templates and print its public key.
+
+```
+fleet ssh:key:create [--format FORMAT] [--json] [--] <name>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | yes | Key name: lower case letters, digits and single dashes, for example deploy-docs (not deploy or push) |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
+
+### fleet ssh:key:delete
+
+Delete an extra SSH key Fleet manages (refused while a template uses it).
+
+```
+fleet ssh:key:delete [-y|--yes] [--format FORMAT] [--json] [--] <name>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | yes | Key name |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--yes` | `-y` | Do not ask for confirmation |  |
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
+
+### fleet ssh:key:import
+
+Import an existing private key as an extra SSH key (read from standard input).
+
+```
+fleet ssh:key:import [--format FORMAT] [--json] [--] <name>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | yes | Key name: lower case letters, digits and single dashes |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
+
+### fleet ssh:key:list
+
+List the host's SSH keys (deploy, push, extras) with fingerprint, public key and where each is used.
+
+```
+fleet ssh:key:list [--format FORMAT] [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
+| `--json` |  | Same as --format=json |  |
 
 ### fleet ssh:trust
 

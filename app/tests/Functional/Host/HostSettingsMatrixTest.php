@@ -30,6 +30,7 @@ final class HostSettingsMatrixTest extends HostPageTestCase
         'uploads' => 'Uploads',
         'jobs' => 'Jobs',
         'capacity' => 'Capacity',
+        'ssh' => 'SSH keys',
         'hardening' => 'Hardening',
         'backups' => 'Backups',
     ];

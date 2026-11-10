@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Deploy your first project
 
 A project is a git repository plus what Fleet needs to run it. Here you register one called `website`, give it a recipe (a template), its files and a secret, deploy it, and let a colleague in. You end with a working site at `https://website--main.fleet.example.com`.
@@ -29,7 +22,7 @@ Names (project, template, port) are **immutable**: an instance id is `<project>-
    fleet project:update website --default-template=web
    ```
 
-   The default template is what `fleet instance:deploy website` uses when you do not name one. A failing line fails the deploy. Terminal lines and CPU limits are covered in [work with agents](05-work-with-agents.md) and [run CI](04-run-ci.md).
+   The default template is what `fleet instance:deploy website` uses when you do not name one. A failing line fails the deploy. Terminal lines and CPU limits are covered in [work with agents](05-work-with-agents.md) and [run CI](04-run-ci.md). If instances must pull or push over SSH, see [SSH keys](../reference/14-ssh-keys.md).
 
 3. **Drop assets.** Assets are the per-project files Fleet copies into every new instance: a `.env`, `web/sites/default/settings.local.php`, a database dump. Use the project's **Assets** tab (`/admin/projects/website/assets`) or `rsync` to `/srv/fleet/assets/website/`. Fleet does not import the dump for you: add the import command to the template's post-deploy lines, for example `--post-deploy='ddev import-db --file=dumps/default.sql.gz'`. Details: [assets and secrets](../reference/08-assets-and-secrets.md).
 

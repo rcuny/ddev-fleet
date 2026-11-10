@@ -1,0 +1,91 @@
+<div class="grid gap-4" data-testid="host-tab-ssh">
+    <twig:Card>
+        <twig:Card:Header>
+            <twig:Card:Title>SSH keys</twig:Card:Title>
+            <twig:Card:Description>Every SSH key of this host in one place. Private keys never leave the host and are not shown; the public half is what you register on a server or a forge. Changes ask for your password again. The whole model is in <code>docs/reference/14-ssh-keys.md</code>.</twig:Card:Description>
+        </twig:Card:Header>
+    </twig:Card>
+
+    {% for key in sshKeys %}
+        <twig:Card data-testid="ssh-key-card" data-key="{{ key.id }}" id="ssh-key-{{ key.id }}">
+            <twig:Card:Header>
+                <twig:Card:Title class="flex flex-wrap items-center gap-2">
+                    <span class="font-mono" data-testid="ssh-key-name">{{ key.id }}</span>
+                    <twig:Badge variant="outline" data-testid="ssh-key-origin">{% if key.kind == 'extra' %}extra, {{ key.origin }}{% else %}host key{% endif %}</twig:Badge>
+                </twig:Card:Title>
+                <twig:Card:Description data-testid="ssh-key-purpose">{{ key.purpose }}</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content class="grid gap-3 text-sm">
+                {% if key.problem %}
+                    <p class="text-destructive" role="alert" data-testid="ssh-key-problem">{{ key.problem }}</p>
+                {% endif %}
+                <dl class="grid gap-x-4 gap-y-1 sm:grid-cols-[auto_1fr]">
+                    <dt class="text-ink-muted">Fingerprint</dt>
+                    <dd class="font-mono text-xs [overflow-wrap:anywhere]" data-testid="ssh-key-fingerprint">{{ key.fingerprint ?? 'not available' }}</dd>
+                    <dt class="text-ink-muted">Used by</dt>
+                    <dd data-testid="ssh-key-used-by">{% if key.usedBy %}{{ key.usedBy|join(', ') }}{% else %}nothing yet{% endif %}</dd>
+                    <dt class="text-ink-muted">{{ key.origin == 'external' ? 'File date' : 'Created' }}</dt>
+                    <dd>{{ key.createdAt ? key.createdAt|date('Y-m-d H:i', 'UTC') ~ ' UTC' : 'unknown' }}</dd>
+                </dl>
+
+                {% if key.publicKey %}
+                    <div class="grid gap-2" data-controller="clipboard">
+                        <twig:Label for="ssh-pub-{{ key.id }}">Public key</twig:Label>
+                        <div class="flex gap-2">
+                            <twig:Input id="ssh-pub-{{ key.id }}" readonly value="{{ key.publicKey }}" data-clipboard-target="source" data-testid="ssh-key-public" class="h-11 min-w-0 flex-1 font-mono text-xs md:h-8" />
+                            <twig:Button variant="outline" type="button" data-action="clipboard#copy" class="h-11 md:h-8" data-testid="ssh-key-copy">Copy</twig:Button>
+                        </div>
+                        <p class="text-xs text-ink-muted"><span data-clipboard-target="status" aria-live="polite" class="text-brand-darker dark:text-brand"></span></p>
+                    </div>
+                {% endif %}
+
+                {% if key.kind == 'extra' %}
+                    {% if key.origin == 'external' %}
+                        <p class="text-xs text-ink-muted" data-testid="ssh-key-external-note">This key file was placed by hand, so Fleet does not manage it: it keeps working, and you remove it by hand.</p>
+                    {% elseif key.deletable %}
+                        <form method="post" action="{{ path('ssh_key_delete', {name: key.id}) }}" class="contents" data-testid="ssh-key-delete-form">
+                            {{ include('setup/_csrf.html.twig') }}
+                            <twig:Button type="submit" variant="destructive" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-delete">Delete {{ key.id }}</twig:Button>
+                        </form>
+                    {% else %}
+                        <p class="text-xs text-ink-muted" data-testid="ssh-key-in-use">In use: take it out of the template(s) above before you delete it.</p>
+                    {% endif %}
+                {% else %}
+                    <form method="post" action="{{ path('ssh_key_rotate', {role: key.id}) }}" class="grid gap-2" data-testid="ssh-key-rotate-form">
+                        {{ include('setup/_csrf.html.twig') }}
+                        <label class="flex items-start gap-2 font-normal text-ink-body">
+                            <input type="checkbox" name="confirm" value="1" class="mt-1 size-4">
+                            <span>Replace the {{ key.id }} key. The old one stops working wherever it is registered.</span>
+                        </label>
+                        <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-rotate">Rotate {{ key.id }} key</twig:Button>
+                    </form>
+                {% endif %}
+            </twig:Card:Content>
+        </twig:Card>
+    {% endfor %}
+
+    <twig:Card data-testid="ssh-key-add">
+        <twig:Card:Header>
+            <twig:Card:Title>Add an extra key</twig:Card:Title>
+            <twig:Card:Description>Extra keys are for templates that need to reach one more server or repository. Generate a new one, or import a key you already have (unencrypted). Then name it in the template's "Extra SSH keys".</twig:Card:Description>
+        </twig:Card:Header>
+        <twig:Card:Content class="grid gap-6">
+            <form method="post" action="{{ path('ssh_key_create') }}" class="grid gap-3" data-testid="ssh-key-create-form">
+                {{ include('setup/_csrf.html.twig') }}
+                <twig:Label for="ssh-create-name">Name</twig:Label>
+                <twig:Input id="ssh-create-name" name="name" required maxlength="32" pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" autocomplete="off" autocapitalize="off" spellcheck="false" class="h-11 md:h-8" aria-describedby="ssh-name-help" />
+                <p id="ssh-name-help" class="text-xs text-ink-muted">Lower case letters, digits and single dashes, starting with a letter. Not "deploy" or "push".</p>
+                <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-create">Generate key</twig:Button>
+            </form>
+
+            <form method="post" action="{{ path('ssh_key_import') }}" class="grid gap-3" data-testid="ssh-key-import-form">
+                {{ include('setup/_csrf.html.twig') }}
+                <twig:Label for="ssh-import-name">Name</twig:Label>
+                <twig:Input id="ssh-import-name" name="name" required maxlength="32" pattern="[a-z][a-z0-9]*(-[a-z0-9]+)*" autocomplete="off" autocapitalize="off" spellcheck="false" class="h-11 md:h-8" />
+                <twig:Label for="ssh-import-key">Private key</twig:Label>
+                <twig:Textarea id="ssh-import-key" name="private_key" required rows="5" maxlength="16384" autocomplete="off" spellcheck="false" wrap="off" class="font-mono text-xs" data-lpignore="true" />
+                <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-import">Import key</twig:Button>
+            </form>
+        </twig:Card:Content>
+    </twig:Card>
+</div>

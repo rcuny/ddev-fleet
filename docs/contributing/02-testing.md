@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Testing
 
 Know which command proves your change is safe, and which suite to extend. This page holds the canonical gates.

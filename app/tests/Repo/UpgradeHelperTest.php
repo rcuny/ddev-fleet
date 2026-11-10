@@ -75,6 +75,68 @@ final class UpgradeHelperTest extends TestCase
         self::assertSame([], glob($this->scratch().'/tmp/fleet-upgrade.*') ?: [], 'the temporary export is removed');
     }
 
+    public function testAnAnsibleHostRunsTheInstallerWithTheAnsibleEngine(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "ansible\n");
+        [$status, $out, $err] = $this->upgrade(['--yes'], ['SUDO_USER' => 'alice']);
+
+        self::assertSame(0, $status, $out.$err);
+        self::assertStringContainsString('Install engine: ansible', $out);
+        self::assertContains('installer --domain=fleet.example.com --ref=v1.2.1 --repo-url='.$this->repo.' --skip-dns-check --engine=ansible', $this->calls());
+    }
+
+    public function testAHostWithoutTheRecordOrWithBashGetsNoEngineFlag(): void
+    {
+        foreach ([null, "bash\n", "garbage\n"] as $record) {
+            @unlink($this->root.'/etc/ddev-fleet/installed-engine');
+            if (null !== $record) {
+                file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', $record);
+            }
+            file_put_contents($this->log, '');
+            [$status, $out, $err] = $this->upgrade(['--yes']);
+
+            self::assertSame(0, $status, $out.$err);
+            self::assertStringContainsString('Install engine: bash', $out);
+            self::assertStringNotContainsString('--engine', implode("\n", $this->calls()));
+        }
+    }
+
+    public function testAnAnsibleHostIsRefusedForATargetWithoutTheAnsibleEngineBeforeAnyChange(): void
+    {
+        new Process(['rm', '-rf', $this->repo])->mustRun();
+        $this->makeRepo(false);
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "ansible\n");
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes'], ['FAKE_DOWN' => '1']);
+
+        self::assertSame(1, $status, $out.$err);
+        self::assertStringContainsString('does not have it', $err);
+        $calls = implode("\n", $this->calls());
+        self::assertStringNotContainsString('systemctl stop', $calls);
+        self::assertStringNotContainsString('upgrade:restore', $calls);
+        self::assertStringNotContainsString('installer ', $calls);
+        self::assertStringNotContainsString('upgrade:backup', $calls, 'a refusal takes no backup');
+        self::assertFileDoesNotExist($this->historyFile(), 'a refusal writes no history');
+    }
+
+    public function testAGarbageEngineRecordWarnsAndFallsBackToBash(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "garbage\n");
+        [$status, $out, $err] = $this->upgrade(['--yes']);
+
+        self::assertSame(0, $status, $out.$err);
+        self::assertStringContainsString('holds something other than', $err);
+    }
+
+    public function testTheHistoryRecordsTheEngine(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "ansible\n");
+        $this->upgrade(['--yes']);
+
+        foreach ($this->history() as $line) {
+            self::assertSame('ansible', $line['engine']);
+        }
+    }
+
     public function testTheInstallerIsTheOneOfThePlannedCommit(): void
     {
         $this->upgrade(['--yes']);
@@ -352,7 +414,7 @@ final class UpgradeHelperTest extends TestCase
     // --- fixtures ----------------------------------------------------------------------------------------------------
 
     /** A local repository with one annotated tag v1.2.1 whose install/install.sh is a fake installer. */
-    private function makeRepo(): void
+    private function makeRepo(bool $engineFlag = true): void
     {
         $this->repo = $this->scratch().'/release.git-src';
         mkdir($this->repo.'/install', 0o755, true);
@@ -361,7 +423,9 @@ final class UpgradeHelperTest extends TestCase
             echo "installer $*" >> "$FAKE_LOG"
             echo "fake installer of v1.2.1" > "$FAKE_RAN"
             exit "${FAKE_INSTALL_EXIT:-0}"
-            SH);
+            SH.($engineFlag
+                ? "\nfor arg in \"\$@\"; do\n  case \"\$arg\" in\n    --engine=bash | --engine=ansible) ;;\n  esac\ndone\n"
+                : "\n# usage: --engine=<bash|ansible> is not supported here\n"));
         $env = ['GIT_AUTHOR_NAME' => 't', 'GIT_AUTHOR_EMAIL' => 't@example.com', 'GIT_COMMITTER_NAME' => 't', 'GIT_COMMITTER_EMAIL' => 't@example.com', 'GIT_CONFIG_GLOBAL' => '/dev/null', 'GIT_CONFIG_SYSTEM' => '/dev/null'];
         foreach ([['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'release'], ['tag', '-a', 'v1.2.1', '-m', 'v1.2.1']] as $args) {
             new Process(['git', '-C', $this->repo, ...$args], null, $env)->mustRun();

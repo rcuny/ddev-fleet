@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Capacity: allotments, slots and slices
 
 One noisy instance should not starve the host. Fleet puts a CPU ceiling on each project and template and a cap on concurrent heavy runs, so CI and agents get predictable CPU. This page is the lookup; the tuning advice is in [operate](../guides/07-operate.md) and the CI setup in [run CI](../guides/04-run-ci.md). Everything is stored per host.

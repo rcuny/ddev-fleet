@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Configuration reference
 
 Every setting you can change, in one place: the host file, the Settings page, the fields and limits of projects, templates and ports, and the variables Fleet writes into each instance. Look things up here; the guides tell you when you need them.
@@ -86,7 +79,8 @@ The browser and the commands apply the same rules and refuse a bad value with th
 | Field | Rule |
 |---|---|
 | Drupal environment | Optional, 1 to 64 letters, digits, `.`, `_`, `-`. Written verbatim as `DRUPAL_ENV=<value>` into the instance's `.env`; quotes and spaces are refused. |
-| Extra SSH keys | Max 8 names of keys at `ssh/<name>_ed25519` in the fleet home (mode `0600`, owned by the fleet user; `deploy` and `push` are reserved). Needs git over SSH in the container on the project. Only the name is stored. |
+| Extra SSH keys | Max 8 names of keys at `ssh/<name>_ed25519` in the fleet home (mode `0600`, owned by the fleet user; `deploy` and `push` are reserved). Needs git over SSH in the container on the project. Only the name is stored. Manage the keys with `fleet ssh:key:*` or the SSH keys tab ([14-ssh-keys.md](14-ssh-keys.md)). |
+| SSH identities | `push_and_extras` (default) or `extras_only` (the agent gets no push key; needs at least one extra key). See [14-ssh-keys.md](14-ssh-keys.md). |
 | Post-deploy, terminal 1, terminal 2 | Each max 50 lines of 2000 characters (the whole list at most 100 100 characters), valid UTF-8, **one command per line**. Every control character is refused (newline, tab, escape, NUL), as are Unicode line and format separators. Blank lines are dropped, spaces trimmed. |
 | CPU threads, slots | As the project; a template may not exceed its project. |
 

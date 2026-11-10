@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Installer reference
 
 The installer turns a fresh Debian 13 host into a working Fleet, and the same command upgrades or repairs it. This page lists its flags, exit codes, steps, checks and recovery commands. For the walk-through, see the [install guide](../guides/01-install.md).

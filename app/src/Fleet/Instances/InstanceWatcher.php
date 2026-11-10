@@ -104,11 +104,14 @@ final class InstanceWatcher
      */
     private function superviseAgents(): void
     {
-        if (null === $this->agent || !$this->agent->hasKey()) {
+        if (null === $this->agent) {
             return;
         }
         foreach ($this->instances->all() as $instance) {
             if (InstanceState::Running !== $instance->state() || !$instance->project()->containerSsh()) {
+                continue;
+            }
+            if (!$this->agent->hasKeyFor($instance)) {
                 continue;
             }
             try {
