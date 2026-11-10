@@ -180,6 +180,31 @@ final class CaddyfileRendererTest extends TestCase
         self::assertStringContainsString("        @hooks path /hooks/*\n        request_body @hooks {\n            max_size 1MB\n        }\n", $out);
     }
 
+    public function testApiRouteHasBodyCapTimeoutNoStoreAndSitsAfterTheStrip(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        $api = strpos($out, "        handle /api/v1/* {\n");
+        self::assertNotFalse($api);
+        $block = substr($out, $api, (int) strpos($out, "\n        }\n", $api) - $api + 10);
+        self::assertStringContainsString("request_body {\n                max_size 1MB\n            }", $block);
+        self::assertStringContainsString('header ?Cache-Control no-store', $block);
+        self::assertStringContainsString('read_timeout 30s', $block);
+        self::assertStringContainsString('env '.TrustedProxyChecker::PROXY_PARAM.' {env.FLEET_PROXY_SECRET}', $block);
+        self::assertStringNotContainsString('Access-Control', $out, 'no CORS: the API is not called from a browser');
+        self::assertGreaterThan((int) strpos($out, 'request_header -Remote_Email'), $api, 'after the identity strip');
+        self::assertGreaterThan((int) strpos($out, 'import /etc/caddy/fleet/gate.conf'), $api, 'after the gate');
+        self::assertGreaterThan((int) strpos($out, 'root *'), $api, 'the root is set before php_fastcgi runs');
+    }
+
+    public function testNoPlainHttpSiteIsRendered(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        // A bare host name is an HTTPS site: Caddy redirects port 80 itself, so a bearer token is never accepted in clear.
+        self::assertDoesNotMatchRegularExpression('/^\s*(http:\/\/|:80\b|auto_https\s+(off|disable_redirects))/m', $out);
+    }
+
     public function testSocketMatchesConstant(): void
     {
         $out = self::renderer()->render(self::host());
@@ -281,7 +306,8 @@ final class CaddyfileRendererTest extends TestCase
         self::assertDoesNotMatchRegularExpression('/application_secret\s+(?!\{file\.)/', $config);
         self::assertSame(3, substr_count($config, '{file./etc/caddy/ovh/'), 'three credential placeholders, each reading its own file');
         self::assertStringNotContainsString('ovh/endpoint', $config, 'the endpoint is written out, not read from a file');
-        self::assertSame(1, substr_count($config, '{env.'), 'the proxy secret is the only environment placeholder');
+        self::assertSame(2, substr_count($config, '{env.'), 'the proxy secret is the only environment placeholder (once per php_fastcgi block)');
+        self::assertSame(2, substr_count($config, '{env.FLEET_PROXY_SECRET}'));
     }
 
     public function testGolden(): void
@@ -357,6 +383,25 @@ final class CaddyfileRendererTest extends TestCase
                     }
 
                     root * /opt/ddev-fleet/app/public
+
+                    # The token API (FLE-274). The gate lets /api/v1/* through without a login because callers are machines; the app
+                    # authenticates each call itself with a bearer token on a firewall that has no proxy-identity authenticator.
+                    # The strip above already removed every Remote-*/Remote_* spelling, so a forged identity never reaches it.
+                    # TLS only: this site address is HTTPS, plain HTTP is redirected before any handler runs. Same body cap as the
+                    # hooks, a short upstream timeout, never cached, no CORS header (not called from a browser).
+                    handle /api/v1/* {
+                        request_body {
+                            max_size 1MB
+                        }
+                        header ?Cache-Control no-store
+                        php_fastcgi unix//run/php/fleet.sock {
+                            env FLEET_PROXY_AUTH {env.FLEET_PROXY_SECRET}
+                            dial_timeout 5s
+                            read_timeout 30s
+                            write_timeout 30s
+                        }
+                    }
+
                     php_fastcgi unix//run/php/fleet.sock {
                         env FLEET_PROXY_AUTH {env.FLEET_PROXY_SECRET}
                     }
