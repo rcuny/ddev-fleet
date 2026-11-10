@@ -1,0 +1,257 @@
+---
+# Port of install/steps/50-caddy.sh. Caddy is NEVER started, restarted or reloaded here (the bash step does not either):
+# the running process, with its live per-instance routes, is not touched. Only `systemctl daemon-reload` runs when a
+# drop-in changed. The per-instance snippets and the env file are owned by `apply caddy`: this role creates the
+# directories and normalises modes of what is already there, and never writes or overwrites a snippet,
+# /etc/caddy/fleet.env or the Caddyfile.
+- name: Map the CPU architecture to Debian's
+  ansible.builtin.set_fact:
+    caddy_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+
+- name: Caddy apt repository
+  ansible.builtin.include_role:
+    name: apt_repo
+  vars:
+    apt_repo_name: caddy
+    apt_repo_key_url: "{{ fleet_caddy_key_url }}"
+    apt_repo_key_file: "{{ fleet_keyring_dir }}/caddy.asc"
+    apt_repo_fingerprint: "{{ fleet_caddy_key_fingerprint }}"
+    apt_repo_line: "{{ fleet_caddy_repo_line }}"
+
+- name: Is the caddy package installed?
+  ansible.builtin.command: dpkg-query -W -f='${Status}' caddy
+  register: caddy_pkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Install the package (the stock service must not start on :80 with the default Caddyfile)
+  block:
+    - name: Forbid service starts
+      ansible.builtin.include_role:
+        name: apt_repo
+        tasks_from: policy_deny
+      when: "'install ok installed' not in caddy_pkg.stdout"
+
+    - name: Install caddy
+      ansible.builtin.apt:
+        name: caddy
+        state: present
+  always:
+    - name: Allow service starts again
+      ansible.builtin.include_role:
+        name: apt_repo
+        tasks_from: policy_allow
+
+- name: Is /usr/bin/caddy diverted?
+  ansible.builtin.command: dpkg-divert --list /usr/bin/caddy
+  register: caddy_divert
+  changed_when: false
+  check_mode: false
+
+# The package binary is diverted to caddy.default so apt can keep upgrading it without ever replacing the custom build.
+- name: Divert the packaged binary
+  ansible.builtin.command: dpkg-divert --divert /usr/bin/caddy.default --rename /usr/bin/caddy
+  when: caddy_divert.stdout | length == 0
+  changed_when: true
+
+- name: Ask the packaged Caddy for its version
+  ansible.builtin.command: /usr/bin/caddy.default version
+  register: caddy_packaged
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Ask the custom build for its version and modules
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - /usr/bin/caddy.custom version
+    - /usr/bin/caddy.custom list-modules
+  register: caddy_custom
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Decide whether the custom build must be refreshed
+  ansible.builtin.set_fact:
+    caddy_packaged_version: >-
+      {{ (caddy_packaged.stdout.split() | first | regex_replace('^v', ''))
+         if caddy_packaged.rc == 0 and caddy_packaged.stdout | length > 0 else '' }}
+    caddy_custom_version: >-
+      {{ (caddy_custom.results[0].stdout.split() | first | regex_replace('^v', ''))
+         if caddy_custom.results[0].rc == 0 and caddy_custom.results[0].stdout | length > 0 else '' }}
+    caddy_custom_has_ovh: "{{ caddy_custom.results[1].rc == 0 and 'dns.providers.ovh' in caddy_custom.results[1].stdout }}"
+
+- name: Compute the wanted version (the packaged one, never less than the pinned minimum)
+  ansible.builtin.set_fact:
+    caddy_wanted_version: >-
+      {{ caddy_packaged_version
+         if (caddy_packaged_version | length > 0 and fleet_caddy_min_version is version(caddy_packaged_version, '<'))
+         else fleet_caddy_min_version }}
+
+- name: Is the custom build current?
+  ansible.builtin.set_fact:
+    caddy_custom_current: >-
+      {{ caddy_custom_has_ovh and caddy_custom_version | length > 0
+         and not (caddy_custom_version is version(caddy_wanted_version, '<')) }}
+
+- name: Refresh the custom build (OVH DNS module)
+  when: not caddy_custom_current | bool and not ansible_check_mode  # a check run reports it below, it cannot download
+  block:
+    - name: Download a candidate (the old build stays untouched until it is verified)
+      ansible.builtin.get_url:
+        url: "{{ fleet_caddy_build_url }}"
+        dest: /usr/bin/caddy.custom.new
+        owner: root
+        group: root
+        mode: "0755"
+        force: true
+      register: caddy_candidate_dl
+
+    - name: Run the candidate
+      ansible.builtin.command:
+        argv: [/usr/bin/caddy.custom.new, version]
+      register: caddy_candidate_version
+      changed_when: false
+      check_mode: false
+
+    - name: List the candidate's modules
+      ansible.builtin.command:
+        argv: [/usr/bin/caddy.custom.new, list-modules]
+      register: caddy_candidate_modules
+      changed_when: false
+      check_mode: false
+
+    - name: Refuse a candidate without the OVH module or older than wanted
+      ansible.builtin.assert:
+        that:
+          - "'dns.providers.ovh' in caddy_candidate_modules.stdout"
+          - (caddy_candidate_version.stdout.split() | first | regex_replace('^v', '')) is version(caddy_wanted_version, '>=')
+        fail_msg: the downloaded Caddy has no dns.providers.ovh module or is older than the required {{ caddy_wanted_version }}
+
+    - name: Put the verified build in place
+      ansible.builtin.command: mv -f /usr/bin/caddy.custom.new /usr/bin/caddy.custom
+      changed_when: true
+  rescue:
+    - name: Drop the candidate
+      ansible.builtin.file:
+        path: /usr/bin/caddy.custom.new
+        state: absent
+
+    - name: Keep an installed build that still meets the pinned minimum, else fail
+      ansible.builtin.assert:
+        that:
+          - caddy_custom_has_ovh | bool
+          - caddy_custom_version | length > 0
+          - caddy_custom_version is version(fleet_caddy_min_version, '>=')
+        fail_msg: no custom Caddy with the OVH DNS module could be installed
+        success_msg: keeping the installed custom Caddy {{ caddy_custom_version }}; re-run later to refresh it
+
+- name: Report a custom build that is missing or too old (a check run cannot download one)
+  ansible.builtin.debug:
+    msg: the custom Caddy would be refreshed to {{ caddy_wanted_version }} (installed {{ caddy_custom_version | default('none', true) }})
+  when: not caddy_custom_current | bool and ansible_check_mode
+
+- name: Read the alternatives for caddy
+  ansible.builtin.command: update-alternatives --query caddy
+  register: caddy_alt
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Point /usr/bin/caddy at the custom build (priorities 10 default, 50 custom, automatic mode)
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - update-alternatives --install /usr/bin/caddy caddy /usr/bin/caddy.default 10
+    - update-alternatives --install /usr/bin/caddy caddy /usr/bin/caddy.custom 50
+    - update-alternatives --auto caddy
+  when: >-
+    caddy_alt.rc != 0
+    or 'Status: auto' not in caddy_alt.stdout
+    or 'Value: /usr/bin/caddy.custom' not in caddy_alt.stdout
+    or 'Alternative: /usr/bin/caddy.custom\nPriority: 50' not in caddy_alt.stdout
+    or 'Alternative: /usr/bin/caddy.default\nPriority: 10' not in caddy_alt.stdout
+  changed_when: true
+
+- name: Check that /usr/bin/caddy has the OVH DNS module
+  ansible.builtin.command: /usr/bin/caddy list-modules
+  register: caddy_active_modules
+  changed_when: false
+  failed_when: "'dns.providers.ovh' not in caddy_active_modules.stdout"
+  check_mode: false
+  when: not ansible_check_mode or caddy_pkg.stdout is search('install ok installed')
+
+- name: Drop-in directory of caddy.service
+  ansible.builtin.file:
+    path: /etc/systemd/system/caddy.service.d
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Sandbox drop-in
+  ansible.builtin.copy:
+    src: "{{ fleet_install_etc_dir }}/caddy-sandbox.conf"
+    dest: /etc/systemd/system/caddy.service.d/10-fleet-sandbox.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Reload systemd units
+
+- name: Environment drop-in (the file it names is written by `apply caddy`, never here)
+  ansible.builtin.copy:
+    src: "{{ fleet_install_etc_dir }}/caddy-env.conf"
+    dest: /etc/systemd/system/caddy.service.d/20-fleet-env.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Reload systemd units
+
+- name: Pick up the drop-ins (no Caddy restart or reload)
+  ansible.builtin.meta: flush_handlers
+
+# fleet writes, caddy reads: the setgid bit is what hands the group over (a lost bit makes Caddy fail to start).
+- name: Snippet directories
+  ansible.builtin.file:
+    path: "{{ item }}"
+    state: directory
+    mode: "2750"
+    owner: fleet
+    group: caddy
+  loop:
+    - "{{ fleet_caddy_dir }}"
+    - "{{ fleet_caddy_dir }}/instances"
+    - "{{ fleet_caddy_dir }}/ports"
+
+- name: Find the directories under the snippet tree
+  ansible.builtin.find:
+    paths: "{{ fleet_caddy_dir }}"
+    file_type: directory
+    recurse: true
+  register: caddy_found_dirs
+
+- name: Find the files under the snippet tree (symlinks are not followed)
+  ansible.builtin.find:
+    paths: "{{ fleet_caddy_dir }}"
+    file_type: file
+    recurse: true
+  register: caddy_found_files
+
+- name: Setgid on every directory (modes only, nothing is rewritten)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: "2750"
+    follow: false
+  loop: "{{ caddy_found_dirs.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+
+- name: Group caddy and 0640 on every file (content untouched)
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    group: caddy
+    mode: "0640"
+    follow: false
+  loop: "{{ caddy_found_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"

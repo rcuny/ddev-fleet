@@ -1,0 +1,16 @@
+---
+# policy_allow_start: removes only our own policy-rc.d; safe to run at any time.
+- name: Look at the policy-rc.d
+  ansible.builtin.slurp:
+    src: /usr/sbin/policy-rc.d
+  register: apt_repo_policy
+  failed_when: false
+  check_mode: false
+
+- name: Allow service starts again (our file only)
+  ansible.builtin.file:
+    path: /usr/sbin/policy-rc.d
+    state: absent
+  when:
+    - apt_repo_policy.content is defined
+    - "'# ddev-fleet installer: temporary, removed after the install' in (apt_repo_policy.content | b64decode).splitlines()"

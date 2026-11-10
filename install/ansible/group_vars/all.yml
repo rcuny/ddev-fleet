@@ -65,3 +65,27 @@ fleet_hardening_ssh_ports: []
 fleet_hardening_strict: true
 # The account whose access must survive; empty = the user who called sudo, else the connecting user.
 fleet_hardening_invoking_user: ""
+
+# Where the bash installer keeps the unit and config files that the caddy and authelia roles install unchanged.
+# One copy only: the roles read them from there (move them into the roles when install/steps/ goes away).
+fleet_install_etc_dir: "{{ playbook_dir }}/../etc"
+fleet_srv_dir: /srv/fleet
+
+# caddy
+fleet_caddy_key_url: https://dl.cloudsmith.io/public/caddy/stable/gpg.key
+fleet_caddy_key_fingerprint: 65760C51EDEA2017CEA2CA15155B6D79CA56EA34
+fleet_caddy_repo_line: "deb [signed-by={{ fleet_keyring_dir }}/caddy.asc] https://dl.cloudsmith.io/public/caddy/stable/deb/debian any-version main"
+# The custom build (OVH DNS module) must reach the packaged Caddy's version, never less than this (CADDY_MIN_VERSION in
+# install/lib/common.sh; InstallerAnsibleTest keeps the two equal).
+fleet_caddy_min_version: 2.11.7
+fleet_caddy_build_url: "https://caddyserver.com/api/download?os=linux&arch={{ caddy_arch }}&p=github.com%2Fcaddy-dns%2Fovh"
+fleet_caddy_dir: /etc/caddy/fleet
+
+# authelia
+fleet_authelia_key_url: https://www.authelia.com/keys/authelia-security.gpg
+fleet_authelia_key_fingerprint: 192085915BD608A458AC58DCE461FA1531286EEA
+fleet_authelia_repo_line: "deb [signed-by={{ fleet_keyring_dir }}/authelia-security.gpg] https://apt.authelia.com stable main"
+fleet_authelia_secret_names:
+  - session_secret
+  - storage_encryption_key
+  - reset_password_jwt_secret

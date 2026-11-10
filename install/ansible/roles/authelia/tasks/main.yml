@@ -1,0 +1,256 @@
+---
+# Port of install/steps/60-authelia.sh: everything Authelia needs on disk BEFORE its first start. Authelia is never
+# started, restarted or reloaded here (a first install leaves it stopped, as the bash step does). NOT written here, because
+# `apply authelia` / the app own them: /etc/authelia/configuration.yml, and the real users in users.yml (an existing
+# users.yml is never overwritten; only a missing, empty or `"users":{}` one gets the placeholder).
+- name: Install the tmpfiles mask first, so not even the package's own postinst can touch the secrets
+  block:
+    - name: The tmpfiles.d directory
+      ansible.builtin.file:
+        path: /etc/tmpfiles.d
+        state: directory
+        mode: "0755"
+        owner: root
+        group: root
+
+    - name: Mask the package's tmpfiles rule
+      ansible.builtin.copy:
+        src: "{{ fleet_install_etc_dir }}/authelia-tmpfiles.conf"
+        dest: /etc/tmpfiles.d/authelia.conf
+        mode: "0644"
+        owner: root
+        group: root
+
+- name: Is the authelia package installed?
+  ansible.builtin.command: dpkg-query -W -f='${Status}' authelia
+  register: authelia_pkg
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Authelia apt repository
+  ansible.builtin.include_role:
+    name: apt_repo
+  vars:
+    apt_repo_name: authelia
+    apt_repo_key_url: "{{ fleet_authelia_key_url }}"
+    apt_repo_key_file: "{{ fleet_keyring_dir }}/authelia-security.gpg"
+    apt_repo_fingerprint: "{{ fleet_authelia_key_fingerprint }}"
+    apt_repo_line: "{{ fleet_authelia_repo_line }}"
+
+- name: Install the package (nothing may start Authelia before its secrets and users.yml exist)
+  block:
+    - name: Forbid service starts
+      ansible.builtin.include_role:
+        name: apt_repo
+        tasks_from: policy_deny
+
+    - name: Install authelia
+      ansible.builtin.apt:
+        name: authelia
+        state: present
+  always:
+    - name: Allow service starts again
+      ansible.builtin.include_role:
+        name: apt_repo
+        tasks_from: policy_allow
+
+- name: Which account does the unit run as? (read from the installed unit, never created or assumed)
+  ansible.builtin.command: systemctl show -p {{ item }} --value authelia.service  # noqa command-instead-of-module
+  loop: [User, Group]
+  register: authelia_unit
+  changed_when: false
+  check_mode: false
+
+- name: Remember the account (a check run on a host without the package assumes authelia)
+  ansible.builtin.set_fact:
+    authelia_fresh: "{{ 'install ok installed' not in authelia_pkg.stdout }}"
+    authelia_default_account: "{{ 'authelia' if ansible_check_mode and 'install ok installed' not in authelia_pkg.stdout else 'root' }}"
+
+- name: Remember the account name
+  ansible.builtin.set_fact:
+    authelia_user: "{{ (authelia_unit.results[0].stdout | trim) or authelia_default_account }}"
+    authelia_group: "{{ (authelia_unit.results[1].stdout | trim) or authelia_default_account }}"
+
+- name: The account must exist
+  ansible.builtin.getent:
+    database: "{{ item.db }}"
+    key: "{{ item.key }}"
+  loop:
+    - {db: passwd, key: "{{ authelia_user }}"}
+    - {db: group, key: "{{ authelia_group }}"}
+  loop_control:
+    label: "{{ item.db }} {{ item.key }}"
+  when: not (ansible_check_mode and authelia_fresh)
+
+- name: A first install must not leave a running Authelia behind (it has no configuration yet)
+  when: authelia_fresh | bool
+  block:
+    - name: Stop it
+      ansible.builtin.systemd_service:
+        name: authelia.service
+        state: stopped
+
+    # Exits 1 ("Unit authelia.service not loaded") when the unit never ran, which is the normal case here.
+    - name: Clear a failed state
+      ansible.builtin.command: systemctl reset-failed authelia.service
+      changed_when: false
+      failed_when: false
+
+- name: Secrets directory
+  ansible.builtin.file:
+    path: /etc/authelia/secrets
+    state: directory
+    mode: "0750"
+    owner: root
+    group: "{{ authelia_group }}"
+
+- name: Which secrets exist (a secret is generated only when its own file is missing or empty)
+  ansible.builtin.stat:
+    path: "/etc/authelia/secrets/{{ item }}"
+  loop: "{{ fleet_authelia_secret_names }}"
+  register: authelia_secret_stat
+
+- name: Generate the missing secrets (a check run also generates, harmlessly, to be able to report the write)
+  ansible.builtin.command: openssl rand -hex 32
+  loop: "{{ authelia_secret_stat.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+  when: not item.stat.exists or item.stat.size == 0
+  register: authelia_secret_new
+  changed_when: false
+  check_mode: false
+  no_log: true
+
+- name: Write them (atomically, the module writes a temporary file and renames it)
+  ansible.builtin.copy:
+    content: "{{ item.stdout }}\n"
+    dest: "/etc/authelia/secrets/{{ item.item.item }}"
+    owner: root
+    group: "{{ authelia_group }}"
+    mode: "0640"
+    force: true
+  loop: "{{ authelia_secret_new.results }}"
+  loop_control:
+    label: "{{ item.item.item }}"
+  when: item.stdout is defined
+  no_log: true
+
+- name: State directory
+  ansible.builtin.file:
+    path: /var/lib/authelia
+    state: directory
+    mode: "0750"
+    owner: "{{ authelia_user }}"
+    group: "{{ authelia_group }}"
+
+# Authelia reaches users.yml through /srv/fleet (0750 fleet:fleet) with a traverse-only ACL: no read, no listing.
+- name: Read the ACL of the fleet directory
+  ansible.builtin.command: getfacl --omit-header --absolute-names {{ fleet_srv_dir }}
+  register: authelia_acl
+  changed_when: false
+  check_mode: false
+  when: authelia_user != 'root'
+
+- name: Traverse-only ACL for the Authelia account
+  ansible.builtin.command: setfacl -m u:{{ authelia_user }}:x {{ fleet_srv_dir }}
+  when:
+    - authelia_user != 'root'
+    - ('user:' ~ authelia_user ~ ':--x') not in authelia_acl.stdout_lines
+  changed_when: true
+
+- name: Directory of users.yml (setgid, so the file the app writes later inherits Authelia's group)
+  ansible.builtin.file:
+    path: "{{ fleet_srv_dir }}/authelia"
+    state: directory
+    mode: "2750"
+    owner: fleet
+    group: "{{ authelia_group }}"
+
+- name: Read users.yml
+  ansible.builtin.slurp:
+    src: "{{ fleet_srv_dir }}/authelia/users.yml"
+  register: authelia_users
+  failed_when: false
+  check_mode: false
+
+# Authelia 4.39 refuses an empty users map, so the file starts with one disabled placeholder entry (the same text the
+# app renders for zero users; a test keeps them equal). An empty map left by an earlier revision is replaced.
+- name: Remove an empty users map (or an empty file) so the placeholder can be written
+  ansible.builtin.file:
+    path: "{{ fleet_srv_dir }}/authelia/users.yml"
+    state: absent
+  when:
+    - authelia_users.content is defined
+    - (authelia_users.content | b64decode | regex_replace('\\s', '')) in ['', '"users":{}']
+
+- name: Placeholder users.yml (an existing file is never touched)
+  ansible.builtin.copy:
+    src: "{{ fleet_install_etc_dir }}/authelia-users-empty.yml"
+    dest: "{{ fleet_srv_dir }}/authelia/users.yml"
+    owner: fleet
+    group: "{{ authelia_group }}"
+    mode: "0640"
+    force: false
+
+- name: Read every file that could hold a default account
+  ansible.builtin.slurp:
+    src: "{{ item }}"
+  loop:
+    - /etc/authelia/users_database.yml
+    - /etc/authelia/users.yml
+    - "{{ fleet_srv_dir }}/authelia/users.yml"
+  register: authelia_stock
+  failed_when: false
+  check_mode: false
+
+- name: No account may exist that nobody created
+  ansible.builtin.assert:
+    that:
+      - item.content is not defined or (item.content | b64decode) is not search('(?m)^[ \t]*"?authelia"?:[ \t]*$')
+    fail_msg: "{{ item.item }} defines the default account 'authelia'; remove it and re-run"
+  loop: "{{ authelia_stock.results[:2] }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: The users.yml must hold a users map
+  ansible.builtin.assert:
+    that: (authelia_stock.results[2].content | b64decode) is search('(?m)^"?users"?:')
+    fail_msg: "{{ fleet_srv_dir }}/authelia/users.yml has no users map"
+  when: authelia_stock.results[2].content is defined
+
+- name: Drop-in directory of authelia.service
+  ansible.builtin.file:
+    path: /etc/systemd/system/authelia.service.d
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Point the unit at the secrets
+  ansible.builtin.copy:
+    src: "{{ fleet_install_etc_dir }}/authelia-secrets.conf"
+    dest: /etc/systemd/system/authelia.service.d/secrets.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Reload systemd units
+
+- name: Pick up the drop-in
+  ansible.builtin.meta: flush_handlers
+
+# Prove the mask works now rather than at the first reboot.
+- name: Apply tmpfiles for /etc/authelia
+  ansible.builtin.command: systemd-tmpfiles --create --prefix=/etc/authelia
+  changed_when: false
+
+- name: Re-check the secrets directory
+  ansible.builtin.stat:
+    path: /etc/authelia/secrets
+  register: authelia_secrets_dir
+
+- name: The mask must be in effect
+  ansible.builtin.assert:
+    that: authelia_secrets_dir.stat.mode == '0750'
+    fail_msg: /etc/authelia/secrets lost its mode after systemd-tmpfiles; the tmpfiles mask is not in effect
+  when: authelia_secrets_dir.stat.exists

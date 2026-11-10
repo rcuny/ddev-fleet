@@ -1,0 +1,23 @@
+---
+# policy_deny_start: while a package installs, no service may start (invoke-rc.d asks policy-rc.d; 101 = not allowed).
+# An existing policy-rc.d that is not ours is left alone.
+- name: Look at an existing policy-rc.d
+  ansible.builtin.slurp:
+    src: /usr/sbin/policy-rc.d
+  register: apt_repo_policy
+  failed_when: false
+  check_mode: false
+
+- name: Forbid service starts during the install
+  ansible.builtin.copy:
+    dest: /usr/sbin/policy-rc.d
+    owner: root
+    group: root
+    mode: "0755"
+    content: |
+      #!/bin/sh
+      # ddev-fleet installer: temporary, removed after the install
+      exit 101
+  when: >-
+    apt_repo_policy.content is not defined
+    or '# ddev-fleet installer: temporary, removed after the install' in (apt_repo_policy.content | b64decode).splitlines()
