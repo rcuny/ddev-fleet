@@ -1,0 +1,691 @@
+openapi: 3.1.0
+info:
+  title: Fleet API
+  version: "1"
+  summary: Orchestration API of a Fleet host.
+  description: |
+    JSON over HTTPS under `/api/v1`, authenticated with a service token (`Authorization: Bearer <token>`).
+    Every response carries `X-Request-Id`. Errors are RFC 9457 `application/problem+json`. Anything that runs `ddev`
+    or `git` is a job: the write endpoints answer `202` with a job reference to poll. Additive changes only inside v1.
+    Hand-maintained; `tests/Functional/Api/OpenApiContractTest.php` fails when a route and this file disagree.
+    Written in docs/reference/16-openapi.md.
+servers:
+  - url: /
+security:
+  - bearer: []
+tags:
+  - {name: host}
+  - {name: projects}
+  - {name: instances}
+  - {name: jobs}
+  - {name: operations}
+paths:
+  /api/v1/openapi.json:
+    get:
+      operationId: getOpenApi
+      summary: This document, as JSON.
+      tags: [host]
+      x-scope: read
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The OpenAPI 3.1 document, content: {application/json: {schema: {type: object}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/tokens/self:
+    get:
+      operationId: getTokenSelf
+      summary: The caller's own token (scopes, restrictions, expiry, last use). Never the secret.
+      tags: [host]
+      x-scope: any
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The token, content: {application/json: {schema: {$ref: "#/components/schemas/TokenSelf"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/host:
+    get:
+      operationId: getHost
+      summary: Host name, Fleet version, generation, instance counts. Host-wide tokens only.
+      tags: [host]
+      x-scope: read
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The host, content: {application/json: {schema: {$ref: "#/components/schemas/Host"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/host/capacity:
+    get:
+      operationId: getHostCapacity
+      summary: The `host:capacity --json` document (schema 1), plus a verdict when `project` is given.
+      tags: [host]
+      x-scope: read
+      parameters:
+        - {name: project, in: query, schema: {type: string}}
+        - {name: template, in: query, description: Needs `project`. Defaults to the project's default template., schema: {type: string}}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The capacity report, content: {application/json: {schema: {$ref: "#/components/schemas/Capacity"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/upgrade:
+    get:
+      operationId: getUpgrade
+      summary: Installed version, newest known release, drift, pending migrations. Read-only, offline.
+      tags: [host]
+      x-scope: read
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The upgrade state, content: {application/json: {schema: {$ref: "#/components/schemas/Upgrade"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/webhooks/log:
+    get:
+      operationId: listWebhookLog
+      summary: Recent webhook deliveries (subject, rule, outcome). No secrets.
+      tags: [host]
+      x-scope: read
+      parameters:
+        - {name: project, in: query, schema: {type: string}}
+        - {name: result, in: query, schema: {type: string}}
+        - {name: hide_ignored, in: query, schema: {type: string, enum: ["1"]}}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: A page of deliveries
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [deliveries, next_cursor]
+                properties:
+                  deliveries: {type: array, items: {$ref: "#/components/schemas/WebhookDelivery"}}
+                  next_cursor: {$ref: "#/components/schemas/NextCursor"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/projects:
+    get:
+      operationId: listProjects
+      summary: Projects visible to the token.
+      tags: [projects]
+      x-scope: read
+      parameters:
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: A page of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [projects, next_cursor]
+                properties:
+                  projects: {type: array, items: {$ref: "#/components/schemas/Object"}}
+                  next_cursor: {$ref: "#/components/schemas/NextCursor"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/projects/{project}:
+    get:
+      operationId: getProject
+      summary: One project.
+      tags: [projects]
+      x-scope: read
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The project, content: {application/json: {schema: {$ref: "#/components/schemas/Object"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/projects/{project}/templates:
+    get:
+      operationId: listTemplates
+      summary: Templates of a project. Secrets appear as placeholder names, never values.
+      tags: [projects]
+      x-scope: read
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: A page of templates
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [templates, next_cursor]
+                properties:
+                  templates: {type: array, items: {$ref: "#/components/schemas/Object"}}
+                  next_cursor: {$ref: "#/components/schemas/NextCursor"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/templates/{project}/{template}:
+    get:
+      operationId: getTemplate
+      summary: One template.
+      tags: [projects]
+      x-scope: read
+      parameters:
+        - {name: project, in: path, required: true, schema: {type: string}}
+        - {name: template, in: path, required: true, schema: {type: string}}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The template, content: {application/json: {schema: {$ref: "#/components/schemas/Object"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances:
+    get:
+      operationId: listInstances
+      summary: Instances visible to the token, sorted by id.
+      tags: [instances]
+      x-scope: read
+      parameters:
+        - {name: project, in: query, schema: {type: string}}
+        - {name: branch, in: query, schema: {type: string}}
+        - {name: state, in: query, schema: {$ref: "#/components/schemas/InstanceState"}}
+        - {name: label, in: query, schema: {type: string}}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: A page of instances
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instances, next_cursor]
+                properties:
+                  instances: {type: array, items: {$ref: "#/components/schemas/Instance"}}
+                  next_cursor: {$ref: "#/components/schemas/NextCursor"}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: deployInstance
+      summary: Deploy an instance. Gated by the server-side capacity check.
+      tags: [operations]
+      x-scope: deploy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [project]
+              properties:
+                project: {type: string}
+                template: {type: string}
+                branch: {type: string}
+                label: {type: string}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "202": {$ref: "#/components/responses/Accepted"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances/{id}:
+    get:
+      operationId: getInstance
+      summary: One instance, with its last jobs.
+      tags: [instances]
+      x-scope: read
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: The instance
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - {$ref: "#/components/schemas/Instance"}
+                  - type: object
+                    required: [jobs]
+                    properties:
+                      jobs: {type: array, items: {$ref: "#/components/schemas/Job"}}
+        default: {$ref: "#/components/responses/Problem"}
+    delete:
+      operationId: destroyInstance
+      summary: Destroy an instance. `If-Match` (the instance's `created_at`) is mandatory; protected instances are refused.
+      tags: [operations]
+      x-scope: [lifecycle, "lifecycle:destroy"]
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+        - {name: If-Match, in: header, required: true, schema: {type: string}}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/PreconditionFailed"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "202": {$ref: "#/components/responses/Accepted"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances/{id}/redeploy:
+    post:
+      operationId: redeployInstance
+      summary: Redeploy an instance. 409 when it is busy.
+      tags: [operations]
+      x-scope: deploy
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                template: {type: string}
+                branch: {type: string}
+                force: {type: boolean}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "202": {$ref: "#/components/responses/Accepted"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances/{id}/start:
+    post:
+      operationId: startInstance
+      summary: Start an instance.
+      tags: [operations]
+      x-scope: lifecycle
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "202": {$ref: "#/components/responses/Accepted"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances/{id}/stop:
+    post:
+      operationId: stopInstance
+      summary: Stop an instance.
+      tags: [operations]
+      x-scope: lifecycle
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "202": {$ref: "#/components/responses/Accepted"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances:destroy-batch:
+    post:
+      operationId: destroyInstancesBatch
+      summary: Destroy up to 20 instances in one call; one job per id, partial results.
+      tags: [operations]
+      x-scope: [lifecycle, "lifecycle:destroy"]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [ids]
+              properties:
+                ids: {type: array, minItems: 1, maxItems: 20, items: {type: string}}
+                if_match:
+                  type: object
+                  description: Per-id `created_at`, required for protected-instance checks.
+                  additionalProperties: {type: string}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "207":
+          description: One result per id
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [results]
+                properties:
+                  results:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, accepted]
+                      properties:
+                        id: {type: string}
+                        accepted: {type: boolean}
+                        job: {$ref: "#/components/schemas/JobRef"}
+                        status: {type: integer}
+                        code: {type: string}
+                        detail: {type: string}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/jobs:
+    get:
+      operationId: listJobs
+      summary: Jobs, newest first.
+      tags: [jobs]
+      x-scope: read
+      parameters:
+        - {name: status, in: query, schema: {$ref: "#/components/schemas/JobStatus"}}
+        - {name: trigger, in: query, schema: {$ref: "#/components/schemas/JobTrigger"}}
+        - {name: type, in: query, schema: {type: string}}
+        - {name: instance, in: query, schema: {type: string}}
+        - {name: project, in: query, schema: {type: string}}
+        - {$ref: "#/components/parameters/Limit"}
+        - {$ref: "#/components/parameters/Cursor"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: A page of jobs
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [jobs, next_cursor]
+                properties:
+                  jobs: {type: array, items: {$ref: "#/components/schemas/Job"}}
+                  next_cursor: {$ref: "#/components/schemas/NextCursor"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/jobs/{id}:
+    get:
+      operationId: getJob
+      summary: One job. Never its parameters.
+      tags: [jobs]
+      x-scope: read
+      parameters:
+        - {$ref: "#/components/parameters/JobId"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200": {description: The job, content: {application/json: {schema: {$ref: "#/components/schemas/Job"}}}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/jobs/{id}/log:
+    get:
+      operationId: getJobLog
+      summary: Masked log bytes from `offset`. Poll with `X-Next-Offset` until `X-Log-Done` is 1.
+      tags: [jobs]
+      x-scope: read
+      parameters:
+        - {$ref: "#/components/parameters/JobId"}
+        - {name: offset, in: query, description: Byte offset, 0 or more., schema: {type: integer, minimum: 0, default: 0}}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: Log text
+          headers:
+            X-Next-Offset: {required: true, schema: {type: integer}}
+            X-Job-State: {required: true, schema: {$ref: "#/components/schemas/JobStatus"}}
+            X-Log-Done: {required: true, schema: {type: string, enum: ["0", "1"]}}
+          content:
+            text/plain: {schema: {type: string}}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/jobs/{id}/retry:
+    post:
+      operationId: retryJob
+      summary: Retry a job. A retried destroy needs `If-Match` like a new one.
+      tags: [operations]
+      x-scope: [deploy, lifecycle, "lifecycle:destroy"]
+      x-scope-note: Depends on the retried job. deploy for a deploy or redeploy, lifecycle for start and stop, lifecycle and lifecycle:destroy for a destroy.
+      parameters:
+        - {$ref: "#/components/parameters/JobId"}
+        - {name: If-Match, in: header, schema: {type: string}}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "412": {$ref: "#/components/responses/PreconditionFailed"}
+        "428": {$ref: "#/components/responses/PreconditionRequired"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "202": {$ref: "#/components/responses/Accepted"}
+        default: {$ref: "#/components/responses/Problem"}
+components:
+  securitySchemes:
+    bearer: {type: http, scheme: bearer, description: "Service token, `flt_...`."}
+  parameters:
+    Limit: {name: limit, in: query, description: Page size, 1 to 200., schema: {type: integer, minimum: 1, maximum: 200, default: 50}}
+    Cursor: {name: cursor, in: query, description: Opaque; take it from `next_cursor`., schema: {type: string}}
+    InstanceId: {name: id, in: path, required: true, schema: {type: string}}
+    JobId: {name: id, in: path, required: true, schema: {type: integer}}
+  responses:
+    Accepted:
+      description: Accepted; poll the job.
+      headers:
+        Location: {required: true, schema: {type: string}}
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [job]
+            properties:
+              job: {$ref: "#/components/schemas/JobRef"}
+    Unauthorized:
+      description: No valid token. The body never says why (missing, unknown, expired, revoked or wrong address).
+      headers:
+        WWW-Authenticate: {required: true, schema: {type: string}}
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Forbidden:
+      description: The token lacks the operation's scope (`scope_missing`), cannot reach the project (`project_not_allowed`) or is limited to some projects on a host-wide read (`host_wide_not_allowed`).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    RateLimited:
+      description: Too many requests (`rate_limited`), or on deploy no capacity for another run (`capacity_full`, with `verdict`). Wait `Retry-After` seconds.
+      headers:
+        Retry-After: {required: true, schema: {type: integer}}
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    NotFound:
+      description: The project, template, instance or job does not exist, or is not visible to the token (`not_found`).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Conflict:
+      description: The instance is busy with another job (`instance_busy`), or it is protected and cannot be destroyed (`protected_instance`).
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    PreconditionFailed:
+      description: "`stale_if_match`: the instance was recreated since the `If-Match` value was read; nothing was done."
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    PreconditionRequired:
+      description: "`if_match_required`: destroying needs an `If-Match` header with the instance's `created_at`."
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    ValidationFailed:
+      description: "`validation_failed`: the body was refused; `errors` maps field to reason."
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    Problem:
+      description: An error (RFC 9457). 401 never says why; 403 names the missing scope; 429 carries `Retry-After`.
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+  schemas:
+    Object: {type: object}
+    NextCursor: {type: [string, "null"]}
+    InstanceState: {type: string, enum: [deploying, running, stopped, failed, destroying, unknown]}
+    JobStatus: {type: string, enum: [queued, running, succeeded, failed, interrupted]}
+    JobTrigger: {type: string, enum: [ui, cli, webhook, schedule, api]}
+    Problem:
+      type: object
+      required: [type, title, status, detail, code, request_id]
+      properties:
+        type: {type: string}
+        title: {type: string}
+        status: {type: integer}
+        detail: {type: string}
+        code:
+          type: string
+          description: "Machine-readable: capacity_full, instance_busy, scope_missing, project_not_allowed, rate_limited, protected_instance, stale_if_match, validation_failed, invalid_filter, ..."
+        request_id: {type: string}
+        errors: {type: object, additionalProperties: {type: string}, description: "Only on validation_failed."}
+        verdict: {type: object, description: "Only on capacity_full."}
+    JobRef:
+      type: object
+      required: [id, state, url]
+      properties:
+        id: {type: integer}
+        state: {$ref: "#/components/schemas/JobStatus"}
+        url: {type: string}
+    Job:
+      type: object
+      required: [id, type, status, final, trigger, requested_by, project, instance, batch_id, retry_of, exit_code, error, created_at, started_at, finished_at]
+      properties:
+        id: {type: integer}
+        type: {type: string}
+        status: {$ref: "#/components/schemas/JobStatus"}
+        final: {type: boolean}
+        trigger: {$ref: "#/components/schemas/JobTrigger"}
+        requested_by: {type: [string, "null"]}
+        project: {type: [string, "null"]}
+        instance: {type: [string, "null"]}
+        batch_id: {type: [string, integer, "null"]}
+        retry_of: {type: [integer, "null"]}
+        exit_code: {type: [integer, "null"]}
+        error: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        started_at: {type: [string, "null"], format: date-time}
+        finished_at: {type: [string, "null"], format: date-time}
+    Instance:
+      type: object
+      required: [id, project, label, state, branch, template, head, ram_mib, requested_by, url, created_at, deployed_at, last_observed_at, busy]
+      properties:
+        id: {type: string}
+        project: {type: string}
+        label: {type: string}
+        state: {$ref: "#/components/schemas/InstanceState"}
+        branch: {type: string}
+        template: {type: string}
+        head: {type: [string, "null"]}
+        ram_mib: {type: [integer, "null"]}
+        requested_by: {type: [string, "null"]}
+        url: {type: string}
+        created_at: {type: string, format: date-time}
+        deployed_at: {type: [string, "null"], format: date-time}
+        last_observed_at: {type: [string, "null"], format: date-time}
+        busy:
+          type: [object, "null"]
+          required: [job_id]
+          properties:
+            job_id: {type: integer}
+    Host:
+      type: object
+      required: [host, version, generation, instances, projects]
+      properties:
+        host: {type: string}
+        version: {type: [string, "null"]}
+        generation: {type: [integer, "null"]}
+        instances:
+          type: object
+          required: [total, by_state]
+          properties:
+            total: {type: integer}
+            by_state: {type: object, additionalProperties: {type: integer}}
+        projects: {type: integer}
+    Capacity:
+      type: object
+      description: The `host:capacity --json` report (`schema` 1); `verdict` is added when `project` is passed.
+      required: [schema]
+      properties:
+        schema: {type: integer}
+        verdict: {type: [object, "null"]}
+    Upgrade:
+      type: object
+      required: [installed, latest, behind, engine, catalog_failed, pending_migrations]
+      properties:
+        installed:
+          type: object
+          required: [raw, version]
+          properties:
+            raw: {type: [string, "null"]}
+            version: {type: [string, "null"]}
+        latest: {type: [object, "null"]}
+        behind: {type: boolean}
+        engine: {type: [string, "null"]}
+        catalog_failed: {type: boolean}
+        pending_migrations: {type: [integer, "null"]}
+    WebhookDelivery:
+      type: object
+      required: [id, received_at, project, source, event, delivery_id, subject, change, result, reason, rule, action, decision, job_id]
+      properties:
+        id: {type: integer}
+        received_at: {type: string}
+        project: {type: [string, "null"]}
+        source: {type: string}
+        event: {type: [string, "null"]}
+        delivery_id: {type: [string, "null"]}
+        subject: {type: [string, "null"]}
+        change: {type: [string, "null"]}
+        result: {type: string}
+        reason: {type: [string, "null"]}
+        rule: {type: [string, "null"]}
+        action: {type: [string, "null"]}
+        decision: {type: [string, object, "null"]}
+        job_id: {type: [integer, "null"]}
+    TokenSelf:
+      type: object
+      required: [id, name, description, prefix_hint, scopes, projects, instance_globs, ip_allow, created_by, created_at, expires_at, expires_in_seconds, last_used_at, last_used_ip, rotated_from]
+      properties:
+        id: {type: [integer, string]}
+        name: {type: string}
+        description: {type: [string, "null"]}
+        prefix_hint: {type: string}
+        scopes: {type: array, items: {type: string}}
+        projects: {type: array, items: {type: string}}
+        instance_globs: {type: array, items: {type: string}}
+        ip_allow: {type: array, items: {type: string}}
+        created_by: {type: [string, "null"]}
+        created_at: {type: string, format: date-time}
+        expires_at: {type: string, format: date-time}
+        expires_in_seconds: {type: integer}
+        last_used_at: {type: [string, "null"], format: date-time}
+        last_used_ip: {type: [string, "null"]}
+        rotated_from: {type: [integer, string, "null"]}

@@ -63,13 +63,13 @@ sudo fleet token:rotate <id> [--grace=SECONDS] [--expires-in=DAYS]
 sudo fleet token:revoke <id>
 ```
 
-`create` and `rotate` print the secret as the only line on stdout (or the `secret` field with `--json`); everything else goes to stderr. It is shown once. Store it as a secret, never in a repository. The audit actor of CLI changes is `cli`.
+`create` and `rotate` print the secret as the only line on stdout (or the `secret` field with `--json`); everything else goes to stderr. It is shown once. Store it as a secret, never in a repository. **`--json` output contains the secret**: keep it out of CI logs, shell history and job output (capture it into a secret store, not a build log). The audit actor of CLI changes is `cli`.
 
-`rotate` makes a successor with the same scopes and restrictions and a new default lifetime (or `--expires-in`). The old token is revoked at once; with `--grace` (at most 3600 seconds) it keeps working that long, so a client can switch without downtime. A revoked or expired token cannot be rotated: issue a new one. `token:list` hides revoked and expired tokens unless you pass `--all`, and flags tokens that **expire within 14 days** (`EXPIRING`) or were **not used for 60 days** (`UNUSED`, counted from creation for a token never used).
+`rotate` makes a successor with the same scopes and restrictions and a new default lifetime (or `--expires-in`). The old token is revoked at once; with `--grace` (at most 3600 seconds) it keeps working that long, so a client can switch without downtime. A revoked or expired token cannot be rotated: issue a new one. A token that was already rotated (its successor exists, so it is in or past its grace period) cannot be rotated again: rotate the successor, or revoke the old one. `token:list` hides revoked and expired tokens unless you pass `--all`, and flags tokens that **expire within 14 days** (`EXPIRING`) or were **not used for 60 days** (`UNUSED`, counted from creation for a token never used).
 
 ### Web interface
 
-**API tokens** (`/admin/api-tokens`, admins only) lists the tokens (prefix hint, scopes, projects, state, expiry, last use time and address; never the secret), the "Needs attention" panel with the expiring and unused tokens, and the create, rotate and revoke forms. Every change asks for your password again (re-auth) and is audited. The new secret appears once, in the page that the change returns, with a copy button.
+**API tokens** (`/admin/api-tokens`, admins only) lists the tokens (prefix hint, scopes, projects, state, expiry, last use time and address; never the secret), the "Needs attention" panel with the expiring and unused tokens, and the create, rotate and revoke forms. The rotate form sets the grace period and, optionally, the successor's lifetime in days. Every change asks for your password again (re-auth) and is audited. The new secret appears once, in the page that the change returns, with a copy button.
 
 ## Limits
 
@@ -86,6 +86,10 @@ A `429` carries `Retry-After`.
 ## Responses
 
 Every response carries `X-Request-Id` and `Cache-Control: no-store`. Errors are `application/problem+json` (RFC 9457): `type`, `title`, `status`, `detail`, `code` and `request_id`. Codes so far: `unauthorized`, `forbidden`, `scope_missing`, `project_not_allowed`, `rate_limited`, `not_found`, `method_not_allowed`, `invalid_limit`, `invalid_cursor`, `invalid_filter`, `invalid_offset`, `internal_error`. An unauthenticated caller gets `401` for every path under `/api/`, existing or not.
+
+## Machine-readable description
+
+The API is described by an OpenAPI 3.1 document: `GET /api/v1/openapi.json` (any valid `read` token) and [openapi.md](16-openapi.md).
 
 ## `GET /api/v1/tokens/self`
 
@@ -123,7 +127,7 @@ Every write answers `202 Accepted` with `{"job": {"id", "state", "url"}}` and a 
 | `POST /api/v1/instances:destroy-batch` | `lifecycle` and `lifecycle:destroy` | Body `{ids: [...], if_match: {"<id>": "<created_at>"}}`, at most 20 ids; an id without its `if_match` entry is refused with `428` in its result. One job per id; the answer is `207` with a `results` entry per id: `{id, accepted: true, job}` or `{id, accepted: false, status, code, detail}`. A refused id does not stop the others. |
 | `POST /api/v1/jobs/{id}/retry` | the scope the repeated work needs | `deploy` for a deploy or redeploy (a failed deploy is retried as a redeploy), `lifecycle` for start and stop, `lifecycle` and `lifecycle:destroy` for a destroy. Only a failed or interrupted job. Retrying a destroy applies the destroy rules again: the `main` protection and the required `If-Match` header. |
 
-Each accepted write is audited as `api.write` (actor `token:<id>:<name>`, subject: the operation, the target, the job and the client address). The jobs record the trigger `api`. The token id is the stable identifier; the name is informational and can be reused.
+Each accepted write is audited as `api.write` (actor `token:<id>:<name>`, subject: the operation, the target, the job and the client address). The jobs record the trigger `api`. The token id is the stable identifier; the name is informational and can be reused. Names cannot contain `:`, so the actor splits unambiguously into `token`, id and name.
 
 **Replays.** There is no idempotency key. Repeating a write while the first job is queued or running answers `409 instance_busy`; after it finished, the write runs again (a repeated destroy of a gone instance answers `404`).
 

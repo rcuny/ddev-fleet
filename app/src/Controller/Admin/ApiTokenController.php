@@ -102,8 +102,15 @@ final class ApiTokenController extends AbstractController
             return $this->back();
         }
 
+        $days = $request->request->getString('expires_in');
+        if ('' !== $days && 1 !== preg_match('/^[1-9]\d{0,3}$/D', $days)) {
+            $this->addFlash('warning', 'Not rotated: the lifetime is a whole number of days.');
+
+            return $this->back();
+        }
+
         try {
-            $issued = $this->issuer->rotate($old, $this->actor->name(), (int) $grace);
+            $issued = $this->issuer->rotate($old, $this->actor->name(), (int) $grace, '' === $days ? null : $this->clock->now()->modify('+'.$days.' days'));
         } catch (InvalidApiTokenRequest $e) {
             $this->addFlash('warning', 'Not rotated: '.$e->getMessage());
 
