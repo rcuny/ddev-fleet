@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (94), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (98), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -29,6 +29,7 @@ This page is **generated** from the console definition by `fleet:docs:cli`; a re
 - [export](#export): Export a project.
 - [import](#import): Import a project.
 - [upgrade](#upgrade): Release check, history and verification.
+- [token](#token): Token.
 - [Wrapper commands](#wrapper-commands-installbinfleet)
 
 ## Exit codes
@@ -1710,6 +1711,75 @@ fleet upgrade:verify [--to TO] [--from FROM] [--sha SHA] [--actor ACTOR]
 | `--from=VALUE` |  | The version it ran before (for the audit row and the rollback hint) | `unknown` |
 | `--sha=VALUE` |  | The commit the plan resolved for --to (the checkout must be at it) |  |
 | `--actor=VALUE` |  | Who ran the upgrade (unix user, for the audit row) | `cli` |
+
+## token
+
+Token.
+
+### fleet token:create
+
+Create an API token (the secret is printed once).
+
+```
+fleet token:create [--description DESCRIPTION] [-s|--scope SCOPE] [-p|--project PROJECT] [--instance-glob INSTANCE-GLOB] [--ip IP] [--expires-in EXPIRES-IN] [--json] [--] <name>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `name` | yes | Token name: lower-case letters, digits, ".", "_", "-" (max 32) |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--description=VALUE` |  | What the token is for | `` |
+| `--scope=VALUE (repeatable)` | `-s` | A scope (repeat for several) |  |
+| `--project=VALUE (repeatable)` | `-p` | A project name, or * (read-only tokens) |  |
+| `--instance-glob=VALUE (repeatable)` |  | Instance pattern for terminal scopes |  |
+| `--ip=VALUE (repeatable)` |  | Allowed address or CIDR range (repeat) |  |
+| `--expires-in=VALUE` |  | Lifetime in days (default depends on the scopes) |  |
+| `--json` |  | Print the result as JSON, secret included |  |
+
+### fleet token:list
+
+List API tokens (active ones; --all adds revoked and expired).
+
+```
+fleet token:list [-a|--all] [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--all` | `-a` | Include revoked and expired tokens |  |
+| `--json` |  | Print as JSON |  |
+
+### fleet token:revoke
+
+Revoke an API token (immediate, irreversible).
+
+```
+fleet token:revoke <id>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `id` | yes | Token id (see token:list) |
+
+### fleet token:rotate
+
+Replace an API token with a successor (new secret printed once).
+
+```
+fleet token:rotate [--grace GRACE] [--expires-in EXPIRES-IN] [--json] [--] <id>
+```
+
+| Argument | Required | Description |
+|---|---|---|
+| `id` | yes | Token id (see token:list) |
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--grace=VALUE` |  | Seconds the old token keeps working (0 to 3600) | `0` |
+| `--expires-in=VALUE` |  | Lifetime of the successor in days (default depends on the scopes) |  |
+| `--json` |  | Print the result as JSON, secret included |  |
 
 ## Wrapper commands (`install/bin/fleet`)
 
