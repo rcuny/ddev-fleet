@@ -21,6 +21,8 @@ final readonly class PushKeyCheck
 {
     public const string DEFAULT_HOST = 'bitbucket.org';
     private const float TIMEOUT = 20.0;
+    /** A web request (the check button, a template save) must not hang: a shorter budget, 5 s of it for the connection. */
+    public const float INTERACTIVE_TIMEOUT = 8.0;
     /** Seconds a definitive answer is reused, per host and push-key fingerprint: repeated clicks or deploys cause no SSH storm. */
     public const int CACHE_TTL = 60;
 
@@ -51,15 +53,15 @@ final readonly class PushKeyCheck
      *
      * @throws \InvalidArgumentException see hostFromRemote()
      */
-    public function runForRemote(string $remote): PushKeyState
+    public function runForRemote(string $remote, bool $interactive = false): PushKeyState
     {
-        return $this->run(self::hostFromRemote($remote));
+        return $this->run(self::hostFromRemote($remote), $interactive);
     }
 
     /**
      * @throws \InvalidArgumentException when $host is not a plain SSH host name
      */
-    public function run(string $host = self::DEFAULT_HOST): PushKeyState
+    public function run(string $host = self::DEFAULT_HOST, bool $interactive = false): PushKeyState
     {
         $host = KnownHostEntry::normalizeHost($host);
         if (str_starts_with($host, '[')) {
@@ -79,7 +81,7 @@ final readonly class PushKeyCheck
         }
 
         try {
-            $result = $this->runner->run(self::argv($key, $this->paths->knownHostsFile(), $host), null, ['GIT_TERMINAL_PROMPT' => '0'], null, self::TIMEOUT);
+            $result = $this->runner->run(self::argv($key, $this->paths->knownHostsFile(), $host, $interactive ? 5 : 10), null, ['GIT_TERMINAL_PROMPT' => '0'], null, $interactive ? self::INTERACTIVE_TIMEOUT : self::TIMEOUT);
         } catch (CommandTimedOut|CommandRunnerException) {
             return PushKeyState::Unreachable;
         }
@@ -95,7 +97,7 @@ final readonly class PushKeyCheck
     /**
      * @return list<string>
      */
-    public static function argv(string $key, string $knownHosts, string $host): array
+    public static function argv(string $key, string $knownHosts, string $host, int $connectTimeout = 10): array
     {
         return [
             'ssh', '-F', '/dev/null',
@@ -106,7 +108,7 @@ final readonly class PushKeyCheck
             '-o', 'StrictHostKeyChecking=yes',
             '-o', 'UserKnownHostsFile='.$knownHosts,
             '-o', 'GlobalKnownHostsFile=/dev/null',
-            '-o', 'ConnectTimeout=10',
+            '-o', 'ConnectTimeout='.$connectTimeout,
             '-T', 'git@'.$host,
         ];
     }

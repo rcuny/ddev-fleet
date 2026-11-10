@@ -109,4 +109,26 @@ final class DriftReportTest extends TestCase
         self::assertSame("ssh-ed25519 AAAAC3 deploy\nplain text", DriftMask::text("ssh-ed25519 AAAAC3 deploy\nplain text"));
         self::assertStringNotContainsString('MIIE', DriftMask::text("x\n-----BEGIN PRIVATE KEY-----\nMIIEvQ\n-----END PRIVATE KEY-----\ny"));
     }
+
+    public function testMasksBareKeyNames(): void
+    {
+        self::assertSame('OVH_CONSUMER_KEY=***', DriftMask::text('OVH_CONSUMER_KEY=abc123'));
+        self::assertSame('  ovh_application_key: ***', DriftMask::text('  ovh_application_key: abc123'));
+        self::assertSame('"access_key": ***', DriftMask::text('"access_key": "abc"'));
+        self::assertSame('consumerKey: ***', DriftMask::text('consumerKey: abc123'));
+        self::assertSame('  applicationKey = ***', DriftMask::text('  applicationKey = abc123'));
+        self::assertSame('"apiKey": ***', DriftMask::text('"apiKey": "abc"'));
+    }
+
+    public function testMasksYamlBlockScalarValues(): void
+    {
+        $in = "+secret_key: |\n+  line1\n+  line2\n+\n+next: kept\n unrelated: kept";
+        $out = DriftMask::text($in);
+
+        self::assertStringNotContainsString('line1', $out);
+        self::assertStringNotContainsString('line2', $out);
+        self::assertStringContainsString("+next: kept\n unrelated: kept", $out);
+        self::assertSame($out, DriftMask::text($out));
+        self::assertSame("api_token: ***\n  ***\n  ***\nname: x", DriftMask::text("api_token: >-\n  abc\n  def\nname: x"));
+    }
 }

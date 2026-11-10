@@ -49,7 +49,7 @@ final readonly class TemplateService
         }
         try {
             $host = \App\Fleet\Ssh\PushKeyCheck::hostFromRemote($owner->git());
-            $state = $this->pushCheck->run($host);
+            $state = $this->pushCheck->run($host, true);
         } catch (\InvalidArgumentException) {
             return null;
         }

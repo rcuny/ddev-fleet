@@ -57,6 +57,23 @@ final class PushKeyCheckTest extends TestCase
         self::assertStringNotContainsString('deploy_ed25519', implode(' ', $argv));
     }
 
+    public function testAnInteractiveCheckUsesAShorterBudget(): void
+    {
+        touch($this->home.'/ssh/push_ed25519');
+        $this->runner->expect(['ssh'], new CommandResult(0, 'authenticated via ssh key.'));
+        $this->runner->expect(['ssh'], new CommandResult(0, 'authenticated via ssh key.'));
+        $check = new PushKeyCheck($this->paths, $this->runner);
+
+        $check->run('bitbucket.org', true);
+        $check->run('github.com');
+
+        [$web, $deploy] = $this->runner->calls();
+        self::assertSame(PushKeyCheck::INTERACTIVE_TIMEOUT, $web->timeout);
+        self::assertContains('ConnectTimeout=5', $web->argv);
+        self::assertGreaterThan(PushKeyCheck::INTERACTIVE_TIMEOUT, $deploy->timeout);
+        self::assertContains('ConnectTimeout=10', $deploy->argv);
+    }
+
     public function testAPortIsRefused(): void
     {
         touch($this->home.'/ssh/push_ed25519');

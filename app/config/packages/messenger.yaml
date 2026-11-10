@@ -4,8 +4,10 @@ framework:
 
         transports:
             # Both live in queue.sqlite (the `queue` Doctrine connection); created by messenger:setup-transports.
+            # redeliver_timeout > the longest job (DriftCheck/ProvisionJob::TIMEOUT 3700 s; Doctrine's default is 3600 s, after
+            # which a message still being handled counts as lost and is delivered again). Pinned by JobTimeoutsTest.
             jobs:
-                dsn: 'doctrine://queue?queue_name=jobs&auto_setup=false'
+                dsn: 'doctrine://queue?queue_name=jobs&auto_setup=false&redeliver_timeout=7200'
                 retry_strategy:
                     max_retries: 0
             failed:
