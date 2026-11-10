@@ -68,6 +68,11 @@ final class CheckoutCleanCheckTest extends CheckTestCase
         self::assertFalse($results[0]->overridable);
     }
 
+    public function testAHeadAtTheTargetCommitIsAResumedInstallAndPasses(): void
+    {
+        self::assertSame([], $this->check($this->runner(head: self::SHA))->check(self::plan()));
+    }
+
     public function testAForeignOriginBlocks(): void
     {
         $results = $this->check($this->runner(origin: 'https://evil.example/ddev-fleet.git'))->check(self::plan());

@@ -35,7 +35,7 @@ final class TokenFormat
     }
 
     /** True when $token has the shape and a correct checksum; says nothing about whether it was ever issued. */
-    public static function isWellFormed(string $token): bool
+    public static function isWellFormed(#[\SensitiveParameter] string $token): bool
     {
         if (1 !== preg_match(self::PATTERN, $token)) {
             return false;
@@ -46,13 +46,13 @@ final class TokenFormat
     }
 
     /** What the database stores: lower-case hex SHA-256 of the full token. */
-    public static function hash(string $token): string
+    public static function hash(#[\SensitiveParameter] string $token): string
     {
         return hash('sha256', $token);
     }
 
     /** The first characters of the secret part, for a list view. */
-    public static function hint(string $token): string
+    public static function hint(#[\SensitiveParameter] string $token): string
     {
         return substr($token, \strlen(self::PREFIX), self::HINT_LENGTH);
     }

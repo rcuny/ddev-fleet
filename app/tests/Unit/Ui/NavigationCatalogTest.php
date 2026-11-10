@@ -11,7 +11,7 @@ use Symfony\Component\Security\Core\Authorization\AuthorizationCheckerInterface;
 
 final class NavigationCatalogTest extends TestCase
 {
-    private const array KEYS = ['home', 'instances', 'projects', 'jobs', 'webhooks', 'schedules', 'secrets', 'users', 'settings', 'upgrade', 'design-system'];
+    private const array KEYS = ['home', 'instances', 'projects', 'jobs', 'webhooks', 'schedules', 'secrets', 'api_tokens', 'users', 'settings', 'upgrade', 'design-system'];
 
     public function testKeysAreInTheDocumentedOrder(): void
     {
@@ -88,6 +88,7 @@ final class NavigationCatalogTest extends TestCase
             'webhooks' => null,
             'schedules' => null,
             'secrets' => null,
+            'api_tokens' => null,
             'users' => null,
             'settings' => null,
             'upgrade' => null,

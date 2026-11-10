@@ -321,7 +321,7 @@ main() {
   if [ "$rc" -ne 0 ]; then
     history_line installer failed
     err "the installer failed (exit $rc). Log: $install_log"
-    err "It is idempotent: run the same command again, or go back with: sudo fleet upgrade --to $from --yes (a rollback: it restores the pre-upgrade backup, see docs/reference/05-upgrade.md)"
+    err "It is idempotent: run the same command again (the checkout already at $target is accepted as a resumed install), or go back with: sudo fleet upgrade --to $from --yes (a rollback: it restores the pre-upgrade backup, see docs/reference/05-upgrade.md)"
     return 1
   fi
   history_line installer ok
