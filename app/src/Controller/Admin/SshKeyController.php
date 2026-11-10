@@ -60,7 +60,7 @@ final class SshKeyController extends AbstractController
             return $this->back();
         }
         try {
-            $state = $this->pushCheck->run($host);
+            $state = $this->pushCheck->run($host, true);
         } catch (\InvalidArgumentException $e) {
             $this->addFlash('warning', $e->getMessage());
 

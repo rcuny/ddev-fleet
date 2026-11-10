@@ -115,7 +115,9 @@ final class DriftReportTest extends TestCase
         self::assertSame('OVH_CONSUMER_KEY=***', DriftMask::text('OVH_CONSUMER_KEY=abc123'));
         self::assertSame('  ovh_application_key: ***', DriftMask::text('  ovh_application_key: abc123'));
         self::assertSame('"access_key": ***', DriftMask::text('"access_key": "abc"'));
-        self::assertSame('keyboard: us', DriftMask::text('keyboard: us'));
+        self::assertSame('consumerKey: ***', DriftMask::text('consumerKey: abc123'));
+        self::assertSame('  applicationKey = ***', DriftMask::text('  applicationKey = abc123'));
+        self::assertSame('"apiKey": ***', DriftMask::text('"apiKey": "abc"'));
     }
 
     public function testMasksYamlBlockScalarValues(): void

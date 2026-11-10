@@ -14,7 +14,7 @@ final class DriftMask
 {
     public const string MASK = '***';
 
-    private const string KEY = '(?:password|passwd|passphrase|secret|token|api[_-]?key|private[_-]?key|secret[_-]?key|credential|jwt|psk|[_-]key)';
+    private const string KEY = '(?:password|passwd|passphrase|secret|token|api[_-]?key|private[_-]?key|secret[_-]?key|credential|jwt|psk|[_-]key|(?-i:[a-z0-9]Key))';
 
     private function __construct()
     {

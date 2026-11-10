@@ -33,17 +33,9 @@ final class CheckModeGuardTest extends TestCase
                     continue;
                 }
                 ++$seen;
-                $module = preg_replace('/^ansible\.builtin\./', '', (string) (array_values(array_diff(array_keys($task), self::NOT_MODULES))[0] ?? '?'));
-                $where = basename(\dirname($file, 2)).'/'.basename($file).': '.($task['name'] ?? '?').' ('.$module.')';
-                if (\in_array($module, self::READ_ONLY, true)) {
-                    continue;
+                if (null !== ($violation = self::violation($task))) {
+                    $violations[] = basename(\dirname($file, 2)).'/'.basename($file).': '.$violation;
                 }
-                $args = (array) ($task['ansible.builtin.'.$module] ?? $task[$module] ?? []);
-                $target = (string) ($args['dest'] ?? $args['path'] ?? '');
-                if (\in_array($module, self::TEMP_ONLY, true) && 1 === preg_match('/^\{\{\s*[a-z0-9_]+\.path\s*\}\}$/', $target)) {
-                    continue;
-                }
-                $violations[] = $where;
             }
         }
 
@@ -53,11 +45,42 @@ final class CheckModeGuardTest extends TestCase
 
     public function testTheGuardCatchesAMutatingModule(): void
     {
-        $tasks = iterator_to_array(self::tasks(Yaml::parse("- name: x\n  block:\n    - name: bad\n      ansible.builtin.lineinfile:\n        path: /etc/hosts\n      check_mode: false\n")), false);
+        $bad = Yaml::parse("name: bad\nansible.builtin.lineinfile:\n  path: /etc/hosts\ncheck_mode: false\n");
+        self::assertSame('bad (lineinfile)', self::violation($bad));
 
-        self::assertSame('bad', $tasks[0]['name']);
-        self::assertNotContains('lineinfile', self::READ_ONLY);
-        self::assertNotContains('lineinfile', self::TEMP_ONLY);
+        $shortName = Yaml::parse("name: short\napt:\n  name: curl\ncheck_mode: false\n");
+        self::assertSame('short (apt)', self::violation($shortName));
+
+        // file/copy/get_url on a path that is not the role's own temp file is a violation too
+        $realFile = Yaml::parse("name: real\nansible.builtin.copy:\n  dest: /etc/motd\ncheck_mode: false\n");
+        self::assertSame('real (copy)', self::violation($realFile));
+    }
+
+    public function testTheGuardAllowsReadOnlyModulesAndTheOwnTempFile(): void
+    {
+        self::assertNull(self::violation(Yaml::parse("name: probe\nansible.builtin.stat:\n  path: /etc/hosts\ncheck_mode: false\n")));
+        self::assertNull(self::violation(Yaml::parse("name: tmp\nansible.builtin.copy:\n  dest: '{{ key_tmp.path }}'\ncheck_mode: false\n")));
+    }
+
+    /**
+     * The reason a task with `check_mode: false` may not stay, or null when it is fine.
+     *
+     * @param array<string, mixed> $task
+     */
+    private static function violation(array $task): ?string
+    {
+        $module = preg_replace('/^ansible\.builtin\./', '', (string) (array_values(array_diff(array_keys($task), self::NOT_MODULES))[0] ?? '?'));
+        $where = ($task['name'] ?? '?').' ('.$module.')';
+        if (\in_array($module, self::READ_ONLY, true)) {
+            return null;
+        }
+        $args = (array) ($task['ansible.builtin.'.$module] ?? $task[$module] ?? []);
+        $target = (string) ($args['dest'] ?? $args['path'] ?? '');
+        if (\in_array($module, self::TEMP_ONLY, true) && 1 === preg_match('/^\{\{\s*[a-z0-9_]+\.path\s*\}\}$/', $target)) {
+            return null;
+        }
+
+        return $where;
     }
 
     /**
