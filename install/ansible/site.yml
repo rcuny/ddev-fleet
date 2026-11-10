@@ -32,6 +32,10 @@
       tags: [packages]
     - role: docker
       tags: [docker]
+    - role: caddy
+      tags: [caddy]
+    - role: authelia
+      tags: [authelia]
     - role: hardening
       when: fleet_hardening_enabled | bool
       tags: [hardening]
