@@ -9,6 +9,8 @@ an installed build that still meets the minimum is kept when the download fails)
 auto), the `list-modules` assertion on `/usr/bin/caddy`, the two `caddy.service.d` drop-ins, and the snippet directories
 `/etc/caddy/fleet{,/instances,/ports}` (`2750 fleet:caddy`, setgid) with the directories below them normalised to `2750` and the snippets under `instances/` and `ports/` to group `caddy` `0640` (other files, such as `stored-certs.list`, are left alone).
 
+Sets the fact `fleet_caddy_changed` when the custom build was replaced or a drop-in changed; the `units` role then restarts Caddy once at the end of the run (a no-op run restarts nothing).
+
 Never does: start, restart or reload Caddy (a changed drop-in only triggers `systemctl daemon-reload`, as in bash), so live routes
 stay up. **Not written, owned by `apply caddy`:** the Caddyfile, every per-instance and port snippet, `/etc/caddy/fleet.env`
 and `/etc/caddy/ovh/`. Existing snippets only get `group caddy` / `0640` (directories `2750`), no content change.

@@ -137,6 +137,7 @@
 
     - name: Put the verified build in place
       ansible.builtin.command: mv -f /usr/bin/caddy.custom.new /usr/bin/caddy.custom
+      register: caddy_custom_put
       changed_when: true
   rescue:
     - name: Drop the candidate
@@ -202,6 +203,7 @@
     mode: "0644"
     owner: root
     group: root
+  register: caddy_sandbox_dropin
   notify: Reload systemd units
 
 - name: Environment drop-in (the file it names is written by `apply caddy`, never here)
@@ -211,10 +213,18 @@
     mode: "0644"
     owner: root
     group: root
+  register: caddy_env_dropin
   notify: Reload systemd units
 
 - name: Pick up the drop-ins (no Caddy restart or reload)
   ansible.builtin.meta: flush_handlers
+
+# Caddy reads its binary, its unit and its environment only when it starts. This role never restarts it; it says that
+# a restart is due, and the units role restarts Caddy once, at the end of the run, when this is true.
+- name: Note that Caddy must be restarted (a refreshed custom build or a changed drop-in)
+  ansible.builtin.set_fact:
+    fleet_caddy_changed: >-
+      {{ caddy_custom_put.changed | default(false) | bool or caddy_sandbox_dropin is changed or caddy_env_dropin is changed }}
 
 # fleet writes, caddy reads: the setgid bit is what hands the group over (a lost bit makes Caddy fail to start).
 - name: Snippet directories

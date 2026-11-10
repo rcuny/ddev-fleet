@@ -1,0 +1,29 @@
+---
+# Unit files copied from install/etc/ into the systemd directory, grouped by what a change must restart.
+units_worker: [fleet-worker@.service, fleet-status.service]
+units_scheduler: [fleet-scheduler.service]
+units_mercure: [fleet-mercure.service]
+# Written, never restarted by a change (a timer or a oneshot picks the new file up by itself; fleet-tmux must not end
+# the operators' panes: a changed unit takes effect at the next `systemctl restart fleet-tmux`).
+units_plain:
+  - fleet-boot.service
+  - fleet-backup.service
+  - fleet-backup.timer
+  - fleet-upgrade-check.service
+  - fleet-upgrade-check.timer
+  - fleet-tls-check.service
+  - fleet-tls-check.timer
+  - fleet-tmux.service
+units_enable:
+  - authelia
+  - php8.4-fpm
+  - fleet-mercure
+  - fleet-worker@1
+  - fleet-scheduler
+  - fleet-status
+  - fleet-boot
+  - caddy
+units_timers: [fleet-backup.timer, fleet-upgrade-check.timer, fleet-tls-check.timer]
+units_health_units: [docker, caddy, authelia, php8.4-fpm, fleet-mercure, fleet-worker@1, fleet-status]
+units_mercure_bin: /usr/local/bin/mercure
+units_mercure_marker_dir: /usr/local/lib/ddev-fleet

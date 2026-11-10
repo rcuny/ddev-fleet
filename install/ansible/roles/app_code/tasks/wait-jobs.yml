@@ -1,0 +1,26 @@
+---
+# FLE-213: jobs started as child processes survive the worker restart, but not the swap of the code and the database
+# under them. Reads the database directly: the application of the old release may not match the new code.
+- name: Look for the database
+  ansible.builtin.stat:
+    path: "{{ fleet_srv_dir }}/var/fleet.sqlite"
+  register: app_code_db
+
+- name: Wait for running jobs
+  ansible.builtin.command:
+    argv: "{{ fleet_run_as + ['php8.4', '-r', app_code_jobs_php, fleet_srv_dir ~ '/var/fleet.sqlite'] }}"
+  register: app_code_running
+  until: app_code_running.stdout | default('0') | int == 0
+  retries: "{{ ((fleet_job_wait | int) // 5) | int }}"
+  delay: 5
+  failed_when: false
+  changed_when: false
+  check_mode: false
+  when: (fleet_job_wait | int) > 0 and app_code_db.stat.exists
+
+- name: Say that jobs are still running at the limit
+  ansible.builtin.debug:
+    msg: >-
+      {{ app_code_running.stdout }} job(s) still running after {{ fleet_job_wait }}s: continuing, they run on against the
+      new code (retry any that fail)
+  when: app_code_running.stdout | default('0') | int > 0

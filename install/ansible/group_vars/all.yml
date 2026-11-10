@@ -66,6 +66,56 @@ fleet_hardening_strict: true
 # The account whose access must survive; empty = the user who called sudo, else the connecting user.
 fleet_hardening_invoking_user: ""
 
+# app layer (php_app, app_code, privileged, units). The release is checked out by the bootstrap; these roles assume
+# the checkout in fleet_src_dir is at fleet_ref and that install/ (this tree's parent) is the root-owned export.
+# The release ref the host is installed at (a tag, or a branch / commit). Required: it becomes installed-version.
+fleet_ref: ""
+# The host's public name and the ACME contact (host-vars.yml).
+fleet_domain: ""
+fleet_acme_email: ""
+fleet_user: fleet
+fleet_home_dir: /home/fleet
+fleet_src_dir: /opt/ddev-fleet
+fleet_caddy_etc_dir: /etc/caddy
+fleet_caddy_fleet_dir: /etc/caddy/fleet
+fleet_systemd_dir: /etc/systemd/system
+fleet_helper_dir: /usr/local/libexec/fleet
+fleet_sudoers_dir: /etc/sudoers.d
+fleet_mercure_etc_dir: /etc/fleet-mercure
+fleet_php_fpm_dir: /etc/php/8.4/fpm
+# The root-owned export of install/: privileged files are installed from here, never from the fleet-writable checkout.
+fleet_install_dir: "{{ playbook_dir | dirname }}"
+# Seconds to wait for running jobs before the code is swapped (0 skips the wait), and for the health check.
+fleet_job_wait: 300
+fleet_health_timeout: 120
+# true: rebuild (composer, assets, cache) even when neither the code nor the environment changed.
+fleet_force_build: false
+# true: restart Caddy (set by the role that refreshes its binary).
+fleet_caddy_changed: false
+
+# Pinned Mercure hub release (sha256 of the release archive per architecture).
+fleet_mercure_version: 1.1.2
+fleet_mercure_sha256:
+  amd64: 64d67a1189c96c0131229e309679695086eca0d4cff0d14f9fef94f109438e30
+  arm64: 60a016f6e838c888f76081944e0607500e8d9f1eb280db6812838714e67a3abb
+
+# How to run something as the fleet user, and the application's console with fleet.env loaded (APP_ENV=prod).
+fleet_run_as:
+  - runuser
+  - -u
+  - "{{ fleet_user }}"
+  - --
+  - env
+  - "HOME={{ fleet_home_dir }}"
+  - DDEV_NONINTERACTIVE=true
+fleet_app_exec:
+  - bash
+  - -c
+  - set -a; . "$1"; set +a; cd "$2" && shift 2 && exec "$@"
+  - fleet-app
+  - "{{ fleet_etc_dir }}/fleet.env"
+  - "{{ fleet_src_dir }}/app"
+
 # Where the bash installer keeps the unit and config files that the caddy and authelia roles install unchanged.
 # One copy only: the roles read them from there (move them into the roles when install/steps/ goes away).
 fleet_install_etc_dir: "{{ playbook_dir }}/../etc"

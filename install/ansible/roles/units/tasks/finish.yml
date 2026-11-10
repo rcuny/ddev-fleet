@@ -1,0 +1,86 @@
+---
+- name: Wait until everything answers
+  when: not ansible_check_mode
+  block:
+    - name: The host answers over HTTPS
+      ansible.builtin.uri:
+        url: "https://{{ fleet_domain }}/health"
+        timeout: 10
+        return_content: false
+      register: units_health
+      until: units_health is succeeded
+      retries: "{{ ((fleet_health_timeout | int) // 13) | int }}"
+      delay: 3
+      changed_when: false
+      check_mode: false
+
+    - name: The Mercure hub answers
+      ansible.builtin.uri:
+        url: http://127.0.0.1:3000/healthz
+        timeout: 5
+      register: units_hub_health
+      until: units_hub_health is succeeded
+      retries: "{{ ((fleet_health_timeout | int) // 8) | int }}"
+      delay: 3
+      changed_when: false
+      check_mode: false
+
+    - name: The services are active
+      ansible.builtin.command: systemctl is-active --quiet {{ item }}  # noqa: command-instead-of-module
+      register: units_active
+      until: units_active.rc == 0
+      retries: "{{ ((fleet_health_timeout | int) // 3) | int }}"
+      delay: 3
+      loop: "{{ units_health_units }}"
+      changed_when: false
+      check_mode: false
+  rescue:
+    - name: Stop with where to look
+      ansible.builtin.fail:
+        msg: >-
+          the install did not become healthy within {{ fleet_health_timeout }}s. Look at: journalctl -u caddy -u authelia
+          -u php8.4-fpm -u fleet-mercure -u fleet-worker@1 -u fleet-status -n 50 --no-pager
+
+# After the health check, so a failed run keeps the previous values.
+- name: Record the installed revision
+  ansible.builtin.copy:
+    content: "{{ fleet_code_revision }}\n"
+    dest: "{{ fleet_etc_dir }}/installed-revision"
+    mode: "0644"
+    owner: root
+    group: root
+  when: fleet_code_revision | default('') | length > 0
+
+- name: Is the ref a tag of the checkout?
+  ansible.builtin.command:
+    argv: >-
+      {{ fleet_run_as + ['git', '-C', fleet_src_dir, 'rev-parse', '-q', '--verify', 'refs/tags/' ~ fleet_ref ~ '^{commit}'] }}
+  register: units_ref_tag
+  failed_when: false
+  changed_when: false
+  check_mode: false
+  when: fleet_ref is match('^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$')
+
+# The tag, or <ref>@<sha7> when the ref is not a tag.
+- name: Record the installed version
+  ansible.builtin.copy:
+    content: "{{ fleet_ref if (units_ref_tag.rc | default(1)) == 0 else fleet_ref ~ '@' ~ fleet_code_revision[:7] }}\n"
+    dest: "{{ fleet_etc_dir }}/installed-version"
+    mode: "0644"
+    owner: root
+    group: root
+  when: fleet_code_revision | default('') | length > 0
+
+# The one-time setup URL is a credential: the playbook never mints or prints it, so it cannot reach an Ansible log.
+# The bootstrap prints it in its final notes (`fleet setup:token`), as the bash installer does.
+- name: Say how to get the setup URL
+  ansible.builtin.debug:
+    msg: >-
+      ddev-fleet is up. The administrator is not created yet: run  sudo fleet setup:token  for the one-time setup URL
+      (a credential for 24 hours; keep it private).
+  when: not (fleet_setup_complete | default(false) | bool)
+
+- name: Say that the setup was already completed
+  ansible.builtin.debug:
+    msg: ddev-fleet is up at https://{{ fleet_domain }}/. Setup was already completed; nothing was reset.
+  when: fleet_setup_complete | default(false) | bool

@@ -1,0 +1,58 @@
+---
+- name: Install the dependencies (no dev packages, the prod autoloader)
+  ansible.builtin.command:
+    argv: >-
+      {{ fleet_run_as + fleet_app_exec + ['php8.4', '/usr/bin/composer', 'install', '--no-dev', '--no-scripts',
+      '--no-interaction', '--prefer-dist', '--optimize-autoloader'] }}
+  changed_when: true
+
+- name: Install the JavaScript importmap
+  ansible.builtin.command:
+    argv: "{{ fleet_run_as + fleet_app_exec + ['php8.4', 'bin/console', 'importmap:install', '--no-interaction'] }}"
+  changed_when: true
+
+# FLE-193: GitHub releases answer 504 now and then, so the Tailwind CLI comes from a host cache (downloaded once, with
+# retries and a SHA-256 check). A failure is only a warning: the bundle then tries its own download.
+- name: Read the Tailwind configuration
+  ansible.builtin.slurp:
+    src: "{{ fleet_src_dir }}/app/config/packages/symfonycasts_tailwind.yaml"
+  register: app_code_tailwind_conf
+  failed_when: false
+
+- name: The pinned Tailwind version
+  ansible.builtin.set_fact:
+    app_code_tailwind_version: >-
+      {{ (app_code_tailwind_conf.content | default('') | b64decode)
+      | regex_findall('(?m)^\s*binary_version:\s*[\"\']?(v[0-9][0-9.]*)') | first | default('') }}
+
+- name: Say that Tailwind is not cached
+  ansible.builtin.debug:
+    msg: "no symfonycasts_tailwind binary_version found: the bundle downloads Tailwind itself"
+  when: app_code_tailwind_version | length == 0
+
+- name: Cache the Tailwind binary on the host
+  ansible.builtin.command:
+    argv: >-
+      {{ fleet_run_as + ['bash', fleet_install_dir ~ '/lib/tailwind-seed.sh', app_code_tailwind_version,
+      fleet_srv_dir ~ '/cache/tailwind', fleet_src_dir ~ '/app/var/tailwind'] }}
+  register: app_code_tailwind_seed
+  failed_when: false
+  changed_when: false
+  when: app_code_tailwind_version | length > 0
+
+- name: Say that the Tailwind binary could not be cached
+  ansible.builtin.debug:
+    msg: "could not cache the Tailwind binary: the bundle downloads it itself"
+  when: app_code_tailwind_seed.rc | default(0) != 0
+
+- name: Build the stylesheet and compile the assets, then rebuild the cache
+  ansible.builtin.command:
+    argv: "{{ fleet_run_as + fleet_app_exec + ['php8.4', 'bin/console'] + item + ['--no-interaction'] }}"
+  loop:
+    - [tailwind:build, --minify]
+    - [asset-map:compile]
+    - [cache:clear]
+    - [cache:warmup]
+  loop_control:
+    label: "{{ item[0] }}"
+  changed_when: true

@@ -1,0 +1,40 @@
+---
+# All of it is safe to repeat: migrations only apply what is new, the queue setup only creates what is missing, and
+# fleet:host:init never changes the setup token, the users or the SSH keys (it refuses to change the domain once the
+# setup is complete).
+- name: Apply the database migrations
+  ansible.builtin.command:
+    argv: "{{ fleet_run_as + fleet_app_exec + ['php8.4', 'bin/console', 'doctrine:migrations:migrate', '--no-interaction'] }}"
+  register: app_code_migrate
+  changed_when: "'Successfully migrated' in app_code_migrate.stdout"
+
+- name: Create the missing queue transports
+  ansible.builtin.command:
+    argv: "{{ fleet_run_as + fleet_app_exec + ['php8.4', 'bin/console', 'messenger:setup-transports', '--no-interaction'] }}"
+  changed_when: false
+
+# FLE-216: a migration can change what the instance Caddy sites contain, so they are rewritten on every run (only
+# instances that already have a site). A failure must not stop the upgrade; fleet:port:refresh retries it.
+- name: Rewrite the instance Caddy sites
+  ansible.builtin.command:
+    argv: "{{ fleet_run_as + fleet_app_exec + ['php8.4', 'bin/console', 'fleet:port:refresh', '--no-interaction'] }}"
+  register: app_code_port_refresh
+  failed_when: false
+  changed_when: false
+
+- name: Say that the port refresh failed
+  ansible.builtin.debug:
+    msg: fleet:port:refresh failed; run it by hand once the cause is fixed
+  when: app_code_port_refresh.rc | default(0) != 0
+
+- name: Record the host settings
+  ansible.builtin.command:
+    argv: >-
+      {{ fleet_run_as + fleet_app_exec + ['php8.4', 'bin/console', 'fleet:host:init', '--domain=' ~ fleet_domain]
+      + (['--acme-email=' ~ fleet_acme_email] if fleet_acme_email | length > 0 else []) }}
+  register: app_code_host_init
+  changed_when: false
+
+- name: Note whether the setup wizard was completed (decides whether a setup token is minted)
+  ansible.builtin.set_fact:
+    fleet_setup_complete: "{{ 'Setup is complete.' in app_code_host_init.stdout | default('') }}"

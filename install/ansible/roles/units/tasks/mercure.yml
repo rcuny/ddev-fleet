@@ -1,0 +1,123 @@
+---
+# The marker holds "<version> <sha256>" of the archive that produced the installed binary, so a re-run downloads again
+# only when the pin changed.
+- name: Pick the archive for this CPU
+  ansible.builtin.set_fact:
+    units_mercure_arch: "{{ {'x86_64': 'amd64', 'aarch64': 'arm64'}[ansible_facts['architecture']] }}"
+
+- name: Look for the installed hub
+  ansible.builtin.stat:
+    path: "{{ units_mercure_bin }}"
+  register: units_mercure_stat
+
+- name: Read the marker
+  ansible.builtin.slurp:
+    src: "{{ units_mercure_marker_dir }}/mercure.version"
+  register: units_mercure_marker
+  failed_when: false
+
+- name: Does the hub need to be installed?
+  ansible.builtin.set_fact:
+    units_mercure_pin: "{{ fleet_mercure_version }} {{ fleet_mercure_sha256[units_mercure_arch] }}"
+    units_mercure_needed: >-
+      {{ not units_mercure_stat.stat.exists or
+      (units_mercure_marker.content | default('') | b64decode | trim) != (fleet_mercure_version ~ ' ' ~ fleet_mercure_sha256[units_mercure_arch]) }}
+
+- name: The marker directory
+  ansible.builtin.file:
+    path: "{{ units_mercure_marker_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: Download, verify and install the hub
+  when: units_mercure_needed | bool and not ansible_check_mode
+  block:
+    - name: A scratch directory
+      ansible.builtin.tempfile:
+        state: directory
+        prefix: mercure.
+      register: units_mercure_tmp
+
+    - name: Download the archive (the pinned sha256 is checked; nothing is installed on a mismatch)
+      ansible.builtin.get_url:
+        url: >-
+          https://github.com/dunglas/mercure/releases/download/v{{ fleet_mercure_version }}/mercure_Linux_{{
+          'x86_64' if units_mercure_arch == 'amd64' else 'arm64' }}.tar.gz
+        dest: "{{ units_mercure_tmp.path }}/mercure.tar.gz"
+        checksum: "sha256:{{ fleet_mercure_sha256[units_mercure_arch] }}"
+        mode: "0600"
+
+    - name: Unpack the binary
+      ansible.builtin.unarchive:
+        src: "{{ units_mercure_tmp.path }}/mercure.tar.gz"
+        dest: "{{ units_mercure_tmp.path }}"
+        remote_src: true
+        include: [mercure]
+        owner: root
+        group: root
+
+    - name: Install it, replacing the old binary in one step
+      ansible.builtin.copy:
+        src: "{{ units_mercure_tmp.path }}/mercure"
+        dest: "{{ units_mercure_bin }}"
+        remote_src: true
+        mode: "0755"
+        owner: root
+        group: root
+  always:
+    - name: Remove the scratch directory
+      ansible.builtin.file:
+        path: "{{ units_mercure_tmp.path }}"
+        state: absent
+      when: units_mercure_tmp.path is defined
+
+- name: Record the installed pin
+  ansible.builtin.copy:
+    content: "{{ units_mercure_pin }}\n"
+    dest: "{{ units_mercure_marker_dir }}/mercure.version"
+    mode: "0644"
+    owner: root
+    group: root
+  when: units_mercure_needed | bool
+
+- name: Validate the hub's configuration before a service uses it
+  ansible.builtin.command:
+    argv:
+      - env
+      - MERCURE_PUBLISHER_JWT_KEY=validate-only-0123456789abcdef0123456789
+      - MERCURE_SUBSCRIBER_JWT_KEY=validate-only-0123456789abcdef0123456789
+      - "{{ units_mercure_bin }}"
+      - validate
+      - --config
+      - "{{ fleet_install_dir }}/etc/mercure.Caddyfile"
+      - --adapter
+      - caddyfile
+  changed_when: false
+  check_mode: false
+  when: units_mercure_stat.stat.exists or not ansible_check_mode
+
+- name: The hub's configuration directory
+  ansible.builtin.file:
+    path: "{{ fleet_mercure_etc_dir }}"
+    state: directory
+    mode: "0755"
+    owner: root
+    group: root
+
+- name: The hub's configuration
+  ansible.builtin.copy:
+    src: "{{ fleet_install_dir }}/etc/mercure.Caddyfile"
+    dest: "{{ fleet_mercure_etc_dir }}/Caddyfile"
+    remote_src: true
+    mode: "0644"
+    owner: root
+    group: root
+  register: units_mercure_conf
+
+- name: Note whether the hub changed
+  ansible.builtin.set_fact:
+    fleet_mercure_changed: >-
+      {{ fleet_mercure_changed | default(false) | bool or units_mercure_needed | bool or
+      units_mercure_conf is changed or units_mercure_copy is changed }}
