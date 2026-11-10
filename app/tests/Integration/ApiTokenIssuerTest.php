@@ -56,6 +56,7 @@ final class ApiTokenIssuerTest extends KernelTestCase
     public static function invalid(): iterable
     {
         yield 'upper-case name' => ['CI', '192.0.2.1'];
+        yield 'name with a colon (the audit actor token:<id>:<name> must split)' => ['ci:prod', '192.0.2.1'];
         yield 'name with a space' => ['my token', '192.0.2.1'];
         yield 'empty name' => ['', '192.0.2.1'];
         yield 'long name' => [str_repeat('a', 33), '192.0.2.1'];
@@ -135,6 +136,16 @@ final class ApiTokenIssuerTest extends KernelTestCase
         $expires = self::getContainer()->get(AuditLog::class)->latest(10, AuditLog::API_TOKEN_EXPIRE);
         self::assertCount(1, $expires);
         self::assertStringContainsString('grace 600s', $expires[0]->subject());
+    }
+
+    public function testATokenAlreadyInItsGracePeriodCannotBeRotatedAgain(): void
+    {
+        $old = $this->issue();
+        $this->issuer->rotate($old->token, 'alice', graceSeconds: 600);
+
+        $this->expectException(InvalidApiTokenRequest::class);
+        $this->expectExceptionMessage('already rotated');
+        $this->issuer->rotate($old->token, 'alice');
     }
 
     public function testARevokedTokenCannotBeRotated(): void

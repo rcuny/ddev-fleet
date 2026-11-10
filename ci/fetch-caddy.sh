@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # FLE-274: a pinned, checksummed stock Caddy for the real-Caddy tests (RenderedCaddyApiRouteTest), so they run in
-# Fleet CI instead of skipping. Downloads the GitHub release tarball, verifies its SHA-256 against the pins below,
+# Fleet CI instead of skipping. Downloads the GitHub release tarball, verifies its SHA-512 against the pins below,
 # caches the binary and prints its path (the only stdout line). The caller exports it as FLEET_CADDY_BIN.
 #
 # Usage: ci/fetch-caddy.sh [cache dir]   (default: ${FLEET_CI_TOOLS:-$HOME/.cache/fleet-ci}/caddy)
-# Exit 0 = binary path on stdout. Non-zero = unavailable (the caller carries on; the tests then skip).
+# Exit 0 = binary path on stdout. Non-zero = unavailable (the caller carries on; the tests then skip, or fail when
+# FLEET_REQUIRE_CADDY=1).
 # To bump: take the new version's checksums from the release's caddy_<v>_checksums.txt and update all three variables.
 # Environment (tests): FLEET_CADDY_BASE_URL, FLEET_CADDY_ARCH (amd64|arm64).
 
@@ -27,8 +28,11 @@ cache=${1:-${FLEET_CI_TOOLS:-$HOME/.cache/fleet-ci}/caddy}/$VERSION-$arch
 bin=$cache/caddy
 tarball=caddy_${VERSION}_linux_${arch}.tar.gz
 
-# Cache hit: the binary is trusted only together with the pinned tarball hash recorded beside it.
-if [ -x "$bin" ] && [ "$(cat "$cache/tarball.sha512" 2> /dev/null)" = "$want" ]; then
+# Cache hit: trust nothing recorded in the cache. Re-hash the kept tarball against the pin in this script, then
+# check the cached binary is byte for byte the one inside it.
+if [ -x "$bin" ] && [ -f "$cache/$tarball" ] \
+    && [ "$(sha512sum "$cache/$tarball" | cut -d' ' -f1)" = "$want" ] \
+    && [ "$(tar -xzOf "$cache/$tarball" caddy | sha512sum | cut -d' ' -f1)" = "$(sha512sum "$bin" | cut -d' ' -f1)" ]; then
     echo "$bin"
     exit 0
 fi
@@ -44,5 +48,5 @@ fi
 tar -xzf "$tmp/$tarball" -C "$tmp" caddy
 mkdir -p "$cache"
 mv "$tmp/caddy" "$bin.new" && chmod 0755 "$bin.new" && mv "$bin.new" "$bin"
-printf '%s' "$want" > "$cache/tarball.sha512"
+cp "$tmp/$tarball" "$cache/$tarball.new" && mv "$cache/$tarball.new" "$cache/$tarball"
 echo "$bin"

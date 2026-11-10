@@ -22,7 +22,8 @@ use PHPUnit\Framework\TestCase;
  * FLE-274 (SR2): the /api/v1/* bypass against a REAL Caddy. The rendered Caddyfile (Authelia gate) is adapted to JSON,
  * the PHP socket is pointed at a tiny FastCGI responder that echoes the parameters it received, the listener is moved
  * to a high loopback port without TLS, and requests are sent over a raw socket so the exact header spelling is ours.
- * Needs FLEET_CADDY_STOCK_BIN (a stock Caddy, see ci/fetch-caddy.sh) or, failing that, FLEET_CADDY_BIN; skips without one.
+ * Needs FLEET_CADDY_STOCK_BIN (a stock Caddy, see ci/fetch-caddy.sh) or, failing that, FLEET_CADDY_BIN; skips without
+ * one, unless FLEET_REQUIRE_CADDY=1 (set in CI), which makes a missing Caddy a failure.
  */
 final class RenderedCaddyApiRouteTest extends TestCase
 {
@@ -37,6 +38,10 @@ final class RenderedCaddyApiRouteTest extends TestCase
     {
         $bin = getenv('FLEET_CADDY_STOCK_BIN') ?: getenv('FLEET_CADDY_BIN');
         if (false === $bin || '' === $bin || !is_executable($bin)) {
+            // CI sets FLEET_REQUIRE_CADDY=1 (like FLEET_REQUIRE_SYSTEMD_ANALYZE): a missing Caddy then fails instead of skipping.
+            if ('' !== (getenv('FLEET_REQUIRE_CADDY') ?: '') && '0' !== getenv('FLEET_REQUIRE_CADDY')) {
+                self::fail('FLEET_REQUIRE_CADDY is set but no executable Caddy is available (FLEET_CADDY_STOCK_BIN / FLEET_CADDY_BIN).');
+            }
             self::markTestSkipped('Neither FLEET_CADDY_STOCK_BIN nor FLEET_CADDY_BIN is set to an executable Caddy.');
         }
         $this->tree = sys_get_temp_dir().'/fleet-caddy-api-'.bin2hex(random_bytes(6));
