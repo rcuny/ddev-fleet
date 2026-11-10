@@ -20,7 +20,7 @@ use App\Fleet\Shell\CommandTimedOut;
 
 /**
  * The extra SSH keys Fleet manages (FLE-266): generate one, import one, delete one nobody uses. The private key is the
- * file `ssh/<name>_ed25519` (0600) with its `.pub` (0644) next to it, written like the host's own keys; the database
+ * file `ssh/<name>_<type>` (`ed25519`, `ecdsa` or `rsa`, the key's real type; 0600) with its `.pub` (0644) next to it, written like the host's own keys; the database
  * keeps the public half and fingerprint only. The private key never enters the database, a log line, a return value or a
  * process argument. A key file placed by hand (no row) keeps working and is listed as "external".
  */
@@ -37,6 +37,7 @@ final readonly class ManagedSshKeys
         private ProjectRepository $projects,
         private TemplateRepository $templates,
         private AuditLog $audit,
+        private SshKeysLock $lock,
     ) {
     }
 
@@ -89,8 +90,13 @@ final readonly class ManagedSshKeys
             if (null === $derived) {
                 throw new \InvalidArgumentException('The private key is invalid or protected by a passphrase.');
             }
+            try {
+                $suffix = SshPublicKeys::fileSuffix($derived['type']);
+            } catch (\InvalidArgumentException) {
+                throw new \InvalidArgumentException('That key type is not supported (use ed25519, ecdsa or rsa).');
+            }
             $line = $derived['type'].' '.$derived['key'].' '.$this->comment($name);
-            $this->install($name, $pem, $line);
+            $this->install($name, $pem, $line, $suffix);
 
             return $this->saveRow($name, ManagedSshKeySource::Imported, $line, SshPublicKeys::fingerprint($derived['type'], $derived['key']));
         });
@@ -118,8 +124,10 @@ final readonly class ManagedSshKeys
             if ([] !== $users = $this->templatesUsing($name)) {
                 throw new Refused(\sprintf('The SSH key "%s" is used by %s. Remove it from the template(s) first.', $name, implode(', ', $users)));
             }
-            @unlink($this->paths->sshExtraKey($name));
-            @unlink($this->paths->sshExtraKey($name).'.pub');
+            foreach (FleetPaths::sshExtraKeySuffixes() as $suffix) {
+                @unlink($this->paths->sshExtraKey($name, $suffix));
+                @unlink($this->paths->sshExtraKey($name, $suffix).'.pub');
+            }
             $this->keys->remove($row);
         });
         $this->audit->record($by, AuditLog::SSH_KEY_DELETE, $name);
@@ -146,8 +154,7 @@ final readonly class ManagedSshKeys
 
     private function assertFree(string $name): void
     {
-        $file = $this->paths->sshExtraKey($name);
-        if (null !== $this->keys->findByName($name) || is_file($file) || is_link($file)) {
+        if (null !== $this->keys->findByName($name) || null !== $this->paths->existingSshExtraKey($name)) {
             throw new Refused(\sprintf('An SSH key named "%s" already exists on this host.', $name));
         }
     }
@@ -166,9 +173,9 @@ final readonly class ManagedSshKeys
         }
     }
 
-    private function install(string $name, #[\SensitiveParameter] string $privatePem, string $publicLine): void
+    private function install(string $name, #[\SensitiveParameter] string $privatePem, string $publicLine, string $suffix = 'ed25519'): void
     {
-        $private = $this->paths->sshExtraKey($name);
+        $private = $this->paths->sshExtraKey($name, $suffix);
         AtomicFile::write($private, $privatePem, 0o600);
         AtomicFile::write($private.'.pub', $publicLine."\n", 0o644);
     }
@@ -222,22 +229,8 @@ final readonly class ManagedSshKeys
      */
     private function locked(callable $work): mixed
     {
-        $dir = $this->paths->sshDir();
-        if (!is_dir($dir) && !@mkdir($dir, 0o700, true) && !is_dir($dir)) {
-            throw new \RuntimeException(\sprintf('Cannot create directory "%s".', $dir));
-        }
-        // The same lock file as SshKeyService, so a rotation and an extra-key change never interleave.
-        $lock = @fopen($dir.'/.keys.lock', 'c');
-        if (false === $lock || !flock($lock, \LOCK_EX)) {
-            false !== $lock && fclose($lock);
-
-            throw new \RuntimeException('Cannot lock the SSH key directory.');
-        }
-        try {
-            return $work();
-        } finally {
-            flock($lock, \LOCK_UN);
-            fclose($lock);
-        }
+        // The same lock as SshKeyService and the template saves, so a rotation, an extra-key change and a template
+        // save that names a key never interleave.
+        return $this->lock->run($work);
     }
 }

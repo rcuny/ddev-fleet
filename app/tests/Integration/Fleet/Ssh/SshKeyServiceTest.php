@@ -223,6 +223,8 @@ final class SshKeyServiceTest extends KernelTestCase
         self::assertSame($this->service->publicKey(SshKeyRole::Deploy)."\n", (string) file_get_contents($this->paths->sshPublicKey(SshKeyRole::Deploy)));
         self::assertSame(0o600, fileperms($this->paths->sshPrivateKey(SshKeyRole::Deploy)) & 0o777);
         self::assertSame(2, (int) $this->entityManager()->getConnection()->fetchOne('SELECT COUNT(*) FROM ssh_key'));
+        // The same audit entry whoever rotates (UI or setup wizard), written by the service itself (FLE-270).
+        self::assertSame(1, (int) $this->entityManager()->getConnection()->fetchOne("SELECT COUNT(*) FROM audit_entry WHERE action = 'ssh.key.rotate' AND subject = 'deploy' AND actor = 'admin'"));
     }
 
     public function testImportRejectsPassphraseProtectedKey(): void
@@ -371,6 +373,8 @@ final class SshKeyServiceTest extends KernelTestCase
             new HostSettingsRepository($this->entityManager()),
             new Ed25519KeyGenerator(),
             $runner,
+            new \App\Fleet\Ssh\SshKeysLock($this->paths),
+            self::getContainer()->get(\App\Fleet\Audit\AuditLog::class),
         );
     }
 

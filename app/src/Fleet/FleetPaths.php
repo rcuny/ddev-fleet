@@ -289,9 +289,35 @@ final readonly class FleetPaths
     /**
      * The private key of a template's extra key (FLE-190). $name must have passed SshKeyNames::error().
      */
-    public function sshExtraKey(string $name): string
+    public function sshExtraKey(string $name, string $suffix = 'ed25519'): string
     {
-        return $this->sshDir().'/'.$name.'_ed25519';
+        return $this->sshDir().'/'.$name.'_'.$suffix;
+    }
+
+    /**
+     * The key file suffixes an extra key may carry: the file is named after the key's real type (FLE-270).
+     *
+     * @return list<string>
+     */
+    public static function sshExtraKeySuffixes(): array
+    {
+        return ['ed25519', 'ecdsa', 'rsa'];
+    }
+
+    /**
+     * The existing private key file of an extra key, whatever its type suffix (a symlink counts, callers refuse it);
+     * null when there is none. $name must have passed SshKeyNames::error().
+     */
+    public function existingSshExtraKey(string $name): ?string
+    {
+        foreach (self::sshExtraKeySuffixes() as $suffix) {
+            $file = $this->sshExtraKey($name, $suffix);
+            if (is_file($file) || is_link($file)) {
+                return $file;
+            }
+        }
+
+        return null;
     }
 
     public function sshPublicKey(SshKeyRole $role): string

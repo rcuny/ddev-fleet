@@ -113,6 +113,42 @@ final class ManagedSshKeysTest extends KernelTestCase
         self::assertFileDoesNotExist($this->paths->sshExtraKey('other'));
     }
 
+    public function testImportNamesTheFileAfterTheRealKeyType(): void
+    {
+        if (!$this->hasSshKeygen()) {
+            self::markTestSkipped('ssh-keygen is not available.');
+        }
+        $dir = sys_get_temp_dir().'/fle270-'.bin2hex(random_bytes(4));
+        mkdir($dir);
+        try {
+            foreach (['rsa' => ['rsa', '-b', '2048'], 'ecdsa' => ['ecdsa', '-b', '256']] as $suffix => $args) {
+                exec(\sprintf('ssh-keygen -q -t %s -b %s -N "" -f %s 2>&1', $args[0], $args[2], escapeshellarg($dir.'/'.$suffix)), $out, $code);
+                self::assertSame(0, $code);
+                $pem = (string) file_get_contents($dir.'/'.$suffix);
+
+                $this->withRealKeygen()->import('k'.$suffix, $pem, 'tester');
+
+                self::assertFileExists($this->paths->sshExtraKey('k'.$suffix, $suffix));
+                self::assertFileExists($this->paths->sshExtraKey('k'.$suffix, $suffix).'.pub');
+                self::assertFileDoesNotExist($this->paths->sshExtraKey('k'.$suffix));
+                self::assertSame($this->paths->sshExtraKey('k'.$suffix, $suffix), $this->paths->existingSshExtraKey('k'.$suffix));
+                self::assertNull(new \App\Fleet\Ssh\ExtraSshKey($this->paths)->problem('k'.$suffix));
+                // A second key of the same name is refused whatever its type.
+                try {
+                    $this->withRealKeygen()->create('k'.$suffix, 'tester');
+                    self::fail('name reused');
+                } catch (Refused) {
+                }
+                $this->withRealKeygen()->delete('k'.$suffix, 'tester');
+                self::assertFileDoesNotExist($this->paths->sshExtraKey('k'.$suffix, $suffix));
+                self::assertFileDoesNotExist($this->paths->sshExtraKey('k'.$suffix, $suffix).'.pub');
+            }
+        } finally {
+            array_map('unlink', glob($dir.'/*') ?: []);
+            @rmdir($dir);
+        }
+    }
+
     public function testDeleteRemovesFilesAndRowButNotWhileATemplateUsesIt(): void
     {
         $this->keys->create('staging', 'tester');
@@ -203,6 +239,7 @@ final class ManagedSshKeysTest extends KernelTestCase
             $c->get(\App\Domain\Project\ProjectRepository::class),
             $c->get(\App\Domain\Template\TemplateRepository::class),
             $c->get(\App\Fleet\Audit\AuditLog::class),
+            new \App\Fleet\Ssh\SshKeysLock($this->paths),
         );
     }
 

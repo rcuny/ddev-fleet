@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Controller\Admin;
 
 use App\Domain\Ssh\SshKeyRole;
-use App\Fleet\Audit\AuditLog;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Ssh\ManagedSshKeys;
 use App\Fleet\Ssh\PushKeyCheck;
@@ -36,7 +35,6 @@ final class SshKeyController extends AbstractController
         private readonly \App\Domain\Project\ProjectRepository $projectRepository,
         private readonly ReauthGuard $reauth,
         private readonly CurrentActor $actor,
-        private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
     ) {
     }
@@ -166,7 +164,6 @@ final class SshKeyController extends AbstractController
 
             return $this->back();
         }
-        $this->audit->record($this->actor->name(), AuditLog::SSH_KEY_ROTATE, $role);
         $this->reauth->close();
         $this->addFlash('success', \sprintf('A new %s key was generated. Register its public key; the old one no longer works.', $role));
 
