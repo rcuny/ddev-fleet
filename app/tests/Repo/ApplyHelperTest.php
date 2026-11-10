@@ -804,7 +804,7 @@ final class ApplyHelperTest extends TestCase
                 continue;
             }
             // $ROOT-relative paths, the secret-file constants (re-prefixed with $ROOT where used), the root PATH, /run.
-            self::assertMatchesRegularExpression('~\$ROOT/|^AUTHELIA_SECRET_FILES|^readonly AUTHELIA_SECRET_FILES|PATH=/usr/local|\(sudo|fail .usage~', $line, 'line '.$number.' names a literal system path: '.$line);
+            self::assertMatchesRegularExpression('~\$ROOT/|^readonly PROVISION_|^AUTHELIA_SECRET_FILES|^readonly AUTHELIA_SECRET_FILES|PATH=/usr/local|\(sudo|fail .usage~', $line, 'line '.$number.' names a literal system path: '.$line);
             ++$allowed;
         }
         self::assertGreaterThanOrEqual(2, $allowed);

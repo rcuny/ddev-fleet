@@ -37,6 +37,13 @@ parameters:
     fleet.installed_version_file: '/etc/ddev-fleet/installed-version'
     fleet.upgrade_history_file: '/var/log/ddev-fleet/upgrade-history.jsonl'
     fleet.installed_revision_file: '/etc/ddev-fleet/installed-revision'
+    # FLE-260: the host's answers, the installer's record of the hardening settings, the firewall confirmation marker, the
+    # installed release's playbook (the root-owned export of install/). Tests point these into their own FLEET_HOME.
+    fleet.host_vars_file: '/etc/ddev-fleet/host-vars.yml'
+    fleet.hardening_settings_file: '/etc/ddev-fleet/hardening.conf'
+    fleet.firewall_marker_file: '/etc/ddev-fleet/firewall-confirmed'
+    fleet.provision_playbook_file: '/usr/local/lib/ddev-fleet-installer/install/ansible/site.yml'
+    fleet.apply_helper_file: '/usr/local/libexec/fleet/apply'
 
 services:
     # symfony-design-system:start
@@ -143,6 +150,25 @@ services:
             $flagFile: '%fleet.reboot_flag_file%'
             $packagesFile: '%fleet.reboot_packages_file%'
 
+    App\Fleet\Host\Provision\HostVarsReader:
+        arguments:
+            $file: '%fleet.host_vars_file%'
+            $storedSettingsFile: '%fleet.hardening_settings_file%'
+
+    App\Fleet\Host\Provision\FirewallSwitch:
+        arguments:
+            $settingsFile: '%fleet.hardening_settings_file%'
+            $markerFile: '%fleet.firewall_marker_file%'
+
+    # Where the app reads the installed helper's target list; the helper is still called by its fixed path.
+    App\Fleet\System\PrivilegedApply:
+        arguments:
+            $helperPath: '%fleet.apply_helper_file%'
+
+    App\Fleet\Host\Provision\ProvisionService:
+        arguments:
+            $playbookFile: '%fleet.provision_playbook_file%'
+
     # Callers type-hint Applier; the one implementation runs `sudo -n apply <target>` through the CommandRunner (a
     # recording runner in dev/test, so nothing privileged runs there).
     App\Fleet\System\Applier:
@@ -205,6 +231,12 @@ when@dev:
         # Not the container's cgroup tree: the dev app has no fleet slices.
         fleet.cgroup_root: '%env(resolve:FLEET_HOME)%/test-cgroup/fleet.slice'
         fleet.upgrade_history_file: '%env(resolve:FLEET_HOME)%/test-upgrade-history.jsonl'
+        # FLE-260: never the real /etc, /usr/local files: a test or spec writes these under its own FLEET_HOME.
+        fleet.host_vars_file: '%env(resolve:FLEET_HOME)%/test-host-vars.yml'
+        fleet.hardening_settings_file: '%env(resolve:FLEET_HOME)%/test-hardening.conf'
+        fleet.firewall_marker_file: '%env(resolve:FLEET_HOME)%/test-firewall-confirmed'
+        fleet.provision_playbook_file: '%env(resolve:FLEET_HOME)%/test-site.yml'
+        fleet.apply_helper_file: '%env(resolve:FLEET_HOME)%/test-apply-helper'
 
     services:
         # Never the developer's real ~/.ddev: a dev app that wrote router files there would change their DDEV router.
@@ -225,6 +257,12 @@ when@test:
         fleet.meminfo_file: '%env(resolve:FLEET_HOME)%/test-meminfo'
         fleet.cpuinfo_file: '%env(resolve:FLEET_HOME)%/test-cpuinfo'
         fleet.upgrade_history_file: '%env(resolve:FLEET_HOME)%/test-upgrade-history.jsonl'
+        # FLE-260: never the real /etc, /usr/local files: a test or spec writes these under its own FLEET_HOME.
+        fleet.host_vars_file: '%env(resolve:FLEET_HOME)%/test-host-vars.yml'
+        fleet.hardening_settings_file: '%env(resolve:FLEET_HOME)%/test-hardening.conf'
+        fleet.firewall_marker_file: '%env(resolve:FLEET_HOME)%/test-firewall-confirmed'
+        fleet.provision_playbook_file: '%env(resolve:FLEET_HOME)%/test-site.yml'
+        fleet.apply_helper_file: '%env(resolve:FLEET_HOME)%/test-apply-helper'
 
     services:
         # Public so the registry wiring test can read it from the container (the upgrade commands inject it).

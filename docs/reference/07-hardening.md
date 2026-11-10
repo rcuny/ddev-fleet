@@ -11,6 +11,16 @@ Hardening locks down SSH and the firewall on a host exposed to the Internet. It 
 
 A plain install or upgrade never touches `sshd`, `ufw`, fail2ban or unattended-upgrades. Docker's `daemon.json` and mail relays are never part of it.
 
+## From the web page (Hardening tab)
+
+On a host installed with the Ansible engine (`install.sh --engine=ansible`), an administrator can turn hardening on, off or change it from **Settings → Hardening** instead of re-running the installer. The tab edits the same answers as the flags above: the allowed SSH accounts, the trusted addresses, the firewall grace period and the `/tmp` option. It also asks for **the SSH account you log in with**, which must be in the allow list; the run refuses a change that would lock that account out, as `--harden` does.
+
+- Saving asks for your password again (once per change), then queues a job and opens its live log. The job writes the answers to `/etc/ddev-fleet/host-vars.yml` and runs the installed release's own playbook through the root helper `apply provision`. The page chooses no playbook, role or argument.
+- If the run fails, the previous answers file is put back, so the next upgrade does not apply a half-accepted change.
+- Switching hardening off here stops the host managing it; it does not undo what was changed (use the steps in [Undo on purpose](#undo-on-purpose) for that).
+- The tab shows the state of the firewall dead-man's switch. While it is armed, the page tells you to run `sudo fleet-firewall-confirm` **from a second SSH session**. The page never confirms for you: logging in again is the proof that you can still reach the host.
+- Unavailable on a host whose root helper predates `apply provision` (upgrade it) and on a host installed with the bash steps (no installed playbook); the tab says which.
+
 ## Turn it on
 
 Open a **second SSH session** and keep it open. Preview (changes nothing), then apply:

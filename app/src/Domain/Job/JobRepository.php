@@ -94,6 +94,31 @@ final readonly class JobRepository
     }
 
     /**
+     * The queued or running job of a type (the newest), for types that have no instance to serialise them.
+     */
+    public function activeOfType(string $type): ?Job
+    {
+        $job = $this->em->createQuery(\sprintf('SELECT j FROM %s j WHERE j.type = :type AND j.status IN (:queued, :running) ORDER BY j.id DESC', Job::class))
+            ->setParameter('type', $type)
+            ->setParameter('queued', JobStatus::Queued)
+            ->setParameter('running', JobStatus::Running)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+
+        return $job instanceof Job ? $job : null;
+    }
+
+    public function latestOfType(string $type): ?Job
+    {
+        $job = $this->em->createQuery(\sprintf('SELECT j FROM %s j WHERE j.type = :type ORDER BY j.id DESC', Job::class))
+            ->setParameter('type', $type)
+            ->setMaxResults(1)
+            ->getOneOrNullResult();
+
+        return $job instanceof Job ? $job : null;
+    }
+
+    /**
      * Whether an earlier job (lower id) of the same batch is still queued or running.
      */
     public function hasEarlierActiveInBatch(Job $job): bool

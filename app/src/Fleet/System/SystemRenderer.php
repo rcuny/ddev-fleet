@@ -23,6 +23,7 @@ final readonly class SystemRenderer
         'caddy' => ['Caddyfile', 'env'],
         'authelia' => ['configuration.yml'],
         'slices' => ['slices.json'],
+        'provision' => ['host-vars.yml'],
     ];
 
     public function __construct(

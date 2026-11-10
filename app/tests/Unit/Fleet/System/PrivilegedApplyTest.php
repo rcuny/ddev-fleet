@@ -35,7 +35,7 @@ final class PrivilegedApplyTest extends TestCase
 
     public function testTheOnlyArgumentsAreTheClosedSetOfTargets(): void
     {
-        self::assertSame(['caddy', 'authelia', 'slices'], array_map(static fn (ApplyTarget $t): string => $t->value, ApplyTarget::cases()));
+        self::assertSame(['caddy', 'authelia', 'slices', 'provision'], array_map(static fn (ApplyTarget $t): string => $t->value, ApplyTarget::cases()));
         self::assertSame('/usr/local/libexec/fleet/apply', PrivilegedApply::HELPER);
     }
 
