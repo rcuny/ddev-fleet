@@ -7,6 +7,7 @@ namespace App\Tests\Functional\Api;
 use App\Api\Token\ApiTokenIssuer;
 use App\Api\Token\IssuedToken;
 use App\Domain\ApiToken\ApiScope;
+use App\Domain\ApiToken\ApiToken;
 use App\Domain\Host\HostSettingsRepository;
 use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
@@ -24,8 +25,12 @@ use App\Domain\Webhook\WebhookRepository;
 use App\Domain\Webhook\WebhookSource;
 use App\Fleet\Audit\AuditLog;
 use App\Fleet\FleetPaths;
+use App\Security\Api\ApiAccessDeniedHandler;
+use App\Security\Api\ApiTokenUser;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
+use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 
 /**
  * FLE-276: the read endpoints (design section 6.1 row by row) end to end through the api firewall, the scope check and
@@ -130,11 +135,42 @@ final class ApiReadTest extends AdminTestCase
         self::assertSame('not_found', $body['code']);
     }
 
-    public function testCapacityOfALimitedTokenListsItsProjectsOnly(): void
+    /**
+     * FLE-276 review (3): host-wide data is for a token that sees every project.
+     */
+    #[DataProvider('hostWidePaths')]
+    public function testHostWideDataIs403ForAProjectLimitedToken(string $path): void
     {
-        $body = $this->get('/api/v1/host/capacity', $this->issue([ApiScope::Read], ['demo']));
+        $body = $this->get($path, $this->issue([ApiScope::Read], ['demo']));
 
-        self::assertSame(['demo'], array_column($body['projects'], 'name'));
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame('host_wide_not_allowed', $body['code']);
+    }
+
+    /**
+     * @return iterable<string, array{string}>
+     */
+    public static function hostWidePaths(): iterable
+    {
+        yield 'host' => ['/api/v1/host'];
+        yield 'capacity' => ['/api/v1/host/capacity'];
+        yield 'capacity verdict' => ['/api/v1/host/capacity?project=demo'];
+        yield 'upgrade' => ['/api/v1/upgrade'];
+    }
+
+    public function testAnUnrestrictedTokenMeansAllProjectsWhateverItsScopes(): void
+    {
+        $user = ApiTokenUser::fromToken($this->issue([ApiScope::Read, ApiScope::Deploy], ['demo'])->token);
+        self::assertFalse($user->unrestricted());
+
+        $wild = $this->issue([ApiScope::Read], ['*'])->token;
+        self::assertTrue(ApiTokenUser::fromToken($wild)->unrestricted());
+        // Even with extra scopes stored (defence in depth behind the issuing rules).
+        $this->em()->getConnection()->executeStatement('UPDATE api_token SET scopes = ? WHERE id = ?', [json_encode(['read', 'deploy']), $wild->id()]);
+        $this->em()->clear();
+        $reloaded = $this->em()->find(ApiToken::class, $wild->id());
+        self::assertInstanceOf(ApiToken::class, $reloaded);
+        self::assertTrue(ApiTokenUser::fromToken($reloaded)->unrestricted());
     }
 
     public function testProjectsAreFilteredByTheTokensList(): void
@@ -423,5 +459,21 @@ final class ApiReadTest extends AdminTestCase
             $this->client->request('GET', $uri, server: ['REMOTE_ADDR' => $this->clientIp]);
             self::assertResponseStatusCodeSame(401, $uri);
         }
+    }
+
+    /**
+     * FLE-273 item c (FLE-276 review): an access_control denial answers 403 problem+json and is audited.
+     */
+    public function testAnAccessControlDenialIsAuditedAnd403(): void
+    {
+        $handler = self::getContainer()->get(ApiAccessDeniedHandler::class);
+        self::assertInstanceOf(ApiAccessDeniedHandler::class, $handler);
+
+        $response = $handler->handle(Request::create('/api/v1/x', server: ['REMOTE_ADDR' => '192.0.2.1']), new AccessDeniedException());
+
+        self::assertSame(403, $response->getStatusCode());
+        $audit = $this->em()->getConnection()->fetchAllAssociative('SELECT * FROM audit_entry WHERE action = ?', [AuditLog::API_DENIED]);
+        self::assertCount(1, $audit);
+        self::assertStringContainsString('access_control:/api/v1/x', (string) $audit[0]['subject']);
     }
 }

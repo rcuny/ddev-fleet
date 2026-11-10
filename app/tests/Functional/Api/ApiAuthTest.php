@@ -355,4 +355,20 @@ final class ApiAuthTest extends AdminTestCase
         self::assertSame($first, $second);
         self::assertSame('192.0.2.5', $this->em()->getConnection()->fetchOne('SELECT last_used_ip FROM api_token'));
     }
+
+    /**
+     * FLE-273 item g / FLE-276 review: bookkeeping that cannot be written must not turn a valid request into a 500.
+     */
+    public function testAFailingLastUsedWriteStillAuthenticates(): void
+    {
+        $issued = $this->issue();
+        $this->em()->getConnection()->executeStatement(
+            "CREATE TRIGGER no_use BEFORE UPDATE ON api_token BEGIN SELECT RAISE(ABORT, 'locked'); END",
+        );
+
+        $body = $this->api('GET', self::SELF, $issued->secret, from: '192.0.2.7');
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('orchestrator', $body['name']);
+    }
 }

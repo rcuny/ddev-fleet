@@ -20,7 +20,7 @@ use Symfony\Component\Routing\Attribute\Route;
 
 /**
  * `GET /api/v1/host` and `GET /api/v1/host/capacity` (scope `read`). The capacity document is the schema-1 report of
- * `fleet:host:capacity --json`; a token limited to some projects gets those projects only. `?project=&template=` adds
+ * `fleet:host:capacity --json`; a token limited to some projects gets 403. `?project=&template=` adds
  * the dispatch verdict (CapacityVerdict).
  */
 final readonly class HostController
@@ -40,6 +40,9 @@ final readonly class HostController
     public function host(): JsonResponse
     {
         $token = $this->authorizer->require(ApiScope::Read);
+        if (!$token->unrestricted()) {
+            throw ApiProblem::hostWide();
+        }
         $version = $this->installed->version();
 
         return new JsonResponse([
@@ -47,8 +50,8 @@ final readonly class HostController
             'version' => $this->installed->raw(),
             'generation' => $version?->major,
             'instances' => [
-                'total' => $token->unrestricted() ? \count($this->instances->ids()) : null,
-                'by_state' => $token->unrestricted() ? $this->instances->countByState() : null,
+                'total' => \count($this->instances->ids()),
+                'by_state' => $this->instances->countByState(),
             ],
             'projects' => \count($this->visibility->projects($token)),
         ]);
@@ -58,6 +61,9 @@ final readonly class HostController
     public function capacity(Request $request): JsonResponse
     {
         $token = $this->authorizer->require(ApiScope::Read);
+        if (!$token->unrestricted()) {
+            throw ApiProblem::hostWide();
+        }
         $project = $request->query->get('project');
         $template = $request->query->get('template');
         if (null !== $project && '' === $project) {
@@ -71,13 +77,6 @@ final readonly class HostController
         }
 
         $report = $this->capacity->report();
-        if (!$token->unrestricted()) {
-            $allowed = $this->visibility->names($token);
-            $report['projects'] = array_values(array_filter(
-                \is_array($report['projects'] ?? null) ? $report['projects'] : [],
-                static fn (mixed $p): bool => \is_array($p) && \in_array($p['name'] ?? null, $allowed, true),
-            ));
-        }
         if (null !== $project) {
             $found = $this->projects->findByName($project) ?? throw ApiProblem::notFound(\sprintf('No project "%s".', $project));
             $name = $template ?? $found->defaultTemplate()

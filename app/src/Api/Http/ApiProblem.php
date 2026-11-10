@@ -40,6 +40,12 @@ final class ApiProblem extends \RuntimeException implements HttpExceptionInterfa
         return new self(403, 'project_not_allowed', \sprintf('This token cannot access the project "%s".', $project));
     }
 
+    /** Host-wide data (host, capacity, upgrade) is for a token that sees every project. */
+    public static function hostWide(): self
+    {
+        return new self(403, 'host_wide_not_allowed', 'This token is limited to some projects and cannot read host-wide data.');
+    }
+
     public static function notFound(string $detail = 'No such resource.'): self
     {
         return new self(404, 'not_found', $detail);

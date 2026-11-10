@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Api;
 
+use App\Api\Http\ApiProblem;
 use App\Domain\ApiToken\ApiScope;
 use App\Fleet\Upgrade\PendingMigrations;
 use App\Fleet\Upgrade\UpgradeStatusReader;
@@ -28,7 +29,10 @@ final readonly class UpgradeController
     #[Route('/api/v1/upgrade', name: 'api_v1_upgrade', methods: ['GET'])]
     public function __invoke(): JsonResponse
     {
-        $this->authorizer->require(ApiScope::Read);
+        $token = $this->authorizer->require(ApiScope::Read);
+        if (!$token->unrestricted()) {
+            throw ApiProblem::hostWide();
+        }
         $status = $this->status->read();
         try {
             $pending = $this->migrations->count();
