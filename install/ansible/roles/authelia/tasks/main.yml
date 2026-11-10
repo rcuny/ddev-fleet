@@ -38,7 +38,8 @@
     apt_repo_fingerprint: "{{ fleet_authelia_key_fingerprint }}"
     apt_repo_line: "{{ fleet_authelia_repo_line }}"
 
-- name: Install the package (nothing may start Authelia before its secrets and users.yml exist)
+- name: Install authelia (nothing may start it before its secrets and users.yml exist)
+  when: "'install ok installed' not in authelia_pkg.stdout"
   block:
     - name: Forbid service starts
       ansible.builtin.include_role:
@@ -54,6 +55,12 @@
       ansible.builtin.include_role:
         name: apt_repo
         tasks_from: policy_allow
+
+- name: Keep the package at its current version (already installed, nothing to start)
+  ansible.builtin.apt:
+    name: authelia
+    state: present
+  when: "'install ok installed' in authelia_pkg.stdout"
 
 - name: Which account does the unit run as? (read from the installed unit, never created or assumed)
   ansible.builtin.command: systemctl show -p {{ item }} --value authelia.service  # noqa command-instead-of-module

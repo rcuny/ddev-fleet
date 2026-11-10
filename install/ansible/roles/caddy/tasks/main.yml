@@ -25,13 +25,13 @@
   failed_when: false
   check_mode: false
 
-- name: Install the package (the stock service must not start on :80 with the default Caddyfile)
+- name: Install caddy (the stock service must not start on :80 with the default Caddyfile)
+  when: "'install ok installed' not in caddy_pkg.stdout"
   block:
     - name: Forbid service starts
       ansible.builtin.include_role:
         name: apt_repo
         tasks_from: policy_deny
-      when: "'install ok installed' not in caddy_pkg.stdout"
 
     - name: Install caddy
       ansible.builtin.apt:
@@ -42,6 +42,12 @@
       ansible.builtin.include_role:
         name: apt_repo
         tasks_from: policy_allow
+
+- name: Keep the package at its current version (already installed, nothing to start)
+  ansible.builtin.apt:
+    name: caddy
+    state: present
+  when: "'install ok installed' in caddy_pkg.stdout"
 
 - name: Is /usr/bin/caddy diverted?
   ansible.builtin.command: dpkg-divert --list /usr/bin/caddy
@@ -230,9 +236,13 @@
     recurse: true
   register: caddy_found_dirs
 
-- name: Find the files under the snippet tree (symlinks are not followed)
+# Only the per-instance and per-port snippets: files `apply caddy` renders elsewhere (stored-certs.list is root:root 0644
+# by design) are not snippets and stay as they are.
+- name: Find the snippets (symlinks are not followed)
   ansible.builtin.find:
-    paths: "{{ fleet_caddy_dir }}"
+    paths:
+      - "{{ fleet_caddy_dir }}/instances"
+      - "{{ fleet_caddy_dir }}/ports"
     file_type: file
     recurse: true
   register: caddy_found_files
@@ -246,7 +256,7 @@
   loop_control:
     label: "{{ item.path }}"
 
-- name: Group caddy and 0640 on every file (content untouched)
+- name: Group caddy and 0640 on every snippet (content untouched)
   ansible.builtin.file:
     path: "{{ item.path }}"
     group: caddy

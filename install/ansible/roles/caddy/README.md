@@ -7,7 +7,7 @@ Does: the Caddy apt repository (pinned key fingerprint), the package (no service
 module (downloaded, verified: it runs, lists `dns.providers.ovh`, is at least the packaged version and `fleet_caddy_min_version`;
 an installed build that still meets the minimum is kept when the download fails), `update-alternatives` (10 default, 50 custom,
 auto), the `list-modules` assertion on `/usr/bin/caddy`, the two `caddy.service.d` drop-ins, and the snippet directories
-`/etc/caddy/fleet{,/instances,/ports}` (`2750 fleet:caddy`, setgid) with modes normalised below them.
+`/etc/caddy/fleet{,/instances,/ports}` (`2750 fleet:caddy`, setgid) with the directories below them normalised to `2750` and the snippets under `instances/` and `ports/` to group `caddy` `0640` (other files, such as `stored-certs.list`, are left alone).
 
 Never does: start, restart or reload Caddy (a changed drop-in only triggers `systemctl daemon-reload`, as in bash), so live routes
 stay up. **Not written, owned by `apply caddy`:** the Caddyfile, every per-instance and port snippet, `/etc/caddy/fleet.env`
