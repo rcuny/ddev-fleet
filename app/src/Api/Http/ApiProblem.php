@@ -14,12 +14,14 @@ final class ApiProblem extends \RuntimeException implements HttpExceptionInterfa
 {
     /**
      * @param array<string, string> $headers
+     * @param array<string, mixed>  $extra   more members of the problem document (`errors`, `verdict`)
      */
     public function __construct(
         private readonly int $status,
         private readonly string $problemCode,
         string $detail,
         private readonly array $headers = [],
+        private readonly array $extra = [],
     ) {
         parent::__construct($detail);
     }
@@ -60,6 +62,39 @@ final class ApiProblem extends \RuntimeException implements HttpExceptionInterfa
     public static function rateLimited(int $retryAfter): self
     {
         return new self(429, 'rate_limited', 'Too many requests.', ['Retry-After' => (string) max(1, $retryAfter)]);
+    }
+
+    /** @param array<string, string> $errors field => message */
+    public static function validation(array $errors): self
+    {
+        return new self(422, 'validation_failed', 'Some values were refused.', [], ['errors' => $errors]);
+    }
+
+    /** The request is valid but not allowed in the current state (`instance_busy`, `protected_instance`, ...). */
+    public static function conflict(string $code, string $detail): self
+    {
+        return new self(409, $code, $detail);
+    }
+
+    public static function staleIfMatch(): self
+    {
+        return new self(412, 'stale_if_match', 'The instance changed since the If-Match value was read (it was recreated); nothing was done.');
+    }
+
+    /** @param array<string, mixed> $verdict */
+    public static function capacityFull(array $verdict): self
+    {
+        $reasons = \is_array($verdict['reasons'] ?? null) ? implode(', ', array_map('strval', $verdict['reasons'])) : 'unknown';
+
+        return new self(429, 'capacity_full', 'No capacity for another run: '.$reasons.'.', ['Retry-After' => '120'], ['verdict' => $verdict]);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function extra(): array
+    {
+        return $this->extra;
     }
 
     public function getStatusCode(): int

@@ -143,5 +143,10 @@ final class ApiScopeVotersTest extends TestCase
         $everything = $this->token([ApiScope::Read, ApiScope::Deploy, ApiScope::Lifecycle, ApiScope::LifecycleDestroy]);
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->projectVote($everything, ProjectVoter::SETTINGS, $blog));
         self::assertSame(VoterInterface::ACCESS_DENIED, $this->projectVote($everything, ProjectVoter::SETTINGS, null));
+
+        // A null subject ("any project", the deploy form) is a person's question: a token always names its project.
+        self::assertSame(VoterInterface::ACCESS_ABSTAIN, $this->projectVote($everything, ProjectVoter::DESTROY, null), 'destroy needs a subject');
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->projectVote($everything, ProjectVoter::DEPLOY, null), 'deploy on a null subject');
+        self::assertSame(VoterInterface::ACCESS_DENIED, $this->projectVote($this->token([ApiScope::Deploy], ['*']), ProjectVoter::DEPLOY, null));
     }
 }
