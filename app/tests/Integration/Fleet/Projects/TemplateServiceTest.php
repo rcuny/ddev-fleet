@@ -356,7 +356,7 @@ final class TemplateServiceTest extends KernelTestCase
         touch($this->home.'/ssh/push_ed25519');
         $runner = new \App\Fleet\Shell\RecordingCommandRunner();
         $runner->expect(['ssh'], new \App\Fleet\Shell\CommandResult(255, '', 'Permission denied (publickey).'));
-        $service = new TemplateService($this->projects, $this->templates, new \App\Fleet\Ssh\ExtraSshKey(new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy')), null, new \App\Fleet\Ssh\PushKeyCheck(new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy'), $runner));
+        $service = new TemplateService($this->projects, $this->templates, new \App\Fleet\Ssh\ExtraSshKey($paths = new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy')), new \App\Fleet\Ssh\SshKeysLock($paths), null, new \App\Fleet\Ssh\PushKeyCheck(new \App\Fleet\FleetPaths($this->home, $this->home.'/caddy'), $runner));
 
         self::assertNull($service->pushKeyWarning('blog'));
         self::assertSame([], $runner->calls());
