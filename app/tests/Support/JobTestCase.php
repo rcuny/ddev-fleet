@@ -59,7 +59,7 @@ abstract class JobTestCase extends KernelTestCase
         $this->hub = $this->createStub(HubInterface::class);
         $this->feed = new JobFeed($this->hub, new NullLogger());
         $this->reader = new LogReader($this->paths);
-        $this->service = new JobService($this->jobs, $this->bus, $this->feed, $this->reader, $this->clock, new NullLogger());
+        $this->service = new JobService($this->jobs, $this->bus, $this->feed, $this->reader, $this->clock, new NullLogger(), new \Symfony\Component\EventDispatcher\EventDispatcher());
     }
 
     protected function tearDown(): void

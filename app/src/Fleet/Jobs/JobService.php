@@ -27,7 +27,7 @@ final readonly class JobService
         private LogReader $logs,
         private ClockInterface $clock,
         private LoggerInterface $logger,
-        private ?EventDispatcherInterface $events = null,
+        private EventDispatcherInterface $events,
     ) {
     }
 
@@ -58,7 +58,7 @@ final readonly class JobService
         $this->jobs->save($job);
         $this->notify($job);
         // FLE-220: a listener may queue the redeploy that was waiting for this instance.
-        $this->events?->dispatch(new JobFinished($job));
+        $this->events->dispatch(new JobFinished($job));
     }
 
     /**

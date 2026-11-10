@@ -6,6 +6,7 @@ namespace App\Fleet\Webhooks;
 
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Job\Job;
+use App\Domain\Job\JobRepository;
 use App\Domain\Job\JobTrigger;
 use App\Domain\Job\PendingRedeployRepository;
 use App\Fleet\Instances\DeployInput;
@@ -35,6 +36,8 @@ final readonly class DeployWebhookAction
         private InstanceService $instances,
         private InstanceRepository $repository,
         private PendingRedeployRepository $pending,
+        private PendingRedeployStarter $starter,
+        private JobRepository $activeJobs,
         private ClockInterface $clock,
     ) {
     }
@@ -63,9 +66,18 @@ final readonly class DeployWebhookAction
             // FLE-220: a fixed-label redeploy that meets a running job is remembered (latest wins) and started when
             // that job ends, instead of being dropped: the newest commit must still get its fleet-gates status.
             if (Refused::BUSY === $e->reason && null !== $existing && $request->replace && null !== $instance) {
-                $entry = $this->pending->remember($existing, $request->branch, \is_string($template) ? $template : null, $by, $this->clock->now());
+                $folded = $this->pending->remember($existing, $request->branch, \is_string($template) ? $template : null, $by, $this->clock->now());
 
-                return new WebhookActionResult(true, \sprintf('redeploy pending: %s is busy, it will redeploy when its job ends (%d request(s) folded)', $existing, $entry->requests()), null, $existing);
+                // The busy job may have ended between the refusal and the write above, with nobody left to wake the
+                // row: look again, and start it now when the instance is free.
+                if ([] === $this->activeJobs->activeInstanceIds([$existing])) {
+                    $started = $this->starter->startFor($existing)[0] ?? null;
+                    if ($started instanceof Job) {
+                        return new WebhookActionResult(true, \sprintf('redeploy queued: %s (job %d)', $existing, (int) $started->id()), $started->id(), $existing);
+                    }
+                }
+
+                return new WebhookActionResult(true, \sprintf('redeploy pending: %s is busy, it will redeploy when its job ends (%d request(s) folded)', $existing, $folded), null, $existing);
             }
 
             return new WebhookActionResult(false, 'not deployed: '.$e->getMessage());

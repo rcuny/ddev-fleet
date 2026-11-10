@@ -214,14 +214,23 @@ final class WebhookActionsTest extends AdminTestCase
     }
 
     /** Ends the job the way the executor does (on the managed entity: the test kernel may have rebooted since). */
-    private function finish(Job $job): void
+    private function finish(Job $job, JobStatus $status = JobStatus::Succeeded): void
     {
         $managed = $this->get(JobRepository::class)->find((int) $job->id());
         self::assertInstanceOf(Job::class, $managed);
-        $this->get(JobService::class)->finish($managed, JobStatus::Succeeded, 0, null);
+        $this->get(JobService::class)->finish($managed, $status, JobStatus::Succeeded === $status ? 0 : 1, JobStatus::Succeeded === $status ? null : 'x');
     }
 
-    public function testPushesWhileTheInstanceIsBusyGiveExactlyOneFollowUpRedeploy(): void
+    /** @return iterable<string, array{JobStatus}> */
+    public static function endings(): iterable
+    {
+        yield 'succeeded' => [JobStatus::Succeeded];
+        yield 'failed' => [JobStatus::Failed];
+        yield 'interrupted' => [JobStatus::Interrupted];
+    }
+
+    #[\PHPUnit\Framework\Attributes\DataProvider('endings')]
+    public function testPushesWhileTheInstanceIsBusyGiveExactlyOneFollowUpRedeploy(JobStatus $ending): void
     {
         $this->pushRule(['branch' => 'develop'], ['label' => 'pw-regression']);
         $receiver = $this->receiver();
@@ -248,7 +257,7 @@ final class WebhookActionsTest extends AdminTestCase
         self::assertCount(1, $pending);
         self::assertSame(2, $pending[0]->requests(), 'the latest request replaced the first');
 
-        $this->finish($running);
+        $this->finish($running, $ending);
 
         $jobs = $this->jobs();
         self::assertCount(3, $jobs, 'exactly one follow-up');
@@ -256,6 +265,20 @@ final class WebhookActionsTest extends AdminTestCase
         self::assertSame(JobTrigger::Webhook, $jobs[2]->trigger());
         self::assertSame('webhook:bitbucket', $jobs[2]->requestedBy());
         self::assertSame([], $this->get(PendingRedeployRepository::class)->all());
+    }
+
+    public function testRememberingTwiceIsOneRowWithTheLatestRequestAndACount(): void
+    {
+        $repository = $this->get(PendingRedeployRepository::class);
+        self::assertSame(1, $repository->remember('blog--y', 'a', null, 'webhook:bitbucket', new \DateTimeImmutable('2026-11-10 10:00:00')));
+        self::assertSame(2, $repository->remember('blog--y', 'b', 'tpl', 'webhook:github', new \DateTimeImmutable('2026-11-10 10:05:00')));
+
+        $all = $repository->all();
+        self::assertCount(1, $all);
+        self::assertSame('b', $all[0]->branch());
+        self::assertSame('tpl', $all[0]->template());
+        self::assertSame('webhook:github', $all[0]->requestedBy());
+        self::assertSame(2, $all[0]->requests());
     }
 
     public function testAPendingRedeployForAnInstanceThatIsGoneIsDropped(): void

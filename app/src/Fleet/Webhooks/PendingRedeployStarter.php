@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Webhooks;
 
 use App\Domain\Instance\InstanceRepository;
+use App\Domain\Job\Job;
 use App\Domain\Job\JobTrigger;
 use App\Domain\Job\PendingRedeploy;
 use App\Domain\Job\PendingRedeployRepository;
@@ -37,12 +38,22 @@ final readonly class PendingRedeployStarter
     public function onJobFinished(JobFinished $event): void
     {
         $instanceId = $event->job->instanceId();
-        if (null === $instanceId) {
-            return;
+        if (null !== $instanceId) {
+            $this->startFor($instanceId);
         }
+    }
+
+    /**
+     * Starts the pending redeploy of an instance, if there is one. Also called by the webhook action right after it
+     * remembered a request, when the busy job ended in between (the lost-wakeup window).
+     *
+     * @return list<Job> the job(s) queued, empty when nothing started
+     */
+    public function startFor(string $instanceId): array
+    {
         $pending = $this->pending->find($instanceId);
         if (!$pending instanceof PendingRedeploy) {
-            return;
+            return [];
         }
 
         // Taken first: with a transport that runs the job at once (sync://) the new job ends inside request(), and its
@@ -57,17 +68,19 @@ final readonly class PendingRedeployStarter
         $branch = null !== $requested && $requested !== $this->repository->find($instanceId)?->branch() ? $requested : null;
 
         try {
-            $this->instances->request('redeploy', new Selector([$instanceId]), new OperationOptions(template: $template, branch: $branch), JobTrigger::Webhook, $requestedBy);
+            return $this->instances->request('redeploy', new Selector([$instanceId]), new OperationOptions(template: $template, branch: $branch), JobTrigger::Webhook, $requestedBy);
         } catch (Refused $e) {
             if (Refused::BUSY === $e->reason) {
                 // Another job took the instance in between: wait for that one.
                 $this->pending->remember($instanceId, $requested, $template, $requestedBy, $requestedAt);
 
-                return;
+                return [];
             }
             $this->logger->warning('Pending redeploy of {instance} dropped: {reason}', ['instance' => $instanceId, 'reason' => $e->getMessage()]);
         } catch (NotFound|ValidationFailed $e) {
             $this->logger->warning('Pending redeploy of {instance} dropped: {reason}', ['instance' => $instanceId, 'reason' => $e->getMessage()]);
         }
+
+        return [];
     }
 }

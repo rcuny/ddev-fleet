@@ -17,19 +17,26 @@ final readonly class PendingRedeployRepository
         return $this->em->getRepository(PendingRedeploy::class)->find($instanceId);
     }
 
-    /** Remembers the request; an existing one for the instance is replaced (latest wins). */
-    public function remember(string $instanceId, ?string $branch, ?string $template, string $requestedBy, \DateTimeImmutable $at): PendingRedeploy
+    /**
+     * Remembers the request; an existing one for the instance is replaced (latest wins). One atomic upsert, so two
+     * concurrent webhooks neither collide on the primary key nor lose a count. Returns how many requests are folded.
+     */
+    public function remember(string $instanceId, ?string $branch, ?string $template, string $requestedBy, \DateTimeImmutable $at): int
     {
-        $pending = $this->find($instanceId);
-        if ($pending instanceof PendingRedeploy) {
-            $pending->replaceWith($branch, $template, $requestedBy, $at);
-        } else {
-            $pending = new PendingRedeploy($instanceId, $branch, $template, $requestedBy, $at);
-            $this->em->persist($pending);
+        $connection = $this->em->getConnection();
+        $at = $at->setTimezone(new \DateTimeZone('UTC'));
+        $connection->executeStatement(
+            'INSERT INTO pending_redeploy (instance_id, branch, template, requested_by, requested_at, requests) VALUES (?, ?, ?, ?, ?, 1) '
+            .'ON CONFLICT(instance_id) DO UPDATE SET branch = excluded.branch, template = excluded.template, '
+            .'requested_by = excluded.requested_by, requested_at = excluded.requested_at, requests = requests + 1',
+            [$instanceId, $branch, $template, $requestedBy, $at->format('Y-m-d H:i:s')],
+        );
+        $known = $this->em->getUnitOfWork()->tryGetById($instanceId, PendingRedeploy::class);
+        if ($known instanceof PendingRedeploy) {
+            $this->em->refresh($known);
         }
-        $this->em->flush();
 
-        return $pending;
+        return (int) $connection->fetchOne('SELECT requests FROM pending_redeploy WHERE instance_id = ?', [$instanceId]);
     }
 
     public function remove(PendingRedeploy $pending): void
