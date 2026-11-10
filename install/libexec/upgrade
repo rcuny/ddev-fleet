@@ -205,6 +205,8 @@ main() {
   local engine=bash
   if [ -r "$root/etc/ddev-fleet/installed-engine" ] && [ "$(head -n 1 "$root/etc/ddev-fleet/installed-engine" | tr -d '[:space:]')" = ansible ]; then
     engine=ansible
+  elif [ -s "$root/etc/ddev-fleet/installed-engine" ] && [ "$(head -n 1 "$root/etc/ddev-fleet/installed-engine" | tr -d '[:space:]')" != bash ]; then
+    err "warning: $root/etc/ddev-fleet/installed-engine holds something other than 'bash' or 'ansible'; treating this host as bash"
   fi
   say "Install engine: $engine"
 
@@ -223,23 +225,7 @@ main() {
   fi
   rm -f -- "$lsr_err"
 
-  # --- 3. backup ---------------------------------------------------------------------------------------------------------
-  local backup=''
-  if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
-    # The restore itself keeps the current database as *.pre-restore-*; the backup being restored is the one named.
-    backup=$rb_backup
-  else
-    say "Taking the pre-upgrade backup ..."
-    out=$(as_fleet upgrade:backup) || { err 'nothing was changed'; return 1; }
-    backup=$(sed -n 's/^BACKUP=//p' <<<"$out" | head -n 1)
-    if ! [[ $backup =~ ^[A-Za-z0-9._-]{1,100}$ ]]; then
-      err 'the backup did not report a file name; nothing was changed'
-      return 1
-    fi
-    say "Backup: $backup"
-  fi
-
-  # --- 4. history: start ---------------------------------------------------------------------------------------------
+  # --- 3. the target's installer and the engine check (before the backup and any history line: a refusal changes nothing)
   history_line() { # event result [backup]
     local extra=''
     [ -n "${3:-}" ] && extra=$(printf ',"backup":"%s"' "$3")
@@ -247,14 +233,12 @@ main() {
     {
       install -d -m 0755 "$history_dir" \
         && { [ -e "$history_file" ] || install -m 0644 /dev/null "$history_file"; } \
-        && printf '{"ts":"%s","event":"%s","result":"%s","from":"%s","to":"%s","sha":"%s","actor":"%s"%s}\n' \
-          "$(now)" "$1" "$2" "$from" "$target" "$sha" "$actor" "$extra" >>"$history_file"
+        && printf '{"ts":"%s","event":"%s","result":"%s","from":"%s","to":"%s","sha":"%s","actor":"%s","engine":"%s"%s}\n' \
+          "$(now)" "$1" "$2" "$from" "$target" "$sha" "$actor" "$engine" "$extra" >>"$history_file"
     } || err "could not write $history_file"
     return 0
   }
-  history_line start started "$backup"
-
-  # --- 5. the target's installer, by the planned sha -----------------------------------------------------------------
+  # (by the planned sha)
   local -a units=()
   # Cleanup is unconditional: an EXIT trap (not RETURN) so a failing command under set -e cannot leak the directory.
   work=$(mktemp -d "${TMPDIR:-/tmp}/fleet-upgrade.XXXXXX")
@@ -277,13 +261,30 @@ main() {
   # the record is bash, and bash is the installer's default, so it gets no flag (releases before the flag do not know it).
   local -a engine_args=()
   if [ "$engine" = ansible ]; then
-    if ! grep -q -e '--engine=' "$work/export/install/install.sh" 2>/dev/null; then
-      history_line installer failed
+    if ! grep -Eq '^[[:space:]]*--engine=.*\)' "$work/export/install/install.sh" 2>/dev/null; then
       err "this host was installed with the Ansible engine, and $target does not have it. Nothing was stopped or restored."
       return 1
     fi
     engine_args=(--engine=ansible)
   fi
+
+  # --- 4. backup ---------------------------------------------------------------------------------------------------------
+  local backup=''
+  if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
+    # The restore itself keeps the current database as *.pre-restore-*; the backup being restored is the one named.
+    backup=$rb_backup
+  else
+    say "Taking the pre-upgrade backup ..."
+    out=$(as_fleet upgrade:backup) || { err 'nothing was changed'; return 1; }
+    backup=$(sed -n 's/^BACKUP=//p' <<<"$out" | head -n 1)
+    if ! [[ $backup =~ ^[A-Za-z0-9._-]{1,100}$ ]]; then
+      err 'the backup did not report a file name; nothing was changed'
+      return 1
+    fi
+    say "Backup: $backup"
+  fi
+
+  history_line start started "$backup"
 
   if [ "$direction" = down ] && [ "$restore" -eq 1 ]; then
     # The older installer was fetched and unpacked above, so an unreachable source costs nothing: the services are only

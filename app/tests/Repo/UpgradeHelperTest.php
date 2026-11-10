@@ -114,6 +114,27 @@ final class UpgradeHelperTest extends TestCase
         self::assertStringNotContainsString('systemctl stop', $calls);
         self::assertStringNotContainsString('upgrade:restore', $calls);
         self::assertStringNotContainsString('installer ', $calls);
+        self::assertStringNotContainsString('upgrade:backup', $calls, 'a refusal takes no backup');
+        self::assertFileDoesNotExist($this->historyFile(), 'a refusal writes no history');
+    }
+
+    public function testAGarbageEngineRecordWarnsAndFallsBackToBash(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "garbage\n");
+        [$status, $out, $err] = $this->upgrade(['--yes']);
+
+        self::assertSame(0, $status, $out.$err);
+        self::assertStringContainsString('holds something other than', $err);
+    }
+
+    public function testTheHistoryRecordsTheEngine(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "ansible\n");
+        $this->upgrade(['--yes']);
+
+        foreach ($this->history() as $line) {
+            self::assertSame('ansible', $line['engine']);
+        }
     }
 
     public function testTheInstallerIsTheOneOfThePlannedCommit(): void
@@ -402,7 +423,9 @@ final class UpgradeHelperTest extends TestCase
             echo "installer $*" >> "$FAKE_LOG"
             echo "fake installer of v1.2.1" > "$FAKE_RAN"
             exit "${FAKE_INSTALL_EXIT:-0}"
-            SH.($engineFlag ? "\n# usage: --engine=<bash|ansible>\n" : "\n"));
+            SH.($engineFlag
+                ? "\nfor arg in \"\$@\"; do\n  case \"\$arg\" in\n    --engine=bash | --engine=ansible) ;;\n  esac\ndone\n"
+                : "\n# usage: --engine=<bash|ansible> is not supported here\n"));
         $env = ['GIT_AUTHOR_NAME' => 't', 'GIT_AUTHOR_EMAIL' => 't@example.com', 'GIT_COMMITTER_NAME' => 't', 'GIT_COMMITTER_EMAIL' => 't@example.com', 'GIT_CONFIG_GLOBAL' => '/dev/null', 'GIT_CONFIG_SYSTEM' => '/dev/null'];
         foreach ([['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'release'], ['tag', '-a', 'v1.2.1', '-m', 'v1.2.1']] as $args) {
             new Process(['git', '-C', $this->repo, ...$args], null, $env)->mustRun();
