@@ -51,7 +51,7 @@ Every field is validated when the rule is added. The first matching rule wins.
 | Shortening | If `<project>--<label>` would pass 59 characters (aliases and a `-999` suffix included), the label is cut and ends in `-` plus 6 hex of the SHA-1 of the branch name, so one branch always gets one id. |
 | Collision guard | A derived label equal to a fixed-label rule's label is skipped as `collides with a fixed-label rule` (a `*--pw-run` branch must not rebuild a baseline). Each skipped branch gets an `ignored` row. |
 
-A busy instance (job queued or running) refuses a redeploy: the delivery records `Busy: ...`.
+A busy instance (job queued or running) does not drop a push to a fixed-label or `--reuse` rule. The redeploy is remembered for that instance (one pending request, the latest push wins: branch, template and requester are overwritten) and the delivery is `accepted` with the note `redeploy pending: ...`. When the active job ends, whatever its outcome, one follow-up `redeploy` job is queued, trigger `webhook`, and appears in the job list. Several pushes during one job therefore give exactly one follow-up. A redeploy always pulls the branch tip, so it builds the newest commit. If another job takes the instance first, the request keeps waiting; if the instance or its template is gone, it is dropped and logged. A deploy that allocates a free label is never busy. The pending request lives in the `pending_redeploy` table, not in `job`: the one active job per instance rule is unchanged.
 
 ### HTTP answers
 
