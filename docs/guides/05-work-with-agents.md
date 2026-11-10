@@ -63,9 +63,10 @@ Pair it with the Jira rule from [automate deploys](03-automate-deploys.md): movi
 
 ## The Claude token
 
-1. Run `fleet claude:token:set` (hidden prompt; or **Host settings, Claude token**).
-2. Deploy. The token is exposed in the container as `CLAUDE_CODE_OAUTH_TOKEN`, so no command line or log holds it.
-3. To rotate, a running instance keeps its old token and a new one restarts its containers (ending a running agent), so it is manual: `fleet claude:token:apply --all --yes`.
+1. Mint a token with `claude setup-token` on any machine that has Claude Code and a browser (your workstation is fine; the installer does not put the Claude CLI on the host). It signs you in and prints a long-lived token (about a year).
+2. Store it with `fleet claude:token:set` (hidden prompt; or **Host settings, Claude token**).
+3. Deploy. The token is exposed in the container as `CLAUDE_CODE_OAUTH_TOKEN`, so no command line or log holds it.
+4. To rotate, mint and store a new token the same way. A running instance keeps its old token and a new one restarts its containers (ending a running agent), so it is manual: `fleet claude:token:apply --all --yes`.
 
 ## Git over SSH in the container
 
