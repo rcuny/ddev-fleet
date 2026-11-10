@@ -96,7 +96,7 @@ sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restor
 The installer records the engine that provisioned the host in `/etc/ddev-fleet/installed-engine` (`bash` or `ansible`;
 a host without the file is `bash`). `fleet upgrade`, and a rollback, run the target release's `install.sh` with the same
 engine: on an `ansible` host that is `--engine=ansible`, so the playbook of the target tag runs again and writes
-`installed-version`. A target release that does not have the Ansible engine is refused before any service is stopped.
+`installed-version`. A target release that does not have the Ansible engine is refused before the backup, before any history line and before any service is stopped. A record that holds anything else than `bash` or `ansible` is reported as a warning and the host is treated as bash.
 The Upgrade page shows the engine.
 
 ## Roll back
@@ -149,7 +149,7 @@ A release's `CHANGELOG.md` can end a version with `#### Rollout` bullets. One st
 | `restore` | `ok`, `failed` | Rollback only: the database was restored from `backup`. |
 | `verify` | `ok`, `unverified` | When the verification returned. |
 
-Every line has `ts` (UTC), `event`, `result`, `from`, `to`, `sha`, `actor`; `start` and `restore` add `backup`. `fleet upgrade verify --to vX.Y.Z` runs the verification alone.
+Every line has `ts` (UTC), `event`, `result`, `from`, `to`, `sha`, `actor`, `engine` (`bash` or `ansible`, see "Install engine"); `start` and `restore` add `backup`. `fleet upgrade verify --to vX.Y.Z` runs the verification alone.
 
 ## Docker network pool and mirrors
 

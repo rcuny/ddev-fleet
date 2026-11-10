@@ -12,6 +12,7 @@ import { hasHorizontalOverflow } from './support/shell';
 // directory is the lock (mkdir is atomic; a lock left by a crash is taken over after a minute).
 const home = fleetHome();
 const versionFile = join(home, 'test-installed-version');
+const engineFile = join(home, 'test-installed-engine');
 const lock = `${versionFile}.lock`;
 let repo = '';
 let bare = '';
@@ -75,6 +76,14 @@ test.describe('upgrade notice and page', () => {
     await expect(page.getByTestId('upgrade-installed')).toHaveText('v1.98.0');
     await expect(page.getByTestId('upgrade-latest')).toHaveText('v1.99.0');
     await expect(page.getByTestId('upgrade-engine')).toHaveText('bash');
+    // The record of an Ansible-installed host (written while the lock is held, removed at once).
+    writeFileSync(engineFile, 'ansible\n');
+    try {
+      await page.reload();
+      await expect(page.getByTestId('upgrade-engine')).toHaveText('ansible');
+    } finally {
+      rmSync(engineFile, { force: true });
+    }
     await expect(page.getByTestId('upgrade-cmd-to')).toHaveValue('sudo fleet upgrade --to v1.99.0');
     await expect(page.getByTestId('upgrade-section')).toContainText('A new thing');
     expect(await hasHorizontalOverflow(page)).toBe(false);
