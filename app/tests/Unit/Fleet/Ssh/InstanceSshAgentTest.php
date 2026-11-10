@@ -91,6 +91,18 @@ final class InstanceSshAgentTest extends TestCase
         self::assertSame([['ssh-add', '-t', '86400', $this->home.'/ssh/push_ed25519'], ['ssh-add', '-t', '86400', $staging]], $adds);
     }
 
+    public function testStartWithoutPushLoadsOnlyTheExtraKeysAndDropsAnEarlierPushKey(): void
+    {
+        $this->agentIsUp();
+        $staging = $this->extraKey('staging');
+
+        $this->agent->start(self::ID, ['staging'], false);
+
+        self::assertSame([$staging], $this->loadedKeys(), 'the push key is never loaded');
+        $removed = array_values(array_filter(array_map(static fn ($call): array => $call->argv, $this->runner->calls()), static fn (array $argv): bool => 'ssh-add' === $argv[0] && '-d' === ($argv[1] ?? '')));
+        self::assertSame([['ssh-add', '-d', $this->home.'/ssh/push_ed25519.pub']], $removed);
+    }
+
     public function testStartFailsClearlyForAnExtraKeyThatIsNotUsable(): void
     {
         $this->agentIsUp();

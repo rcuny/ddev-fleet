@@ -24,3 +24,4 @@ Lookup pages: every command, setting, path and format. They are exact rather tha
 | [webhooks-and-schedules.md](11-webhooks-and-schedules.md) | Configure Jira and Bitbucket hooks and cron schedules |
 | [export-format.md](12-export-format.md) | Read the project export format |
 | [troubleshooting.md](13-troubleshooting.md) | Match a symptom to a fix |
+| [ssh-keys.md](14-ssh-keys.md) | Know what each SSH key is for (pull, push, extras) and manage them |

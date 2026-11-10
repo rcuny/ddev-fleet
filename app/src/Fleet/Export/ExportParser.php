@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Export;
 
 use App\Domain\Project\GitBotMode;
+use App\Domain\Template\SshIdentities;
 use App\Domain\Webhook\WebhookSource;
 use App\Fleet\Projects\ProjectService;
 use App\Fleet\Projects\Rule\SshKeyNames;
@@ -149,7 +150,7 @@ final class ExportParser
         $templates = [];
         foreach ($this->items($value, 'templates', TemplateService::MAX_PER_PROJECT) as $i => $item) {
             $path = "templates[$i]";
-            if (!$this->keys($item, $path, ['name', 'drupal_env', 'post_deploy'], ['ssh_keys'])) {
+            if (!$this->keys($item, $path, ['name', 'drupal_env', 'post_deploy'], ['ssh_keys', 'ssh_identities'])) {
                 continue;
             }
             \assert(\is_array($item));
@@ -160,11 +161,21 @@ final class ExportParser
                     $commands[$key] = $this->stringList($item['post_deploy'][$key], "$path.post_deploy.$key", self::MAX_LINES);
                 }
             }
+            $identities = SshIdentities::PushAndExtras->value;
+            if (\array_key_exists('ssh_identities', $item)) {
+                $given = $this->string($item['ssh_identities'], "$path.ssh_identities");
+                if (null !== $given && null === SshIdentities::tryFrom($given)) {
+                    $this->problems[] = "$path.ssh_identities: must be push_and_extras or extras_only.";
+                } elseif (null !== $given) {
+                    $identities = $given;
+                }
+            }
             $templates[] = [
                 'name' => $this->string($item['name'], "$path.name") ?? '',
                 'drupal_env' => $this->nullableString($item['drupal_env'], "$path.drupal_env"),
                 'post_deploy' => $commands,
                 'ssh_keys' => \array_key_exists('ssh_keys', $item) ? $this->stringList($item['ssh_keys'], "$path.ssh_keys", SshKeyNames::MAX_KEYS) : [],
+                'ssh_identities' => $identities,
             ];
         }
 

@@ -6,6 +6,7 @@ namespace App\Fleet\Projects;
 
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
+use App\Domain\Template\SshIdentities;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
 use App\Fleet\Projects\Rule\Capacity;
@@ -77,6 +78,7 @@ final readonly class TemplateService
         $template->changeDrupalEnv($input->drupalEnv, $now);
         $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
         $template->changeSshKeys($input->sshKeys, $now);
+        $template->changeSshIdentities($input->sshIdentities, $now);
         $template->changeCapacity($input->cpuThreads, $input->slots, $now);
 
         try {
@@ -112,6 +114,7 @@ final readonly class TemplateService
         $template->changeDrupalEnv($input->drupalEnv, $now);
         $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
         $template->changeSshKeys($input->sshKeys, $now);
+        $template->changeSshIdentities($input->sshIdentities, $now);
         $template->changeCapacity($input->cpuThreads, $input->slots, $now);
         $this->templates->save($template);
         // A new limit reaches the running slice at once (no restart of the instances).
@@ -171,6 +174,10 @@ final readonly class TemplateService
 
         if (null !== $error = $this->sshKeysError($input->sshKeys, $containerSsh)) {
             $errors['sshKeys'] = $error;
+        }
+
+        if (SshIdentities::ExtrasOnly === $input->sshIdentities && [] === $input->sshKeys) {
+            $errors['sshIdentities'] = '"Extra keys only" needs at least one extra SSH key: otherwise the instance would have no key at all.';
         }
 
         foreach (['cpuThreads' => ['CPU threads', $project?->cpuThreads()], 'slots' => ['Slots', $project?->slots()]] as $field => [$what, $limit]) {

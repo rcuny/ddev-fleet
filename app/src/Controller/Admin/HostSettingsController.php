@@ -24,6 +24,7 @@ use App\Fleet\PortMirror\PortMirrorSwitch;
 use App\Fleet\Secrets\SecretConflict;
 use App\Fleet\Secrets\SecretService;
 use App\Fleet\Secrets\SecretStore;
+use App\Fleet\Ssh\SshKeyCatalog;
 use App\Fleet\System\ConfigValue;
 use App\Fleet\Tls\TlsStatusFile;
 use App\Fleet\Workspace\ClaudeTokenRotation;
@@ -67,6 +68,7 @@ final class HostSettingsController extends AbstractController
         'uploads' => 'Uploads',
         'jobs' => 'Jobs',
         'capacity' => 'Capacity',
+        'ssh' => 'SSH keys',
         'backups' => 'Backups',
     ];
 
@@ -82,6 +84,7 @@ final class HostSettingsController extends AbstractController
         private readonly HostCapacity $capacity,
         private readonly HostHardwareProbe $hardware,
         private readonly UnslicedInstances $unsliced,
+        private readonly SshKeyCatalog $sshCatalog,
         private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
         private readonly ClockInterface $clock,
@@ -94,6 +97,13 @@ final class HostSettingsController extends AbstractController
         $tab = $request->query->getString('tab');
 
         return $this->show(isset(self::TABS[$tab]) ? $tab : 'general', $this->settings->get());
+    }
+
+    /** The SSH keys tab at a path of its own, so the re-auth page can return to it (it only accepts paths). */
+    #[Route('/admin/host/ssh-keys', name: 'settings_ssh_keys', methods: ['GET'])]
+    public function sshKeys(): Response
+    {
+        return $this->show('ssh', $this->settings->get());
     }
 
     #[Route('/admin/host/general', name: 'settings_general', methods: ['POST'])]
@@ -467,8 +477,8 @@ final class HostSettingsController extends AbstractController
 
         $forms = [];
         foreach (array_keys(self::TABS) as $key) {
-            // The certificates tab only reports; it has no form.
-            if ('certificates' === $key) {
+            // The certificates and SSH keys tabs have no Symfony form (the keys page posts to SshKeyController).
+            if (\in_array($key, ['certificates', 'ssh'], true)) {
                 continue;
             }
             $forms[$key] = ($key === $tab && null !== $submitted ? $submitted : $this->form($key, $host))->createView();
@@ -486,6 +496,7 @@ final class HostSettingsController extends AbstractController
             'tls' => 'certificates' === $tab ? $this->tlsStatus->read() : null,
             'mirror' => 'network' === $tab ? $this->mirrorView() : null,
             'capacity' => 'capacity' === $tab ? $this->capacity->report() : null,
+            'sshKeys' => 'ssh' === $tab ? $this->sshCatalog->entries() : [],
             'unsliced' => 'capacity' === $tab ? $this->unsliced->list() : [],
             'secrets' => [
                 'claude' => $this->rotation->lastRotated(),

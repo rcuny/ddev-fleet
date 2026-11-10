@@ -8,6 +8,7 @@ use App\Domain\Instance\Instance;
 use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Project\Project;
+use App\Domain\Template\SshIdentities;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
 use App\Fleet\Ddev\Ddev;
@@ -298,7 +299,7 @@ final class DeployWorkflow
 
             return [];
         }
-        if (!$this->agent->hasKey()) {
+        if (!$this->agent->hasKeyFor($instance)) {
             $log->line('warning: the project asks for git over SSH in the container, but the host has no push key; no ssh-agent was started');
 
             return [];
@@ -310,7 +311,10 @@ final class DeployWorkflow
             throw new JobFailed('ssh-agent setup failed: '.$e->getMessage());
         }
         $extra = $template->sshKeys();
-        $log->line('started a dedicated ssh-agent for this instance (push key'.([] === $extra ? '' : ' and the template\'s extra key(s): '.implode(', ', $extra)).', '.InstanceSshAgent::KEY_LIFETIME.' s)');
+        $held = SshIdentities::ExtrasOnly === $template->sshIdentities()
+            ? 'the template\'s extra key(s) only, no push key: '.implode(', ', $extra)
+            : 'push key'.([] === $extra ? '' : ' and the template\'s extra key(s): '.implode(', ', $extra));
+        $log->line('started a dedicated ssh-agent for this instance ('.$held.', '.InstanceSshAgent::KEY_LIFETIME.' s)');
 
         return [InstanceSshAgent::OVERRIDE_FILE];
     }

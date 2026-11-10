@@ -75,6 +75,7 @@ services:
             - '../src/Domain/Schedule/ScheduleRun.php'
             - '../src/Domain/Schedule/SchedulerHeartbeat.php'
             - '../src/Domain/Secret/Secret.php'
+            - '../src/Domain/Ssh/ManagedSshKey.php'
             - '../src/Domain/Ssh/SshKey.php'
             - '../src/Domain/Template/Template.php'
             - '../src/Domain/User/User.php'

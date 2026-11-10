@@ -25,8 +25,8 @@ final readonly class GitClient
 
     /**
      * What git runs inside the web container (`GIT_SSH_COMMAND`, set in config.fleet.yaml; the environment wins over
-     * `core.sshCommand`, which holds host paths). No identity option: the keys come from DDEV's ssh-agent, and
-     * `IdentitiesOnly` would ignore them. Strict, pinned, never prompts. No quotes and no `$`: DDEV copies web_environment into a generated compose file and
+     * `core.sshCommand`, which holds host paths). No identity option: the keys come from the instance's own ssh-agent (SSH_AUTH_SOCK points at its
+     * socket, FLE-145; never DDEV's shared agent, see docs/reference/14-ssh-keys.md), and `IdentitiesOnly` would ignore them. Strict, pinned, never prompts. No quotes and no `$`: DDEV copies web_environment into a generated compose file and
      * a double quote there breaks it (FLE-188).
      */
     public const string CONTAINER_SSH_COMMAND = 'ssh -o BatchMode=yes -o StrictHostKeyChecking=yes -o UserKnownHostsFile='.DdevPaths::CONTAINER_APPROOT.'/'.self::CONTAINER_KNOWN_HOSTS;
