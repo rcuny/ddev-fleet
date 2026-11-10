@@ -5,7 +5,7 @@
 # and `fleet_admin_default_password` have no public-safe default and MUST be
 # supplied via /etc/ddev-fleet/local-vars.yml (written by bootstrap.sh's
 # value-collection phase) before a real server rollout — see
-# docs/installation.md.
+# docs/installation.md (`legacy` branch).
 
 # --- OS assumption ----------------------------------------------------------
 # Roles use ansible.builtin.apt and target a Debian-family host. Verified
@@ -33,7 +33,7 @@ fleet_daemon_port: 8765
 # (ProtectSystem=strict, syscall filter, no capabilities, ...) and adds a
 # Caddy drop-in (caddy.service.d/50-fleet-sandbox.conf). Validated on a live
 # server, incl. a full `ddev start`. Set false to fall back to the pre-FLE-1
-# units (the Caddy drop-in is then removed). See docs/operations.md
+# units (the Caddy drop-in is then removed). See docs/operations.md (`legacy` branch)
 # "systemd sandboxing". Templates read it with `| default(true)`.
 fleet_systemd_sandbox_enabled: true
 
@@ -45,7 +45,7 @@ ddev_router_https_port: 8443
 # port is no longer an Ansible var hand-synced against a Python constant.
 # It is now `fleet.ports.typesense` in fleet.yml (default 9108/8108 via
 # Registry.port_profile()'s legacy fallback, core/registry.py), reconciled
-# into Caddy by fleet.core.caddyports — see docs/networking.md.
+# into Caddy by fleet.core.caddyports — see docs/reference/09-networking.md.
 
 # --- Domain & TLS (spec §9) --------------------------------------------------
 # fleet_domain already includes the "fleet." label (it matches fleet.yml's
@@ -83,7 +83,7 @@ fleet_admin_user: admin
 # (see ansible/roles/caddy/tasks/main.yml).
 fleet_caddy_snippet_dir: /etc/caddy/fleet
 
-# --- TLS certificate mode (docs/installation.md "Choosing a TLS mode") -----
+# --- TLS certificate mode (docs/installation.md (`legacy` branch) "Choosing a TLS mode") -----
 # How Caddy gets Let's Encrypt certificates for `*.{{ fleet_domain }}` and
 # every named-port site (core/caddyports.py). Two allowed values (asserted
 # in the caddy role — an unrecognised value fails fast with a clear
@@ -106,7 +106,7 @@ fleet_caddy_snippet_dir: /etc/caddy/fleet
 # "TLS certificates" prompt), like fleet_domain. Switching an existing
 # server's mode: edit local-vars.yml, then (for ovh_dns) create
 # /etc/caddy/ovh.env, then re-run `ansible/caddy-only.yml` — see
-# docs/installation.md.
+# docs/installation.md (`legacy` branch).
 fleet_tls_mode: on_demand
 
 # --- OVH DNS-01 (ovh_dns mode only; ignored otherwise) ----------------------
@@ -119,7 +119,7 @@ fleet_ovh_env_file: /etc/caddy/ovh.env
 
 # --- Product repo (spec §3.1, §17) -------------------------------------------
 fleet_repo_url: https://github.com/rcuny/ddev-fleet.git
-# Ansible provisions the v0.x Python host only (ansible/LEGACY-0x.md): the checkout follows the
+# Ansible provisions the v0.x Python host only (0.x only, `legacy` branch): the checkout follows the
 # `legacy` branch. 1.x hosts use install/install.sh (default --ref main).
 fleet_repo_version: legacy
 # When true, the code is delivered out-of-band (e.g. rsync/tar of a clean
@@ -129,13 +129,13 @@ fleet_repo_version: legacy
 # when it is run with FLEET_SKIP_FETCH=1.
 fleet_skip_fetch: false
 
-# --- Auth mode (docs/README-authelia.md) -----------------------------------
+# --- Auth mode (docs/README-authelia.md (`legacy` branch)) -----------------------------------
 # basic (default): today's per-instance HTTP basic auth, symmetric
 # username==password, rotatable without Ansible (fleet.core.caddyauth).
 # authelia: a cookie-based login portal (Authelia, systemd service) that
 # works on networks blocking basic auth outright; per-project users come
 # from fleet.yml's users: (fleet.core.authelia). See
-# docs/README-authelia.md for the full design and how to switch modes on
+# docs/README-authelia.md (`legacy` branch) for the full design and how to switch modes on
 # an existing server (ansible/authelia.yml).
 fleet_auth_mode: basic
 

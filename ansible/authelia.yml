@@ -15,7 +15,7 @@
 #   sudo ansible-playbook authelia.yml
 # The authelia role's own tasks already run `fleet refresh-auth` on every
 # apply, so users.yml and every instance's snippet are current once this
-# playbook finishes — no extra manual step. See docs/README-authelia.md
+# playbook finishes — no extra manual step. See docs/README-authelia.md (`legacy` branch)
 # "Switching modes".
 - name: Switch auth mode (Authelia role + Caddy re-render + host.yml)
   hosts: localhost
