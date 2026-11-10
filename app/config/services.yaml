@@ -176,6 +176,14 @@ services:
         arguments:
             $playbookFile: '%fleet.provision_playbook_file%'
 
+    # FLE-261: the drift check runs the same installed playbook, read-only; the last report is one file under FLEET_HOME.
+    App\Fleet\Host\Drift\DriftCheck:
+        arguments:
+            $playbookFile: '%fleet.provision_playbook_file%'
+    App\Fleet\Host\Drift\DriftReportStore:
+        arguments:
+            $file: '%env(resolve:FLEET_HOME)%/drift-report.json'
+
     # Callers type-hint Applier; the one implementation runs `sudo -n apply <target>` through the CommandRunner (a
     # recording runner in dev/test, so nothing privileged runs there).
     App\Fleet\System\Applier:

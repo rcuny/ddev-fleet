@@ -16,6 +16,7 @@ const TABS = [
   { key: 'capacity', label: 'Capacity' },
   { key: 'ssh', label: 'SSH keys' },
   { key: 'hardening', label: 'Hardening' },
+  { key: 'drift', label: 'Drift' },
   { key: 'backups', label: 'Backups' },
 ] as const;
 

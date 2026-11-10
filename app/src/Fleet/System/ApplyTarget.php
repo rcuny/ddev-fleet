@@ -15,4 +15,6 @@ enum ApplyTarget: string
     case Slices = 'slices';
     /** The host's optional roles (hardening): installs the staged host-vars.yml, then runs the installed tag's playbook. */
     case Provision = 'provision';
+    /** The read-only twin of provision (FLE-261): the installed playbook with --check --diff; stages nothing, prints a JSON report. */
+    case Drift = 'drift';
 }

@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (93), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (94), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -1355,6 +1355,18 @@ fleet host:capacity [--json] [--reserve RESERVE] [--max-instances MAX-INSTANCES]
 | `--json` |  | Print the report as JSON |  |
 | `--reserve=VALUE` |  | Compute with this many reserved threads instead of the saved value |  |
 | `--max-instances=VALUE` |  | Report this instance cap instead of the saved value |  |
+
+### fleet host:drift
+
+Check the host against the installed release without changing anything.
+
+```
+fleet host:drift [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--json` |  | Print the report as JSON |  |
 
 ### fleet host:init
 
