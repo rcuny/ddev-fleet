@@ -107,6 +107,8 @@ final class ApplyProvisionHelperTest extends TestCase
         yield 'a non-boolean' => ["---\nfleet_domain: \"x.example.com\"\nfleet_hardening_enabled: yes\n"];
         yield 'no domain' => ["---\nfleet_hardening_enabled: false\n"];
         yield 'an inline mapping' => [$ok."fleet_shell_profile: {a: b}\n"];
+        yield 'hardening without the login account' => ["---\nfleet_domain: \"x.example.com\"\nfleet_hardening_enabled: true\nfleet_hardening_ssh_allow_users:\n  - \"admin\"\n"];
+        yield 'login account not in the allow list' => ["---\nfleet_domain: \"x.example.com\"\nfleet_hardening_enabled: true\nfleet_hardening_ssh_allow_users:\n  - \"admin\"\nfleet_hardening_invoking_user: \"other\"\n"];
         yield 'no document start' => ["fleet_domain: \"x.example.com\"\nfleet_hardening_enabled: false\n"];
     }
 
@@ -134,6 +136,42 @@ final class ApplyProvisionHelperTest extends TestCase
         self::assertSame(1, $status);
         self::assertStringContainsString('provision failed (exit 2)', $err);
         self::assertSame($before, file_get_contents($this->root.'/etc/ddev-fleet/host-vars.yml'));
+    }
+
+    public function testAFailedRunWithNothingStagedKeepsTheCurrentAnswers(): void
+    {
+        $before = (string) file_get_contents($this->root.'/etc/ddev-fleet/host-vars.yml');
+
+        [$status, , $err] = $this->provision(2);
+
+        self::assertSame(1, $status);
+        self::assertStringContainsString('provision failed (exit 2)', $err);
+        self::assertFileExists($this->root.'/etc/ddev-fleet/host-vars.yml');
+        self::assertSame($before, file_get_contents($this->root.'/etc/ddev-fleet/host-vars.yml'));
+    }
+
+    public function testRefusesASymlinkedStagedFile(): void
+    {
+        $before = (string) file_get_contents($this->root.'/etc/ddev-fleet/host-vars.yml');
+        file_put_contents($this->root.'/elsewhere.yml', $this->hardened());
+        symlink($this->root.'/elsewhere.yml', $this->root.'/srv/fleet/staging/provision/host-vars.yml');
+
+        [$status] = $this->provision();
+
+        self::assertNotSame(0, $status);
+        self::assertSame('', $this->calls(), 'the playbook must not run');
+        self::assertSame($before, file_get_contents($this->root.'/etc/ddev-fleet/host-vars.yml'));
+    }
+
+    public function testRefusesAnInvalidInstalledVersionRef(): void
+    {
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-version', "--evil flag\n");
+
+        [$status, , $err] = $this->provision();
+
+        self::assertSame(65, $status);
+        self::assertStringContainsString('not a valid ref', $err);
+        self::assertSame('', $this->calls());
     }
 
     public function testRefusesAPlaybookTreeThatOthersCanWrite(): void

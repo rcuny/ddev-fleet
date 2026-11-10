@@ -752,6 +752,7 @@ apply_slices() {
 provision_check_host_vars() {
   local file=$1 line n=0 key list='' items=0
   local -A seen=()
+  local invoking='' hardening='' allow=' ' item
   local first=1 domain_re='^[a-z0-9]([a-z0-9.-]{0,251}[a-z0-9])?$'
   local user_re='^[a-z_][a-z0-9_-]{0,31}$' addr_re='^[0-9a-fA-F.:]{2,45}(/[0-9]{1,3})?$'
   while IFS= read -r line || [ -n "$line" ]; do
@@ -768,7 +769,10 @@ provision_check_host_vars() {
     if [[ $line =~ ^\ \ -\ \"([^\"]{1,64})\"$ ]]; then
       [ -n "$list" ] || fail "the staged host vars have a list item without a list (line $n)" 65
       case $list in
-        fleet_hardening_ssh_allow_users) [[ ${BASH_REMATCH[1]} =~ $user_re ]] || fail "the staged host vars have an invalid SSH user (line $n)" 65 ;;
+        fleet_hardening_ssh_allow_users)
+          item=${BASH_REMATCH[1]}
+          [[ $item =~ $user_re ]] || fail "the staged host vars have an invalid SSH user (line $n)" 65
+          allow+="$item " ;;
         fleet_hardening_trusted_ips) [[ ${BASH_REMATCH[1]} =~ $addr_re ]] || fail "the staged host vars have an invalid address (line $n)" 65 ;;
       esac
       items=$((items + 1))
@@ -790,11 +794,12 @@ provision_check_host_vars() {
       fleet_acme_email)
         [[ $value =~ ^\"([A-Za-z0-9._%+-]{1,64}@[A-Za-z0-9.-]{1,253})?\"$ ]] || fail "the staged host vars have an invalid ACME e-mail (line $n)" 65 ;;
       fleet_shell_profile | fleet_hardening_enabled | fleet_hardening_tmp)
-        [[ $value = true || $value = false ]] || fail "the staged host vars have a non-boolean $key (line $n)" 65 ;;
+        [[ $value = true || $value = false ]] || fail "the staged host vars have a non-boolean $key (line $n)" 65
+        [ "$key" != fleet_hardening_enabled ] || hardening=$value ;;
       fleet_hardening_firewall_grace_minutes)
         [[ $value =~ ^[0-9]{1,3}$ ]] && [ "$((10#$value))" -ge 2 ] && [ "$((10#$value))" -le 120 ] || fail "the firewall grace period must be 2 to 120 minutes (line $n)" 65 ;;
       fleet_hardening_invoking_user)
-        [[ $value =~ ^\"([^\"]+)\"$ && ${BASH_REMATCH[1]} =~ $user_re ]] || fail "the staged host vars have an invalid SSH account (line $n)" 65 ;;
+        [[ $value =~ ^\"([^\"]+)\"$ ]] && invoking=${BASH_REMATCH[1]} && [[ $invoking =~ $user_re ]] || fail "the staged host vars have an invalid SSH account (line $n)" 65 ;;
       fleet_hardening_ssh_allow_users | fleet_hardening_trusted_ips)
         if [ "$value" = '[]' ]; then
           :
@@ -808,17 +813,24 @@ provision_check_host_vars() {
   done <"$file"
   [ -n "${seen[fleet_domain]:-}" ] || fail 'the staged host vars have no fleet_domain' 65
   [ -n "${seen[fleet_hardening_enabled]:-}" ] || fail 'the staged host vars do not say whether hardening is on' 65
+  # Lock-out safety: hardening on needs the account the admin logs in with, and that account must be allowed to log in.
+  if [ "$hardening" = true ]; then
+    [ -n "$invoking" ] || fail 'hardening needs fleet_hardening_invoking_user (the SSH account you log in with)' 65
+    [[ $allow == *" $invoking "* ]] || fail 'the SSH account you log in with is not in the SSH allow list' 65
+  fi
 }
 
 # apply_provision: install the staged host answers (when staged), then run the installed tag's playbook.
+# A failed run restores the answers file only (and only when this run installed one); it does not undo a half-applied run.
 apply_provision() {
   local etc="$ROOT$PROVISION_ETC" install_dir="$ROOT$PROVISION_INSTALL_DIR" playbook ref version_file facts owner mode
-  local vars="$etc/host-vars.yml" cmd=() rc=0
+  local vars="$etc/host-vars.yml" cmd=() rc=0 installed=0
 
   if stage_in host-vars.yml "$PRIV/host-vars.yml"; then
     provision_check_host_vars "$PRIV/host-vars.yml"
     keep_previous "$vars" host-vars
     put_file "$PRIV/host-vars.yml" "$vars" 0644 root root || fail 'could not write the host vars'
+    installed=1
     printf 'apply: host vars installed\n'
   fi
 
@@ -849,8 +861,9 @@ apply_provision() {
   (cd "$install_dir/ansible" && timeout "$T_PROVISION" "${cmd[@]}" </dev/null 3<&- 4<&- 9<&-) || rc=$?
   if [ "$rc" -ne 0 ]; then
     printf 'apply: provision failed (exit %d)\n' "$rc" >&2
-    # The previous answers go back, so the next run does not apply a half-accepted change.
-    restore_previous "$vars" host-vars 0644 root root
+    # Only when this run installed new answers: the previous answers go back, so the next run does not re-apply a
+    # half-accepted change. This restores the answers file ONLY; it does not undo a half-applied playbook run.
+    [ "$installed" -eq 0 ] || restore_previous "$vars" host-vars 0644 root root
     exit 1
   fi
   printf 'apply: provision finished\n'
