@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Automate deploys
 
 You choose what to automate. Instances can be created when a Jira issue changes status, when a branch is pushed, or every night, and each trigger is optional: Fleet queues the same jobs a person would, and you can keep any step manual. This page gives three recipes for project `website`. Setting them up is for administrators.

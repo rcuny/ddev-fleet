@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Secure the host
 
 Fleet is built so one process faces the Internet and everything else sits behind it. This page explains that model in plain words and shows the optional hardening for the host itself.

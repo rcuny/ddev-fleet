@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Troubleshooting
 
 Find your symptom, read the likely cause, apply the fix. Tables are grouped by where you are in the journey. Anything else: the last section.

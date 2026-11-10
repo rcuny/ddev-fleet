@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Networking
 
 One public entry point keeps the host small to defend: Caddy terminates TLS for every hostname, gates access with Authelia, and forwards to instances, which never listen on the Internet. This page lists every port, how certificates behave, and how named ports and the in-network mirror work. The installer does not touch the firewall; [secure the host](../guides/08-secure-the-host.md) covers the opt-in hardening and [files on disk](03-files-on-disk.md) the units.

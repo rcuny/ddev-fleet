@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Start here
 
 Find the shortest path to what you want to do. Pick a journey below, or scan the full map.

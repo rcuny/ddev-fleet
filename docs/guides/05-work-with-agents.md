@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # The tmux workspace and agents
 
 Fleet keeps one persistent tmux session on the host with a window for every instance. It is the place where you, a colleague or a coding agent such as Claude Code work inside an instance, and it is one of Fleet's most useful features. You can follow what happens in every instance at a glance, leave a long run or an agent working after you disconnect, and step in whenever you want to. An agent is optional: the workspace is just as useful for runners, logs and your own shell.

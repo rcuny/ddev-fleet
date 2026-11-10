@@ -8,7 +8,7 @@ use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
 
 /**
- * The shape of the documentation tree: frontmatter on every page, links that resolve, one mention of the retired Python
+ * The shape of the documentation tree: no front matter on any page, links that resolve, one mention of the retired Python
  * line, no private names, and every command named in at least one page besides the generated reference.
  */
 final class DocsStructureTest extends TestCase
@@ -42,15 +42,20 @@ final class DocsStructureTest extends TestCase
     }
 
     #[DataProvider('docsPages')]
-    public function testEveryPageHasFrontmatter(string $page): void
+    public function testNoPageStartsWithFrontmatter(string $page): void
     {
-        // The generated CLI reference carries no date (FLE-239): it must stay byte-for-byte deterministic.
-        $updated = 'docs/reference/01-cli.md' === $page ? '' : '\nLast updated: \d{4}-\d{2}-\d{2}';
-        self::assertMatchesRegularExpression(
-            '/\A---\nAuthor: [^\n]+\nReviewer: [^\n]+'.$updated.'\nType: [^\n]+\n---\n/',
-            self::read($page),
-            "$page needs the Author, Reviewer, Last updated and Type frontmatter",
-        );
+        // Product Markdown has no front matter (FLE-269). The kept files (.github issue templates, Claude skill files)
+        // are not documentation pages and are not listed by pages().
+        self::assertStringStartsNotWith('---', self::read($page), "$page must not start with a front matter block");
+    }
+
+    public function testReadmeAndContributorFilesHaveNoFrontmatter(): void
+    {
+        foreach (['README.md', 'CLAUDE.md', 'CONTRIBUTING.md', 'AI_POLICY.md'] as $file) {
+            if (is_file(self::root().'/'.$file)) {
+                self::assertStringStartsNotWith('---', self::read($file), "$file must not start with a front matter block");
+            }
+        }
     }
 
     public function testTheTreeIsNotEmpty(): void

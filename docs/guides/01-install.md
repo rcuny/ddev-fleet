@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Install Fleet
 
 One command turns a fresh Debian 13 host into a working Fleet with real HTTPS, and a short browser wizard finishes the job. You will end this page signed in as an administrator, ready to add a project.

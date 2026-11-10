@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-07
-Type: documentation
----
-
 # Reference
 
 Lookup pages: every command, setting, path and format. They are exact rather than gentle, so start with a [guide](../guides/README.md) if you are new.

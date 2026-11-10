@@ -1,10 +1,3 @@
----
-Author: Claude Code
-Reviewer: none
-Last updated: 2026-11-06
-Type: documentation
----
-
 # Contributing to Fleet
 
 You want to fix a bug or add a feature without breaking the build. These four pages cover setup, tests, CI and releases, and none of them is needed to use Fleet.
