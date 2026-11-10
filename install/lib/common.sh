@@ -769,14 +769,17 @@ version_lt() {
   [ "$a" != "$b" ] && [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" = "$a" ]
 }
 
-# What /etc/ddev-fleet/installed-version holds: the tag when --ref is one (and exists), else <ref>@<sha7>. The sha is the
-# checkout's HEAD. Printed on stdout; empty when it cannot be determined.
+# What /etc/ddev-fleet/installed-version holds: the tag when --ref is one (and exists) or when the checkout's HEAD is
+# exactly a v* release tag (a re-run without --ref), else <ref>@<sha7>. The sha is the checkout's HEAD. Printed on stdout; empty when it cannot be determined.
 installed_version_label() {
-  local sha=${CODE_REVISION:-}
+  local exact sha=${CODE_REVISION:-}
   [ -n "$sha" ] || sha=$(run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse HEAD 2>/dev/null || true)
   if [[ $REF =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
     && run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse -q --verify "refs/tags/$REF^{commit}" >/dev/null 2>&1; then
     printf '%s\n' "$REF"
+  elif exact=$(run_as_fleet git -C "$FLEET_SRC_DIR" describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null) \
+    && [[ $exact =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+    printf '%s\n' "$exact"
   elif [ -n "$sha" ]; then
     printf '%s@%s\n' "$REF" "${sha:0:7}"
   fi

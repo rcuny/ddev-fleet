@@ -56,6 +56,7 @@ This writes `/etc/ddev-fleet/firewall-confirmed` and stops the timer. The instal
 ## Day-to-day
 
 - **Add a trusted address:** re-run with `--harden` and the full `--trusted-ip` list. A dropped address is not removed from `ufw` (`ufw status numbered`, `ufw delete <n>`).
+  Without `--ref` the installer keeps the release the checkout is on (it records the tag when HEAD is exactly one); to be explicit, pass `--ref=<installed tag>`.
 - **"Too many authentication failures"** (an agent offering many keys, `MaxAuthTries 3`): `ssh -o IdentitiesOnly=yes -i <key> ...`.
 
 ## Locked out
