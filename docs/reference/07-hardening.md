@@ -109,3 +109,5 @@ DDEV puts every project's `db` container on the shared `ddev_default` network un
 Instances deployed earlier keep the exposure until they restart: `fleet instance:isolate` lists them, `--apply` queues a restart of the running ones (opt-in, it ends what runs in the containers).
 
 **Agent templates:** instances that run AI agents execute code you do not review. Treat any instance on a host as able to reach other containers on `ddev_default` (web containers); only the database is closed by this change, and the database credentials remain the DDEV defaults inside a project. Do not put secrets for other projects in an agent instance.
+
+**Database credentials.** The isolation is at the network level. The database user and root password stay DDEV's defaults inside each project: DDEV's tooling (`ddev import-db`, `ddev export-db`, `ddev mysql`, the generated Drupal settings) relies on them, and Fleet's database jobs use those commands. A container that cannot resolve or reach another project's `db` cannot log in to it, whatever the credentials are.

@@ -45,4 +45,16 @@ final class InstanceIsolationTest extends InstanceJobTestCase
         self::assertSame(['db:127.0.0.1'], $parsed['services']['web']['extra_hosts']);
         self::assertArrayNotHasKey('db', $parsed['services']);
     }
+
+    public function testTheRecordingRunnerListsDbAndWebWhenUnscripted(): void
+    {
+        // Dev and the Playwright suite run on the recording runner: a deploy must get past the isolation step there.
+        $instance = $this->instance('main', 'develop');
+        $dir = $this->paths->instanceDir($instance->id());
+        mkdir($dir.'/.ddev', 0o750, true);
+
+        new InstanceIsolationWriter($this->ddev)->write($dir, $this->logFor($this->job('deploy', $instance)));
+
+        self::assertStringContainsString('!override', (string) file_get_contents($dir.'/'.InstanceIsolationWriter::RELATIVE_PATH));
+    }
 }

@@ -83,6 +83,12 @@ final class RecordingCommandRunner implements CommandRunner, BackgroundRunner
         self::pretendToClone($argv);
         self::pretendToExport($argv);
 
+        // An unscripted `ddev debug compose-config` lists a plain db + web project: the isolation override (FLE-297)
+        // and the CPU slice override read the service list before every start, and dev (Playwright) has no ddev.
+        if ('ddev' === ($argv[0] ?? null) && 'debug' === ($argv[1] ?? null) && 'compose-config' === ($argv[2] ?? null)) {
+            return new CommandResult(0, "services:\n  db:\n    image: recorded\n  web:\n    image: recorded\n");
+        }
+
         return new CommandResult(0);
     }
 
