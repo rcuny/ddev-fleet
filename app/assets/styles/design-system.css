@@ -208,3 +208,54 @@
     .body-content li + li { margin-top: 0.25rem; }
 }
 /* symfony-design-system:end */
+
+/* Categorical colours 6 to 8 for the Adjust allotments donut (FLE-318): 3:1 against the surface, letters label every segment. */
+:root {
+    --chart-6: #7c3aed;
+    --chart-7: #15803d;
+    --chart-8: #be185d;
+}
+
+.dark {
+    --chart-6: #a78bfa;
+    --chart-7: #4ade80;
+    --chart-8: #f472b6;
+}
+
+/* Adjust allotments slider (FLE-318): grey track up to the allocatable threads, orange beyond (the right half). */
+input[type="range"].allot-range {
+    appearance: none;
+    background: transparent;
+}
+input[type="range"].allot-range::-webkit-slider-runnable-track {
+    height: 0.625rem;
+    border-radius: 9999px;
+    background: linear-gradient(to right, var(--color-hairline) 0 50%, var(--color-signal) 50% 100%);
+}
+input[type="range"].allot-range::-moz-range-track {
+    height: 0.625rem;
+    border-radius: 9999px;
+    background: linear-gradient(to right, var(--color-hairline) 0 50%, var(--color-signal) 50% 100%);
+}
+input[type="range"].allot-range::-webkit-slider-thumb {
+    appearance: none;
+    width: 1.25rem;
+    height: 1.25rem;
+    margin-top: -0.3125rem;
+    border-radius: 9999px;
+    border: 2px solid var(--color-surface);
+    background: var(--thumb, var(--color-brand));
+    box-shadow: 0 0 0 1px var(--color-ink-muted);
+}
+input[type="range"].allot-range::-moz-range-thumb {
+    width: 1.25rem;
+    height: 1.25rem;
+    border-radius: 9999px;
+    border: 2px solid var(--color-surface);
+    background: var(--thumb, var(--color-brand));
+    box-shadow: 0 0 0 1px var(--color-ink-muted);
+}
+input[type="range"].allot-range:focus-visible {
+    outline: 2px solid var(--color-brand);
+    outline-offset: 2px;
+}

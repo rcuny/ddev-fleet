@@ -80,6 +80,20 @@ final readonly class ProjectRepository
         return $counts;
     }
 
+    /**
+     * Runs $work in one database transaction: it commits when $work returns and rolls back when it throws.
+     *
+     * @template T
+     *
+     * @param \Closure(): T $work
+     *
+     * @return T
+     */
+    public function transactional(\Closure $work): mixed
+    {
+        return $this->em->wrapInTransaction($work);
+    }
+
     public function save(Project $project): void
     {
         $this->em->persist($project);

@@ -36,6 +36,8 @@ final readonly class AuditLog
     public const string REAUTH_FAILURE = 'reauth.failure';
     public const string REAUTH_REQUIRED = 'reauth.required';
 
+    /** A project's CPU threads or slots allotment changed (the Adjust allotments sheet, FLE-318); one entry per project. */
+    public const string PROJECT_CAPACITY = 'project.capacity';
     public const string PROJECT_EXPORT = 'project.export';
     public const string PROJECT_IMPORT = 'project.import';
 
