@@ -27,6 +27,12 @@ use Symfony\Component\Yaml\Yaml;
  * - `exec-host` / `exec_host` hooks, which run arbitrary commands on the host as the fleet user;
  * - a file that is a symlink, a directory, unreadable or unparsable, and a `.ddev` that is itself a symlink (it cannot be verified).
  *
+ * `.ddev/web-build/*` (top-level files, FLE-314) is scanned as text for what a Dockerfile can add to the web image: a mention of
+ * `docker.sock`, installing a Docker CLI or engine package (`docker.io`, `docker-ce`, `docker-ce-cli`, `docker-cli`,
+ * `docker-compose-plugin`, `containerd.io`) and setuid or setgid bits (`chmod u+s`, `chmod 4755`, ...). Fleet's own
+ * `Dockerfile.fleet-*` fragments are exempt; a symlinked or unreadable file is refused. `curl | sh` and `ADD <url>` are
+ * deliberately not refused (ordinary build steps; the image has no socket or privilege to abuse).
+ *
  * Bind sources are resolved to the instance directory (`${DDEV_APPROOT}` and friends), normalised, then followed through symlinks
  * on their existing prefix (`realpath`), so neither `..` after a variable nor a symlinked subdirectory leaves the checkout.
  * `.ddev/commands/host/*` are not refused: they run only when an administrator invokes them on the host, never at start.
@@ -84,6 +90,10 @@ final class ComposeOverrideGuard
             }
         }
 
+        foreach ($this->webBuildFiles($root) as $relative) {
+            $this->scanDockerfile($root, $relative, $violations);
+        }
+
         // One entry per file and key: a socket mount is found by the key walk and by the volume check.
         $unique = [];
         foreach ($violations as $v) {
@@ -91,6 +101,54 @@ final class ComposeOverrideGuard
         }
 
         return array_values($unique);
+    }
+
+    /**
+     * @return list<string> top-level files of `.ddev/web-build`, relative to the checkout, without Fleet's own fragments
+     */
+    private function webBuildFiles(string $root): array
+    {
+        $found = [];
+        foreach (glob($root.'/.ddev/web-build/*') ?: [] as $file) {
+            $name = basename($file);
+            if (str_starts_with($name, 'Dockerfile.fleet-') || (is_dir($file) && !is_link($file))) {
+                continue;
+            }
+            $found[] = '.ddev/web-build/'.$name;
+        }
+        sort($found);
+
+        return $found;
+    }
+
+    /**
+     * @param list<OverrideViolation> $violations
+     */
+    private function scanDockerfile(string $root, string $relative, array &$violations): void
+    {
+        $path = $root.'/'.$relative;
+        if (is_link($path)) {
+            $violations[] = new OverrideViolation($relative, '(file)', 'is a symbolic link, which cannot be verified');
+
+            return;
+        }
+        $text = @file_get_contents($path);
+        if (false === $text) {
+            $violations[] = new OverrideViolation($relative, '(file)', 'cannot be read');
+
+            return;
+        }
+        // Join backslash continuations so a package list or a chmod split over lines is still one line.
+        $text = preg_replace('/\\\r?\n\s*/', ' ', $text) ?? $text;
+        if (str_contains($text, 'docker.sock')) {
+            $violations[] = new OverrideViolation($relative, 'docker.sock', 'mentions the Docker socket, which gives the container root on the host');
+        }
+        if (1 === preg_match('/(?<![\w.\/-])(docker\.io|docker-ce(?:-cli)?|docker-cli|docker-compose-plugin|containerd\.io)(?![\w.-])/i', $text)) {
+            $violations[] = new OverrideViolation($relative, 'docker-cli', 'installs a Docker CLI or engine package into the web image');
+        }
+        if (1 === preg_match('/\bchmod\b[^\n;&|]*?(?:\s[ugoa]*[+=][rwxXt]*s|\s0?[2-7][0-7]{3}\b)/i', $text)) {
+            $violations[] = new OverrideViolation($relative, 'chmod', 'sets a setuid or setgid bit, which can be used to gain root in the container');
+        }
     }
 
     private static function untag(mixed $value): mixed
