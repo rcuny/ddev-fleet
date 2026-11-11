@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Tests\Functional\Admin;
 
 use App\Domain\Audit\AuditEntryRepository;
+use App\Domain\Project\ProjectRepository;
 use App\Fleet\FleetPaths;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
@@ -915,6 +916,48 @@ final class SecretPagesTest extends AdminTestCase
 
         $this->post('/admin/projects/blog/keys/ssh', ['container_ssh' => '0']);
         self::assertSame('blog/off', array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.container-ssh' === $e[1]))[0][2]);
+    }
+
+    public function testTheApiTerminalSwitchIsOffByDefaultNeedsConfirmAndReauthAndIsAudited(): void
+    {
+        $this->makeProject();
+        self::assertStringContainsString('is <strong>off</strong>', $this->open('/admin/projects/blog/keys')->filter('[data-testid=api-terminal-state]')->html());
+
+        // No confirmation: nothing changes. No recent re-auth: the challenge, nothing changes.
+        $this->post('/admin/projects/blog/keys/api-terminal', ['allow_api_terminal' => '1']);
+        self::assertFalse($this->apiTerminal());
+        $this->post('/admin/projects/blog/keys/api-terminal', ['allow_api_terminal' => '1', 'confirm' => '1']);
+        self::assertStringContainsString('/admin/reauth', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertFalse($this->apiTerminal());
+
+        $this->confirmPassword();
+        $this->post('/admin/projects/blog/keys/api-terminal', ['allow_api_terminal' => '1', 'confirm' => '1']);
+        self::assertResponseRedirects('/admin/projects/blog/keys');
+        self::assertTrue($this->apiTerminal());
+        $this->post('/admin/projects/blog/keys/api-terminal', ['allow_api_terminal' => '1', 'confirm' => '1']);
+        $this->post('/admin/projects/blog/keys/api-terminal', ['allow_api_terminal' => '0']);
+        self::assertFalse($this->apiTerminal());
+
+        $rows = array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.api-terminal' === $e[1]));
+        self::assertSame(['blog/off', 'blog/on'], array_map(static fn (array $e): string => $e[2], $rows));
+    }
+
+    public function testTheApiTerminalSwitchNeedsAValidCsrfToken(): void
+    {
+        $this->makeProject();
+        $this->post('/admin/projects/blog/keys/api-terminal', ['_token' => 'wrong', 'allow_api_terminal' => '1', 'confirm' => '1']);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertFalse($this->apiTerminal());
+    }
+
+    private function apiTerminal(): bool
+    {
+        $this->em()->clear();
+        $project = new ProjectRepository($this->em())->findByName('blog');
+        self::assertNotNull($project);
+
+        return $project->allowApiTerminal();
     }
 
     public function testGitOverSshNeedsAValidCsrfToken(): void

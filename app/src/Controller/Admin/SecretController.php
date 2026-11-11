@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controller\Admin;
 
 use App\Domain\Project\Project;
+use App\Domain\Project\ProjectRepository;
 use App\Fleet\Audit\AuditLog;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\ProjectInput;
@@ -43,6 +44,7 @@ final class SecretController extends AbstractController
         private readonly ReauthGuard $reauth,
         private readonly TemplateService $templates,
         private readonly AuditLog $audit,
+        private readonly ProjectRepository $projectRepository,
     ) {
     }
 
@@ -93,6 +95,45 @@ final class SecretController extends AbstractController
         $project = $this->load($name);
 
         return $this->page($project, null, ['name' => self::queryName($request)]);
+    }
+
+    /**
+     * Turns terminal input over the HTTP API (`terminal:write` tokens) on or off for the project (FLE-286). ON needs the dialog's
+     * `confirm=1` and a recent re-auth, like Git over SSH; OFF needs neither. Deliberately not a ProjectInput field: no CLI
+     * option, export or import can switch it on. Every change is audited, a repeat of the stored value is not.
+     */
+    #[Route('/admin/projects/{name}/keys/api-terminal', name: 'project_keys_api_terminal', requirements: ['name' => self::PROJECT], methods: ['POST'])]
+    public function apiTerminal(Request $request, string $name): Response
+    {
+        $project = $this->load($name);
+        $this->requireCsrf($request);
+        $enable = '1' === $request->request->get('allow_api_terminal');
+
+        if ($enable === $project->allowApiTerminal()) {
+            $this->addFlash('success', 'No change: terminal input over the API was already '.($enable ? 'on' : 'off').'.');
+
+            return $this->back($project);
+        }
+        if ($enable) {
+            if ('1' !== $request->request->get('confirm')) {
+                $this->addFlash('warning', 'Not changed: turning on terminal input needs the confirmation.');
+
+                return $this->back($project);
+            }
+            if (!$this->reauth->requireRecentAuth()) {
+                return $this->reauth->challenge('api-terminal', $name, '/admin/projects/'.$name.'/keys');
+            }
+        }
+
+        $project->changeAllowApiTerminal($enable);
+        $this->projectRepository->save($project);
+        if ($enable) {
+            $this->reauth->close();
+        }
+        $this->audit->record($this->actor->name(), AuditLog::PROJECT_API_TERMINAL, $name.'/'.($enable ? 'on' : 'off'));
+        $this->addFlash('success', 'Terminal input over the API is now '.($enable ? 'on' : 'off').'.');
+
+        return $this->back($project);
     }
 
     /**

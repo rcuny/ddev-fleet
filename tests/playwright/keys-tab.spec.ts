@@ -35,6 +35,34 @@ test.describe('keys & secrets tab', () => {
     }
   });
 
+  test('terminal input over the API is off, changes only through the dialog behind re-auth and is audited @phone', async ({ page }) => {
+    const name = uniqueName();
+    try {
+      await createProjectViaUi(page, name);
+      await page.goto(`/admin/projects/${name}/keys`);
+      await expect(page.getByTestId('api-terminal-risk')).toContainText('never reaches a shell');
+      await expect(page.getByTestId('api-terminal-state')).toContainText('is off');
+      expect(await hasHorizontalOverflow(page)).toBe(false);
+      await expectNoBlockingViolations(page);
+
+      let dialog = await openDialog(page, page.getByTestId('api-terminal-change'));
+      await submitAndWait(page, dialog.getByTestId('api-terminal-confirm-button'));
+      await expect(page).toHaveURL(/\/admin\/reauth/);
+      await confirmPassword(page);
+      await expect(page.getByTestId('api-terminal-state')).toContainText('is off');
+
+      dialog = await openDialog(page, page.getByTestId('api-terminal-change'));
+      await submitAndWait(page, dialog.getByTestId('api-terminal-confirm-button'));
+      await expect(page.getByTestId('flashes')).toContainText('Terminal input over the API is now on.');
+      await expect(page.getByTestId('api-terminal-state')).toContainText('is on');
+
+      await page.goto('/admin/audit');
+      await expect(page.getByTestId('audit-row').filter({ hasText: `${name}/on` })).toHaveCount(1);
+    } finally {
+      await deleteProjectViaUi(page, name);
+    }
+  });
+
   test('the secret value field is masked and a multi-line value has its own textarea', async ({ page }) => {
     const name = uniqueName();
     try {

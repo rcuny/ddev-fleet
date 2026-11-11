@@ -37,4 +37,25 @@ final class TerminalTextTest extends TestCase
         self::assertTrue(mb_check_encoding($out['text'], 'UTF-8'));
         self::assertStringEndsWith('fin', $out['text']);
     }
+
+    public function testAnUnterminatedOscPayloadIsCutToTheEndOfItsLine(): void
+    {
+        $text = new TerminalText(new RegisteredSecretsMasker());
+
+        $out = $text->clean("before \e]0;title that never ends\nnext line stays\n\e]52;c;c2VjcmV0");
+
+        self::assertSame("before\nnext line stays", $out['text']);
+    }
+
+    public function testASecretSplitByAnEscapeOrJoinedFromAWrappedLineIsStillMasked(): void
+    {
+        $masker = new RegisteredSecretsMasker();
+        $masker->register('hunter2hunter2');
+        $text = new TerminalText($masker);
+
+        // capture-pane -J joins wrapped lines; an escape in the middle must not hide the secret from the masker.
+        self::assertSame('a [masked] b', $text->clean("a hunter2\e[0mhunter2 b")['text']);
+        self::assertSame('a [masked] b', $text->clean("a hunt\e]0;x\x07er2hunter2 b")['text']);
+        self::assertStringNotContainsString('hunter2', $text->clean("pre hunter2hunter2\n")['text']);
+    }
 }

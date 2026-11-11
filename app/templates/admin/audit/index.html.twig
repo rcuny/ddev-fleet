@@ -49,5 +49,33 @@
                 </twig:Table:Body>
             </twig:Table>
         {% endif %}
+
+        {% if terminalCalls|length > 0 %}
+            <h2>Terminal input over the API</h2>
+            <p class="text-sm text-ink-muted">The latest {{ terminalCalls|length }} calls with the text sent (token-like secrets masked), newest first.</p>
+            <twig:Table>
+                <twig:Table:Caption class="sr-only">Terminal input calls</twig:Table:Caption>
+                <twig:Table:Header>
+                    <twig:Table:Row>
+                        <twig:Table:Head>Token</twig:Table:Head>
+                        <twig:Table:Head>Instance</twig:Table:Head>
+                        <twig:Table:Head>Pane</twig:Table:Head>
+                        <twig:Table:Head>Outcome</twig:Table:Head>
+                        <twig:Table:Head>Text</twig:Table:Head>
+                    </twig:Table:Row>
+                </twig:Table:Header>
+                <twig:Table:Body>
+                    {% for call in terminalCalls %}
+                        <twig:Table:Row data-testid="terminal-call-row">
+                            <twig:Table:Cell class="whitespace-normal [overflow-wrap:anywhere]">{{ call.actor }}</twig:Table:Cell>
+                            <twig:Table:Cell class="whitespace-normal [overflow-wrap:anywhere]">{{ call.instance }}</twig:Table:Cell>
+                            <twig:Table:Cell>{{ call.pane }}{{ call.enter ? ' + Enter' : '' }}</twig:Table:Cell>
+                            <twig:Table:Cell>{{ call.outcome }}</twig:Table:Cell>
+                            <twig:Table:Cell class="whitespace-normal font-mono [overflow-wrap:anywhere]">{{ call.text }}</twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% endfor %}
+                </twig:Table:Body>
+            </twig:Table>
+        {% endif %}
     </div>
 {% endblock %}

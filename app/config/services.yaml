@@ -70,6 +70,7 @@ services:
             # Doctrine builds the DBAL type itself (config/packages/doctrine.yaml); it is not a service.
             - '../src/Doctrine/UtcDateTimeImmutableType.php'
             # Entities are mapped, not services (DoctrineTypesAndEntitiesTest keeps this list complete).
+            - '../src/Domain/ApiCall/ApiCall.php'
             - '../src/Domain/ApiToken/ApiToken.php'
             - '../src/Domain/Audit/AuditEntry.php'
             - '../src/Domain/Host/HostSettings.php'

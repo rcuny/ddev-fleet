@@ -320,6 +320,48 @@ paths:
                   captured_at: {type: string, format: date-time}
                   text: {type: string}
         default: {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: writeInstanceTerminal
+      summary: "Type one line of text into the agent pane (tty1 or tty2) of an instance. Needs the project's opt-in, a running instance and the agent in the foreground, never a shell. Recorded with its text before it is sent."
+      tags: [instances]
+      x-scope: terminal:write
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                pane: {type: string, enum: [tty1, tty2], default: tty2}
+                text: {type: string, maxLength: 4096, description: "One line, no control characters, not starting with !, / or #; at most 4096 bytes."}
+                enter: {type: boolean, default: false, description: Press Enter after the text.}
+      responses:
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: The text was typed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instance, pane, foreground, length, sha256, enter, call]
+                properties:
+                  instance: {type: string}
+                  pane: {type: string, enum: [tty1, tty2]}
+                  foreground: {type: string}
+                  length: {type: integer}
+                  sha256: {type: string}
+                  enter: {type: boolean}
+                  call: {type: integer, description: The evidence row id.}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances/{id}/redeploy:
     post:
       operationId: redeployInstance

@@ -48,7 +48,7 @@ The prefix and the checksum let secret scanners find a leaked token and let the 
 | `deploy` | Create and redeploy instances of the listed projects. |
 | `lifecycle` | Start, stop and retry on the listed projects. |
 | `lifecycle:destroy` | A flag on top of `lifecycle`: destroy instances. |
-| `terminal:read`, `terminal:write` | `terminal:read` reads an agent's pane (see "Terminal read"); typing into it (`terminal:write`) arrives later. `terminal:write` cannot be combined with `deploy` or `lifecycle`. |
+| `terminal:read`, `terminal:write` | `terminal:read` reads an agent's pane (see "Terminal read"); typing into it needs `terminal:write` (see "Terminal write"). `terminal:write` cannot be combined with `deploy` or `lifecycle`. |
 
 There is no wildcard scope and no scope implies another. Settings, secrets, users and tokens are never reachable with a token.
 
@@ -114,7 +114,7 @@ All need the `read` scope and answer JSON, except the job log. A token limited t
 | `GET /api/v1/upgrade` | `installed`, `latest`, `behind`, `engine`, `catalog_failed`, `pending_migrations`. Offline: it reports what the host last saw and never asks the release source. |
 | `GET /api/v1/webhooks/log` | Recent deliveries (subject, rule, decision, outcome, job id), newest first. Filters: `project`, `result`, `hide_ignored=1`. No request body and no secret. |
 
-Not in this release: the `agent` object on instances (running, foreground command, idle time) needs the tmux probe and arrives with the terminal endpoints.
+Not in this release: the `agent` object on instances (running, foreground command, idle time).
 
 ## Write endpoints
 
@@ -133,6 +133,27 @@ Every write answers `202 Accepted` with `{"job": {"id", "state", "url"}}` and a 
 
 `GET /api/v1/instances/{id}/terminal?pane=tty2&lines=40` needs `terminal:read`, the instance's project in the token's project list **and** an instance pattern of the token that matches the id (`403 instance_not_allowed` otherwise; a token without patterns reaches none). `pane` is `tty1` or `tty2` (default `tty2`, the agent's pane); anything else, the sidebar and the `general` window included, is `400 invalid_pane`, and `general` is not an instance id. `lines` is 1 to 200 (default 40). The answer is JSON `{instance, pane, lines, truncated, captured_at, text}`: terminal escapes and control characters are removed, registered secret values are masked, and the text is capped at 64 KiB (the end is kept, `truncated: true`). Reads have their own limit of 30 per minute per token on top of the read pool (`429` with `Retry-After`). Each read is audited as `api.terminal.read` with the instance, pane, line and byte counts and the client address, never the text. `404` when the instance or its window has no such pane.
 
+### Terminal write
+
+`POST /api/v1/instances/{id}/terminal` with `{"pane":"tty2","text":"...","enter":true}` types one line of text into the agent of an instance. This is the most sensitive call of the API: the text reaches an agent that acts with the instance's privileges (push key, tokens). It is a message to an agent, never a command for the host, and every gate below must pass or nothing is typed.
+
+| Gate | Refusal |
+|---|---|
+| Token holds `terminal:write`, and the stored token still obeys the issue rules, checked again on every call (never combined with `deploy`/`lifecycle`, a non-empty IP allow-list that matches the client, 7 days at most from creation, a non-empty instance-pattern list; 1 day by default) | `403 token_not_permitted` (a row edited in the database stops working) |
+| The instance exists, its project is in the token and an instance pattern matches the id. These three cases answer identically, so a token cannot probe which instances exist | `404 not_found`, `"No such instance."` |
+| The project's **Terminal input over the API** switch is on (Project, Keys & secrets; off by default, admin only, asks for the password again, audited as `project.api-terminal`). It is not part of the CLI, the export or the import, so no script turns it on | `409 terminal_write_disabled` |
+| The instance is running | `409 instance_not_running` |
+| `pane` is `tty1` or `tty2` (the sidebar and the `general` window cannot be named); the pane is found by its `tty1`/`tty2` tag, or by position only in a window with exactly two untagged shells; a split window without tags has no addressable pane | `400 invalid_pane`, `404` |
+| `text` is one line of plain text: valid UTF-8, at most 4096 bytes, no control, format (bidi, zero-width), separator or unassigned character (so no newline and no escape), and it does not start with `!`, `/` or `#` (the agent reads those as a shell command, a slash command or a memory note). Key names such as `C-c` are plain text, never keys | `422` |
+| Rate limit: one call per 2 seconds and 6 per minute per token, and 10 per minute per instance across all tokens | `429` with `Retry-After` |
+| The pane's foreground command is the agent (`claude`), read twice: when the call is accepted and again immediately before the keys are sent. A shell, an editor, `ssh`, `sudo` or anything else is refused; so is a pane that is no longer in the instance's own window | `409 pane_not_agent`, `409 pane_changed` |
+| The call is recorded first, as `pending`, and finished as `sent` or `failed`: a row in `api_call` (token, client address, pane, foreground command, length, sha256 of the original text and the text up to 4 KiB with token-like secrets masked) and an `api.terminal.write` audit entry. If either cannot be written, nothing is sent | `503 audit_unavailable` |
+
+The answer is `{instance, pane, foreground, length, sha256, enter, call}`. `enter` presses Enter after the text; without it the text only lands in the agent's input line. Denials are audited as `api.denied` with their reason, at most 20 rows a minute per token (further refusals are answered without a row). `api_call` rows are deleted with the job retention (`FLEET_JOB_RETENTION_DAYS`, 90 days). The admin Audit log page lists the latest terminal calls with their text. Enter is sent only if the agent is still in the foreground after the text was typed.
+
+**What this does not prevent.** The foreground check reduces host takeover to agent takeover; it does not remove it: an agent told to run commands can run them with its own privileges, and the check and the keystroke are two tmux calls, so a pane that changes in those few milliseconds is a residual race (the re-check narrows it, the evidence row shows what was sent). Accepted residual risks: a process that renames itself `claude` passes the check; an open permission prompt in the agent receives the text as an answer; a `!` bash mode left in the agent's input buffer by an earlier input turns the next line into a command. Turn the switch on only for projects whose agents an orchestrator must nudge, keep the token's IP list and instance patterns tight, and revoke it when the work is done.
+
+
 Each accepted write is audited as `api.write` (actor `token:<id>:<name>`, subject: the operation, the target, the job and the client address). The jobs record the trigger `api`. The token id is the stable identifier; the name is informational and can be reused. Names cannot contain `:`, so the actor splits unambiguously into `token`, id and name.
 
 **Replays.** There is no idempotency key. Repeating a write while the first job is queued or running answers `409 instance_busy`; after it finished, the write runs again (a repeated destroy of a gone instance answers `404`).
@@ -143,4 +164,4 @@ Lists take `?limit=` (1 to 200, default 50) and an opaque `?cursor=`; the respon
 
 ## Audit
 
-`api_token.create` and `api_token.revoke` record a new and a revoked token. `api_token.rotate` records the successor, and the old token's end is audited too: `api_token.revoke` when it dies at once, `api_token.expire` (with the grace in seconds) when it gets a grace period; `api.denied` records refused calls (authentication, scope, project, address). The actor of a token's calls is `token:<id>:<name>`. A secret is never written to the log.
+`api_token.create` and `api_token.revoke` record a new and a revoked token. `api_token.rotate` records the successor, and the old token's end is audited too: `api_token.revoke` when it dies at once, `api_token.expire` (with the grace in seconds) when it gets a grace period; `api.denied` records refused calls (authentication, scope, project, address). The actor of a token's calls is `token:<id>:<name>`. A secret is never written to the log. `api.terminal.write` records each terminal input that was carried out (instance, pane, foreground command, byte count, the `api_call` evidence row id; the text itself is in `api_call`); `project.api-terminal` records an admin turning the project switch on or off.
