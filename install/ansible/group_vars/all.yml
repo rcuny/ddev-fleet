@@ -48,6 +48,10 @@ fleet_ddev_key_fingerprint: DBD730A3A581BDAC98BAF17FC16711FC1179C7CA
 fleet_ddev_router_http_port: 8080
 fleet_ddev_router_https_port: 8443
 
+# minimum tool versions the isolation features need (FLE-310); keep in step with install/lib/preflight.sh
+fleet_min_docker_version: "26.0.0"
+fleet_min_compose_version: "2.24.4"
+
 # docker
 fleet_docker_key_url: https://download.docker.com/linux/debian/gpg
 fleet_docker_key_fingerprint: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88

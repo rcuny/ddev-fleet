@@ -105,6 +105,7 @@ final class HostSettingsController extends AbstractController
         private readonly LoggerInterface $logger,
         private readonly ClockInterface $clock,
         private readonly \App\Fleet\Host\Docker\DockerSocketCheck $dockerSocket,
+        private readonly \App\Fleet\Host\Docker\ToolVersions $toolVersions,
     ) {
     }
 
@@ -578,6 +579,8 @@ final class HostSettingsController extends AbstractController
             'workspace' => $this->workspace->run()->toArray(),
             // FLE-298: a Docker socket that is not root:docker 0660 is warned about on every tab.
             'dockerSocket' => $this->dockerSocket->check(),
+            // FLE-310: Docker, compose and DDEV versions against the isolation features' minimums (General tab).
+            'toolVersions' => 'general' === $tab ? $this->toolVersions->read() : [],
             'tls' => 'certificates' === $tab ? $this->tlsStatus->read() : null,
             'mirror' => 'network' === $tab ? $this->mirrorView() : null,
             'capacity' => 'capacity' === $tab ? $this->capacity->report() : null,

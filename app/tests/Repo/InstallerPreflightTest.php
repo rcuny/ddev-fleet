@@ -106,6 +106,67 @@ final class InstallerPreflightTest extends TestCase
         self::assertStringContainsString('BLOCK docker.answer:', $out);
     }
 
+    private const DOCKER_VERSIONS = 'case "$1" in version) echo "%s";; compose) echo "%s";; *) exit 0;; esac';
+
+    public function testRecentDockerComposeAndDdevPass(): void
+    {
+        [$status, $out, $err] = $this->preflight([
+            'docker' => \sprintf(self::DOCKER_VERSIONS, '27.3.1', 'v2.29.7'),
+            'ddev' => 'if [ "$1" = --version ]; then echo "ddev version v1.24.3"; else echo \'{"raw":[]}\'; fi',
+        ]);
+
+        self::assertSame(0, $status, $err.$out);
+        self::assertStringContainsString('INFO docker.version: Docker Engine 27.3.1', $out);
+        self::assertStringContainsString('INFO docker.compose-version: docker compose 2.29.7', $out);
+        self::assertStringContainsString('INFO ddev.version: DDEV 1.24.3', $out);
+    }
+
+    public function testTheExactMinimumsPass(): void
+    {
+        [$status, $out] = $this->preflight([
+            'docker' => \sprintf(self::DOCKER_VERSIONS, '26.0.0', '2.24.4'),
+            'ddev' => 'if [ "$1" = --version ]; then echo "ddev version v1.24.0"; else echo \'{"raw":[]}\'; fi',
+        ]);
+
+        self::assertSame(0, $status, $out);
+        self::assertStringNotContainsString('BLOCK', $out);
+    }
+
+    public function testAnOldDockerEngineIsABlock(): void
+    {
+        [$status, $out] = $this->preflight(['docker' => \sprintf(self::DOCKER_VERSIONS, '25.0.5', '2.29.7')]);
+
+        self::assertSame(3, $status);
+        self::assertStringContainsString('BLOCK docker.version: Docker Engine 25.0.5 is older than 26.0.0', $out);
+        self::assertStringNotContainsString('BLOCK docker.compose-version', $out);
+    }
+
+    public function testAnOldComposeIsABlock(): void
+    {
+        [$status, $out] = $this->preflight(['docker' => \sprintf(self::DOCKER_VERSIONS, '27.0.0', '2.24.3')]);
+
+        self::assertSame(3, $status);
+        self::assertStringContainsString('BLOCK docker.compose-version: docker compose 2.24.3 is older than 2.24.4', $out);
+    }
+
+    public function testAnOldDdevIsABlock(): void
+    {
+        [$status, $out] = $this->preflight([
+            'ddev' => 'if [ "$1" = --version ]; then echo "ddev version v1.23.5"; else echo \'{"raw":[]}\'; fi',
+        ]);
+
+        self::assertSame(3, $status);
+        self::assertStringContainsString('BLOCK ddev.version: DDEV 1.23.5 is older than 1.24.0', $out);
+    }
+
+    public function testAVersionThatCannotBeReadIsNotABlock(): void
+    {
+        [$status, $out] = $this->preflight();
+
+        self::assertSame(0, $status, $out);
+        self::assertStringContainsString('INFO docker.version: cannot read the Docker Engine version', $out);
+    }
+
     public function testADdevThatDoesNotAnswerIsABlock(): void
     {
         [$status, $out] = $this->preflight(['ddev' => 'exit 1']);
