@@ -212,4 +212,21 @@ final class SshKeysPageTest extends AdminTestCase
         self::assertSame(\App\Fleet\Ssh\PushKeyCheck::INTERACTIVE_TIMEOUT, $call->timeout, 'the web button uses the short budget');
         self::assertContains('ConnectTimeout=5', $call->argv);
     }
+
+    public function testAnUnregisteredPushKeyFlashLinksToTheGuide(): void
+    {
+        $projects = $this->container()->get(ProjectService::class);
+        self::assertInstanceOf(ProjectService::class, $projects);
+        $projects->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git'));
+        $runner = $this->container()->get(\App\Fleet\Shell\CommandRunner::class);
+        self::assertInstanceOf(\App\Fleet\Shell\RecordingCommandRunner::class, $runner);
+        $runner->expect(['ssh'], new \App\Fleet\Shell\CommandResult(255, 'git@git.example.com: Permission denied (publickey).'));
+
+        $this->post('/admin/host/ssh-keys/check-push', ['host' => 'git.example.com']);
+
+        $flashes = $this->open('/admin/host/ssh-keys')->filter('[data-testid=flashes]');
+        self::assertStringContainsString('The push key is not registered on the git host git.example.com', $flashes->text());
+        self::assertStringContainsString('with write access', $flashes->text());
+        self::assertSame(\App\Fleet\Ssh\GuideLinks::TROUBLESHOOTING, $flashes->filter('a[data-testid=flash-guide-link]')->attr('href'));
+    }
 }

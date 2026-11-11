@@ -13,6 +13,11 @@ test.describe('keys & secrets tab', () => {
       await page.goto(`/admin/projects/${name}/keys`);
       await expect(page.getByTestId('container-ssh-risk')).toContainText('any process in the container can use the push key');
       await expect(page.getByTestId('container-ssh-state')).toContainText('is off');
+      // Inline help (FLE-296): what turning it on allows, and a link to the guide.
+      const help = page.getByTestId('container-ssh-help');
+      await expect(help).toContainText('push with the host');
+      await expect(help).toContainText('never gets the deploy key');
+      await expect(help.getByRole('link', { name: 'Read the guide' })).toHaveAttribute('href', /10-git-access-and-ssh-keys\.md$/);
       expect(await hasHorizontalOverflow(page)).toBe(false);
       await expectNoBlockingViolations(page);
 
