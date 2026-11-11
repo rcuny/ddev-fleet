@@ -19,7 +19,7 @@ final class StartStopJobTest extends InstanceJobTestCase
     private function start(\App\Domain\Instance\Instance $instance, array $params = []): void
     {
         $job = $this->job('start', $instance, $params);
-        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent, $this->preStartGate())->execute($job, $this->logFor($job));
     }
 
     public function testStartsAndMarksRunning(): void
@@ -44,7 +44,7 @@ final class StartStopJobTest extends InstanceJobTestCase
         $this->runner->expect(['ssh-agent'], new CommandResult(1, '', 'cannot bind'));
 
         $job = $this->job('start', $instance);
-        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent, $this->preStartGate())->execute($job, $this->logFor($job));
 
         self::assertSame(InstanceState::Running, $instance->state());
         self::assertStringContainsString('warning: ssh-agent did not start', $this->logText($job));
@@ -114,7 +114,7 @@ final class StartStopJobTest extends InstanceJobTestCase
         file_put_contents($this->paths->agentPidFile($instance->id()), "99\n");
 
         $job = $this->job('start', $instance);
-        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent, $this->preStartGate())->execute($job, $this->logFor($job));
 
         self::assertFileDoesNotExist($override);
         self::assertDirectoryDoesNotExist($this->paths->agentSocketDir($instance->id()));
@@ -171,7 +171,7 @@ final class StartStopJobTest extends InstanceJobTestCase
         $this->runner->expect(['ddev', 'start'], new CommandResult(1, '', "Error: Bind for 127.0.0.1:8080 failed: port is already allocated\n"));
 
         $job = $this->job('start', $instance, ['retryPortConflict' => true]);
-        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent)->execute($job, $this->logFor($job));
+        new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent, $this->preStartGate())->execute($job, $this->logFor($job));
 
         self::assertSame(['ddev start', 'ddev stop', 'ddev start'], $this->commandNames());
         self::assertStringContainsString('port conflict on start - retrying with stop+start', $this->logText($job));
@@ -261,5 +261,23 @@ final class StartStopJobTest extends InstanceJobTestCase
             self::assertSame('ddev stop failed with exit code 1', $e->getMessage());
         }
         self::assertSame(InstanceState::Running, $instance->state());
+    }
+
+    public function testStartIsRefusedWhenTheCheckoutHoldsADockerSocketOverride(): void
+    {
+        // FLE-298: a project that added the override after its deploy must not start.
+        $instance = $this->instance('main', 'develop', InstanceState::Stopped);
+        $dir = $this->checkout($instance);
+        mkdir($dir.'/.ddev', 0o750, true);
+        file_put_contents($dir.'/.ddev/docker-compose.dockersock.yaml', "services:\n  web:\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n");
+
+        try {
+            $this->start($instance);
+            self::fail('expected the start to be refused');
+        } catch (JobFailed $e) {
+            self::assertStringContainsString('docker-compose.dockersock.yaml: services.web.volumes[0]', $e->getMessage());
+        }
+        self::assertNotContains('ddev start', $this->commandNames());
+        self::assertSame(InstanceState::Stopped, $instance->state());
     }
 }

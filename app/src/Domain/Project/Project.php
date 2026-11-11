@@ -78,6 +78,14 @@ class Project
     #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
     private bool $allowApiTerminal = false;
 
+    /**
+     * Opt-in (FLE-298): the deploy guard lets this project's compose overrides do what it otherwise refuses (Docker socket,
+     * privileged, host namespaces, host mounts). Off by default, changed only by the admin page behind re-auth, and not part of
+     * ProjectInput, the CLI or the export, so no import or script turns it on.
+     */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $allowPrivilegedOverrides = false;
+
     /** CPU threads all instances of the project may use together; null = unlimited (capacity allotments, FLE-197). */
     #[ORM\Column(type: Types::INTEGER, nullable: true)]
     private ?int $cpuThreads = null;
@@ -280,6 +288,17 @@ class Project
     public function changeAllowApiTerminal(bool $allow, ?\DateTimeImmutable $now = null): void
     {
         $this->allowApiTerminal = $allow;
+        $this->touch($now);
+    }
+
+    public function allowPrivilegedOverrides(): bool
+    {
+        return $this->allowPrivilegedOverrides;
+    }
+
+    public function changeAllowPrivilegedOverrides(bool $allow, ?\DateTimeImmutable $now = null): void
+    {
+        $this->allowPrivilegedOverrides = $allow;
         $this->touch($now);
     }
 

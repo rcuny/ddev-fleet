@@ -118,6 +118,11 @@ abstract class InstanceJobTestCase extends KernelTestCase
         $this->template = $this->saveTemplate('full', []);
     }
 
+    protected function preStartGate(): \App\Fleet\Isolation\PreStartGate
+    {
+        return new \App\Fleet\Isolation\PreStartGate(new \App\Fleet\Isolation\ComposeOverrideGuard(), new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock), $this->paths);
+    }
+
     /**
      * A deploy workflow wired like production; the capacity collaborators are optional (null = a host without them).
      */
@@ -142,6 +147,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->agent,
             $this->feed,
             $this->clock,
+            $this->preStartGate(),
             $this->steps,
             $cgroup,
             $pushCheck,

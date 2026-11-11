@@ -34,6 +34,13 @@
                 <twig:Alert:Description class="text-ink-body">The host settings do not exist yet. On the host, run <code class="break-all">sudo fleet host:init --domain=fleet.example.com</code>, then reload this page.</twig:Alert:Description>
             </twig:Alert>
         {% else %}
+            {% if dockerSocket is defined and not dockerSocket.ok %}
+                <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal" data-testid="docker-socket-warning">
+                    <twig:ux:icon name="lucide:triangle-alert" />
+                    <twig:Alert:Title>The Docker socket is not root:docker 0660</twig:Alert:Title>
+                    <twig:Alert:Description class="text-ink-body">{{ dockerSocket.summary }}. Anyone able to write to it, and any container that mounts it, is root on this host. Run <code class="break-all">sudo fleet host:docker-socket --restore</code> and <code class="break-all">sudo fleet instance:audit-overrides</code> to find the instances that mount it.</twig:Alert:Description>
+                </twig:Alert>
+            {% endif %}
             {% include 'admin/host/_' ~ tab ~ '.html.twig' %}
         {% endif %}
     </div>

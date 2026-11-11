@@ -11,6 +11,7 @@ Lookup pages: every command, setting, path and format. They are exact rather tha
 | [upgrade.md](05-upgrade.md) | Run the upgrade checks and roll back |
 | [backup-and-restore.md](06-backup-and-restore.md) | Take, verify and restore backups |
 | [hardening.md](07-hardening.md) | See what hardening changes on the host |
+| [instance-isolation.md](17-instance-isolation.md) | What a project's DDEV files may not ask for, the deploy guard, the Docker socket check |
 | [assets-and-secrets.md](08-assets-and-secrets.md) | Manage seed files and encrypted secrets |
 | [networking.md](09-networking.md) | Understand Caddy, DNS, named ports and TLS |
 | [capacity.md](10-capacity.md) | Set CPU allotments and slots |

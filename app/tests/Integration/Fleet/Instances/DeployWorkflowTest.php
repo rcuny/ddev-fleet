@@ -37,6 +37,54 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::fail('expected the deploy to fail');
     }
 
+    private function writeOverride(string $yaml): void
+    {
+        $this->steps->append(new class($yaml) implements DeployStep {
+            public function __construct(private readonly string $yaml)
+            {
+            }
+
+            public function phase(): StepPhase
+            {
+                return StepPhase::BeforeStart;
+            }
+
+            public function run(DeployContext $context): void
+            {
+                file_put_contents($context->dir.'/.ddev/docker-compose.dockersock.yaml', $this->yaml);
+            }
+        });
+    }
+
+    public function testADockerSocketOverrideRefusesTheDeployBeforeDdevStarts(): void
+    {
+        // FLE-298: the Docker socket bridge of a project. Nothing may start.
+        $this->writeOverride("services:\n  web:\n    volumes:\n      - /var/run/docker.sock:/var/run/docker.sock\n");
+        $this->saveTemplate('full', ['ddev init']);
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('Refused: the project ships DDEV files', $e->getMessage());
+        self::assertStringContainsString('.ddev/docker-compose.dockersock.yaml: services.web.volumes[0]', $e->getMessage());
+        self::assertNotContains('ddev start', $this->commandNames());
+    }
+
+    public function testAProjectWithPrivilegedOverridesOnDeploysAndIsAuditedWithTheViolations(): void
+    {
+        $this->writeOverride("services:\n  web:\n    privileged: true\n");
+        $this->saveTemplate('full', []);
+        $this->project->changeAllowPrivilegedOverrides(true);
+        new \App\Domain\Project\ProjectRepository($this->em)->save($this->project);
+
+        $job = $this->deploy();
+
+        self::assertSame(InstanceState::Running, $this->instances->find('acme--main')?->state());
+        self::assertContains('ddev start', $this->commandNames());
+        self::assertStringContainsString('privileged compose overrides allowed', $this->logText($job));
+        $actions = array_map(static fn ($e): string => $e->action().' '.$e->subject(), new \App\Domain\Audit\AuditEntryRepository($this->em)->latest(10));
+        self::assertStringContainsString('deploy.overrides-allowed acme--main: .ddev/docker-compose.dockersock.yaml: services.web.privileged', implode("\n", $actions));
+    }
+
     public function testHappyPathRunsTheStepsInOrder(): void
     {
         $this->saveTemplate('full', ['ddev init', 'ddev drush cr'], 'dev');

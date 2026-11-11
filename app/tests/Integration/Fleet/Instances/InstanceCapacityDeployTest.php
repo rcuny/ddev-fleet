@@ -234,6 +234,7 @@ final class InstanceCapacityDeployTest extends InstanceJobTestCase
             $this->ddev,
             $this->paths,
             $this->feed,
+            $this->preStartGate(),
             $this->cgroupWriter(),
         );
         $job = $this->job('restart', $instance);
@@ -243,5 +244,31 @@ final class InstanceCapacityDeployTest extends InstanceJobTestCase
         self::assertSame(['ddev debug', 'ddev restart'], $this->commandNames());
         self::assertFileExists($dir.'/'.InstanceCgroupWriter::RELATIVE_PATH);
         self::assertStringContainsString('FLEET_PROJECT_SLOTS=5', (string) file_get_contents($dir.'/.ddev/config.fleet.yaml'));
+    }
+
+    public function testRestartIsRefusedWhenTheCheckoutHoldsAPrivilegedOverride(): void
+    {
+        // FLE-298: the shared pre-start check also stands in front of `ddev restart`.
+        $instance = $this->instance('main', 'develop', \App\Domain\Instance\InstanceState::Running);
+        $dir = $this->checkout($instance);
+        mkdir($dir.'/.ddev', 0o750, true);
+        file_put_contents($dir.'/.ddev/docker-compose.evil.yaml', "services:\n  web:\n    privileged: true\n");
+        $restart = new \App\Fleet\Jobs\Type\RestartJob(
+            $this->instances,
+            new \App\Fleet\Instances\InstanceConfigWriter($this->instanceHostnames, new \App\Fleet\Instances\GitIdentityResolver(new \App\Fleet\Instances\DomainGitIdentity($this->instanceHostnames)), $this->secretStore, $this->masker, new \App\Fleet\Typesense\TypesenseEnvironment(new \App\Fleet\Typesense\TypesenseKeys($this->secretStore), new \App\Domain\Port\NamedPortRepository($this->em), $this->instanceHostnames, $this->masker), $this->capacity()),
+            $this->ddev,
+            $this->paths,
+            $this->feed,
+            $this->preStartGate(),
+        );
+        $job = $this->job('restart', $instance);
+
+        try {
+            $restart->execute($job, $this->logFor($job));
+            self::fail('expected the restart to be refused');
+        } catch (\App\Fleet\Jobs\JobFailed $e) {
+            self::assertStringContainsString('services.web.privileged', $e->getMessage());
+        }
+        self::assertNotContains('ddev restart', $this->commandNames());
     }
 }
