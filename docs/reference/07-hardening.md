@@ -101,16 +101,13 @@ Steps that run a command, such as firewall rules, are not visible in check mode:
 
 ## Instance isolation (databases)
 
-DDEV puts every project's `db` container on the shared `ddev_default` network under the alias `db` (and the name `ddev-<project>-db`). Left alone, a container of one instance could resolve `db` to another project's database and use DDEV's default credentials (`db`/`db`). Fleet writes `.ddev/docker-compose.zzz-fleet-isolation.yaml` into each instance before **every** start path (deploy, redeploy, start, restart and the port-mirror self-repair):
+DDEV puts every project's `db` container on the shared `ddev_default` network under the alias `db` (and the name `ddev-<project>-db`). Left alone, a container of one instance could resolve `db` to another project's database and use DDEV's default credentials (`db`/`db`). DDEV attaches the container itself, outside the compose merge, so a compose override cannot prevent it (a `!override` file shipped in 1.9.0 was ignored by DDEV 1.25). Fleet therefore disconnects the containers afterwards:
 
-- with a db service, `db` is attached to the instance's own network only (it leaves `ddev_default`; ddev-router only needs `web` there);
-- without one (`omit_containers: [db]`), `db` and `ddev-<project>-db` are pinned to `127.0.0.1` in **every** service of the project, so the names never reach another project.
+- **After every start path** (deploy, redeploy, start, restart and the port-mirror self-repair) every container of the project except `web` (and any container the router publishes through traefik labels) that is on `ddev_default` is disconnected with `docker network disconnect`. The job log gets an info line and the audit log one `isolation.db-disconnect` entry per event; the job succeeds. It fails only when the disconnect fails or the container is still attached afterwards.
+- **Every two minutes** the instance watcher repeats this for each running instance, so a later DDEV action (a start of another project, a router restart) that attaches the db again is undone and audited.
+- Without a db (`omit_containers: [db]`), `db` and `ddev-<project>-db` are pinned to `127.0.0.1` in **every** service through `.ddev/docker-compose.zzz-fleet-isolation.yaml`, so the names never reach another project. An instance with a db gets no file; a stale one from 1.9.0 is removed at the next start.
 
-**Requirements.** The `!override` tag needs DDEV 1.24.0 or newer and docker compose 2.24.4 or newer. Fleet reads both versions before writing the file and refuses (the job fails with the versions found) when they are older or unreadable.
-
-**Proof after each start.** DDEV loads a project's own `docker-compose.override.yaml` last, so a project file can undo ours. After every start or restart Fleet therefore inspects the live container (`docker inspect ddev-<project>-db`). If it is still on `ddev_default`, Fleet disconnects it, writes a `SECURITY:` line in the job log and fails the job. Nothing is silent.
-
-Instances deployed earlier keep the exposure until they restart: `fleet instance:isolate` lists them (it checks the file's content), `--apply` queues a restart of the running ones (opt-in, it ends what runs in the containers).
+`fleet instance:isolate` lists running instances that currently have a container on `ddev_default`; `--apply` queues a restart of them (the watcher also fixes them within minutes).
 
 Live check on a host (replace the project names): from a web container of a project **without** a db, `getent hosts db` must print `127.0.0.1`; from any web container, `mysql -hddev-<other>-db -udb -pdb -e 'show databases'` must fail; on the host `docker inspect ddev-<other>-db --format '{{json .NetworkSettings.Networks}}'` must not list `ddev_default`.
 

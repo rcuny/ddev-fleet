@@ -8,7 +8,6 @@ use App\Domain\Instance\InstanceRepository;
 use App\Domain\Instance\InstanceState;
 use App\Domain\Job\JobTrigger;
 use App\Fleet\Audit\AuditLog;
-use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceDbIsolationWriter;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\Refused;
@@ -32,8 +31,8 @@ final class InstanceIsolateCommand extends Command
 {
     public function __construct(
         private readonly InstanceRepository $instances,
-        private readonly FleetPaths $paths,
         private readonly ClaudeTokenApplier $applier,
+        private readonly InstanceDbIsolationWriter $isolation,
     ) {
         parent::__construct();
     }
@@ -51,27 +50,32 @@ final class InstanceIsolateCommand extends Command
         $exposed = [];
         $running = [];
         foreach ($this->instances->all() as $instance) {
-            $dir = $this->paths->instanceDir($instance->id());
-            if (!is_dir($dir.'/.ddev') || InstanceDbIsolationWriter::isIsolated($dir)) {
+            if (InstanceState::Running !== $instance->state()) {
+                continue; // a stopped instance is converged by its next start
+            }
+            try {
+                if ([] === $this->isolation->exposed($instance->id())) {
+                    continue;
+                }
+            } catch (\RuntimeException $e) {
+                $io->warning($instance->id().': '.$e->getMessage());
                 continue;
             }
             $exposed[] = $instance->id();
-            if (InstanceState::Running === $instance->state()) {
-                $running[] = $instance->id();
-            }
+            $running[] = $instance->id();
         }
         sort($exposed);
         sort($running);
 
         if ([] === $exposed) {
-            $io->success('Every instance has the database isolation override.');
+            $io->success('No running instance has a container on the shared ddev network.');
 
             return Command::SUCCESS;
         }
-        $io->writeln(\sprintf('%d instance(s) without the database isolation override (%d running):', \count($exposed), \count($running)));
+        $io->writeln(\sprintf('%d instance(s) with a container on the shared ddev network (%d running):', \count($exposed), \count($running)));
         $io->listing($exposed);
         if (true !== $input->getOption('apply')) {
-            $io->note('Nothing changed. Run with --apply to restart the running ones; stopped ones get the override at their next restart or redeploy.');
+            $io->note('Nothing changed. Run with --apply to restart the running ones (the instance watcher also disconnects them within minutes).');
 
             return Command::SUCCESS;
         }

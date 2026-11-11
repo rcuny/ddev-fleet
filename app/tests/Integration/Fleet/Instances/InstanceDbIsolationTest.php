@@ -15,7 +15,7 @@ use App\Tests\Support\InstanceJobTestCase;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * FLE-297: the db container leaves ddev_default; an instance without one pins "db" to loopback in every service; the
+ * FLE-297 / FLE-307: after each start the non-web containers are disconnected from ddev_default (no compose override for a db); an instance without one pins "db" to loopback in every service; the
  * live networks are checked after each start path; old DDEV or docker compose is refused.
  */
 final class InstanceDbIsolationTest extends InstanceJobTestCase
@@ -34,22 +34,16 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         return [$instance, $dir];
     }
 
-    private function write(string $composeConfig): string
+    public function testAnInstanceWithADbGetsNoComposeFileAndAStaleOneIsRemoved(): void
     {
-        [$instance, $dir] = $this->prepare($composeConfig);
-        new InstanceDbIsolationWriter($this->ddev)->write($dir, $instance->id(), $this->logFor($this->job('deploy', $instance))->line(...));
+        [$instance, $dir] = $this->prepare(self::WITH_DB);
+        file_put_contents($dir.'/'.InstanceDbIsolationWriter::RELATIVE_PATH, "# stale FLE-297 override\n");
+        $lines = [];
+        $path = new InstanceDbIsolationWriter($this->ddev)->write($dir, $instance->id(), static function (string $l) use (&$lines): void { $lines[] = $l; });
 
-        return (string) file_get_contents($dir.'/'.InstanceDbIsolationWriter::RELATIVE_PATH);
-    }
-
-    public function testTheDbServiceKeepsOnlyTheProjectNetwork(): void
-    {
-        $text = $this->write(self::WITH_DB);
-
-        self::assertStringContainsString('!override', $text);
-        self::assertStringNotContainsString('ddev_default', $text);
-        self::assertStringNotContainsString('#ddev-generated', $text);
-        self::assertStringNotContainsString('extra_hosts', $text);
+        self::assertNull($path);
+        self::assertFileDoesNotExist($dir.'/'.InstanceDbIsolationWriter::RELATIVE_PATH);
+        self::assertStringContainsString('removed', implode("\n", $lines));
     }
 
     public function testAnInstanceWithoutDbPinsTheNamesInEveryService(): void
@@ -68,23 +62,13 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
     {
         [$instance, $dir] = $this->prepare(self::WITH_DB);
         file_put_contents($dir.'/'.InstanceDbIsolationWriter::LEGACY_PATH, 'old');
-        $name = new InstanceDbIsolationWriter($this->ddev)->write($dir, $instance->id(), $this->logFor($this->job('deploy', $instance))->line(...));
+        $name = new InstanceDbIsolationWriter($this->ddev)->write($dir, 'x--y', $this->logFor($this->job('deploy', $instance))->line(...)) ?? InstanceDbIsolationWriter::RELATIVE_PATH;
 
         $files = ['docker-compose.override.yaml', 'docker-compose.zz.yaml', basename($name)];
         $sorted = $files;
         sort($sorted);
         self::assertSame(basename($name), end($sorted));
         self::assertFileDoesNotExist($dir.'/'.InstanceDbIsolationWriter::LEGACY_PATH);
-    }
-
-    public function testIsIsolatedChecksTheContentNotOnlyTheFile(): void
-    {
-        [$instance, $dir] = $this->prepare(self::WITH_DB);
-        self::assertFalse(InstanceDbIsolationWriter::isIsolated($dir));
-        file_put_contents($dir.'/'.InstanceDbIsolationWriter::RELATIVE_PATH, '');
-        self::assertFalse(InstanceDbIsolationWriter::isIsolated($dir));
-        new InstanceDbIsolationWriter($this->ddev)->write($dir, $instance->id(), $this->logFor($this->job('deploy', $instance))->line(...));
-        self::assertTrue(InstanceDbIsolationWriter::isIsolated($dir));
     }
 
     public function testAnOldDdevOrComposeIsRefused(): void
@@ -106,47 +90,91 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         $writer->assertSupported();
     }
 
-    public function testVerifyPassesWhenDbIsOffTheSharedNetwork(): void
+    private function ps(string $project, string ...$rows): void
     {
-        [$instance, $dir] = $this->prepare(self::WITH_DB);
-        $writer = new InstanceDbIsolationWriter($this->ddev);
-        $writer->write($dir, $instance->id(), static function (string $l): void {});
-        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"'.$instance->id().'_default":{}}'));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, implode("\n", $rows)."\n"));
+    }
 
-        $writer->verify($dir, $instance->id(), static function (string $l): void {});
+    private function psRow(string $project, string $service, string $labels = ''): string
+    {
+        return 'ddev-'.$project.'-'.$service.'|'.$service.'|com.ddev.site-name='.$project.$labels;
+    }
 
-        $inspect = $this->runner->callsMatching(['docker', 'inspect']);
-        $argv = $inspect[0]->argv;
-        self::assertSame('ddev-'.$instance->id().'-db', end($argv));
+    private function auditCount(): int
+    {
+        return \count($this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'isolation.db-disconnect']));
+    }
+
+    private function converger(): InstanceDbIsolationWriter
+    {
+        return new InstanceDbIsolationWriter($this->ddev, new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock));
+    }
+
+    public function testConvergeLeavesAContainerThatIsOffTheSharedNetwork(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'web'), $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"'.$id.'_default":{}}'));
+
+        self::assertSame([], $this->converger()->converge($id, static function (string $l): void {}));
         self::assertSame([], $this->runner->callsMatching(['docker', 'network']));
+        self::assertSame(0, $this->auditCount());
     }
 
-    public function testVerifyFailsClosedAndDisconnectsWhenDbIsStillOnTheSharedNetwork(): void
+    public function testAttachedAfterStartIsDisconnectedAndSucceeds(): void
     {
-        [$instance, $dir] = $this->prepare(self::WITH_DB);
-        $writer = new InstanceDbIsolationWriter($this->ddev);
-        $writer->write($dir, $instance->id(), static function (string $l): void {});
-        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{},"x_default":{}}'));
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'web'), $this->psRow($id, 'db'), $this->psRow($id, 'mailpit'), $this->psRow($id, 'typesense', ',traefik.enable=true'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{},"x_default":{}}')); // db before
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}')); // db after
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}')); // mailpit, already off
+        $lines = [];
 
-        try {
-            $writer->verify($dir, $instance->id(), static function (string $l): void {});
-            self::fail('expected a failure');
-        } catch (\RuntimeException $e) {
-            self::assertStringContainsString('attached to ddev_default', $e->getMessage());
-            self::assertStringContainsString('was disconnected', $e->getMessage());
-        }
-        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default']));
+        $cut = $this->converger()->converge($id, static function (string $l) use (&$lines): void { $lines[] = $l; });
+
+        self::assertSame(['ddev-'.$id.'-db'], $cut);
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default', 'ddev-'.$id.'-db']));
+        self::assertStringNotContainsString('SECURITY', implode("\n", $lines));
+        self::assertStringContainsString('disconnected', implode("\n", $lines));
+        self::assertSame(1, $this->auditCount());
+        // web and the routed typesense are never inspected
+        self::assertCount(3, $this->runner->callsMatching(['docker', 'inspect']));
     }
 
-    public function testVerifyFailsWhenTheContainerCannotBeInspected(): void
+    public function testAFailedDisconnectFailsTheJob(): void
     {
-        [$instance, $dir] = $this->prepare(self::WITH_DB);
-        $writer = new InstanceDbIsolationWriter($this->ddev);
-        $writer->write($dir, $instance->id(), static function (string $l): void {});
-        $this->runner->expect(['docker', 'inspect'], new CommandResult(1, '', 'no such object'));
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(1, '', 'denied'));
 
         $this->expectException(\RuntimeException::class);
-        $writer->verify($dir, $instance->id(), static function (string $l): void {});
+        $this->expectExceptionMessage('disconnecting it failed');
+        $this->converger()->converge($id, static function (string $l): void {});
+    }
+
+    public function testStillAttachedAfterTheDisconnectFails(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('still attached');
+        $this->converger()->converge($id, static function (string $l): void {});
+    }
+
+    public function testExposedOnlyReportsAndChangesNothing(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+
+        self::assertSame(['ddev-'.$id.'-db'], new InstanceDbIsolationWriter($this->ddev)->exposed($id));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'network']));
     }
 
     private function startJob(): StartJob
@@ -154,23 +182,24 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         return new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent, $this->preStartGate(true));
     }
 
-    public function testTheStartJobWritesTheFileBeforeStartingAndVerifiesAfter(): void
+    public function testTheStartJobWritesBeforeStartingAndConvergesAfter(): void
     {
         [$instance, $dir] = $this->prepare(self::WITH_DB);
         $job = $this->job('start', $instance);
 
         $this->startJob()->execute($job, $this->logFor($job));
 
-        self::assertTrue(InstanceDbIsolationWriter::isIsolated($dir));
         $names = $this->commandNames();
         self::assertLessThan(array_search('ddev start', $names, true), array_search('ddev debug', $names, true));
-        self::assertGreaterThan(array_search('ddev start', $names, true), array_search('docker inspect', $names, true));
+        self::assertGreaterThan(array_search('ddev start', $names, true), array_search('docker ps', $names, true));
     }
 
-    public function testTheStartJobFailsWhenTheDbIsStillExposed(): void
+    public function testTheStartJobFailsWhenTheDisconnectFails(): void
     {
         [$instance] = $this->prepare(self::WITH_DB);
+        $this->ps($instance->id(), $this->psRow($instance->id(), 'db'));
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(1));
         $job = $this->job('start', $instance);
 
         $this->expectException(JobFailed::class);
@@ -193,10 +222,9 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
 
         $restart->execute($job, $this->logFor($job));
 
-        self::assertTrue(InstanceDbIsolationWriter::isIsolated($dir));
         $names = $this->commandNames();
-        self::assertContains('docker inspect', $names);
-        self::assertGreaterThan(array_search('ddev restart', $names, true), array_search('docker inspect', $names, true));
+        self::assertContains('docker ps', $names);
+        self::assertGreaterThan(array_search('ddev restart', $names, true), array_search('docker ps', $names, true));
     }
 
     public function testTheRecordingRunnerAnswersTheProbesWhenUnscripted(): void
@@ -206,8 +234,6 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         $this->runner->expect(['ddev', 'debug'], new CommandResult(0, self::WITH_DB));
         $writer = new InstanceDbIsolationWriter($this->ddev);
         $writer->write($dir, $instance->id(), static function (string $l): void {});
-        $writer->verify($dir, $instance->id(), static function (string $l): void {});
-
-        self::assertTrue(InstanceDbIsolationWriter::isIsolated($dir));
+        self::assertSame([], $writer->converge($instance->id(), static function (string $l): void {}));
     }
 }

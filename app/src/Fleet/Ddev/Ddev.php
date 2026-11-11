@@ -242,6 +242,34 @@ final readonly class Ddev
         return array_map('strval', array_keys($networks));
     }
 
+    /**
+     * The containers of a DDEV project, running or not (`docker ps -a`, matched by DDEV's own `com.ddev.site-name` label).
+     * `routed` is true for a container carrying a traefik label: the router must reach it over ddev_default (FLE-307).
+     *
+     * @return list<array{name: string, service: string, routed: bool}>
+     */
+    public function projectContainers(string $project): array
+    {
+        try {
+            $result = $this->runner->run(['docker', 'ps', '-a', '--filter', 'label=com.ddev.site-name='.$project, '--format', '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Labels}}'], null, [], null, self::STATS_TIMEOUT);
+        } catch (\Throwable $e) {
+            throw new DdevUnavailable('docker ps did not answer.', 0, $e);
+        }
+        if (!$result->isSuccess()) {
+            throw new DdevUnavailable('docker ps failed.');
+        }
+        $rows = [];
+        foreach (preg_split('/\R/', trim($result->stdout)) ?: [] as $line) {
+            $parts = explode('|', $line, 3);
+            if ('' === $parts[0] || 3 !== \count($parts)) {
+                continue;
+            }
+            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'routed' => str_contains($parts[2], 'traefik.')];
+        }
+
+        return $rows;
+    }
+
     public function disconnectNetwork(string $network, string $container): bool
     {
         try {

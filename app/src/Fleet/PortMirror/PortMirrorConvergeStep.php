@@ -30,6 +30,16 @@ final readonly class PortMirrorConvergeStep implements DeployStep
     public function run(DeployContext $context): void
     {
         try {
+            $this->converge($context);
+        } finally {
+            // FLE-307: the router repair starts the project again and restarts the router; DDEV may re-attach the db.
+            $this->preStart->verifyStarted($context->instance, $context->dir, $context->log);
+        }
+    }
+
+    private function converge(DeployContext $context): void
+    {
+        try {
             $message = $this->converger->converge($context->dir, $context->log->output(...), fn () => $this->preStart->enforce($context->instance, $context->dir, $context->log));
         } catch (PortMirrorFailed $e) {
             $context->log->line('WARNING: '.$e->getMessage());
