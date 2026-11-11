@@ -7,6 +7,92 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-11-11
+
+### Added
+- **FLE-271:** `fleet ssh:check-push-key [--host=bitbucket.org]` and a "Check the push key" button in the SSH keys view test whether the push key itself is registered on a git host. The test ignores the user's `~/.ssh/config` and any ssh-agent (`-F /dev/null`, `IdentitiesOnly`, `IdentityAgent=none`), so a pinned deploy key can no longer make a missing push key look fine. A clear "push key is not registered on the git host" message is shown in the CLI and the UI.
+- The push-key check also runs as a warning (never a failure) when a `container_ssh` project is deployed and when its template is saved, reads the host from the project's remote, caches answers for 60 seconds and ignores system-wide known hosts. The button only offers the hosts of registered projects.
+- **FLE-273: the foundation of the HTTP API.** A separate `api` firewall for `/api/`, with service tokens (`flt_svc_` + checksum, only the SHA-256 stored, required expiry, revocation, optional IP allow-list), scopes (`read`, `deploy`, `lifecycle`, `lifecycle:destroy`, `terminal:read`, `terminal:write`) with a project voter, per-token rate limits, a per-address limit on failed authentications, RFC 9457 `application/problem+json` errors, audit entries (`api_token.*`, `api.denied`) and `GET /api/v1/tokens/self`.
+- The API never trusts the proxy identity headers, a token in the query string or a session: bearer header only. Every failed authentication looks the same to the caller.
+- New reference page `docs/reference/15-api.md`.
+
+- **FLE-274: Caddy route for the HTTP API.** `/api/v1/*` now skips the Authelia login (and only that path; `/api/other` stays gated). The identity strip stays in front of everything, so a forged `Remote-*` / `Remote_*` header never reaches the app. The route is TLS only, caps request bodies at 1 MB, uses a 30-second upstream timeout, sends `Cache-Control: no-store` (replacing whatever the app sends) and no CORS header. A repository test runs the rendered Caddyfile against a real Caddy (`FLEET_CADDY_STOCK_BIN`; Fleet CI fetches a pinned, checksummed Caddy with `ci/fetch-caddy.sh`) and sends forged identity headers, oversized bodies and path tricks.
+
+- **FLE-275: API token management.** `fleet token:create|list|rotate|revoke` (the secret is printed once, on stdout only) and
+  **API tokens** in the web interface (`/admin/api-tokens`, admins, password asked again for every change) make, rotate and
+  revoke service tokens for the HTTP API. A "Needs attention" panel and `token:list` flag tokens that expire within 14 days or
+  were not used for 60 days. Documented in `docs/reference/15-api.md`, including that the failed-authentication limit is per
+  client address.
+
+- **FLE-276: API read endpoints.** `GET /api/v1/` `host`, `host/capacity` (with an optional server-side dispatch verdict
+  `?project=&template=`), `projects`, `projects/{p}/templates`, `templates/{p}/{t}`, `instances` (with `url`, `created_at`
+  and `busy`), `instances/{id}`, `jobs`, `jobs/{id}`, `jobs/{id}/log?offset=N` (tail with `X-Next-Offset`), `upgrade` (offline)
+  and `webhooks/log`. Scope `read`; a token limited to some projects sees those projects only. Lists paginate with
+  `limit` and `cursor`. See `docs/reference/15-api.md`.
+
+- **FLE-277: API write endpoints.** `POST /api/v1/instances` (deploy, behind the server-side capacity gate),
+  `POST /instances/{id}/redeploy|start|stop`, `DELETE /instances/{id}` (needs `lifecycle:destroy`, refuses `main`, requires
+  `If-Match` on `created_at`, 428 without it), `POST /instances:destroy-batch` (one job and one result per id) and `POST /jobs/{id}/retry`.
+  Each answers `202` with the job to poll, is limited to the token's projects and audited as `api.write`; jobs carry the new
+  trigger `api`. No dispatch endpoint: dispatch stays the Jira webhook. See `docs/reference/15-api.md`.
+
+- **FLE-278: OpenAPI description of the HTTP API.** `GET /api/v1/openapi.json` (any `read` token) serves the hand-maintained OpenAPI 3.1 document `app/resources/api/openapi.yaml`; a contract test fails when a route and the document disagree or a real response does not fit its schema. Reference page `docs/reference/16-openapi.md`.
+- The token rotate form in the web interface can set the successor's lifetime.
+
+### Changed
+- Rotating an API token that was already rotated (in its grace period) is refused.
+- `ci/fetch-caddy.sh` re-hashes the cached Caddy tarball and binary on every cache hit instead of trusting a recorded hash; its header says SHA-512. `FLEET_REQUIRE_CADDY=1` makes a missing Caddy fail the real-Caddy test instead of skipping it.
+- Docs: `token:create --json` and `token:rotate --json` print the secret; keep it out of CI logs.
+
+- **FLE-282: tests for DriftMask negative cases, the PushKeyCheck cache pool wiring and the API token audit actor; the destroy-batch 207 description says 428/412 are reported per item.**
+
+### Fixed
+- **FLE-270: SSH keys review minors (FLE-266)**
+  - A template save that names extra keys now checks and stores under the same lock as key creation, import and deletion, so a key cannot be deleted in between.
+  - An imported RSA or ECDSA extra key is stored as `ssh/<name>_rsa` / `_ecdsa` (by its real type), no longer as `_ed25519`; existing files keep working.
+  - An "extra keys only" start checks the result of `ssh-add -d` and fails if the push key is still in the agent.
+  - Rotating a host key writes the same `ssh.key.rotate` audit entry from the UI and the setup wizard.
+  - Hand-placed `*_rsa` and `*_ecdsa` key files are now listed as external keys.
+  - An extras-only start no longer fails on a host without a push key.
+
+- **FLE-272: the ssh-agent of an instance whose state was "unknown" lost its push key after 24 hours.** The status
+  watcher renewed the key lifetime only for instances in state `running`; an instance that `ddev list` omitted or
+  reported with an unmapped status kept an agent whose key silently expired (`The agent has no identities`). The
+  watcher now also renews the key of an "unknown" instance whose agent still answers. It never starts an agent for one
+  that has none, and a stopped instance still has no agent. The 24 h key lifetime stays (a stopped watcher must not
+  leave a write key loaded for ever).
+- Rotating a token now refuses a revoked or expired one, and audits the end of the old token (`api_token.revoke`, or
+  `api_token.expire` with the grace period).
+- **FLE-280: `host:drift` hardening.** The report mask now also hides bare `*_key` names (`OVH_CONSUMER_KEY`) and the
+  multi-line value of a secret key written as a YAML block scalar. A task failure handled by a block `rescue` no longer
+  shows as failed in the report. A repo test fails when a role task with `check_mode: false` uses a mutating module, and the
+  job queue's `redeliver_timeout` is now 7200 s, above the 3700 s drift and provision jobs (Doctrine's default 3600 s could
+  redeliver a running job).
+  Camel-case names (`consumerKey`, `applicationKey`) are masked too. The SSH push-key check from the web (button, template
+  save) now uses an 8 s budget instead of 20 s.
+
+- The users list no longer prefetches a user's edit page on hover, which could request a just-deleted user's page from a stale list and log a 404; the setup wizard test host now waits for its php server to exit before removing its home (FLE-283).
+- **FLE-284: Renovate no longer bumps `ansible-core` in `install/ansible/requirements-dev.txt`.** The pin matches the ansible-core that Debian 13 ships (the deploy target); a newer core hid a lint failure that broke on 2.19 (FLE-241). A `packageRule` disables it, `requirements-dev.txt` says so, and a repository test pins the rule. Other python ci tooling updates are unchanged.
+
+### Security
+- API clients are judged by their IPv4 address when a dual-stack socket reports it as `::ffff:a.b.c.d`, so an IPv4 allow-list
+  entry matches; a failed write of a token's last-use time no longer turns a valid request into a 500; token strings are
+  marked `#[\SensitiveParameter]`.
+- `host`, `host/capacity` and `upgrade` answer 403 `host_wide_not_allowed` to a token limited to some projects; an access rule
+  that refuses a token is now audited as `api.denied`.
+- `ProjectVoter` no longer grants `PROJECT_DEPLOY` to an API token on a null subject ("any project"): a token always names its
+  project (carried over from the FLE-276 review).
+- Redeploy over the API validates `branch` (422 on option-like or malformed names); the check lives in `InstanceService::request()`.
+- Retrying a destroy job over the API applies the `main` protection and the required `If-Match`.
+
+### Dependencies
+- `friendsofphp/php-cs-fixer` ^3.95.29 → ^3.95.30 (#237).
+- `community.general` >=14.0.0 → >=14.0.1 for the 0.x `ansible/` tree (#236).
+
+#### Rollout
+- Run the database migration (`fleet upgrade` does it): adds the `api_token` table. No endpoint other than `GET /api/v1/tokens/self` exists yet and no token can be created from the UI or CLI yet (follow-up tickets), so the API is not usable from outside until those and the Caddy route land.
+- Re-render the Caddyfile and gate (`fleet host:render --apply`; `fleet upgrade` does it). No schema change.
+
 ## [1.6.1] - 2026-11-10
 
 ### Fixed
@@ -1323,7 +1409,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.6.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/rcuny/ddev-fleet/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/rcuny/ddev-fleet/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/rcuny/ddev-fleet/compare/v1.5.3...v1.6.0
 [1.5.3]: https://github.com/rcuny/ddev-fleet/compare/v1.5.2...v1.5.3
