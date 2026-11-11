@@ -11,7 +11,7 @@ curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/insta
 
 | Flag | Meaning |
 |---|---|
-| `--domain=<fqdn>` | Required. The public host name. |
+| `--domain=<fqdn>` | Required. The public host name. `--domain=auto` derives `<ip-with-dashes>.nip.io` from the host's public IPv4 address (the `FLEET_PUBLIC_IPV4` variable overrides the lookup); instances are `<instance>.<ip-with-dashes>.nip.io`, one Let's Encrypt certificate each. A test convenience: [try on DigitalOcean](../guides/11-try-on-digitalocean.md). |
 | `--acme-email=<email>` | Let's Encrypt contact address (recommended). |
 | `--ref=<ref>` | Branch, tag or commit to install; default `main`. Pin a release with `--ref=vX.Y.Z`. |
 | `--repo-url=<url\|path>` | Install from another git remote or path instead of the public mirror. |
