@@ -19,6 +19,8 @@ final readonly class GitClient
 {
     public const float CLONE_TIMEOUT = 1800.0;
     public const float HEAD_TIMEOUT = 10.0;
+    /** The throw-away scan clone of a redeploy (FLE-323): short, so a hung remote does not hold the job for the full CLONE_TIMEOUT. */
+    public const float SCAN_CLONE_TIMEOUT = 180.0;
 
     /** The pinned known_hosts the container reads, relative to the checkout (the container sees it under DdevPaths::CONTAINER_APPROOT). */
     public const string CONTAINER_KNOWN_HOSTS = '.ddev/fleet_known_hosts';
@@ -93,7 +95,7 @@ final readonly class GitClient
             $this->paths->stagingDir(),
             ['GIT_TERMINAL_PROMPT' => '0', 'GIT_ALLOW_PROTOCOL' => 'https:ssh', 'GIT_SSH_COMMAND' => $this->sshCommand(false)],
             $onOutput,
-            self::CLONE_TIMEOUT,
+            self::SCAN_CLONE_TIMEOUT,
         );
     }
 

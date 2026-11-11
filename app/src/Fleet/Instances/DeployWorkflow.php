@@ -101,9 +101,13 @@ final class DeployWorkflow
 
     /**
      * A redeploy of a RUNNING instance removes the old checkout and its containers before the new files can be scanned.
-     * If the new checkout would not pass the guard, the instance would end stopped with nothing to start. So the branch is
-     * cloned (shallow) into the staging directory first and scanned; a refusal stops the job with the old instance still running.
-     * An unreadable remote does not decide anything here: the real deploy reports it.
+     * So the branch is cloned (shallow, short timeout) into the staging directory first and scanned. The job stops, with the
+     * old instance still running and untouched, when
+     *  - the clone fails (branch gone, remote unreachable, timeout): the real deploy would fail on its own clone, after the old
+     *    checkout was already removed (FLE-323); audit `redeploy.aborted`;
+     *  - the guard cannot scan the checkout (unreadable YAML, ...): same audit, a clear message;
+     *  - the guard refuses the new checkout: audit `redeploy.refused` (FLE-319).
+     * Only a RUNNING instance is protected; a stopped or failed one has nothing running to lose and is torn down as before.
      *
      * @throws JobFailed
      */
@@ -111,6 +115,7 @@ final class DeployWorkflow
     {
         $stage = $this->paths->stagingDir().'/redeploy-'.$instance->id();
         $refused = [];
+        $aborted = null;
         try {
             if (file_exists($stage) || is_link($stage)) {
                 $this->teardown->removeTree($stage, $log);
@@ -121,14 +126,27 @@ final class DeployWorkflow
             $cloned = $this->git->cloneForScan($project->git(), $instance->branch(), $stage, $log->output(...));
             if ($cloned->isSuccess()) {
                 $refused = $this->preStart->refusals($instance, $stage);
+            } else {
+                $aborted = \sprintf('git could not clone branch "%s" of the project (exit code %d); check that the branch still exists and the repository is reachable', $instance->branch(), $cloned->exitCode);
             }
-        } catch (\InvalidArgumentException|CommandRunnerException|JobFailed $e) {
-            $log->line('redeploy: the guard pre-check could not run ('.$e->getMessage().'); the deploy checks again before it starts anything');
+        } catch (\InvalidArgumentException) {
+            $aborted = 'the repository URL or the branch is not valid';
+        } catch (CommandRunnerException $e) {
+            $aborted = 'git clone did not finish: '.$e->getMessage();
+        } catch (JobFailed|\RuntimeException $e) {
+            $aborted = 'the new checkout could not be checked: '.$e->getMessage();
         } finally {
             try {
                 $this->teardown->removeTree($stage, $log);
-            } catch (JobFailed) {
+            } catch (JobFailed $e) {
+                $log->line('redeploy: the staging directory '.$stage.' could not be removed ('.$e->getMessage().'); the next redeploy removes it');
             }
+        }
+        if (null !== $aborted) {
+            $log->line('redeploy aborted: '.$aborted.'; the running instance was left as it is');
+            $this->audit?->record('system', AuditLog::REDEPLOY_ABORTED, $instance->id().': '.$aborted);
+
+            throw new JobFailed(\sprintf('Redeploy aborted, the instance is still running its old checkout: %s. Nothing was changed.', $aborted));
         }
         if ([] === $refused) {
             return;
