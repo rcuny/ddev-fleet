@@ -1,0 +1,8 @@
+{#- A flash message as escaped text; the guide URL inside it becomes a real link (FLE-296). -#}
+{%- set guide = constant('App\\Fleet\\Ssh\\GuideLinks::TROUBLESHOOTING') -%}
+{%- if guide in message -%}
+    {%- set parts = message|split(guide, 2) -%}
+    {{- parts[0] -}}<a href="{{ guide }}" class="inline-flex min-h-11 items-center underline sm:min-h-0" rel="noopener" target="_blank" data-testid="flash-guide-link">troubleshooting guide</a>{{- parts[1] -}}
+{%- else -%}
+    {{- message -}}
+{%- endif -%}

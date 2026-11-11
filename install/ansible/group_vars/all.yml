@@ -134,8 +134,8 @@ fleet_app_exec:
   - "{{ fleet_etc_dir }}/fleet.env"
   - "{{ fleet_src_dir }}/app"
 
-# Where the bash installer keeps the unit and config files that the caddy and authelia roles install unchanged.
-# One copy only: the roles read them from there (move them into the roles when install/steps/ goes away).
+# Where the installer keeps the unit and config files that the caddy and authelia roles install unchanged.
+# One copy only: the roles read them from there (a later cleanup could move them into the roles).
 fleet_install_etc_dir: "{{ playbook_dir }}/../etc"
 
 # caddy

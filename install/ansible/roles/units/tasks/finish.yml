@@ -81,7 +81,7 @@
     group: root
 
 # The one-time setup URL is a credential: the playbook never mints or prints it, so it cannot reach an Ansible log.
-# The bootstrap prints it in its final notes (`fleet setup:token`), as the bash installer does.
+# The operator runs `sudo fleet setup:token` to get it.
 - name: Say how to get the setup URL
   ansible.builtin.debug:
     msg: >-

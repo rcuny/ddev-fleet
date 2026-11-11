@@ -82,6 +82,7 @@ final readonly class ProjectExporter
                 'issue_id_regexp' => $project->issueIdRegexp(),
                 'display_submodule_branch' => $project->displaySubmoduleBranch(),
                 'typesense' => $project->typesense(),
+                'typesense_dashboard' => $project->typesenseDashboard(),
                 'container_ssh' => $project->containerSsh(),
             ],
             'ports' => array_map(static fn (NamedPort $port): array => [
@@ -100,6 +101,8 @@ final readonly class ProjectExporter
                 ],
                 'ssh_keys' => $template->sshKeys(),
                 'ssh_identities' => $template->sshIdentities()->value,
+                'database' => $template->hasDatabase(),
+                'agent' => $template->isAgent(),
             ], $this->templates->forProject($project)),
             'webhooks' => $this->webhookSection($project),
             'schedules' => $this->scheduleSection($project),

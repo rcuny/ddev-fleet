@@ -67,6 +67,15 @@ Opt-in per project (on the **Keys & secrets** tab, or `--container-ssh`). The in
 
 Check it all with `fleet workspace:check` (push key, git identity, token). Success: it reports every check true.
 
+## Agent templates and instances without a database
+
+Tick **An AI agent works in these instances** on a template (`--agent=yes`) and the instance page carries a warning; the
+instance gets `FLEET_AGENT=1`. An agent runs shell commands on its own, so keep it away from data that matters and from
+production credentials. Untick **Instances have a database** (`--database=no`) for a template with no database service:
+the instance gets `FLEET_HAS_DB=0` and `DB_HOST`, `DATABASE_HOST` and `MYSQL_HOST` set to a name that never resolves, so a
+tool does not fall back to the generic `db` host (which can belong to another project on the same host). A prompt for an
+agent should say: never use the bare `db`, `typesense` or `mailpit` host names; run `ddev describe` first.
+
 ## If something goes wrong
 
 | Symptom | Fix |

@@ -524,7 +524,8 @@ final class ProjectPagesTest extends AdminTestCase
         $this->open($path);
 
         self::assertResponseStatusCodeSame(200);
-        self::assertCount(0, $this->client->getResponse()->headers->getCookies(), $path.' does not start a session');
+        // The Mercure subscribe cookie of an administrator's shell (FLE-289) is not a session.
+        self::assertCount(0, array_filter($this->client->getResponse()->headers->getCookies(), static fn ($c): bool => !str_contains($c->getName(), 'mercure')), $path.' does not start a session');
     }
 
     /**

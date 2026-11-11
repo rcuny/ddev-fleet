@@ -118,6 +118,11 @@ abstract class InstanceJobTestCase extends KernelTestCase
         $this->template = $this->saveTemplate('full', []);
     }
 
+    protected function preStartGate(bool $dbIsolation = false): \App\Fleet\Isolation\PreStartGate
+    {
+        return new \App\Fleet\Isolation\PreStartGate(new \App\Fleet\Isolation\ComposeOverrideGuard(), new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock), $this->paths, $dbIsolation ? new \App\Fleet\Instances\InstanceDbIsolationWriter($this->ddev) : null);
+    }
+
     /**
      * A deploy workflow wired like production; the capacity collaborators are optional (null = a host without them).
      */
@@ -142,6 +147,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->agent,
             $this->feed,
             $this->clock,
+            $this->preStartGate(),
             $this->steps,
             $cgroup,
             $pushCheck,

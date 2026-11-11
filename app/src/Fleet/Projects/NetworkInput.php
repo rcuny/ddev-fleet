@@ -20,6 +20,7 @@ final readonly class NetworkInput
         public bool $typesense,
         public array $ports,
         public array $access = [],
+        public bool $typesenseDashboard = false,
     ) {
     }
 }

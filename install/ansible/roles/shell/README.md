@@ -1,6 +1,6 @@
 # shell
 
-Ansible port of `install/steps/35-shell.sh`.
+Ansible port of the former bash step 35-shell.sh.
 
 - `/etc/profile.d/10-fleet-shell.sh` (0644 `root:root`), copied from `install/etc/profile.d/10-fleet-shell.sh`, the same
   file the bash installer writes; a warning when the file on the host is foreign content;

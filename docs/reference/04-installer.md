@@ -1,6 +1,6 @@
 # Installer reference
 
-The installer turns a fresh Debian 13 host into a working Fleet, and the same command upgrades or repairs it. This page lists its flags, exit codes, steps, checks and recovery commands. For the walk-through, see the [install guide](../guides/01-install.md).
+The installer turns a fresh Debian 13 host into a working Fleet, and the same command upgrades or repairs it. This page lists its flags, exit codes, roles, checks and recovery commands. For the walk-through, see the [install guide](../guides/01-install.md).
 
 ## Flags
 
@@ -22,48 +22,47 @@ curl -fsSL https://raw.githubusercontent.com/rcuny/ddev-fleet/main/install/insta
 | `--trusted-ip=<ip\|cidr>` | With `--harden`, repeatable: address never banned, always allowed through the firewall. |
 | `--harden-tmp` | With `--harden`: mount `/tmp` `nosuid,nodev,noexec` at next boot (can break builds). |
 | `--firewall-grace=<minutes>` | With `--harden`: dead-man's switch delay, 2 to 120, default 10. |
-| `--engine=<bash\|ansible>` | How the host is provisioned: the numbered bash steps (default) or the Ansible playbook `install/ansible/site.yml`. See [the Ansible engine](#the-ansible-engine). |
+| `--engine=ansible` | Deprecated and ignored: the Ansible playbook is the only engine. `--engine=bash` is refused with exit `64` (the bash engine was removed). Scripts that pass `--engine=ansible` keep working. |
 | `--preflight` | Check the host and change nothing; works without root. |
 | `--dry-run` | Print the plan, change nothing. |
 | `--help` | Usage text. |
 
-Exit codes: `0` ok, `1` a step failed, `2` DNS mismatch, `3` pre-flight blocked, `64` usage, `75` another run in progress, `77` not root, `78` unsupported host.
+Exit codes: `0` ok, `1` a task failed, `2` DNS mismatch, `3` pre-flight blocked, `64` usage, `75` another run in progress, `77` not root, `78` unsupported host.
 
 ## What it does
 
-Two stages. `install.sh` validates the flags, installs `ca-certificates`, `curl` and `git`, creates the `fleet` user and clones the ref into `/opt/ddev-fleet` **as `fleet`, never as root**, then copies `install/` to a root-owned location and runs the steps in numeric order:
+Two stages. `install.sh` validates the flags, installs `ca-certificates`, `curl` and `git`, creates the `fleet` user and clones the ref into `/opt/ddev-fleet` **as `fleet`, never as root**, then copies `install/` to a root-owned location and runs its `run.sh`. Stage 2 runs the pre-flight and DNS checks, then the Ansible playbook `install/ansible/site.yml` (see [the playbook](#the-playbook)). The roles run in this order:
 
-| Step | Does |
+| Role | Does |
 |---|---|
-| 10 packages | PHP 8.4 from Debian, Composer, `openssh-client`, `acl`, `sudo`, `tmux`, a few tools. |
-| 20 docker | Docker CE; `daemon.json` is merged, never replaced: an address pool of `/24`s in `10.64.0.0/10` (Docker's default holds about 30 instance networks), `live-restore`, log rotation. Docker is never restarted on a host that already runs it. |
-| 30 fleet user | The `fleet` user (in group `docker`), `/srv/fleet`, `/etc/ddev-fleet`, `/opt/ddev-fleet`. |
-| 35 to 50 | Shell profile (not with `--no-shell-profile`); DDEV (router on 8080, 8443); Caddy with the OVH DNS module. |
-| 60 authelia | Authelia, its three secrets (generated once), a disabled placeholder user. |
-| 70 env | `fleet.env` and `mercure.env`: only missing keys are added. |
-| 80 code | `composer install --no-dev`, assets, prod cache. |
-| 85 app init | Migrations, queue transport, `fleet:host:init`. |
-| 90 privileged | Root helper, its sudoers line, the `fleet` command. |
-| 95 units | php-fpm pool, worker, status watcher, boot, Mercure and timer units. |
-| 98 render and start | Renders and installs the Caddy and Authelia configuration, starts everything, waits for `https://<domain>/health`, prints the setup URL. |
+| `packages` | PHP 8.4 from Debian, Composer, `openssh-client`, `acl`, `sudo`, `tmux`, a few tools. |
+| `docker` | Docker CE; `daemon.json` is merged, never replaced: an address pool of `/24`s in `10.64.0.0/10` (Docker's default holds about 30 instance networks), `live-restore`, log rotation. Docker is never restarted on a host that already runs it. |
+| `fleet_user` | The `fleet` user (in group `docker`), `/srv/fleet`, `/etc/ddev-fleet`, `/opt/ddev-fleet`. |
+| `shell`, `ddev`, `caddy` | Shell profile (not with `--no-shell-profile`); DDEV (router on 8080, 8443); Caddy with the OVH DNS module. |
+| `authelia` | Authelia, its three secrets (generated once), a disabled placeholder user. |
+| `php_app` | `fleet.env` and `mercure.env`: only missing keys are added; the php-fpm pool. |
+| `app_code` | `composer install --no-dev`, assets, prod cache, migrations, queue transport, `fleet:host:init`. |
+| `privileged` | Root helpers, the `apply` sudoers line, the `fleet` command. |
+| `units` | Worker, status watcher, boot, Mercure, scheduler and timer units; renders and installs the Caddy and Authelia configuration, starts everything and waits for `https://<domain>/health`. |
+| `hardening` | Only with `--harden` or stored hardening settings ([07-hardening.md](07-hardening.md)). |
 
-Every step is idempotent: a re-run converges, adds only missing `fleet.env` keys and never changes existing ones. If a step fails, read the named step in `/var/log/ddev-fleet-install.log`, fix the cause and run the same command again.
+The playbook is idempotent: a re-run converges, adds only missing `fleet.env` keys and never changes existing ones. A re-run on a host that is already up to date changes nothing (a check-mode run of the playbook reports `changed=0`), and a build runs only when the code or the environment changed. If a task fails, read it in `/var/log/ddev-fleet-install.log`, fix the cause and run the same command again.
 
 The installer waits (bounded) for running jobs to finish before it swaps code and database, because a job running on while the code changes can fail. `FLEET_INSTALL_JOB_WAIT=<seconds>` in the installer's environment sets the limit (default 300; `0` skips the wait). Jobs still running after that are left to finish. After a reboot or upgrade, start instances one at a time with `fleet:instance:start --all --sequential`.
 
-## The Ansible engine
+## The playbook
 
-`--engine=ansible` replaces the numbered steps with the playbook in `install/ansible/` (the bash steps stay the default, and `--engine` is temporary). Stage 1 is unchanged. Stage 2 runs the same flag validation, pre-flight checks and DNS check, then:
+Ansible is the only engine (since the bash steps were removed; hosts first installed by the older bash engine are moved over by their next [upgrade](05-upgrade.md#install-engine)). Stage 1 installs nothing of it. Stage 2 runs the flag validation, pre-flight checks and DNS check, then:
 
 1. installs `ansible-core` and `python3-apt` from Debian's repository;
 2. writes `/etc/ddev-fleet/host-vars.yml` from the flags;
 3. runs `ansible-playbook -i localhost, -c local install/ansible/site.yml -e fleet_ref=<ref> -e fleet_hardening_strict=<true|false>` from the root-owned copy of `install/`.
 
-`--preflight` and `fleet upgrade` pre-flight work with either engine. `--dry-run` prints the three actions and changes nothing.
+`--dry-run` prints the three actions and changes nothing. To see what a run would change on a live host, run the playbook yourself in Ansible's check and diff mode from `/usr/local/lib/ddev-fleet-installer/install/ansible` (needs the same `-e` values; `command` tasks are skipped in check mode).
 
 ### host-vars.yml
 
-The host's own answers, mode `0644` (no secret in it), rewritten on every run from the flags and, for hardening, from the settings an earlier run stored in `hardening.conf` (a list flag replaces that list; `--harden` alone keeps what was stored). The installer's bash writer (`install/lib/host-vars.sh`) and the app's `App\Fleet\System\HostVarsRenderer` produce the same bytes. The release ref and the lock-out check are per run, so they are passed with `-e`, not stored. There is no TLS-mode key: the TLS mode is chosen in the setup wizard, as with the bash engine.
+The host's own answers, mode `0644` (no secret in it), rewritten on every run from the flags and, for hardening, from the settings an earlier run stored in `hardening.conf` (a list flag replaces that list; `--harden` alone keeps what was stored). The installer's writer (`install/lib/host-vars.sh`) and the app's `App\Fleet\System\HostVarsRenderer` produce the same bytes. The release ref and the lock-out check are per run, so they are passed with `-e`, not stored. There is no TLS-mode key: the TLS mode is chosen in the setup wizard.
 
 | Key | From | Meaning |
 |---|---|---|
@@ -80,17 +79,17 @@ An explicit `--harden` refuses a lock-out (`fleet_hardening_strict=true`); a sto
 
 ## Setup URL
 
-The installer prints a setup URL. It is a credential for 24 hours (or until Finish): whoever opens it can create the administrator. Open it yourself; never paste it into a chat or ticket. Until setup finishes, Caddy lets only `/setup` and `/health` through.
+The installer ends by telling you to run `sudo fleet setup:token`, which prints the setup URL (the playbook never mints it, so it cannot reach a log). It is a credential for 24 hours (or until Finish): whoever opens it can create the administrator. Open it yourself; never paste it into a chat or ticket. Until setup finishes, Caddy lets only `/setup` and `/health` through.
 
 ## Pre-flight
 
-`--preflight` prints one line per finding, `BLOCK`, `WARN` or `INFO <id>: <message>`, and exits `0`, or `3` when anything blocks. A normal run does the same checks first and stops before the steps on a `BLOCK`. Run it from a checkout: `bash install/run.sh --preflight --domain=<fqdn>`.
+`--preflight` prints one line per finding, `BLOCK`, `WARN` or `INFO <id>: <message>`, and exits `0`, or `3` when anything blocks. A normal run does the same checks first and stops before it changes anything on a `BLOCK`. Run it from a checkout: `bash install/run.sh --preflight --domain=<fqdn>`.
 
 | Id | Checks |
 |---|---|
 | `host.os`, `host.arch` | Debian 13; amd64 or arm64. |
 | `disk.opt`, `disk.srv`, `disk.var` | Free space on `/opt` (500 MiB), `/srv/fleet` (2 GiB) and `/var` (2 GiB). |
-| `host.packages` | Required commands present (step 10 installs missing ones). |
+| `host.packages` | Required commands present (the `packages` role installs missing ones). |
 | `docker.answer`, `ddev.answer` | Docker and DDEV answer when installed. |
 | `instances.id-length` | Existing instance ids are not too long. |
 | `fleet.env` | The file, when it exists, is readable. |

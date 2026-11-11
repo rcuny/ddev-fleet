@@ -142,14 +142,15 @@ definitions:
     # a hard gate by dropping the `|| echo` once it is clean.
     - step: &ansible-lint
         name: Ansible lint (non-blocking)
-        # ansible-core >= 2.21 (ci/requirements-infra.txt) needs Python >= 3.12.
+        # install/ansible/requirements-dev.txt pins ansible-core to what Debian 13 ships (FLE-263: the only Ansible tree).
         image: python:3.13-trixie
         caches:
           - pip
         script:
-          - pip install -q -r ci/requirements-infra.txt || { echo "could not install ci/requirements-infra.txt (non-blocking)"; exit 0; }
-          - ansible-lint ansible/ || echo "ansible-lint reported findings (non-blocking)"
-          - yamllint ansible/ || echo "yamllint reported findings (non-blocking)"
+          - pip install -q -r install/ansible/requirements-dev.txt yamllint || { echo "could not install install/ansible/requirements-dev.txt (non-blocking)"; exit 0; }
+          - ansible-lint install/ansible/ || echo "ansible-lint reported findings (non-blocking)"
+          - ansible-playbook --syntax-check -i localhost, install/ansible/site.yml || echo "syntax-check reported findings (non-blocking)"
+          - (cd install/ansible && yamllint .) || echo "yamllint reported findings (non-blocking)"
 
 pipelines:
   pull-requests:

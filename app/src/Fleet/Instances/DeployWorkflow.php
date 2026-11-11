@@ -14,6 +14,7 @@ use App\Domain\Template\TemplateRepository;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Git\GitClient;
+use App\Fleet\Isolation\PreStartGate;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
@@ -60,10 +61,12 @@ final class DeployWorkflow
         private readonly InstanceSshAgent $agent,
         private readonly JobFeed $feed,
         private readonly ClockInterface $clock,
+        private readonly PreStartGate $preStart,
         #[AutowireIterator('fleet.deploy_step')]
         private readonly iterable $steps = [],
         private readonly ?InstanceCgroupWriter $cgroup = null,
         private readonly ?PushKeyCheck $pushCheck = null,
+        private readonly ?InstanceIsolation $isolation = null,
     ) {
     }
 
@@ -165,6 +168,13 @@ final class DeployWorkflow
         }
         $written[] = $sshKnownHosts;
         $written[] = InstanceCgroupWriter::RELATIVE_PATH;
+        $written[] = InstanceDbIsolationWriter::RELATIVE_PATH;
+        if (null !== $this->isolation) {
+            $override = $this->isolation->write($dir, $project, $log->line(...));
+            if (null !== $override) {
+                $written[] = $override;
+            }
+        }
         array_push($written, ...$this->setUpContainerAgent($instance, $project, $template, $dir, $log));
         GitExclude::add($dir, $written);
 
@@ -190,6 +200,8 @@ final class DeployWorkflow
                 throw new JobFailed('The CPU slice override could not be written: '.$e->getMessage());
             }
         }
+        // The last file is in place (project's own, assets, fleet's): nothing starts that hands a container the host (FLE-298).
+        $this->preStart->enforce($instance, $dir, $log);
         $started = $this->ran(fn (): CommandResult => $this->ddev->start($dir, $log->output(...)), 'ddev start');
         if (!$started->isSuccess()) {
             throw new JobFailed(\sprintf('ddev start failed with exit code %d', $started->exitCode), $started->exitCode);
@@ -198,6 +210,7 @@ final class DeployWorkflow
         if (null !== $warning) {
             $log->line($warning);
         }
+        $this->preStart->verifyStarted($instance, $dir, $log);
         $this->runSteps(StepPhase::AfterStart, $context);
 
         // 9. Post-deploy lines, already split and substituted.

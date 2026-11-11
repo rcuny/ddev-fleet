@@ -35,61 +35,47 @@ final class InstallerSafetyTest extends TestCase
         self::assertSame([], $hits, "remote-access or firewall changes:\n".implode("\n", $hits));
     }
 
-    public function testHardeningStaysInItsOwnDirectory(): void
+    public function testHardeningIsOnlyTheGatedRoleAndTheBashEngineIsGone(): void
     {
-        // The one step that may reach install/harden/ is inert unless asked for: it names neither daemon, only the
-        // settings file and the --harden switch.
-        $step = (string) file_get_contents(self::installDir().'/steps/99-harden.sh');
-        self::assertStringContainsString('"${HARDEN:-0}" != 1', $step);
-        self::assertStringContainsString('ENABLED=1', $step);
-        self::assertStringContainsString('return 0', $step);
-        $callers = [];
+        // FLE-263: the bash steps and install/harden/ no longer exist; the opt-in hardening is the Ansible role, run by
+        // site.yml only when the host answers say so.
+        self::assertDirectoryDoesNotExist(self::installDir().'/steps');
+        self::assertDirectoryDoesNotExist(self::installDir().'/harden');
+        $site = (string) file_get_contents(self::installDir().'/ansible/site.yml');
+        self::assertMatchesRegularExpression('/- role: hardening\n\s+when: fleet_hardening_enabled/', $site);
         foreach (self::installFiles() as $file) {
-            if (!str_starts_with($file, self::installDir().'/harden/') && !str_starts_with($file, self::installDir().'/ansible/') && str_contains((string) file_get_contents($file), 'harden/harden.sh')) {
-                $callers[] = basename($file);
+            if (str_starts_with($file, self::installDir().'/ansible/')) {
+                continue;
             }
+            self::assertStringNotContainsString('harden/harden.sh', (string) file_get_contents($file), $file);
         }
-        self::assertSame(['99-harden.sh'], $callers);
     }
 
     public function testOnlyTheSshClientIsInstalled(): void
     {
         // ssh-keygen and ssh-keyscan come from openssh-client; the server package would also start sshd.
-        $packages = (string) file_get_contents(self::installDir().'/steps/10-packages.sh');
+        $vars = (string) file_get_contents(self::installDir().'/ansible/group_vars/all.yml');
 
-        self::assertStringContainsString('openssh-client', $packages);
-        self::assertStringNotContainsString('openssh-server', $packages);
-        self::assertStringNotContainsString('openssh-sftp-server', $packages);
+        self::assertStringContainsString('- openssh-client', $vars);
+        self::assertStringNotContainsString('openssh-server', $vars);
+        self::assertStringNotContainsString('openssh-sftp-server', $vars);
     }
 
     public function testEveryAptRepositoryPinsTheFingerprintOfItsSigningKey(): void
     {
-        $calls = 0;
-        foreach (glob(self::installDir().'/steps/*.sh') ?: [] as $file) {
-            $code = implode("\n", self::codeLines($file));
-            // apt_repo <name> <url> <keyfile> "<deb line>" \ <40 hex digits>
-            if (0 < preg_match_all('/\bapt_repo(?:[\s\\\\]+\S+){3}[\s\\\\]+"[^"]*"[\s\\\\]+(\S+)/', $code, $matches)) {
-                foreach ($matches[1] as $fingerprint) {
-                    ++$calls;
-                    self::assertMatchesRegularExpression('/^[0-9A-F]{40}$/', $fingerprint, basename($file).': apt_repo without a pinned fingerprint');
-                }
-            }
-        }
-        self::assertSame(4, $calls, 'docker, ddev, caddy and authelia');
-    }
-
-    public function testTheDryRunPlanShowsEachFingerprintCheck(): void
-    {
-        [, $out] = $this->dryRun();
+        $vars = (string) file_get_contents(self::installDir().'/ansible/group_vars/all.yml');
 
         foreach ([
-            'docker.asc' => '9DC858229FC7DD38854AE2D88D81803C0EBFCD88',
-            'ddev.asc' => 'DBD730A3A581BDAC98BAF17FC16711FC1179C7CA',
-            'caddy.asc' => '65760C51EDEA2017CEA2CA15155B6D79CA56EA34',
-            'authelia-security.gpg' => '192085915BD608A458AC58DCE461FA1531286EEA',
-        ] as $file => $fingerprint) {
-            self::assertStringContainsString('+ verify /etc/apt/keyrings/'.$file.': primary key fingerprint '.$fingerprint."\n", $out);
+            'docker' => '9DC858229FC7DD38854AE2D88D81803C0EBFCD88',
+            'ddev' => 'DBD730A3A581BDAC98BAF17FC16711FC1179C7CA',
+            'caddy' => '65760C51EDEA2017CEA2CA15155B6D79CA56EA34',
+            'authelia' => '192085915BD608A458AC58DCE461FA1531286EEA',
+        ] as $name => $fingerprint) {
+            self::assertStringContainsString("fleet_{$name}_key_fingerprint: {$fingerprint}\n", $vars);
         }
+        self::assertSame(4, preg_match_all('/^fleet_\w+_key_fingerprint: [0-9A-F]{40}$/m', $vars), 'docker, ddev, caddy and authelia');
+        // The shared role refuses a key whose fingerprint differs.
+        self::assertStringContainsString('fingerprint', (string) file_get_contents(self::installDir().'/ansible/roles/apt_repo/tasks/main.yml'));
     }
 
     public function testNoRecursiveChownToRootOnOpt(): void
@@ -206,66 +192,19 @@ final class InstallerSafetyTest extends TestCase
         self::assertSame([], $hits, "wget or pipe-to-shell:\n".implode("\n", $hits));
     }
 
-    public function testSetupUrlIsNotWrittenToTheLog(): void
+    public function testNothingInTheInstallerMintsOrPrintsTheSetupUrl(): void
     {
-        $log = $this->scratch().'/install.log';
-        $calls = $this->scratch().'/calls.log';
-        $token = 'TOKEN-0123456789abcdefghijklmnopqrstuvwxyz';
-        // The token command prints the URL on stdout, like fleet:setup:token; the stub records that it ran.
-        $stubs = $this->stubs([
-            'runuser' => 'echo called >> '.escapeshellarg($calls).'; echo "https://fleet.example.com/setup?token='.$token.'"; echo "minted" >&2',
-        ]);
-        $driver = \sprintf(
-            '. "$INSTALL_DIR/steps/98-render-start.sh"; INSTALL_LOG=%s; DOMAIN=fleet.example.com; FLEET_DRY_RUN=0; SETUP_COMPLETE=0; '.
-            'log_start; echo "step output goes to the log"; announce_setup; echo "install complete"; log_stop; print_final_notes',
-            escapeshellarg($log),
-        );
-
-        [$status, $out, $err] = $this->withCommon($driver, [], $stubs);
-
-        self::assertSame(0, $status, $err);
-        self::assertStringContainsString($token, $out, 'the terminal gets the URL');
-        self::assertStringContainsString('sudo fleet setup:token', $out);
-        self::assertStringContainsString('step output goes to the log', (string) file_get_contents($log));
-        self::assertStringContainsString('install complete', (string) file_get_contents($log));
-        self::assertStringNotContainsString($token, (string) file_get_contents($log), 'the one-time URL must never land in the install log');
-        self::assertStringNotContainsString('setup?token', (string) file_get_contents($log));
-        self::assertSame(0o600, fileperms($log) & 0o777, 'the log is private');
-        self::assertSame(1, substr_count((string) file_get_contents($calls), 'called'));
-    }
-
-    public function testTheTerminalCopyOfTheUrlComesAfterTheLogIsClosed(): void
-    {
-        $log = $this->scratch().'/install.log';
-        $stubs = $this->stubs(['runuser' => 'echo "https://fleet.example.com/setup?token=ABC"']);
-        $driver = \sprintf(
-            '. "$INSTALL_DIR/steps/98-render-start.sh"; INSTALL_LOG=%s; DOMAIN=fleet.example.com; FLEET_DRY_RUN=0; SETUP_COMPLETE=0; '.
-            'log_start; announce_setup; echo "install complete"; log_stop; print_final_notes',
-            escapeshellarg($log),
-        );
-
-        [, $out] = $this->withCommon($driver, [], $stubs);
-
-        self::assertLessThan(strpos($out, 'token=ABC'), strpos($out, 'install complete'), 'the URL is the last thing on the terminal');
-    }
-
-    public function testNoTokenCommandRunsWhenSetupIsAlreadyComplete(): void
-    {
-        $calls = $this->scratch().'/calls.log';
-        $stubs = $this->stubs(['runuser' => 'echo called >> '.escapeshellarg($calls)]);
-
-        [$status, $out, $err] = $this->withCommon(
-            '. "$INSTALL_DIR/steps/98-render-start.sh"; DOMAIN=fleet.example.com; FLEET_DRY_RUN=0; SETUP_COMPLETE=1; announce_setup; print_final_notes',
-            [],
-            $stubs,
-        );
-
-        self::assertSame(0, $status, $err);
-        self::assertFileDoesNotExist($calls);
-        self::assertStringContainsString('Setup was already completed', $out);
-        self::assertStringContainsString('sudo fleet user:reset-password <name>', $out);
-        self::assertStringContainsString('sudo fleet setup:reset', $out);
-        self::assertStringNotContainsString('token=', $out);
+        // The one-time URL is a credential for 24 hours: no installer script and no playbook task may run the token
+        // command, so it can never land in the install log or an Ansible log. The playbook only says how to get it.
+        foreach (self::installFiles() as $file) {
+            foreach (self::codeLines($file) as $number => $line) {
+                self::assertStringNotContainsString('fleet:setup:token', $line, $file.':'.$number);
+                self::assertStringNotContainsString('setup?token', $line, $file.':'.$number);
+            }
+        }
+        $finish = (string) file_get_contents(self::installDir().'/ansible/roles/units/tasks/finish.yml');
+        self::assertStringContainsString('sudo fleet setup:token', $finish);
+        self::assertStringNotContainsString('ansible.builtin.command', substr($finish, (int) strpos($finish, 'Say how to get the setup URL')));
     }
 
     public function testDryRunNeverPrintsAUrlOrRunsTheTokenCommand(): void
@@ -273,22 +212,7 @@ final class InstallerSafetyTest extends TestCase
         [, $out] = $this->dryRun();
 
         self::assertStringNotContainsString('token=', $out);
-        self::assertStringContainsString('(a real run prints the setup URL for https://fleet.example.com/ here)', $out);
-    }
-
-    public function testNothingPrintsTheSetupUrlExceptThroughTheFinalNotes(): void
-    {
-        // Only announce_setup handles the URL; no step echoes the output of fleet:setup:token into the stream.
-        foreach (self::installFiles() as $file) {
-            foreach (self::codeLines($file) as $number => $line) {
-                if (str_contains($line, 'fleet:setup:token') && !str_contains($file, '98-render-start.sh')) {
-                    self::fail($file.':'.$number.' runs the token command outside step 98');
-                }
-            }
-        }
-        $step = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
-        self::assertSame(1, preg_match('/url=\$\(fleet_console fleet:setup:token\)/', $step), 'the URL is captured, not streamed');
-        self::assertStringNotContainsString('term_print "$url"', $step);
+        self::assertStringNotContainsString('setup:token', $out);
     }
 
     /**
@@ -298,9 +222,8 @@ final class InstallerSafetyTest extends TestCase
     {
         $hits = [];
         foreach (self::installFiles() as $file) {
-            // FLE-211: the opt-in hardening lives in install/harden/ and nowhere else (see testHardeningStaysInItsOwnDirectory).
-            // FLE-241 (spike): the Ansible port of the hardening lives in install/ansible/roles/hardening/ and is not run by the installer.
-            if (str_starts_with($file, self::installDir().'/harden/') || str_starts_with($file, self::installDir().'/ansible/')) {
+            // The opt-in hardening lives in install/ansible/roles/hardening/ and nowhere else (see testHardeningIsOnlyTheGatedRoleAndTheBashEngineIsGone).
+            if (str_starts_with($file, self::installDir().'/ansible/')) {
                 continue;
             }
             foreach (self::codeLines($file) as $number => $line) {

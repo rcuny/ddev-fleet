@@ -1,4 +1,4 @@
-# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-upgrade-check.timer and enabled by step 98.
+# Installed by ddev-fleet (the Ansible role units) as /etc/systemd/system/fleet-upgrade-check.timer and enabled by the same role.
 # Daily look at the published releases; the delay spreads the hosts over the day, and Persistent runs a missed check at
 # the next boot.
 [Unit]

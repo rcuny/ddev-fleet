@@ -1,4 +1,4 @@
-# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-upgrade-check.service.
+# Installed by ddev-fleet (the Ansible role units) as /etc/systemd/system/fleet-upgrade-check.service.
 # One look at the published releases (fleet:upgrade:refresh: `git ls-remote` of the release tags into the cached
 # catalog the Upgrade page and the version notice read). Started by fleet-upgrade-check.timer; `systemctl start
 # fleet-upgrade-check` runs it by hand. It only checks: nothing here installs or changes the host.

@@ -1,6 +1,6 @@
 # app_code
 
-Port of `install/steps/80-code.sh` and `85-app-init.sh`, run as `fleet` with `fleet.env` loaded.
+Port of the former bash step 80-code.sh and `85-app-init.sh`, run as `fleet` with `fleet.env` loaded.
 
 - The checkout in `fleet_src_dir` is made by the bootstrap; this role only reads its revision.
 - Waits (bounded by `fleet_job_wait`) for running jobs, then builds (composer, importmap, Tailwind, assets, cache), then

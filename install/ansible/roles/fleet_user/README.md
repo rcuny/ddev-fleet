@@ -1,6 +1,6 @@
 # fleet_user
 
-Ansible port of `install/steps/30-fleet-user.sh`.
+Ansible port of the former bash step 30-fleet-user.sh.
 
 - the `docker` system group and the `fleet` system user (home `/home/fleet`, shell `/bin/bash`, own group), created
   only when missing, then added to `docker`;

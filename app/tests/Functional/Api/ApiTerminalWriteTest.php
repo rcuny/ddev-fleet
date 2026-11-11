@@ -20,6 +20,7 @@ use App\Domain\Template\TemplateRepository;
 use App\Fleet\Shell\CommandResult;
 use App\Fleet\Shell\RecordingCommandRunner;
 use App\Tests\Support\AdminTestCase;
+use App\Tests\Support\RecordingHub;
 use PHPUnit\Framework\Attributes\DataProvider;
 
 /**
@@ -117,6 +118,51 @@ final class ApiTerminalWriteTest extends AdminTestCase
     private function audit(): array
     {
         return array_map(static fn ($e): array => [$e->action(), $e->subject()], new AuditEntryRepository($this->em())->latest(50));
+    }
+
+    private function recordingHub(): RecordingHub
+    {
+        $hub = self::getContainer()->get(RecordingHub::class);
+        self::assertInstanceOf(RecordingHub::class, $hub);
+        $hub->reset();
+
+        return $hub;
+    }
+
+    public function testTheOwnerIsAlertedWhenTextIsSent(): void
+    {
+        $this->window('acme--fle-1', ['claude', 'claude', 'claude']);
+        $hub = $this->recordingHub();
+
+        $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'Please rebase and push.']);
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(1, $hub->updates());
+        self::assertSame(['/alerts/terminal-write'], $hub->updates()[0]->getTopics());
+        self::assertTrue($hub->updates()[0]->isPrivate());
+        self::assertSame('sent', json_decode($hub->updates()[0]->getData(), true, flags: \JSON_THROW_ON_ERROR)['outcome']);
+        self::assertStringNotContainsString('rebase', $hub->updates()[0]->getData());
+    }
+
+    public function testTheOwnerIsAlertedWhenTheSendFailsAfterTheKeysMayHaveBeenTyped(): void
+    {
+        $this->window('acme--fle-1', ['claude', 'bash']);
+        $hub = $this->recordingHub();
+
+        $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello']);
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertCount(1, $hub->updates());
+        self::assertSame('failed', json_decode($hub->updates()[0]->getData(), true, flags: \JSON_THROW_ON_ERROR)['outcome']);
+    }
+
+    public function testNoAlertForARefusedCall(): void
+    {
+        $hub = $this->recordingHub();
+
+        $this->send('/api/v1/instances/demo--fle-1/terminal', ['text' => 'hello']);
+
+        self::assertCount(0, $hub->updates());
     }
 
     public function testTypesTheTextIntoTheAgentPaneAndRecordsItFirst(): void
@@ -315,11 +361,13 @@ final class ApiTerminalWriteTest extends AdminTestCase
         $answers['outside patterns'] = [$this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--other-*'])), $this->client->getResponse()->getStatusCode()];
         $answers['token for another project'] = [$this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--fle-*'], ['demo'])), $this->client->getResponse()->getStatusCode()];
 
+        $reference = $answers['missing'][0];
+        unset($reference['request_id']);
         foreach ($answers as $label => [$body, $status]) {
             self::assertSame(404, $status, $label);
             unset($body['request_id']);
-            self::assertSame($answers['missing'][0]['detail'], $body['detail'], $label);
-            self::assertSame($answers['missing'][0]['code'], $body['code'], $label);
+            // The whole problem body, not selected fields: any extra key or changed value would tell the cases apart.
+            self::assertSame($reference, $body, $label);
             self::assertStringNotContainsString('acme', json_encode($body, \JSON_THROW_ON_ERROR), $label);
         }
         self::assertSame(0, $this->sendCalls());

@@ -105,6 +105,6 @@ def test_rejects_invalid_version(tmp_path, bad):
     assert _run(tmp_path, "file:///x", bad).returncode == 64
 
 
-def test_step_80_seeds_before_tailwind_build():
-    step = (SCRIPT.parents[1] / "steps" / "80-code.sh").read_text()
-    assert step.index("\n  seed_tailwind_binary\n") < step.index("fleet_console tailwind:build")
+def test_the_build_seeds_the_tailwind_binary_before_the_stylesheet_build():
+    build = (SCRIPT.parents[1] / "ansible" / "roles" / "app_code" / "tasks" / "build.yml").read_text()
+    assert build.index("tailwind-seed.sh") < build.index("tailwind:build")

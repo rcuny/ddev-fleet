@@ -1,6 +1,6 @@
 # php_app
 
-Port of `install/steps/70-env.sh` and the php-fpm part of `95-units.sh`. Writes `/etc/ddev-fleet/fleet.env`
+Port of the former bash step 70-env.sh and the php-fpm part of `95-units.sh`. Writes `/etc/ddev-fleet/fleet.env`
 (`root:fleet` 0640) and `mercure.env` (`root:root` 0600), the `fleet` php-fpm pool (the stock pool is renamed), the
 `90-fleet.ini` settings and the unit drop-in. Nothing is started.
 

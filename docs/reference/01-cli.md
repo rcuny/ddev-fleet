@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (99), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (103), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -136,7 +136,7 @@ fleet project:show [--format FORMAT] [--json] [--] <name>
 Change a project (only the options you give).
 
 ```
-fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--container-ssh|--no-container-ssh] [--unset UNSET] [--format FORMAT] [--json] [--] <name>
+fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--typesense-dashboard|--no-typesense-dashboard] [--container-ssh|--no-container-ssh] [--unset UNSET] [--format FORMAT] [--json] [--] <name>
 ```
 
 | Argument | Required | Description |
@@ -158,6 +158,7 @@ fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname H
 | `--slots=VALUE` |  | Concurrent heavy runs across the project's templates: a number, or none for unlimited |  |
 | `--default-template=VALUE` |  | Template deployed when none is given (one of the project's templates) |  |
 | `--typesense / --no-typesense` |  | Give the project a Typesense search service (--no-typesense removes it) |  |
+| `--typesense-dashboard / --no-typesense-dashboard` |  | Run the Typesense dashboard service too (off by default: it has no authentication of its own; --no-typesense-dashboard turns it off) |  |
 | `--container-ssh / --no-container-ssh` |  | Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it) |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: default-branch, default-template, hostnames, ports, issue-id-regexp, display-submodule-branch (repeat for several) |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
@@ -172,7 +173,7 @@ Deploy recipes of a project.
 Create a template in a project.
 
 ```
-fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--format FORMAT] [--json] [--] <project> <name>
+fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--database DATABASE] [--agent AGENT] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--format FORMAT] [--json] [--] <project> <name>
 ```
 
 | Argument | Required | Description |
@@ -188,6 +189,8 @@ fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--t
 | `--tty2=VALUE (repeatable)` |  | Command line typed into the second instance terminal (repeat for several; replaces the old list) |  |
 | `--ssh-key=VALUE (repeatable)` |  | Name of an extra SSH key (the file ssh/_ed25519 in the fleet home) loaded into the instance's ssh-agent; the project needs container_ssh (repeat for several; replaces the old list) |  |
 | `--ssh-identities=VALUE` |  | Which keys the instance's ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key) |  |
+| `--database=VALUE` |  | Whether instances have a database of their own: yes (default) or no (Fleet exports FLEET_HAS_DB=0 and a poisoned DB_HOST) |  |
+| `--agent=VALUE` |  | Whether an AI agent works in the instances: yes or no (default). The UI warns and FLEET_AGENT=1 is exported |  |
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the template may use together, at most the project's: a number, or none to inherit the project's |  |
 | `--slots=VALUE` |  | Concurrent heavy runs of the template, at most the project's slots: a number, or none for unlimited |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
@@ -252,7 +255,7 @@ fleet template:show [--format FORMAT] [--json] [--] <project> <name>
 Change a template (only the options you give).
 
 ```
-fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--unset UNSET] [--format FORMAT] [--json] [--] <project> <name>
+fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--database DATABASE] [--agent AGENT] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--unset UNSET] [--format FORMAT] [--json] [--] <project> <name>
 ```
 
 | Argument | Required | Description |
@@ -268,6 +271,8 @@ fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--t
 | `--tty2=VALUE (repeatable)` |  | Command line typed into the second instance terminal (repeat for several; replaces the old list) |  |
 | `--ssh-key=VALUE (repeatable)` |  | Name of an extra SSH key (the file ssh/_ed25519 in the fleet home) loaded into the instance's ssh-agent; the project needs container_ssh (repeat for several; replaces the old list) |  |
 | `--ssh-identities=VALUE` |  | Which keys the instance's ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key) |  |
+| `--database=VALUE` |  | Whether instances have a database of their own: yes (default) or no (Fleet exports FLEET_HAS_DB=0 and a poisoned DB_HOST) |  |
+| `--agent=VALUE` |  | Whether an AI agent works in the instances: yes or no (default). The UI warns and FLEET_AGENT=1 is exported |  |
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the template may use together, at most the project's: a number, or none to inherit the project's |  |
 | `--slots=VALUE` |  | Concurrent heavy runs of the template, at most the project's slots: a number, or none for unlimited |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: drupal-env, post-deploy, tty1, tty2, ssh-keys (repeat for several) |  |
@@ -496,6 +501,18 @@ fleet ssh:trust [--fingerprint FINGERPRINT] [--yes] [--format FORMAT] [--json] [
 
 Deploy, start, stop and watch instances.
 
+### fleet instance:audit-overrides
+
+List instances whose compose overrides the deploy guard would refuse (read-only).
+
+```
+fleet instance:audit-overrides [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--json` |  | Print the report as JSON |  |
+
 ### fleet instance:deploy
 
 Deploy one or more instances of a project.
@@ -542,6 +559,19 @@ fleet instance:destroy [--all] [--project PROJECT] [--state STATE] [-y|--yes] [-
 | `--detach` |  | Only queue the job(s) and return |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
 | `--json` |  | Same as --format=json |  |
+
+### fleet instance:isolate
+
+List instances whose db is still on the shared ddev network (--apply: restart the running ones).
+
+```
+fleet instance:isolate [--apply] [-y|--yes]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--apply` |  | Queue a restart for every running exposed instance (ends what runs in their containers) |  |
+| `--yes` | `-y` | Do not ask for confirmation (--apply) |  |
 
 ### fleet instance:list
 
@@ -1370,6 +1400,18 @@ fleet host:capacity [--json] [--reserve RESERVE] [--max-instances MAX-INSTANCES]
 | `--reserve=VALUE` |  | Compute with this many reserved threads instead of the saved value |  |
 | `--max-instances=VALUE` |  | Report this instance cap instead of the saved value |  |
 
+### fleet host:docker-socket
+
+Check (and with --restore, fix) the permissions of the Docker socket.
+
+```
+fleet host:docker-socket [--restore]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--restore` |  | Set the socket back to root:docker 0660 (needs root) |  |
+
 ### fleet host:drift
 
 Check the host against the installed release without changing anything.
@@ -1763,6 +1805,14 @@ fleet token:list [-a|--all] [--json]
 |---|---|---|---|
 | `--all` | `-a` | Include revoked and expired tokens |  |
 | `--json` |  | Print as JSON |  |
+
+### fleet token:remind
+
+Warn about API tokens that expire soon (and write the daily audit reminder).
+
+```
+fleet token:remind
+```
 
 ### fleet token:revoke
 

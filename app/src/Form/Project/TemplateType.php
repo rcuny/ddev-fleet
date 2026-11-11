@@ -7,7 +7,9 @@ namespace App\Form\Project;
 use App\Domain\Template\SshIdentities;
 use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\Rule\ResourceName;
+use App\Fleet\Ssh\GuideLinks;
 use Symfony\Component\Form\AbstractType;
+use Symfony\Component\Form\Extension\Core\Type\CheckboxType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
 use Symfony\Component\Form\Extension\Core\Type\SubmitType;
@@ -78,7 +80,18 @@ final class TemplateType extends AbstractType
                 'label' => 'SSH identities',
                 'required' => true,
                 'choices' => array_combine(array_map(static fn (SshIdentities $i): string => $i->label(), SshIdentities::cases()), array_map(static fn (SshIdentities $i): string => $i->value, SshIdentities::cases())),
-                'help' => 'Which keys the instance\'s own ssh-agent holds. "Extra keys only" keeps the host\'s push (write) key out of a narrow-purpose instance; it needs at least one extra key.',
+                'help' => 'Which keys the instance\'s own ssh-agent holds. "Extra keys only" keeps the host\'s push (write) key out of a narrow-purpose instance; it needs at least one extra key. <a href="'.GuideLinks::GIT_ACCESS.'" class="inline-flex min-h-11 items-center underline sm:min-h-0" rel="noopener" target="_blank">Read the guide</a>.',
+                'help_html' => true,
+            ])
+            ->add('database', CheckboxType::class, [
+                'label' => 'Instances have a database',
+                'required' => false,
+                'help' => 'Untick for a template without a database service (for example a dispatched agent). Fleet then exports FLEET_HAS_DB=0 and a poisoned DB_HOST, so a tool never falls back to the generic `db` host of another project.',
+            ])
+            ->add('agent', CheckboxType::class, [
+                'label' => 'An AI agent works in these instances',
+                'required' => false,
+                'help' => 'Marks the template as an agent template: the instance page carries a warning, and FLEET_AGENT=1 is exported. Agents run autonomous shell commands; keep them away from data that matters.',
             ])
             ->add('cpuThreads', IntegerType::class, [
                 'label' => 'CPU threads',

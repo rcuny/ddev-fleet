@@ -4,6 +4,14 @@
             <twig:Card:Title>SSH keys</twig:Card:Title>
             <twig:Card:Description>Every SSH key of this host in one place. Private keys never leave the host and are not shown; the public half is what you register on a server or a forge. Changes ask for your password again. The whole model is in <code>docs/reference/14-ssh-keys.md</code>.</twig:Card:Description>
         </twig:Card:Header>
+        <twig:Card:Content class="text-sm">
+            <ul class="grid list-disc gap-1 pl-5 text-ink-body" data-testid="ssh-keys-overview">
+                <li><strong>deploy</strong> reads: the host pulls your repositories with it. It never enters an instance.</li>
+                <li><strong>push</strong> writes: agents in an instance push with it, only where the project has Git over SSH in the container on.</li>
+                <li><strong>extra keys</strong> reach other git hosts, from the instances whose template names them.</li>
+            </ul>
+            <p class="mt-2 text-xs text-ink-muted">What a key can do is limited by what its git host allows it. <a href="{{ constant('App\\Fleet\\Ssh\\GuideLinks::GIT_ACCESS') }}" class="inline-flex min-h-11 items-center underline sm:min-h-0" rel="noopener" target="_blank">Read the guide</a>.</p>
+        </twig:Card:Content>
     </twig:Card>
 
     {% for key in sshKeys %}
@@ -63,7 +71,7 @@
                                 </select>
                                 <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-check-push">Check the push key</twig:Button>
                             {% endif %}
-                            <p class="text-xs text-ink-muted">Tests this key alone (not ~/.ssh/config, not an agent): is it registered on that git host?</p>
+                            <p class="text-xs text-ink-muted">Tests this key alone (not ~/.ssh/config, not an agent): is it registered on that git host? If the check fails, register the public key above on the git host with write access, then check again (<a href="{{ constant('App\\Fleet\\Ssh\\GuideLinks::TROUBLESHOOTING') }}" class="inline-flex min-h-11 items-center underline sm:min-h-0" rel="noopener" target="_blank" data-testid="ssh-key-check-help">guide</a>).</p>
                             
                         </form>
                     {% endif %}

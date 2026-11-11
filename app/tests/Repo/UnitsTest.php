@@ -126,6 +126,12 @@ final class UnitsTest extends TestCase
         }
     }
 
+    /** The units role: defaults (which units, which are enabled) and its tasks. */
+    private static function unitsRole(string $file): string
+    {
+        return (string) file_get_contents(self::installDir().'/ansible/roles/units/'.$file);
+    }
+
     public function testWorkerCanWriteEverythingTheAppWrites(): void
     {
         $paths = explode(' ', $this->unit('fleet-worker@.service')['Service']['ReadWritePaths'][0]);
@@ -138,10 +144,10 @@ final class UnitsTest extends TestCase
 
     public function testOneWorkerIsEnabled(): void
     {
-        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $defaults = self::unitsRole('defaults/main.yml');
 
-        self::assertMatchesRegularExpression('/systemctl enable [^\n]*fleet-worker@1 /', $start);
-        self::assertStringNotContainsString('fleet-worker@2', $start, 'the SQLite queue cannot take a second consumer');
+        self::assertMatchesRegularExpression('/^  - fleet-worker@1$/m', $defaults);
+        self::assertStringNotContainsString('fleet-worker@2', $defaults, 'the SQLite queue cannot take a second consumer');
         self::assertStringContainsString('fleet-worker@2', (string) file_get_contents(self::installDir().'/etc/fleet-worker@.service'), 'the unit says why not');
     }
 
@@ -176,12 +182,13 @@ final class UnitsTest extends TestCase
 
     public function testBootUnitIsEnabledButNotStarted(): void
     {
-        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $defaults = self::unitsRole('defaults/main.yml');
+        $start = self::unitsRole('tasks/start.yml');
 
-        self::assertMatchesRegularExpression('/systemctl enable [^\n]*fleet-boot/', $start);
-        self::assertDoesNotMatchRegularExpression('/systemctl (re)?start [^\n]*fleet-boot/', $start);
-        self::assertStringContainsString('install_etc fleet-boot.service', (string) file_get_contents(self::installDir().'/steps/95-units.sh'));
-        self::assertStringContainsString('install_etc fleet-status.service', (string) file_get_contents(self::installDir().'/steps/95-units.sh'));
+        self::assertMatchesRegularExpression('/^units_enable:\n(?:  - \S+\n)*  - fleet-boot\n/m', $defaults);
+        self::assertDoesNotMatchRegularExpression('/name: fleet-boot\b[^\n]*\n\s+state: (re)?started/', $start);
+        self::assertStringContainsString('fleet-boot.service', $defaults);
+        self::assertStringContainsString('fleet-status.service', $defaults);
     }
 
     public function testNewUnitsVerifyWhenSystemdAnalyzeIsAvailable(): void
@@ -221,7 +228,8 @@ final class UnitsTest extends TestCase
         self::assertSame(['/srv/fleet /opt/ddev-fleet/app/var'], $service['ReadWritePaths']);
         // The unit reads FLEET_HOME from fleet.env; ReadWritePaths cannot expand it, so it must name the installer's value.
         self::assertStringContainsString("\nFLEET_SRV_DIR=/srv/fleet\n", (string) file_get_contents(\dirname(__DIR__, 3).'/install/lib/common.sh'));
-        self::assertStringContainsString('"FLEET_HOME=$FLEET_SRV_DIR"', (string) file_get_contents(\dirname(__DIR__, 3).'/install/steps/70-env.sh'));
+        self::assertStringContainsString('fleet_srv_dir: /srv/fleet', (string) file_get_contents(\dirname(__DIR__, 3).'/install/ansible/group_vars/all.yml'));
+        self::assertStringContainsString('{key: FLEET_HOME, value: "{{ fleet_srv_dir }}"}', (string) file_get_contents(\dirname(__DIR__, 3).'/install/ansible/roles/php_app/defaults/main.yml'));
         self::assertStringStartsWith('/srv/fleet ', $service['ReadWritePaths'][0]);
         foreach (['NoNewPrivileges', 'PrivateTmp', 'PrivateDevices', 'ProtectHome', 'RestrictSUIDSGID', 'LockPersonality'] as $directive) {
             self::assertSame(['yes'], $service[$directive], $directive);
@@ -272,15 +280,14 @@ final class UnitsTest extends TestCase
         self::assertArrayNotHasKey('Service', $unit);
     }
 
-    public function testUpgradeCheckUnitsAreInstalledAndTheTimerEnabledByTheSteps(): void
+    public function testUpgradeCheckUnitsAreInstalledAndTheTimerEnabledByTheRole(): void
     {
-        $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
-        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $defaults = self::unitsRole('defaults/main.yml');
         $uninstall = (string) file_get_contents(self::installDir().'/uninstall.sh');
 
-        self::assertStringContainsString('install_etc fleet-upgrade-check.service "$SYSTEMD_DIR/fleet-upgrade-check.service" 0644 root:root', $units);
-        self::assertStringContainsString('install_etc fleet-upgrade-check.timer "$SYSTEMD_DIR/fleet-upgrade-check.timer" 0644 root:root', $units);
-        self::assertStringContainsString('systemctl enable --now fleet-upgrade-check.timer', $start);
+        self::assertStringContainsString('  - fleet-upgrade-check.service', $defaults);
+        self::assertStringContainsString('  - fleet-upgrade-check.timer', $defaults);
+        self::assertMatchesRegularExpression('/^units_timers: \[[^\]]*fleet-upgrade-check\.timer/m', $defaults);
         self::assertStringContainsString('systemctl disable --now fleet-upgrade-check.timer', $uninstall);
         self::assertStringContainsString('fleet-upgrade-check.service"', $uninstall);
     }
@@ -313,44 +320,42 @@ final class UnitsTest extends TestCase
         self::assertArrayNotHasKey('Service', $unit);
     }
 
-    public function testTlsCheckUnitsAreInstalledAndTheTimerEnabledByTheSteps(): void
+    public function testTlsCheckUnitsAreInstalledAndTheTimerEnabledByTheRole(): void
     {
-        $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
-        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $defaults = self::unitsRole('defaults/main.yml');
         $uninstall = (string) file_get_contents(self::installDir().'/uninstall.sh');
 
-        self::assertStringContainsString('install_etc fleet-tls-check.service "$SYSTEMD_DIR/fleet-tls-check.service" 0644 root:root', $units);
-        self::assertStringContainsString('install_etc fleet-tls-check.timer "$SYSTEMD_DIR/fleet-tls-check.timer" 0644 root:root', $units);
-        self::assertStringContainsString('systemctl enable --now fleet-tls-check.timer', $start);
+        self::assertStringContainsString('  - fleet-tls-check.service', $defaults);
+        self::assertStringContainsString('  - fleet-tls-check.timer', $defaults);
+        self::assertMatchesRegularExpression('/^units_timers: \[[^\]]*fleet-tls-check\.timer/m', $defaults);
         self::assertStringContainsString('systemctl disable --now fleet-tls-check.timer', $uninstall);
         self::assertStringContainsString('fleet-tls-check.service"', $uninstall);
     }
 
-    public function testSchedulerUnitIsInstalledAndEnabledByTheSteps(): void
+    public function testSchedulerUnitIsInstalledAndEnabledByTheRole(): void
     {
-        $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
-        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $defaults = self::unitsRole('defaults/main.yml');
         $service = $this->unit('fleet-scheduler.service')['Service'];
 
-        self::assertStringContainsString('install_etc fleet-scheduler.service "$SYSTEMD_DIR/fleet-scheduler.service" 0644 root:root', $units);
-        self::assertMatchesRegularExpression('~systemctl enable [^\n]*\bfleet-scheduler\b~', $start);
-        self::assertStringContainsString('systemctl start fleet-scheduler', $start);
-        self::assertStringContainsString('systemctl restart fleet-scheduler', $start);
+        self::assertStringContainsString('units_scheduler: [fleet-scheduler.service]', $defaults);
+        self::assertMatchesRegularExpression('/^  - fleet-scheduler$/m', $defaults);
+        self::assertStringContainsString('name: fleet-scheduler', self::unitsRole('tasks/start.yml'));
         self::assertSame(['fleet'], $service['User']);
         self::assertSame(['always'], $service['Restart']);
         self::assertStringContainsString('messenger:consume scheduler_default', $service['ExecStart'][0]);
         self::assertStringNotContainsString('NOT installed', (string) file_get_contents(self::installDir().'/etc/fleet-scheduler.service'));
     }
 
-    public function testBackupUnitsAreInstalledAndTheTimerEnabledByTheSteps(): void
+    public function testBackupUnitsAreInstalledAndTheTimerEnabledByTheRole(): void
     {
-        $units = (string) file_get_contents(self::installDir().'/steps/95-units.sh');
-        $start = (string) file_get_contents(self::installDir().'/steps/98-render-start.sh');
+        $defaults = self::unitsRole('defaults/main.yml');
+        $uninstall = (string) file_get_contents(self::installDir().'/uninstall.sh');
 
-        self::assertStringContainsString('install_etc fleet-backup.service "$SYSTEMD_DIR/fleet-backup.service" 0644 root:root', $units);
-        self::assertStringContainsString('install_etc fleet-backup.timer "$SYSTEMD_DIR/fleet-backup.timer" 0644 root:root', $units);
-        self::assertStringContainsString('systemctl enable --now fleet-backup.timer', $start);
-        self::assertStringNotContainsString('systemctl enable', $units, 'units are enabled by step 98');
+        self::assertStringContainsString('  - fleet-backup.service', $defaults);
+        self::assertStringContainsString('  - fleet-backup.timer', $defaults);
+        self::assertMatchesRegularExpression('/^units_timers: \[[^\]]*fleet-backup\.timer/m', $defaults);
+        self::assertStringContainsString('systemctl disable --now fleet-backup.timer', $uninstall);
+        self::assertStringContainsString('fleet-backup.service"', $uninstall);
     }
 
     public function testMercureUnitDirectives(): void
@@ -463,7 +468,8 @@ final class UnitsTest extends TestCase
         self::assertStringContainsString(self::SUDOERS_LINE, (string) file_get_contents(self::installDir().'/etc/sudoers-fleet-apply'));
         self::assertSame('/usr/local/libexec/fleet/apply', PrivilegedApply::HELPER);
         self::assertStringContainsString('HELPER_DIR=/usr/local/libexec/fleet', (string) file_get_contents(self::installDir().'/lib/common.sh'));
-        self::assertStringContainsString('"$HELPER_DIR/apply"', (string) file_get_contents(self::installDir().'/steps/90-privileged.sh'));
+        self::assertStringContainsString('fleet_helper_dir: /usr/local/libexec/fleet', (string) file_get_contents(self::installDir().'/ansible/group_vars/all.yml'));
+        self::assertMatchesRegularExpression('/loop: \[apply, upgrade\]/', (string) file_get_contents(self::installDir().'/ansible/roles/privileged/tasks/main.yml'));
     }
 
     public function testHelperStagingFilesAreTheOnesTheAppStages(): void
@@ -501,7 +507,7 @@ final class UnitsTest extends TestCase
         $mask = self::installDir().'/etc/authelia-tmpfiles.conf';
 
         self::assertFileExists($mask);
-        self::assertStringContainsString('/etc/tmpfiles.d/authelia.conf', (string) file_get_contents(self::installDir().'/steps/60-authelia.sh'));
+        self::assertStringContainsString('dest: /etc/tmpfiles.d/authelia.conf', (string) file_get_contents(self::installDir().'/ansible/roles/authelia/tasks/main.yml'));
     }
 
     public function testUnitFilesHoldNoSecrets(): void

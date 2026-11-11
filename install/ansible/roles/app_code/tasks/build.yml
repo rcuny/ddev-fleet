@@ -1,4 +1,13 @@
 ---
+# FLE-281: the compiled prod container of the previous release (app/var/cache/prod) is built for the old classes. Any
+# console command booting it against the new code can fail ("Too few arguments to ...::__construct()" when a service
+# constructor changed), and cache:clear boots it too, so the directory is removed, not cleared, before the first console
+# command. The build below rebuilds it (cache:warmup). This file runs only when the code changed or no build is finished.
+- name: Remove the stale prod container cache of the previous release
+  ansible.builtin.file:
+    path: "{{ fleet_src_dir }}/app/var/cache/prod"
+    state: absent
+
 - name: Install the dependencies (no dev packages, the prod autoloader)
   ansible.builtin.command:
     argv: >-

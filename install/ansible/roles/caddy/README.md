@@ -1,6 +1,6 @@
 # caddy
 
-Port of `install/steps/50-caddy.sh`, behaviour for behaviour. Always on, after `docker`.
+Port of the former bash step 50-caddy.sh, behaviour for behaviour. Always on, after `docker`.
 
 Does: the Caddy apt repository (pinned key fingerprint), the package (no service start during the install), the
 `dpkg-divert` of the packaged binary to `/usr/bin/caddy.default`, the custom build `/usr/bin/caddy.custom` with the OVH DNS

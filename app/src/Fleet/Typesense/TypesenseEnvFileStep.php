@@ -42,7 +42,7 @@ final readonly class TypesenseEnvFileStep implements DeployStep
         }
 
         try {
-            $keys = $this->keys->ensure($context->project);
+            $keys = $this->keys->forInstance($context->project, $context->instance->id());
         } catch (SecretOpenFailed) {
             throw new JobFailed('typesense: a stored Typesense key could not be opened; nothing was written.');
         }

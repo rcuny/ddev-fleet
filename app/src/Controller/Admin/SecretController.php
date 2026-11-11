@@ -137,6 +137,45 @@ final class SecretController extends AbstractController
     }
 
     /**
+     * Lets the project's compose overrides do what the deploy guard refuses (Docker socket, privileged, host namespaces, host
+     * mounts; FLE-298). ON needs the dialog's `confirm=1` and a recent re-auth; OFF needs neither. Deliberately not a ProjectInput
+     * field: no CLI option, export or import can switch it on. Every change is audited, a repeat of the stored value is not.
+     */
+    #[Route('/admin/projects/{name}/keys/privileged-overrides', name: 'project_keys_privileged_overrides', requirements: ['name' => self::PROJECT], methods: ['POST'])]
+    public function privilegedOverrides(Request $request, string $name): Response
+    {
+        $project = $this->load($name);
+        $this->requireCsrf($request);
+        $enable = '1' === $request->request->get('allow_privileged_overrides');
+
+        if ($enable === $project->allowPrivilegedOverrides()) {
+            $this->addFlash('success', 'No change: privileged overrides were already '.($enable ? 'on' : 'off').'.');
+
+            return $this->back($project);
+        }
+        if ($enable) {
+            if ('1' !== $request->request->get('confirm')) {
+                $this->addFlash('warning', 'Not changed: turning on privileged overrides needs the confirmation.');
+
+                return $this->back($project);
+            }
+            if (!$this->reauth->requireRecentAuth()) {
+                return $this->reauth->challenge('privileged-overrides', $name, '/admin/projects/'.$name.'/keys');
+            }
+        }
+
+        $project->changeAllowPrivilegedOverrides($enable);
+        $this->projectRepository->save($project);
+        if ($enable) {
+            $this->reauth->close();
+        }
+        $this->audit->record($this->actor->name(), AuditLog::PROJECT_PRIVILEGED_OVERRIDES, $name.'/'.($enable ? 'on' : 'off'));
+        $this->addFlash('success', 'Privileged overrides are now '.($enable ? 'on' : 'off').'.');
+
+        return $this->back($project);
+    }
+
+    /**
      * Turns the per-instance ssh-agent with the push key on or off. Turning it ON is as sensitive as revealing a secret:
      * the server needs `confirm=1` (the dialog's button sends it; a crafted request without it changes nothing) and a recent
      * re-auth. Turning it off needs neither. The change is audited, a repeat of the stored value is not.
