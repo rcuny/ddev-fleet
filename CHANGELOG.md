@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.2] - 2026-11-11
+
+### Added
+- **FLE-318: "Adjust allotments" sheet on the Capacity tab.** Sliders for every project's CPU threads (grey up to the allocatable threads, orange up to twice that), slot steppers, live totals and an inline SVG donut, an over-allocation warning (never blocks), quick actions (even split, prioritise, restore) and one all-or-nothing save with one audit entry per changed project.
+
+### Fixed
+- **FLE-317: the router repair no longer takes down a running instance the deploy guard would refuse to restart.** Before the repairing `ddev start` of the port mirror converge, the guard scan runs first; if it would refuse, nothing is started, stopped or restarted, the instance keeps running, the log says `repair skipped: guard would refuse (<file:key>)` and a `repair.skipped` audit entry is written (`fleet instance:audit-overrides` lists the same files). Only a person's start, restart or deploy is refused.
+
 ## [1.9.1] - 2026-11-11
 
 ### Added
@@ -1498,7 +1506,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.9.1...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.9.2...HEAD
+[1.9.2]: https://github.com/rcuny/ddev-fleet/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/rcuny/ddev-fleet/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/rcuny/ddev-fleet/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/rcuny/ddev-fleet/compare/v1.7.0...v1.8.0
