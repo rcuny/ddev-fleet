@@ -146,10 +146,62 @@ def test_cli_destroy_needs_confirm_and_sends_nothing(capsys):
     assert f.requests == [] and "--confirm blog--x" in capsys.readouterr().err
 
 
-def test_capacity_is_a_clear_stub_without_a_request(capsys):
-    f = Fake()
+def test_capacity_uses_the_scoped_endpoint_for_the_given_project(capsys):
+    f = Fake(Resp({"schema": 1, "scope": "project", "project": "blog", "verdict": {"ok": True}}))
+    assert fa.main(["capacity", "--project", "blog", "--template", "dev"], environ=ENV, opener=f) == 0
+    assert f.requests[0].full_url.endswith("/api/v1/host/capacity?project=blog&template=dev")
+    assert json.loads(capsys.readouterr().out)["verdict"]["ok"] is True
+
+
+def test_capacity_defaults_to_the_tokens_single_project():
+    a, f = api(Resp({"projects": ["blog"]}), Resp({"verdict": {"ok": False}}))
+    assert a.capacity()["verdict"]["ok"] is False
+    assert f.requests[0].full_url.endswith("/tokens/self") and f.requests[1].full_url.endswith("/host/capacity?project=blog")
+
+
+@pytest.mark.parametrize("projects", [[], ["a", "b"], ["*"]])
+def test_capacity_without_a_single_project_is_a_usage_error(projects, capsys):
+    f = Fake(Resp({"projects": projects}))
     assert fa.main(["capacity"], environ=ENV, opener=f) == 2
-    assert f.requests == [] and "capacity_unavailable" in capsys.readouterr().err
+    assert len(f.requests) == 1 and "project_required" in capsys.readouterr().err
+
+
+def test_capacity_403_for_another_project_is_exit_1(capsys):
+    f = Fake(http_error(403, {"code": "project_not_allowed", "detail": "no"}))
+    assert fa.main(["capacity", "--project", "other"], environ=ENV, opener=f) == 1
+
+
+def test_wait_without_a_job_id_does_not_exit_3(capsys):
+    f = Fake(Resp({"accepted": True}, 202))
+    assert fa.main(["start", "blog--x", "--wait"], environ=ENV, opener=f) == 0
+    assert len(f.requests) == 1
+
+
+def test_retry_after_http_date_falls_back_to_backoff():
+    assert fa.retry_wait("Wed, 21 Oct 2026 07:28:00 GMT", 2) == 4
+    assert fa.retry_wait("0", 1) == 2 and fa.retry_wait("5", 1) == 5
+
+
+@pytest.mark.parametrize("url", ["http://localhost:8080", "http://127.0.0.1", "http://[::1]:9"])
+def test_plain_http_is_allowed_on_loopback_only(url):
+    assert fa.FleetApi(environ={"FLEET_API_TOKEN": TOKEN, "FLEET_API_URL": url}).base == url
+
+
+def test_literal_token_is_masked_even_without_the_flt_shape():
+    odd = "plainsecret-value-123"
+    a = fa.FleetApi(environ={"FLEET_API_TOKEN": odd, "FLEET_API_URL": "https://fleet.example.com"},
+                    opener=Fake(http_error(400, {"code": "x", "detail": f"bad {odd}"})))
+    with pytest.raises(fa.ApiError) as e:
+        a.get("/jobs/x")
+    assert odd not in str(e.value) and "flt_***" in str(e.value)
+
+
+def test_network_error_message_is_masked():
+    err = urllib.error.URLError(f"connect failed for {TOKEN}")
+    a, _ = api(err, err, err, err)
+    with pytest.raises(fa.ApiError) as e:
+        a.get("/jobs/x")
+    assert e.value.code == "network" and TOKEN not in str(e.value)
 
 
 def test_deploy_wait_polls_to_final_and_exit_code(capsys):
