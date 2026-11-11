@@ -1788,6 +1788,14 @@ fleet token:list [-a|--all] [--json]
 | `--all` | `-a` | Include revoked and expired tokens |  |
 | `--json` |  | Print as JSON |  |
 
+### fleet token:remind
+
+Warn about API tokens that expire soon (and write the daily audit reminder).
+
+```
+fleet token:remind
+```
+
 ### fleet token:revoke
 
 Revoke an API token (immediate, irreversible).

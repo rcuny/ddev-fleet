@@ -11,11 +11,10 @@ use App\Domain\Project\Project;
 use App\Domain\Template\SshIdentities;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
-use App\Fleet\Audit\AuditLog;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Git\GitClient;
-use App\Fleet\Isolation\ComposeOverrideGuard;
+use App\Fleet\Isolation\InstanceIsolation;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
@@ -62,8 +61,7 @@ final class DeployWorkflow
         private readonly InstanceSshAgent $agent,
         private readonly JobFeed $feed,
         private readonly ClockInterface $clock,
-        private readonly ComposeOverrideGuard $guard,
-        private readonly AuditLog $audit,
+        private readonly InstanceIsolation $isolation,
         #[AutowireIterator('fleet.deploy_step')]
         private readonly iterable $steps = [],
         private readonly ?InstanceCgroupWriter $cgroup = null,
@@ -195,7 +193,7 @@ final class DeployWorkflow
             }
         }
         // The last file is in place (project's own, assets, fleet's): nothing starts that hands a container the host (FLE-298).
-        $this->enforceIsolation($instance, $project, $dir, $log);
+        $this->isolation->enforce($instance, $dir, $log);
         $started = $this->ran(fn (): CommandResult => $this->ddev->start($dir, $log->output(...)), 'ddev start');
         if (!$started->isSuccess()) {
             throw new JobFailed(\sprintf('ddev start failed with exit code %d', $started->exitCode), $started->exitCode);
@@ -232,33 +230,6 @@ final class DeployWorkflow
 
         // 11. The tmux window's tty commands, only now that the site is installed (FLE-171).
         $this->runSteps(StepPhase::AfterDeploy, $context);
-    }
-
-    /**
-     * FLE-298: refuses the deploy, before `ddev start`, when the checkout's `.ddev/` files would mount the Docker socket, run
-     * privileged, share a host namespace or mount host paths. A project an admin switched `allow_privileged_overrides` on for is let
-     * through, and the violations are logged and audited.
-     *
-     * @throws JobFailed
-     */
-    private function enforceIsolation(Instance $instance, Project $project, string $dir, JobLog $log): void
-    {
-        $violations = $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]);
-        if ([] === $violations) {
-            return;
-        }
-        $lines = array_map(static fn ($v): string => $v->message(), $violations);
-        if ($project->allowPrivilegedOverrides()) {
-            $log->line('warning: privileged compose overrides allowed for this project (allow_privileged_overrides): '.implode('; ', $lines));
-            $this->audit->record('system', AuditLog::DEPLOY_OVERRIDES_ALLOWED, $instance->id().': '.implode('; ', $lines));
-
-            return;
-        }
-        foreach ($lines as $line) {
-            $log->line('refused: '.$line);
-        }
-
-        throw new JobFailed(\sprintf('Deploy refused: the project ships DDEV files that would give its containers access to the host: %s. Remove them (or keep them out of the repository), or ask an admin to switch on privileged overrides for the project. Nothing was started.', implode('; ', $lines)));
     }
 
     /**

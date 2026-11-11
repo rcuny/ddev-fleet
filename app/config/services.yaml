@@ -325,6 +325,13 @@ when@test:
             alias: App\Tests\Support\FakeInstanceGuard
             public: true
 
+        # Mercure updates are remembered, not sent (FLE-289: the terminal write alert is read back from here).
+        App\Tests\Support\RecordingHub:
+            public: true
+        Symfony\Component\Mercure\HubInterface:
+            alias: App\Tests\Support\RecordingHub
+            public: true
+
         # The suite never talks to a router: a test scripts the live entrypoints on the fake (public to fetch it).
         App\Tests\Support\FakeLiveEntrypoints:
             public: true

@@ -119,6 +119,11 @@ class ApiCall
         return $this->outcome;
     }
 
+    public function createdAt(): \DateTimeImmutable
+    {
+        return $this->createdAt;
+    }
+
     public function clientIp(): string
     {
         return $this->clientIp;

@@ -4,7 +4,7 @@ Fleet clones a project repository and runs its DDEV project. The repository is n
 
 ## The deploy guard
 
-Before `ddev start`, every deploy and redeploy reads the instance's `.ddev/docker-compose*.y(a)ml` and `.ddev/config*.y(a)ml` (the project's own, the seeded assets and the files Fleet wrote). The deploy is **refused** (state `failed`, nothing started, the log names the file and the key) when it finds any of:
+Before every `ddev start` or `ddev restart` Fleet makes (deploy, redeploy, start, restart, and the repairing start of the router converge), one shared check reads the instance's `.ddev/docker-compose*.y(a)ml` and `.ddev/config*.y(a)ml` (the project's own, the seeded assets and the files Fleet wrote). The job is **refused** (state `failed`, nothing started, the log names the file and the key) when it finds any of:
 
 | What | Example |
 |---|---|
@@ -15,7 +15,14 @@ Before `ddev start`, every deploy and redeploy reads the instance's `.ddev/docke
 | Host devices | `devices:` |
 | The sandbox switched off | `security_opt: [seccomp=unconfined]`, `apparmor=unconfined` |
 | A bind mount of a host path outside the instance directory | `/:/host`, `~/.ssh:/ssh`, `../../other:/o`, a volume with `driver_opts` `o: bind` and an outside `device` |
-| A file that cannot be verified | a symlink, a file that does not parse, a host path starting with a variable other than `${DDEV_*}` |
+| Another container's namespaces, cgroups and kernel settings | `network_mode`/`pid`/`ipc` of `container:` or `service:`, `cgroup: host`, `cgroup_parent`, `sysctls`, `volumes_from: container:...`, `security_opt` `label=disable` or `no-new-privileges:false` |
+| Files that are never scanned | `include:`, `extends: {file: ...}` |
+| Commands on the host | `exec-host` / `exec_host` hooks in any `config*.yaml` (they run as the fleet user at start) |
+| A file that cannot be verified | a symlink, a directory, an unreadable or unparsable file, a `.ddev` that is a symlink, a `services` or `volumes` value that is not a mapping, a host path starting with a variable other than a bare `${DDEV_APPROOT}`, `${DDEV_DOCROOT}` or `${DDEV_COMPOSER_ROOT}` |
+
+Bind sources are resolved (the DDEV variables to the instance directory, `..` after a variable is refused) and followed through symlinks, so a symlinked subdirectory cannot lead out of the checkout. Fleet's own CPU slice override (`docker-compose.fleet-cgroup.yaml`, a `*.slice` `cgroup_parent`) is allowed.
+
+Not refused: `.ddev/commands/host/*`. They run only when an administrator invokes them on the host as `fleet`, never at start. A project that ships `exec-host` hooks (the Fleet development project does) needs the project switch below.
 
 Allowed: named volumes, paths inside the instance directory (relative paths count from the `.ddev/` directory), DDEV's own `${DDEV_*}` variables, and the instance's own ssh-agent socket directory that Fleet mounts for projects that use Git over SSH.
 

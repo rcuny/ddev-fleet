@@ -37,6 +37,35 @@ final class ApiTokenPageTest extends AdminTestCase
         self::assertResponseStatusCodeSame(403);
     }
 
+    private function hasMercureCookie(): bool
+    {
+        foreach ($this->client->getResponse()->headers->getCookies() as $cookie) {
+            if (str_contains($cookie->getName(), 'mercure')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function testTheAdminShellListensForTerminalWriteAlertsAndAMemberDoesNot(): void
+    {
+        $crawler = $this->open('/admin/api-tokens');
+        $alert = $crawler->filter('[data-testid=terminal-alert]');
+        self::assertCount(1, $alert);
+        self::assertSame('/alerts/terminal-write', $alert->attr('data-terminal-alert-topic-value'));
+        self::assertSame('/admin/audit', $alert->attr('data-terminal-alert-audit-value'));
+        self::assertNotNull($alert->attr('data-turbo-permanent'));
+        self::assertTrue($this->hasMercureCookie(), 'the admin page sets the cookie that authorises the alert topic');
+
+        $this->as('member');
+        $crawler = $this->open('/');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $crawler->filter('[data-testid=terminal-alert]'));
+        self::assertStringNotContainsString('terminal-write', (string) $this->client->getResponse()->getContent());
+        self::assertFalse($this->hasMercureCookie());
+    }
+
     public function testCreatingNeedsAFreshReauthAndLeavesNothingBehind(): void
     {
         $this->post('/admin/api-tokens/create', self::FORM);
@@ -161,5 +190,21 @@ final class ApiTokenPageTest extends AdminTestCase
 
         self::assertCount(1, $crawler->filter('[data-testid=api-token-expiring] li'));
         self::assertCount(0, $crawler->filter('[data-testid=api-token-unused]'));
+    }
+
+    public function testTheAttentionPanelCountsRecentTerminalInput(): void
+    {
+        $crawler = $this->open('/admin/api-tokens');
+        self::assertCount(0, $crawler->filter('[data-testid=api-token-terminal-writes]'));
+
+        $calls = self::getContainer()->get(\App\Domain\ApiCall\ApiCallRepository::class);
+        $calls->save(new \App\Domain\ApiCall\ApiCall(1, 'token:1:orch', 'POST terminal', 'blog--main', 'tty2', 'claude', '192.0.2.1', 5, hash('sha256', 'hello'), 'hello', true, new \DateTimeImmutable('-1 hour')));
+        $calls->save(new \App\Domain\ApiCall\ApiCall(1, 'token:1:orch', 'POST terminal', 'blog--main', 'tty2', 'claude', '192.0.2.1', 5, hash('sha256', 'old'), 'old', true, new \DateTimeImmutable('-3 days')));
+
+        $crawler = $this->open('/admin/api-tokens');
+
+        self::assertCount(1, $crawler->filter('[data-testid=api-token-terminal-writes]'));
+        self::assertStringContainsString('1 call in the last 24 hours', $crawler->filter('[data-testid=api-token-terminal-writes]')->text());
+        self::assertStringNotContainsString('hello', $crawler->filter('[data-testid=api-token-terminal-writes]')->text(), 'the text stays in the audit view');
     }
 }

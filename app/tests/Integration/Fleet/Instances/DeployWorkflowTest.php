@@ -64,7 +64,7 @@ final class DeployWorkflowTest extends InstanceJobTestCase
 
         $e = $this->failedDeploy();
 
-        self::assertStringContainsString('Deploy refused', $e->getMessage());
+        self::assertStringContainsString('Refused: the project ships DDEV files', $e->getMessage());
         self::assertStringContainsString('.ddev/docker-compose.dockersock.yaml: services.web.volumes[0]', $e->getMessage());
         self::assertNotContains('ddev start', $this->commandNames());
     }

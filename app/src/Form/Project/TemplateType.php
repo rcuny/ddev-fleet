@@ -7,6 +7,7 @@ namespace App\Form\Project;
 use App\Domain\Template\SshIdentities;
 use App\Fleet\Projects\Rule\CommandLines;
 use App\Fleet\Projects\Rule\ResourceName;
+use App\Fleet\Ssh\GuideLinks;
 use Symfony\Component\Form\AbstractType;
 use Symfony\Component\Form\Extension\Core\Type\ChoiceType;
 use Symfony\Component\Form\Extension\Core\Type\IntegerType;
@@ -78,7 +79,8 @@ final class TemplateType extends AbstractType
                 'label' => 'SSH identities',
                 'required' => true,
                 'choices' => array_combine(array_map(static fn (SshIdentities $i): string => $i->label(), SshIdentities::cases()), array_map(static fn (SshIdentities $i): string => $i->value, SshIdentities::cases())),
-                'help' => 'Which keys the instance\'s own ssh-agent holds. "Extra keys only" keeps the host\'s push (write) key out of a narrow-purpose instance; it needs at least one extra key.',
+                'help' => 'Which keys the instance\'s own ssh-agent holds. "Extra keys only" keeps the host\'s push (write) key out of a narrow-purpose instance; it needs at least one extra key. <a href="'.GuideLinks::GIT_ACCESS.'" class="underline" rel="noopener" target="_blank">Read the guide</a>.',
+                'help_html' => true,
             ])
             ->add('cpuThreads', IntegerType::class, [
                 'label' => 'CPU threads',

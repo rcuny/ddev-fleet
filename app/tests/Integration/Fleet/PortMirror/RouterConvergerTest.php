@@ -197,7 +197,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
     public function testTheSyncStepRunsBeforeStartAndTheConvergeStepNeverFailsTheDeploy(): void
     {
         $sync = new PortMirrorSyncStep($this->mirror);
-        $converge = new PortMirrorConvergeStep($this->converger);
+        $converge = new PortMirrorConvergeStep($this->converger, $this->isolation());
         self::assertSame(StepPhase::BeforeStart, $sync->phase());
         self::assertSame(StepPhase::AfterStart, $converge->phase());
 
@@ -227,9 +227,27 @@ final class RouterConvergerTest extends PortMirrorTestCase
         $instance = $this->instance();
         $job = $this->job('deploy', $instance);
 
-        new PortMirrorConvergeStep($this->converger)->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
+        new PortMirrorConvergeStep($this->converger, $this->isolation())->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
 
         self::assertStringNotContainsString('port mirror', $this->logText($job));
         self::assertSame([], $this->argvs());
+    }
+
+    public function testTheRepairingStartIsRefusedWhenTheCheckoutNowHoldAPrivilegedOverride(): void
+    {
+        // FLE-298: the repair runs `ddev start` again; the shared isolation check stands in front of it.
+        $instance = $this->instance();
+        $dir = $this->checkout($instance);
+        mkdir($dir.'/.ddev', 0o750, true);
+        file_put_contents($dir.'/.ddev/docker-compose.evil.yaml', "services:\n  web:\n    privileged: true\n");
+        $this->mirror->sync();
+        $this->live->script(self::BASE);
+        $job = $this->job('deploy', $instance);
+        $context = new DeployContext($instance, $this->project, $dir, [], $this->logFor($job), $this->secretRenderer);
+
+        new PortMirrorConvergeStep($this->converger, $this->isolation())->run($context);
+
+        self::assertNotContains('ddev start', $this->commandNames());
+        self::assertStringContainsString('services.web.privileged', $this->logText($job));
     }
 }

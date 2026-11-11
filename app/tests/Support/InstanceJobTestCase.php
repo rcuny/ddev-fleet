@@ -118,6 +118,11 @@ abstract class InstanceJobTestCase extends KernelTestCase
         $this->template = $this->saveTemplate('full', []);
     }
 
+    protected function isolation(): \App\Fleet\Isolation\InstanceIsolation
+    {
+        return new \App\Fleet\Isolation\InstanceIsolation(new \App\Fleet\Isolation\ComposeOverrideGuard(), new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock), $this->paths);
+    }
+
     /**
      * A deploy workflow wired like production; the capacity collaborators are optional (null = a host without them).
      */
@@ -142,8 +147,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->agent,
             $this->feed,
             $this->clock,
-            new \App\Fleet\Isolation\ComposeOverrideGuard(),
-            new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock),
+            $this->isolation(),
             $this->steps,
             $cgroup,
             $pushCheck,

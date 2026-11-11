@@ -10,6 +10,7 @@ use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceCgroupWriter;
 use App\Fleet\Instances\InstanceConfigWriter;
+use App\Fleet\Isolation\InstanceIsolation;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
@@ -30,6 +31,7 @@ final readonly class RestartJob implements JobType
         private Ddev $ddev,
         private FleetPaths $paths,
         private JobFeed $feed,
+        private InstanceIsolation $isolation,
         private ?InstanceCgroupWriter $cgroup = null,
     ) {
     }
@@ -60,6 +62,7 @@ final readonly class RestartJob implements JobType
         } catch (\RuntimeException $e) {
             throw new JobFailed('The CPU slice override could not be written: '.$e->getMessage());
         }
+        $this->isolation->enforce($instance, $dir, $log);
         try {
             $result = $this->ddev->restart($dir, $log->output(...));
         } catch (CommandRunnerException $e) {

@@ -71,6 +71,7 @@ final readonly class CaddyfileRenderer
             'ovh_dir' => self::OVH_DIR,
             'ovh_endpoint' => TlsMode::OvhDns === $host->tlsMode() ? $this->endpoint() : '',
             'stripped_headers' => self::strippedHeaders(),
+            'api_client_ca' => is_file($this->paths->apiClientCaFile()) ? ConfigValue::path('The API client CA file', $this->paths->apiClientCaFile()) : null,
             'snippet_dir' => ConfigValue::path('The Caddy snippet directory', $this->paths->caddySnippetDir()),
             'gate_import' => ConfigValue::path('The Caddy snippet directory', $this->paths->caddySnippetDir()).'/gate.conf',
             'root' => ConfigValue::path('The project directory', $this->projectDir).'/public',

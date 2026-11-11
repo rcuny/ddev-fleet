@@ -7,6 +7,7 @@ namespace App\Fleet\PortMirror;
 use App\Fleet\Instances\DeployContext;
 use App\Fleet\Instances\DeployStep;
 use App\Fleet\Instances\StepPhase;
+use App\Fleet\Isolation\InstanceIsolation;
 use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 
 /**
@@ -17,7 +18,7 @@ use Symfony\Component\DependencyInjection\Attribute\AutoconfigureTag;
 #[AutoconfigureTag('fleet.deploy_step', ['priority' => 200])]
 final readonly class PortMirrorConvergeStep implements DeployStep
 {
-    public function __construct(private RouterConverger $converger)
+    public function __construct(private RouterConverger $converger, private InstanceIsolation $isolation)
     {
     }
 
@@ -29,7 +30,7 @@ final readonly class PortMirrorConvergeStep implements DeployStep
     public function run(DeployContext $context): void
     {
         try {
-            $message = $this->converger->converge($context->dir, $context->log->output(...));
+            $message = $this->converger->converge($context->dir, $context->log->output(...), fn () => $this->isolation->enforce($context->instance, $context->dir, $context->log));
         } catch (PortMirrorFailed $e) {
             $context->log->line('WARNING: '.$e->getMessage());
 
