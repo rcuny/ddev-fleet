@@ -148,6 +148,14 @@ final class ComposeOverrideGuard
         if (1 === preg_match('/(?<![\w.\/-])(docker\.io(?!\/)|docker-ce(?:-cli)?|docker-cli|docker-compose-plugin|containerd\.io)(?![\w.\/-])/i', $text)) {
             $violations[] = new OverrideViolation($relative, 'docker-cli', 'installs a Docker CLI or engine package into the web image');
         }
+        // Alpine's bare `docker` package (`apk add docker`; `docker-compose-doc` and the like are other packages), and
+        // Docker's convenience install script (`curl -fsSL https://get.docker.com | sh`).
+        elseif (
+            1 === preg_match('/\bapk\s+(?:-\S+\s+)*add\b[^\n;&|]*?(?<![\w.\/-])docker(?![\w.\/-])/i', $text)
+            || 1 === preg_match('/(?<![\w.-])get\.docker\.com(?![\w.-])|\bget-docker\.sh\b/i', $text)
+        ) {
+            $violations[] = new OverrideViolation($relative, 'docker-cli', 'installs a Docker CLI or engine package into the web image');
+        }
         if ($this->setsSetuid($text)) {
             $violations[] = new OverrideViolation($relative, 'chmod', 'sets a setuid bit, which can be used to gain root in the container');
         }
