@@ -89,6 +89,17 @@ final class RecordingCommandRunner implements CommandRunner, BackgroundRunner
             return new CommandResult(0, "services:\n  db:\n    image: recorded\n  web:\n    image: recorded\n");
         }
 
+        // Version probes and the post-start network check of the isolation override (FLE-297).
+        if (['ddev', '--version'] === $argv) {
+            return new CommandResult(0, "ddev version v1.24.10\n");
+        }
+        if (['docker', 'compose', 'version', '--short'] === $argv) {
+            return new CommandResult(0, "2.29.7\n");
+        }
+        if ('docker' === ($argv[0] ?? null) && 'inspect' === ($argv[1] ?? null)) {
+            return new CommandResult(0, '{"recorded_default":{}}');
+        }
+
         return new CommandResult(0);
     }
 

@@ -63,7 +63,7 @@ final readonly class RestartJob implements JobType
             throw new JobFailed('The CPU slice override could not be written: '.$e->getMessage());
         }
         try {
-            $this->dbIsolation?->write($dir, $log);
+            $this->dbIsolation?->write($dir, $instance->id(), $log->line(...));
         } catch (\RuntimeException $e) {
             throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
         }
@@ -79,6 +79,11 @@ final readonly class RestartJob implements JobType
         $warning = $this->cgroup?->check($instance, $instance->project());
         if (null !== $warning) {
             $log->line($warning);
+        }
+        try {
+            $this->dbIsolation?->verify($dir, $instance->id(), $log->line(...));
+        } catch (\RuntimeException $e) {
+            throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
         }
 
         $this->feed->instanceChanged($instance->id());

@@ -202,6 +202,70 @@ final readonly class Ddev
     }
 
     /**
+     * The installed DDEV version (`ddev --version`, "ddev version v1.24.10"), without the "v"; null when unreadable.
+     */
+    public function ddevVersion(): ?string
+    {
+        return $this->versionOf(['ddev', '--version']);
+    }
+
+    /**
+     * The installed docker compose plugin version (`docker compose version --short`), without the "v"; null when unreadable.
+     */
+    public function composeVersion(): ?string
+    {
+        return $this->versionOf(['docker', 'compose', 'version', '--short']);
+    }
+
+    /**
+     * The Docker networks a container is attached to (`docker inspect`), or null when the container does not exist.
+     *
+     * @return list<string>|null
+     *
+     * @throws DdevUnavailable when docker answers with something that is not a network map
+     */
+    public function containerNetworks(string $container): ?array
+    {
+        try {
+            $result = $this->runner->run(['docker', 'inspect', '--format', '{{json .NetworkSettings.Networks}}', $container], null, [], null, self::STATS_TIMEOUT);
+        } catch (\Throwable $e) {
+            throw new DdevUnavailable('docker inspect '.$container.' did not answer.', 0, $e);
+        }
+        if (!$result->isSuccess()) {
+            return null;
+        }
+        $networks = json_decode(trim($result->stdout), true);
+        if (!\is_array($networks)) {
+            throw new DdevUnavailable('docker inspect '.$container.' printed no network map.');
+        }
+
+        return array_map('strval', array_keys($networks));
+    }
+
+    public function disconnectNetwork(string $network, string $container): bool
+    {
+        try {
+            return $this->runner->run(['docker', 'network', 'disconnect', $network, $container], null, [], null, self::STATS_TIMEOUT)->isSuccess();
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * @param list<string> $argv
+     */
+    private function versionOf(array $argv): ?string
+    {
+        try {
+            $result = $this->runner->run($argv, null, $this->env, null, self::STATS_TIMEOUT);
+        } catch (\Throwable) {
+            return null;
+        }
+
+        return $result->isSuccess() && 1 === preg_match('/v?(\d+\.\d+\.\d+)/', $result->stdout, $m) ? $m[1] : null;
+    }
+
+    /**
      * Whether a start failed because a port or the container network could not be set up (worth one retry).
      */
     public static function isPortConflict(string $output): bool

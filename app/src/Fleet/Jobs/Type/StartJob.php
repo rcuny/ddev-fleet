@@ -9,6 +9,7 @@ use App\Domain\Instance\InstanceState;
 use App\Domain\Job\Job;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
+use App\Fleet\Instances\InstanceDbIsolationWriter;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
@@ -32,6 +33,7 @@ final readonly class StartJob implements JobType
         private JobFeed $feed,
         private ClockInterface $clock,
         private InstanceSshAgent $agent,
+        private ?InstanceDbIsolationWriter $dbIsolation = null,
     ) {
     }
 
@@ -73,6 +75,15 @@ final readonly class StartJob implements JobType
             }
         }
 
+        // FLE-297: the isolation override must be in place on every start path (a stopped instance may predate it).
+        try {
+            if (is_dir($dir.'/.ddev')) {
+                $this->dbIsolation?->write($dir, $instance->id(), $log->line(...));
+            }
+        } catch (\RuntimeException $e) {
+            throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
+        }
+
         try {
             $result = $this->ddev->start($dir, $log->output(...), $timeout);
             if (!$result->isSuccess() && true === ($params['retryPortConflict'] ?? false) && Ddev::isPortConflict(self::output($result))) {
@@ -90,6 +101,12 @@ final readonly class StartJob implements JobType
         $instance->changeState(InstanceState::Running, $this->clock->now());
         $this->instances->save($instance);
         $this->feed->instanceChanged($instance->id());
+
+        try {
+            $this->dbIsolation?->verify($dir, $instance->id(), $log->line(...));
+        } catch (\RuntimeException $e) {
+            throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
+        }
     }
 
     private static function output(CommandResult $result): string

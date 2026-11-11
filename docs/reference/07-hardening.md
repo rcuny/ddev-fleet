@@ -101,13 +101,19 @@ Steps that run a command, such as firewall rules, are not visible in check mode:
 
 ## Instance isolation (databases)
 
-DDEV puts every project's `db` container on the shared `ddev_default` network under the alias `db` (and the name `ddev-<project>-db`). Left alone, a container of one instance could resolve `db` to another project's database and use DDEV's default credentials (`db`/`db`). Fleet writes `.ddev/docker-compose.fleet-db-isolation.yaml` into each instance:
+DDEV puts every project's `db` container on the shared `ddev_default` network under the alias `db` (and the name `ddev-<project>-db`). Left alone, a container of one instance could resolve `db` to another project's database and use DDEV's default credentials (`db`/`db`). Fleet writes `.ddev/docker-compose.zzz-fleet-isolation.yaml` into each instance before **every** start path (deploy, redeploy, start, restart and the port-mirror self-repair):
 
 - with a db service, `db` is attached to the instance's own network only (it leaves `ddev_default`; ddev-router only needs `web` there);
-- without one (`omit_containers: [db]`), `db` is pinned to `127.0.0.1` in the web container, so the name never reaches another project.
+- without one (`omit_containers: [db]`), `db` and `ddev-<project>-db` are pinned to `127.0.0.1` in **every** service of the project, so the names never reach another project.
 
-Instances deployed earlier keep the exposure until they restart: `fleet instance:isolate` lists them, `--apply` queues a restart of the running ones (opt-in, it ends what runs in the containers).
+**Requirements.** The `!override` tag needs DDEV 1.24.0 or newer and docker compose 2.24.4 or newer. Fleet reads both versions before writing the file and refuses (the job fails with the versions found) when they are older or unreadable.
+
+**Proof after each start.** DDEV loads a project's own `docker-compose.override.yaml` last, so a project file can undo ours. After every start or restart Fleet therefore inspects the live container (`docker inspect ddev-<project>-db`). If it is still on `ddev_default`, Fleet disconnects it, writes a `SECURITY:` line in the job log and fails the job. Nothing is silent.
+
+Instances deployed earlier keep the exposure until they restart: `fleet instance:isolate` lists them (it checks the file's content), `--apply` queues a restart of the running ones (opt-in, it ends what runs in the containers).
+
+Live check on a host (replace the project names): from a web container of a project **without** a db, `getent hosts db` must print `127.0.0.1`; from any web container, `mysql -hddev-<other>-db -udb -pdb -e 'show databases'` must fail; on the host `docker inspect ddev-<other>-db --format '{{json .NetworkSettings.Networks}}'` must not list `ddev_default`.
 
 **Agent templates:** instances that run AI agents execute code you do not review. Treat any instance on a host as able to reach other containers on `ddev_default` (web containers); only the database is closed by this change, and the database credentials remain the DDEV defaults inside a project. Do not put secrets for other projects in an agent instance.
 
-**Database credentials.** The isolation is at the network level. The database user and root password stay DDEV's defaults inside each project: DDEV's tooling (`ddev import-db`, `ddev export-db`, `ddev mysql`, the generated Drupal settings) relies on them, and Fleet's database jobs use those commands. A container that cannot resolve or reach another project's `db` cannot log in to it, whatever the credentials are.
+**Database credentials.** The isolation is at the network level. The database user and root password stay DDEV's defaults inside each project: DDEV's tooling (`ddev import-db`, `ddev export-db`, `ddev mysql`, the generated Drupal settings) relies on them, and Fleet's database jobs use those commands. A container that cannot resolve or reach another project's `db` cannot log in to it, whatever the credentials are. Per-instance random credentials are tracked in FLE-302.

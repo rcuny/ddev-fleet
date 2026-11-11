@@ -41,6 +41,7 @@ final class RouterConverger
         private readonly TraefikDirectory $traefik,
         private readonly float $healthWait = 60.0,
         ?\Closure $sleep = null,
+        private readonly ?\App\Fleet\Instances\InstanceDbIsolationWriter $dbIsolation = null,
     ) {
         $this->sleep = $sleep ?? static function (float $seconds): void {
             usleep((int) ($seconds * 1_000_000));
@@ -151,7 +152,16 @@ final class RouterConverger
             $notes[] = 'could not write the failed-apply marker ('.$e->getMessage().')';
         }
         try {
+            // FLE-297: this start path writes the database isolation override too, and checks it afterwards.
+            $project = basename($instanceDir);
+            $log = static function (string $line) use ($onOutput): void {
+                $onOutput('stdout', $line."\n");
+            };
+            $this->dbIsolation?->write($instanceDir, $project, $log);
             $start = $this->ddev->start($instanceDir, $onOutput);
+            if ($start->isSuccess()) {
+                $this->dbIsolation?->verify($instanceDir, $project, $log);
+            }
             if (!$start->isSuccess()) {
                 $notes[] = \sprintf('"ddev start" exited %d', $start->exitCode);
             }

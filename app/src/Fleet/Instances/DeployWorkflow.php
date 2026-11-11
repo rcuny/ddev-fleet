@@ -202,7 +202,7 @@ final class DeployWorkflow
         // FLE-297: the db container must not be reachable as "db" from other projects' containers.
         if (null !== $this->dbIsolation) {
             try {
-                $this->dbIsolation->write($dir, $log);
+                $this->dbIsolation->write($dir, $instance->id(), $log->line(...));
             } catch (\RuntimeException $e) {
                 throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
             }
@@ -214,6 +214,13 @@ final class DeployWorkflow
         $warning = $this->cgroup?->check($instance, $project);
         if (null !== $warning) {
             $log->line($warning);
+        }
+        if (null !== $this->dbIsolation) {
+            try {
+                $this->dbIsolation->verify($dir, $instance->id(), $log->line(...));
+            } catch (\RuntimeException $e) {
+                throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
+            }
         }
         $this->runSteps(StepPhase::AfterStart, $context);
 
