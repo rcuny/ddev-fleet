@@ -7,6 +7,7 @@ namespace App\Tests\Repo;
 use App\Tests\Repo\Support\InstallerHarness;
 use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
+use Symfony\Component\Yaml\Yaml;
 
 /**
  * FLE-306: the cloud-init file for DigitalOcean, the installer's --domain=auto and the guide that ties them together.
@@ -28,6 +29,16 @@ final class DigitalOceanCloudInitTest extends TestCase
         self::assertStringContainsString('ufw allow 443/tcp', $text);
         self::assertStringContainsString('fleet setup:token', $text);
         self::assertStringContainsString('/root/FLEET-READY.txt', $text);
+        self::assertStringContainsString('chmod 0600 "$READY"', $text);
+        self::assertStringContainsString('Fleet install FAILED', $text);
+        self::assertStringNotContainsString('| tee /dev/console', $text, 'the setup link must not reach the console or a log');
+
+        $parsed = Yaml::parse($text);
+        self::assertIsArray($parsed);
+        self::assertSame('/usr/local/sbin/fleet-first-boot', $parsed['write_files'][0]['path']);
+        self::assertSame('0700', $parsed['write_files'][0]['permissions']);
+        self::assertIsString($parsed['write_files'][0]['content']);
+        self::assertNotEmpty($parsed['runcmd']);
         // Let's Encrypt over HTTP-01 is the default; the OVH DNS-01 mode is never chosen here.
         self::assertStringNotContainsStringIgnoringCase('ovh', $text);
         // No secret, and example.com style addresses only.

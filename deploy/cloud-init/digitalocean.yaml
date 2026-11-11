@@ -3,8 +3,8 @@
 # create a Debian 13 Droplet (2 vCPU / 8 GB or more). Guide: docs/guides/11-try-on-digitalocean.md.
 #
 # First boot installs Fleet from the latest release tag, gets Let's Encrypt certificates for an <ip>.nip.io name (nothing to
-# set up in DNS), turns the firewall on for SSH, HTTP and HTTPS, and prints a one-time setup link to the console, to
-# /etc/motd and to /root/FLEET-READY.txt. Open that link first: whoever holds it creates the administrator account.
+# set up in DNS), turns the firewall on for SSH, HTTP and HTTPS, and writes a one-time setup link to the root-only file
+# /root/FLEET-READY.txt (the console and /etc/motd say how to read it). Open that link first: whoever holds it creates the administrator account.
 #
 # Edit the three settings below, nothing else is required.
 write_files:
@@ -28,6 +28,12 @@ write_files:
       READY=/root/FLEET-READY.txt
 
       say() { printf '[fleet-first-boot] %s\n' "$*"; }
+      on_failure() {
+        printf 'Fleet install FAILED (exit %s). Read /var/log/fleet-first-boot.log, then re-run:  sudo /usr/local/sbin/fleet-first-boot\n' "$1" >/etc/motd
+        chmod 0644 /etc/motd
+        cat /etc/motd >/dev/console 2>&1 || true
+      }
+      trap 'on_failure $?' ERR
 
       say "installing prerequisites"
       apt-get update -q
@@ -53,17 +59,16 @@ write_files:
         | bash -s -- "${args[@]}"
 
       url=$(fleet setup:token | tail -n 1)
-      umask 077
+      # The link is a credential: root-only file, never printed to the console or into any log.
+      ( umask 077; printf 'One-time setup link (valid 24 hours, or until you finish the wizard):\n  %s\n\nWhoever holds it creates the administrator account.\n' "$url" >"$READY" )
+      chmod 0600 "$READY"
       {
-        printf 'Fleet is installed.\n\n'
-        printf 'One-time setup link (valid 24 hours, or until you finish the wizard):\n  %s\n\n' "$url"
-        printf 'Open it first; whoever holds this link creates the administrator account.\n'
-        printf 'Teardown: destroy the Droplet in the DigitalOcean control panel.\n'
-      } >"$READY"
-      cp "$READY" /etc/motd
+        printf 'Fleet is installed.\n'
+        printf 'Read the one-time setup link as root:  sudo cat %s\n' "$READY"
+        printf 'Open it first. Teardown: destroy the Droplet in the DigitalOcean control panel.\n'
+      } >/etc/motd
       chmod 0644 /etc/motd
-      # The console shows it too (Droplet > Access > Droplet Console); cloud-init also logs it.
-      { cat "$READY"; } | tee /dev/console || true
+      { cat /etc/motd; } >/dev/console 2>&1 || true
       say "done"
 runcmd:
   - [bash, -c, "/usr/local/sbin/fleet-first-boot 2>&1 | tee -a /var/log/fleet-first-boot.log"]

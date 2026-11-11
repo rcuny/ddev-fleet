@@ -20,7 +20,7 @@ On first boot the file installs Fleet from the latest `v1.*` release tag, enable
 
 ## Read the link and finish the setup
 
-When it is done, the link is on the Droplet console (**Access > Droplet Console**), in `/etc/motd` at your next SSH login and in `/root/FLEET-READY.txt`. If it is not there yet, follow the progress with `tail -f /var/log/fleet-first-boot.log`; the whole run is also in `/var/log/cloud-init-output.log`.
+When it is done, the Droplet console (**Access > Droplet Console**) and `/etc/motd` at your next SSH login say so, and the link itself is in the root-only file `/root/FLEET-READY.txt`: read it with `sudo cat /root/FLEET-READY.txt`. If the install failed, the same places say so and name the log. If nothing is there yet, follow the progress with `tail -f /var/log/fleet-first-boot.log`; the whole run is also in `/var/log/cloud-init-output.log`. Neither log contains the link.
 
 Open the link first. It is valid for 24 hours or until you finish the wizard, and **whoever holds it creates the administrator account**: do not paste it anywhere public. Then follow the [setup wizard and first project](02-first-project.md).
 
@@ -28,7 +28,7 @@ Open the link first. It is valid for 24 hours or until you finish the wizard, an
 
 With `FLEET_DOMAIN='auto'` the installer calls the host `<ip-with-dashes>.nip.io`, for example `203-0-113-7.nip.io` for the address `203.0.113.7`, and instances `<instance>.203-0-113-7.nip.io`. The name works because [nip.io](https://nip.io) answers every such name with the address inside it, so there is no DNS to set up. Fleet's default `http01` TLS mode then asks Let's Encrypt for one certificate per host name (no wildcard certificate is possible for these names).
 
-nip.io is a free service run by a third party, so treat it as a test convenience, never as a production name: if it is down or blocked, the host's name stops resolving. Do not switch to `sslip.io` to work around a problem: it shares a Let's Encrypt rate-limit bucket with many other users. For anything you keep, set `FLEET_DOMAIN` to your own domain with an A record for it and for `auth.<your domain>` (or one wildcard record) pointing at the Droplet, or re-run the installer later with `--domain=<fqdn>`. The wildcard certificate through OVH DNS stays an explicit option in the setup wizard, never the default.
+nip.io is a free service run by a third party, so treat it as a test convenience, never as a production name: if it is down or blocked, the host's name stops resolving. All users of `nip.io` names share Let's Encrypt's certificate rate limits for that domain, so a certificate request can be refused when many people test at once; this guide makes no claim about the service's Public Suffix List status. Your own domain (`--domain=<fqdn>`) is the fallback. Do not switch to `sslip.io` to work around a problem: it shares a Let's Encrypt rate-limit bucket with many other users. For anything you keep, set `FLEET_DOMAIN` to your own domain with an A record for it and for `auth.<your domain>` (or one wildcard record) pointing at the Droplet, or re-run the installer later with `--domain=<fqdn>`. The wildcard certificate through OVH DNS stays an explicit option in the setup wizard, never the default.
 
 ## The same file from the command line
 
