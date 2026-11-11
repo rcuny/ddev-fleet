@@ -7,7 +7,7 @@ namespace App\Api\Terminal;
 use App\Fleet\Jobs\LogMasker;
 
 /**
- * Turns a raw pane capture into what the API may return: terminal escapes and control characters removed, registered
+ * Turns a raw pane capture into what the API may return: terminal escapes (an OSC payload without BEL or ST is cut to the end of its line) and control characters removed, registered
  * secrets masked, trailing blank lines dropped, and at most MAX_BYTES (the end of the capture is kept, valid UTF-8).
  */
 final readonly class TerminalText
@@ -25,7 +25,7 @@ final readonly class TerminalText
      */
     public function clean(string $raw): array
     {
-        $text = preg_replace('/\e\[[0-?]*[ -\/]*[@-~]|\e\][^\a\e]*(?:\a|\e\\\\)|\e[PX^_][^\e]*(?:\e\\\\)?|\e[@-Z\\\\-_]/', '', $raw) ?? '';
+        $text = preg_replace('/\e\[[0-?]*[ -\/]*[@-~]|\e\][^\a\e\n]*(?:\a|\e\\\\)|\e\][^\n]*|\e[PX^_][^\e]*(?:\e\\\\)?|\e[@-Z\\\\-_]/', '', $raw) ?? '';
         $text = str_replace(["\r\n", "\r"], "\n", $text);
         $text = preg_replace('/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/', '', $text) ?? '';
         $text = (string) preg_replace('/[^\S\n]+$/m', '', $text);

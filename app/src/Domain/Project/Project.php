@@ -67,6 +67,13 @@ class Project
     #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
     private bool $containerSsh = false;
 
+    /**
+     * Opt-in: the HTTP API may type into this project's agent panes (`terminal:write`, FLE-286). Off by default, changed only
+     * by the admin page behind re-auth, and not part of ProjectInput, the CLI or the export, so no import or script turns it on.
+     */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $allowApiTerminal = false;
+
     /** CPU threads all instances of the project may use together; null = unlimited (capacity allotments, FLE-197). */
     #[ORM\Column(type: Types::INTEGER, nullable: true)]
     private ?int $cpuThreads = null;
@@ -258,6 +265,17 @@ class Project
     public function changeContainerSsh(bool $containerSsh, ?\DateTimeImmutable $now = null): void
     {
         $this->containerSsh = $containerSsh;
+        $this->touch($now);
+    }
+
+    public function allowApiTerminal(): bool
+    {
+        return $this->allowApiTerminal;
+    }
+
+    public function changeAllowApiTerminal(bool $allow, ?\DateTimeImmutable $now = null): void
+    {
+        $this->allowApiTerminal = $allow;
         $this->touch($now);
     }
 

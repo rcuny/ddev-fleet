@@ -11,6 +11,9 @@ namespace App\Fleet\Workspace;
 final readonly class PaneInfo
 {
     public const string ROLE_SIDEBAR = 'sidebar';
+    /** Stable tags of the two shells, set when the window is healed with exactly two of them (FLE-286). */
+    public const string ROLE_TTY1 = 'tty1';
+    public const string ROLE_TTY2 = 'tty2';
 
     public function __construct(
         public string $id,
