@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-11
+
+### Added
+- API hardening follow-ups: opt-in mTLS for `/api/v1/*` (put a CA PEM at `/etc/caddy/fleet/api-client-ca.pem`; Caddy then refuses API calls without a verified client certificate, off by default); a private Mercure alert for every terminal write, sent (or failed after the keys may have been typed), shown live as a toast in the administrator's shell, plus a "Needs attention" count; expiry reminders for API tokens (`fleet:token:remind`, hourly worker check, one `api_token.expiring` audit entry a day, a warning in `fleet:token:list`) (FLE-289).
+
+
+- **FLE-296: a guide to git access and SSH keys.** `docs/guides/10-git-access-and-ssh-keys.md` explains in plain language which key reads (deploy), which pushes (push) and which reaches other git hosts (extra keys), what an instance can and cannot do with your code, how to set up pushing, rotate and revoke keys, and how to fix `Permission denied (publickey)`.
+
+- **FLE-301: container idempotency job for the host playbook.** `ci/ansible-idempotency.sh` runs `install/ansible/site.yml` twice in a Debian 13 systemd container and fails unless the second run reports `changed=0`; roles that cannot run in a container are skipped by tag. See `docs/contributing/03-ci.md`.
+
+### Changed
+- **FLE-263: `--engine` is deprecated.** `install.sh --engine=ansible` is accepted and ignored with a note (older
+  `fleet upgrade` helpers still pass it); `--engine=bash` is refused with exit 64 and a clear message.
+- **FLE-263: `fleet upgrade` moves a bash-installed host to Ansible.** On a host recorded as `bash` (or without
+  `installed-engine`), the first upgrade to this release runs the playbook, which reproduces the host with nothing
+  changed and writes `installed-engine=ansible`. The helper prints `Install engine: bash -> ansible` before the
+  backup. A rollback to a release that still has both engines passes `--engine=ansible` on an Ansible host.
+- **FLE-263: the app_code role removes the stale prod container cache** before a build, as the bash step did (FLE-281).
+
+
+- `JobPruner` requires the `ApiCallRepository`, so the terminal-input purge always runs, and the uniform-404 test compares the whole problem body (FLE-289, from the FLE-286 review).
+
+- **FLE-296: short inline help where keys matter.** The project form and the Keys & secrets tab say what Git over SSH in the container allows, the template form says what "Extra keys only" changes, the SSH keys tab lists the three keys in one line each, and a failed push key check says what to do. Each links to the guide.
+
+### Removed
+- **FLE-263: Ansible is the only install engine.** The bash installer steps (`install/steps/`), the bash hardening
+  (`install/harden/`) and the 0.x `ansible/` tree with its pytest tests and `ci/requirements-infra.txt` are removed
+  from `develop` (the 0.x line keeps them on the `legacy` branch). The firewall scripts and units live only in
+  `install/ansible/roles/hardening/files/`. The bash `Installer*Test` classes that drove the steps are replaced by
+  checks of the roles, the lint (`ansible-lint` production profile, `yamllint`, `--syntax-check` on `install/ansible/`)
+  and the existing idempotency job.
+
+### Fixed
+- **FLE-304: the guide links on the SSH keys tab, the project and template forms and in flash messages are 44 px tap
+  targets on a phone.** They were small inline text links (12 px high) and broke the phone tap-target spec on `develop`.
+
+### Security
+- **FLE-297: instance isolation, the db container is no longer reachable from other projects.** DDEV attaches every `db` container to the shared `ddev_default` network with the alias `db`, so an instance without its own database (`omit_containers: [db]`) resolved `db` to another project's database and could read and write it with the default credentials. Fleet now writes `.ddev/docker-compose.zzz-fleet-isolation.yaml` before every start path: the `db` service keeps only the project's own network, and an instance without a db container gets `db` and `ddev-<project>-db` pinned to `127.0.0.1` in every service. It needs DDEV >= 1.24.0 and docker compose >= 2.24.4. After each start Fleet inspects the live db container and fails the job (disconnecting it from `ddev_default`) when the isolation did not take effect. New command `fleet instance:isolate` lists instances deployed before the fix and, with `--apply`, restarts the running ones.
+
+- **FLE-298: deploy guard against privileged compose overrides.** A deploy, redeploy, start or restart is refused, before `ddev start`/`restart` (one shared check), when the instance's `.ddev/docker-compose*` or `config*` files mount the Docker socket, run privileged, share a host namespace, add SYS_ADMIN/NET_ADMIN/ALL, pass devices, run `exec-host` hooks, include other files or mount host paths outside the instance (symlinks and `${DDEV_*}/..` followed). An admin-only, re-authenticated, audited project switch (off by default) allows them. New read-only `instance:audit-overrides`, and `fleet:host:docker-socket [--restore]`; the status watcher checks that the Docker socket is `root:docker` 0660, audits and warns on Settings. See `docs/reference/17-instance-isolation.md`.
+
+
+- **FLE-300: instance isolation (audit 2026-11-11, R4 R5 R6 R8).** Every instance gets its own Typesense admin and search keys (derived from the project's keys; a redeploy replaces the old search key). Mailpit requires basic auth with a per-instance password shown on the instance page. The web container mounts the router's `traefik/` cache tree read-only, only when the host has Docker 26+ and Compose 2.23+ and `traefik/` already exists in the cache volume (otherwise a job log warning, and the next deploy applies it). The Typesense dashboard service is switched off by default (compose profile `dashboard`); a project setting (*Also run the Typesense dashboard*, `--typesense-dashboard`) turns it back on. The installer adds DDEV's shared `ddev-ssh-agent` container to the omitted containers (merged with any existing list); a manual `ddev auth ssh` no longer works on a Fleet host. Templates have two new options: *Instances have a database* (off: `FLEET_HAS_DB=0` and a poisoned `DB_HOST`) and *An AI agent works in these instances* (instance page warning, `FLEET_AGENT=1`); both are in the export format, the CLI (`--database`, `--agent`) and the API shapes.
+
+### Rollout
+- ACTION: after the upgrade run `fleet instance:isolate` to list the instances still exposed, then `fleet instance:isolate --apply` to restart the running ones (ends what runs in their containers; nothing is restarted automatically). New deploys and every start, restart or redeploy get the override on their own.
+- Per-instance random database credentials are not part of this change (tracked in FLE-302); the network isolation is the control.
+
+#### Rollout
+- Before the first upgrade of a bash-installed host to this release, test it on a throw-away host first: the bash to
+  Ansible switch runs the whole playbook on the live host (backup first, then `changed=0` is expected apart from the
+  rebuild of the application for the new version).
+- Run `sudo fleet instance:audit-overrides` after the upgrade; redeploy of an instance with a socket mount is refused until the project drops it or an admin allows it.
+- If the host socket is not `root:docker` 0660, run `sudo fleet host:docker-socket --restore`.
+- Projects that ship `exec-host` hooks need `allow_privileged_overrides` switched on before they deploy, start or restart on the new version.
+- Rotating `APP_SECRET` changes every Mailpit login: redeploy to apply the new ones.
+- Redeploy the instances to apply the new Typesense keys, the Mailpit login and the read-only mount (they are baked at deploy).
+- Re-run the installer (`ddev push-product`) so the DDEV global config omits `ddev-ssh-agent`; DDEV stops the container at the next `ddev start`.
+
 ## [1.8.0] - 2026-11-11
 
 ### Added
@@ -1429,7 +1488,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.9.0...HEAD
+[1.9.0]: https://github.com/rcuny/ddev-fleet/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/rcuny/ddev-fleet/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/rcuny/ddev-fleet/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/rcuny/ddev-fleet/compare/v1.6.0...v1.6.1
