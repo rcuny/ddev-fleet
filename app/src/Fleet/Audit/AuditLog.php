@@ -78,6 +78,8 @@ final readonly class AuditLog
     public const string REPAIR_SKIPPED = 'repair.skipped';
     /** A redeploy of a running instance was refused because the new checkout would fail the guard; the old instance was left running (FLE-319). */
     public const string REDEPLOY_REFUSED = 'redeploy.refused';
+    /** A redeploy of a running instance was stopped before teardown because the new checkout could not be cloned or scanned; the old instance was left running (FLE-323). */
+    public const string REDEPLOY_ABORTED = 'redeploy.aborted';
     /** The host's Docker socket was not root:docker 660 (FLE-298); the subject says what it was and whether it was restored. */
     public const string HOST_DOCKER_SOCKET = 'host.docker-socket';
 
