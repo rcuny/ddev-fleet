@@ -28,9 +28,9 @@ use Symfony\Component\Yaml\Yaml;
  * - a file that is a symlink, a directory, unreadable or unparsable, and a `.ddev` that is itself a symlink (it cannot be verified).
  *
  * `.ddev/web-build/*` (top-level files, FLE-314) is scanned as text for what a Dockerfile can add to the web image: a mention of
- * `docker.sock`, installing a Docker CLI or engine package (`docker.io`, `docker-ce`, `docker-ce-cli`, `docker-cli`,
- * `docker-compose-plugin`, `containerd.io`) and setuid or setgid bits (`chmod u+s`, `chmod 4755`, ...). Fleet's own
- * `Dockerfile.fleet-*` fragments are exempt; a symlinked or unreadable file is refused. `curl | sh` and `ADD <url>` are
+ * `docker.sock` (whole-line `#` comments are ignored), installing a Docker CLI or engine package (`docker.io`, `docker-ce`, `docker-ce-cli`, `docker-cli`,
+ * `docker-compose-plugin`, `containerd.io`) and setuid bits (`chmod u+s`, `chmod 4755`; setgid alone, `g+s` or `2775`, is allowed). Fleet's own
+ * `Dockerfile.fleet-*` fragments are exempt; subdirectories (build contexts) are not scanned; a symlinked or unreadable file is refused. `curl | sh` and `ADD <url>` are
  * deliberately not refused (ordinary build steps; the image has no socket or privilege to abuse).
  *
  * Bind sources are resolved to the instance directory (`${DDEV_APPROOT}` and friends), normalised, then followed through symlinks
@@ -138,17 +138,43 @@ final class ComposeOverrideGuard
 
             return;
         }
-        // Join backslash continuations so a package list or a chmod split over lines is still one line.
+        // Whole-line comments are ignored; backslash continuations are joined so a package list split over lines is one line.
+        $text = implode("\n", array_filter(explode("\n", $text), static fn (string $l): bool => !str_starts_with(ltrim($l), '#')));
         $text = preg_replace('/\\\r?\n\s*/', ' ', $text) ?? $text;
         if (str_contains($text, 'docker.sock')) {
             $violations[] = new OverrideViolation($relative, 'docker.sock', 'mentions the Docker socket, which gives the container root on the host');
         }
-        if (1 === preg_match('/(?<![\w.\/-])(docker\.io|docker-ce(?:-cli)?|docker-cli|docker-compose-plugin|containerd\.io)(?![\w.-])/i', $text)) {
+        // `docker.io/library/node` is a registry prefix, not the apt package: a following `/` is fine.
+        if (1 === preg_match('/(?<![\w.\/-])(docker\.io(?!\/)|docker-ce(?:-cli)?|docker-cli|docker-compose-plugin|containerd\.io)(?![\w.\/-])/i', $text)) {
             $violations[] = new OverrideViolation($relative, 'docker-cli', 'installs a Docker CLI or engine package into the web image');
         }
-        if (1 === preg_match('/\bchmod\b[^\n;&|]*?(?:\s[ugoa]*[+=][rwxXt]*s|\s0?[2-7][0-7]{3}\b)/i', $text)) {
-            $violations[] = new OverrideViolation($relative, 'chmod', 'sets a setuid or setgid bit, which can be used to gain root in the container');
+        if ($this->setsSetuid($text)) {
+            $violations[] = new OverrideViolation($relative, 'chmod', 'sets a setuid bit, which can be used to gain root in the container');
         }
+    }
+
+    /**
+     * A `chmod` that sets the setuid bit: numeric modes of four digits whose first digit has the 4 bit (4755, 6755), symbolic
+     * `u+s`, `a+s`, `ug+s` or a bare `+s`. Setgid alone (`g+s`, `2775`, the shared-group directory idiom) is allowed.
+     */
+    private function setsSetuid(string $text): bool
+    {
+        if (1 === preg_match('/\bchmod\b[^\n;&|]*?\s0?[4-7][0-7]{3}\b/i', $text)) {
+            return true;
+        }
+        if (0 < preg_match_all('/\bchmod\b([^\n;&|]*)/i', $text, $lines)) {
+            foreach ($lines[1] as $args) {
+                if (0 < preg_match_all('/(?:^|[\s,])([ugoa]*)[+=][rwxXt]*s/i', $args, $modes)) {
+                    foreach ($modes[1] as $who) {
+                        if ('' === $who || 1 === preg_match('/[ua]/i', $who)) {
+                            return true;
+                        }
+                    }
+                }
+            }
+        }
+
+        return false;
     }
 
     private static function untag(mixed $value): mixed
