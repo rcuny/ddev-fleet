@@ -100,7 +100,7 @@ final readonly class ProjectService
      * @throws NotFound
      * @throws ValidationFailed
      */
-    public function update(string $name, ProjectInput $input, bool $refresh = true): Project
+    public function update(string $name, ProjectInput $input, bool $refresh = true, bool $syncSlices = true): Project
     {
         $project = $this->get($name);
         $input = $input->normalised();
@@ -121,11 +121,63 @@ final readonly class ProjectService
             $this->sites?->refresh($project);
         }
         // A new limit reaches the running slice at once (no restart of the instances).
-        if ($limitBefore !== $project->cpuThreads()) {
+        if ($syncSlices && $limitBefore !== $project->cpuThreads()) {
             $this->slices?->sync();
         }
 
         return $project;
+    }
+
+    /**
+     * Changes the CPU threads and slots of several projects at once (the Adjust allotments sheet, FLE-318), all or
+     * nothing: every project goes through the rules of update(), the errors of all of them are collected, and one
+     * refusal rolls the whole batch back. The CPU slices are synced once, after the commit. Values equal to the stored
+     * ones are skipped.
+     *
+     * @param list<array{name: string, cpu_threads: int|null, slots: int|null}> $changes
+     *
+     * @return list<array{name: string, threads: array{int|null, int|null}, slots: array{int|null, int|null}}> what changed
+     *
+     * @throws CapacityBatchFailed
+     */
+    public function updateCapacities(array $changes): array
+    {
+        $done = $this->projects->transactional(function () use ($changes): array {
+            $done = [];
+            $errors = [];
+            foreach ($changes as $change) {
+                try {
+                    $project = $this->get($change['name']);
+                } catch (NotFound) {
+                    $errors[$change['name']] = ['cpu_threads' => \sprintf('Project "%s" does not exist.', $change['name'])];
+                    continue;
+                }
+                $before = ['threads' => $project->cpuThreads(), 'slots' => $project->slots()];
+                if ($before['threads'] === $change['cpu_threads'] && $before['slots'] === $change['slots']) {
+                    continue;
+                }
+                try {
+                    $this->update($project->name(), ProjectInput::fromProject($project)->with(['cpuThreads' => $change['cpu_threads'], 'slots' => $change['slots']]), false, false);
+                } catch (ValidationFailed $failed) {
+                    $errors[$change['name']] = array_filter([
+                        'cpu_threads' => $failed->errors['cpuThreads'] ?? null,
+                        'slots' => $failed->errors['slots'] ?? null,
+                    ]) ?: ['cpu_threads' => implode(' ', $failed->errors)];
+                    continue;
+                }
+                $done[] = ['name' => $change['name'], 'threads' => [$before['threads'], $change['cpu_threads']], 'slots' => [$before['slots'], $change['slots']]];
+            }
+            if ([] !== $errors) {
+                throw new CapacityBatchFailed($errors);
+            }
+
+            return $done;
+        });
+        if ([] !== $done) {
+            $this->slices?->sync();
+        }
+
+        return $done;
     }
 
     /**
