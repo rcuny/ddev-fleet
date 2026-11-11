@@ -36,6 +36,7 @@ final class InstanceWatcher
     public const int REMIND_SECONDS = 3600;
     public const int USAGE_SECONDS = 10;
     public const int SOCKET_SECONDS = 60;
+    public const int ISOLATION_SECONDS = 120;
 
     private ?\DateTimeImmutable $listedAt = null;
     private ?\DateTimeImmutable $measuredAt = null;
@@ -44,6 +45,10 @@ final class InstanceWatcher
     private ?\DateTimeImmutable $sampledAt = null;
     private ?\DateTimeImmutable $socketAt = null;
     private ?\DateTimeImmutable $remindedAt = null;
+    private ?\DateTimeImmutable $isolatedAt = null;
+
+    /** @var array<string, string> the last isolation failure logged per instance (logged again only when it changes) */
+    private array $isolationFailed = [];
 
     /** @var array<string, int> */
     private array $ram = [];
@@ -61,6 +66,7 @@ final class InstanceWatcher
         private readonly ?UsageSampler $usage = null,
         private readonly ?\App\Fleet\Host\Docker\DockerSocketWatch $socket = null,
         private readonly ?\App\Api\Token\ApiTokenReminder $reminder = null,
+        private readonly ?InstanceDbIsolationWriter $isolation = null,
     ) {
     }
 
@@ -122,7 +128,37 @@ final class InstanceWatcher
             $this->socketAt = $now;
         }
 
+        if (null !== $this->isolation && (null === $this->isolatedAt || self::due($this->isolatedAt, $now, self::ISOLATION_SECONDS))) {
+            $this->reconverge();
+            $this->isolatedAt = $now;
+        }
+
         return $changed;
+    }
+
+    /**
+     * FLE-307: DDEV may attach a db container to ddev_default again after a start (of this or another project) or a router
+     * restart; every running instance is converged (disconnect, log, audit) on each pass. A failure is only logged.
+     */
+    private function reconverge(): void
+    {
+        foreach ($this->instances->all() as $instance) {
+            if (InstanceState::Running !== $instance->state()) {
+                continue;
+            }
+            try {
+                $this->isolation?->converge($instance->id(), function (string $line) use ($instance): void {
+                    $this->logger->warning($instance->id().': '.$line);
+                });
+                unset($this->isolationFailed[$instance->id()]);
+            } catch (\RuntimeException $e) {
+                // A stuck disconnect is logged once per change of state, not every pass.
+                if (($this->isolationFailed[$instance->id()] ?? null) !== $e->getMessage()) {
+                    $this->isolationFailed[$instance->id()] = $e->getMessage();
+                    $this->logger->error('The network isolation of an instance could not be enforced.', ['instance' => $instance->id(), 'exception' => $e]);
+                }
+            }
+        }
     }
 
     /**

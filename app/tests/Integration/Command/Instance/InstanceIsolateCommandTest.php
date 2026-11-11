@@ -6,7 +6,9 @@ namespace App\Tests\Integration\Command\Instance;
 
 use App\Command\Instance\InstanceIsolateCommand;
 use App\Domain\Instance\InstanceState;
+use App\Fleet\Instances\InstanceDbIsolationWriter;
 use App\Fleet\Isolation\ComposeOverrideGuard;
+use App\Fleet\Shell\CommandResult;
 use App\Fleet\Workspace\ClaudeTokenApplier;
 use App\Tests\Support\InstanceJobTestCase;
 use Symfony\Component\Console\Tester\CommandTester;
@@ -18,12 +20,21 @@ final class InstanceIsolateCommandTest extends InstanceJobTestCase
         $applier = self::getContainer()->get(ClaudeTokenApplier::class);
         self::assertInstanceOf(ClaudeTokenApplier::class, $applier);
 
-        return new CommandTester(new InstanceIsolateCommand($this->instances, $this->paths, $applier, new ComposeOverrideGuard()));
+        // Every project looks exposed to the live check: one db container on ddev_default (the fake ignores the filter).
+        // The fake answers each expectation once, so queue one pair per running instance.
+        foreach ($this->instances->all() as $instance) {
+            if (InstanceState::Running === $instance->state()) {
+                $this->runner->expect(['docker', 'ps'], new CommandResult(0, "ddev-x-db|db|com.ddev.site-name=x\n"));
+                $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+            }
+        }
+
+        return new CommandTester(new InstanceIsolateCommand($this->instances, $applier, $this->paths, new ComposeOverrideGuard(), new InstanceDbIsolationWriter($this->ddev)));
     }
 
-    private function running(string $label, bool $refused = false): string
+    private function running(string $label, bool $refused = false, InstanceState $state = InstanceState::Running): string
     {
-        $instance = $this->instance($label, 'develop', InstanceState::Running);
+        $instance = $this->instance($label, 'develop', $state);
         $dir = $this->paths->instanceDir($instance->id());
         mkdir($dir.'/.ddev', 0o777, true);
         if ($refused) {
@@ -62,7 +73,7 @@ final class InstanceIsolateCommandTest extends InstanceJobTestCase
         $tester = $this->tester();
         self::assertSame(0, $tester->execute(['selectors' => [$a], '--apply' => true, '--yes' => true]));
         self::assertSame(1, $this->queued());
-        self::assertStringContainsString('1 instance(s) without', $tester->getDisplay());
+        self::assertStringContainsString('with a container on the shared ddev network', $tester->getDisplay());
     }
 
     public function testAnUnknownSelectorFailsWithoutQueueingAnything(): void
@@ -83,8 +94,32 @@ final class InstanceIsolateCommandTest extends InstanceJobTestCase
         self::assertSame(1, $tester->execute(['--apply' => true, '--force-refused' => true, '--yes' => true], ['interactive' => false]));
         self::assertSame(0, $this->queued());
 
+        $tester = $this->tester(); // fresh live-check answers for the second run
         $tester->setInputs(['yes', 'yes']);
         self::assertSame(0, $tester->execute(['--apply' => true, '--force-refused' => true]));
         self::assertSame(1, $this->queued());
+    }
+
+    public function testAProjectThatAllowsPrivilegedOverridesIsNotSkipped(): void
+    {
+        $this->running('sock', true);
+        $this->project->changeAllowPrivilegedOverrides(true);
+        $this->em->flush();
+
+        $tester = $this->tester();
+        self::assertSame(0, $tester->execute(['--apply' => true, '--yes' => true], ['interactive' => false]));
+        self::assertSame(1, $this->queued());
+        self::assertStringNotContainsString('the deploy guard refuses', $tester->getDisplay());
+    }
+
+    public function testAStoppedRefusedInstanceIsNeitherQueuedNorReported(): void
+    {
+        $this->running('ok');
+        $this->running('sock', true, InstanceState::Stopped);
+
+        $tester = $this->tester();
+        self::assertSame(0, $tester->execute(['--apply' => true, '--yes' => true], ['interactive' => false]));
+        self::assertSame(1, $this->queued());
+        self::assertStringNotContainsString('the deploy guard refuses', $tester->getDisplay());
     }
 }

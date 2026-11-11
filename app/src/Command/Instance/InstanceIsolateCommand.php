@@ -39,9 +39,10 @@ final class InstanceIsolateCommand extends Command
 {
     public function __construct(
         private readonly InstanceRepository $instances,
-        private readonly FleetPaths $paths,
         private readonly ClaudeTokenApplier $applier,
+        private readonly FleetPaths $paths,
         private readonly ComposeOverrideGuard $guard,
+        private readonly InstanceDbIsolationWriter $isolation,
     ) {
         parent::__construct();
     }
@@ -80,15 +81,20 @@ final class InstanceIsolateCommand extends Command
             if ([] !== $selectors && !\in_array($instance->id(), $selectors, true) && !\in_array($instance->project()->name(), $selectors, true)) {
                 continue;
             }
-            $dir = $this->paths->instanceDir($instance->id());
-            if (!is_dir($dir.'/.ddev') || InstanceDbIsolationWriter::isIsolated($dir)) {
+            if (InstanceState::Running !== $instance->state()) {
+                continue; // a stopped instance is converged by its next start
+            }
+            try {
+                if ([] === $this->isolation->exposed($instance->id())) {
+                    continue;
+                }
+            } catch (\RuntimeException $e) {
+                $io->warning($instance->id().': '.$e->getMessage());
                 continue;
             }
             $exposed[] = $instance->id();
-            if (InstanceState::Running !== $instance->state()) {
-                continue;
-            }
-            $violations = $instance->project()->allowPrivilegedOverrides() ? [] : $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]);
+            $dir = $this->paths->instanceDir($instance->id());
+            $violations = $instance->project()->allowPrivilegedOverrides() || !is_dir($dir.'/.ddev') ? [] : $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]);
             if ([] !== $violations) {
                 $refused[$instance->id()] = array_map(static fn ($v): string => $v->message(), $violations);
                 continue;
@@ -101,17 +107,17 @@ final class InstanceIsolateCommand extends Command
         $forceRefused = true === $input->getOption('force-refused');
 
         if ([] === $exposed) {
-            $io->success('Every instance has the database isolation override.');
+            $io->success('No running instance has a container on the shared ddev network.');
 
             return Command::SUCCESS;
         }
-        $io->writeln(\sprintf('%d instance(s) without the database isolation override (%d running):', \count($exposed), \count($running)));
+        $io->writeln(\sprintf('%d instance(s) with a container on the shared ddev network (%d running):', \count($exposed), \count($running)));
         $io->listing($exposed);
         foreach ($refused as $id => $messages) {
             $io->writeln(\sprintf('<comment>%s: the deploy guard refuses its overrides, so a restart would leave it stopped:</comment> %s', $id, OutputFormatter::escape(implode('; ', \array_slice($messages, 0, 3)))));
         }
         if (true !== $input->getOption('apply')) {
-            $io->note('Nothing changed. Run with --apply to restart the running ones; stopped ones get the override at their next restart or redeploy.');
+            $io->note('Nothing changed. Run with --apply to restart the running ones (the instance watcher also disconnects them within minutes).');
 
             return Command::SUCCESS;
         }
