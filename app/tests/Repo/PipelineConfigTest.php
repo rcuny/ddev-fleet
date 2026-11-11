@@ -265,6 +265,13 @@ final class PipelineConfigTest extends TestCase
         $disabledText = json_encode($disabled, \JSON_THROW_ON_ERROR);
         self::assertStringContainsString('debian', $disabledText);
         self::assertStringContainsString('"php"', $disabledText);
+
+        // ansible-core stays on Debian 13's series (FLE-284); the other pip tooling keeps updating.
+        $ansibleCore = array_values(array_filter($disabled, static fn (array $r): bool => ['ansible-core'] === ($r['matchPackageNames'] ?? null)));
+        self::assertCount(1, $ansibleCore);
+        self::assertSame(['install/ansible/requirements-dev.txt'], $ansibleCore[0]['matchFileNames']);
+        self::assertStringContainsString('Debian 13', $ansibleCore[0]['description']);
+        self::assertStringContainsString('Renovate ignores ansible-core', (string) file_get_contents(self::root().'/install/ansible/requirements-dev.txt'));
     }
 
     public function testRenovateConfigHasNoPythonAppOrVendoredAssetRules(): void

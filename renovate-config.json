@@ -158,6 +158,19 @@
       "groupName": "python ci tooling"
     },
     {
+      "description": "ansible-core in install/ansible/requirements-dev.txt is pinned to the version Debian 13 ships (apt), the deploy target: a lint run on a newer core hid a regex_search failure that broke on 2.19 (FLE-241, .jira/renaudcuny/FLE/FLE-241/2026-11-09-ansible-spike-report.md; FLE-284). Renovate must not bump it. Other python ci tooling updates keep working. Update the pin by hand when Debian ships a new series.",
+      "matchManagers": [
+        "pip_requirements"
+      ],
+      "matchFileNames": [
+        "install/ansible/requirements-dev.txt"
+      ],
+      "matchPackageNames": [
+        "ansible-core"
+      ],
+      "enabled": false
+    },
+    {
       "description": "Ansible Galaxy collections: one grouped PR",
       "matchManagers": [
         "ansible-galaxy"
