@@ -59,7 +59,7 @@ paths:
   /api/v1/host/capacity:
     get:
       operationId: getHostCapacity
-      summary: The `host:capacity --json` document (schema 1), plus a verdict when `project` is given.
+      summary: The `host:capacity --json` document (schema 1), plus a verdict when `project` is given. A project-limited token must pass `project` (one of its own) and gets the scoped document.
       tags: [host]
       x-scope: read
       parameters:
@@ -70,7 +70,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/RateLimited"}
-        "200": {description: The capacity report, content: {application/json: {schema: {$ref: "#/components/schemas/Capacity"}}}}
+        "200": {description: "The capacity report; for a project-limited token the scoped document (verdict, own figures, remaining instance headroom)", content: {application/json: {schema: {$ref: "#/components/schemas/Capacity"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/upgrade:
     get:
@@ -668,6 +668,11 @@ components:
       properties:
         schema: {type: integer}
         verdict: {type: [object, "null"]}
+        scope: {type: string, enum: [project], description: "Present for a project-limited token: the document holds only that project's verdict and figures."}
+        project: {type: string}
+        instances:
+          type: object
+          description: "Scoped document: `project_count` (the project's instances) and `remaining` (headroom under the host instance cap, a count only)."
     Upgrade:
       type: object
       required: [installed, latest, behind, engine, catalog_failed, pending_migrations]
