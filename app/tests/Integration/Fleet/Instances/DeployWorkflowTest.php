@@ -85,6 +85,51 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString('deploy.overrides-allowed acme--main: .ddev/docker-compose.dockersock.yaml: services.web.privileged', implode("\n", $actions));
     }
 
+    public function testARedeployOfARunningInstanceWhoseNewCheckoutIsRefusedLeavesItRunning(): void
+    {
+        // FLE-319: the old checkout and containers must survive; nothing is torn down or started.
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $dir = $this->paths->instanceDir($instance->id());
+        mkdir($dir.'/.ddev', 0o750, true);
+        file_put_contents($dir.'/marker', 'old');
+        $this->runner->expect(['git'], new CommandResult(0, ''), static function (array $argv): void {
+            $target = end($argv);
+            mkdir($target.'/.ddev', 0o750, true);
+            file_put_contents($target.'/.ddev/docker-compose.dockersock.yaml', "services:\n  web:\n    privileged: true\n");
+        });
+        $job = $this->job('redeploy', $instance);
+
+        try {
+            $this->workflow->run($instance, $this->project, true, $this->logFor($job), false);
+            self::fail('expected a refusal');
+        } catch (JobFailed $e) {
+            self::assertStringContainsString('still running its old checkout', $e->getMessage());
+            self::assertStringContainsString('docker-compose.dockersock.yaml:services.web.privileged', $e->getMessage());
+        }
+
+        self::assertSame(InstanceState::Running, $this->instances->find($instance->id())?->state());
+        self::assertFileExists($dir.'/marker');
+        self::assertNotContains('ddev delete', $this->commandNames());
+        self::assertNotContains('ddev start', $this->commandNames());
+        self::assertDirectoryDoesNotExist($this->paths->stagingDir().'/redeploy-'.$instance->id());
+        self::assertStringContainsString('redeploy refused', $this->logText($job));
+        $audit = $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'redeploy.refused']);
+        self::assertCount(1, $audit);
+    }
+
+    public function testARedeployOfARunningInstanceWithACleanNewCheckoutProceeds(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $job = $this->job('redeploy', $instance);
+
+        $this->workflow->run($instance, $this->project, true, $this->logFor($job), false);
+
+        self::assertSame(2, \count(array_keys($this->commandNames(), 'git clone', true)), 'the scan clone, then the real one');
+        self::assertContains('ddev start', $this->commandNames());
+        self::assertSame(InstanceState::Running, $this->instances->find($instance->id())?->state());
+        self::assertDirectoryDoesNotExist($this->paths->stagingDir().'/redeploy-'.$instance->id());
+    }
+
     public function testHappyPathRunsTheStepsInOrder(): void
     {
         $this->saveTemplate('full', ['ddev init', 'ddev drush cr'], 'dev');

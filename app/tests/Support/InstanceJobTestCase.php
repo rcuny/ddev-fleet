@@ -151,6 +151,8 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->steps,
             $cgroup,
             $pushCheck,
+            null,
+            new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock),
         );
     }
 

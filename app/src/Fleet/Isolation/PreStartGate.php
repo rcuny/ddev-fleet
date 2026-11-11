@@ -33,7 +33,17 @@ final readonly class PreStartGate
      */
     public function enforce(Instance $instance, string $dir, JobLog $log): void
     {
-        $this->scan($instance, $dir, $log);
+        $this->enforceScanned($instance, $dir, $log, $this->violations($instance, $dir));
+    }
+
+    /**
+     * @param list<OverrideViolation> $violations the result of one scan of $dir
+     *
+     * @throws JobFailed
+     */
+    private function enforceScanned(Instance $instance, string $dir, JobLog $log, array $violations): void
+    {
+        $this->refuse($instance, $log, $violations);
         // FLE-297: the database isolation override, on every start path (a stopped instance may predate it).
         if (is_dir($dir.'/.ddev')) {
             // FLE-313: Mailpit's basic auth must not fail DDEV's web healthcheck. After the scan: a Fleet-owned file, not scanned.
@@ -54,21 +64,23 @@ final readonly class PreStartGate
      * FLE-317: the gate for an automatic repair (the router converge's repairing `ddev start`), never for a person's start. If the
      * scan would refuse, nothing is stopped or restarted: the instance keeps running as it is, the skip is logged and audited
      * ("repair skipped: guard would refuse (<file:key>)", `fleet instance:audit-overrides` lists the same files), and JobFailed
-     * tells the caller to go no further. Otherwise it is the ordinary enforce().
+     * tells the caller to go no further. Otherwise it is the ordinary enforce(), on the same single scan (FLE-319).
      *
+     * @throws RepairSkipped
      * @throws JobFailed
      */
     public function enforceRepair(Instance $instance, string $dir, JobLog $log): void
     {
-        $refused = $this->refusals($instance, $dir);
+        $violations = $this->violations($instance, $dir);
+        $refused = $this->describe($instance, $violations);
         if ([] !== $refused) {
             $what = implode('; ', $refused);
             $log->line('repair skipped: guard would refuse ('.$what.'); the instance is left as it is');
             $this->audit->record('system', AuditLog::REPAIR_SKIPPED, $instance->id().': '.$what);
 
-            throw new JobFailed('repair skipped: guard would refuse ('.$what.')');
+            throw new RepairSkipped('repair skipped: guard would refuse ('.$what.')');
         }
-        $this->enforce($instance, $dir, $log);
+        $this->enforceScanned($instance, $dir, $log, $violations);
     }
 
     /**
@@ -76,14 +88,29 @@ final readonly class PreStartGate
      */
     public function refusals(Instance $instance, string $dir): array
     {
+        return $this->describe($instance, $this->violations($instance, $dir));
+    }
+
+    /**
+     * @return list<OverrideViolation>
+     */
+    private function violations(Instance $instance, string $dir): array
+    {
+        return $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]);
+    }
+
+    /**
+     * @param list<OverrideViolation> $violations
+     *
+     * @return list<string>
+     */
+    private function describe(Instance $instance, array $violations): array
+    {
         if ($instance->project()->allowPrivilegedOverrides()) {
             return [];
         }
 
-        return array_map(
-            static fn (OverrideViolation $v): string => $v->file.':'.$v->key,
-            $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]),
-        );
+        return array_map(static fn (OverrideViolation $v): string => $v->file.':'.$v->key, $violations);
     }
 
     /**
@@ -101,9 +128,11 @@ final readonly class PreStartGate
         }
     }
 
-    private function scan(Instance $instance, string $dir, JobLog $log): void
+    /**
+     * @param list<OverrideViolation> $violations
+     */
+    private function refuse(Instance $instance, JobLog $log, array $violations): void
     {
-        $violations = $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]);
         if ([] === $violations) {
             return;
         }

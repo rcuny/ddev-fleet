@@ -214,6 +214,25 @@ final class RouterConvergerTest extends PortMirrorTestCase
         self::assertStringContainsString('repair skipped: guard would refuse (.ddev/config.bridge.yaml:hooks.post-start[0].exec-host)', $log);
         $audit = $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'repair.skipped']);
         self::assertCount(1, $audit);
+        self::assertStringContainsString('the instance was left as it is (repair skipped', $log);
+        self::assertStringNotContainsString('"ddev start" was run again', $log);
+        self::assertStringNotContainsString('Self-repair problems', $log);
+    }
+
+    public function testARepairTheGuardAcceptsStillStartsTheInstance(): void
+    {
+        // FLE-319: the positive path of enforceRepair().
+        $this->mirror->sync();
+        $this->healthy();
+        $this->live->script(self::BASE);
+        $instance = $this->instance();
+        $dir = $this->checkout($instance);
+        $job = $this->job('deploy', $instance);
+
+        new PortMirrorConvergeStep($this->converger, $this->preStartGate())->run(new DeployContext($instance, $this->project, $dir, [], $this->logFor($job), $this->secretRenderer));
+
+        self::assertNotSame([], $this->runner->callsMatching(['ddev', 'start']));
+        self::assertStringNotContainsString('repair skipped', $this->logText($job));
     }
 
     public function testTheSyncStepRunsBeforeStartAndTheConvergeStepNeverFailsTheDeploy(): void

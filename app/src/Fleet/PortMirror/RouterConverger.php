@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\PortMirror;
 
 use App\Fleet\Ddev\Ddev;
+use App\Fleet\Isolation\RepairSkipped;
 use App\Fleet\Shell\CommandRunner;
 
 /**
@@ -141,6 +142,7 @@ final class RouterConverger
     private function repair(MirrorPlan $plan, string $instanceDir, callable $onOutput, string $reason, ?\Closure $beforeStart): never
     {
         $notes = [];
+        $skipped = null;
         try {
             $this->files->remove();
         } catch (\Throwable $e) {
@@ -159,6 +161,8 @@ final class RouterConverger
             if (!$start->isSuccess()) {
                 $notes[] = \sprintf('"ddev start" exited %d', $start->exitCode);
             }
+        } catch (RepairSkipped $e) {
+            $skipped = $e->getMessage();
         } catch (\Throwable $e) {
             $notes[] = '"ddev start" failed ('.$e->getMessage().')';
         }
@@ -166,7 +170,9 @@ final class RouterConverger
             $notes[] = 'second "docker restart '.self::ROUTER.'" failed';
         }
 
-        throw new PortMirrorFailed(\sprintf('The in-network port mirror could not be applied: %s. The mirror files were removed, "ddev start" was run again and %s restarted, so the router runs without the mirror.%s The mirror stays off (%s in %s) until you run "fleet port:refresh". Check "docker logs %s", or switch the mirror off in the host settings.', $reason, self::ROUTER, [] === $notes ? '' : ' Self-repair problems: '.implode('; ', $notes).'.', TraefikDirectory::MARKER_FILENAME, $this->traefik->dir(), self::ROUTER));
+        $startText = null === $skipped ? '"ddev start" was run again' : 'the instance was left as it is ('.$skipped.')';
+
+        throw new PortMirrorFailed(\sprintf('The in-network port mirror could not be applied: %s. The mirror files were removed, %s and %s restarted, so the router runs without the mirror.%s The mirror stays off (%s in %s) until you run "fleet port:refresh". Check "docker logs %s", or switch the mirror off in the host settings.', $reason, $startText, self::ROUTER, [] === $notes ? '' : ' Self-repair problems: '.implode('; ', $notes).'.', TraefikDirectory::MARKER_FILENAME, $this->traefik->dir(), self::ROUTER));
     }
 
     private function restartRouter(): bool
