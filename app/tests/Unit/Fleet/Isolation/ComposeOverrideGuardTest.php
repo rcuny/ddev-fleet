@@ -199,4 +199,36 @@ final class ComposeOverrideGuardTest extends TestCase
         self::assertSame([], new ComposeOverrideGuard()->scan($this->dir));
         unlink($this->dir.'/docker-compose.yaml');
     }
+
+    /** @return iterable<string, array{string, string, list<string>}> */
+    public static function webBuild(): iterable
+    {
+        yield 'docker.io' => ['Dockerfile', "FROM x\nRUN apt-get install -y curl docker.io\n", ['.ddev/web-build/Dockerfile docker-cli']];
+        yield 'docker-ce-cli, continued line' => ['Dockerfile.web', "RUN apt-get install -y \\\n  git docker-ce-cli\n", ['.ddev/web-build/Dockerfile.web docker-cli']];
+        yield 'socket' => ['pre.Dockerfile', "RUN ln -s /x /var/run/docker.sock\n", ['.ddev/web-build/pre.Dockerfile docker.sock']];
+        yield 'chmod u+s' => ['Dockerfile', "RUN chmod u+s /usr/bin/find\n", ['.ddev/web-build/Dockerfile chmod']];
+        yield 'chmod a+s' => ['Dockerfile', "RUN chmod -R ug+s,a+x /x\n", ['.ddev/web-build/Dockerfile chmod']];
+        yield 'chmod +s' => ['Dockerfile', "RUN chmod +s /x\n", ['.ddev/web-build/Dockerfile chmod']];
+        yield 'chmod 6755' => ['Dockerfile', "RUN chmod 6755 /x\n", ['.ddev/web-build/Dockerfile chmod']];
+        yield 'registry prefix' => ['Dockerfile', "FROM docker.io/library/node:20\nCOPY --from=docker.io/x/y /a /b\n", []];
+        yield 'setgid directory idiom' => ['Dockerfile', "RUN chmod 2775 /var/www && chmod g+s /var/www && chmod -R 1777 /tmp/x\n", []];
+        yield 'comment lines ignored' => ['Dockerfile', "# never mount docker.sock or install docker.io\n  # chmod u+s\nRUN true\n", []];
+        yield 'chmod 4755' => ['Dockerfile', "RUN chmod 4755 /bin/x\n", ['.ddev/web-build/Dockerfile chmod']];
+        yield 'ordinary build is fine' => ['Dockerfile', "RUN curl -fsSL https://x.example/i.sh | sh\nADD https://x.example/a.tgz /opt/\nRUN chmod 755 /x && chmod +x /y && apt-get install -y dockerize\n", []];
+        yield 'fleet fragment exempt' => ['Dockerfile.fleet-mailpit-healthcheck', "RUN chmod u+s /x docker.io\n", []];
+    }
+
+    /**
+     * @param list<string> $expected
+     */
+    #[DataProvider('webBuild')]
+    public function testWebBuildFiles(string $name, string $content, array $expected): void
+    {
+        mkdir($this->dir.'/.ddev/web-build');
+        file_put_contents($this->dir.'/.ddev/web-build/'.$name, $content);
+        $got = array_map(static fn ($v): string => $v->file.' '.$v->key, new ComposeOverrideGuard()->scan($this->dir));
+        unlink($this->dir.'/.ddev/web-build/'.$name);
+        rmdir($this->dir.'/.ddev/web-build');
+        self::assertSame($expected, $got);
+    }
 }
