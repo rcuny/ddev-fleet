@@ -86,6 +86,7 @@ Caddy is the only Internet-facing process; Authelia handles sign-in. The Fleet a
 - [Automate deploys](docs/guides/03-automate-deploys.md) and [the tmux workspace](docs/guides/05-work-with-agents.md)
 - [Use the HTTP API](docs/guides/09-use-the-api.md) with a token
 - [Git access and SSH keys](docs/guides/10-git-access-and-ssh-keys.md): who can read and push your code
+- [Try Fleet on DigitalOcean](docs/guides/11-try-on-digitalocean.md): a throw-away Droplet from one pasted file, no domain needed
 - [All guides](docs/guides/README.md) and [all reference pages](docs/reference/README.md)
 - [CLI reference](docs/reference/01-cli.md)
 - [Contributing](docs/contributing/README.md)

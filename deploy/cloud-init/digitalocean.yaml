@@ -1,0 +1,69 @@
+#cloud-config
+# Try Fleet on a DigitalOcean Droplet: paste this whole file into "Advanced Options > Add Initialization scripts" when you
+# create a Debian 13 Droplet (2 vCPU / 8 GB or more). Guide: docs/guides/11-try-on-digitalocean.md.
+#
+# First boot installs Fleet from the latest release tag, gets Let's Encrypt certificates for an <ip>.nip.io name (nothing to
+# set up in DNS), turns the firewall on for SSH, HTTP and HTTPS, and prints a one-time setup link to the console, to
+# /etc/motd and to /root/FLEET-READY.txt. Open that link first: whoever holds it creates the administrator account.
+#
+# Edit the three settings below, nothing else is required.
+write_files:
+  - path: /usr/local/sbin/fleet-first-boot
+    owner: root:root
+    permissions: "0700"
+    content: |
+      #!/usr/bin/env bash
+      # Settings -----------------------------------------------------------------------------------------------------
+      # Contact address Let's Encrypt may write to about expiring certificates. Optional.
+      ACME_EMAIL=''
+      # 'auto' = <public-ip-with-dashes>.nip.io, a test convenience (nip.io is run by a third party). For your own domain
+      # put its name here and create an A record for it and for auth.<name> pointing at this Droplet, or one wildcard record.
+      FLEET_DOMAIN='auto'
+      # A release tag such as v1.10.0, or leave empty for the latest v1.* tag.
+      FLEET_REF=''
+      # --------------------------------------------------------------------------------------------------------------
+      set -Eeuo pipefail
+      export DEBIAN_FRONTEND=noninteractive
+      REPO=https://github.com/rcuny/ddev-fleet.git
+      READY=/root/FLEET-READY.txt
+
+      say() { printf '[fleet-first-boot] %s\n' "$*"; }
+
+      say "installing prerequisites"
+      apt-get update -q
+      apt-get install -y -q ca-certificates curl git ufw
+
+      # Firewall first: SSH, HTTP (certificates) and HTTPS only. Docker's published ports are not affected by it.
+      ufw default deny incoming
+      ufw default allow outgoing
+      ufw allow 22/tcp
+      ufw allow 80/tcp
+      ufw allow 443/tcp
+      ufw --force enable
+
+      if [ -z "$FLEET_REF" ]; then
+        FLEET_REF=$(git ls-remote --tags --refs "$REPO" 'v1.*' | sed 's|.*refs/tags/||' | grep -E '^v1\.[0-9]+\.[0-9]+$' | sort -V | tail -n 1)
+      fi
+      [ -n "$FLEET_REF" ] || { say "could not find a release tag; set FLEET_REF"; exit 1; }
+      say "installing Fleet $FLEET_REF for domain $FLEET_DOMAIN (about 7 minutes)"
+
+      args=(--domain="$FLEET_DOMAIN" --ref="$FLEET_REF")
+      [ -z "$ACME_EMAIL" ] || args+=(--acme-email="$ACME_EMAIL")
+      curl -fsSL --proto '=https' --tlsv1.2 "https://raw.githubusercontent.com/rcuny/ddev-fleet/$FLEET_REF/install/install.sh" \
+        | bash -s -- "${args[@]}"
+
+      url=$(fleet setup:token | tail -n 1)
+      umask 077
+      {
+        printf 'Fleet is installed.\n\n'
+        printf 'One-time setup link (valid 24 hours, or until you finish the wizard):\n  %s\n\n' "$url"
+        printf 'Open it first; whoever holds this link creates the administrator account.\n'
+        printf 'Teardown: destroy the Droplet in the DigitalOcean control panel.\n'
+      } >"$READY"
+      cp "$READY" /etc/motd
+      chmod 0644 /etc/motd
+      # The console shows it too (Droplet > Access > Droplet Console); cloud-init also logs it.
+      { cat "$READY"; } | tee /dev/console || true
+      say "done"
+runcmd:
+  - [bash, -c, "/usr/local/sbin/fleet-first-boot 2>&1 | tee -a /var/log/fleet-first-boot.log"]

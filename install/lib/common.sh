@@ -232,6 +232,8 @@ Installs ddev-fleet on a fresh Debian 13 host. Re-running upgrades an existing i
 Required:
   --domain=<fqdn>       public host name of this fleet, e.g. fleet.example.com. The DNS records for
                         <fqdn> and auth.<fqdn> (or one wildcard record) must already point at this host.
+                        --domain=auto derives <ip-with-dashes>.nip.io from this host's public IPv4 address
+                        (a test convenience: nip.io is a third-party service, see docs/guides/11-try-on-digitalocean.md)
 
 Options:
   --acme-email=<email>  contact address for Let's Encrypt
@@ -287,6 +289,20 @@ validate_repo_url() {
   [[ $1 =~ ^[A-Za-z0-9/][A-Za-z0-9._/:@+~%=-]{0,499}$ ]]
 }
 
+# --domain=auto: <ip-with-dashes>.nip.io from the public IPv4 address (FLEET_PUBLIC_IPV4 overrides the lookup, for tests).
+# nip.io answers every <anything>.<ip-with-dashes>.nip.io with that address, so the DNS check passes without any record, and
+# the http01 TLS mode gets one Let's Encrypt certificate per host name (no wildcard is needed or possible there).
+# In a dry run with no address available the documentation address 192.0.2.1 is used so the plan can still be printed.
+auto_domain() {
+  local ip=${FLEET_PUBLIC_IPV4:-}
+  [ -n "$ip" ] || ip=$(public_addr 4)
+  if [ -z "$ip" ] && is_dry; then
+    ip=192.0.2.1
+  fi
+  [[ $ip =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] || die "$EX_USAGE" "--domain=auto could not find this host's public IPv4 address; pass --domain=<fqdn> instead"
+  printf '%s.nip.io\n' "${ip//./-}"
+}
+
 parse_args() {
   local arg
   for arg in "$@"; do
@@ -333,6 +349,10 @@ parse_args() {
     usage >&2
     die "$EX_USAGE" "--domain=<fqdn> is required"
   }
+  if [ "$DOMAIN" = auto ]; then
+    DOMAIN=$(auto_domain)
+    printf 'Using %s as the domain (--domain=auto, derived from this host'"'"'s public IPv4 address)\n' "$DOMAIN"
+  fi
   validate_domain "$DOMAIN" || die "$EX_USAGE" "--domain must be a lowercase fully qualified host name such as fleet.example.com (no wildcard, port or IP address)"
   if [ -n "$ACME_EMAIL" ]; then
     validate_email "$ACME_EMAIL" || die "$EX_USAGE" "--acme-email is not a valid email address"
