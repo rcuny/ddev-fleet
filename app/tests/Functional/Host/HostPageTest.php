@@ -54,6 +54,13 @@ final class HostPageTest extends HostPageTestCase
         self::assertCount(0, $crawler->filter('input[name*=domain], input[name*=tls]'));
     }
 
+    public function testGeneralShowsTheToolVersions(): void
+    {
+        $crawler = $this->open('/admin/host');
+
+        self::assertCount(3, $crawler->filter('[data-testid=host-tool-version]'));
+    }
+
     public function testAcmeEmailIsSavedValidatedAndCleared(): void
     {
         $this->submit('general', 'Save', ['host_general[acmeEmail]' => '  ops@example.com ']);

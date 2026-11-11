@@ -32,6 +32,7 @@ Find the shortest path to what you want to do. Pick a journey below, or scan the
 - [Secure the host](guides/08-secure-the-host.md): security model and hardening.
 - [Use the API](guides/09-use-the-api.md): create a token, call the HTTP API.
 - [Git access and SSH keys](guides/10-git-access-and-ssh-keys.md): which key reads, which pushes, what an instance can do.
+- [Try Fleet on DigitalOcean](guides/11-try-on-digitalocean.md): a throw-away Droplet from one pasted cloud-init file, no domain needed.
 
 **Reference** ([index](reference/README.md))
 - [CLI](reference/01-cli.md): every command.

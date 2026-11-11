@@ -50,6 +50,8 @@ Installs ddev-fleet on a fresh Debian 13 host. Re-running upgrades an existing i
 Required:
   --domain=<fqdn>       public host name of this fleet, e.g. fleet.example.com. The DNS records for
                         <fqdn> and auth.<fqdn> (or one wildcard record) must already point at this host.
+                        --domain=auto derives <ip-with-dashes>.nip.io from this host's public IPv4 address
+                        (a test convenience: nip.io is a third-party service, see docs/guides/11-try-on-digitalocean.md)
 
 Options:
   --acme-email=<email>  contact address for Let's Encrypt
@@ -137,7 +139,8 @@ USAGE
     usage >&2
     fail 64 "--domain=<fqdn> is required"
   fi
-  valid_domain "$domain" || fail 64 "--domain must be a lowercase fully qualified host name such as fleet.example.com (no wildcard, port or IP address)"
+  # --domain=auto is resolved by stage 2 (lib/common.sh), once curl is installed.
+  [ "$domain" = auto ] || valid_domain "$domain" || fail 64 "--domain must be a lowercase fully qualified host name such as fleet.example.com (no wildcard, port or IP address)"
   if [ -n "$acme_email" ]; then
     valid_email "$acme_email" || fail 64 "--acme-email is not a valid email address"
   fi

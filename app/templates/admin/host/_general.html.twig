@@ -15,6 +15,21 @@
                 <dd><strong>{{ host.tlsMode.value }}</strong></dd>
             </div>
         </dl>
+        {% if toolVersions is defined and toolVersions is not empty %}
+            <dl class="grid gap-4 sm:grid-cols-3" data-testid="host-tool-versions">
+                {% for tool in toolVersions %}
+                    <div data-testid="host-tool-version">
+                        <dt class="text-sm text-ink-muted">{{ tool.label }}</dt>
+                        <dd>
+                            <strong>{{ tool.version ?? 'unknown' }}</strong>
+                            {% if not tool.ok %}
+                                <span class="block text-sm text-signal-darker dark:text-signal" data-testid="host-tool-version-warning">needs {{ tool.minimum }} or newer; the instance isolation features rely on it</span>
+                            {% endif %}
+                        </dd>
+                    </div>
+                {% endfor %}
+            </dl>
+        {% endif %}
         <div class="grid gap-2 text-sm" data-testid="host-general-cli">
             <p><strong>Domain.</strong> Set by the installer. Changing it after setup is not supported yet: it involves DNS records, certificates and the sign-in cookie domain.</p>
             <p><strong>TLS mode.</strong> Run <code class="break-all">sudo fleet setup:reset</code> on the host, change the mode in the setup wizard's second step and finish again. If Caddy does not come back after a change, go back to HTTP-01 from a shell: <code class="break-all">sudo fleet host:init --tls-mode=http01 --force &amp;&amp; sudo fleet host:render --apply &amp;&amp; sudo systemctl restart caddy</code>.</p>

@@ -36,6 +36,8 @@ final readonly class AuditLog
     public const string REAUTH_FAILURE = 'reauth.failure';
     public const string REAUTH_REQUIRED = 'reauth.required';
 
+    /** A project's CPU threads or slots allotment changed (the Adjust allotments sheet, FLE-318); one entry per project. */
+    public const string PROJECT_CAPACITY = 'project.capacity';
     public const string PROJECT_EXPORT = 'project.export';
     public const string PROJECT_IMPORT = 'project.import';
 
@@ -72,7 +74,12 @@ final readonly class AuditLog
     public const string PROJECT_PRIVILEGED_OVERRIDES = 'project.privileged-overrides';
     /** A deploy ran with the guard off for its project, with the violations it let through (FLE-298). */
     public const string DEPLOY_OVERRIDES_ALLOWED = 'deploy.overrides-allowed';
+    /** An automatic repair (router converge) was skipped because the guard would refuse the instance; nothing was stopped (FLE-317). */
     public const string REPAIR_SKIPPED = 'repair.skipped';
+    /** A redeploy of a running instance was refused because the new checkout would fail the guard; the old instance was left running (FLE-319). */
+    public const string REDEPLOY_REFUSED = 'redeploy.refused';
+    /** A redeploy of a running instance was stopped before teardown because the new checkout could not be cloned or scanned; the old instance was left running (FLE-323). */
+    public const string REDEPLOY_ABORTED = 'redeploy.aborted';
     /** The host's Docker socket was not root:docker 660 (FLE-298); the subject says what it was and whether it was restored. */
     public const string HOST_DOCKER_SOCKET = 'host.docker-socket';
 
