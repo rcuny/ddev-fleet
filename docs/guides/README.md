@@ -13,5 +13,6 @@ Task-oriented pages, in the order you will most likely need them: install Fleet,
 | [operate.md](07-operate.md) | Back up, upgrade, move projects, manage capacity |
 | [secure-the-host.md](08-secure-the-host.md) | Understand the security model and harden the host |
 | [use-the-api.md](09-use-the-api.md) | Create an API token and call Fleet from scripts and CI |
+| [git-access-and-ssh-keys.md](10-git-access-and-ssh-keys.md) | Understand which key reads, which pushes, and what an instance can do with your code |
 
 Looking up a flag, a field or a path instead? Go to the [reference](../reference/README.md). New to the vocabulary? Read [concepts](../concepts.md) first.

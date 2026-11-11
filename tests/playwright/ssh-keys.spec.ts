@@ -26,6 +26,13 @@ test.describe('SSH keys view', () => {
     await expect(page.getByTestId('ssh-key-card').first()).toBeVisible();
     await expect(page.getByTestId('ssh-key-create-form')).toBeVisible();
     await expect(page.getByTestId('ssh-key-import-form')).toBeVisible();
+    // Inline help (FLE-296): the three keys in one line each, and the help next to the push key check.
+    const overview = page.getByTestId('ssh-keys-overview');
+    await expect(overview).toContainText('deploy reads');
+    await expect(overview).toContainText('push writes');
+    await expect(overview).toContainText('extra keys reach other git hosts');
+    await expect(page.getByTestId('ssh-key-check-help')).toHaveAttribute('href', /10-git-access-and-ssh-keys\.md#troubleshooting$/);
+    await expect(page.getByTestId('host-tab-ssh')).toContainText('register the public key above on the git host with write access');
     expect(await hasHorizontalOverflow(page)).toBe(false);
     await expectNoBlockingViolations(page, 'SSH keys view');
     expect(unexpectedErrors(errors)).toEqual([]);

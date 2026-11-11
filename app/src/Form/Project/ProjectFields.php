@@ -92,7 +92,7 @@ final class ProjectFields
         $builder->add('containerSsh', CheckboxType::class, [
             'label' => 'Git over SSH inside the container: a dedicated ssh-agent with the push key for each instance',
             'required' => false,
-            'help' => 'Only for projects whose agents push from the web container. The key is usable by every process in that instance\'s container while the agent runs.',
+            'help' => 'Only for projects whose agents push from the web container. Turning it on lets agents in an instance push with the host\'s push key, wherever the git host allows that key to write; every process in that container can use it while the agent runs. Guide: docs/guides/10-git-access-and-ssh-keys.md.',
         ]);
     }
 

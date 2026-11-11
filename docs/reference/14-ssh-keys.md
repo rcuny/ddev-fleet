@@ -1,5 +1,7 @@
 # SSH keys
 
+New to this? Start with the guide [Git access and SSH keys](../guides/10-git-access-and-ssh-keys.md), which explains in plain language what each key lets an instance do. This page is the reference.
+
 Fleet uses SSH keys for two different jobs: the host pulls your code, and an instance may push it. This page is the one place that says which key does what, where it lives and who decides when it is used. The list of every key, with fingerprints and public halves, is the **SSH keys** tab of the host settings (`/admin/host/ssh-keys`) and `fleet ssh:key:list`.
 
 ## The keys

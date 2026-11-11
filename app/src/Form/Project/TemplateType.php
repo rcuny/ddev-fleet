@@ -78,7 +78,7 @@ final class TemplateType extends AbstractType
                 'label' => 'SSH identities',
                 'required' => true,
                 'choices' => array_combine(array_map(static fn (SshIdentities $i): string => $i->label(), SshIdentities::cases()), array_map(static fn (SshIdentities $i): string => $i->value, SshIdentities::cases())),
-                'help' => 'Which keys the instance\'s own ssh-agent holds. "Extra keys only" keeps the host\'s push (write) key out of a narrow-purpose instance; it needs at least one extra key.',
+                'help' => 'Which keys the instance\'s own ssh-agent holds. "Extra keys only" keeps the host\'s push (write) key out of a narrow-purpose instance; it needs at least one extra key. Guide: docs/guides/10-git-access-and-ssh-keys.md.',
             ])
             ->add('cpuThreads', IntegerType::class, [
                 'label' => 'CPU threads',
