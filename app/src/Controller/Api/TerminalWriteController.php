@@ -8,6 +8,7 @@ use App\Api\Http\ApiProblem;
 use App\Api\Http\ClientAddress;
 use App\Api\Terminal\EvidenceMasker;
 use App\Api\Terminal\TerminalInput;
+use App\Api\Terminal\TerminalWriteNotifier;
 use App\Api\Token\ApiTokenPolicy;
 use App\Api\Write\JsonBody;
 use App\Domain\ApiCall\ApiCall;
@@ -53,6 +54,7 @@ final readonly class TerminalWriteController
         #[Autowire(service: 'limiter.api_terminal_write_denied')]
         private RateLimiterFactoryInterface $denied,
         private EvidenceMasker $masker,
+        private TerminalWriteNotifier $notifier,
     ) {
     }
 
@@ -147,6 +149,7 @@ final readonly class TerminalWriteController
             throw ApiProblem::conflict('pane_changed', 'The pane stopped running the agent before the call completed; Enter was not sent.');
         }
         $this->finish($call, ApiCall::SENT);
+        $this->notifier->sent($call);
 
         return new JsonResponse([
             'instance' => $id,

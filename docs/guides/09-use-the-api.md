@@ -88,7 +88,8 @@ sudo fleet token:revoke <id>
 
 - **Rotate** before expiry. The successor has the same scopes and limits; the old token is revoked at once, or after `--grace` seconds (3600 at most) so a client can switch without downtime. Run `token:rotate` again on the successor, not on the old token.
 - **Revoke** a token the moment it leaks or its job ends.
-- **Needs attention.** `token:list` and the **API tokens** page flag tokens that expire within 14 days (`EXPIRING`) or have not been used for 60 days (`UNUSED`). Revoke the unused ones.
+- **Needs attention.** `token:list` and the **API tokens** page flag tokens that expire within 14 days (`EXPIRING`) or have not been used for 60 days (`UNUSED`). Revoke the unused ones. `sudo fleet token:remind` (also run by the worker once an hour) writes one `api_token.expiring` audit entry a day for each token in that window and prints a `WARNING` line for it; `token:list` prints the same warning on stderr, so `--json` stays clean.
+- **Terminal input alerts.** Every terminal write also publishes a private Mercure update on `/alerts/terminal-write` (instance, pane, token, length, time; never the text) and shows as a count under **Needs attention** on the **API tokens** page, with the text itself in the audit view. If the hub is down the call still goes through; the evidence and the audit entry are the record.
 - **Audit.** Creation, rotation, revocation and every refused call (`api.denied`) are in the audit log, and each accepted write is recorded as `api.write` with the token id.
 - **Storage.** Keep the secret in a secrets manager or the CI's secret variables, or in an env file only the caller can read. Never commit it to a repository. Fleet stores only a hash, so a lost secret cannot be recovered: rotate it.
 
@@ -113,3 +114,7 @@ Add `-s deploy` to let it deploy and redeploy, `-s lifecycle:destroy` to let it 
 - [The API reference](../reference/15-api.md)
 - [Share and access](06-share-and-access.md)
 - [Secure the host](08-secure-the-host.md)
+
+## Require a client certificate (optional)
+
+Off by default. To add mutual TLS in front of `/api/v1/*`, put the PEM file of the CA that signs your client certificates at `/etc/caddy/fleet/api-client-ca.pem` (readable by the `caddy` user) and run `sudo fleet host:render --apply`. From then on Caddy asks for a client certificate on the host's main site, verifies one when offered against that CA, and answers `403` to any `/api/v1/*` call without one; a certificate the CA did not sign fails the handshake. The browser UI is unaffected (it offers no certificate and needs none). The bearer token is still required: the certificate is a second factor, not a replacement. To turn it off, remove the file and render again. Test with `curl --cert client.pem --key client.key https://<host>/api/v1/tokens/self -H "Authorization: Bearer flt_..."`.

@@ -32,6 +32,8 @@ final class InstanceWatcher
     public const int LIST_SECONDS = 10;
     public const int RAM_SECONDS = 30;
     public const int PRUNE_SECONDS = 86400;
+    /** The API token expiry reminder runs this often; it writes at most one audit entry a day per token. */
+    public const int REMIND_SECONDS = 3600;
     public const int USAGE_SECONDS = 10;
 
     private ?\DateTimeImmutable $listedAt = null;
@@ -39,6 +41,7 @@ final class InstanceWatcher
     private ?\DateTimeImmutable $prunedAt = null;
     private ?\DateTimeImmutable $agentsAt = null;
     private ?\DateTimeImmutable $sampledAt = null;
+    private ?\DateTimeImmutable $remindedAt = null;
 
     /** @var array<string, int> */
     private array $ram = [];
@@ -54,6 +57,7 @@ final class InstanceWatcher
         private readonly ?InstanceSshAgent $agent = null,
         private readonly LoggerInterface $logger = new NullLogger(),
         private readonly ?UsageSampler $usage = null,
+        private readonly ?\App\Api\Token\ApiTokenReminder $reminder = null,
     ) {
     }
 
@@ -78,6 +82,16 @@ final class InstanceWatcher
         if (null === $this->prunedAt || self::due($this->prunedAt, $now, self::PRUNE_SECONDS)) {
             $this->pruner->prune($this->retentionDays);
             $this->prunedAt = $now;
+        }
+
+        if (null !== $this->reminder && (null === $this->remindedAt || self::due($this->remindedAt, $now, self::REMIND_SECONDS))) {
+            // FLE-289: the daily API token expiry reminder; a failure must not stop the state updates.
+            try {
+                $this->reminder->remind();
+            } catch (\Throwable $e) {
+                $this->logger->warning('The API token reminder failed.', ['exception' => $e]);
+            }
+            $this->remindedAt = $now;
         }
 
         if (null !== $this->agent && (null === $this->agentsAt || self::due($this->agentsAt, $now, InstanceSshAgent::REFRESH_SECONDS))) {

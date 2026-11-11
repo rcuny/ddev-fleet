@@ -35,6 +35,7 @@ final class ApiTokenController extends AbstractController
         private readonly ReauthGuard $reauth,
         private readonly CurrentActor $actor,
         private readonly ClockInterface $clock,
+        private readonly \App\Domain\ApiCall\ApiCallRepository $apiCalls,
     ) {
     }
 
@@ -144,6 +145,7 @@ final class ApiTokenController extends AbstractController
             'now' => $now,
             'expiring' => ApiTokenWatch::expiring($all, $now),
             'unused' => ApiTokenWatch::unused($all, $now),
+            'terminal_calls_24h' => $this->apiCalls->countSince($now->modify('-24 hours')),
             'expiring_days' => ApiTokenWatch::EXPIRING_DAYS,
             'unused_days' => ApiTokenWatch::UNUSED_DAYS,
             'scopes' => ApiScope::cases(),

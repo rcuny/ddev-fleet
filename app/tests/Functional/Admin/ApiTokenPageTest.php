@@ -162,4 +162,20 @@ final class ApiTokenPageTest extends AdminTestCase
         self::assertCount(1, $crawler->filter('[data-testid=api-token-expiring] li'));
         self::assertCount(0, $crawler->filter('[data-testid=api-token-unused]'));
     }
+
+    public function testTheAttentionPanelCountsRecentTerminalInput(): void
+    {
+        $crawler = $this->open('/admin/api-tokens');
+        self::assertCount(0, $crawler->filter('[data-testid=api-token-terminal-writes]'));
+
+        $calls = self::getContainer()->get(\App\Domain\ApiCall\ApiCallRepository::class);
+        $calls->save(new \App\Domain\ApiCall\ApiCall(1, 'token:1:orch', 'POST terminal', 'blog--main', 'tty2', 'claude', '192.0.2.1', 5, hash('sha256', 'hello'), 'hello', true, new \DateTimeImmutable('-1 hour')));
+        $calls->save(new \App\Domain\ApiCall\ApiCall(1, 'token:1:orch', 'POST terminal', 'blog--main', 'tty2', 'claude', '192.0.2.1', 5, hash('sha256', 'old'), 'old', true, new \DateTimeImmutable('-3 days')));
+
+        $crawler = $this->open('/admin/api-tokens');
+
+        self::assertCount(1, $crawler->filter('[data-testid=api-token-terminal-writes]'));
+        self::assertStringContainsString('1 call in the last 24 hours', $crawler->filter('[data-testid=api-token-terminal-writes]')->text());
+        self::assertStringNotContainsString('hello', $crawler->filter('[data-testid=api-token-terminal-writes]')->text(), 'the text stays in the audit view');
+    }
 }

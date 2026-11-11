@@ -315,11 +315,13 @@ final class ApiTerminalWriteTest extends AdminTestCase
         $answers['outside patterns'] = [$this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--other-*'])), $this->client->getResponse()->getStatusCode()];
         $answers['token for another project'] = [$this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--fle-*'], ['demo'])), $this->client->getResponse()->getStatusCode()];
 
+        $reference = $answers['missing'][0];
+        unset($reference['request_id']);
         foreach ($answers as $label => [$body, $status]) {
             self::assertSame(404, $status, $label);
             unset($body['request_id']);
-            self::assertSame($answers['missing'][0]['detail'], $body['detail'], $label);
-            self::assertSame($answers['missing'][0]['code'], $body['code'], $label);
+            // The whole problem body, not selected fields: any extra key or changed value would tell the cases apart.
+            self::assertSame($reference, $body, $label);
             self::assertStringNotContainsString('acme', json_encode($body, \JSON_THROW_ON_ERROR), $label);
         }
         self::assertSame(0, $this->sendCalls());

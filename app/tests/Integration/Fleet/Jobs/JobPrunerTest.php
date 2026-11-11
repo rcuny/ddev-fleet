@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Integration\Fleet\Jobs;
 
+use App\Domain\ApiCall\ApiCall;
+use App\Domain\ApiCall\ApiCallRepository;
 use App\Domain\Job\Job;
 use App\Domain\Job\JobRepository;
 use App\Domain\Job\JobStatus;
@@ -14,7 +16,7 @@ final class JobPrunerTest extends InstanceJobTestCase
 {
     private function pruner(): JobPruner
     {
-        return new JobPruner(new JobRepository($this->em), $this->paths, $this->clock);
+        return new JobPruner(new JobRepository($this->em), $this->paths, $this->clock, new ApiCallRepository($this->em));
     }
 
     private function finished(string $type, JobStatus $status, string $ago): Job
@@ -81,5 +83,19 @@ final class JobPrunerTest extends InstanceJobTestCase
         $this->expectException(\InvalidArgumentException::class);
 
         $this->pruner()->prune(0);
+    }
+
+    public function testPurgesTerminalEvidenceOlderThanTheRetention(): void
+    {
+        $calls = new ApiCallRepository($this->em);
+        $old = new ApiCall(1, 'tok', 'POST terminal', 'acme--main', 'tty2', 'claude', '127.0.0.1', 5, hash('sha256', 'old'), 'old', true, $this->clock->now()->modify('-100 days'));
+        $new = new ApiCall(1, 'tok', 'POST terminal', 'acme--main', 'tty2', 'claude', '127.0.0.1', 3, hash('sha256', 'new'), 'new', true, $this->clock->now()->modify('-1 day'));
+        $calls->save($old);
+        $calls->save($new);
+
+        $this->pruner()->prune(90);
+
+        $this->em->clear();
+        self::assertSame(['new'], array_map(static fn (ApiCall $c): string => $c->text(), $calls->latest()));
     }
 }
