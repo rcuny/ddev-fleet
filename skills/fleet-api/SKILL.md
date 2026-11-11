@@ -39,7 +39,7 @@ Run `python3 skills/fleet-api/bin/fleet_api.py <command>` (the path is where thi
 | `instance <id>` | One instance and its last five jobs; `created_at` | `read` |
 | `job <id>` | A job's status (`final`, `error`, `exit_code`) | `read` |
 | `job-log <id> [--offset N]` | Log from byte N; stderr prints `next-offset=... state=... done=...`. Poll with the printed offset every 2 to 5 seconds to tail | `read` |
-| `capacity` | Capacity verdict for the own project. **Not available yet**: fails with `capacity_unavailable` and sends nothing. Do not guess a verdict | - |
+| `capacity [--project P --template T]` | Capacity verdict (`verdict.ok`, `reasons`, `instances.remaining`) of the own project, from the project-scoped `GET /host/capacity`. `--project` is optional when the token names exactly one project. Do not guess a verdict | `read` |
 | `deploy --project P [--branch B --template T --label L] [--wait]` | Create an instance | `deploy` |
 | `redeploy <id> [--branch B --template T --force] [--wait]` | Redeploy | `deploy` |
 | `start <id>`, `stop <id>` `[--wait]` | Start or stop | `lifecycle` |

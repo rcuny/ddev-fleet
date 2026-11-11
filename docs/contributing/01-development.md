@@ -55,7 +55,7 @@ In production the app trusts `Remote-User` and `Remote-Groups` only from a reque
 - Gates green ([02-testing.md](02-testing.md)). Never merge a red suite.
 - The repository is public: no real hostnames or client names; `RepoHygieneTest` enforces it.
 - Docs tests pin guide names, command names and options, so changing a command means changing its doc.
-- Product Markdown has no front matter (no `Author`, `Reviewer`, `Last updated` or `Type` block): a page starts with its `# Title`, and git history is the record. The only front matter kept is functional: `.github/ISSUE_TEMPLATE/*.md` (GitHub reads it) and the Claude skill files `ansible/roles/*/files/claude/skills/*/SKILL.md` and `skills/*/SKILL.md`. `DocsStructureTest` enforces it.
+- Product Markdown has no front matter (no `Author`, `Reviewer`, `Last updated` or `Type` block): a page starts with its `# Title`, and git history is the record. The only front matter kept is functional: `.github/ISSUE_TEMPLATE/*.md` (GitHub reads it) and the Claude skill files `ansible/roles/*/files/claude/skills/*/SKILL.md` and `skills/*/SKILL.md`. `DocsStructureTest` enforces it for the documentation pages, `README.md` and the contributor files; it does not look at `skills/*/SKILL.md`.
 
 ## Troubleshooting
 

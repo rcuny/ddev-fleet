@@ -143,6 +143,7 @@ final class ApiReadTest extends AdminTestCase
         $body = $this->get('/api/v1/host/capacity?project=acme&template=full', $this->issue([ApiScope::Read], ['acme']));
 
         self::assertResponseStatusCodeSame(200);
+        self::assertSame(['schema', 'scope', 'project', 'verdict', 'instances'], array_keys($body));
         self::assertSame('project', $body['scope']);
         self::assertSame('acme', $body['verdict']['project']);
         self::assertIsBool($body['verdict']['ok']);
@@ -161,6 +162,22 @@ final class ApiReadTest extends AdminTestCase
         self::assertResponseStatusCodeSame(403);
         self::assertSame('project_not_allowed', $body['code']);
         self::assertStringNotContainsString('"projects"', (string) json_encode($body));
+    }
+
+    public function testCapacityOfAnUnknownProjectIsTheSame403AsAnotherProjectsName(): void
+    {
+        $token = $this->issue([ApiScope::Read], ['acme']);
+        $other = $this->get('/api/v1/host/capacity?project=demo', $token);
+        self::assertResponseStatusCodeSame(403);
+        $ghost = $this->get('/api/v1/host/capacity?project=ghost', $token);
+        self::assertResponseStatusCodeSame(403);
+
+        self::assertSame($other['code'], $ghost['code']);
+        unset($other['request_id'], $ghost['request_id']);
+        self::assertSame(
+            str_replace('demo', '<p>', (string) json_encode($other)),
+            str_replace('ghost', '<p>', (string) json_encode($ghost)),
+        );
     }
 
     /**

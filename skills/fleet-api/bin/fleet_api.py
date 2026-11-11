@@ -22,8 +22,14 @@ FINAL_JOB = {"succeeded", "failed", "interrupted", "cancelled"}
 MAX_RETRY_WAIT = 60
 
 
+_LITERALS = set()  # tokens seen by this process: masked even when they do not look like flt_...
+
+
 def mask(text):
-    return TOKEN_RE.sub("flt_***", str(text))
+    out = TOKEN_RE.sub("flt_***", str(text))
+    for lit in sorted(_LITERALS, key=len, reverse=True):
+        out = out.replace(lit, "flt_***")
+    return out
 
 
 class ApiError(Exception):
@@ -65,10 +71,6 @@ def retry_wait(value, attempt):
     return min(secs, MAX_RETRY_WAIT)
 
 
-class CapacityUnavailable(ApiError):
-    pass
-
-
 class FleetApi:
     def __init__(self, token=None, base_url=None, environ=None, opener=None, sleep=time.sleep, retries=3, timeout=30):
         env = os.environ if environ is None else environ
@@ -78,6 +80,7 @@ class FleetApi:
         url = (base_url or env.get("FLEET_API_URL") or "").strip()
         if not url:
             raise ApiError(0, "no_url", "FLEET_API_URL is not set in the environment")
+        _LITERALS.add(self.token)
         self.base = url.rstrip("/")
         check_base_url(self.base)
         self._open = opener or _NO_REDIRECT_OPEN
@@ -214,11 +217,14 @@ class FleetApi:
         return self.get(f"/instances/{iid}/terminal", pane=pane, lines=lines)
 
     def capacity(self, project=None, template=None):
-        """Capacity verdict for the token's own project. Not available yet: the host-wide document answers 403 to a
-        project-limited token, and the project-scoped verdict endpoint does not exist. Fails clearly, sends nothing."""
-        raise CapacityUnavailable(0, "capacity_unavailable",
-                                  "the project capacity verdict is not exposed to project tokens yet; "
-                                  "ask the Fleet administrator, and do not guess a verdict")
+        """Capacity verdict for the token's own project (`GET /host/capacity?project=`, project-scoped document).
+        Without `project` the token's single project is used; several or none is a usage error (nothing is guessed)."""
+        if not project:
+            projects = [p for p in (self.token_self().get("projects") or []) if p != "*"]
+            if len(projects) != 1:
+                raise ApiError(0, "project_required", "pass --project: the token does not name exactly one project")
+            project = projects[0]
+        return self.get("/host/capacity", project=project, template=template)
 
 
 # -- CLI
@@ -238,7 +244,7 @@ def _build_parser():
     jl = sub.add_parser("job-log", help="print a job log from a byte offset")
     jl.add_argument("id")
     jl.add_argument("--offset", type=int, default=0)
-    cap = sub.add_parser("capacity", help="capacity verdict for the own project (not available yet)")
+    cap = sub.add_parser("capacity", help="capacity verdict for the own project (scoped document)")
     cap.add_argument("--project")
     cap.add_argument("--template")
     d = sub.add_parser("deploy", help="create an instance")
@@ -281,7 +287,7 @@ def run(args, api):
         sys.stdout.write(text)
         print(f"next-offset={meta['next_offset']} state={meta['state']} done={int(meta['done'])}", file=sys.stderr)
     elif c == "capacity":
-        api.capacity(args.project, args.template)
+        _print(api.capacity(args.project, args.template))
     elif c == "terminal":
         doc = api.terminal(args.id, args.pane, args.lines)
         sys.stdout.write(doc.get("text", ""))
@@ -298,7 +304,7 @@ def run(args, api):
         else:
             res = getattr(api, c)(args.id, **wait)
         _print(res)
-        if args.wait and res.get("status") != "succeeded":
+        if args.wait and "status" in res and res["status"] != "succeeded":  # no job id: nothing was waited for
             return 3
     return 0
 
@@ -310,7 +316,7 @@ def main(argv=None, environ=None, opener=None):
     except ApiError as e:
         print(f"error: {e}", file=sys.stderr)
         return 2 if e.status == 0 and e.code in ("no_token", "no_url", "insecure_url", "confirmation_required",
-                                                  "capacity_unavailable") else 1
+                                                  "project_required") else 1
 
 
 if __name__ == "__main__":
