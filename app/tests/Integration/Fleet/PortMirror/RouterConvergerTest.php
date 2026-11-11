@@ -257,6 +257,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
     {
         // The router never shows the mirror: converge() fails (logged), verifyStarted still runs and detaches the db.
         $this->mirror->sync();
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, "healthy\n"));
         $this->live->script(self::BASE);
         $instance = $this->instance();
         $job = $this->job('deploy', $instance);

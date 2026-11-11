@@ -120,8 +120,8 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         self::assertStringNotContainsString('SECURITY', implode("\n", $lines));
         self::assertStringContainsString('disconnected', implode("\n", $lines));
         self::assertSame(1, $this->auditCount());
-        // web and the routed typesense are never inspected
-        self::assertCount(3, $this->runner->callsMatching(['docker', 'inspect']));
+        // web and the label-routed typesense are never inspected for networks; mailpit's env is read once
+        self::assertCount(4, $this->runner->callsMatching(['docker', 'inspect']));
     }
 
     public function testADbWithTraefikLabelsIsStillDetached(): void
@@ -139,12 +139,12 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
     {
         $id = 'blog--main';
         $this->ps($id, $this->psRow($id, 'db'), $this->psRow($id, 'typesense'), $this->psRow($id, 'sidecar'));
-        $this->runner->expect(['docker', 'inspect', '--format'], new CommandResult(0, '["A=b","HTTP_EXPOSE=9108:8108"]')); // typesense: routed
-        $this->runner->expect(['docker', 'inspect', '--format'], new CommandResult(0, '["A=b"]')); // sidecar: not exposed
+        $this->runner->expect(['docker', 'inspect', '--format', '{{json .Config.Env}}'], new CommandResult(0, '["A=b","HTTP_EXPOSE=9108:8108"]')); // typesense: routed
+        $this->runner->expect(['docker', 'inspect', '--format', '{{json .Config.Env}}'], new CommandResult(0, '["A=b"]')); // sidecar: not exposed
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}')); // db before
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}')); // sidecar before
         $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}')); // db after
-        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}')); // sidecar before
         $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}')); // sidecar after
 
@@ -163,7 +163,7 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
 
         self::assertSame(['ddev-'.$id.'-db'], $this->converger()->converge($id, static function (string $l): void {}));
-        self::assertSame([], $this->runner->callsMatching(['docker', 'inspect', '--format']), 'the db env is never consulted');
+        self::assertSame([], $this->runner->callsMatching(['docker', 'inspect', '--format', '{{json .Config.Env}}']), 'the db env is never consulted');
     }
 
     public function testALabelValueContainingTraefikDoesNotExemptAService(): void
