@@ -1,6 +1,6 @@
 import type { Page } from '@playwright/test';
 
-/** The eleven shell destinations in menu order (admin sees all of them). */
+/** The twelve shell destinations in menu order (admin sees all of them). */
 export const ADMIN_NAV = [
   { label: 'Home', path: '/' },
   { label: 'Instances', path: '/instances' },
@@ -9,6 +9,7 @@ export const ADMIN_NAV = [
   { label: 'Webhooks', path: '/admin/webhooks' },
   { label: 'Schedules', path: '/admin/schedules' },
   { label: 'Secrets', path: '/admin/secrets' },
+  { label: 'API tokens', path: '/admin/api-tokens' },
   { label: 'Users', path: '/admin/users' },
   { label: 'Settings', path: '/admin/host' },
   { label: 'Upgrade', path: '/admin/host/upgrade' },

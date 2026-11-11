@@ -185,4 +185,31 @@ final class SshKeysPageTest extends AdminTestCase
 
         return (string) $this->em()->getConnection()->fetchOne('SELECT fingerprint FROM ssh_key WHERE role = ?', [$role]);
     }
+
+    public function testThePushKeyCheckRefusesAHostThatIsNotAProjectRemote(): void
+    {
+        $this->post('/admin/host/ssh-keys/check-push', ['host' => 'evil.example.com']);
+
+        self::assertResponseRedirects('/admin/host/ssh-keys', 303);
+        self::assertStringContainsString('registered projects', $this->open('/admin/host/ssh-keys')->filter('[data-testid=flashes]')->text());
+    }
+
+    public function testThePushKeyCheckReportsARegisteredKeyForAProjectHost(): void
+    {
+        $projects = $this->container()->get(ProjectService::class);
+        self::assertInstanceOf(ProjectService::class, $projects);
+        $projects->create(new ProjectInput('blog', 'https://git.example.com/acme/blog.git'));
+        $runner = $this->container()->get(\App\Fleet\Shell\CommandRunner::class);
+        self::assertInstanceOf(\App\Fleet\Shell\RecordingCommandRunner::class, $runner);
+        $runner->expect(['ssh'], new \App\Fleet\Shell\CommandResult(0, 'authenticated via ssh key.'));
+
+        $this->post('/admin/host/ssh-keys/check-push', ['host' => 'git.example.com']);
+
+        self::assertResponseRedirects('/admin/host/ssh-keys', 303);
+        $flash = $this->open('/admin/host/ssh-keys')->filter('[data-testid=flashes]')->text();
+        self::assertStringContainsString('git.example.com', $flash);
+        $call = $runner->callsMatching(['ssh'])[0];
+        self::assertSame(\App\Fleet\Ssh\PushKeyCheck::INTERACTIVE_TIMEOUT, $call->timeout, 'the web button uses the short budget');
+        self::assertContains('ConnectTimeout=5', $call->argv);
+    }
 }

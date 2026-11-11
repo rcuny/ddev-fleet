@@ -28,7 +28,7 @@ Repair formatting with `php vendor/bin/php-cs-fixer fix`. `ci/run-gates.sh` runs
 |---|---|---|---|
 | PHPUnit `Unit`, `Integration`, `Functional`, `Repo` | `app/tests/<Suite>/` | plain objects; container and database wiring; HTTP round trips; repository rules (hygiene, CI config, tag guard, docs) | `php vendor/bin/phpunit [--testsuite Repo] [--filter X]` in `app/` |
 | Playwright | `tests/playwright/` | the real UI, plus an axe accessibility sweep. `desktop` (1280 px) runs every spec; `phone` (390 px) is opt-in and runs only tests tagged `@phone` | commands above; `npm run test:smoke` for `@smoke` |
-| Installer and real-binary | `app/tests/Repo/Installer*Test` and friends | the install scripts with `--dry-run` and stubbed commands; rendered Caddy and Mercure configs when `FLEET_CADDY_BIN` / `FLEET_MERCURE_BIN` are set (else skipped) | part of `Repo` |
+| Installer and real-binary | `app/tests/Repo/Installer*Test` and friends | the install scripts with `--dry-run` and stubbed commands; rendered Caddy and Mercure configs when `FLEET_CADDY_BIN` / `FLEET_MERCURE_BIN` are set (else skipped). Fleet CI sets `FLEET_CADDY_STOCK_BIN` (a stock Caddy; `FLEET_CADDY_BIN` stays the OVH build) from `ci/fetch-caddy.sh` (pinned version, SHA-512 checked, cached under `~/.cache/fleet-ci`), so the real-Caddy API route test runs there | part of `Repo` |
 | pytest | `tests/pytest/` | CI tooling (systemd scorer, gates summary, Renovate helper) | command above |
 
 A phone-only spec is named `<topic>.phone.spec.ts` with `@phone` on its describe; to give one test a phone run, put `@phone` in its title.

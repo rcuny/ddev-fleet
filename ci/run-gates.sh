@@ -211,6 +211,20 @@ if [ "$mode" = full ]; then
     echo "playwright selection: $pw_note"
 fi
 
+# FLE-274: a pinned, checksummed stock Caddy so the real-Caddy tests (Repo suite) run instead of skipping.
+# FLEET_CADDY_STOCK_BIN is deliberately not FLEET_CADDY_BIN: that one must have the OVH DNS module (a different test).
+# An operator-set value wins; if the fetch fails the tests skip, as before.
+if [ -z "${FLEET_CADDY_STOCK_BIN:-}" ]; then
+    FLEET_CADDY_STOCK_BIN="$(bash "$root/ci/fetch-caddy.sh" 2> /dev/null || true)"
+fi
+[ -z "$FLEET_CADDY_STOCK_BIN" ] || export FLEET_CADDY_STOCK_BIN
+# FLEET_REQUIRE_CADDY=1 (set by Fleet CI, passed through to the tests): a missing Caddy fails instead of skipping.
+if [ "${FLEET_REQUIRE_CADDY:-0}" != 0 ] && [ -z "$FLEET_CADDY_STOCK_BIN" ] && [ -z "${FLEET_CADDY_BIN:-}" ]; then
+    echo "FLEET_REQUIRE_CADDY is set but ci/fetch-caddy.sh produced no Caddy binary" >&2
+    exit 1
+fi
+echo "real-Caddy API tests: ${FLEET_CADDY_STOCK_BIN:-skipped (no Caddy binary)}"
+
 # Stale Symfony caches give false Playwright and PHPUnit reds after a branch switch.
 rm -rf "$root/app/var/cache/dev" "$root/app/var/cache/test"
 

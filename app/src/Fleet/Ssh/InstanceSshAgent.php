@@ -126,7 +126,7 @@ final readonly class InstanceSshAgent
             }
         } else {
             // A previous start may have loaded it (the template was switched to extras only): the agent must hold no write key now.
-            $this->runner->run(['ssh-add', '-d', $this->paths->sshPublicKey(SshKeyRole::Push)], null, ['SSH_AUTH_SOCK' => $socket], null, self::TIMEOUT);
+            $this->removePushKey($socket);
         }
 
         // The key path is the only argument: the key material never reaches argv, a log or the database.
@@ -135,6 +135,34 @@ final readonly class InstanceSshAgent
             if (!$added->isSuccess()) {
                 throw new \RuntimeException(\sprintf('The SSH key "%s" could not be loaded into the instance\'s ssh-agent (exit %d).', $name, $added->exitCode));
             }
+        }
+    }
+
+    /**
+     * `ssh-add -d` exits non-zero both when the key was not loaded (fine) and when the removal failed (not fine), so a
+     * failure is checked against what the agent holds: the push key still listed means the write key is still there (FLE-270).
+     *
+     * @throws \RuntimeException when the push key is still in the agent
+     */
+    private function removePushKey(string $socket): void
+    {
+        $public = $this->paths->sshPublicKey(SshKeyRole::Push);
+        $env = ['SSH_AUTH_SOCK' => $socket];
+        $removed = $this->runner->run(['ssh-add', '-d', $public], null, $env, null, self::TIMEOUT);
+        if ($removed->isSuccess()) {
+            return;
+        }
+
+        $line = is_file($public) ? (string) @file_get_contents($public) : '';
+        $blob = explode(' ', trim($line))[1] ?? '';
+        if ('' === $blob) {
+            // No push key on this host (extras-only start): there is nothing that could be loaded.
+            return;
+        }
+        $listed = $this->runner->run(['ssh-add', '-L'], null, $env, null, self::TIMEOUT);
+        // exit 1 = the agent holds no keys at all; anything else than 0 and 1 means the agent cannot be asked.
+        if (1 !== $listed->exitCode && (!$listed->isSuccess() || str_contains($listed->stdout, $blob))) {
+            throw new \RuntimeException(\sprintf('The push key could not be removed from the instance\'s ssh-agent (exit %d).', $removed->exitCode));
         }
     }
 
@@ -194,6 +222,15 @@ final readonly class InstanceSshAgent
                 'volumes' => [$dir.':'.self::CONTAINER_DIR],
                 'environment' => ['SSH_AUTH_SOCK='.self::CONTAINER_SOCKET],
             ]]], 5, 2);
+    }
+
+    /**
+     * Whether this instance's agent answers on its socket (FLE-272). The status watcher uses it to keep re-keying the agent
+     * of an instance whose state is momentarily "unknown", without ever starting an agent for one that has none.
+     */
+    public function isRunning(string $instanceId): bool
+    {
+        return $this->alive($this->paths->agentSocket($instanceId));
     }
 
     private function alive(string $socket): bool

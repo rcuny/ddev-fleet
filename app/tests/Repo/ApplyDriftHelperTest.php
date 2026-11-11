@@ -139,6 +139,15 @@ final class ApplyDriftHelperTest extends TestCase
             - name: Boom
               ansible.builtin.fail:
                 msg: nope
+            - name: Handled
+              block:
+                - name: Rescued failure
+                  ansible.builtin.fail:
+                    msg: handled below
+              rescue:
+                - name: Recover
+                  ansible.builtin.debug:
+                    msg: recovered
             YAML);
         file_put_contents($dir.'/site.yml', "- hosts: all\n  gather_facts: false\n  roles: [r1]\n");
         mkdir($dir.'/callback_plugins');
@@ -158,7 +167,7 @@ final class ApplyDriftHelperTest extends TestCase
         self::assertSame(['Write a file', 'Hidden'], array_column($role['changed'], 'task'));
         self::assertSame('(hidden: the task has no_log)', $role['changed'][1]['diff']);
         self::assertSame(['thing would be refreshed'], $role['drift']);
-        self::assertSame('Boom', $role['failed'][0]['task']);
+        self::assertSame(['Boom'], array_column($role['failed'], 'task'), 'a failure handled by a rescue is not a failure');
         self::assertFileDoesNotExist($dir.'/target');
     }
 }

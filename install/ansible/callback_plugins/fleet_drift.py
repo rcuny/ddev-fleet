@@ -113,9 +113,23 @@ class CallbackModule(CallbackBase):
     def v2_runner_on_skipped(self, result):
         self._role(result)
 
+    @staticmethod
+    def _rescued(task):
+        """True when a block around the task has a rescue section that will handle this failure."""
+        child = task
+        parent = getattr(task, "_parent", None)
+        while parent is not None:
+            if getattr(parent, "rescue", None) and any(
+                getattr(t, "_uuid", None) == getattr(child, "_uuid", object()) for t in (getattr(parent, "block", None) or [])
+            ):
+                return True
+            child = parent
+            parent = getattr(parent, "_parent", None)
+        return False
+
     def v2_runner_on_failed(self, result, ignore_errors=False):
         bucket = self._role(result)
-        if ignore_errors:
+        if ignore_errors or self._rescued(result._task):
             return
         self._failed_play = True
         if result._task.no_log:

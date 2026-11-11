@@ -26,9 +26,9 @@ final readonly class ExtraSshKey
         if (null !== SshKeyNames::error([$name])) {
             return \sprintf('"%s" is not a valid SSH key name.', $name);
         }
-        $file = $this->paths->sshExtraKey($name);
-        if (is_link($file) || !is_file($file)) {
-            return \sprintf('The SSH key "%s" does not exist on this host (expected ssh/%s_ed25519 in the fleet home).', $name, $name);
+        $file = $this->paths->existingSshExtraKey($name);
+        if (null === $file || is_link($file) || !is_file($file)) {
+            return \sprintf('The SSH key "%s" does not exist on this host (expected ssh/%s_ed25519, _ecdsa or _rsa in the fleet home).', $name, $name);
         }
         $stat = @stat($file);
         if (false === $stat) {
@@ -46,6 +46,6 @@ final readonly class ExtraSshKey
 
     public function path(string $name): string
     {
-        return $this->paths->sshExtraKey($name);
+        return $this->paths->existingSshExtraKey($name) ?? $this->paths->sshExtraKey($name);
     }
 }

@@ -8,7 +8,7 @@ Fleet uses SSH keys for two different jobs: the host pulls your code, and an ins
 |---|---|---|---|
 | `deploy` | **Pull.** Clones and fetches your projects' repositories on the host. Read access is enough: register it as a read-only access key. | The host's own git commands, with `IdentitiesOnly`. Never given to an instance. | Nobody: it stays in `ssh/deploy_ed25519` (mode 0600). |
 | `push` | **Push.** Lets an instance push to your remotes. Register it with write access only where agents must push. | Loaded into that instance's own ssh-agent, only for projects with **Git over SSH in the container** turned on. | Nobody: a file on the host, loaded by `ssh-add`; no key file enters a container. |
-| extra keys | One more server or repository a template needs to reach (a private package registry, a second forge). | Loaded into the agent of instances whose template names them, next to the push key or instead of it. | Nobody, as above (`ssh/<name>_ed25519`). |
+| extra keys | One more server or repository a template needs to reach (a private package registry, a second forge). | Loaded into the agent of instances whose template names them, next to the push key or instead of it. | Nobody, as above (`ssh/<name>_<type>`). |
 
 The deploy and push keys are created by the setup wizard (or `fleet host:init`). Rotating one (the **Rotate** button, behind your password) makes the old key stop working wherever it is registered, so register the new public key first or right after.
 
@@ -18,7 +18,7 @@ With **Git over SSH in the container** on, each instance gets its own `ssh-agent
 
 ## Extra keys
 
-An extra key is a file `ssh/<name>_ed25519`. Names are lower case letters, digits and single dashes, at most 32 characters; `deploy` and `push` are reserved; a template names at most 8.
+An extra key is a file `ssh/<name>_<type>`, where `<type>` is the key's real type: `ed25519` (generated keys), or `ed25519`, `ecdsa` or `rsa` for an imported one. Names are lower case letters, digits and single dashes, at most 32 characters; `deploy` and `push` are reserved; a template names at most 8.
 
 | Origin | What it is | Manage it |
 |---|---|---|
@@ -55,3 +55,11 @@ An extra key is a file `ssh/<name>_ed25519`. Names are lower case letters, digit
 | `fleet ssh:trust <host>` | Adds a server's host keys after you confirm their fingerprints. |
 
 Exact options: [01-cli.md](01-cli.md).
+
+## Checking the push key against a git host
+
+`fleet ssh:check-push-key [--host=bitbucket.org] [--json]` (and the "Check the push key" button in the SSH keys view) asks the git host whether the host's push key is registered. It runs `ssh -F /dev/null -o IdentitiesOnly=yes -o IdentityAgent=none -i <push key> -T git@<host>` against Fleet's pinned `known_hosts`, so the user's `~/.ssh/config` (which may pin the deploy key to the host) and any ssh-agent cannot make the test pass for another key. Exit 0 means the host accepted the push key; exit 1 means it is not registered (register the public key shown in the view), the host key is not trusted yet (`fleet ssh:trust`), there is no push key, or the host was unreachable.
+
+Note: `core.sshCommand` in an instance checkout carries host paths (`ssh/push_ed25519`, `ssh/known_hosts`). Inside the web container those paths do not exist; git there relies on `GIT_SSH_COMMAND` from `web_environment` (which wins over `core.sshCommand`) and the container's ssh-agent. A git process in a container started without that variable would fail with a host-key error rather than use the host keys.
+
+The check also runs by itself, as a warning that never blocks: at the start of a deploy of a project with `container_ssh` on (in the job log), and after saving a template of such a project (a flash message). The host is read from the project's remote (`ssh://`, `git@host:path` or `https://`); the result is cached for 60 seconds per host and push-key fingerprint, an unreachable host is never cached, and the UI button only offers the hosts of registered projects. `GlobalKnownHostsFile=/dev/null` keeps system-wide known hosts out of the test.

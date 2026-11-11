@@ -5,7 +5,7 @@ Fleet is built so one process faces the Internet and everything else sits behind
 ## The security model
 
 - **One Internet-facing process.** Caddy terminates TLS for every name and forwards to everything else.
-- **A login portal.** Only `/health` and the signed `/hooks/*` receivers skip sign-in.
+- **A login portal.** Only `/health`, the signed `/hooks/*` receivers and the bearer-token `/api/v1/*` API skip sign-in.
 - **A per-project gate.** Each instance's site checks the user's project group ([share and access](06-share-and-access.md)).
 - **A proxy secret.** The app trusts an identity only when Caddy presents it.
 - **The app never runs as root.** Writing the rendered configuration goes through a root helper with one sudoers line.

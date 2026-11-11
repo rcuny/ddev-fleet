@@ -1,0 +1,139 @@
+{% extends 'base.html.twig' %}
+
+{% block title %}API tokens · {{ parent() }}{% endblock %}
+
+{#- Needs: tokens, now, expiring, unused, expiring_days, unused_days, scopes, max_grace, issued (IssuedToken|null), what, states (token id => state). -#}
+{% block content %}
+    <twig:PageHeader title="API tokens" description="Service tokens for the HTTP API. A token is shown once, when it is made; only its hash is kept." />
+
+    <div class="mt-6 grid gap-6">
+        {% if issued %}
+            <twig:Card data-testid="api-token-secret">
+                <twig:Card:Header>
+                    <twig:Card:Title>Token "{{ issued.token.name }}" {{ what }}</twig:Card:Title>
+                    <twig:Card:Description>Copy it now and store it as a secret. It cannot be shown again; if you lose it, rotate the token.</twig:Card:Description>
+                </twig:Card:Header>
+                <twig:Card:Content class="grid gap-2" data-controller="clipboard">
+                    <twig:Label for="api-token-secret-value">Secret</twig:Label>
+                    <div class="flex gap-2">
+                        <twig:Input id="api-token-secret-value" readonly value="{{ issued.secret }}" data-clipboard-target="source" data-testid="api-token-secret-value" autocomplete="off" class="h-11 min-w-0 flex-1 font-mono text-xs md:h-8" />
+                        <twig:Button variant="outline" type="button" data-action="clipboard#copy" class="h-11 md:h-8">Copy</twig:Button>
+                    </div>
+                    <p class="text-xs text-ink-muted"><span data-clipboard-target="status" aria-live="polite" class="text-brand-darker dark:text-brand"></span></p>
+                    <p class="text-xs text-ink-muted">Expires {{ issued.token.expiresAt|date('Y-m-d H:i', 'UTC') }} UTC.</p>
+                </twig:Card:Content>
+            </twig:Card>
+        {% endif %}
+
+        <twig:Card data-testid="api-token-attention">
+            <twig:Card:Header>
+                <twig:Card:Title>Needs attention</twig:Card:Title>
+                <twig:Card:Description>Tokens that expire within {{ expiring_days }} days, and tokens not used for {{ unused_days }} days (revoke those you no longer need).</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content class="grid gap-3 text-sm">
+                {% if expiring|length == 0 and unused|length == 0 %}
+                    <p class="text-ink-muted" data-testid="api-token-attention-empty">Nothing needs attention.</p>
+                {% endif %}
+                {% if expiring|length > 0 %}
+                    <div data-testid="api-token-expiring">
+                        <p class="font-medium">Expiring soon</p>
+                        <ul class="list-disc pl-5">
+                            {% for t in expiring %}<li>{{ t.name }} (#{{ t.id }}): {{ t.expiresAt|date('Y-m-d H:i', 'UTC') }} UTC</li>{% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+                {% if unused|length > 0 %}
+                    <div data-testid="api-token-unused">
+                        <p class="font-medium">Unused</p>
+                        <ul class="list-disc pl-5">
+                            {% for t in unused %}<li>{{ t.name }} (#{{ t.id }}): {{ t.lastUsedAt ? 'last used ' ~ t.lastUsedAt|date('Y-m-d', 'UTC') : 'never used, created ' ~ t.createdAt|date('Y-m-d', 'UTC') }}</li>{% endfor %}
+                        </ul>
+                    </div>
+                {% endif %}
+            </twig:Card:Content>
+        </twig:Card>
+
+        {% if tokens|length == 0 %}
+            <p class="rounded-md border border-hairline p-4 text-sm text-ink-muted" data-testid="api-token-empty">No tokens yet.</p>
+        {% else %}
+            <twig:Table>
+                <twig:Table:Caption class="sr-only">API tokens</twig:Table:Caption>
+                <twig:Table:Header>
+                    <twig:Table:Row>
+                        <twig:Table:Head>Token</twig:Table:Head>
+                        <twig:Table:Head>Scopes and projects</twig:Table:Head>
+                        <twig:Table:Head>Expires (UTC)</twig:Table:Head>
+                        <twig:Table:Head>Last use</twig:Table:Head>
+                        <twig:Table:Head>Actions</twig:Table:Head>
+                    </twig:Table:Row>
+                </twig:Table:Header>
+                <twig:Table:Body>
+                    {% for t in tokens %}
+                        {% set st = states[t.id] %}
+                        <twig:Table:Row data-testid="api-token-row">
+                            <twig:Table:Cell class="whitespace-normal [overflow-wrap:anywhere]">
+                                <span class="font-medium">{{ t.name }}</span> <span class="text-ink-muted">#{{ t.id }}</span>
+                                <span class="font-mono text-xs text-ink-muted">{{ t.prefixHint }}…</span>
+                                <twig:Badge variant="{{ st == 'active' ? 'default' : 'secondary' }}" data-testid="api-token-state">{{ st }}</twig:Badge>
+                                {% if t.description %}<br><span class="text-xs text-ink-muted">{{ t.description }}</span>{% endif %}
+                            </twig:Table:Cell>
+                            <twig:Table:Cell class="whitespace-normal [overflow-wrap:anywhere]">
+                                {{ t.scopes|join(', ') }}<br><span class="text-xs text-ink-muted">{{ t.projects|join(', ') }}{% if t.ipAllow %} · from {{ t.ipAllow|join(', ') }}{% endif %}</span>
+                            </twig:Table:Cell>
+                            <twig:Table:Cell>{{ t.expiresAt|date('Y-m-d H:i', 'UTC') }}</twig:Table:Cell>
+                            <twig:Table:Cell>{% if t.lastUsedAt %}{{ t.lastUsedAt|date('Y-m-d H:i', 'UTC') }}<br><span class="text-xs text-ink-muted">{{ t.lastUsedIp }}</span>{% else %}never{% endif %}</twig:Table:Cell>
+                            <twig:Table:Cell class="whitespace-normal">
+                                {% if st == 'active' %}
+                                    <form method="post" action="{{ path('api_token_rotate', {id: t.id}) }}" class="mb-2 grid gap-2" data-testid="api-token-rotate-form">
+                                        {{ include('setup/_csrf.html.twig') }}
+                                        <twig:Label for="grace-{{ t.id }}" class="text-xs">Old token still works for (seconds, 0 to {{ max_grace }})</twig:Label>
+                                        <twig:Input id="grace-{{ t.id }}" name="grace" value="0" inputmode="numeric" pattern="\d{1,4}" class="h-11 md:h-8" />
+                                        <twig:Label for="rotate-days-{{ t.id }}" class="text-xs">Successor lifetime (days, empty = default)</twig:Label>
+                                        <twig:Input id="rotate-days-{{ t.id }}" name="expires_in" inputmode="numeric" pattern="[1-9]\d{0,3}" class="h-11 md:h-8" autocomplete="off" />
+                                        <twig:Button type="submit" variant="outline" class="h-11 md:h-8" data-testid="api-token-rotate">Rotate</twig:Button>
+                                    </form>
+                                    <form method="post" action="{{ path('api_token_revoke', {id: t.id}) }}" data-testid="api-token-revoke-form">
+                                        {{ include('setup/_csrf.html.twig') }}
+                                        <twig:Button type="submit" variant="destructive" class="h-11 md:h-8" data-testid="api-token-revoke">Revoke</twig:Button>
+                                    </form>
+                                {% endif %}
+                            </twig:Table:Cell>
+                        </twig:Table:Row>
+                    {% endfor %}
+                </twig:Table:Body>
+            </twig:Table>
+        {% endif %}
+
+        <twig:Card data-testid="api-token-add">
+            <twig:Card:Header>
+                <twig:Card:Title>New token</twig:Card:Title>
+                <twig:Card:Description>You are asked for your password again. The expiry is required; leave it empty for the default of the chosen scopes.</twig:Card:Description>
+            </twig:Card:Header>
+            <twig:Card:Content>
+                <form method="post" action="{{ path('api_token_create') }}" class="grid gap-3" data-testid="api-token-create-form">
+                    {{ include('setup/_csrf.html.twig') }}
+                    <twig:Label for="api-token-name">Name</twig:Label>
+                    <twig:Input id="api-token-name" name="name" required maxlength="32" pattern="[a-z0-9][a-z0-9._-]*" autocomplete="off" autocapitalize="off" spellcheck="false" class="h-11 md:h-8" />
+                    <twig:Label for="api-token-description">Description</twig:Label>
+                    <twig:Input id="api-token-description" name="description" maxlength="255" class="h-11 md:h-8" />
+                    <fieldset class="grid gap-2">
+                        <legend class="text-sm font-medium">Scopes</legend>
+                        {% for scope in scopes %}
+                            <label class="flex items-center gap-2 font-normal text-ink-body"><input type="checkbox" name="scopes[]" value="{{ scope.value }}" class="size-4"> <span class="font-mono text-xs">{{ scope.value }}</span></label>
+                        {% endfor %}
+                        <p class="text-xs text-ink-muted">terminal:write cannot be combined with deploy or lifecycle and needs an allowed address.</p>
+                    </fieldset>
+                    <twig:Label for="api-token-projects">Projects (names, separated by commas; * for a read-only token)</twig:Label>
+                    <twig:Input id="api-token-projects" name="projects" required class="h-11 md:h-8" autocomplete="off" />
+                    <twig:Label for="api-token-globs">Instance patterns (terminal scopes)</twig:Label>
+                    <twig:Input id="api-token-globs" name="instance_globs" class="h-11 md:h-8" autocomplete="off" />
+                    <twig:Label for="api-token-ip">Allowed addresses or CIDR ranges</twig:Label>
+                    <twig:Input id="api-token-ip" name="ip_allow" class="h-11 md:h-8" autocomplete="off" />
+                    <twig:Label for="api-token-days">Lifetime in days</twig:Label>
+                    <twig:Input id="api-token-days" name="expires_in" inputmode="numeric" pattern="[1-9]\d{0,3}" class="h-11 md:h-8" autocomplete="off" />
+                    <twig:Button type="submit" class="h-11 w-full md:h-8 md:w-auto" data-testid="api-token-create">Create token</twig:Button>
+                </form>
+            </twig:Card:Content>
+        </twig:Card>
+    </div>
+{% endblock %}

@@ -10,7 +10,7 @@ use Doctrine\ORM\Mapping as ORM;
 
 /**
  * The public half and fingerprint of an extra SSH key Fleet created or imported (FLE-266). The private key is the file
- * `ssh/<name>_ed25519` (App\Fleet\FleetPaths::sshExtraKey()), never the database. A key file with no row here was
+ * `ssh/<name>_<type>` (App\Fleet\FleetPaths::existingSshExtraKey()), never the database. A key file with no row here was
  * placed by hand and is shown as "external".
  */
 #[ORM\Entity]

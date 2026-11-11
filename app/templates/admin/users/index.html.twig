@@ -28,7 +28,7 @@
                 {% for row in rows %}
                     {% set user = row.user %}
                     <li data-testid="user-row" data-username="{{ user.username }}" class="px-4 py-2 hover:bg-surface">
-                        <a href="{{ path('user_edit', {username: user.username}) }}" class="flex min-h-11 min-w-0 items-center gap-3 hover:no-underline">
+                        <a href="{{ path('user_edit', {username: user.username}) }}" data-turbo-prefetch="false" class="flex min-h-11 min-w-0 items-center gap-3 hover:no-underline">
                             <twig:ux:icon name="lucide:user" class="size-4 shrink-0 text-ink-muted" />
                             <span class="min-w-0 flex-1">
                                 <span class="block truncate text-sm font-medium text-ink-display">{{ user.displayName }}</span>

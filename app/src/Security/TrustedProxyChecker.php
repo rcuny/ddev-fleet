@@ -75,7 +75,7 @@ final readonly class TrustedProxyChecker
      * ::ffff:127.0.0.1 (also ::ffff:7f00:1, any case or zero-compression) -> 127.0.0.1; everything else unchanged.
      * Dual-stack sockets report IPv4 peers in the mapped form, which would not match an IPv4 entry.
      */
-    private static function unmap(string $ip): string
+    public static function unmap(string $ip): string
     {
         $packed = @inet_pton($ip);
         if (false === $packed || 16 !== \strlen($packed) || !str_starts_with($packed, str_repeat("\0", 10)."\xff\xff")) {
