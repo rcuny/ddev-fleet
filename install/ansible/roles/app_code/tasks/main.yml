@@ -1,5 +1,5 @@
 ---
-# Port of install/steps/80-code.sh and 85-app-init.sh, as the fleet user with fleet.env loaded (APP_ENV=prod).
+# Port of the former bash step 80-code.sh and 85-app-init.sh, as the fleet user with fleet.env loaded (APP_ENV=prod).
 # The checkout in fleet_src_dir is made by the bootstrap. The build runs when the code or the environment changed, when
 # the build is incomplete or when fleet_force_build is set (the bash step rebuilt on every run).
 - name: Wait for running jobs (bounded) before the code and the database change under them

@@ -1,6 +1,6 @@
 # ddev
 
-Ansible port of `install/steps/40-ddev.sh`.
+Ansible port of the former bash step 40-ddev.sh.
 
 - DDEV's apt repository: key `/etc/apt/keyrings/ddev.asc` checked against the pinned fingerprint, source
   `/etc/apt/sources.list.d/ddev.list`, package `ddev` (no version pin, as in the bash step);

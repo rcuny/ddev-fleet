@@ -75,13 +75,42 @@ final class UpgradeHelperTest extends TestCase
         self::assertSame([], glob($this->scratch().'/tmp/fleet-upgrade.*') ?: [], 'the temporary export is removed');
     }
 
-    public function testAnAnsibleHostRunsTheInstallerWithTheAnsibleEngine(): void
+    public function testAnAnsibleHostUpgradingToAnAnsibleOnlyReleaseGetsNoFlag(): void
     {
         file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "ansible\n");
         [$status, $out, $err] = $this->upgrade(['--yes'], ['SUDO_USER' => 'alice']);
 
         self::assertSame(0, $status, $out.$err);
         self::assertStringContainsString('Install engine: ansible', $out);
+        self::assertStringNotContainsString('Install engine: ansible ->', $out);
+        self::assertContains('installer --domain=fleet.example.com --ref=v1.2.1 --repo-url='.$this->repo.' --skip-dns-check', $this->calls());
+    }
+
+    public function testABashHostIsSwitchedToAnsibleByAReleaseWithoutTheBashEngine(): void
+    {
+        // FLE-263: the playbook reproduces a bash-installed host with nothing changed and records installed-engine=ansible.
+        foreach ([null, "bash\n"] as $record) {
+            @unlink($this->root.'/etc/ddev-fleet/installed-engine');
+            if (null !== $record) {
+                file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', $record);
+            }
+            file_put_contents($this->log, '');
+            [$status, $out, $err] = $this->upgrade(['--yes']);
+
+            self::assertSame(0, $status, $out.$err);
+            self::assertStringContainsString('Install engine: bash -> ansible', $out);
+            self::assertStringNotContainsString('--engine', implode("\n", $this->calls()));
+        }
+    }
+
+    public function testAnAnsibleHostRollingBackToAReleaseWithBothEnginesAsksForAnsible(): void
+    {
+        new Process(['rm', '-rf', $this->repo])->mustRun();
+        $this->makeRepo('both');
+        file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "ansible\n");
+        [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes'], ['FAKE_DOWN' => '1']);
+
+        self::assertSame(0, $status, $out.$err);
         self::assertContains('installer --domain=fleet.example.com --ref=v1.2.1 --repo-url='.$this->repo.' --skip-dns-check --engine=ansible', $this->calls());
     }
 
@@ -104,7 +133,7 @@ final class UpgradeHelperTest extends TestCase
     public function testAnAnsibleHostIsRefusedForATargetWithoutTheAnsibleEngineBeforeAnyChange(): void
     {
         new Process(['rm', '-rf', $this->repo])->mustRun();
-        $this->makeRepo(false);
+        $this->makeRepo('bash-only');
         file_put_contents($this->root.'/etc/ddev-fleet/installed-engine', "ansible\n");
         [$status, $out, $err] = $this->upgrade(['--to', 'v1.2.1', '--yes'], ['FAKE_DOWN' => '1']);
 
@@ -276,10 +305,10 @@ final class UpgradeHelperTest extends TestCase
     {
         $sudoers = (string) file_get_contents(self::installDir().'/etc/sudoers-fleet-apply');
         self::assertStringNotContainsString('upgrade', $sudoers, 'the application must not be able to start an upgrade');
-        $step = (string) file_get_contents(self::installDir().'/steps/90-privileged.sh');
-        self::assertStringContainsString('"$HELPER_DIR/upgrade" 0755 root:root', $step);
+        $role = (string) file_get_contents(self::installDir().'/ansible/roles/privileged/tasks/main.yml');
+        self::assertMatchesRegularExpression('/loop: \[apply, upgrade\]/', $role);
         self::assertCount(1, glob(self::installDir().'/etc/sudoers-*') ?: [], 'the apply sudoers file is the only one');
-        self::assertStringNotContainsString('fleet-upgrade', $step);
+        self::assertStringNotContainsString('fleet-upgrade', $role);
 
         $source = (string) file_get_contents(self::installDir().'/libexec/upgrade');
         $before = substr($source, 0, (int) strpos($source, 'if [ "$EUID" -ne 0 ]; then'));
@@ -414,7 +443,10 @@ final class UpgradeHelperTest extends TestCase
     // --- fixtures ----------------------------------------------------------------------------------------------------
 
     /** A local repository with one annotated tag v1.2.1 whose install/install.sh is a fake installer. */
-    private function makeRepo(bool $engineFlag = true): void
+    /**
+     * @param string $kind 'ansible-only' (a release after FLE-263: no install/steps), 'both' (steps and the --engine flag) or 'bash-only' (steps, no flag)
+     */
+    private function makeRepo(string $kind = 'ansible-only'): void
     {
         $this->repo = $this->scratch().'/release.git-src';
         mkdir($this->repo.'/install', 0o755, true);
@@ -423,9 +455,13 @@ final class UpgradeHelperTest extends TestCase
             echo "installer $*" >> "$FAKE_LOG"
             echo "fake installer of v1.2.1" > "$FAKE_RAN"
             exit "${FAKE_INSTALL_EXIT:-0}"
-            SH.($engineFlag
+            SH.('bash-only' !== $kind
                 ? "\nfor arg in \"\$@\"; do\n  case \"\$arg\" in\n    --engine=bash | --engine=ansible) ;;\n  esac\ndone\n"
                 : "\n# usage: --engine=<bash|ansible> is not supported here\n"));
+        if ('ansible-only' !== $kind) {
+            mkdir($this->repo.'/install/steps', 0o755, true);
+            file_put_contents($this->repo.'/install/steps/10-packages.sh', "# a bash step\n");
+        }
         $env = ['GIT_AUTHOR_NAME' => 't', 'GIT_AUTHOR_EMAIL' => 't@example.com', 'GIT_COMMITTER_NAME' => 't', 'GIT_COMMITTER_EMAIL' => 't@example.com', 'GIT_CONFIG_GLOBAL' => '/dev/null', 'GIT_CONFIG_SYSTEM' => '/dev/null'];
         foreach ([['init', '-q', '-b', 'main'], ['add', '.'], ['commit', '-q', '-m', 'release'], ['tag', '-a', 'v1.2.1', '-m', 'v1.2.1']] as $args) {
             new Process(['git', '-C', $this->repo, ...$args], null, $env)->mustRun();

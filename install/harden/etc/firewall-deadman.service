@@ -1,7 +1,0 @@
-# Installed by ddev-fleet host hardening (install --harden). Started by fleet-firewall-deadman.timer.
-[Unit]
-Description=ddev-fleet firewall dead-man's switch: turn the firewall off unless the operator confirmed
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/fleet-firewall-deadman-fire

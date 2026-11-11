@@ -198,17 +198,17 @@ final class InstallerEntryTest extends TestCase
         self::assertSame(77, $status);
     }
 
-    public function testDryRunPrintsEveryStepInOrder(): void
+    public function testDryRunPrintsTheThreeEngineStagesInOrder(): void
     {
         [$status, $out] = $this->dryRun();
 
         self::assertSame(0, $status);
         preg_match_all('/^==> (\S+)$/m', $out, $matches);
-        $steps = self::stepNames();
-        self::assertNotSame([], $steps);
-        self::assertSame($steps, $matches[1], 'the dry-run plan must list exactly the steps of install/steps/, in numeric order');
+        self::assertSame(['ansible-packages', 'host-vars', 'ansible-playbook'], $matches[1], 'Ansible is the only engine: packages, host vars, the playbook');
         self::assertStringContainsString('dry-run complete', $out);
         self::assertStringContainsString('[stage 1]', $out);
+        self::assertDirectoryDoesNotExist(self::installDir().'/steps', 'the bash steps are gone (FLE-263)');
+        self::assertDirectoryDoesNotExist(self::installDir().'/harden', 'the bash hardening is gone (FLE-263)');
     }
 
     public function testDryRunFromRunScriptAlonePrintsTheSameStepLines(): void

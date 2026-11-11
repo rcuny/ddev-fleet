@@ -30,7 +30,7 @@ final class InstallerDnsCheckTest extends TestCase
 
         self::assertSame(0, $status, $err);
         self::assertStringContainsString('DNS ok', $out);
-        self::assertStringContainsString('==> 10-packages', $out);
+        self::assertStringContainsString('==> ansible-playbook', $out);
     }
 
     public function testWildcardStyleRecordsPassWhenBothNamesResolveToThisHost(): void

@@ -63,7 +63,7 @@ Options:
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
   --harden-tmp          with --harden: also mount /tmp nosuid,nodev,noexec at the next boot (can break builds that run files from /tmp)
-  --engine=<bash|ansible> how the host is provisioned: the bash steps (default) or the Ansible playbook (see docs)
+  --engine=ansible      accepted and ignored (deprecated): the Ansible playbook is the only engine; --engine=bash is refused
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -123,7 +123,8 @@ USAGE
       --skip-dns-check) ;;
       --no-shell-profile) ;;
       --harden | --ssh-allow-user=* | --trusted-ip=* | --firewall-grace=* | --harden-tmp) ;; # validated by stage 2 (lib/common.sh)
-      --engine=bash | --engine=ansible) ;; # used by stage 2
+      --engine=ansible) ;; # deprecated no-op, noted by stage 2
+      --engine=*) fail 64 "--engine=${arg#--engine=} is not supported: the bash engine was removed, Ansible is the only engine (omit --engine)" ;;
       --preflight) preflight=1 ;;
       --dry-run) dry_run=1 ;;
       *)

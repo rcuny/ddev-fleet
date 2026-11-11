@@ -308,8 +308,8 @@ final class PipelineConfigTest extends TestCase
             }
         }
         self::assertNotNull($lint);
-        self::assertContains('ansible-lint ansible/ || echo "ansible-lint reported findings (non-blocking)"', $lint['script']);
-        self::assertStringContainsString('ci/requirements-infra.txt', $this->script($lint));
+        self::assertContains('ansible-lint install/ansible/ || echo "ansible-lint reported findings (non-blocking)"', $lint['script']);
+        self::assertStringContainsString('install/ansible/requirements-dev.txt', $this->script($lint));
         foreach ($this->flatSteps($this->pipelines['pipelines']['tags']['v*']) as $step) {
             self::assertStringStartsNotWith('Ansible lint', (string) $step['name']);
         }

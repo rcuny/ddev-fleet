@@ -44,11 +44,10 @@ tag may publish to the GitHub mirror (a `v1.*` tag must be on `origin/main`, a `
 |---|---|
 | `app/` | The Symfony 8.1 project (PHP 8.4): `src/`, `templates/`, `assets/`, `config/`, `migrations/`, `tests/` |
 | `tests/playwright/` | TypeScript browser E2E (`@playwright/test`), its own npm package |
-| `tests/pytest/` | Python tests that remain for the CI tooling and the Ansible roles (see `docs/contributing/02-testing.md`) |
-| `ci/` | Tag guard (`tag-guard.sh`), the offline systemd security scorer for the installer's 1.x units and its baseline, requirements files for the Python CI steps |
+| `tests/pytest/` | Python tests that remain for the CI tooling (see `docs/contributing/02-testing.md`) |
+| `ci/` | Tag guard (`tag-guard.sh`), the offline systemd security scorer for the installer's units and its baseline, the Ansible idempotency job, requirements files for the Python CI steps |
 | `bitbucket-pipelines.yml`, `renovate-config.json` | CI and dependency updates |
-| `install/` | The 1.x installer (pure bash): `install.sh` (bootstrap), `run.sh`, `lib/common.sh`, `steps/NN-*.sh`, `etc/` (unit files, pool, sudoers line, env drop-ins), `libexec/apply` (the root helper), `bin/fleet` (the CLI wrapper), `uninstall.sh`. Tested by `app/tests/Repo/Installer*Test` and friends |
-| `ansible/` | Provisioning for the 0.x host layout, kept as reference and not used by the installer |
+| `install/` | The installer: `install.sh` (bootstrap, bash), `run.sh` (stage 2: pre-flight, DNS check, host vars, then the playbook), `lib/` (shared bash helpers), `ansible/` (**the playbook `site.yml` and its roles: the only provisioning engine**, see the section below), `etc/` (unit files, pool, sudoers line, env drop-ins that the roles install), `libexec/apply` and `libexec/upgrade` (the root helpers), `bin/fleet` (the CLI wrapper), `uninstall.sh`. Tested by `app/tests/Repo/Installer*Test` and friends, `ansible-lint` and `ci/ansible-idempotency.sh` |
 | `docs/` | Documentation: `docs/README.md` is the map (guides, reference, contributing) |
 | `demo/`, `scripts/` | A minimal DDEV project the 0.x installer seeds as `demo`; the Renovate merge helper |
 
@@ -235,8 +234,8 @@ first mode (it skips itself against an external server, whose `FLEET_HOME` is no
 
 `app/tests/`: `Unit/` (plain objects), `Integration/` (kernel and container wiring, SQLite, the
 runner seam), `Functional/` (HTTP through `WebTestCase`, the wizard included), `Repo/` (repository rules: hygiene,
-pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its bash
-steps, the root helper, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
+pipeline configuration, tag guard, design-system agent block, Python app gone, and the installer: its entry scripts, the
+Ansible roles' contracts, the root helpers, units, sudoers, uninstall, docs). Some tests need a real binary (`FLEET_CADDY_BIN`,
 `FLEET_MERCURE_BIN`, `ssh-keygen`, `shellcheck`) or run only as an unprivileged user, and skip otherwise. Each PHPUnit
 process gets its own `FLEET_HOME` and forces `APP_ENV=test`. Run guide: `docs/contributing/02-testing.md`. Current counts:
 `ci/test-counts.sh` (never write counts into the docs).
@@ -249,12 +248,13 @@ Facts to keep true when editing it:
 
 - **Two stages.** `install.sh` (self-contained, wrapped in `main`) clones the ref into `/opt/ddev-fleet` as `fleet`
   (git never runs as root there), exports a root-owned copy of `install/` and execs its `run.sh`; privileged files
-  (`apply`, sudoers, wrapper) are always installed from that copy, never from the fleet-writable checkout. Steps are
-  `install/steps/NN-*.sh`, each defines `step_main`, each is idempotent; `run.sh` prints `==> <step>` lines only for
-  steps. `--dry-run` prints the whole plan and changes nothing.
+  (`apply`, sudoers, wrapper) are always installed from that copy, never from the fleet-writable checkout. `run.sh`
+  installs `ansible-core`, writes `/etc/ddev-fleet/host-vars.yml` and runs `install/ansible/site.yml`; it prints
+  `==> <stage>` lines for those three stages. Ansible is the only engine (FLE-263): `--engine=ansible` is a deprecated
+  no-op, `--engine=bash` is refused. `--dry-run` prints the plan and changes nothing.
 - **Never touched unless `--harden` is given (or stored in `/etc/ddev-fleet/hardening.conf`):** `sshd`, ufw / iptables / nftables, fail2ban
-  (a lockout risk). All of it lives in `install/harden/` + step `99-harden.sh`, the only place `InstallerSafetyTest` allows those
-  words; unattended-upgrades is never touched. `/opt/ddev-fleet` stays `fleet:fleet`. Authelia's `/etc/tmpfiles.d/authelia.conf` mask is installed
+  (a lockout risk). All of it lives in the `hardening` role (`install/ansible/roles/hardening/`, gated by `fleet_hardening_enabled`), the
+  only place `InstallerSafetyTest` allows those words; unattended-upgrades is never touched. `/opt/ddev-fleet` stays `fleet:fleet`. Authelia's `/etc/tmpfiles.d/authelia.conf` mask is installed
   before the package. Caddy snippet directories are `fleet:caddy` 2750 (setgid).
 - **Env files:** `/etc/ddev-fleet/fleet.env` (`root:fleet` 0640; app, workers, CLI, php-fpm via a unit drop-in),
   `mercure.env` (0600), `/etc/caddy/fleet.env` (written by `apply caddy`). Only missing keys are added and secrets are
@@ -265,38 +265,37 @@ Facts to keep true when editing it:
   `setup` or `authelia`) written by `GateWriter` and loaded with `caddy reload`. It strips every `Remote-*` / `Remote_*`
   request header on all routes before the gate. Setup mode lets through only `/setup`, `/assets/*` and `/health`.
   Instance sites are snippets `instances/<id>.conf` in the Caddy directory, imported by the main Caddyfile, written by the worker and loaded through the admin API (`CaddyReloader`); each passes Authelia's `forward_auth` (which lets any signed-in user through its one `*.<domain>` rule) and then answers 403 unless `Remote-Groups` holds the admin group or `fleet-project-<project>` (the per-project check lives here, not in Authelia's configuration: access changes must never restart Authelia). Named ports and Typesense arrive in M0.07.
-- **Restarts on re-run:** Caddy and Authelia are always restarted (Authelia drops every session); php-fpm and the
-  workers when the code or env changed.
+- **Restarts on re-run:** the playbook restarts a service only when what it runs changed (Authelia with its configuration,
+  which drops every session; Caddy when its binary was refreshed; php-fpm and the workers when the code or env changed). A
+  run that changed nothing restarts nothing.
 - Not shipped yet (do not assume it exists): `fleet-tmux`, named ports and Typesense exposure, the branch picker and
   live-branch indicator. `fleet-worker@1`, `fleet-status` and `fleet-boot` are installed. Authelia's self-service password reset is off until an SMTP server is configured (`docs/reference/07-hardening.md`; recovery: `fleet user:reset-password`).
 - Installer tests that need root or real binaries skip without them; run `shellcheck -x install/**/*.sh install/libexec/apply
   install/bin/fleet` before committing a script.
 
-## The 0.x host layout (Ansible, legacy)
+## The Ansible playbook (`install/ansible/`)
 
-`ansible/` still describes the 0.x host: it installs the Python package and units, which no longer
-exist on `develop`, and the 1.x installer does not use it. Do not run it against a live
-host from `develop`, and never run the full
-`site.yml` against a live host at all (the `fleet_service` role rewrites the checkout's git
-remote). Apply individual roles through the scoped playbooks beside it (`caddy-only.yml`,
-`hardening.yml`, `fleet-units.yml`, `authelia.yml`, `claude-onboarding.yml`),
-`--check --diff` first. The roles are not reshaped for 1.x. Roles, in `site.yml` order:
+The playbook is the installer's only engine (FLE-263; the bash steps, the bash hardening and the 0.x `ansible/` tree
+are gone from `develop`, the 0.x tree stays on `legacy`). `site.yml` runs these roles in order; `group_vars/all.yml`
+holds defaults only and the host's own answers come from `/etc/ddev-fleet/host-vars.yml` (written by `run.sh` or by the
+app: `docs/reference/04-installer.md`):
 
 | Role | Responsibility |
 |---|---|
-| `base` | apt cache + base packages (git, rsync, curl, tmux, unattended-upgrades, …), periodic unattended-upgrades enablement |
-| `docker` | Docker CE apt repo + packages, `docker.service` enabled |
-| `fleet_user` | The `fleet` system user, `/srv/fleet` tree, `.secrets`, `fleet.yml` seed, deploy/push SSH keys, forge `known_hosts` |
-| `shell_profile` | System-wide interactive shell prompt/aliases/exports for root and `fleet`, plus the `CLAUDE_CODE_OAUTH_TOKEN` export hook |
-| `ddev` | DDEV apt repo + package, global router config (loopback-only ports), mkcert local CA |
-| `claude_cli` | Node.js/npm + the Claude Code CLI, so `claude setup-token` can mint `CLAUDE_CODE_OAUTH_TOKEN` |
-| `caddy` | Caddy apt repo + package, fleet-owned Caddy snippet dirs, seeded admin-auth default credentials, the rendered Caddyfile, the `50-fleet-sandbox.conf` systemd sandbox drop-in (FLE-1) |
-| `fleet_service` | Clones/updates the product repo into `{{ fleet_opt_dir }}`, installs the editable venv, deploys `fleet.service` + `fleet-boot.service` (both sandboxed via the shared `fleet-sandbox.inc.j2`, FLE-1; toggle `fleet_systemd_sandbox_enabled`) + `fleet-tmux.service` (owns the `fleet` tmux session in its own cgroup, deliberately unsandboxed; tag `fleet_tmux`) + the `fleet` CLI wrapper |
-| `network_hardening` | UFW (deny-incoming/allow-outgoing, SSH/80/443 allows, plus the registry's named ports staged via `fleet-ufw-sync` before `ufw enable`), the `DOCKER-USER` guard in `/etc/ufw/after.rules`, and the UFW dead-man's switch (`fleet-ufw-deadman.timer`/`.service`, boot-time `fleet-ufw-deadman-bootcheck.service`, `fleet-firewall-confirm`) |
-| `security_hardening` | Unattended-upgrades tuning (auto-reboot hardcoded off), `needrestart` auto-restart trap, Docker `live-restore`+log limits (applied by a Docker *reload*, never a restart: a restart stops every instance), SSH drop-in, fail2ban, conservative sysctl, scoped auditd, conditional `/tmp` hardening, msmtp + the sandboxed `fleet-reboot-notify` timer/service, and a closing `systemd-analyze security` check of the fleet units + caddy + authelia (FLE-1; see `docs/reference/07-hardening.md`) |
+| `packages` | Debian packages (PHP 8.4, Composer, `openssh-client`, `acl`, `sudo`, `tmux`, ...) |
+| `docker`, `ddev`, `apt_repo` | Docker CE and DDEV from their apt repositories (`apt_repo` pins each signing key's fingerprint) |
+| `fleet_user`, `shell` | The `fleet` user and `/srv/fleet`, `/etc/ddev-fleet`, `/opt/ddev-fleet`; the shell profile |
+| `caddy`, `authelia` | The packages, the sandbox/env drop-ins, the placeholder users; never started or restarted by the role itself |
+| `php_app`, `app_code` | `fleet.env`, `mercure.env`, the php-fpm pool; composer, assets, migrations, `fleet:host:init` |
+| `privileged`, `units` | The root helpers, sudoers, wrapper; the systemd units, the rendered configuration, starting and the health wait |
+| `hardening` | Opt-in sshd, firewall (dead-man's switch), fail2ban, sysctl, auditd, `/tmp`; off unless `fleet_hardening_enabled` |
 
-`network_hardening` and `security_hardening` are independently optional: every task in both gates
-on a single top-level `import_tasks ... when:`, so a bare `site.yml` run stays inert for both.
+Rules: `ansible.builtin` modules only, target Debian 13's `ansible-core` 2.19 (pinned in `install/ansible/requirements-dev.txt`),
+change detection and handlers, one short README per role. Lint with `ansible-lint install/ansible/` (production profile),
+`(cd install/ansible && yamllint .)` and `ansible-playbook --syntax-check -i localhost, install/ansible/site.yml`. A re-run
+on an up-to-date host must report `changed=0` (`ci/ansible-idempotency.sh`, `--check --diff` on a live host). Files that
+are installed byte for byte (`install/etc/*`, the helpers) are not edited for style: a changed byte restarts a service.
+`fleet upgrade` moves a host recorded as `bash` to Ansible on its first upgrade (`docs/reference/05-upgrade.md`).
 
 ## Working principles for agents (owner, 2026-11-07, FLE-253)
 

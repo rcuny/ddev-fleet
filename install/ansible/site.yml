@@ -1,5 +1,5 @@
 ---
-# FLE-241 spike: host provisioning as Ansible roles (packages, docker, hardening).
+# Host provisioning as Ansible roles: the only engine of the installer (install/run.sh) and of `fleet upgrade` (FLE-263).
 # Run on the host itself:  ansible-playbook -i localhost, -c local site.yml [--check --diff] [-e @host-vars.yml]
 - name: Provision a ddev-fleet host
   hosts: all
@@ -42,7 +42,7 @@
       tags: [caddy]
     - role: authelia
       tags: [authelia]
-    # The application layer, always on (replaces install/steps/70, 80, 85, 90, 95 and 98).
+    # The application layer, always on (replaces the former bash step 70, 80, 85, 90, 95 and 98).
     - role: php_app
       tags: [php_app, app]
     - role: app_code

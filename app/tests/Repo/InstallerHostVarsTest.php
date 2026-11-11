@@ -99,7 +99,7 @@ final class InstallerHostVarsTest extends TestCase
         self::assertStringNotContainsString('==> 10-packages', $out);
     }
 
-    public function testExplicitHardenIsStrictAndTheBashEngineStaysTheDefault(): void
+    public function testExplicitHardenIsStrictAndTheDefaultRunIsTheSameEngine(): void
     {
         $env = ['FLEET_OS_RELEASE' => $this->osRelease()];
         $strict = new Process(['bash', self::installDir().'/run.sh', '--dry-run', '--engine=ansible', '--domain=fleet.example.com', '--skip-dns-check', '--harden', '--ssh-allow-user=admin'], null, $env);
@@ -108,8 +108,8 @@ final class InstallerHostVarsTest extends TestCase
 
         $default = new Process(['bash', self::installDir().'/run.sh', '--dry-run', '--domain=fleet.example.com', '--skip-dns-check'], null, $env);
         $default->run();
-        self::assertStringContainsString('==> 10-packages', $default->getOutput());
-        self::assertStringNotContainsString('ansible-playbook', $default->getOutput());
+        self::assertStringContainsString('==> ansible-playbook', $default->getOutput());
+        self::assertStringContainsString('fleet_hardening_strict=false', $default->getOutput());
     }
 
     public function testUnknownEngineIsAUsageErrorInBothStages(): void
@@ -119,6 +119,23 @@ final class InstallerHostVarsTest extends TestCase
             $process->run();
             self::assertSame(64, $process->getExitCode(), $script);
         }
+    }
+
+    public function testEngineBashIsRefusedWithAClearMessageAndEngineAnsibleIsAcceptedAsDeprecated(): void
+    {
+        foreach (['install.sh', 'run.sh'] as $script) {
+            $bash = new Process(['bash', self::installDir().'/'.$script, '--dry-run', '--engine=bash', '--domain=fleet.example.com', '--skip-dns-check'], null, ['FLEET_OS_RELEASE' => $this->osRelease()]);
+            $bash->run();
+            self::assertSame(64, $bash->getExitCode(), $script);
+            self::assertStringContainsString('the bash engine was removed', $bash->getErrorOutput(), $script);
+        }
+
+        // An older `fleet upgrade` helper still passes it for a host recorded as ansible.
+        $ansible = new Process(['bash', self::installDir().'/run.sh', '--dry-run', '--engine=ansible', '--domain=fleet.example.com', '--skip-dns-check'], null, ['FLEET_OS_RELEASE' => $this->osRelease()]);
+        $ansible->run();
+        self::assertSame(0, $ansible->getExitCode(), $ansible->getErrorOutput());
+        self::assertStringContainsString('deprecated and ignored', $ansible->getErrorOutput());
+        self::assertStringContainsString('==> ansible-playbook', $ansible->getOutput());
     }
 
     public function testPreflightAcceptsTheEngineFlag(): void

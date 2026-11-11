@@ -1,7 +1,7 @@
 # shellcheck shell=bash
-# shellcheck disable=SC2034  # constants below are consumed by run.sh and the steps that source this file
+# shellcheck disable=SC2034  # constants below are consumed by run.sh and the libraries that source this file
 #
-# Helpers shared by install/run.sh and install/steps/*.sh. Sourced, never executed.
+# Helpers shared by install/run.sh and install/lib/*.sh. Sourced, never executed.
 #
 # Dry-run contract: with FLEET_DRY_RUN=1 nothing is changed. `run` and the file helpers print what they would do as
 # "+ ..." lines (some are pseudo-commands such as "+ write" or "+ dir"). Read-only probes still run (DNS, os-release).
@@ -69,14 +69,12 @@ REF=main
 REPO_URL=https://github.com/rcuny/ddev-fleet.git
 SKIP_DNS_CHECK=0
 SHELL_PROFILE=1
-# --harden and its settings (opt-in host hardening, install/harden/): off unless asked for or stored by an earlier run.
+# --harden and its settings (opt-in host hardening, install/ansible/roles/hardening): off unless asked for or stored by an earlier run.
 HARDEN=0
 HARDEN_SSH_USERS=()
 HARDEN_TRUSTED_IPS=()
 HARDEN_GRACE=
 HARDEN_TMP=0
-# --engine: bash (the numbered steps, default) or ansible (install/ansible/site.yml, lib/host-vars.sh).
-ENGINE=bash
 # --preflight: run only the pre-flight checks (lib/preflight.sh), change nothing.
 PREFLIGHT_ONLY=0
 
@@ -212,20 +210,6 @@ run_as_fleet() {
   run runuser -u "$FLEET_USER" -- env "HOME=$FLEET_HOME_DIR" DDEV_NONINTERACTIVE=true "$@"
 }
 
-# Runs a command as the fleet user in the app directory with the application environment (/etc/ddev-fleet/fleet.env)
-# loaded: exactly what the workers and the `fleet` wrapper run with.
-fleet_app_run() {
-  if is_dry; then
-    printf '+ as fleet, in %s/app with %s/fleet.env loaded:' "$FLEET_SRC_DIR" "$FLEET_ETC_DIR"
-    printf ' %q' "$@"
-    printf '\n'
-    return 0
-  fi
-  # shellcheck disable=SC2016  # the script is single-quoted on purpose: the inner shell expands $1, $2 and "$@"
-  run_as_fleet bash -c 'set -a; . "$1"; set +a; cd "$2" && shift 2 && exec "$@"' fleet-app \
-    "$FLEET_ETC_DIR/fleet.env" "$FLEET_SRC_DIR/app" "$@"
-}
-
 # Deletes whatever is left in the app's staging directory. The staged Caddy environment file holds the OVH credentials
 # in clear text, and the root helper removes only what it installed: an install that dies between the render and the
 # `apply` calls (or an apply that fails) must not leave them in /srv/fleet, which operators back up. Called from the exit
@@ -235,16 +219,6 @@ discard_staging() {
   [ -d "$FLEET_SRV_DIR/staging" ] || return 0
   run_as_fleet find "$FLEET_SRV_DIR/staging" -mindepth 1 \( -type f -o -type l \) -delete >/dev/null 2>&1 || true
   return 0
-}
-
-# `php8.4 bin/console <args>` through fleet_app_run.
-fleet_console() {
-  fleet_app_run php8.4 bin/console "$@"
-}
-
-# True in dry-run (so the plan is complete) or when the command is not installed yet.
-missing_or_dry() {
-  is_dry || ! command -v "$1" >/dev/null 2>&1
 }
 
 # --- argument handling -------------------------------------------------------------------------------------------
@@ -271,7 +245,7 @@ Options:
   --trusted-ip=<ip|cidr> with --harden: an address that is never banned or firewalled (repeatable)
   --firewall-grace=<min> with --harden: minutes before the dead-man's switch turns an unconfirmed firewall off (default 10)
   --harden-tmp          with --harden: also mount /tmp nosuid,nodev,noexec at the next boot (can break builds that run files from /tmp)
-  --engine=<bash|ansible> how the host is provisioned: the bash steps (default) or the Ansible playbook (see docs)
+  --engine=ansible      accepted and ignored (deprecated): the Ansible playbook is the only engine; --engine=bash is refused
   --preflight           only check this host (disk, instance ids, Docker, DDEV, ...) and change nothing; works without
                         root. One line per finding: BLOCK|WARN|INFO <id>: <message>
   --dry-run             print the plan and change nothing (works without root)
@@ -341,9 +315,11 @@ parse_args() {
         HARDEN_GRACE=${arg#--firewall-grace=}
         ;;
       --harden-tmp) HARDEN_TMP=1 ;;
+      --engine=ansible)
+        # Deprecated no-op: releases before the bash engine was removed passed it on an upgrade.
+        printf 'note: --engine=ansible is deprecated and ignored; the Ansible playbook is the only engine\n' >&2 ;;
       --engine=*)
-        ENGINE=${arg#--engine=}
-        case $ENGINE in bash | ansible) ;; *) die "$EX_USAGE" "--engine must be bash or ansible" ;; esac
+        die "$EX_USAGE" "--engine=${arg#--engine=} is not supported: the bash engine was removed, Ansible is the only engine (omit --engine)"
         ;;
       --preflight) PREFLIGHT_ONLY=1 ;;
       --dry-run) FLEET_DRY_RUN=1 ;;
@@ -403,7 +379,7 @@ check_root() {
   [ "$(id -u)" -eq 0 ] || die "$EX_NOTROOT" "run as root (sudo bash install.sh ...), or add --dry-run to only print the plan"
 }
 
-# The installer runs as root and sources INSTALL_DIR/steps/*.sh and installs INSTALL_DIR/etc and libexec files, so
+# The installer runs as root and runs INSTALL_DIR/ansible/site.yml and installs INSTALL_DIR/etc and libexec files, so
 # nothing under it may be changeable by another account (a checkout owned by a developer, or the fleet-owned /opt
 # checkout). install.sh hands over a root-owned export; a dry-run changes nothing and may run from any checkout.
 check_install_dir() {
@@ -579,19 +555,6 @@ check_dns() {
 
 # --- files --------------------------------------------------------------------------------------------------------
 
-# ensure_dir <path> <mode> <owner:group>: creates the directory and sets owner and mode every time (repairs drift,
-# e.g. a lost setgid bit).
-ensure_dir() {
-  local dir=$1 mode=$2 owner=$3
-  if is_dry; then
-    printf '+ dir %s %s %s\n' "$dir" "$mode" "$owner"
-    return 0
-  fi
-  mkdir -p "$dir"
-  set_owner "$owner" "$dir"
-  chmod "$mode" "$dir"
-}
-
 # chown, except under the test prefix (an unprivileged run cannot hand files to root or fleet).
 set_owner() {
   [ -z "$FLEET_ROOT_PREFIX" ] || return 0
@@ -622,22 +585,6 @@ write_file() {
   fi
   mv -f "$tmp" "$path"
   FILE_CHANGED=1
-}
-
-# install_etc <file under install/etc> <destination> <mode> <owner:group>
-install_etc() {
-  write_file "$2" "$3" "$4" <"$INSTALL_DIR/etc/$1"
-}
-
-# write_file_once: like write_file but leaves an existing non-empty file untouched.
-write_file_once() {
-  local path=$1
-  if ! is_dry && [ -s "$path" ]; then
-    FILE_CHANGED=0
-    cat >/dev/null
-    return 0
-  fi
-  write_file "$@"
 }
 
 # --- apt ----------------------------------------------------------------------------------------------------------
@@ -710,11 +657,6 @@ apt_refresh() {
   fi
 }
 
-apt_install() {
-  apt_refresh
-  apt_get install "$@"
-}
-
 # --- no service start during a package install ------------------------------------------------------------------
 
 POLICY_RC=/usr/sbin/policy-rc.d
@@ -783,27 +725,5 @@ apt_repo() {
   write_file "$APT_SOURCES_DIR/$name.list" 0644 root:root <<<"$line"
   if [ "$FILE_CHANGED" = 1 ]; then
     APT_DIRTY=1
-  fi
-}
-
-# True when $1 is a strictly older dotted version than $2 (leading "v" ignored).
-version_lt() {
-  local a=${1#v} b=${2#v}
-  [ "$a" != "$b" ] && [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n 1)" = "$a" ]
-}
-
-# What /etc/ddev-fleet/installed-version holds: the tag when --ref is one (and exists) or when the checkout's HEAD is
-# exactly a v* release tag (a re-run without --ref), else <ref>@<sha7>. The sha is the checkout's HEAD. Printed on stdout; empty when it cannot be determined.
-installed_version_label() {
-  local exact sha=${CODE_REVISION:-}
-  [ -n "$sha" ] || sha=$(run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse HEAD 2>/dev/null || true)
-  if [[ $REF =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]] \
-    && run_as_fleet git -C "$FLEET_SRC_DIR" rev-parse -q --verify "refs/tags/$REF^{commit}" >/dev/null 2>&1; then
-    printf '%s\n' "$REF"
-  elif exact=$(run_as_fleet git -C "$FLEET_SRC_DIR" describe --tags --exact-match --match 'v[0-9]*' HEAD 2>/dev/null) \
-    && [[ $exact =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
-    printf '%s\n' "$exact"
-  elif [ -n "$sha" ]; then
-    printf '%s@%s\n' "$REF" "${sha:0:7}"
   fi
 }

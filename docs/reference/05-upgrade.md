@@ -86,11 +86,17 @@ sudo fleet upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restor
 
 ### Install engine
 
-The installer records the engine that provisioned the host in `/etc/ddev-fleet/installed-engine` (`bash` or `ansible`;
-a host without the file is `bash`). `fleet upgrade`, and a rollback, run the target release's `install.sh` with the same
-engine: on an `ansible` host that is `--engine=ansible`, so the playbook of the target tag runs again and writes
-`installed-version`. A target release that does not have the Ansible engine is refused before the backup, before any history line and before any service is stopped. A record that holds anything else than `bash` or `ansible` is reported as a warning and the host is treated as bash.
-The Upgrade page shows the engine.
+Ansible is the only install engine. The installer records it in `/etc/ddev-fleet/installed-engine` (`ansible`); a host
+without the file, or with `bash` in it, was installed by the bash engine that older releases had. `fleet upgrade` to a
+release without the bash engine **switches such a host to Ansible**: the target's playbook runs once, reproduces what the
+bash installer made without changing it (a check-mode run reports `changed=0`), and writes `installed-engine` and
+`installed-version`. The helper prints `Install engine: bash -> ansible` before it takes the backup, so the pre-upgrade
+backup covers the switch, and the history line records the engine that ran the upgrade.
+
+A rollback to a release that still has both engines runs it with `--engine=ansible` on an `ansible` host, so the
+playbook runs again; a target that has no Ansible engine at all (a release from before it existed) is refused before the
+backup, before any history line and before any service is stopped. A record that holds anything else than `bash` or
+`ansible` is reported as a warning and the host is treated as bash. The Upgrade page shows the engine.
 
 ## Roll back
 
@@ -142,7 +148,7 @@ A release's `CHANGELOG.md` can end a version with `#### Rollout` bullets. One st
 | `restore` | `ok`, `failed` | Rollback only: the database was restored from `backup`. |
 | `verify` | `ok`, `unverified` | When the verification returned. |
 
-Every line has `ts` (UTC), `event`, `result`, `from`, `to`, `sha`, `actor`, `engine` (`bash` or `ansible`, see "Install engine"); `start` and `restore` add `backup`. `fleet upgrade verify --to vX.Y.Z` runs the verification alone.
+Every line has `ts` (UTC), `event`, `result`, `from`, `to`, `sha`, `actor`, `engine` (the engine recorded before the run, `bash` or `ansible`, see "Install engine"); `start` and `restore` add `backup`. `fleet upgrade verify --to vX.Y.Z` runs the verification alone.
 
 ## Docker network pool and mirrors
 

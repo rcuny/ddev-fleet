@@ -1,5 +1,5 @@
 ---
-# Port of install/steps/90-privileged.sh: the only things that give the fleet user a root-side effect, installed from
+# Port of the former bash step 90-privileged.sh: the only things that give the fleet user a root-side effect, installed from
 # the ROOT-OWNED export of install/ (fleet_install_dir), never from the fleet-writable checkout.
 - name: The helper directory
   ansible.builtin.file:

@@ -1,6 +1,6 @@
 # authelia
 
-Port of `install/steps/60-authelia.sh`, behaviour for behaviour. Always on, after `caddy`.
+Port of the former bash step 60-authelia.sh, behaviour for behaviour. Always on, after `caddy`.
 
 Does: the tmpfiles mask (`/etc/tmpfiles.d/authelia.conf`, before the package), the Authelia apt repository (pinned key
 fingerprint) and package (no service start during the install; the step has no version pin, apt installs the repository's current

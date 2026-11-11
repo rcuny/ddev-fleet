@@ -6,7 +6,7 @@ A plain install or upgrade never touches `sshd`, `ufw`, fail2ban or unattended-u
 
 ## From the web page (Hardening tab)
 
-On a host installed with the Ansible engine (`install.sh --engine=ansible`), an administrator can turn hardening on, off or change it from **Settings → Hardening** instead of re-running the installer. The tab edits the same answers as the flags above: the allowed SSH accounts, the trusted addresses, the firewall grace period and the `/tmp` option. It also asks for **the SSH account you log in with**, which must be in the allow list; the run refuses a change that would lock that account out, as `--harden` does.
+On a host provisioned by the Ansible playbook (every new install; an older host after its first upgrade), an administrator can turn hardening on, off or change it from **Settings → Hardening** instead of re-running the installer. The tab edits the same answers as the flags above: the allowed SSH accounts, the trusted addresses, the firewall grace period and the `/tmp` option. It also asks for **the SSH account you log in with**, which must be in the allow list; the run refuses a change that would lock that account out, as `--harden` does.
 
 - Saving asks for your password again (once per change), then queues a job and opens its live log. The job writes the answers to `/etc/ddev-fleet/host-vars.yml` and runs the installed release's own playbook through the root helper `apply provision`. The page chooses no playbook, role or argument.
 - If the run fails, the previous answers file is put back (only when that run installed new answers), so the next upgrade does not apply a half-accepted change. The rollback restores the answers file only: it does not undo a half-applied playbook run.
