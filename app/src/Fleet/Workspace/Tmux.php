@@ -41,6 +41,9 @@ final readonly class Tmux
     public const int COMMAND_MAX = 4096;
     public const float TIMEOUT = 15.0;
 
+    /** The only foreground commands API terminal input may reach (FLE-286): the agent, never a shell or any other program. */
+    public const array AGENTS = ['claude'];
+
     /** Foreground commands that mean "a shell at its prompt". */
     private const array SHELLS = ['bash', 'sh', 'zsh', 'dash', 'fish', '-bash', '-sh', '-zsh'];
 
@@ -230,8 +233,7 @@ final readonly class Tmux
         if (!\in_array($instanceId, $this->listWindows(), true)) {
             throw new WorkspaceException('The instance has no window.');
         }
-        $shells = self::shells($this->panes($instanceId));
-        $target = $shells[Pane::Tty1 === $pane ? 0 : 1] ?? null;
+        $target = self::shellFor($this->panes($instanceId), $pane);
         if (null === $target) {
             throw new WorkspaceException(\sprintf('The window has no %s pane.', strtolower($pane->name)));
         }
@@ -252,7 +254,7 @@ final readonly class Tmux
         if (Pane::Sidebar === $pane) {
             throw new WorkspaceException('Only tty1 or tty2 can be busy, not the sidebar.');
         }
-        $target = self::shells($this->panes($instanceId))[Pane::Tty1 === $pane ? 0 : 1] ?? null;
+        $target = self::shellFor($this->panes($instanceId), $pane);
         if (null === $target) {
             return false;
         }
@@ -269,6 +271,130 @@ final readonly class Tmux
         }
 
         return $this->runner->run(['pgrep', '-P', $pid], null, [], null, self::TIMEOUT)->isSuccess();
+    }
+
+    /**
+     * The pane API terminal input would type into, found strictly and checked: tty1 or tty2 by its `tty1`/`tty2` tag (or, in an
+     * untagged window with exactly two shells, by position; a window with any other number of shells has no addressable pane),
+     * never the sidebar and never `general`. Null when the pane does not exist; the foreground command is read now.
+     *
+     * @throws WorkspaceException
+     */
+    public function agentPane(string $instanceId, Pane $pane): ?AgentPane
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane) {
+            throw new WorkspaceException('Keys are sent to tty1 or tty2, not to the sidebar.');
+        }
+        if (!\in_array($instanceId, $this->listWindows(), true)) {
+            return null;
+        }
+        $target = self::strictShell($this->panes($instanceId), $pane);
+        if (null === $target) {
+            return null;
+        }
+        $state = $this->paneState($target->id);
+        if (null === $state || $state['window'] !== $instanceId) {
+            return null;
+        }
+
+        return new AgentPane($target->id, $state['command']);
+    }
+
+    /**
+     * Types $text (no control characters; the caller validated it) into an agent pane, then Enter when asked. Re-reads the pane
+     * immediately before sending and refuses unless it is still the same pane of the same window, alive, with an agent in the
+     * foreground. tmux cannot check and send atomically: what is left is the time between that read and the keystroke, a few
+     * milliseconds (the residual risk is documented in docs/reference/15-api.md).
+     *
+     * @throws WorkspaceException
+     */
+    public function sendToAgent(string $instanceId, AgentPane $pane, string $text, bool $enter): void
+    {
+        self::assertId($instanceId);
+        if ('' === $text || \strlen($text) > self::COMMAND_MAX || 1 === preg_match('/[\x00-\x1f\x7f]/', $text)) {
+            throw new WorkspaceException('The text is empty, too long, or contains a control character.');
+        }
+        $state = $this->paneState($pane->id);
+        if (null === $state || $state['window'] !== $instanceId || $state['dead'] || !\in_array($state['command'], self::AGENTS, true)) {
+            throw new WorkspaceException('The pane is no longer running an agent.');
+        }
+
+        $this->must(['send-keys', '-t', $pane->id, '-l', '--', $text], 'send the keys');
+        if ($enter) {
+            // Again between the text and Enter: if the agent is gone, the text is left unsubmitted rather than run by a shell.
+            $after = $this->paneState($pane->id);
+            if (null === $after || $after['window'] !== $instanceId || $after['dead'] || !\in_array($after['command'], self::AGENTS, true)) {
+                throw new WorkspaceException('The pane stopped running an agent before Enter; Enter was not sent.');
+            }
+            $this->must(['send-keys', '-t', $pane->id, 'Enter'], 'send Enter');
+        }
+    }
+
+    /**
+     * @return array{window: string, command: string, dead: bool}|null
+     */
+    private function paneState(string $paneId): ?array
+    {
+        if (1 !== preg_match('/^%[0-9]{1,9}$/D', $paneId)) {
+            return null;
+        }
+        $result = $this->tmux(['display-message', '-p', '-t', $paneId, "#{window_name}\t#{pane_current_command}\t#{pane_dead}"]);
+        if (!$result->isSuccess()) {
+            return null;
+        }
+        $f = explode("\t", rtrim($result->stdout, "\r\n"), 3);
+        if (3 !== \count($f) || '' === $f[0]) {
+            return null;
+        }
+
+        return ['window' => $f[0], 'command' => $f[1], 'dead' => '1' === $f[2]];
+    }
+
+    /**
+     * @param list<PaneInfo> $panes
+     */
+    private static function strictShell(array $panes, Pane $pane): ?PaneInfo
+    {
+        $role = Pane::Tty1 === $pane ? PaneInfo::ROLE_TTY1 : PaneInfo::ROLE_TTY2;
+        foreach ($panes as $candidate) {
+            if ($candidate->role === $role) {
+                return $candidate;
+            }
+        }
+        $shells = array_values(array_filter(self::shells($panes), static fn (PaneInfo $p): bool => '' === $p->role));
+        if (2 !== \count($shells) || 2 !== \count(self::shells($panes))) {
+            return null;
+        }
+
+        return $shells[Pane::Tty1 === $pane ? 0 : 1];
+    }
+
+    /**
+     * The visible text and scrollback of tty1 or tty2 of the window (`capture-pane -p -J`, the last $lines lines), read only.
+     * The sidebar and the `general` window are never captured: the pane is found by position among the window's shells,
+     * and only an instance id (never `general`) names a window. Null when the window or the pane does not exist.
+     *
+     * @throws WorkspaceException
+     */
+    public function capture(string $instanceId, Pane $pane, int $lines): ?string
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane) {
+            throw new WorkspaceException('Only tty1 or tty2 can be read, not the sidebar.');
+        }
+        if ($lines < 1 || $lines > 1000) {
+            throw new WorkspaceException('The line count is out of range.');
+        }
+        if (!\in_array($instanceId, $this->listWindows(), true)) {
+            return null;
+        }
+        $target = self::shellFor($this->panes($instanceId), $pane);
+        if (null === $target) {
+            return null;
+        }
+
+        return $this->must(['capture-pane', '-p', '-J', '-t', $target->id, '-S', '-'.$lines], 'capture the pane')->stdout;
     }
 
     /**
@@ -430,6 +556,42 @@ final readonly class Tmux
         if ($changed) {
             $this->applyLayout($name);
         }
+        $this->tagShells($name);
+    }
+
+    /**
+     * Gives the two shells of a window the stable `tty1` / `tty2` tags (left, right), so a later split or a lost sidebar cannot
+     * move the address of a pane. Only a window with exactly two untagged shells is tagged; the `general` window never is.
+     */
+    private function tagShells(string $name): void
+    {
+        if (self::HOME_WINDOW === $name) {
+            return;
+        }
+        $shells = self::shells($this->panes($name));
+        if (2 !== \count($shells) || '' !== $shells[0]->role || '' !== $shells[1]->role) {
+            return;
+        }
+        $this->must(['set-option', '-p', '-t', $shells[0]->id, '@fleet_role', PaneInfo::ROLE_TTY1], 'tag tty1');
+        $this->must(['set-option', '-p', '-t', $shells[1]->id, '@fleet_role', PaneInfo::ROLE_TTY2], 'tag tty2');
+    }
+
+    /**
+     * tty1 or tty2 of the panes: by tag when tagged, else by position among the shells (the 1.x layout before the tags).
+     *
+     * @param list<PaneInfo> $panes
+     */
+    private static function shellFor(array $panes, Pane $pane): ?PaneInfo
+    {
+        $role = Pane::Tty1 === $pane ? PaneInfo::ROLE_TTY1 : PaneInfo::ROLE_TTY2;
+        foreach ($panes as $candidate) {
+            if ($candidate->role === $role) {
+                return $candidate;
+            }
+        }
+        $untagged = array_values(array_filter(self::shells($panes), static fn (PaneInfo $p): bool => '' === $p->role));
+
+        return $untagged[Pane::Tty1 === $pane ? 0 : 1] ?? null;
     }
 
     private function dirOf(string $name): string

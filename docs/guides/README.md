@@ -12,5 +12,6 @@ Task-oriented pages, in the order you will most likely need them: install Fleet,
 | [share-and-access.md](06-share-and-access.md) | Choose who may see what: users and roles |
 | [operate.md](07-operate.md) | Back up, upgrade, move projects, manage capacity |
 | [secure-the-host.md](08-secure-the-host.md) | Understand the security model and harden the host |
+| [use-the-api.md](09-use-the-api.md) | Create an API token and call Fleet from scripts and CI |
 
 Looking up a flag, a field or a path instead? Go to the [reference](../reference/README.md). New to the vocabulary? Read [concepts](../concepts.md) first.

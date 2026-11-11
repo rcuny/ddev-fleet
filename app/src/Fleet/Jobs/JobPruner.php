@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Fleet\Jobs;
 
+use App\Domain\ApiCall\ApiCallRepository;
 use App\Domain\Job\JobRepository;
 use App\Fleet\FleetPaths;
 use Psr\Clock\ClockInterface;
@@ -19,6 +20,7 @@ final readonly class JobPruner
         private JobRepository $jobs,
         private FleetPaths $paths,
         private ClockInterface $clock,
+        private ?ApiCallRepository $apiCalls = null,
     ) {
     }
 
@@ -31,6 +33,9 @@ final readonly class JobPruner
             throw new \InvalidArgumentException('The retention must be at least one day.');
         }
         $before = $this->clock->now()->modify(\sprintf('-%d days', $days));
+
+        // Terminal-input evidence (FLE-286) follows the same retention.
+        $this->apiCalls?->pruneBefore($before);
 
         $instanceOf = $this->jobs->finishedBefore($before);
         $deleted = $this->jobs->pruneFinishedBefore($before);

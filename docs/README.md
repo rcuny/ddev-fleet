@@ -30,6 +30,7 @@ Find the shortest path to what you want to do. Pick a journey below, or scan the
 - [Share and access](guides/06-share-and-access.md): users and roles.
 - [Operate](guides/07-operate.md): backups, upgrades, moving projects, capacity.
 - [Secure the host](guides/08-secure-the-host.md): security model and hardening.
+- [Use the API](guides/09-use-the-api.md): create a token, call the HTTP API.
 
 **Reference** ([index](reference/README.md))
 - [CLI](reference/01-cli.md): every command.

@@ -59,7 +59,7 @@ paths:
   /api/v1/host/capacity:
     get:
       operationId: getHostCapacity
-      summary: The `host:capacity --json` document (schema 1), plus a verdict when `project` is given.
+      summary: The `host:capacity --json` document (schema 1), plus a verdict when `project` is given. A project-limited token must pass `project` (one of its own) and gets the scoped document.
       tags: [host]
       x-scope: read
       parameters:
@@ -70,7 +70,7 @@ paths:
         "403": {$ref: "#/components/responses/Forbidden"}
         "404": {$ref: "#/components/responses/NotFound"}
         "429": {$ref: "#/components/responses/RateLimited"}
-        "200": {description: The capacity report, content: {application/json: {schema: {$ref: "#/components/schemas/Capacity"}}}}
+        "200": {description: "The capacity report; for a project-limited token the scoped document (verdict, own figures, remaining instance headroom)", content: {application/json: {schema: {$ref: "#/components/schemas/Capacity"}}}}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/upgrade:
     get:
@@ -288,6 +288,79 @@ paths:
         "428": {$ref: "#/components/responses/PreconditionRequired"}
         "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
+        default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances/{id}/terminal:
+    get:
+      operationId: getInstanceTerminal
+      summary: Read-only capture of tty1 or tty2 of an instance (escape-free, masked, at most 200 lines and 64 KiB). The token must list the instance's project and a matching instance pattern.
+      tags: [instances]
+      x-scope: terminal:read
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+        - {name: pane, in: query, description: "tty1 or tty2 (the sidebar and the general window are never readable).", schema: {type: string, enum: [tty1, tty2], default: tty2}}
+        - {name: lines, in: query, description: Last N lines, 1 to 200., schema: {type: integer, minimum: 1, maximum: 200, default: 40}}
+      responses:
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: The pane text
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instance, pane, lines, truncated, captured_at, text]
+                properties:
+                  instance: {type: string}
+                  pane: {type: string, enum: [tty1, tty2]}
+                  lines: {type: integer}
+                  truncated: {type: boolean}
+                  captured_at: {type: string, format: date-time}
+                  text: {type: string}
+        default: {$ref: "#/components/responses/Problem"}
+    post:
+      operationId: writeInstanceTerminal
+      summary: "Type one line of text into the agent pane (tty1 or tty2) of an instance. Needs the project's opt-in, a running instance and the agent in the foreground, never a shell. Recorded with its text before it is sent."
+      tags: [instances]
+      x-scope: terminal:write
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              properties:
+                pane: {type: string, enum: [tty1, tty2], default: tty2}
+                text: {type: string, maxLength: 4096, description: "One line, no control characters, not starting with !, / or #; at most 4096 bytes."}
+                enter: {type: boolean, default: false, description: Press Enter after the text.}
+      responses:
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "409": {$ref: "#/components/responses/Conflict"}
+        "422": {$ref: "#/components/responses/ValidationFailed"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: The text was typed
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instance, pane, foreground, length, sha256, enter, call]
+                properties:
+                  instance: {type: string}
+                  pane: {type: string, enum: [tty1, tty2]}
+                  foreground: {type: string}
+                  length: {type: integer}
+                  sha256: {type: string}
+                  enter: {type: boolean}
+                  call: {type: integer, description: The evidence row id.}
         default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances/{id}/redeploy:
     post:
@@ -637,6 +710,11 @@ components:
       properties:
         schema: {type: integer}
         verdict: {type: [object, "null"]}
+        scope: {type: string, enum: [project], description: "Present for a project-limited token: the document holds only that project's verdict and figures."}
+        project: {type: string}
+        instances:
+          type: object
+          description: "Scoped document: `project_count` (the project's instances) and `remaining` (headroom under the host instance cap, a count only)."
     Upgrade:
       type: object
       required: [installed, latest, behind, engine, catalog_failed, pending_migrations]

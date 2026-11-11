@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.8.0] - 2026-11-11
+
+### Added
+- API: `GET /api/v1/instances/{id}/terminal` (scope `terminal:read`): read-only capture of tty1 or tty2, limited by the token's projects and instance patterns, escape-free, masked, capped at 200 lines and 64 KiB, rate-limited and audited (FLE-285).
+
+- API: `POST /api/v1/instances/{id}/terminal` (scope `terminal:write`): types one line of text into an instance's agent pane. Opt-in per project (admin switch behind re-auth, not settable from the CLI, export or import), foreground process must be the agent and is checked again just before the keys are sent, strict text allow-list, 1 call per 2 seconds, 6 per minute per token and 10 per minute per instance, the token's issue rules checked again on every call, one identical 404 for a missing, foreign or unmatched instance, masked text in the evidence, evidence in a new `api_call` table (text included) and an audit entry written before the send (no record, no keys) (FLE-286).
+
+- **FLE-290: a guide to create and use HTTP API tokens** (`docs/guides/09-use-the-api.md`), linked from the README, the docs map and the API reference.
+
+- **FLE-292: a reusable `fleet-api` Claude skill for project orchestrators.** `skills/fleet-api/` holds a `SKILL.md` and a standard-library Python client and CLI for the HTTP API: token check, instances, jobs and job logs, deploy, redeploy, start, stop, destroy (needs `--confirm <id>`, sends `If-Match`) and terminal read. https only, no redirects, `Retry-After` honoured. The project capacity verdict is a clear stub until the endpoint exists. See "Use the HTTP API".
+
+### Changed
+- Terminal panes are tagged `tty1` and `tty2` when a window is healed, and read and write find them by that tag, so splitting a pane no longer moves their address. An unterminated OSC payload in a terminal read is cut to the end of its line (FLE-286, from the FLE-285 review).
+
+- **FLE-291: a project-limited API token can read `GET /api/v1/host/capacity?project=<own project>`.** It gets the scoped document (dispatch verdict, its own project's figures, remaining instance-cap headroom), never other projects or host totals; without `project`, or for another project, it is still refused (403). Unrestricted tokens keep the full report.
+- **FLE-293:** The `fleet-api` skill's `capacity` command now calls the project-scoped `GET /api/v1/host/capacity?project=` and prints the verdict; `--project` defaults to the token's single project.
+
+### Fixed
+- `fleet-api --wait` no longer exits 3 when the answer carries no job id; the literal token is masked in every message.
+
 ## [1.7.0] - 2026-11-11
 
 ### Added
@@ -1409,7 +1429,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.7.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.8.0...HEAD
+[1.8.0]: https://github.com/rcuny/ddev-fleet/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/rcuny/ddev-fleet/compare/v1.6.1...v1.7.0
 [1.6.1]: https://github.com/rcuny/ddev-fleet/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/rcuny/ddev-fleet/compare/v1.5.3...v1.6.0

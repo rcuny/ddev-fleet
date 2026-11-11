@@ -29,10 +29,30 @@ framework:
             policy: sliding_window
             limit: 30
             interval: '1 minute'
+        # Terminal reads (v1.8.0), per token, on top of api_read: a capture is heavier than a database read.
+        api_terminal_read:
+            policy: sliding_window
+            limit: 30
+            interval: '1 minute'
         # Terminal input (v1.8.0), per token, stricter than any other write.
         api_terminal_write:
             policy: sliding_window
             limit: 6
+            interval: '1 minute'
+        # ... and at most one input every 2 seconds (no burst of six).
+        api_terminal_write_burst:
+            policy: sliding_window
+            limit: 1
+            interval: '2 seconds'
+        # ... at most 10 inputs a minute into one instance whatever the token, so several tokens cannot flood one agent pane.
+        api_terminal_write_instance:
+            policy: sliding_window
+            limit: 10
+            interval: '1 minute'
+        # ... and at most 20 refused attempts a minute per token get an audit row (the rest are refused without one).
+        api_terminal_write_denied:
+            policy: sliding_window
+            limit: 20
             interval: '1 minute'
         # Failed token authentications (App\Security\Api\ApiAuthFailureThrottle), per client address.
         api_auth_failure:
@@ -57,7 +77,15 @@ when@test:
                 storage_service: fleet.test.reveal_storage
             api_write:
                 storage_service: fleet.test.reveal_storage
+            api_terminal_read:
+                storage_service: fleet.test.reveal_storage
             api_terminal_write:
+                storage_service: fleet.test.reveal_storage
+            api_terminal_write_burst:
+                storage_service: fleet.test.reveal_storage
+            api_terminal_write_instance:
+                storage_service: fleet.test.reveal_storage
+            api_terminal_write_denied:
                 storage_service: fleet.test.reveal_storage
             api_auth_failure:
                 storage_service: fleet.test.reveal_storage

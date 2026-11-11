@@ -158,6 +158,8 @@ final class OpenApiContractTest extends AdminTestCase
             ['GET', '/api/v1/host', ''],
             ['GET', '/api/v1/host/capacity', ''],
             ['GET', '/api/v1/host/capacity?project=acme', ''],
+            ['GET', '/api/v1/host/capacity?project=acme', '', $this->writer->secret, [], 200],
+            ['GET', '/api/v1/host/capacity', '', $this->writer->secret, [], 403],
             ['GET', '/api/v1/upgrade', ''],
             ['GET', '/api/v1/webhooks/log', ''],
             ['GET', '/api/v1/projects', ''],
@@ -265,7 +267,7 @@ final class OpenApiContractTest extends AdminTestCase
                     if ($read && !$isAll) {
                         $held = [ApiScope::Deploy];
                     }
-                    $token = $issuer->issue('sc'.++$n, 'test', $held, $read && $isAll ? ['*'] : ['acme'], [], [], new \DateTimeImmutable('+30 days'), 'cli');
+                    $token = $issuer->issue('sc'.++$n, 'test', $held, $read && $isAll ? ['*'] : ['acme'], ['*'], \in_array(ApiScope::TerminalWrite, $held, true) ? [$this->clientIp] : [], new \DateTimeImmutable(\in_array(ApiScope::TerminalWrite, $held, true) ? '+3 days' : '+30 days'), 'cli');
                     $this->call(strtoupper((string) $method), $uri, 'POST' === strtoupper((string) $method) ? '{}' : '', $token->secret, 'DELETE' === strtoupper((string) $method) ? ['HTTP_IF_MATCH' => 'x'] : []);
                     $status = $this->client->getResponse()->getStatusCode();
                     if ($isAll) {
