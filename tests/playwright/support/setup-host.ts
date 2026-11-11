@@ -165,8 +165,16 @@ async function startHost(pristine: { home: string; setupLink: string }, options:
       socket.destroy();
     }
     await new Promise<void>((done) => forwarder.close(() => done()));
-    server.kill('SIGTERM');
-    rmSync(home, { recursive: true, force: true });
+    // Wait for php (and its workers) to exit before removing the home: a worker still writing into it
+    // made rmSync fail with ENOTEMPTY. SIGKILL after 5 s; the rm retries, but real failures still throw.
+    if (server.exitCode === null && server.signalCode === null) {
+      const exited = new Promise<void>((done) => server.once('exit', () => done()));
+      server.kill('SIGTERM');
+      const timer = setTimeout(() => server.kill('SIGKILL'), 5000);
+      await exited;
+      clearTimeout(timer);
+    }
+    rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   };
 
   try {
