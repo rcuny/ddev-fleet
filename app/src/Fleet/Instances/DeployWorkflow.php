@@ -11,6 +11,7 @@ use App\Domain\Project\Project;
 use App\Domain\Template\SshIdentities;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Git\GitClient;
@@ -67,6 +68,7 @@ final class DeployWorkflow
         private readonly ?InstanceCgroupWriter $cgroup = null,
         private readonly ?PushKeyCheck $pushCheck = null,
         private readonly ?InstanceIsolation $isolation = null,
+        private readonly ?AuditLog $audit = null,
     ) {
     }
 
@@ -81,6 +83,11 @@ final class DeployWorkflow
     {
         unset($force);
 
+        // FLE-319: before the old checkout goes. Outside the try: a refusal here leaves the instance exactly as it was.
+        if ($replace && InstanceState::Running === $instance->state()) {
+            $this->refuseRefusedRedeploy($instance, $project, $log);
+        }
+
         try {
             $this->deploy($instance, $project, $replace, $log, $template, $requestedLabel);
         } catch (\Throwable $e) {
@@ -90,6 +97,47 @@ final class DeployWorkflow
 
             throw $e;
         }
+    }
+
+    /**
+     * A redeploy of a RUNNING instance removes the old checkout and its containers before the new files can be scanned.
+     * If the new checkout would not pass the guard, the instance would end stopped with nothing to start. So the branch is
+     * cloned (shallow) into the staging directory first and scanned; a refusal stops the job with the old instance still running.
+     * An unreadable remote does not decide anything here: the real deploy reports it.
+     *
+     * @throws JobFailed
+     */
+    private function refuseRefusedRedeploy(Instance $instance, Project $project, JobLog $log): void
+    {
+        $stage = $this->paths->stagingDir().'/redeploy-'.$instance->id();
+        $refused = [];
+        try {
+            if (file_exists($stage) || is_link($stage)) {
+                $this->teardown->removeTree($stage, $log);
+            }
+            if (!is_dir($this->paths->stagingDir())) {
+                @mkdir($this->paths->stagingDir(), 0o750, true);
+            }
+            $cloned = $this->git->cloneForScan($project->git(), $instance->branch(), $stage, $log->output(...));
+            if ($cloned->isSuccess()) {
+                $refused = $this->preStart->refusals($instance, $stage);
+            }
+        } catch (\InvalidArgumentException|CommandRunnerException|JobFailed $e) {
+            $log->line('redeploy: the guard pre-check could not run ('.$e->getMessage().'); the deploy checks again before it starts anything');
+        } finally {
+            try {
+                $this->teardown->removeTree($stage, $log);
+            } catch (JobFailed) {
+            }
+        }
+        if ([] === $refused) {
+            return;
+        }
+        $what = implode('; ', $refused);
+        $log->line('redeploy refused: the new checkout would fail the guard ('.$what.'); the running instance was left as it is');
+        $this->audit?->record('system', AuditLog::REDEPLOY_REFUSED, $instance->id().': '.$what);
+
+        throw new JobFailed(\sprintf('Redeploy refused, the instance is still running its old checkout: the project now ships DDEV files that would give its containers access to the host (%s). Remove them from the branch, or ask an admin to switch on privileged overrides for the project, then redeploy.', $what));
     }
 
     private function deploy(Instance $instance, Project $project, bool $replace, JobLog $log, ?string $templateName, ?string $requestedLabel): void

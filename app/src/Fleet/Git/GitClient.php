@@ -70,6 +70,34 @@ final readonly class GitClient
     }
 
     /**
+     * FLE-319: a throw-away shallow clone of $branch of $url into $dir (a direct child of FleetPaths::stagingDir()), only so the
+     * pre-start guard can scan the files a redeploy would bring before the running instance is touched.
+     *
+     * @param callable(string, string): void $onOutput
+     *
+     * @throws \InvalidArgumentException when a value is not safe to pass to git or $dir is not a staging child
+     */
+    public function cloneForScan(string $url, string $branch, string $dir, callable $onOutput): CommandResult
+    {
+        foreach (['url' => $url, 'branch' => $branch] as $what => $value) {
+            if ('' === $value || '-' === $value[0] || preg_match('/[\x00-\x20\x7f]/', $value)) {
+                throw new \InvalidArgumentException(\sprintf('The %s is not valid.', $what));
+            }
+        }
+        if (\dirname($dir) !== $this->paths->stagingDir() || 1 !== preg_match('/^redeploy-[a-z0-9-]+$/', basename($dir))) {
+            throw new \InvalidArgumentException('The target directory is not a staging directory.');
+        }
+
+        return $this->runner->run(
+            ['git', '-c', 'protocol.ext.allow=never', '-c', 'protocol.file.allow=never', 'clone', '--depth', '1', '--branch', $branch, '--', $url, $dir],
+            $this->paths->stagingDir(),
+            ['GIT_TERMINAL_PROMPT' => '0', 'GIT_ALLOW_PROTOCOL' => 'https:ssh', 'GIT_SSH_COMMAND' => $this->sshCommand(false)],
+            $onOutput,
+            self::CLONE_TIMEOUT,
+        );
+    }
+
+    /**
      * Makes git over SSH work in a checkout's terminals (tty1/tty2, CI scripts): `core.sshCommand` carries the same
      * options as the clone, so no `~/.ssh` is needed and a missing host trust fails fast (BatchMode) instead of
      * hanging at a host-key prompt. The push key, when the host has one, is offered first so agent instances can push.
