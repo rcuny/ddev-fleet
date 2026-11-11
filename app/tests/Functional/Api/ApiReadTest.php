@@ -136,6 +136,34 @@ final class ApiReadTest extends AdminTestCase
     }
 
     /**
+     * FLE-291: a project-limited token gets the verdict and figures of its own project, nothing else.
+     */
+    public function testCapacityOfOwnProjectIsScopedForAProjectLimitedToken(): void
+    {
+        $body = $this->get('/api/v1/host/capacity?project=acme&template=full', $this->issue([ApiScope::Read], ['acme']));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('project', $body['scope']);
+        self::assertSame('acme', $body['verdict']['project']);
+        self::assertIsBool($body['verdict']['ok']);
+        self::assertIsArray($body['verdict']['reasons']);
+        self::assertSame(['project_count', 'remaining'], array_keys($body['instances']));
+        self::assertIsInt($body['instances']['remaining']);
+        self::assertArrayNotHasKey('projects', $body);
+        self::assertArrayNotHasKey('instances', $body['verdict']);
+        self::assertStringNotContainsString('demo', (string) json_encode($body));
+    }
+
+    public function testCapacityOfAnotherProjectIs403ForAProjectLimitedToken(): void
+    {
+        $body = $this->get('/api/v1/host/capacity?project=demo', $this->issue([ApiScope::Read], ['acme']));
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame('project_not_allowed', $body['code']);
+        self::assertStringNotContainsString('"projects"', (string) json_encode($body));
+    }
+
+    /**
      * FLE-276 review (3): host-wide data is for a token that sees every project.
      */
     #[DataProvider('hostWidePaths')]
@@ -154,7 +182,6 @@ final class ApiReadTest extends AdminTestCase
     {
         yield 'host' => ['/api/v1/host'];
         yield 'capacity' => ['/api/v1/host/capacity'];
-        yield 'capacity verdict' => ['/api/v1/host/capacity?project=demo'];
         yield 'upgrade' => ['/api/v1/upgrade'];
     }
 
