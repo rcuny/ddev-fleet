@@ -2,8 +2,9 @@
 {% set open_on_load = app.request.query.getBoolean('adjust') %}
 <div class="mt-4" data-controller="dialog allotments" data-dialog-open-value="{{ open_on_load ? 'true' : 'false' }}"
      data-allotments-url-value="{{ path('settings_allotments') }}" data-allotments-save-url-value="{{ path('settings_allotments_save') }}"
-     data-allotments-csrf-value="{{ csrf_token('submit') }}" data-allotments-autoload-value="{{ open_on_load ? 'true' : 'false' }}"
+     data-allotments-autoload-value="{{ open_on_load ? 'true' : 'false' }}"
      data-action="allotments:close->dialog#close">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
     <twig:Button type="button" variant="outline" class="min-h-11 md:min-h-8" data-dialog-target="trigger" data-action="click->dialog#open click->allotments#load" aria-haspopup="dialog" data-testid="allotments-open">
         <twig:ux:icon name="lucide:sliders-horizontal" />
         Adjust allotments

@@ -256,4 +256,84 @@ test.describe('capacity', () => {
       await deleteProjectViaUi(page, name).catch(() => undefined);
     }
   });
+
+  test('Adjust allotments: open, totals, over-allocation warning, quick actions, one save, axe, 44 px targets @phone', async ({ page }) => {
+    test.slow();
+    const name = uniqueName('adj');
+    try {
+      await createProjectViaUi(page, name, undefined, 'overview');
+      await openHostTab(page, 'capacity');
+      const allocatable = await number(page, 'capacity-allocatable');
+      test.skip(allocatable < 2, 'a host with fewer than 2 allocatable threads cannot show an over-allocation');
+
+      await page.getByTestId('allotments-open').click();
+      const sheet = page.getByTestId('allotments-sheet');
+      await expect(sheet).toBeVisible();
+      const row = page.getByTestId('allotments-rows').locator('li', { hasText: name });
+      await expect(row).toBeVisible();
+      await expect(page.getByTestId('allotments-save')).toBeDisabled();
+      await expect(page.getByTestId('allotments-donut')).toHaveAttribute('aria-label', /allocatable/);
+      await expectNoBlockingViolations(page, 'Adjust allotments sheet');
+
+      if (isPhone()) {
+        for (const control of await sheet.locator('button:visible, input:visible:not([type=range]):not([type=checkbox]), select:visible').all()) {
+          const box = await control.boundingBox();
+          expect(box?.height ?? 0, 'a control is at least 44 px high').toBeGreaterThanOrEqual(43.5);
+        }
+      }
+
+      // Over-allocation warns but never blocks Save.
+      const field = row.getByTestId('allotments-threads-number');
+      await field.fill(String(allocatable * 2));
+      await expect(page.getByTestId('allotments-overallocation')).toBeVisible();
+      await expect(page.getByTestId('allotments-changes')).toContainText('1 change');
+      await expect(page.getByTestId('allotments-save')).toBeEnabled();
+      await expectNoBlockingViolations(page, 'Adjust allotments over-allocated');
+
+      // Reset restores the saved value; Even split and Restore saved act on every row.
+      await row.locator('[data-reset]').click();
+      await expect(page.getByTestId('allotments-changes')).toContainText('0 changes');
+      await page.getByTestId('allotments-even').click();
+      await expect(page.getByTestId('allotments-save')).toBeEnabled();
+      await page.getByTestId('allotments-restore').click();
+      await expect(page.getByTestId('allotments-save')).toBeDisabled();
+
+      // One save applies the change; the table behind shows it.
+      await field.fill('1');
+      await row.getByTestId('allotments-slots-unlimited').uncheck();
+      await row.getByTestId('allotments-slots-number').fill('2');
+      await page.getByTestId('allotments-save').click();
+      await expect(page.getByTestId('flashes')).toContainText('Allotments saved');
+      const tableRow = page.locator(`[data-testid=capacity-project-row][data-project=${name}]`);
+      await expect(tableRow.getByTestId('capacity-project-limit')).toHaveText('1');
+      await expect(tableRow).toContainText('2 (');
+    } finally {
+      await deleteProjectViaUi(page, name).catch(() => undefined);
+    }
+  });
+
+  test('Adjust allotments: a refused project keeps the sheet open and saves nothing; ?adjust=1 reopens it @phone', async ({ page }) => {
+    test.slow();
+    const name = uniqueName('adj');
+    try {
+      await createProjectViaUi(page, name, undefined, 'overview');
+      await openSection(page, 'Capacity');
+      await page.getByLabel('CPU threads').fill('2');
+      await submitAndWait(page, page.getByRole('button', { name: 'Save' }));
+      await createTemplateViaUi(page, name, { name: 'gates' });
+      await page.goto('/admin/host?tab=capacity&adjust=1');
+      const row = page.getByTestId('allotments-rows').locator('li', { hasText: name });
+      await expect(row).toBeVisible();
+      // Cancel with unsaved changes asks first.
+      await row.getByTestId('allotments-threads-number').fill('1');
+      page.once('dialog', (dialog) => dialog.dismiss());
+      await page.getByTestId('allotments-cancel').click();
+      await expect(page.getByTestId('allotments-sheet')).toBeVisible();
+      page.once('dialog', (dialog) => dialog.accept());
+      await page.getByTestId('allotments-cancel').click();
+      await expect(page.getByTestId('allotments-sheet')).toBeHidden();
+    } finally {
+      await deleteProjectViaUi(page, name).catch(() => undefined);
+    }
+  });
 });

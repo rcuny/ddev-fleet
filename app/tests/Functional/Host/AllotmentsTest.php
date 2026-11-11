@@ -20,7 +20,7 @@ final class AllotmentsTest extends HostPageTestCase
 
         $crawler = $this->open('/admin/host?tab=capacity');
         self::assertCount(1, $crawler->filter('[data-testid=allotments-open]'));
-        $token = (string) $crawler->filter('[data-controller~=allotments]')->attr('data-allotments-csrf-value');
+        $token = (string) $crawler->filter('[data-controller~=allotments] input[name=_csrf_token]')->attr('value');
 
         $this->client->request('GET', '/admin/host/allotments');
         self::assertResponseStatusCodeSame(200);

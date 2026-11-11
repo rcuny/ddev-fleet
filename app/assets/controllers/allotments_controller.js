@@ -1,4 +1,5 @@
 import { Controller } from '@hotwired/stimulus';
+import { generateCsrfToken } from './csrf_protection_controller.js';
 
 // The "Adjust allotments" sheet of the capacity tab (FLE-318). Twig renders the empty sheet and one row <template>;
 // this controller loads the allotments as JSON, keeps slider and number in sync, computes the totals and the donut
@@ -12,7 +13,7 @@ export default class extends Controller {
         'scroll', 'donut', 'ring', 'centre', 'threadsLine', 'slotsLine', 'legend', 'banner', 'bannerTitle', 'errorBox',
         'errorText', 'prioProject', 'prioPct', 'status', 'rows', 'slices', 'changes', 'save', 'rowTemplate',
     ];
-    static values = { url: String, saveUrl: String, csrf: String, autoload: Boolean };
+    static values = { url: String, saveUrl: String, autoload: Boolean };
 
     #data = null;
     #state = [];
@@ -112,10 +113,14 @@ export default class extends Controller {
         this.saveTarget.disabled = true;
         this.#hideError();
         this.rowsTarget.querySelectorAll('[data-threads-error], [data-slots-error]').forEach((el) => { el.textContent = ''; });
+        // The app's double-submit CSRF: the hidden field holds the token id until generateCsrfToken() swaps in a random
+        // token and sets the matching cookie, exactly as it does when a form is submitted.
+        generateCsrfToken(this.element);
+        const csrf = this.element.querySelector('input[name="_csrf_token"]').value;
         try {
             const response = await fetch(this.saveUrlValue, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': this.csrfValue },
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-CSRF-Token': csrf },
                 body: JSON.stringify({ projects: changed.map((p) => ({ name: p.name, cpu_threads: p.cur.t, slots: p.cur.s })) }),
             });
             const body = await response.json().catch(() => ({}));
