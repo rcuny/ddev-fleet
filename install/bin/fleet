@@ -11,7 +11,7 @@
 #   fleet                          ->  lists the fleet:* commands
 #   fleet list | help <cmd> | ...  ->  anything that does not start with one of our groups goes to the console unchanged
 #
-# Installed by install/steps/90-privileged.sh as /usr/local/bin/fleet (root:root 0755). Everyone but the `fleet` user
+# Installed by the Ansible role privileged as /usr/local/bin/fleet (root:root 0755). Everyone but the `fleet` user
 # is re-executed as `fleet` through sudo (root and sudoers members); `fleet` itself loads /etc/ddev-fleet/fleet.env,
 # the same configuration the web app and the workers run with, and starts the console.
 set -euo pipefail

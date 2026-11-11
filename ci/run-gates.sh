@@ -176,13 +176,13 @@ if [ "$mode" = full ]; then
             skip_gate pytest 1 "infra install failed"
             skip_gate systemd-security 1 "infra install failed"
         fi
-        # Non-blocking, like the pipeline: ansible-core >= 2.21 needs Python >= 3.12.
+        # Non-blocking, like the pipeline: lints install/ansible with the versions of install/ansible/requirements-dev.txt.
         if python3 -c 'import sys; sys.exit(0 if sys.version_info >= (3, 12) else 1)'; then
             local lint_venv="$root/.venv-lint" lintstamp="$root/.venv-lint/.ci-req-hash" lintcmd
-            lintcmd="python3 -m venv '$lint_venv' && '$lint_venv/bin/pip' install -q -r '$root/ci/requirements-infra.txt'"
-            if stamp_ok "$lintstamp" "$root/ci/requirements-infra.txt" '' && [ -x "$lint_venv/bin/ansible-lint" ]; then lintcmd='echo "venv reused: requirements-infra.txt unchanged"'; fi
-            run_gate ansible-lint 0 bash -c "$lintcmd && cd '$root' && '$lint_venv/bin/ansible-lint' ansible/ && '$lint_venv/bin/yamllint' ansible/" || true
-            [ ! -x "$lint_venv/bin/ansible-lint" ] || stamp_set "$lintstamp" "$root/ci/requirements-infra.txt" ''
+            lintcmd="python3 -m venv '$lint_venv' && '$lint_venv/bin/pip' install -q -r '$root/install/ansible/requirements-dev.txt' yamllint"
+            if stamp_ok "$lintstamp" "$root/install/ansible/requirements-dev.txt" '' && [ -x "$lint_venv/bin/ansible-lint" ]; then lintcmd='echo "venv reused: requirements-dev.txt (install/ansible) unchanged"'; fi
+            run_gate ansible-lint 0 bash -c "$lintcmd && cd '$root' && '$lint_venv/bin/ansible-lint' install/ansible/ && (cd install/ansible && '$lint_venv/bin/yamllint' .)" || true
+            [ ! -x "$lint_venv/bin/ansible-lint" ] || stamp_set "$lintstamp" "$root/install/ansible/requirements-dev.txt" ''
         else
             skip_gate ansible-lint 0 "Python $(python3 -c 'import sys; print("%d.%d" % sys.version_info[:2])') is older than 3.12"
         fi

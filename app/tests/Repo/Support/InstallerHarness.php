@@ -171,13 +171,4 @@ trait InstallerHarness
 
         return $lines;
     }
-
-    /** @return list<string> the step files in numeric order, as the installer discovers them */
-    private static function stepNames(): array
-    {
-        $names = array_map(static fn (string $p): string => basename($p, '.sh'), glob(self::installDir().'/steps/[0-9][0-9]-*.sh') ?: []);
-        sort($names);
-
-        return $names;
-    }
 }

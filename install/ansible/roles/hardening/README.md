@@ -1,6 +1,6 @@
 # hardening (opt-in)
 
-Port of `install/harden/`. Off unless `fleet_hardening_enabled: true`.
+Port of the former bash hardening (`install/harden/`). Off unless `fleet_hardening_enabled: true`.
 
 SSH drop-in safety (FLE-255): the existing `/etc/ssh/sshd_config.d/10-fleet-hardening.conf` is copied to a private
 temporary file before the template runs. A drop-in that fails `sshd -t -f` is never written, so the existing good one is

@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # shellcheck source-path=SCRIPTDIR
-# ddev-fleet installer, stage 2: validates the flags, checks DNS and runs install/steps/NN-*.sh in numeric order.
+# ddev-fleet installer, stage 2: validates the flags, runs the pre-flight checks and DNS check, writes the host vars and
+# runs the Ansible playbook install/ansible/site.yml.
 # Normally started by install.sh from a root-owned export of install/; it can also run from a checkout
 # (bash install/run.sh --dry-run --domain=fleet.example.com --skip-dns-check).
 #
-# Every step is idempotent. A failed step prints its name; fix the cause and run the same command again.
+# The playbook is idempotent. A failed task prints its name; fix the cause and run the same command again.
 
 main() {
   set -Eeuo pipefail
@@ -58,7 +59,7 @@ main() {
 
   STEP_NAME=preflight
   printf '[preflight] domain %s, ref %s\n' "$DOMAIN" "$REF"
-  # A BLOCK stops the run here, before anything is installed (step 10 is the first change).
+  # A BLOCK stops the run here, before anything is installed (the first package install is the first change).
   if is_dry; then
     printf 'dry-run: pre-flight checks not run (bash install/run.sh --preflight ... runs them)\n'
   else
@@ -66,21 +67,8 @@ main() {
   fi
   check_dns "$DOMAIN"
 
-  local step name
-  if [ "$ENGINE" = ansible ]; then
-    # The numbered steps are replaced by the playbook; the checks above and the finish below are shared.
-    ansible_engine_main
-  fi
-  for step in "$INSTALL_DIR"/steps/[0-9][0-9]-*.sh; do
-    [ -f "$step" ] || continue
-    [ "$ENGINE" = bash ] || break
-    name=$(basename "$step" .sh)
-    # shellcheck disable=SC1090  # the steps are discovered at run time
-    . "$step"
-    log_step "$name"
-    step_main
-    unset -f step_main
-  done
+  # The Ansible playbook does the work (FLE-263: the only engine); the checks above and the finish below are shared.
+  ansible_engine_main
 
   STEP_NAME=finish
   if is_dry; then

@@ -1,4 +1,4 @@
-# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-backup.service.
+# Installed by ddev-fleet (the Ansible role units) as /etc/systemd/system/fleet-backup.service.
 # One database backup (fleet:backup:create: a consistent copy of fleet.sqlite and queue.sqlite into $FLEET_HOME/backups,
 # then pruning to the retention set on the host page). Started by fleet-backup.timer; `systemctl start fleet-backup`
 # or `fleet backup:create` run it by hand.

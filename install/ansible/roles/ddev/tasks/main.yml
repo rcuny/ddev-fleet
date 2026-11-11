@@ -1,5 +1,5 @@
 ---
-# Port of install/steps/40-ddev.sh. DDEV comes from its apt repository (no version pin, as in the bash step); the
+# Port of the former bash step 40-ddev.sh. DDEV comes from its apt repository (no version pin, as in the bash step); the
 # repository key is checked against the pinned fingerprint before it is trusted.
 - name: DDEV repository key (the fingerprint is pinned)
   block:

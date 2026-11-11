@@ -1,4 +1,4 @@
-"""FLE-281: step 80 removes the stale prod container cache first; apt-get update is retried."""
+"""FLE-281: the build removes the stale prod container cache first; apt-get update is retried."""
 
 import subprocess
 from pathlib import Path
@@ -10,29 +10,17 @@ def _bash(script: str, tmp: Path) -> subprocess.CompletedProcess:
     return subprocess.run(["bash", "-c", script], capture_output=True, text=True, cwd=tmp)
 
 
-def test_step_80_removes_the_stale_prod_cache_before_any_console_command(tmp_path):
-    cache = tmp_path / "app" / "var" / "cache" / "prod" / "ContainerOld"
-    cache.mkdir(parents=True)
-    (cache / "App_KernelProdContainer.php").write_text("<?php // stale")
-    keep = tmp_path / "app" / "var" / "cache" / "dev"
-    keep.mkdir()
-    script = f"""
-set -e
-run_as_fleet() {{ "$@"; }}
-FLEET_SRC_DIR={tmp_path}
-source {ROOT}/steps/80-code.sh
-clear_stale_prod_cache
-"""
-    result = _bash(script, tmp_path)
-    assert result.returncode == 0, result.stderr
-    assert not (tmp_path / "app/var/cache/prod").exists()
-    assert keep.exists()
+BUILD = ROOT / "ansible" / "roles" / "app_code" / "tasks" / "build.yml"
 
 
-def test_step_80_clears_the_cache_before_composer_and_console(tmp_path):
-    body = (ROOT / "steps" / "80-code.sh").read_text().split("step_main() {", 1)[1]
-    assert body.index("clear_stale_prod_cache") < body.index("fleet_app_run")
-    assert body.index("clear_stale_prod_cache") < body.index("fleet_console")
+def test_the_build_removes_the_stale_prod_cache_before_any_console_command():
+    text = BUILD.read_text()
+    removal = text.index("Remove the stale prod container cache")
+    block = text[removal : text.index("- name:", removal + 1)]
+    assert "state: absent" in block and "app/var/cache/prod" in block
+    # The cache is removed, not cleared: cache:clear boots the stale container too. Nothing that boots the app comes first.
+    assert removal < text.index("composer")
+    assert removal < text.index("bin/console")
 
 
 def test_apt_update_is_retried_then_succeeds(tmp_path):

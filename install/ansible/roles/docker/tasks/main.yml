@@ -1,5 +1,5 @@
 ---
-# Port of install/steps/20-docker.sh. The daemon is enabled and started every run; daemon.json is MERGED, never
+# Port of the former bash step 20-docker.sh. The daemon is enabled and started every run; daemon.json is MERGED, never
 # replaced (an operator's keys stay); Docker is never restarted here.
 - name: Look for an installed Docker
   ansible.builtin.stat:

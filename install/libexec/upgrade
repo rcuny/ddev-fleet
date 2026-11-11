@@ -3,7 +3,7 @@
 #
 #   upgrade [--to vX.Y.Z] [--yes] [--force=<check-id>]... [--no-db-restore] [--repo-url=<url|path>]
 #
-# Installed by install/steps/90-privileged.sh as root:root 0755 from the root-owned export of install/. There is NO
+# Installed by the privileged Ansible role as root:root 0755 from the root-owned export of install/. There is NO
 # sudoers entry for it: the application can never start an upgrade (docs/reference/05-upgrade.md).
 #
 # The flow (every step before the installer changes nothing but the backup directory):
@@ -14,9 +14,11 @@
 #   4. the history line "start" (versions, shas, time, actor from SUDO_USER, backup file name);
 #   5. the target's install/ tree is fetched by the commit sha the plan resolved into a root-owned temp directory and its
 #      install.sh is run with --ref=<tag> (the tag must still point at that sha, or nothing runs);
-#      On a host installed with the Ansible engine (/etc/ddev-fleet/installed-engine says so; no record = bash) the same
-#      install.sh gets --engine=ansible, so the playbook of the target tag runs again. A target without that flag is refused
-#      before any service is stopped;
+#      Ansible is the only engine since FLE-263. A host installed by the bash engine (no /etc/ddev-fleet/installed-engine,
+#      or one saying bash) is switched to Ansible by the first upgrade to a release without the bash engine: the playbook
+#      reproduces such a host with nothing changed, and writes installed-engine=ansible. A rollback to a release that
+#      still has both engines passes --engine=ansible on an Ansible host, so the same engine runs again; a target that
+#      has no Ansible engine at all is refused before any service is stopped;
 #   6. the history line "installer"; then `fleet upgrade:verify` (the NEW code) and the line "verify".
 # Rollback (`--to` an older release): same shape, but step 3 is replaced by stopping the fleet services and restoring the
 # pre-upgrade backup the history names (`fleet upgrade:restore`, no migration: the installer of the older release runs the
@@ -257,15 +259,24 @@ main() {
     return 1
   fi
 
-  # The engine that installed this host runs again (the playbook of the target tag on an Ansible host). A host without
-  # the record is bash, and bash is the installer's default, so it gets no flag (releases before the flag do not know it).
+  # Ansible is the only engine of a release without install/steps/. A bash-installed host upgraded to such a release is
+  # switched to Ansible by it (nothing to pass). A target that still has both engines (a rollback to a release from before
+  # FLE-263) defaults to bash, so an Ansible host asks for --engine=ansible and a target that cannot do that is refused.
   local -a engine_args=()
-  if [ "$engine" = ansible ]; then
-    if ! grep -Eq '^[[:space:]]*--engine=.*\)' "$work/export/install/install.sh" 2>/dev/null; then
-      err "this host was installed with the Ansible engine, and $target does not have it. Nothing was stopped or restored."
-      return 1
+  local target_engine=ansible
+  if [ -d "$work/export/install/steps" ]; then
+    target_engine=bash
+    if [ "$engine" = ansible ]; then
+      if ! grep -Eq '^[[:space:]]*--engine=.*\)' "$work/export/install/install.sh" 2>/dev/null; then
+        err "this host was installed with the Ansible engine, and $target does not have it. Nothing was stopped or restored."
+        return 1
+      fi
+      engine_args=(--engine=ansible)
+      target_engine=ansible
     fi
-    engine_args=(--engine=ansible)
+  fi
+  if [ "$engine" != "$target_engine" ]; then
+    say "Install engine: $engine -> $target_engine (the playbook of $target takes over; the host is recorded as $target_engine afterwards)"
   fi
 
   # --- 4. backup ---------------------------------------------------------------------------------------------------------

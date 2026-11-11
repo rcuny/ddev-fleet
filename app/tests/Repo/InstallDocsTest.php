@@ -103,11 +103,8 @@ final class InstallDocsTest extends TestCase
         }
 
         // Every KEY=VALUE the installer writes to fleet.env is explained.
-        $env = self::read('install/steps/70-env.sh');
-        if (1 !== preg_match('/env_ensure "\$env_file"(.*?)\n\n/s', $env, $block)) {
-            self::fail('env_ensure call not found in 70-env.sh');
-        }
-        preg_match_all('/^\s*"?([A-Z][A-Z_]+)=/m', $block[1], $keys);
+        $env = self::read('install/ansible/roles/php_app/defaults/main.yml');
+        preg_match_all('/^  - \{key: ([A-Z][A-Z_]+),/m', $env, $keys);
         self::assertGreaterThanOrEqual(10, \count($keys[1]));
         foreach ($keys[1] as $key) {
             self::assertStringContainsString($key, $configuration, "docs/reference/02-configuration.md does not explain $key in fleet.env");

@@ -1,5 +1,5 @@
 ---
-# Port of install/steps/95-units.sh (the unit files and the Mercure hub, written but not started) and
+# Port of the former bash step 95-units.sh (the unit files and the Mercure hub, written but not started) and
 # 98-render-start.sh (render the Caddy and Authelia configuration, start, wait until healthy, record the version).
 - name: Unit files
   ansible.builtin.import_tasks: files.yml

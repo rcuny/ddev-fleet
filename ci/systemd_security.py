@@ -4,7 +4,7 @@
 Subcommands (see docs/contributing/03-ci.md):
 
   offline          score the unit files the installer ships (install/etc/*.service,
-                   install/harden/etc/*.service, the Caddy sandbox drop-in) with
+                   install/ansible/roles/hardening/files/*.service, the Caddy sandbox drop-in) with
                    `systemd-analyze security --offline=yes`, write a report (and
                    print a table).
   compare          compare a report with the committed baseline; print a Markdown
@@ -41,7 +41,7 @@ TIMEOUT = 120
 ENV = "offline"
 
 # Where the installer's unit files live. Every *.service found here is scored (timers carry no sandbox).
-UNIT_DIRS = (ROOT / "install" / "etc", ROOT / "install" / "harden" / "etc")
+UNIT_DIRS = (ROOT / "install" / "etc", ROOT / "install" / "ansible" / "roles" / "hardening" / "files")
 
 # The installer ships a sandbox drop-in for the Debian caddy package's unit, not a unit of its own: it is scored
 # layered over a stand-in for the vendor unit (/usr/lib/systemd/system/caddy.service).
@@ -444,7 +444,7 @@ def render_report(data: dict, *, when: str) -> str:
         "`systemd-analyze security` scores how much of the system a service's sandbox leaves "
         "exposed to it, on a scale from 0 (best: locked down) to 10 (worst: no sandbox at all). "
         "The offline check scores the unit files the installer ships (`install/etc`, "
-        "`install/harden/etc`, and the Caddy sandbox drop-in); no host is involved.",
+        "`install/ansible/roles/hardening/files`, and the Caddy sandbox drop-in); no host is involved.",
         "",
         "Every score is compared with the committed baseline "
         "`ci/systemd-security-baseline.json`. A unit counts as a regression only when its score "

@@ -204,13 +204,13 @@ final class InstallerPreflightTest extends TestCase
         self::assertStringContainsString('BLOCK fleet.env: MERCURE_JWT_SECRET', $out);
     }
 
-    public function testANormalRunChecksBeforeAnyStepAndStopsOnABlock(): void
+    public function testANormalRunChecksBeforeTheEngineAndStopsOnABlock(): void
     {
         $run = (string) file_get_contents(self::installDir().'/run.sh');
 
         $check = strpos($run, 'preflight_run || die "$EX_PREFLIGHT"');
         self::assertNotFalse($check);
-        self::assertLessThan(strpos($run, 'steps/[0-9][0-9]-*.sh'), $check, 'the pre-flight comes before step 10');
+        self::assertLessThan(strpos($run, 'ansible_engine_main'), $check, 'the pre-flight comes before the engine');
     }
 
     public function testTheFlagIsMirroredInBothScriptsAndExitCode3IsDocumented(): void

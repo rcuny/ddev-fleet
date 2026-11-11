@@ -3,7 +3,7 @@
 #
 #   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision|drift>
 #
-# Installed by install/steps/90-privileged.sh as root:root 0755, reachable by the `fleet` user through one sudoers
+# Installed by the Ansible role privileged as root:root 0755, reachable by the `fleet` user through one sudoers
 # line (install/etc/sudoers-fleet-apply). The only input is the target name; the files come from a fixed place,
 # /srv/fleet/staging/<target>/. The helper:
 #   - pins the staging directory once: it is opened, and the opened directory must be the real

@@ -31,7 +31,7 @@ parameters:
     fleet.cgroup_root: '/sys/fs/cgroup/fleet.slice'
     fleet.capacity_usage_file: '%env(resolve:FLEET_HOME)%/capacity-usage.json'
     fleet.slots_dir: '%env(resolve:FLEET_HOME)%/slots'
-    # The tag the installer wrote (install/steps/98-render-start.sh) and the release source (tests and rehearsals point
+    # The tag the installer wrote (the units role, install/ansible/roles/units/tasks/finish.yml) and the release source (tests and rehearsals point
     # FLEET_UPGRADE_REPO_URL at a local repository; empty means the public GitHub mirror, App\Fleet\Upgrade\RepoUrl).
     env(FLEET_UPGRADE_REPO_URL): ''
     fleet.installed_version_file: '/etc/ddev-fleet/installed-version'

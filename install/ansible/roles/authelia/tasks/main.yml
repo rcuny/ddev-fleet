@@ -1,5 +1,5 @@
 ---
-# Port of install/steps/60-authelia.sh: everything Authelia needs on disk BEFORE its first start. Authelia is never
+# Port of the former bash step 60-authelia.sh: everything Authelia needs on disk BEFORE its first start. Authelia is never
 # started, restarted or reloaded here (a first install leaves it stopped, as the bash step does). NOT written here, because
 # `apply authelia` / the app own them: /etc/authelia/configuration.yml, and the real users in users.yml (an existing
 # users.yml is never overwritten; only a missing, empty or `"users":{}` one gets the placeholder).

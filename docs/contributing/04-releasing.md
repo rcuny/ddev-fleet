@@ -51,6 +51,8 @@ Replace `1.X.Y`. Run from a checkout of the Bitbucket repo.
 
 Each host updates when its operator runs `sudo fleet upgrade`; `fleet upgrade --check` shows the changelog and rollout notes first. See [upgrade reference](../reference/05-upgrade.md).
 
+The install engine is Ansible only (`install/ansible/`); a host installed by the old bash engine is switched to it by its first `fleet upgrade` to a release without `install/steps/`. Nothing in the release procedure passes `--engine`.
+
 ## Learn more
 
 - [03-ci.md](03-ci.md): the tag guard and gates

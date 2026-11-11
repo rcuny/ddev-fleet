@@ -35,14 +35,11 @@ final class InstallerAnsibleTest extends TestCase
         self::assertSame(['packages', 'docker', 'fleet_user', 'shell', 'ddev', 'caddy', 'authelia', 'php_app', 'app_code', 'privileged', 'units', 'hardening'], $m[1]);
     }
 
-    public function testShellRoleWritesTheSameHookBlockAsTheBashStep(): void
+    public function testShellRoleWritesTheHookBlockBetweenItsMarkers(): void
     {
         $root = \dirname(__DIR__, 3).'/install';
-        $bash = (string) file_get_contents($root.'/steps/35-shell.sh');
         $role = (string) file_get_contents($root.'/ansible/roles/shell/tasks/main.yml');
 
-        self::assertStringContainsString("SHELL_HOOK_BEGIN='# BEGIN ddev-fleet shell profile'", $bash);
-        self::assertStringContainsString("SHELL_HOOK_END='# END ddev-fleet shell profile'", $bash);
         self::assertStringContainsString('marker: "# {mark} ddev-fleet shell profile"', $role);
         self::assertStringContainsString('marker_begin: BEGIN', $role);
         self::assertStringContainsString('marker_end: END', $role);

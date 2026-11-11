@@ -9,7 +9,7 @@ use PHPUnit\Framework\TestCase;
 use Symfony\Component\Process\Process;
 
 /**
- * What the installer generates must boot the production kernel: step 70 writes fleet.env into a scratch directory, a
+ * What the installer generates must boot the production kernel: the fleet.env the php_app role writes (its default keys) is put in a scratch directory, a
  * subprocess starts from an EMPTY environment, loads that file the way the unit and the `fleet` wrapper do (set -a)
  * and runs the console. Only the paths that cannot exist off a server (FLEET_HOME, FLEET_CADDY_DIR, the cache) are
  * pointed at the scratch directory afterwards.
@@ -24,13 +24,23 @@ final class InstalledEnvBootsProdTest extends TestCase
     protected function setUp(): void
     {
         $etc = $this->scratch().'/etc-ddev-fleet';
-        $stubs = $this->stubs(['chown' => 'exit 0']);
-        [$status, , $err] = $this->withCommon(
-            '. "$INSTALL_DIR/steps/70-env.sh"; FLEET_ETC_DIR='.escapeshellarg($etc).'; DOMAIN=fleet.example.com; step_main',
-            [],
-            $stubs,
-        );
-        self::assertSame(0, $status, $err);
+        mkdir($etc);
+        // The keys the php_app role adds to a fresh fleet.env, with its "@secret" placeholders replaced by random hex
+        // and its template variables by the values the role would use.
+        $defaults = (string) file_get_contents(\dirname(__DIR__, 3).'/install/ansible/roles/php_app/defaults/main.yml');
+        preg_match_all('/^  - \{key: ([A-Z_]+), value: (.*)\}$/m', $defaults, $pairs, \PREG_SET_ORDER);
+        self::assertGreaterThanOrEqual(10, \count($pairs));
+        $lines = [];
+        foreach ($pairs as [, $key, $raw]) {
+            $value = trim($raw, " \"'");
+            $value = '@secret' === $value ? bin2hex(random_bytes(32)) : str_replace(
+                ['{{ fleet_srv_dir }}', '{{ fleet_caddy_fleet_dir }}', '{{ fleet_domain }}'],
+                ['/srv/fleet', '/etc/caddy/fleet', 'fleet.example.com'],
+                $value,
+            );
+            $lines[] = $key.'='.$value;
+        }
+        file_put_contents($etc.'/fleet.env', implode("\n", $lines)."\n");
         $this->envFile = $etc.'/fleet.env';
 
         mkdir($this->scratch().'/home');

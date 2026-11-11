@@ -1,5 +1,5 @@
 # shellcheck shell=bash
-# Managed by the ddev-fleet installer (install/steps/35-shell.sh): changes are overwritten on the next install run.
+# Managed by the ddev-fleet installer (the Ansible role shell): changes are overwritten on the next install run.
 # Opt out with --no-shell-profile; the uninstaller removes this file and the hooks that source it.
 #
 # Interactive shell prompt, colours and aliases for every account on a fleet host. This file is SOURCED, not

@@ -1,5 +1,5 @@
 ---
-# Port of install/harden/harden.sh (five parts). Gated in site.yml by fleet_hardening_enabled.
+# Port of the former bash hardening (install/harden/harden.sh) (five parts). Gated in site.yml by fleet_hardening_enabled.
 - name: Resolve and validate the settings
   ansible.builtin.import_tasks: settings.yml
 - name: Install the hardening packages

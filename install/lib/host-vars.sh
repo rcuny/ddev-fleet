@@ -113,7 +113,7 @@ ansible_engine_packages() {
   apt_get install ansible-core python3-apt
 }
 
-# Replaces the numbered steps: host vars, Ansible, the playbook from the root-owned export of install/.
+# The provisioning: host vars, Ansible, the playbook from the root-owned export of install/.
 ansible_engine_main() {
   STEP_NAME=ansible-packages
   log_step ansible-packages
