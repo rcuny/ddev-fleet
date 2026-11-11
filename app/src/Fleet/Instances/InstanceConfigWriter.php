@@ -18,7 +18,7 @@ use Symfony\Component\Yaml\Yaml;
 
 /**
  * Writes `.ddev/config.fleet.yaml`, the one file fleet adds to ddev's configuration of an instance: its name, domain,
- * environment (the Typesense host, port and keys of a Typesense project, and `FLEET_PORT_<NAME>` for each named port, the slot and CPU variables of InstanceCapacityEnvironment) and extra host names. It never touches the project's own `config.yaml`. The file may hold the Claude
+ * environment (the Typesense host, port and keys of a Typesense project, and `FLEET_PORT_<NAME>` for each named port, the slot and CPU variables of InstanceCapacityEnvironment) and extra host names, and the isolation variables of InstanceIsolation (Mailpit auth, FLEET_HAS_DB, FLEET_AGENT). It never touches the project's own `config.yaml`. The file may hold the Claude
  * token and the Typesense keys (registered with the job log masker), so it is not world readable, and it is dumped through the YAML component so no value can break out of it.
  */
 final readonly class InstanceConfigWriter
@@ -58,6 +58,7 @@ final readonly class InstanceConfigWriter
         private SecretRegistry $registry,
         private TypesenseEnvironment $typesense,
         private ?InstanceCapacityEnvironment $capacity = null,
+        private ?InstanceIsolation $isolation = null,
     ) {
     }
 
@@ -82,6 +83,9 @@ final readonly class InstanceConfigWriter
         array_push($environment, ...self::portVariables($project));
         if (null !== $this->capacity) {
             array_push($environment, ...$this->capacity->variables($instance, $project));
+        }
+        if (null !== $this->isolation) {
+            array_push($environment, ...$this->isolation->variables($instance, $project));
         }
         $identity = $this->identities->forProject($project);
         if (null !== $identity) {

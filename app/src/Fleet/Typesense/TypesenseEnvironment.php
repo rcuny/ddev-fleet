@@ -40,7 +40,7 @@ final readonly class TypesenseEnvironment
             return [];
         }
 
-        $keys = $this->keys->ensure($project);
+        $keys = $this->keys->forInstance($project, $instance->id());
         $this->registry->register($keys->admin);
         $this->registry->register($keys->search);
 

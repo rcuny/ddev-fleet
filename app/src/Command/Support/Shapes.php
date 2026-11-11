@@ -33,6 +33,8 @@ final class Shapes
             ],
             'ssh_keys' => $template->sshKeys(),
             'ssh_identities' => $template->sshIdentities()->value,
+            'database' => $template->hasDatabase(),
+            'agent' => $template->isAgent(),
             'cpu_threads' => $template->cpuThreads(),
             'slots' => $template->slots(),
             'created_at' => $template->createdAt()->setTimezone($utc)->format(self::TIME),

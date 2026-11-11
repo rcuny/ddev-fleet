@@ -34,6 +34,7 @@ final readonly class ProjectInput
         public bool $containerSsh = false,
         public ?int $cpuThreads = null,
         public ?int $slots = null,
+        public bool $typesenseDashboard = false,
     ) {
     }
 
@@ -55,6 +56,7 @@ final readonly class ProjectInput
             $project->containerSsh(),
             $project->cpuThreads(),
             $project->slots(),
+            $project->typesenseDashboard(),
         );
     }
 
@@ -97,6 +99,7 @@ final readonly class ProjectInput
             $this->containerSsh,
             $this->cpuThreads,
             $this->slots,
+            $this->typesenseDashboard,
         );
     }
 

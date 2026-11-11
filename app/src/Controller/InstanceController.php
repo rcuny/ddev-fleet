@@ -12,6 +12,7 @@ use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\TemplateRepository;
 use App\Fleet\Instances\DeployInput;
 use App\Fleet\Instances\InstanceHostnames;
+use App\Fleet\Instances\InstanceIsolation;
 use App\Fleet\Instances\InstanceNaming;
 use App\Fleet\Instances\InstanceService;
 use App\Fleet\Instances\OperationOptions;
@@ -57,6 +58,7 @@ final class InstanceController extends AbstractController
         private readonly CurrentActor $actor,
         private readonly LiveFeedCookie $feedCookie,
         private readonly InstanceTopics $topics,
+        private readonly InstanceIsolation $isolation,
     ) {
     }
 
@@ -229,6 +231,8 @@ final class InstanceController extends AbstractController
             'active' => $active,
             'latest' => $jobs[0] ?? null,
             'canDestroy' => $this->isGranted(ProjectVoter::DESTROY, $instance->project()),
+            'agentTemplate' => $this->templates->find($instance->project(), $instance->templateName())?->isAgent() ?? false,
+            'mailpit' => $this->isGranted(ProjectVoter::OPERATE, $instance->project()) ? $this->isolation->mailpitCredentials($id) : null,
         ]);
         if (null !== $active) {
             $this->feedCookie->attach($request, $response, ['/jobs/'.$active->id()]);
