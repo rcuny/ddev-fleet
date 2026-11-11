@@ -1,3 +1,4 @@
 # Lint toolchain for install/ansible. ansible-core is pinned to what Debian 13 ships (apt), the deploy target.
+# Renovate ignores ansible-core here (renovate-config.json packageRule, FLE-284): bump it by hand when Debian ships a new series.
 ansible-core==2.19.11
 ansible-lint
