@@ -253,6 +253,25 @@ final class RouterConvergerTest extends PortMirrorTestCase
         new PortMirrorConvergeStep($this->converger, $this->preStartGate(true))->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
     }
 
+    public function testAFailingRouterRepairStillVerifiesTheIsolationAndKeepsTheJobOutcome(): void
+    {
+        // The router never shows the mirror: converge() fails (logged), verifyStarted still runs and detaches the db.
+        $this->mirror->sync();
+        $this->live->script(self::BASE);
+        $instance = $this->instance();
+        $job = $this->job('deploy', $instance);
+        $id = $instance->id();
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
+
+        new PortMirrorConvergeStep($this->converger, $this->preStartGate(true))->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
+
+        self::assertStringContainsString('WARNING', $this->logText($job));
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default', 'ddev-'.$id.'-db']));
+    }
+
     public function testTheConvergeStepSaysNothingWhenThereIsNothingToDo(): void
     {
         $this->mirror->sync();

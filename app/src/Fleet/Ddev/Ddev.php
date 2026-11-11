@@ -244,7 +244,7 @@ final readonly class Ddev
 
     /**
      * The containers of a DDEV project, running or not (`docker ps -a`, matched by DDEV's own `com.ddev.site-name` label).
-     * `routed` is true for a non-db container carrying a traefik router label key (the db is never routed, FLE-307 review): the router must reach it over ddev_default (FLE-307).
+     * `routed` is true for a non-web, non-db container carrying a traefik router label key or a non-empty HTTP_EXPOSE / HTTPS_EXPOSE env (the db is never routed, FLE-307 review): the router must reach it over ddev_default (FLE-307).
      *
      * @return list<array{name: string, service: string, routed: bool}>
      */
@@ -264,10 +264,35 @@ final readonly class Ddev
             if ('' === $parts[0] || 3 !== \count($parts)) {
                 continue;
             }
-            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'routed' => 'db' !== $parts[1] && self::hasRouterLabel($parts[2])];
+            $routed = 'db' !== $parts[1] && 'web' !== $parts[1] && (self::hasRouterLabel($parts[2]) || $this->hasExposeEnv($parts[0]));
+            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'routed' => $routed];
         }
 
         return $rows;
+    }
+
+    /**
+     * DDEV v1.25 configures the router from the container env (HTTP_EXPOSE / HTTPS_EXPOSE, through its traefik file config), not from docker labels.
+     * A container that cannot be inspected counts as not exposed (it is then detached, the safe side).
+     */
+    private function hasExposeEnv(string $container): bool
+    {
+        try {
+            $result = $this->runner->run(['docker', 'inspect', '--format', '{{json .Config.Env}}', $container], null, [], null, self::STATS_TIMEOUT);
+        } catch (\Throwable) {
+            return false;
+        }
+        $env = $result->isSuccess() ? json_decode(trim($result->stdout), true) : null;
+        if (!\is_array($env)) {
+            return false;
+        }
+        foreach ($env as $entry) {
+            if (\is_string($entry) && 1 === preg_match('/^(HTTP_EXPOSE|HTTPS_EXPOSE)=.+/', $entry)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**

@@ -106,6 +106,7 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
     {
         $id = 'blog--main';
         $this->ps($id, $this->psRow($id, 'web'), $this->psRow($id, 'db'), $this->psRow($id, 'mailpit'), $this->psRow($id, 'typesense', ',traefik.enable=true'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '["PATH=/bin"]')); // mailpit env: no HTTP_EXPOSE
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{},"x_default":{}}')); // db before
         $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}')); // db after
@@ -132,6 +133,37 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
 
         self::assertSame(['ddev-'.$id.'-db'], $this->converger()->converge($id, static function (string $l): void {}));
+    }
+
+    public function testAServiceWithHttpExposeEnvStaysAttachedAndADbWithItDoesNot(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'), $this->psRow($id, 'typesense'), $this->psRow($id, 'sidecar'));
+        $this->runner->expect(['docker', 'inspect', '--format'], new CommandResult(0, '["A=b","HTTP_EXPOSE=9108:8108"]')); // typesense: routed
+        $this->runner->expect(['docker', 'inspect', '--format'], new CommandResult(0, '["A=b"]')); // sidecar: not exposed
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}')); // db before
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}')); // db after
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}')); // sidecar before
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}')); // sidecar after
+
+        $cut = $this->converger()->converge($id, static function (string $l): void {});
+
+        self::assertSame(['ddev-'.$id.'-db', 'ddev-'.$id.'-sidecar'], $cut);
+        self::assertSame([], $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default', 'ddev-'.$id.'-typesense']));
+    }
+
+    public function testADbWithHttpExposeEnvIsStillDetached(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
+
+        self::assertSame(['ddev-'.$id.'-db'], $this->converger()->converge($id, static function (string $l): void {}));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'inspect', '--format']), 'the db env is never consulted');
     }
 
     public function testALabelValueContainingTraefikDoesNotExemptAService(): void
