@@ -16,7 +16,7 @@ use Symfony\Component\Yaml\Yaml;
 
 /**
  * FLE-297 / FLE-307: after each start the non-web containers are disconnected from ddev_default (no compose override for a db); an instance without one pins "db" to loopback in every service; the
- * live networks are checked after each start path; old DDEV or docker compose is refused.
+ * live networks are checked after each start path; a db is always detached, whatever its labels.
  */
 final class InstanceDbIsolationTest extends InstanceJobTestCase
 {
@@ -71,25 +71,6 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         self::assertFileDoesNotExist($dir.'/'.InstanceDbIsolationWriter::LEGACY_PATH);
     }
 
-    public function testAnOldDdevOrComposeIsRefused(): void
-    {
-        [$instance, $dir] = $this->prepare(self::WITH_DB);
-        $this->runner->expect(['ddev', '--version'], new CommandResult(0, "ddev version v1.23.5\n"));
-        $writer = new InstanceDbIsolationWriter($this->ddev);
-        try {
-            $writer->write($dir, $instance->id(), static function (string $l): void {});
-            self::fail('expected a refusal');
-        } catch (\RuntimeException $e) {
-            self::assertStringContainsString('DDEV >= '.InstanceDbIsolationWriter::MIN_DDEV, $e->getMessage());
-        }
-        self::assertFileDoesNotExist($dir.'/'.InstanceDbIsolationWriter::RELATIVE_PATH);
-
-        $this->runner->expect(['docker', 'compose'], new CommandResult(0, "2.20.0\n"));
-        $this->expectException(\RuntimeException::class);
-        $this->expectExceptionMessage('docker compose >=');
-        $writer->assertSupported();
-    }
-
     private function ps(string $project, string ...$rows): void
     {
         $this->runner->expect(['docker', 'ps'], new CommandResult(0, implode("\n", $rows)."\n"));
@@ -140,6 +121,24 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         self::assertSame(1, $this->auditCount());
         // web and the routed typesense are never inspected
         self::assertCount(3, $this->runner->callsMatching(['docker', 'inspect']));
+    }
+
+    public function testADbWithTraefikLabelsIsStillDetached(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db', ',traefik.enable=true,traefik.http.routers.x.rule=Host(`a`)'));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
+
+        self::assertSame(['ddev-'.$id.'-db'], $this->converger()->converge($id, static function (string $l): void {}));
+    }
+
+    public function testALabelValueContainingTraefikDoesNotExemptAService(): void
+    {
+        self::assertFalse(\App\Fleet\Ddev\Ddev::hasRouterLabel('a=b,note=see traefik.enable,c=d'));
+        self::assertTrue(\App\Fleet\Ddev\Ddev::hasRouterLabel('a=b,traefik.http.routers.t.rule=Host(`x`)'));
+        self::assertTrue(\App\Fleet\Ddev\Ddev::hasRouterLabel('traefik.enable=true'));
     }
 
     public function testAFailedDisconnectFailsTheJob(): void

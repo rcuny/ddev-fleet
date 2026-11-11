@@ -220,6 +220,39 @@ final class RouterConvergerTest extends PortMirrorTestCase
         self::assertSame($dir, $this->runner->calls()[2]->cwd, 'ddev start runs in the instance directory');
     }
 
+    public function testTheConvergeStepVerifiesTheIsolationAfterTheRouterRepair(): void
+    {
+        // FLE-307: the repair restarts the router and the project; the db is detached again afterwards.
+        $this->mirror->sync();
+        $this->live->script(self::WITH_MIRROR);
+        $instance = $this->instance();
+        $job = $this->job('deploy', $instance);
+        $id = $instance->id();
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
+
+        new PortMirrorConvergeStep($this->converger, $this->preStartGate(true))->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
+
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default', 'ddev-'.$id.'-db']));
+    }
+
+    public function testTheConvergeStepFailsWhenTheDisconnectAfterTheRepairFails(): void
+    {
+        $this->mirror->sync();
+        $this->live->script(self::WITH_MIRROR);
+        $instance = $this->instance();
+        $job = $this->job('deploy', $instance);
+        $id = $instance->id();
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(1));
+
+        $this->expectException(\App\Fleet\Jobs\JobFailed::class);
+        new PortMirrorConvergeStep($this->converger, $this->preStartGate(true))->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
+    }
+
     public function testTheConvergeStepSaysNothingWhenThereIsNothingToDo(): void
     {
         $this->mirror->sync();

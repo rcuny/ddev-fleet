@@ -244,7 +244,7 @@ final readonly class Ddev
 
     /**
      * The containers of a DDEV project, running or not (`docker ps -a`, matched by DDEV's own `com.ddev.site-name` label).
-     * `routed` is true for a container carrying a traefik label: the router must reach it over ddev_default (FLE-307).
+     * `routed` is true for a non-db container carrying a traefik router label key (the db is never routed, FLE-307 review): the router must reach it over ddev_default (FLE-307).
      *
      * @return list<array{name: string, service: string, routed: bool}>
      */
@@ -264,10 +264,26 @@ final readonly class Ddev
             if ('' === $parts[0] || 3 !== \count($parts)) {
                 continue;
             }
-            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'routed' => str_contains($parts[2], 'traefik.')];
+            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'routed' => 'db' !== $parts[1] && self::hasRouterLabel($parts[2])];
         }
 
         return $rows;
+    }
+
+    /**
+     * Whether a `docker ps` label list ("k=v,k=v") carries a traefik router label KEY (`traefik.enable`, `traefik.http.routers.*`).
+     * Only keys count: a value that merely contains "traefik." (or a spoofed label on a service that never needs the router) says nothing.
+     */
+    public static function hasRouterLabel(string $labels): bool
+    {
+        foreach (explode(',', $labels) as $pair) {
+            $key = trim(explode('=', $pair, 2)[0]);
+            if ('traefik.enable' === $key || str_starts_with($key, 'traefik.http.routers.') || str_starts_with($key, 'traefik.tcp.routers.')) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public function disconnectNetwork(string $network, string $container): bool

@@ -20,7 +20,7 @@ use Symfony\Component\Yaml\Yaml;
  *
  * The mechanism is {@see self::converge()}: after every start, restart and router repair, and on every watcher pass, it
  * disconnects the project's non-web containers (db, mailpit, typesense, solr, redis...) from `ddev_default` when attached,
- * except those carrying a traefik label. A compose override cannot do it: DDEV connects the db container to `ddev_default`
+ * except a non-db service carrying a traefik router label key (the db is always detached, whatever its labels). A compose override cannot do it: DDEV connects the db container to `ddev_default`
  * itself, outside the compose merge (live finding FLE-307, DDEV 1.25.5, the `!override` file was ignored), so no override
  * is written for an instance with a db and a stale one is removed. An instance WITHOUT a db (`omit_containers: [db]`)
  * still gets a compose file that pins `db` and `ddev-<project>-db` to 127.0.0.1 in EVERY service, so the names can never
@@ -35,8 +35,6 @@ final readonly class InstanceDbIsolationWriter
     /** The name of the first (FLE-297) version of the file; removed on every write. */
     public const string LEGACY_PATH = '.ddev/docker-compose.fleet-db-isolation.yaml';
     public const string MARKER = '# fleet-managed: instance database isolation (FLE-297)';
-    public const string MIN_DDEV = '1.24.0';
-    public const string MIN_COMPOSE = '2.24.4';
     public const string SHARED_NETWORK = 'ddev_default';
 
     public function __construct(private Ddev $ddev, private ?AuditLog $audit = null)
@@ -69,11 +67,10 @@ final readonly class InstanceDbIsolationWriter
      *
      * @return string|null the path written, relative to $dir (null: an instance with a db needs no file)
      *
-     * @throws \RuntimeException when DDEV or docker compose is too old, the services cannot be listed or the file cannot be written
+     * @throws \RuntimeException when the services cannot be listed or the file cannot be written
      */
     public function write(string $dir, string $project, \Closure $log): ?string
     {
-        $this->assertSupported();
         $services = $this->ddev->composeServices($dir);
         if (is_file($dir.'/'.self::LEGACY_PATH)) {
             @unlink($dir.'/'.self::LEGACY_PATH);
@@ -110,7 +107,7 @@ final readonly class InstanceDbIsolationWriter
         }
         $exposed = [];
         foreach ($containers as $container) {
-            if ('web' === $container['service'] || $container['routed']) {
+            if ('web' === $container['service'] || ('db' !== $container['service'] && $container['routed'])) {
                 continue;
             }
             $networks = $this->ddev->containerNetworks($container['name']);
@@ -154,20 +151,5 @@ final readonly class InstanceDbIsolationWriter
         }
 
         return $cut;
-    }
-
-    /**
-     * @throws \RuntimeException below the minimum versions, or when they cannot be read (fail closed)
-     */
-    public function assertSupported(): void
-    {
-        $ddev = $this->ddev->ddevVersion();
-        if (null === $ddev || version_compare($ddev, self::MIN_DDEV, '<')) {
-            throw new \RuntimeException(\sprintf('The database isolation needs DDEV >= %s (found %s).', self::MIN_DDEV, $ddev ?? 'no readable version'));
-        }
-        $compose = $this->ddev->composeVersion();
-        if (null === $compose || version_compare($compose, self::MIN_COMPOSE, '<')) {
-            throw new \RuntimeException(\sprintf('The database isolation needs docker compose >= %s for the !override tag (found %s).', self::MIN_COMPOSE, $compose ?? 'no readable version'));
-        }
     }
 }
