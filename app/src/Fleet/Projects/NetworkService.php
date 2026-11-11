@@ -75,6 +75,7 @@ final readonly class NetworkService
         $errors = $this->projects->validate(ProjectInput::fromProject($project)->with([
             'additionalHostnames' => $input->hostnames,
             'typesense' => $input->typesense,
+            'typesenseDashboard' => $input->typesense && $input->typesenseDashboard,
             'ports' => $input->ports,
         ])->normalised(), $project);
         if ([] !== $errors) {
@@ -124,6 +125,7 @@ final readonly class NetworkService
         $updated = $this->projects->update($name, ProjectInput::fromProject($project)->with([
             'additionalHostnames' => $input->hostnames,
             'typesense' => $input->typesense,
+            'typesenseDashboard' => $input->typesense && $input->typesenseDashboard,
             'ports' => $input->ports,
         ]));
 

@@ -18,6 +18,8 @@ final readonly class TemplateInput
      * @param list<string>  $tty2          command lines typed into the second instance terminal
      * @param list<string>  $sshKeys       names of extra SSH keys (ssh/<name>_ed25519) loaded into the instance's agent (FLE-190)
      * @param SshIdentities $sshIdentities whether the agent also holds the host's push key (FLE-266)
+     * @param bool          $database      whether the instance has a database of its own; false poisons DB_HOST (FLE-300)
+     * @param bool          $agent         whether an AI agent works in the instance (FLE-300)
      */
     public function __construct(
         public string $name,
@@ -29,6 +31,8 @@ final readonly class TemplateInput
         public ?int $cpuThreads = null,
         public ?int $slots = null,
         public SshIdentities $sshIdentities = SshIdentities::PushAndExtras,
+        public bool $database = true,
+        public bool $agent = false,
     ) {
     }
 
@@ -44,6 +48,8 @@ final readonly class TemplateInput
             $template->cpuThreads(),
             $template->slots(),
             $template->sshIdentities(),
+            $template->hasDatabase(),
+            $template->isAgent(),
         );
     }
 
@@ -77,6 +83,8 @@ final readonly class TemplateInput
             $this->cpuThreads,
             $this->slots,
             $this->sshIdentities,
+            $this->database,
+            $this->agent,
         );
     }
 

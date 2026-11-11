@@ -53,6 +53,14 @@ class Template
     #[ORM\Column(type: Types::STRING, length: 16, enumType: SshIdentities::class, options: ['default' => 'push_and_extras'])]
     private SshIdentities $sshIdentities = SshIdentities::PushAndExtras;
 
+    /** Whether instances of this template have a database of their own (FLE-300). False: Fleet poisons the DB host (FLEET_HAS_DB=0). */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => true])]
+    private bool $database = true;
+
+    /** Whether an AI agent works in the instances of this template (FLE-300): the UI warns, the instance gets FLEET_AGENT=1. */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $agent = false;
+
     /** CPU threads all instances of the template may use together; null = inherits the project's (FLE-197). */
     #[ORM\Column(type: Types::INTEGER, nullable: true)]
     private ?int $cpuThreads = null;
@@ -136,6 +144,23 @@ class Template
     public function changeSshIdentities(SshIdentities $sshIdentities, ?\DateTimeImmutable $now = null): void
     {
         $this->sshIdentities = $sshIdentities;
+        $this->touch($now);
+    }
+
+    public function hasDatabase(): bool
+    {
+        return $this->database;
+    }
+
+    public function isAgent(): bool
+    {
+        return $this->agent;
+    }
+
+    public function changeIsolation(bool $database, bool $agent, ?\DateTimeImmutable $now = null): void
+    {
+        $this->database = $database;
+        $this->agent = $agent;
         $this->touch($now);
     }
 
