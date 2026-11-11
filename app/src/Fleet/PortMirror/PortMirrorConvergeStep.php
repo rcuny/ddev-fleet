@@ -38,7 +38,7 @@ final readonly class PortMirrorConvergeStep implements DeployStep
     private function converge(DeployContext $context): void
     {
         try {
-            $message = $this->converger->converge($context->dir, $context->log->output(...), fn () => $this->preStart->enforce($context->instance, $context->dir, $context->log));
+            $message = $this->converger->converge($context->dir, $context->log->output(...), fn () => $this->preStart->enforceRepair($context->instance, $context->dir, $context->log));
         } catch (PortMirrorFailed $e) {
             $context->log->line('WARNING: '.$e->getMessage());
 

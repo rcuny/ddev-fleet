@@ -72,6 +72,7 @@ final readonly class AuditLog
     public const string PROJECT_PRIVILEGED_OVERRIDES = 'project.privileged-overrides';
     /** A deploy ran with the guard off for its project, with the violations it let through (FLE-298). */
     public const string DEPLOY_OVERRIDES_ALLOWED = 'deploy.overrides-allowed';
+    public const string REPAIR_SKIPPED = 'repair.skipped';
     /** The host's Docker socket was not root:docker 660 (FLE-298); the subject says what it was and whether it was restored. */
     public const string HOST_DOCKER_SOCKET = 'host.docker-socket';
 

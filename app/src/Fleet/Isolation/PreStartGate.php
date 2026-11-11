@@ -51,6 +51,42 @@ final readonly class PreStartGate
     }
 
     /**
+     * FLE-317: the gate for an automatic repair (the router converge's repairing `ddev start`), never for a person's start. If the
+     * scan would refuse, nothing is stopped or restarted: the instance keeps running as it is, the skip is logged and audited
+     * ("repair skipped: guard would refuse (<file:key>)", `fleet instance:audit-overrides` lists the same files), and JobFailed
+     * tells the caller to go no further. Otherwise it is the ordinary enforce().
+     *
+     * @throws JobFailed
+     */
+    public function enforceRepair(Instance $instance, string $dir, JobLog $log): void
+    {
+        $refused = $this->refusals($instance, $dir);
+        if ([] !== $refused) {
+            $what = implode('; ', $refused);
+            $log->line('repair skipped: guard would refuse ('.$what.'); the instance is left as it is');
+            $this->audit->record('system', AuditLog::REPAIR_SKIPPED, $instance->id().': '.$what);
+
+            throw new JobFailed('repair skipped: guard would refuse ('.$what.')');
+        }
+        $this->enforce($instance, $dir, $log);
+    }
+
+    /**
+     * @return list<string> the `file:key` of every violation that would make enforce() refuse (empty when it would pass)
+     */
+    public function refusals(Instance $instance, string $dir): array
+    {
+        if ($instance->project()->allowPrivilegedOverrides()) {
+            return [];
+        }
+
+        return array_map(
+            static fn (OverrideViolation $v): string => $v->file.':'.$v->key,
+            $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]),
+        );
+    }
+
+    /**
      * FLE-297: call it after every successful `ddev start` or `ddev restart`. Disconnects the db (and other non-web) containers
      * from the shared ddev_default network, FLE-307 (see InstanceDbIsolationWriter::converge()).
      *
