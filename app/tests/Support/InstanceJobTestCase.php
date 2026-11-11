@@ -126,7 +126,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
     /**
      * A deploy workflow wired like production; the capacity collaborators are optional (null = a host without them).
      */
-    protected function workflowWith(?\App\Fleet\Instances\InstanceCgroupWriter $cgroup = null, ?\App\Fleet\Instances\InstanceCapacityEnvironment $capacity = null, ?\App\Fleet\Ssh\PushKeyCheck $pushCheck = null): DeployWorkflow
+    protected function workflowWith(?\App\Fleet\Instances\InstanceCgroupWriter $cgroup = null, ?\App\Fleet\Instances\InstanceCapacityEnvironment $capacity = null, ?\App\Fleet\Ssh\PushKeyCheck $pushCheck = null, ?\App\Fleet\Isolation\PreStartGate $preStart = null): DeployWorkflow
     {
         $hostnames = $this->instanceHostnames;
         $secrets = $this->secretStore;
@@ -147,7 +147,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->agent,
             $this->feed,
             $this->clock,
-            $this->preStartGate(),
+            $preStart ?? $this->preStartGate(),
             $this->steps,
             $cgroup,
             $pushCheck,
