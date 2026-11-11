@@ -98,3 +98,14 @@ Fleet then adopts a password hash Authelia changed (a user's reset) before rewri
 `sudo fleet host:drift` (and **Settings → Drift**, button "Run drift check") compares the host with what the installed release's playbook would set up, in check mode, through the root helper `apply drift`. It changes nothing. The report lists, per role, what is unchanged, what would change (with the diff; values that look like secrets are masked) and what could not be checked. `--json` prints the same report (schema 1). Exit code: 0 no drift, 1 drift found, 2 a task could not be checked, 3 no report.
 
 Steps that run a command, such as firewall rules, are not visible in check mode: the host can differ there without the report saying so. The check does not run on a schedule and sends no alert. Roles mark drift that a check run cannot show as a changed task with a `DRIFT:` debug message (see `install/ansible/README.md`).
+
+## Instance isolation (databases)
+
+DDEV puts every project's `db` container on the shared `ddev_default` network under the alias `db` (and the name `ddev-<project>-db`). Left alone, a container of one instance could resolve `db` to another project's database and use DDEV's default credentials (`db`/`db`). Fleet writes `.ddev/docker-compose.fleet-isolation.yaml` into each instance:
+
+- with a db service, `db` is attached to the instance's own network only (it leaves `ddev_default`; ddev-router only needs `web` there);
+- without one (`omit_containers: [db]`), `db` is pinned to `127.0.0.1` in the web container, so the name never reaches another project.
+
+Instances deployed earlier keep the exposure until they restart: `fleet instance:isolate` lists them, `--apply` queues a restart of the running ones (opt-in, it ends what runs in the containers).
+
+**Agent templates:** instances that run AI agents execute code you do not review. Treat any instance on a host as able to reach other containers on `ddev_default` (web containers); only the database is closed by this change, and the database credentials remain the DDEV defaults inside a project. Do not put secrets for other projects in an agent instance.

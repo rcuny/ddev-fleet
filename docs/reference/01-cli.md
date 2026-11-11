@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (99), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (100), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -542,6 +542,19 @@ fleet instance:destroy [--all] [--project PROJECT] [--state STATE] [-y|--yes] [-
 | `--detach` |  | Only queue the job(s) and return |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
 | `--json` |  | Same as --format=json |  |
+
+### fleet instance:isolate
+
+List instances whose db is still on the shared ddev network (--apply: restart the running ones).
+
+```
+fleet instance:isolate [--apply] [-y|--yes]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--apply` |  | Queue a restart for every running exposed instance (ends what runs in their containers) |  |
+| `--yes` | `-y` | Do not ask for confirmation (--apply) |  |
 
 ### fleet instance:list
 

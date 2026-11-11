@@ -64,6 +64,7 @@ final class DeployWorkflow
         private readonly iterable $steps = [],
         private readonly ?InstanceCgroupWriter $cgroup = null,
         private readonly ?PushKeyCheck $pushCheck = null,
+        private readonly ?InstanceIsolationWriter $isolation = null,
     ) {
     }
 
@@ -165,6 +166,7 @@ final class DeployWorkflow
         }
         $written[] = $sshKnownHosts;
         $written[] = InstanceCgroupWriter::RELATIVE_PATH;
+        $written[] = InstanceIsolationWriter::RELATIVE_PATH;
         array_push($written, ...$this->setUpContainerAgent($instance, $project, $template, $dir, $log));
         GitExclude::add($dir, $written);
 
@@ -188,6 +190,14 @@ final class DeployWorkflow
                 $this->cgroup->write($instance, $project, $dir, $log);
             } catch (\RuntimeException $e) {
                 throw new JobFailed('The CPU slice override could not be written: '.$e->getMessage());
+            }
+        }
+        // FLE-297: the db container must not be reachable as "db" from other projects' containers.
+        if (null !== $this->isolation) {
+            try {
+                $this->isolation->write($dir, $log);
+            } catch (\RuntimeException $e) {
+                throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
             }
         }
         $started = $this->ran(fn (): CommandResult => $this->ddev->start($dir, $log->output(...)), 'ddev start');

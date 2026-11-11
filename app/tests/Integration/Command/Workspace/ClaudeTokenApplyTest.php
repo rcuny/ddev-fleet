@@ -54,6 +54,13 @@ final class ClaudeTokenApplyTest extends KernelTestCase
         parent::tearDown();
     }
 
+    private function composeConfig(): void
+    {
+        for ($i = 0; $i < 3; ++$i) { // the isolation override lists the services once per restart
+            $this->runner->expect(['ddev', 'debug'], new CommandResult(0, "services:\n  db:\n    image: db\n  web:\n    image: web\n"));
+        }
+    }
+
     /**
      * Instances i1..: running, stopped, running, with a checkout (and a stale config.fleet.yaml) for each.
      *
@@ -61,6 +68,7 @@ final class ClaudeTokenApplyTest extends KernelTestCase
      */
     private function fleet(): array
     {
+        $this->composeConfig();
         $instances = $this->instancesOf($this->projectNamed('acme'), [InstanceState::Running, InstanceState::Stopped, InstanceState::Running]);
         $ids = [];
         foreach ($instances as $instance) {
@@ -201,6 +209,7 @@ final class ClaudeTokenApplyTest extends KernelTestCase
     {
         $this->fleet();
         $this->runner->reset();
+        $this->composeConfig();
 
         $plain = $this->cli('fleet:claude:token:set', [], [self::TOKEN."\n"]);
         self::assertSame(0, $plain->getStatusCode(), $plain->getErrorOutput());
