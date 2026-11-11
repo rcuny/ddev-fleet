@@ -289,6 +289,37 @@ paths:
         "429": {$ref: "#/components/responses/RateLimited"}
         "202": {$ref: "#/components/responses/Accepted"}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/instances/{id}/terminal:
+    get:
+      operationId: getInstanceTerminal
+      summary: Read-only capture of tty1 or tty2 of an instance (escape-free, masked, at most 200 lines and 64 KiB). The token must list the instance's project and a matching instance pattern.
+      tags: [instances]
+      x-scope: terminal:read
+      parameters:
+        - {$ref: "#/components/parameters/InstanceId"}
+        - {name: pane, in: query, description: "tty1 or tty2 (the sidebar and the general window are never readable).", schema: {type: string, enum: [tty1, tty2], default: tty2}}
+        - {name: lines, in: query, description: Last N lines, 1 to 200., schema: {type: integer, minimum: 1, maximum: 200, default: 40}}
+      responses:
+        "400": {$ref: "#/components/responses/Problem"}
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "200":
+          description: The pane text
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [instance, pane, lines, truncated, captured_at, text]
+                properties:
+                  instance: {type: string}
+                  pane: {type: string, enum: [tty1, tty2]}
+                  lines: {type: integer}
+                  truncated: {type: boolean}
+                  captured_at: {type: string, format: date-time}
+                  text: {type: string}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/instances/{id}/redeploy:
     post:
       operationId: redeployInstance

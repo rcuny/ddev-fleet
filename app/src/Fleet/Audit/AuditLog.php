@@ -57,6 +57,8 @@ final readonly class AuditLog
     public const string API_DENIED = 'api.denied';
     /** A write the API accepted (deploy, redeploy, start, stop, destroy, retry); the subject names the target and the job. */
     public const string API_WRITE = 'api.write';
+    /** A terminal read the API served: the subject holds the instance, pane, line and byte counts, never the text. */
+    public const string API_TERMINAL_READ = 'api.terminal.read';
 
     public const string PROJECT_MEMBER_ADD = 'project.member.add';
     public const string PROJECT_MEMBER_REMOVE = 'project.member.remove';

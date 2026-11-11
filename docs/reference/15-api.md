@@ -48,7 +48,7 @@ The prefix and the checksum let secret scanners find a leaked token and let the 
 | `deploy` | Create and redeploy instances of the listed projects. |
 | `lifecycle` | Start, stop and retry on the listed projects. |
 | `lifecycle:destroy` | A flag on top of `lifecycle`: destroy instances. |
-| `terminal:read`, `terminal:write` | Read or type into an agent's pane (later release). `terminal:write` cannot be combined with `deploy` or `lifecycle`. |
+| `terminal:read`, `terminal:write` | `terminal:read` reads an agent's pane (see "Terminal read"); typing into it (`terminal:write`) arrives later. `terminal:write` cannot be combined with `deploy` or `lifecycle`. |
 
 There is no wildcard scope and no scope implies another. Settings, secrets, users and tokens are never reachable with a token.
 
@@ -128,6 +128,10 @@ Every write answers `202 Accepted` with `{"job": {"id", "state", "url"}}` and a 
 | `DELETE /api/v1/instances/{id}` | `lifecycle` and `lifecycle:destroy` | `409 protected_instance` for a project's `main` instance. `If-Match: "<created_at>"` (the instance's `created_at`) is required: without it `428 if_match_required`, with a different value `412 stale_if_match`, and nothing is destroyed, so a stale id never removes a newer instance that reused it. |
 | `POST /api/v1/instances:destroy-batch` | `lifecycle` and `lifecycle:destroy` | Body `{ids: [...], if_match: {"<id>": "<created_at>"}}`, at most 20 ids; an id without its `if_match` entry is refused with `428` in its result. One job per id; the answer is `207` with a `results` entry per id: `{id, accepted: true, job}` or `{id, accepted: false, status, code, detail}`. A refused id does not stop the others. |
 | `POST /api/v1/jobs/{id}/retry` | the scope the repeated work needs | `deploy` for a deploy or redeploy (a failed deploy is retried as a redeploy), `lifecycle` for start and stop, `lifecycle` and `lifecycle:destroy` for a destroy. Only a failed or interrupted job. Retrying a destroy applies the destroy rules again: the `main` protection and the required `If-Match` header. |
+
+### Terminal read
+
+`GET /api/v1/instances/{id}/terminal?pane=tty2&lines=40` needs `terminal:read`, the instance's project in the token's project list **and** an instance pattern of the token that matches the id (`403 instance_not_allowed` otherwise; a token without patterns reaches none). `pane` is `tty1` or `tty2` (default `tty2`, the agent's pane); anything else, the sidebar and the `general` window included, is `400 invalid_pane`, and `general` is not an instance id. `lines` is 1 to 200 (default 40). The answer is JSON `{instance, pane, lines, truncated, captured_at, text}`: terminal escapes and control characters are removed, registered secret values are masked, and the text is capped at 64 KiB (the end is kept, `truncated: true`). Reads have their own limit of 30 per minute per token on top of the read pool (`429` with `Retry-After`). Each read is audited as `api.terminal.read` with the instance, pane, line and byte counts and the client address, never the text. `404` when the instance or its window has no such pane.
 
 Each accepted write is audited as `api.write` (actor `token:<id>:<name>`, subject: the operation, the target, the job and the client address). The jobs record the trigger `api`. The token id is the stable identifier; the name is informational and can be reused. Names cannot contain `:`, so the actor splits unambiguously into `token`, id and name.
 
