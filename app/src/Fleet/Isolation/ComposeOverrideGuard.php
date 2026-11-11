@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Fleet\Isolation;
 
 use Symfony\Component\Yaml\Exception\ParseException;
+use Symfony\Component\Yaml\Tag\TaggedValue;
 use Symfony\Component\Yaml\Yaml;
 
 /**
@@ -68,7 +69,8 @@ final class ComposeOverrideGuard
                 continue;
             }
             try {
-                $data = Yaml::parse($text);
+                // Compose tags (!override, !reset) are legal: read the value inside them, so a tag never hides a key from the scan.
+                $data = self::untag(Yaml::parse($text, Yaml::PARSE_CUSTOM_TAGS));
             } catch (ParseException $e) {
                 $violations[] = new OverrideViolation($relative, '(file)', 'cannot be parsed ('.$e->getMessage().'), so it cannot be verified');
                 continue;
@@ -89,6 +91,18 @@ final class ComposeOverrideGuard
         }
 
         return array_values($unique);
+    }
+
+    private static function untag(mixed $value): mixed
+    {
+        if ($value instanceof TaggedValue) {
+            return self::untag($value->getValue());
+        }
+        if (\is_array($value)) {
+            return array_map(self::untag(...), $value);
+        }
+
+        return $value;
     }
 
     /**

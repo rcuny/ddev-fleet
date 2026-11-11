@@ -86,6 +86,19 @@ final class ComposeOverrideGuardTest extends TestCase
         self::assertSame(['.ddev/docker-compose.evil.yaml '.$key], $this->scan('docker-compose.evil.yaml', $yaml));
     }
 
+    public function testFleetsOwnNetworkOverrideWithItsTagIsAccepted(): void
+    {
+        self::assertSame([], $this->scan('docker-compose.zzz-fleet-isolation.yaml', "services:\n  db:\n    networks: !override\n      default: {}\n"));
+    }
+
+    public function testATagDoesNotHideAViolation(): void
+    {
+        $found = $this->scan('docker-compose.override.yaml', "services:\n  web: !override\n    network_mode: host\n    pid: 'host'\n    cgroup: host\n");
+
+        self::assertNotSame([], $found);
+        self::assertTrue([] !== array_filter($found, static fn (string $f): bool => str_contains($f, 'cgroup')), implode("\n", $found));
+    }
+
     public function testASocketChmodInAConfigHookIsRefusedWithItsKeyPath(): void
     {
         $found = $this->scan('config.dockersock.yaml', "hooks:\n  post-start:\n    - exec-host: sudo chmod 666 /var/run/docker.sock\n");

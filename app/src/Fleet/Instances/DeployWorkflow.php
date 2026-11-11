@@ -168,6 +168,7 @@ final class DeployWorkflow
         }
         $written[] = $sshKnownHosts;
         $written[] = InstanceCgroupWriter::RELATIVE_PATH;
+        $written[] = InstanceDbIsolationWriter::RELATIVE_PATH;
         if (null !== $this->isolation) {
             $override = $this->isolation->write($dir, $project, $log->line(...));
             if (null !== $override) {
@@ -209,6 +210,7 @@ final class DeployWorkflow
         if (null !== $warning) {
             $log->line($warning);
         }
+        $this->preStart->verifyStarted($instance, $dir, $log);
         $this->runSteps(StepPhase::AfterStart, $context);
 
         // 9. Post-deploy lines, already split and substituted.

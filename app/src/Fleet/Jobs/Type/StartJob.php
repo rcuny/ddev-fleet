@@ -93,6 +93,7 @@ final readonly class StartJob implements JobType
         $instance->changeState(InstanceState::Running, $this->clock->now());
         $this->instances->save($instance);
         $this->feed->instanceChanged($instance->id());
+        $this->preStart->verifyStarted($instance, $dir, $log);
     }
 
     private static function output(CommandResult $result): string

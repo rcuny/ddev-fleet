@@ -7,6 +7,7 @@ namespace App\Fleet\Isolation;
 use App\Domain\Instance\Instance;
 use App\Fleet\Audit\AuditLog;
 use App\Fleet\FleetPaths;
+use App\Fleet\Instances\InstanceDbIsolationWriter;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobLog;
 
@@ -22,6 +23,7 @@ final readonly class PreStartGate
         private ComposeOverrideGuard $guard,
         private AuditLog $audit,
         private FleetPaths $paths,
+        private ?InstanceDbIsolationWriter $dbIsolation = null,
     ) {
     }
 
@@ -29,6 +31,34 @@ final readonly class PreStartGate
      * @throws JobFailed
      */
     public function enforce(Instance $instance, string $dir, JobLog $log): void
+    {
+        $this->scan($instance, $dir, $log);
+        // FLE-297: the database isolation override, on every start path (a stopped instance may predate it).
+        if (is_dir($dir.'/.ddev')) {
+            try {
+                $this->dbIsolation?->write($dir, $instance->id(), $log->line(...));
+            } catch (\RuntimeException $e) {
+                throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
+            }
+        }
+    }
+
+    /**
+     * FLE-297: call it after every successful `ddev start` or `ddev restart`. Proves that the db container is off the shared
+     * ddev_default network (see InstanceDbIsolationWriter::verify()).
+     *
+     * @throws JobFailed
+     */
+    public function verifyStarted(Instance $instance, string $dir, JobLog $log): void
+    {
+        try {
+            $this->dbIsolation?->verify($dir, $instance->id(), $log->line(...));
+        } catch (\RuntimeException $e) {
+            throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
+        }
+    }
+
+    private function scan(Instance $instance, string $dir, JobLog $log): void
     {
         $violations = $this->guard->scan($dir, [$this->paths->agentSocketDir($instance->id())]);
         if ([] === $violations) {

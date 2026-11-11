@@ -14,8 +14,16 @@ use App\Tests\Support\InstanceCliTestCase;
 
 final class DeployCommandTest extends InstanceCliTestCase
 {
+    private function composeConfig(int $deploys): void
+    {
+        for ($i = 0; $i < $deploys; ++$i) { // the isolation override lists the services once per deploy
+            $this->runner()->expect(['ddev', 'debug'], new \App\Fleet\Shell\CommandResult(0, "services:\n  db:\n    image: db\n  web:\n    image: web\n"));
+        }
+    }
+
     public function testDeploysAttachedAndPrintsTheUrl(): void
     {
+        $this->composeConfig(1);
         $tester = $this->command('fleet:instance:deploy', ['project' => 'acme']);
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
@@ -36,6 +44,7 @@ final class DeployCommandTest extends InstanceCliTestCase
 
     public function testCountTwoCreatesSuffixedInstances(): void
     {
+        $this->composeConfig(2);
         $tester = $this->command('fleet:instance:deploy', ['project' => 'acme', '--count' => '2']);
 
         self::assertSame(0, $tester->getStatusCode(), $tester->getDisplay());
@@ -83,6 +92,7 @@ final class DeployCommandTest extends InstanceCliTestCase
 
     public function testDiskRefusalExitsTwo(): void
     {
+        $this->composeConfig(2);
         $paths = self::getContainer()->get(FleetPaths::class);
         self::assertInstanceOf(FleetPaths::class, $paths);
         self::getContainer()->set(DiskHeadroom::class, new DiskHeadroom(new HostHealth($paths), 1.01));

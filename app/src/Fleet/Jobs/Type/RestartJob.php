@@ -76,6 +76,7 @@ final readonly class RestartJob implements JobType
         if (null !== $warning) {
             $log->line($warning);
         }
+        $this->preStart->verifyStarted($instance, $dir, $log);
 
         $this->feed->instanceChanged($instance->id());
     }
