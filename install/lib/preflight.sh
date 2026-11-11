@@ -23,6 +23,13 @@ PREFLIGHT_ENV_KEYS=(APP_ENV APP_SECRET MERCURE_JWT_SECRET FLEET_PROXY_SECRET FLE
 # Commands the install needs; step 10 installs a missing one, so on a host that is already installed it is a WARN.
 PREFLIGHT_COMMANDS=(openssl jq tmux composer php8.4)
 
+# Minimum tool versions (FLE-310). Docker Engine 26 and compose 2.24.4 are what the isolation features need (FLE-297 db
+# isolation: compose 2.24.4; FLE-300 read-only traefik mount: Engine 26, compose 2.23); DDEV 1.24.0 for FLE-297.
+# Keep in step with install/ansible/group_vars/all.yml (fleet_min_*) and App\Fleet\Host\Docker\ToolVersions.
+PREFLIGHT_MIN_DOCKER=${PREFLIGHT_MIN_DOCKER:-26.0.0}
+PREFLIGHT_MIN_COMPOSE=${PREFLIGHT_MIN_COMPOSE:-2.24.4}
+PREFLIGHT_MIN_DDEV=${PREFLIGHT_MIN_DDEV:-1.24.0}
+
 PREFLIGHT_BLOCKS=0
 PREFLIGHT_NETWORK_TIMEOUT=${PREFLIGHT_NETWORK_TIMEOUT:-10}
 
@@ -172,6 +179,43 @@ pf_check_tool() {
   fi
 }
 
+# True when version $1 is >= $2 (dotted numbers; a leading v and any suffix such as -rc1 or +ds are ignored).
+pf_version_ge() {
+  local a=${1#v} b=${2#v}
+  a=${a%%[-+~]*}
+  b=${b%%[-+~]*}
+  [ "$(printf '%s\n%s\n' "$b" "$a" | sort -V | head -n 1)" = "$b" ]
+}
+
+# pf_check_version <id> <label> <minimum> <fix hint> <raw output...>: the first x.y.z in the output is the version.
+# Output that holds no version is reported as not checked (never a BLOCK: the answer checks above own "does not work").
+pf_check_version() {
+  local id=$1 label=$2 min=$3 hint=$4 raw=$5 version
+  version=$(printf '%s\n' "$raw" | grep -oE '[0-9]+\.[0-9]+(\.[0-9]+)?' | head -n 1 || true)
+  if [ -z "$version" ]; then
+    pf_emit INFO "$id" "cannot read the $label version; not checked"
+  elif pf_version_ge "$version" "$min"; then
+    pf_emit INFO "$id" "$label $version (need $min or newer)"
+  else
+    pf_emit BLOCK "$id" "$label $version is older than $min, which the instance isolation features need. $hint"
+  fi
+}
+
+# Docker Engine, docker compose and DDEV versions. Skipped quietly when a tool is absent (pf_check_tool reports that).
+pf_check_versions() {
+  local raw=''
+  if command -v docker >/dev/null 2>&1; then
+    raw=$(timeout "$PREFLIGHT_NETWORK_TIMEOUT" docker version --format '{{.Server.Version}}' 2>/dev/null </dev/null || true)
+    pf_check_version docker.version "Docker Engine" "$PREFLIGHT_MIN_DOCKER" "Upgrade docker-ce (apt-get install --only-upgrade docker-ce docker-ce-cli containerd.io) and run again" "$raw"
+    raw=$(timeout "$PREFLIGHT_NETWORK_TIMEOUT" docker compose version --short 2>/dev/null </dev/null || true)
+    pf_check_version docker.compose-version "docker compose" "$PREFLIGHT_MIN_COMPOSE" "Upgrade docker-compose-plugin (apt-get install --only-upgrade docker-compose-plugin) and run again" "$raw"
+  fi
+  if command -v ddev >/dev/null 2>&1; then
+    raw=$(pf_ddev --version 2>/dev/null || true)
+    pf_check_version ddev.version "DDEV" "$PREFLIGHT_MIN_DDEV" "Upgrade it (apt-get install --only-upgrade ddev) and run again" "$raw"
+  fi
+}
+
 pf_check_packages() {
   local missing=() cmd
   if ! command -v apt-get >/dev/null 2>&1 || ! command -v dpkg >/dev/null 2>&1; then
@@ -239,6 +283,7 @@ preflight_run() {
   pf_check_packages
   pf_check_tool docker.answer docker info
   pf_check_tool ddev.answer ddev version
+  pf_check_versions
   pf_check_instances
   pf_check_env
   pf_check_github

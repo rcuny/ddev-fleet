@@ -91,6 +91,7 @@ The installer ends by telling you to run `sudo fleet setup:token`, which prints 
 | `disk.opt`, `disk.srv`, `disk.var` | Free space on `/opt` (500 MiB), `/srv/fleet` (2 GiB) and `/var` (2 GiB). |
 | `host.packages` | Required commands present (the `packages` role installs missing ones). |
 | `docker.answer`, `ddev.answer` | Docker and DDEV answer when installed. |
+| `docker.version`, `docker.compose-version`, `ddev.version` | Docker Engine 26.0.0, docker compose 2.24.4 and DDEV 1.24.0 or newer (the instance isolation features rely on them). An older one blocks, and the message names the package to upgrade. `fleet upgrade` runs the same check, and the `docker` role asserts Engine and compose after installing. The versions show on the General tab of `/admin/host`. |
 | `instances.id-length` | Existing instance ids are not too long. |
 | `fleet.env` | The file, when it exists, is readable. |
 | `network.repo` | The release source answers. |
