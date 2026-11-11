@@ -76,6 +76,20 @@ def test_fails_when_a_run_reports_a_failure(tmp_path):
     assert "first run did not finish cleanly" in r.stdout
 
 
+def test_fails_when_another_host_changed_something_on_the_second_run(tmp_path):
+    other = "PLAY RECAP ****\n" + _recap(0).split("\n")[1] + "\nweb2                      : ok=5    changed=2    unreachable=0    failed=0    skipped=0    rescued=0    ignored=0\n"
+    r = _run(tmp_path, _recap(30), other)
+    assert r.returncode == 1
+    assert "second run changed 2 task" in r.stdout
+
+
+def test_fails_when_another_host_is_unreachable(tmp_path):
+    bad = _recap(0) + "web2                      : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0\n"
+    r = _run(tmp_path, _recap(30), bad)
+    assert r.returncode == 1
+    assert "second run did not finish cleanly" in r.stdout
+
+
 def test_fails_when_there_is_no_recap(tmp_path):
     r = _run(tmp_path, "boom\n", _recap(0))
     assert r.returncode == 1

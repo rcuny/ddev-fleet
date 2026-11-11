@@ -27,8 +27,10 @@
 #   FLEET_CT_BASE_IMAGE    default debian:trixie
 #   FLEET_CT_SKIP_TAGS     default docker,ddev,app_code,units,hardening
 #   FLEET_CT_PRIVILEGED    1 = run the container with --privileged (fallback when systemd does not boot without it)
-#   FLEET_CT_RUN_TIMEOUT   seconds allowed per playbook run (default 480)
+#   FLEET_CT_RUN_TIMEOUT   seconds allowed per playbook run (default 300)
 #   FLEET_CT_BOOT_TIMEOUT  seconds allowed for systemd to boot (default 60)
+#   FLEET_CT_STEP_TIMEOUT  seconds allowed per single engine call: build, cp, syntax-check (default 120)
+#   FLEET_CT_TOTAL_TIMEOUT overall budget in seconds; every call is capped to what is left (default 720, 12 minutes)
 #
 # Exit codes: 0 second run changed=0; 1 a run failed, the second run changed something, or systemd did not boot;
 # 2 usage; 3 no container engine (nothing was tested; the caller decides whether that is a failure).
@@ -61,8 +63,11 @@ done
 
 base_image="${FLEET_CT_BASE_IMAGE:-debian:trixie}"
 skip_tags="${FLEET_CT_SKIP_TAGS:-docker,ddev,app_code,units,hardening}"
-run_timeout="${FLEET_CT_RUN_TIMEOUT:-480}"
+run_timeout="${FLEET_CT_RUN_TIMEOUT:-300}"
 boot_timeout="${FLEET_CT_BOOT_TIMEOUT:-60}"
+step_timeout="${FLEET_CT_STEP_TIMEOUT:-120}"
+total_timeout="${FLEET_CT_TOTAL_TIMEOUT:-720}"
+start_ts=$(date +%s)
 engine="${FLEET_CT_ENGINE:-}"
 if [ -z "$engine" ]; then
     if command -v docker > /dev/null 2>&1; then engine=docker; elif command -v podman > /dev/null 2>&1; then engine=podman; fi
@@ -94,7 +99,7 @@ if [ "$dry_run" = 1 ]; then
     echo "engine:        $engine"
     echo "image:         $image (from $base_image, built once and reused)"
     echo "skipped tags:  $skip_tags"
-    echo "run timeout:   ${run_timeout}s per run, systemd boot ${boot_timeout}s"
+    echo "run timeout:   ${run_timeout}s per run, systemd boot ${boot_timeout}s, ${step_timeout}s per other call, ${total_timeout}s in all"
     echo "playbook:      ${playbook_cmd[*]} --skip-tags $skip_tags   (twice)"
     exit 0
 fi
@@ -104,6 +109,13 @@ log1="$report_dir/ansible-idempotency-run1.log"
 log2="$report_dir/ansible-idempotency-run2.log"
 report="$report_dir/ansible-idempotency.txt"
 : > "$report"
+
+# Seconds a call may take: the smaller of its own limit and what is left of the total budget (at least 1).
+budget() {
+    local left=$((total_timeout - ($(date +%s) - start_ts)))
+    [ "$left" -lt 1 ] && left=1
+    [ "$1" -lt "$left" ] && echo "$1" || echo "$left"
+}
 
 say() { printf '%s\n' "$*" | tee -a "$report"; }
 
@@ -120,7 +132,10 @@ trap cleanup EXIT
 
 if ! "$engine" image inspect "$image" > /dev/null 2>&1; then
     echo "ansible-idempotency: building $image"
-    printf '%s' "$dockerfile" | "$engine" build -q -t "$image" - > /dev/null
+    printf '%s' "$dockerfile" | timeout "$(budget 300)" "$engine" build -q -t "$image" - > /dev/null || {
+        echo "ansible-idempotency: building $image failed or timed out" >&2
+        exit 1
+    }
 fi
 
 run_args=(run -d --name "$name" --tmpfs /tmp --tmpfs /run --tmpfs /run/lock)
@@ -135,23 +150,26 @@ fi
 
 booted=0
 state=''
+boot_start=$(date +%s)
 for ((i = 0; i < boot_timeout; i++)); do
-    state="$("$engine" exec "$name" systemctl is-system-running 2> /dev/null || true)"
+    [ $(($(date +%s) - boot_start)) -ge "$boot_timeout" ] && break
+    state="$(timeout 10 "$engine" exec "$name" systemctl is-system-running 2> /dev/null || true)"
     case "$state" in running | degraded) booted=1; break ;; esac
+    [ "$(budget "$boot_timeout")" -le 1 ] && break
     sleep 1
 done
 if [ "$booted" != 1 ]; then
     say "FAIL: systemd did not boot in ${boot_timeout}s (state: ${state:-none}); engine $engine."
     say "      Retry with FLEET_CT_PRIVILEGED=1 if the host forbids systemd in an unprivileged container."
-    "$engine" logs "$name" 2>&1 | tail -n 20 | tee -a "$report" >&2 || true
+    timeout 10 "$engine" logs "$name" 2>&1 | tail -n 20 | tee -a "$report" >&2 || true
     exit 1
 fi
 
 # The whole install/ tree: the roles read install/etc, install/libexec and install/lib relative to the playbook.
-"$engine" exec "$name" mkdir -p /opt/fleet-ct /etc/ddev-fleet
-"$engine" cp "$root/install" "$name:/opt/fleet-ct/install"
+timeout "$(budget 30)" "$engine" exec "$name" mkdir -p /opt/fleet-ct /etc/ddev-fleet
+timeout "$(budget "$step_timeout")" "$engine" cp "$root/install" "$name:/opt/fleet-ct/install"
 # The host's own answers (documentation addresses only). Hardening stays off, as on a default host.
-"$engine" exec -i "$name" tee /etc/ddev-fleet/host-vars.yml > /dev/null << 'EOF'
+timeout "$(budget 30)" "$engine" exec -i "$name" tee /etc/ddev-fleet/host-vars.yml > /dev/null << 'EOF'
 ---
 fleet_domain: ci.example.test
 fleet_acme_email: ci@example.test
@@ -164,18 +182,21 @@ ansible_env=(env ANSIBLE_FORCE_COLOR=0 ANSIBLE_NOCOLOR=1 ANSIBLE_STDOUT_CALLBACK
 run_playbook() {
     local log="$1" t0 rc=0
     t0=$(date +%s)
-    timeout "$run_timeout" "$engine" exec "$name" "${ansible_env[@]}" "${playbook_cmd[@]}" --skip-tags "$skip_tags" > "$log" 2>&1 || rc=$?
+    timeout "$(budget "$run_timeout")" "$engine" exec "$name" "${ansible_env[@]}" "${playbook_cmd[@]}" --skip-tags "$skip_tags" > "$log" 2>&1 || rc=$?
     RUN_SECS=$(($(date +%s) - t0))
     RUN_RC=$rc
-    RUN_RECAP="$(awk '/^localhost[[:space:]]*:/ {
-        for (i = 1; i <= NF; i++) { split($i, kv, "="); v[kv[1]] = kv[2] }
-        print v["ok"] + 0, v["changed"] + 0, v["failed"] + 0, v["unreachable"] + 0
-    }' "$log" | tail -n 1)"
+    # Every host line of the PLAY RECAP (` host : ok=N changed=N ...`) is summed, so any host with changed, failed or
+    # unreachable tasks counts, not only localhost.
+    RUN_RECAP="$(awk '/^[^[:space:]][^[:space:]]*[[:space:]]*: +ok=[0-9]+/ {
+        n++
+        for (i = 1; i <= NF; i++) { split($i, kv, "="); if (kv[2] != "") v[kv[1]] = kv[2] }
+        ok += v["ok"]; ch += v["changed"]; fa += v["failed"]; un += v["unreachable"]
+    } END { if (n) print ok + 0, ch + 0, fa + 0, un + 0 }' "$log")"
 }
 
 say "ansible-idempotency: $engine, image $image, skipped tags: $skip_tags"
 
-"$engine" exec "$name" "${ansible_env[@]}" "${playbook_cmd[@]}" --syntax-check > "$report_dir/ansible-idempotency-syntax.log" 2>&1 || {
+timeout "$(budget "$step_timeout")" "$engine" exec "$name" "${ansible_env[@]}" "${playbook_cmd[@]}" --syntax-check > "$report_dir/ansible-idempotency-syntax.log" 2>&1 || {
     say "FAIL: --syntax-check failed (see ansible-idempotency-syntax.log)"
     tail -n 20 "$report_dir/ansible-idempotency-syntax.log" >&2
     exit 1
