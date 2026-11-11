@@ -41,7 +41,6 @@ final class RouterConverger
         private readonly TraefikDirectory $traefik,
         private readonly float $healthWait = 60.0,
         ?\Closure $sleep = null,
-        private readonly ?\App\Fleet\Instances\InstanceDbIsolationWriter $dbIsolation = null,
     ) {
         $this->sleep = $sleep ?? static function (float $seconds): void {
             usleep((int) ($seconds * 1_000_000));
@@ -49,19 +48,20 @@ final class RouterConverger
     }
 
     /**
-     * @param callable(string, string): void $onOutput receives the output of the repairing `ddev start`
+     * @param callable(string, string): void $onOutput    receives the output of the repairing `ddev start`
+     * @param (\Closure(): void)|null        $beforeStart called before that repairing start; throws to forbid it (FLE-298 isolation check)
      *
      * @return string a line for the deploy log (empty when nothing had to be done)
      *
      * @throws PortMirrorFailed
      */
-    public function converge(string $instanceDir, callable $onOutput): string
+    public function converge(string $instanceDir, callable $onOutput, ?\Closure $beforeStart = null): string
     {
         if (!$this->traefik->exists()) {
             return '';
         }
         try {
-            return $this->lock->run(fn (): string => $this->convergeLocked($instanceDir, $onOutput));
+            return $this->lock->run(fn (): string => $this->convergeLocked($instanceDir, $onOutput, $beforeStart));
         } catch (MirrorLockBusy $e) {
             return $e->getMessage().'; skipped';
         }
@@ -70,7 +70,7 @@ final class RouterConverger
     /**
      * @param callable(string, string): void $onOutput
      */
-    private function convergeLocked(string $instanceDir, callable $onOutput): string
+    private function convergeLocked(string $instanceDir, callable $onOutput, ?\Closure $beforeStart): string
     {
         $plan = $this->mirror->plan();
         $wanted = $plan->wantedNames();
@@ -96,7 +96,7 @@ final class RouterConverger
             return 'restarted '.self::ROUTER.': port mirror now '.([] === $plan->publicPorts() ? 'none' : implode(', ', $plan->publicPorts()));
         }
 
-        $this->repair($plan, $instanceDir, $onOutput, $reason);
+        $this->repair($plan, $instanceDir, $onOutput, $reason, $beforeStart);
     }
 
     /**
@@ -138,7 +138,7 @@ final class RouterConverger
      *
      * @throws PortMirrorFailed always
      */
-    private function repair(MirrorPlan $plan, string $instanceDir, callable $onOutput, string $reason): never
+    private function repair(MirrorPlan $plan, string $instanceDir, callable $onOutput, string $reason, ?\Closure $beforeStart): never
     {
         $notes = [];
         try {
@@ -152,16 +152,10 @@ final class RouterConverger
             $notes[] = 'could not write the failed-apply marker ('.$e->getMessage().')';
         }
         try {
-            // FLE-297: this start path writes the database isolation override too, and checks it afterwards.
-            $project = basename($instanceDir);
-            $log = static function (string $line) use ($onOutput): void {
-                $onOutput('stdout', $line."\n");
-            };
-            $this->dbIsolation?->write($instanceDir, $project, $log);
-            $start = $this->ddev->start($instanceDir, $onOutput);
-            if ($start->isSuccess()) {
-                $this->dbIsolation?->verify($instanceDir, $project, $log);
+            if (null !== $beforeStart) {
+                $beforeStart();
             }
+            $start = $this->ddev->start($instanceDir, $onOutput);
             if (!$start->isSuccess()) {
                 $notes[] = \sprintf('"ddev start" exited %d', $start->exitCode);
             }

@@ -14,6 +14,7 @@ use App\Domain\Template\TemplateRepository;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Git\GitClient;
+use App\Fleet\Isolation\PreStartGate;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
@@ -60,12 +61,12 @@ final class DeployWorkflow
         private readonly InstanceSshAgent $agent,
         private readonly JobFeed $feed,
         private readonly ClockInterface $clock,
+        private readonly PreStartGate $preStart,
         #[AutowireIterator('fleet.deploy_step')]
         private readonly iterable $steps = [],
         private readonly ?InstanceCgroupWriter $cgroup = null,
         private readonly ?PushKeyCheck $pushCheck = null,
         private readonly ?InstanceIsolation $isolation = null,
-        private readonly ?InstanceDbIsolationWriter $dbIsolation = null,
     ) {
     }
 
@@ -199,14 +200,8 @@ final class DeployWorkflow
                 throw new JobFailed('The CPU slice override could not be written: '.$e->getMessage());
             }
         }
-        // FLE-297: the db container must not be reachable as "db" from other projects' containers.
-        if (null !== $this->dbIsolation) {
-            try {
-                $this->dbIsolation->write($dir, $instance->id(), $log->line(...));
-            } catch (\RuntimeException $e) {
-                throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
-            }
-        }
+        // The last file is in place (project's own, assets, fleet's): nothing starts that hands a container the host (FLE-298).
+        $this->preStart->enforce($instance, $dir, $log);
         $started = $this->ran(fn (): CommandResult => $this->ddev->start($dir, $log->output(...)), 'ddev start');
         if (!$started->isSuccess()) {
             throw new JobFailed(\sprintf('ddev start failed with exit code %d', $started->exitCode), $started->exitCode);
@@ -215,13 +210,7 @@ final class DeployWorkflow
         if (null !== $warning) {
             $log->line($warning);
         }
-        if (null !== $this->dbIsolation) {
-            try {
-                $this->dbIsolation->verify($dir, $instance->id(), $log->line(...));
-            } catch (\RuntimeException $e) {
-                throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
-            }
-        }
+        $this->preStart->verifyStarted($instance, $dir, $log);
         $this->runSteps(StepPhase::AfterStart, $context);
 
         // 9. Post-deploy lines, already split and substituted.

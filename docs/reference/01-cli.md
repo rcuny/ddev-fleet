@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (101), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (103), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -500,6 +500,18 @@ fleet ssh:trust [--fingerprint FINGERPRINT] [--yes] [--format FORMAT] [--json] [
 ## instance
 
 Deploy, start, stop and watch instances.
+
+### fleet instance:audit-overrides
+
+List instances whose compose overrides the deploy guard would refuse (read-only).
+
+```
+fleet instance:audit-overrides [--json]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--json` |  | Print the report as JSON |  |
 
 ### fleet instance:deploy
 
@@ -1387,6 +1399,18 @@ fleet host:capacity [--json] [--reserve RESERVE] [--max-instances MAX-INSTANCES]
 | `--json` |  | Print the report as JSON |  |
 | `--reserve=VALUE` |  | Compute with this many reserved threads instead of the saved value |  |
 | `--max-instances=VALUE` |  | Report this instance cap instead of the saved value |  |
+
+### fleet host:docker-socket
+
+Check (and with --restore, fix) the permissions of the Docker socket.
+
+```
+fleet host:docker-socket [--restore]
+```
+
+| Option | Shortcut | Description | Default |
+|---|---|---|---|
+| `--restore` |  | Set the socket back to root:docker 0660 (needs root) |  |
 
 ### fleet host:drift
 

@@ -10,7 +10,7 @@ use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceCgroupWriter;
 use App\Fleet\Instances\InstanceConfigWriter;
-use App\Fleet\Instances\InstanceDbIsolationWriter;
+use App\Fleet\Isolation\PreStartGate;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
@@ -31,8 +31,8 @@ final readonly class RestartJob implements JobType
         private Ddev $ddev,
         private FleetPaths $paths,
         private JobFeed $feed,
+        private PreStartGate $preStart,
         private ?InstanceCgroupWriter $cgroup = null,
-        private ?InstanceDbIsolationWriter $dbIsolation = null,
     ) {
     }
 
@@ -62,11 +62,7 @@ final readonly class RestartJob implements JobType
         } catch (\RuntimeException $e) {
             throw new JobFailed('The CPU slice override could not be written: '.$e->getMessage());
         }
-        try {
-            $this->dbIsolation?->write($dir, $instance->id(), $log->line(...));
-        } catch (\RuntimeException $e) {
-            throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
-        }
+        $this->preStart->enforce($instance, $dir, $log);
         try {
             $result = $this->ddev->restart($dir, $log->output(...));
         } catch (CommandRunnerException $e) {
@@ -80,11 +76,7 @@ final readonly class RestartJob implements JobType
         if (null !== $warning) {
             $log->line($warning);
         }
-        try {
-            $this->dbIsolation?->verify($dir, $instance->id(), $log->line(...));
-        } catch (\RuntimeException $e) {
-            throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
-        }
+        $this->preStart->verifyStarted($instance, $dir, $log);
 
         $this->feed->instanceChanged($instance->id());
     }

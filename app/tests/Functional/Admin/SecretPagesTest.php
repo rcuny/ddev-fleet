@@ -942,6 +942,36 @@ final class SecretPagesTest extends AdminTestCase
         self::assertSame(['blog/off', 'blog/on'], array_map(static fn (array $e): string => $e[2], $rows));
     }
 
+    public function testThePrivilegedOverridesSwitchIsOffByDefaultNeedsConfirmAndReauthAndIsAudited(): void
+    {
+        $this->makeProject();
+        self::assertStringContainsString('are <strong>off</strong>', $this->open('/admin/projects/blog/keys')->filter('[data-testid=privileged-overrides-state]')->html());
+
+        $this->post('/admin/projects/blog/keys/privileged-overrides', ['allow_privileged_overrides' => '1']);
+        self::assertFalse($this->privileged());
+        $this->post('/admin/projects/blog/keys/privileged-overrides', ['allow_privileged_overrides' => '1', 'confirm' => '1']);
+        self::assertStringContainsString('/admin/reauth', (string) $this->client->getResponse()->headers->get('Location'));
+        self::assertFalse($this->privileged());
+
+        $this->confirmPassword();
+        $this->post('/admin/projects/blog/keys/privileged-overrides', ['allow_privileged_overrides' => '1', 'confirm' => '1']);
+        self::assertTrue($this->privileged());
+        $this->post('/admin/projects/blog/keys/privileged-overrides', ['allow_privileged_overrides' => '0']);
+        self::assertFalse($this->privileged());
+
+        $rows = array_values(array_filter($this->audit(), static fn (array $e): bool => 'project.privileged-overrides' === $e[1]));
+        self::assertSame(['blog/off', 'blog/on'], array_map(static fn (array $e): string => $e[2], $rows));
+    }
+
+    private function privileged(): bool
+    {
+        $this->em()->clear();
+        $project = new ProjectRepository($this->em())->findByName('blog');
+        self::assertNotNull($project);
+
+        return $project->allowPrivilegedOverrides();
+    }
+
     public function testTheApiTerminalSwitchNeedsAValidCsrfToken(): void
     {
         $this->makeProject();

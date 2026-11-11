@@ -151,7 +151,7 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
 
     private function startJob(): StartJob
     {
-        return new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent, new InstanceDbIsolationWriter($this->ddev));
+        return new StartJob($this->instances, $this->ddev, $this->paths, $this->feed, $this->clock, $this->agent, $this->preStartGate(true));
     }
 
     public function testTheStartJobWritesTheFileBeforeStartingAndVerifiesAfter(): void
@@ -187,8 +187,7 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
             $this->ddev,
             $this->paths,
             $this->feed,
-            null,
-            new InstanceDbIsolationWriter($this->ddev),
+            $this->preStartGate(true),
         );
         $job = $this->job('restart', $instance);
 
