@@ -6,6 +6,7 @@ namespace App\Tests\Integration\Command\Project;
 
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Projects\NamedPortInput;
 use App\Fleet\Projects\NamedPortService;
 use App\Fleet\Projects\ProjectSnapshot;
@@ -91,7 +92,7 @@ final class ProjectCommandsTest extends KernelTestCase
         self::assertSame('(?:ABC|XYZ)-\d{1,6}', $expected['issue_id_regexp']);
         self::assertTrue($expected['typesense']);
 
-        self::assertSame($expected, $this->json($this->cli('fleet:project:show', ['name' => 'blog', '--format' => 'json'])));
+        self::assertSame($expected + ['allow_privileged_overrides' => false], $this->json($this->cli('fleet:project:show', ['name' => 'blog', '--format' => 'json'])));
         self::assertSame([$expected], $this->json($this->cli('fleet:project:list', ['--json' => true])));
     }
 
@@ -187,6 +188,40 @@ final class ProjectCommandsTest extends KernelTestCase
 
         self::assertSame(1, $again->getStatusCode());
         self::assertStringContainsString('<name>: A project with this name already exists.', $again->getErrorOutput());
+    }
+
+    public function testUpdateTogglesPrivilegedOverridesAndAuditsEachChange(): void
+    {
+        $this->create();
+        $audit = self::getContainer()->get(AuditLog::class);
+
+        $on = $this->cli('fleet:project:update', ['name' => 'blog', '--allow-privileged-overrides' => true]);
+        self::assertSame(0, $on->getStatusCode(), $on->getErrorOutput());
+        self::assertStringContainsString('take over the host', $on->getErrorOutput());
+        self::assertTrue($this->shown('blog')['allow_privileged_overrides']);
+
+        $this->cli('fleet:project:update', ['name' => 'blog', '--allow-privileged-overrides' => true]);
+        self::assertCount(1, $audit->latest(10, AuditLog::PROJECT_PRIVILEGED_OVERRIDES), 'a repeat is not audited');
+        $entry = $audit->latest(10, AuditLog::PROJECT_PRIVILEGED_OVERRIDES)[0];
+        self::assertSame('blog/on', $entry->subject());
+        self::assertStringStartsWith('cli', $entry->actor());
+
+        $this->cli('fleet:project:update', ['name' => 'blog', '--no-allow-privileged-overrides' => true]);
+        self::assertFalse($this->shown('blog')['allow_privileged_overrides']);
+        self::assertCount(2, $audit->latest(10, AuditLog::PROJECT_PRIVILEGED_OVERRIDES));
+
+        $both = $this->cli('fleet:project:update', ['name' => 'blog', '--allow-privileged-overrides' => true, '--no-allow-privileged-overrides' => true, '--json' => true]);
+        self::assertSame(2, $both->getStatusCode());
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function shown(string $name): array
+    {
+        $this->entityManager()->clear();
+
+        return $this->json($this->cli('fleet:project:show', ['name' => $name, '--json' => true]));
     }
 
     public function testUpdateChangesOnlyGivenOptions(): void

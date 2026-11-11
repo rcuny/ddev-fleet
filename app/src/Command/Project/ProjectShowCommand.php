@@ -36,7 +36,7 @@ final class ProjectShowCommand extends Command
 
         return $out->run(function () use ($input, $out): void {
             $project = $this->projects->get((string) $input->getArgument('name'));
-            $out->emit(ProjectSnapshot::fromProject($project)->toArray(), static function (JsonOutput $out) use ($project): void {
+            $out->emit(ProjectSnapshot::fromProject($project)->toArray() + ['allow_privileged_overrides' => $project->allowPrivilegedOverrides()], static function (JsonOutput $out) use ($project): void {
                 $out->pairs([
                     'name' => $project->name(),
                     'git' => $project->git(),
@@ -51,6 +51,7 @@ final class ProjectShowCommand extends Command
                     'display submodule branch' => $project->displaySubmoduleBranch(),
                     'typesense' => $project->typesense() ? 'yes' : 'no',
                     'container ssh' => $project->containerSsh() ? 'yes' : 'no',
+                    'privileged overrides' => $project->allowPrivilegedOverrides() ? 'ON (allowed)' : 'off',
                     'cpu threads' => $project->cpuThreads() ?? 'unlimited',
                     'slots' => $project->slots() ?? 'unlimited',
                     'templates' => array_map(static fn (Template $template): string => $template->name(), $project->templates()),

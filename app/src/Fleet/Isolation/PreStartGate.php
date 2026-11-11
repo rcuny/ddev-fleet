@@ -8,6 +8,7 @@ use App\Domain\Instance\Instance;
 use App\Fleet\Audit\AuditLog;
 use App\Fleet\FleetPaths;
 use App\Fleet\Instances\InstanceDbIsolationWriter;
+use App\Fleet\Instances\MailpitHealthcheckFile;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobLog;
 
@@ -35,6 +36,12 @@ final readonly class PreStartGate
         $this->scan($instance, $dir, $log);
         // FLE-297: the database isolation override, on every start path (a stopped instance may predate it).
         if (is_dir($dir.'/.ddev')) {
+            // FLE-313: Mailpit's basic auth must not fail DDEV's web healthcheck. After the scan: a Fleet-owned file, not scanned.
+            try {
+                MailpitHealthcheckFile::write($dir, $log->line(...));
+            } catch (\RuntimeException $e) {
+                $log->line('WARNING: isolation: the Mailpit healthcheck fragment was not written: '.$e->getMessage());
+            }
             try {
                 $this->dbIsolation?->write($dir, $instance->id(), $log->line(...));
             } catch (\RuntimeException $e) {
@@ -44,15 +51,15 @@ final readonly class PreStartGate
     }
 
     /**
-     * FLE-297: call it after every successful `ddev start` or `ddev restart`. Proves that the db container is off the shared
-     * ddev_default network (see InstanceDbIsolationWriter::verify()).
+     * FLE-297: call it after every successful `ddev start` or `ddev restart`. Disconnects the db (and other non-web) containers
+     * from the shared ddev_default network, FLE-307 (see InstanceDbIsolationWriter::converge()).
      *
      * @throws JobFailed
      */
     public function verifyStarted(Instance $instance, string $dir, JobLog $log): void
     {
         try {
-            $this->dbIsolation?->verify($dir, $instance->id(), $log->line(...));
+            $this->dbIsolation?->converge($instance->id(), $log->line(...));
         } catch (\RuntimeException $e) {
             throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
         }

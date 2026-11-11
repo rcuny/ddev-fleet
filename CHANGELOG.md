@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.9.1] - 2026-11-11
+
+### Added
+- **FLE-308: `fleet project:update <project> --allow-privileged-overrides | --no-allow-privileged-overrides`.** The privileged compose overrides switch (FLE-298) can now be set from the root CLI, so a host can be prepared before an upgrade. The change is audited (`project.privileged-overrides`, actor `cli:<user>`), turning it on prints the risk, and `project:show` (and its JSON) shows the current value. It is still not part of create, export or import.
+
+### Fixed
+- **FLE-313: every `ddev start` timed out on DDEV's web healthcheck since 1.9.0.** Mailpit's basic auth (`MP_UI_AUTH`) made the unauthenticated probe on port 8025 answer 401. Fleet now writes `.ddev/web-build/Dockerfile.fleet-mailpit-healthcheck` before every start, pointing that probe at Mailpit's unauthenticated `/livez`; the Mailpit UI and API keep their basic auth and no credential is stored in the image. If a DDEV release changes the script, the build step prints a warning and leaves it alone.
+- **FLE-307: the database isolation no longer fails every start.** DDEV attaches the `db` container to `ddev_default` itself, so the compose override of 1.9.0 (FLE-297) never took effect and each start, restart and deploy of an instance with a db ended in a failed job. The post-start step is now the mechanism: it disconnects the project's non-web containers from `ddev_default`, logs an info line, audits it (`isolation.db-disconnect`) and succeeds; it fails only when the disconnect fails. The instance watcher repeats the check every two minutes. The compose file is no longer written for an instance with a db (a stale one is removed); the `db` pinning of database-less instances stays. The `db` is always detached, even with traefik labels; other services are exempt only with a traefik router label key.
+- **FLE-309: `fleet instance:isolate --apply` no longer stops instances the deploy guard refuses.** It now skips them and prints one line per skipped instance with the reason (unless the project allows privileged overrides). It also takes instance ids or project names to narrow the selection, and `--force-refused` restarts the refused ones only after an interactive confirmation (`--yes` does not replace it).
+
 ## [1.9.0] - 2026-11-11
 
 ### Added
@@ -1488,7 +1498,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.9.1...HEAD
+[1.9.1]: https://github.com/rcuny/ddev-fleet/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/rcuny/ddev-fleet/compare/v1.8.0...v1.9.0
 [1.8.0]: https://github.com/rcuny/ddev-fleet/compare/v1.7.0...v1.8.0
 [1.7.0]: https://github.com/rcuny/ddev-fleet/compare/v1.6.1...v1.7.0

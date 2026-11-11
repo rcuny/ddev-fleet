@@ -169,6 +169,7 @@ final class DeployWorkflow
         $written[] = $sshKnownHosts;
         $written[] = InstanceCgroupWriter::RELATIVE_PATH;
         $written[] = InstanceDbIsolationWriter::RELATIVE_PATH;
+        $written[] = MailpitHealthcheckFile::RELATIVE_PATH;
         if (null !== $this->isolation) {
             $override = $this->isolation->write($dir, $project, $log->line(...));
             if (null !== $override) {
