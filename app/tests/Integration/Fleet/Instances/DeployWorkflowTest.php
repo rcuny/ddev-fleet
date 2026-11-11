@@ -85,6 +85,45 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString('deploy.overrides-allowed acme--main: .ddev/docker-compose.dockersock.yaml: services.web.privileged', implode("\n", $actions));
     }
 
+    public function testADeployDisconnectsTheDbFromTheSharedNetworkAfterTheStart(): void
+    {
+        // FLE-297 review gap: the deploy must run the isolation check right after `ddev start`, before the post-deploy lines.
+        $this->workflow = $this->workflowWith(preStart: $this->preStartGate(true));
+        $this->saveTemplate('full', ['ddev drush cr']);
+        $id = 'acme--main';
+        $this->runner->expect(['ddev', 'debug', 'compose-config'], new CommandResult(0, "services:\n  web: {}\n  db: {}\n"));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
+
+        $job = $this->deploy();
+
+        self::assertSame(InstanceState::Running, $this->instances->find($id)?->state());
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default', 'ddev-'.$id.'-db']));
+        $names = $this->commandNames();
+        $disconnect = array_search('docker network', $names, true);
+        self::assertIsInt($disconnect, implode(', ', $names));
+        self::assertLessThan(array_search('ddev drush', $names, true), $disconnect);
+        self::assertStringContainsString('isolation: disconnected ddev-'.$id.'-db from ddev_default', $this->logText($job));
+    }
+
+    public function testAFailedDisconnectFailsTheDeployBeforeThePostDeployLines(): void
+    {
+        $this->workflow = $this->workflowWith(preStart: $this->preStartGate(true));
+        $this->saveTemplate('full', ['ddev drush cr']);
+        $id = 'acme--main';
+        $this->runner->expect(['ddev', 'debug', 'compose-config'], new CommandResult(0, "services:\n  web: {}\n  db: {}\n"));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(1));
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('The database isolation is not in effect', $e->getMessage());
+        self::assertNotContains('ddev drush', $this->commandNames());
+    }
+
     public function testHappyPathRunsTheStepsInOrder(): void
     {
         $this->saveTemplate('full', ['ddev init', 'ddev drush cr'], 'dev');
