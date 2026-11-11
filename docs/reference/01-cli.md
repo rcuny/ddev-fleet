@@ -136,7 +136,7 @@ fleet project:show [--format FORMAT] [--json] [--] <name>
 Change a project (only the options you give).
 
 ```
-fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--typesense-dashboard|--no-typesense-dashboard] [--container-ssh|--no-container-ssh] [--unset UNSET] [--format FORMAT] [--json] [--] <name>
+fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--typesense-dashboard|--no-typesense-dashboard] [--container-ssh|--no-container-ssh] [--unset UNSET] [--allow-privileged-overrides] [--no-allow-privileged-overrides] [--format FORMAT] [--json] [--] <name>
 ```
 
 | Argument | Required | Description |
@@ -161,6 +161,8 @@ fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname H
 | `--typesense-dashboard / --no-typesense-dashboard` |  | Run the Typesense dashboard service too (off by default: it has no authentication of its own; --no-typesense-dashboard turns it off) |  |
 | `--container-ssh / --no-container-ssh` |  | Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it) |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: default-branch, default-template, hostnames, ports, issue-id-regexp, display-submodule-branch (repeat for several) |  |
+| `--allow-privileged-overrides` |  | Let the project's compose overrides do what the deploy guard refuses (Docker socket, privileged, host mounts): the containers can then take over the host |  |
+| `--no-allow-privileged-overrides` |  | Turn privileged compose overrides off again (the default) |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
 | `--json` |  | Same as --format=json |  |
 

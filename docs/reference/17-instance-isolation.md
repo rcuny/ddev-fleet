@@ -30,7 +30,7 @@ This is a best effort on the files DDEV reads at start. It does not stop a proje
 
 ### The project switch
 
-An administrator can allow a project to keep such overrides: **Project → Keys → Privileged compose overrides**. It is off by default, it asks for your password again, it is not part of the CLI, the export or the import (no script can turn it on), and every change is written to the audit log (`project.privileged-overrides`). While it is on, each deploy that relies on it logs a warning and writes `deploy.overrides-allowed` with the violations it let through. Turn it on only for a project whose code you fully trust: its containers can then take over the host and every other instance on it.
+An administrator can allow a project to keep such overrides: **Project → Keys → Privileged compose overrides**. It is off by default, it asks for your password again, from the root CLI, `sudo fleet project:update <project> --allow-privileged-overrides` (or `--no-allow-privileged-overrides`), it is not part of project creation, the export or the import (no import can turn it on), and every change is written to the audit log (`project.privileged-overrides`). While it is on, each deploy that relies on it logs a warning and writes `deploy.overrides-allowed` with the violations it let through. Turn it on only for a project whose code you fully trust: its containers can then take over the host and every other instance on it.
 
 ## Checking existing instances
 
