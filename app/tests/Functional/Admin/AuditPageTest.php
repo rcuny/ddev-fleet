@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Tests\Functional\Admin;
 
+use App\Domain\ApiCall\ApiCall;
+use App\Domain\ApiCall\ApiCallRepository;
 use App\Fleet\Projects\ProjectInput;
 use App\Fleet\Projects\ProjectService;
 use App\Tests\Support\AdminTestCase;
@@ -44,6 +46,22 @@ final class AuditPageTest extends AdminTestCase
         $projects = $this->container()->get(ProjectService::class);
         self::assertInstanceOf(ProjectService::class, $projects);
         $projects->create(new ProjectInput($name, 'https://git.example.com/acme/'.$name.'.git'));
+    }
+
+    public function testTerminalCallsAreListedWithTheirTextAndPrunedWithTheRetention(): void
+    {
+        $repo = new ApiCallRepository($this->em());
+        $repo->save(new ApiCall(7, 'token:7:nudge', 'POST terminal', 'acme--fle-1', 'tty2', 'claude', '192.0.2.1', 3, hash('sha256', 'old'), 'old', false, new \DateTimeImmutable('-200 days')));
+        $repo->save(new ApiCall(7, 'token:7:nudge', 'POST terminal', 'acme--fle-1', 'tty2', 'claude', '192.0.2.1', 5, hash('sha256', 'hello'), 'hello there', true, new \DateTimeImmutable('-1 hour')));
+
+        $crawler = $this->open('/admin/audit');
+        $rows = $crawler->filter('[data-testid=terminal-call-row]');
+        self::assertCount(2, $rows);
+        self::assertStringContainsString('hello there', $rows->first()->text());
+        self::assertStringContainsString('pending', $rows->first()->text());
+
+        self::assertSame(1, $repo->pruneBefore(new \DateTimeImmutable('-90 days')));
+        self::assertCount(1, $this->open('/admin/audit')->filter('[data-testid=terminal-call-row]'));
     }
 
     public function testThePageItsDescriptionAndTheWayToAndFromTheSecretsPage(): void

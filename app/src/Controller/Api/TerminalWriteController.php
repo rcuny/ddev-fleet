@@ -6,7 +6,9 @@ namespace App\Controller\Api;
 
 use App\Api\Http\ApiProblem;
 use App\Api\Http\ClientAddress;
+use App\Api\Terminal\EvidenceMasker;
 use App\Api\Terminal\TerminalInput;
+use App\Api\Token\ApiTokenPolicy;
 use App\Api\Write\JsonBody;
 use App\Domain\ApiCall\ApiCall;
 use App\Domain\ApiCall\ApiCallRepository;
@@ -46,6 +48,11 @@ final readonly class TerminalWriteController
         private RateLimiterFactoryInterface $limiter,
         #[Autowire(service: 'limiter.api_terminal_write_burst')]
         private RateLimiterFactoryInterface $burst,
+        #[Autowire(service: 'limiter.api_terminal_write_instance')]
+        private RateLimiterFactoryInterface $instanceLimiter,
+        #[Autowire(service: 'limiter.api_terminal_write_denied')]
+        private RateLimiterFactoryInterface $denied,
+        private EvidenceMasker $masker,
     ) {
     }
 
@@ -54,19 +61,22 @@ final readonly class TerminalWriteController
     {
         $token = $this->authorizer->require(ApiScope::TerminalWrite);
         $ip = ClientAddress::of($request);
+        // The policy again, on the stored token: a row edited after issue must not keep a working terminal token.
+        if (null !== $why = ApiTokenPolicy::terminalWriteProblem($token->token(), $ip)) {
+            $this->deny($token->tokenId(), $token->getUserIdentifier(), 'token_policy_'.$why, $id, $ip);
+
+            throw new ApiProblem(403, 'token_not_permitted', 'This token may not send terminal input.');
+        }
+        // A missing instance, another project's and one outside the token's patterns all answer the same.
         $instance = $this->instances->find($id);
-        if (null === $instance) {
+        if (null === $instance || !$token->allowsProject($instance->project()->name()) || !$token->allowsInstance($id)) {
+            $this->deny($token->tokenId(), $token->getUserIdentifier(), null === $instance ? 'no_such_instance' : 'instance_not_allowed', $id, $ip);
+
             throw ApiProblem::notFound('No such instance.');
         }
         $project = $instance->project();
-        $this->authorizer->require(ApiScope::TerminalWrite, $project->name());
-        if (!$token->allowsInstance($id)) {
-            $this->deny($token->getUserIdentifier(), 'instance_not_allowed', $id, $ip);
-
-            throw ApiProblem::instanceNotAllowed($id);
-        }
         if (!$project->allowApiTerminal()) {
-            $this->deny($token->getUserIdentifier(), 'terminal_write_disabled', $id, $ip);
+            $this->deny($token->tokenId(), $token->getUserIdentifier(), 'terminal_write_disabled', $id, $ip);
 
             throw ApiProblem::conflict('terminal_write_disabled', 'Terminal input over the API is not enabled for this project. An administrator turns it on in the project settings.');
         }
@@ -85,16 +95,16 @@ final readonly class TerminalWriteController
         \assert(null !== $text);
         $enter = $body->bool('enter');
         if (null !== $problem = TerminalInput::problem($text)) {
-            $this->deny($token->getUserIdentifier(), 'invalid_text', $id, $ip);
+            $this->deny($token->tokenId(), $token->getUserIdentifier(), 'invalid_text', $id, $ip);
 
             throw ApiProblem::validation(['text' => $problem]);
         }
 
         $key = (string) $token->tokenId();
-        foreach ([$this->burst, $this->limiter] as $factory) {
-            $limit = $factory->create($key)->consume();
+        foreach ([[$this->burst, $key], [$this->limiter, $key], [$this->instanceLimiter, $id]] as [$factory, $limitKey]) {
+            $limit = $factory->create($limitKey)->consume();
             if (!$limit->isAccepted()) {
-                $this->deny($token->getUserIdentifier(), 'rate_limited', $id, $ip);
+                $this->deny($token->tokenId(), $token->getUserIdentifier(), 'rate_limited', $id, $ip);
 
                 throw ApiProblem::rateLimited(max(1, $limit->getRetryAfter()->getTimestamp() - time()));
             }
@@ -109,13 +119,13 @@ final readonly class TerminalWriteController
             throw ApiProblem::notFound('That instance has no such terminal pane.');
         }
         if (!$target->isAgent()) {
-            $this->deny($token->getUserIdentifier(), 'pane_not_agent', $id.' '.$paneName.' foreground='.self::safe($target->command), $ip);
+            $this->deny($token->tokenId(), $token->getUserIdentifier(), 'pane_not_agent', $id.' '.$paneName.' foreground='.self::safe($target->command), $ip);
 
             throw ApiProblem::conflict('pane_not_agent', 'The pane is not running the agent; terminal input is only sent to an agent, never to a shell.');
         }
 
         // Evidence and audit first: no record, no keys.
-        $call = new ApiCall($token->tokenId(), $token->getUserIdentifier(), 'POST terminal', $id, $paneName, $target->command, $ip, \strlen($text), hash('sha256', $text), $text, $enter, new \DateTimeImmutable());
+        $call = new ApiCall($token->tokenId(), $token->getUserIdentifier(), 'POST terminal', $id, $paneName, $target->command, $ip, \strlen($text), hash('sha256', $text), $this->masker->mask($text), $enter, new \DateTimeImmutable());
         try {
             $this->calls->save($call);
             $this->audit->record(
@@ -134,7 +144,7 @@ final readonly class TerminalWriteController
         } catch (WorkspaceException) {
             $this->finish($call, ApiCall::FAILED);
 
-            throw ApiProblem::conflict('pane_changed', 'The pane stopped running the agent before the text was sent; nothing was typed.');
+            throw ApiProblem::conflict('pane_changed', 'The pane stopped running the agent before the call completed; Enter was not sent.');
         }
         $this->finish($call, ApiCall::SENT);
 
@@ -159,8 +169,12 @@ final readonly class TerminalWriteController
         }
     }
 
-    private function deny(string $actor, string $reason, string $what, string $ip): void
+    /** Audits a refusal, unless this token already filled its refusal quota (then it is refused without a row, so it cannot flood the table). */
+    private function deny(int $tokenId, string $actor, string $reason, string $what, string $ip): void
     {
+        if (!$this->denied->create((string) $tokenId)->consume()->isAccepted()) {
+            return;
+        }
         $this->audit->record($actor, AuditLog::API_DENIED, \sprintf('%s:%s %s ip=%s', $reason, ApiScope::TerminalWrite->value, $what, $ip));
     }
 

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controller\Admin;
 
+use App\Domain\ApiCall\ApiCallRepository;
 use App\Fleet\Audit\AuditLog;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\Request;
@@ -17,7 +18,7 @@ final class AuditController extends AbstractController
 {
     public const int LIMIT = 200;
 
-    public function __construct(private readonly AuditLog $audit)
+    public function __construct(private readonly AuditLog $audit, private readonly ApiCallRepository $apiCalls)
     {
     }
 
@@ -35,6 +36,7 @@ final class AuditController extends AbstractController
             'actions' => $actions,
             'action' => $action,
             'limit' => self::LIMIT,
+            'terminalCalls' => null === $action ? $this->apiCalls->latest(50) : [],
         ]);
     }
 }

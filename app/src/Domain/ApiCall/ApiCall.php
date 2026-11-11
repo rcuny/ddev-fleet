@@ -58,6 +58,7 @@ class ApiCall
         #[ORM\Column(type: UtcDateTimeImmutableType::NAME)]
         private \DateTimeImmutable $createdAt,
     ) {
+        $this->outcome = self::PENDING;
         $this->actor = mb_substr($actor, 0, 64);
         $this->foreground = mb_substr($foreground, 0, 64);
         $this->text = mb_strcut($text, 0, self::TEXT_MAX);
@@ -66,6 +67,11 @@ class ApiCall
     public function id(): ?int
     {
         return $this->id;
+    }
+
+    public function actor(): string
+    {
+        return $this->actor;
     }
 
     public function tokenId(): int

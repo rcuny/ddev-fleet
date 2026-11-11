@@ -305,7 +305,7 @@ final readonly class Tmux
      * Types $text (no control characters; the caller validated it) into an agent pane, then Enter when asked. Re-reads the pane
      * immediately before sending and refuses unless it is still the same pane of the same window, alive, with an agent in the
      * foreground. tmux cannot check and send atomically: what is left is the time between that read and the keystroke, a few
-     * milliseconds (the residual risk is documented in docs/reference/09-api-terminal.md).
+     * milliseconds (the residual risk is documented in docs/reference/15-api.md).
      *
      * @throws WorkspaceException
      */
@@ -322,6 +322,11 @@ final readonly class Tmux
 
         $this->must(['send-keys', '-t', $pane->id, '-l', '--', $text], 'send the keys');
         if ($enter) {
+            // Again between the text and Enter: if the agent is gone, the text is left unsubmitted rather than run by a shell.
+            $after = $this->paneState($pane->id);
+            if (null === $after || $after['window'] !== $instanceId || $after['dead'] || !\in_array($after['command'], self::AGENTS, true)) {
+                throw new WorkspaceException('The pane stopped running an agent before Enter; Enter was not sent.');
+            }
             $this->must(['send-keys', '-t', $pane->id, 'Enter'], 'send Enter');
         }
     }

@@ -121,7 +121,7 @@ final class ApiTerminalWriteTest extends AdminTestCase
 
     public function testTypesTheTextIntoTheAgentPaneAndRecordsItFirst(): void
     {
-        $this->window('acme--fle-1');
+        $this->window('acme--fle-1', ['claude', 'claude', 'claude']);
 
         $body = $this->send('/api/v1/instances/acme--fle-1/terminal', ['pane' => 'tty2', 'text' => 'Please rebase and push.', 'enter' => true]);
 
@@ -305,15 +305,111 @@ final class ApiTerminalWriteTest extends AdminTestCase
         self::assertSame(0, $this->sendCalls());
     }
 
-    public function testATokenForAnotherProjectOrInstancePatternIsRefused(): void
+    public function testMissingForeignAndUnmatchedInstancesAnswerIdentically(): void
     {
         $this->window('acme--fle-1');
+        $answers = [];
 
-        $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--fle-*'], ['demo']));
-        self::assertResponseStatusCodeSame(403);
-        $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--other-*']));
-        self::assertResponseStatusCodeSame(403);
+        $answers['missing'] = [$this->send('/api/v1/instances/acme--nope/terminal', ['text' => 'hello']), $this->client->getResponse()->getStatusCode()];
+        $answers['other project'] = [$this->send('/api/v1/instances/demo--fle-1/terminal', ['text' => 'hello']), $this->client->getResponse()->getStatusCode()];
+        $answers['outside patterns'] = [$this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--other-*'])), $this->client->getResponse()->getStatusCode()];
+        $answers['token for another project'] = [$this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $this->token(['acme--fle-*'], ['demo'])), $this->client->getResponse()->getStatusCode()];
+
+        foreach ($answers as $label => [$body, $status]) {
+            self::assertSame(404, $status, $label);
+            unset($body['request_id']);
+            self::assertSame($answers['missing'][0]['detail'], $body['detail'], $label);
+            self::assertSame($answers['missing'][0]['code'], $body['code'], $label);
+            self::assertStringNotContainsString('acme', json_encode($body, \JSON_THROW_ON_ERROR), $label);
+        }
         self::assertSame(0, $this->sendCalls());
+    }
+
+    /**
+     * @return iterable<string, array{string, list<mixed>}>
+     */
+    public static function tamperedTokens(): iterable
+    {
+        yield 'no ip allow-list' => ['ip_allow', []];
+        yield 'deploy scope added' => ['scopes', ['terminal:write', 'deploy']];
+        yield 'lifecycle scope added' => ['scopes', ['terminal:write', 'lifecycle']];
+        yield 'no instance patterns' => ['instance_globs', []];
+        yield 'lifetime of 30 days' => ['expires_at', ['+30 days']];
+    }
+
+    /**
+     * @param list<mixed> $value
+     */
+    #[DataProvider('tamperedTokens')]
+    public function testATokenEditedInTheDatabaseAfterIssueIsRefused(string $column, array $value): void
+    {
+        $this->window('acme--fle-1');
+        $token = $this->token();
+        $stored = '+30 days' === ($value[0] ?? null) ? new \DateTimeImmutable('+30 days')->format('Y-m-d H:i:s') : json_encode($value, \JSON_THROW_ON_ERROR);
+        $this->em()->getConnection()->executeStatement(\sprintf('UPDATE api_token SET %s = :v', $column), ['v' => $stored]);
+        $this->em()->clear();
+
+        $body = $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello'], $token);
+
+        self::assertResponseStatusCodeSame(403);
+        self::assertSame('token_not_permitted', $body['code'] ?? null);
+        self::assertSame(0, $this->sendCalls());
+        self::assertSame([], $this->evidence());
+        self::assertNotEmpty(array_filter($this->audit(), static fn (array $a): bool => 'api.denied' === $a[0] && str_contains($a[1], 'token_policy_')));
+    }
+
+    public function testSeveralTokensCannotFloodOneInstance(): void
+    {
+        $tokens = [$this->token(), $this->token(), $this->token()];
+        $accepted = 0;
+        $limited = 0;
+        // Each token sends once per call (so the per-token limits never trip); the per-instance limit is 10 a minute.
+        for ($i = 0; $i < 12; ++$i) {
+            $this->window('acme--fle-1');
+            $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'x'.$i], $this->token());
+            200 === $this->client->getResponse()->getStatusCode() ? ++$accepted : ++$limited;
+        }
+
+        self::assertSame(10, $accepted);
+        self::assertSame(2, $limited);
+        self::assertSame(429, $this->client->getResponse()->getStatusCode());
+        unset($tokens);
+    }
+
+    public function testRefusalsPastTheQuotaGetNoAuditRows(): void
+    {
+        $token = $this->token();
+        for ($i = 0; $i < 30; ++$i) {
+            $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => '/bad'], $token);
+            self::assertResponseStatusCodeSame(422);
+        }
+
+        $denials = array_filter($this->audit(), static fn (array $a): bool => 'api.denied' === $a[0] && str_contains($a[1], 'invalid_text'));
+        self::assertCount(20, $denials);
+    }
+
+    public function testTokenLikeSecretsAreMaskedInTheStoredTextButTheHashIsOfTheOriginal(): void
+    {
+        $this->window('acme--fle-1');
+        $text = 'use ghp_abcdefghijklmnopqrstuvwxyz0123456789AB to push';
+
+        $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => $text]);
+
+        self::assertResponseStatusCodeSame(200);
+        $rows = $this->evidence();
+        self::assertStringNotContainsString('ghp_abcdefghijklmnopqrstuvwxyz0123456789AB', $rows[0]->text());
+        self::assertSame(hash('sha256', $text), $rows[0]->sha256());
+    }
+
+    public function testEnterIsNotSentWhenTheAgentLeavesAfterTheText(): void
+    {
+        $this->window('acme--fle-1', ['claude', 'claude', 'bash']);
+
+        $this->send('/api/v1/instances/acme--fle-1/terminal', ['text' => 'hello', 'enter' => true]);
+
+        self::assertResponseStatusCodeSame(409);
+        self::assertSame(1, $this->sendCalls(), 'the text was typed, Enter was not');
+        self::assertSame(ApiCall::FAILED, $this->evidence()[0]->outcome());
     }
 
     /**
