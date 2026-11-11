@@ -1,4 +1,4 @@
-# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/fleet-mercure/Caddyfile. The hub runs as a dynamic user,
+# Installed by ddev-fleet (the Ansible role units) as /etc/fleet-mercure/Caddyfile. The hub runs as a dynamic user,
 # which cannot read /etc/ddev-fleet (root:fleet 0750), so its configuration lives in its own directory.
 # Keys come from the environment (mercure.env); the hub listens on loopback only and Caddy proxies to it.
 {

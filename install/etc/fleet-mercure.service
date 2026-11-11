@@ -1,4 +1,4 @@
-# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-mercure.service.
+# Installed by ddev-fleet (the Ansible role units) as /etc/systemd/system/fleet-mercure.service.
 # The Mercure hub (a Caddy build with the Mercure module), standalone on 127.0.0.1:3000; Caddy proxies
 # /.well-known/mercure to it. Its keys come from /etc/ddev-fleet/mercure.env (root:root 0600, read by systemd).
 [Unit]

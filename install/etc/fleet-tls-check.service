@@ -1,4 +1,4 @@
-# Installed by ddev-fleet (install/steps/95-units.sh) as /etc/systemd/system/fleet-tls-check.service.
+# Installed by ddev-fleet (the Ansible role units) as /etc/systemd/system/fleet-tls-check.service.
 # One certificate health check (fleet:host:tls-check): reads Caddy's journal for Let's Encrypt rate limits and failed
 # challenges, looks at the certificate Caddy serves for the host name, and writes $FLEET_HOME/var/tls-status.json for
 # the banner, the Host page and `fleet host:tls-status`. Started by fleet-tls-check.timer; `systemctl start
