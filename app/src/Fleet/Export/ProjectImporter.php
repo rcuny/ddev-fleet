@@ -536,6 +536,8 @@ final readonly class ProjectImporter
             $template['post_deploy']['tty2'],
             $template['ssh_keys'],
             sshIdentities: SshIdentities::from($template['ssh_identities']),
+            database: $template['database'],
+            agent: $template['agent'],
         );
     }
 

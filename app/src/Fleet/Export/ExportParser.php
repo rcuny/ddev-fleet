@@ -150,7 +150,7 @@ final class ExportParser
         $templates = [];
         foreach ($this->items($value, 'templates', TemplateService::MAX_PER_PROJECT) as $i => $item) {
             $path = "templates[$i]";
-            if (!$this->keys($item, $path, ['name', 'drupal_env', 'post_deploy'], ['ssh_keys', 'ssh_identities'])) {
+            if (!$this->keys($item, $path, ['name', 'drupal_env', 'post_deploy'], ['ssh_keys', 'ssh_identities', 'database', 'agent'])) {
                 continue;
             }
             \assert(\is_array($item));
@@ -176,6 +176,8 @@ final class ExportParser
                 'post_deploy' => $commands,
                 'ssh_keys' => \array_key_exists('ssh_keys', $item) ? $this->stringList($item['ssh_keys'], "$path.ssh_keys", SshKeyNames::MAX_KEYS) : [],
                 'ssh_identities' => $identities,
+                'database' => \array_key_exists('database', $item) ? $this->bool($item['database'], "$path.database") : true,
+                'agent' => \array_key_exists('agent', $item) ? $this->bool($item['agent'], "$path.agent") : false,
             ];
         }
 

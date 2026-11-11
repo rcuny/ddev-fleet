@@ -92,9 +92,10 @@
          and ddev_global.get('router_http_port') | string == fleet_ddev_router_http_port | string
          and ddev_global.get('router_https_port') | string == fleet_ddev_router_https_port | string
          and not (ddev_global.get('router_bind_all_interfaces', false) | bool)
-         and not (ddev_global.get('instrumentation_opt_in', false) | bool) }}
+         and not (ddev_global.get('instrumentation_opt_in', false) | bool)
+         and 'ddev-ssh-agent' in (ddev_global.get('omit_containers', []) or []) }}
 
-- name: The router listens on the loopback ports Caddy proxies to; no usage reporting
+- name: The router listens on the loopback ports Caddy proxies to; no usage reporting, and no shared ssh-agent container (FLE-300, instance isolation audit F9)
   ansible.builtin.command:
     argv:
       - ddev
@@ -104,6 +105,7 @@
       - --router-https-port={{ fleet_ddev_router_https_port }}
       - --router-bind-all-interfaces=false
       - --instrumentation-opt-in=false
+      - --omit-containers=ddev-ssh-agent
   become: true
   become_user: "{{ fleet_user }}"
   environment:

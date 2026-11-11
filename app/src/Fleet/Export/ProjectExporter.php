@@ -100,6 +100,8 @@ final readonly class ProjectExporter
                 ],
                 'ssh_keys' => $template->sshKeys(),
                 'ssh_identities' => $template->sshIdentities()->value,
+                'database' => $template->hasDatabase(),
+                'agent' => $template->isAgent(),
             ], $this->templates->forProject($project)),
             'webhooks' => $this->webhookSection($project),
             'schedules' => $this->scheduleSection($project),

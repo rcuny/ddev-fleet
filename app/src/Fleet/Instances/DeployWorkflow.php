@@ -64,6 +64,7 @@ final class DeployWorkflow
         private readonly iterable $steps = [],
         private readonly ?InstanceCgroupWriter $cgroup = null,
         private readonly ?PushKeyCheck $pushCheck = null,
+        private readonly ?InstanceIsolation $isolation = null,
     ) {
     }
 
@@ -165,6 +166,9 @@ final class DeployWorkflow
         }
         $written[] = $sshKnownHosts;
         $written[] = InstanceCgroupWriter::RELATIVE_PATH;
+        if (null !== $this->isolation) {
+            $written[] = $this->isolation->write($dir);
+        }
         array_push($written, ...$this->setUpContainerAgent($instance, $project, $template, $dir, $log));
         GitExclude::add($dir, $written);
 

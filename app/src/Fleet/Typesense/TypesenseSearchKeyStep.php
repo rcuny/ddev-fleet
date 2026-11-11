@@ -71,7 +71,7 @@ final class TypesenseSearchKeyStep implements DeployStep
         }
 
         try {
-            $keys = $this->keys->ensure($context->project);
+            $keys = $this->keys->forInstance($context->project, $context->instance->id());
         } catch (SecretOpenFailed) {
             $context->log->line('WARNING: typesense: a stored Typesense key could not be opened; the search key was not registered.');
 
@@ -123,7 +123,15 @@ final class TypesenseSearchKeyStep implements DeployStep
         }
         foreach ($existing as $key) {
             if (\is_array($key) && self::DESCRIPTION === ($key['description'] ?? null)) {
-                return false;
+                // FLE-300: an instance deployed before keys were per instance holds the old project-wide search key.
+                // Typesense lists only the first characters of a key's value; when they differ the key is replaced.
+                $prefix = $key['value_prefix'] ?? null;
+                if (!\is_string($prefix) || '' === $prefix || str_starts_with($searchKey, rtrim($prefix, '.'))) {
+                    return false;
+                }
+                if (isset($key['id']) && \is_int($key['id'])) {
+                    $this->http->request('DELETE', $url.'/'.$key['id'], ['headers' => $headers, 'timeout' => self::TIMEOUT])->getContent();
+                }
             }
         }
 

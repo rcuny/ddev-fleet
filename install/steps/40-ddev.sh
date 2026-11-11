@@ -1,5 +1,6 @@
 # shellcheck shell=bash
-# Step 40: DDEV from its apt repository, configured for the fleet user: the router listens on the loopback ports
+# Step 40: DDEV from its apt repository, configured for the fleet user (FLE-300: without DDEV's shared ssh-agent container, whose
+# socket every web container would mount; the per-instance agent of container_ssh is the only supported way): the router listens on the loopback ports
 # Caddy proxies to (bound explicitly to loopback, not to every interface), and mkcert's local CA is installed for the NSS store only (a headless host has no browser store).
 
 step_main() {
@@ -8,7 +9,7 @@ step_main() {
     DBD730A3A581BDAC98BAF17FC16711FC1179C7CA
   apt_install ddev
 
-  run_as_fleet ddev config global --router-http-port=8080 --router-https-port=8443 --router-bind-all-interfaces=false --instrumentation-opt-in=false
+  run_as_fleet ddev config global --router-http-port=8080 --router-https-port=8443 --router-bind-all-interfaces=false --instrumentation-opt-in=false --omit-containers=ddev-ssh-agent
 
   if is_dry || [ ! -r "$FLEET_HOME_DIR/.local/share/mkcert/rootCA.pem" ]; then
     run_as_fleet env TRUST_STORES=nss mkcert -install

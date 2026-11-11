@@ -65,7 +65,7 @@ DDEV's router HTTPS port is `8443` because Caddy owns `443`. Inside the network 
 
 ## Typesense
 
-Fleet installs no Typesense server: each instance runs its own container from the project's `.ddev/docker-compose.typesense.yaml`. On a project's first deploy Fleet generates an admin and a search-only key as project secrets ([assets and secrets](08-assets-and-secrets.md)), shared by its instances and never rotated.
+Fleet installs no Typesense server: each instance runs its own container from the project's `.ddev/docker-compose.typesense.yaml`. On a project's first deploy Fleet generates an admin and a search-only key as project secrets ([assets and secrets](08-assets-and-secrets.md)), kept as the project's master keys and never rotated; each instance gets its own pair derived from them (see Isolation between instances).
 
 | Variable | Where | Content |
 |---|---|---|
@@ -75,6 +75,18 @@ Fleet installs no Typesense server: each instance runs its own container from th
 | `FLEET_TYPESENSE_PORT` | `web_environment` | Public port of the `typesense` entry (9108); https. |
 
 Registering the search key is retried for up to 60 seconds; if Typesense never answers, the job log gets `WARNING: typesense` and the deploy succeeds. Operator steps: switch on the project's Typesense flag, run `fleet port:firewall` and open the port, deploy.
+
+## Isolation between instances
+
+All DDEV containers of a host share the `ddev_default` Docker network, so one instance can reach the services of
+another. What Fleet narrows:
+
+- **Typesense:** every instance gets its own admin and search keys, derived (HMAC-SHA256) from the project's keys and the instance id. A redeploy replaces the search key an older deploy registered. The Typesense dashboard service comes from the project's own `docker-compose.typesense.yaml`: Fleet cannot add authentication to it, so keep it off (or behind a profile) on shared hosts.
+- **Mailpit:** requires basic auth (`MP_UI_AUTH`). The user is `fleet`; the password is per instance and shown on the instance page to users who may operate the project. Applied at deploy and redeploy.
+- **Global cache:** `.ddev/docker-compose.fleet-isolation.yaml` mounts the router's `traefik/` tree of the `ddev-global-cache` volume read-only into the web container, so it cannot rewrite the router's configuration. The same volume still holds shared bash and MySQL history and the Composer and npm caches, writable from every container: a poisoned cache entry reaches other projects' builds.
+- **ssh-agent:** the installer sets `omit_containers: [ddev-ssh-agent]` in the fleet user's global DDEV config. Use the per-instance agent (Git over SSH in the container); never run `ddev auth ssh` on a Fleet host.
+
+Not covered here: reachability of other instances' databases and web containers (needs host firewall rules).
 
 ## Checks on a live host
 

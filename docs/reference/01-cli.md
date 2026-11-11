@@ -172,7 +172,7 @@ Deploy recipes of a project.
 Create a template in a project.
 
 ```
-fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--format FORMAT] [--json] [--] <project> <name>
+fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--database DATABASE] [--agent AGENT] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--format FORMAT] [--json] [--] <project> <name>
 ```
 
 | Argument | Required | Description |
@@ -188,6 +188,8 @@ fleet template:create [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--t
 | `--tty2=VALUE (repeatable)` |  | Command line typed into the second instance terminal (repeat for several; replaces the old list) |  |
 | `--ssh-key=VALUE (repeatable)` |  | Name of an extra SSH key (the file ssh/_ed25519 in the fleet home) loaded into the instance's ssh-agent; the project needs container_ssh (repeat for several; replaces the old list) |  |
 | `--ssh-identities=VALUE` |  | Which keys the instance's ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key) |  |
+| `--database=VALUE` |  | Whether instances have a database of their own: yes (default) or no (Fleet exports FLEET_HAS_DB=0 and a poisoned DB_HOST) |  |
+| `--agent=VALUE` |  | Whether an AI agent works in the instances: yes or no (default). The UI warns and FLEET_AGENT=1 is exported |  |
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the template may use together, at most the project's: a number, or none to inherit the project's |  |
 | `--slots=VALUE` |  | Concurrent heavy runs of the template, at most the project's slots: a number, or none for unlimited |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |
@@ -252,7 +254,7 @@ fleet template:show [--format FORMAT] [--json] [--] <project> <name>
 Change a template (only the options you give).
 
 ```
-fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--unset UNSET] [--format FORMAT] [--json] [--] <project> <name>
+fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--tty1 TTY1] [--tty2 TTY2] [--ssh-key SSH-KEY] [--ssh-identities SSH-IDENTITIES] [--database DATABASE] [--agent AGENT] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--unset UNSET] [--format FORMAT] [--json] [--] <project> <name>
 ```
 
 | Argument | Required | Description |
@@ -268,6 +270,8 @@ fleet template:update [--drupal-env DRUPAL-ENV] [--post-deploy POST-DEPLOY] [--t
 | `--tty2=VALUE (repeatable)` |  | Command line typed into the second instance terminal (repeat for several; replaces the old list) |  |
 | `--ssh-key=VALUE (repeatable)` |  | Name of an extra SSH key (the file ssh/_ed25519 in the fleet home) loaded into the instance's ssh-agent; the project needs container_ssh (repeat for several; replaces the old list) |  |
 | `--ssh-identities=VALUE` |  | Which keys the instance's ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key) |  |
+| `--database=VALUE` |  | Whether instances have a database of their own: yes (default) or no (Fleet exports FLEET_HAS_DB=0 and a poisoned DB_HOST) |  |
+| `--agent=VALUE` |  | Whether an AI agent works in the instances: yes or no (default). The UI warns and FLEET_AGENT=1 is exported |  |
 | `--cpu-threads=VALUE` |  | CPU threads all instances of the template may use together, at most the project's: a number, or none to inherit the project's |  |
 | `--slots=VALUE` |  | Concurrent heavy runs of the template, at most the project's slots: a number, or none for unlimited |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: drupal-env, post-deploy, tty1, tty2, ssh-keys (repeat for several) |  |

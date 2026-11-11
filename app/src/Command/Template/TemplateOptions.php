@@ -36,6 +36,8 @@ final class TemplateOptions
             ->addOption('tty2', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Command line typed into the second instance terminal (repeat for several; replaces the old list)')
             ->addOption('ssh-key', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Name of an extra SSH key (the file ssh/<name>_ed25519 in the fleet home) loaded into the instance\'s ssh-agent; the project needs container_ssh (repeat for several; replaces the old list)')
             ->addOption('ssh-identities', null, InputOption::VALUE_REQUIRED, 'Which keys the instance\'s ssh-agent holds: push-and-extras (the host push key and the extra keys, the default) or extras-only (no push key)')
+            ->addOption('database', null, InputOption::VALUE_REQUIRED, 'Whether instances have a database of their own: yes (default) or no (Fleet exports FLEET_HAS_DB=0 and a poisoned DB_HOST)')
+            ->addOption('agent', null, InputOption::VALUE_REQUIRED, 'Whether an AI agent works in the instances: yes or no (default). The UI warns and FLEET_AGENT=1 is exported')
             ->addOption('cpu-threads', null, InputOption::VALUE_REQUIRED, 'CPU threads all instances of the template may use together, at most the project\'s: a number, or none to inherit the project\'s')
             ->addOption('slots', null, InputOption::VALUE_REQUIRED, 'Concurrent heavy runs of the template, at most the project\'s slots: a number, or none for unlimited')
         ;
@@ -86,6 +88,17 @@ final class TemplateOptions
                 $errors['sshIdentities'] = 'Choose push-and-extras or extras-only.';
             } else {
                 $changes['sshIdentities'] = $parsed;
+            }
+        }
+        foreach (['database' => 'database', 'agent' => 'agent'] as $option => $property) {
+            if (null === $given = $input->getOption($option)) {
+                continue;
+            }
+            $flag = filter_var((string) $given, \FILTER_VALIDATE_BOOLEAN, \FILTER_NULL_ON_FAILURE);
+            if (null === $flag) {
+                $errors[$property] = 'Choose yes or no.';
+            } else {
+                $changes[$property] = $flag;
             }
         }
         $errors += CapacityOption::collect($input, $changes);

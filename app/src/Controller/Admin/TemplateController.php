@@ -86,7 +86,7 @@ final class TemplateController extends AbstractController
     {
         $project = $this->project($name);
 
-        $form = $this->createForm(TemplateType::class, null, ['mode' => TemplateType::CREATE] + $this->projectLimits($project));
+        $form = $this->createForm(TemplateType::class, ['database' => true], ['mode' => TemplateType::CREATE] + $this->projectLimits($project));
         $form->handleRequest($request);
 
         if ($form->isSubmitted() && $form->isValid()) {
@@ -102,6 +102,8 @@ final class TemplateController extends AbstractController
                         tty2: $lists['tty2'],
                         sshKeys: $lists['sshKeys'],
                         sshIdentities: SshIdentities::tryFrom(self::text($data['sshIdentities'] ?? null)) ?? SshIdentities::PushAndExtras,
+                        database: (bool) ($data['database'] ?? false),
+                        agent: (bool) ($data['agent'] ?? false),
                         cpuThreads: self::optionalInt($data['cpuThreads'] ?? null),
                         slots: self::optionalInt($data['slots'] ?? null),
                     ));
@@ -134,6 +136,8 @@ final class TemplateController extends AbstractController
             'tty2' => implode("\n", $stored->tty2()),
             'sshKeys' => implode("\n", $stored->sshKeys()),
             'sshIdentities' => $stored->sshIdentities()->value,
+            'database' => $stored->hasDatabase(),
+            'agent' => $stored->isAgent(),
             'cpuThreads' => $stored->cpuThreads(),
             'slots' => $stored->slots(),
         ], ['mode' => TemplateType::EDIT] + $this->projectLimits($project));
@@ -151,6 +155,8 @@ final class TemplateController extends AbstractController
                         'tty2' => $lists['tty2'],
                         'sshKeys' => $lists['sshKeys'],
                         'sshIdentities' => SshIdentities::tryFrom(self::text($data['sshIdentities'] ?? null)) ?? SshIdentities::PushAndExtras,
+                        'database' => (bool) ($data['database'] ?? false),
+                        'agent' => (bool) ($data['agent'] ?? false),
                         'cpuThreads' => self::optionalInt($data['cpuThreads'] ?? null),
                         'slots' => self::optionalInt($data['slots'] ?? null),
                     ]));
