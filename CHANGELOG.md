@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.6.1] - 2026-11-10
+
+### Fixed
+- **FLE-281: the installer no longer boots a stale prod container cache.** Step 80 removes `app/var/cache/prod` before the first console command (a changed service constructor made `asset-map:compile` fail during an upgrade). `fleet upgrade` accepts a checkout already at the target commit as a resumed install after a failed install of that target (`checkout.moved` no longer blocks it), and `apt-get update` is retried (3 attempts) when a vendor repository answers a transient error.
+
 ## [1.6.0] - 2026-11-10
 
 ### Added
@@ -1318,7 +1323,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.6.1...HEAD
+[1.6.1]: https://github.com/rcuny/ddev-fleet/compare/v1.6.0...v1.6.1
 [1.6.0]: https://github.com/rcuny/ddev-fleet/compare/v1.5.3...v1.6.0
 [1.5.3]: https://github.com/rcuny/ddev-fleet/compare/v1.5.2...v1.5.3
 [1.5.2]: https://github.com/rcuny/ddev-fleet/compare/v1.5.1...v1.5.2
