@@ -215,6 +215,13 @@ final class ComposeOverrideGuardTest extends TestCase
         yield 'comment lines ignored' => ['Dockerfile', "# never mount docker.sock or install docker.io\n  # chmod u+s\nRUN true\n", []];
         yield 'chmod 4755' => ['Dockerfile', "RUN chmod 4755 /bin/x\n", ['.ddev/web-build/Dockerfile chmod']];
         yield 'ordinary build is fine' => ['Dockerfile', "RUN curl -fsSL https://x.example/i.sh | sh\nADD https://x.example/a.tgz /opt/\nRUN chmod 755 /x && chmod +x /y && apt-get install -y dockerize\n", []];
+        yield 'apk add docker' => ['Dockerfile', "FROM alpine\nRUN apk add --no-cache curl docker\n", ['.ddev/web-build/Dockerfile docker-cli']];
+        yield 'apk -U add docker, continued' => ['Dockerfile', "RUN apk -U add \\\n  git docker\n", ['.ddev/web-build/Dockerfile docker-cli']];
+        yield 'get.docker.com piped to sh' => ['Dockerfile', "RUN curl -fsSL https://get.docker.com | sh\n", ['.ddev/web-build/Dockerfile docker-cli']];
+        yield 'get.docker.com script download' => ['Dockerfile', "RUN wget -O get-docker.sh https://get.docker.com && sh get-docker.sh\n", ['.ddev/web-build/Dockerfile docker-cli']];
+        yield 'apk docker package and cli once' => ['Dockerfile', "RUN apk add docker docker-cli\n", ['.ddev/web-build/Dockerfile docker-cli']];
+        yield 'apk other docker-named packages' => ['Dockerfile', "RUN apk add docker-compose-doc dockerize\n", []];
+        yield 'apk add then registry prefix' => ['Dockerfile', "RUN apk add curl\nFROM docker.io/library/alpine\nCOPY --from=docker /a /b\n", []];
         yield 'fleet fragment exempt' => ['Dockerfile.fleet-mailpit-healthcheck', "RUN chmod u+s /x docker.io\n", []];
     }
 
