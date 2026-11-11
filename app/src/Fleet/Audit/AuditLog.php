@@ -53,6 +53,8 @@ final readonly class AuditLog
     public const string API_TOKEN_ROTATE = 'api_token.rotate';
     public const string API_TOKEN_REVOKE = 'api_token.revoke';
     public const string API_TOKEN_EXPIRE = 'api_token.expire';
+    /** A reminder: a token expires within the warning window (once a day per token, FLE-289). */
+    public const string API_TOKEN_EXPIRING = 'api_token.expiring';
     /** A refused API call: bad, expired or revoked token, scope or project refusal, IP refusal, rate limit. */
     public const string API_DENIED = 'api.denied';
     /** A write the API accepted (deploy, redeploy, start, stop, destroy, retry); the subject names the target and the job. */
@@ -85,6 +87,12 @@ final readonly class AuditLog
             self::fit($subject, AuditEntry::SUBJECT_MAX),
             $this->clock->now(),
         ));
+    }
+
+    /** Whether $action was recorded with a subject starting with $subjectPrefix since $since. */
+    public function recordedSince(string $action, string $subjectPrefix, \DateTimeImmutable $since): bool
+    {
+        return $this->entries->existsSince($action, $subjectPrefix, $since);
     }
 
     /**

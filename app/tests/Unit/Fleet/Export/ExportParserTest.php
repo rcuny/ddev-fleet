@@ -30,6 +30,7 @@ final class ExportParserTest extends TestCase
                 'issue_id_regexp' => null,
                 'display_submodule_branch' => null,
                 'typesense' => false,
+                'typesense_dashboard' => false,
                 'container_ssh' => false,
             ],
             'ports' => [],

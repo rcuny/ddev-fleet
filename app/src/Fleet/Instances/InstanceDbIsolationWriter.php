@@ -11,7 +11,7 @@ use Symfony\Component\Yaml\Tag\TaggedValue;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Network isolation of an instance's database (FLE-297), as `.ddev/docker-compose.fleet-isolation.yaml`.
+ * Network isolation of an instance's database (FLE-297), as `.ddev/docker-compose.fleet-db-isolation.yaml`.
  *
  * DDEV attaches every `db` container to the shared `ddev_default` network with the alias `db` (and its container name),
  * so a web container of ANOTHER project, also on `ddev_default`, resolves `db` or `ddev-<project>-db` to someone else's
@@ -26,9 +26,9 @@ use Symfony\Component\Yaml\Yaml;
  * Like the cgroup override the file carries no `#ddev-generated` marker, so DDEV never overwrites it. The service list
  * comes from `ddev debug compose-config`, which works on a stopped project.
  */
-final readonly class InstanceIsolationWriter
+final readonly class InstanceDbIsolationWriter
 {
-    public const string RELATIVE_PATH = '.ddev/docker-compose.fleet-isolation.yaml';
+    public const string RELATIVE_PATH = '.ddev/docker-compose.fleet-db-isolation.yaml';
 
     public function __construct(private Ddev $ddev)
     {

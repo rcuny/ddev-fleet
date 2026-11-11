@@ -189,6 +189,15 @@ final readonly class FleetPaths
     }
 
     /**
+     * FLE-289: the opt-in client-certificate CA for `/api/v1/*`. When this PEM file exists the rendered Caddyfile asks for a
+     * client certificate (verified against it) and refuses API calls without one; absent, nothing changes.
+     */
+    public function apiClientCaFile(): string
+    {
+        return $this->caddyDir.'/api-client-ca.pem';
+    }
+
+    /**
      * Where the worker writes one Caddy site snippet per instance (the main Caddyfile imports `instances/*.conf`).
      */
     public function caddyInstancesDir(): string

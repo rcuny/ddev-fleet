@@ -501,4 +501,34 @@ final class CaddyfileRendererTest extends TestCase
 
         self::renderer(caddyDir: $path)->render(self::host());
     }
+
+    public function testNoClientCertificateRequirementByDefault(): void
+    {
+        $out = self::renderer()->render(self::host());
+
+        self::assertStringNotContainsString('client_auth', $out);
+        self::assertStringNotContainsString('@nocert', $out);
+    }
+
+    public function testApiClientCertificateIsRequiredOnlyWhenTheCaFileExists(): void
+    {
+        $dir = sys_get_temp_dir().'/fleet-mtls-'.bin2hex(random_bytes(4));
+        mkdir($dir);
+        file_put_contents($dir.'/api-client-ca.pem', "-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----\n");
+
+        try {
+            $out = self::renderer(caddyDir: $dir)->render(self::host());
+        } finally {
+            unlink($dir.'/api-client-ca.pem');
+            rmdir($dir);
+        }
+
+        self::assertStringContainsString("client_auth {\n            mode verify_if_given\n            trust_pool file ".$dir.'/api-client-ca.pem', $out);
+        $api = (int) strpos($out, '        handle /api/v1/* {');
+        $nocert = strpos($out, '@nocert expression {http.request.tls.client.subject}');
+        self::assertNotFalse($nocert);
+        self::assertGreaterThan($api, $nocert, 'the certificate check sits inside the API handler');
+        self::assertStringContainsString('respond @nocert "A client certificate is required." 403', $out);
+        self::assertSame(1, substr_count($out, 'client_auth'), 'the UI site only asks for a certificate, the API handler enforces it');
+    }
 }

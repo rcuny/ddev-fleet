@@ -40,4 +40,16 @@ final readonly class AuditEntryRepository
 
         return array_map(static fn (array $row): string => $row['action'], $rows);
     }
+
+    /** Whether an entry of $action whose subject starts with $subjectPrefix was recorded at or after $since. */
+    public function existsSince(string $action, string $subjectPrefix, \DateTimeImmutable $since): bool
+    {
+        $count = $this->em->createQuery('SELECT COUNT(e.id) FROM '.AuditEntry::class.' e WHERE e.action = :action AND e.createdAt >= :since AND e.subject LIKE :prefix ESCAPE \'!\'')
+            ->setParameter('action', $action)
+            ->setParameter('since', $since, \App\Doctrine\UtcDateTimeImmutableType::NAME)
+            ->setParameter('prefix', str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $subjectPrefix).'%')
+            ->getSingleScalarResult();
+
+        return (int) $count > 0;
+    }
 }

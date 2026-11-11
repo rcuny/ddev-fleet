@@ -105,6 +105,7 @@ final readonly class TemplateService
             $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
             $template->changeSshKeys($input->sshKeys, $now);
             $template->changeSshIdentities($input->sshIdentities, $now);
+            $template->changeIsolation($input->database, $input->agent, $now);
             $template->changeCapacity($input->cpuThreads, $input->slots, $now);
 
             try {
@@ -148,6 +149,7 @@ final readonly class TemplateService
             $template->changeCommands($input->postDeploy, $input->tty1, $input->tty2, $now);
             $template->changeSshKeys($input->sshKeys, $now);
             $template->changeSshIdentities($input->sshIdentities, $now);
+            $template->changeIsolation($input->database, $input->agent, $now);
             $template->changeCapacity($input->cpuThreads, $input->slots, $now);
             $this->templates->save($template);
 

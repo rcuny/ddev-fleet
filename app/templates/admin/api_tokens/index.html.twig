@@ -2,7 +2,7 @@
 
 {% block title %}API tokens · {{ parent() }}{% endblock %}
 
-{#- Needs: tokens, now, expiring, unused, expiring_days, unused_days, scopes, max_grace, issued (IssuedToken|null), what, states (token id => state). -#}
+{#- Needs: tokens, now, expiring, unused, terminal_calls_24h, expiring_days, unused_days, scopes, max_grace, issued (IssuedToken|null), what, states (token id => state). -#}
 {% block content %}
     <twig:PageHeader title="API tokens" description="Service tokens for the HTTP API. A token is shown once, when it is made; only its hash is kept." />
 
@@ -31,7 +31,7 @@
                 <twig:Card:Description>Tokens that expire within {{ expiring_days }} days, and tokens not used for {{ unused_days }} days (revoke those you no longer need).</twig:Card:Description>
             </twig:Card:Header>
             <twig:Card:Content class="grid gap-3 text-sm">
-                {% if expiring|length == 0 and unused|length == 0 %}
+                {% if expiring|length == 0 and unused|length == 0 and terminal_calls_24h == 0 %}
                     <p class="text-ink-muted" data-testid="api-token-attention-empty">Nothing needs attention.</p>
                 {% endif %}
                 {% if expiring|length > 0 %}
@@ -40,6 +40,12 @@
                         <ul class="list-disc pl-5">
                             {% for t in expiring %}<li>{{ t.name }} (#{{ t.id }}): {{ t.expiresAt|date('Y-m-d H:i', 'UTC') }} UTC</li>{% endfor %}
                         </ul>
+                    </div>
+                {% endif %}
+                {% if terminal_calls_24h > 0 %}
+                    <div data-testid="api-token-terminal-writes">
+                        <p class="font-medium">Terminal input over the API</p>
+                        <p>{{ terminal_calls_24h }} call{{ terminal_calls_24h == 1 ? '' : 's' }} in the last 24 hours. <a class="underline" href="{{ path('audit') }}">Read them in the audit view</a>.</p>
                     </div>
                 {% endif %}
                 {% if unused|length > 0 %}

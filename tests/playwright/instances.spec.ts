@@ -30,6 +30,13 @@ test.describe('instances: admin', () => {
     expect(errors.filter((e) => !e.startsWith('console.error: Failed to load resource'))).toEqual([]);
   });
 
+  test('the detail page shows the instance\'s Mailpit login and no agent warning for a plain template', async ({ page }) => {
+    const id = await deployOne(page);
+    await page.goto(`/instances/${id}`);
+    await expect(page.getByTestId('mailpit-credentials')).toContainText(/fleet \/ [0-9a-f]{32}/);
+    await expect(page.getByTestId('agent-warning')).toHaveCount(0);
+  });
+
   test('the filter form narrows the list', async ({ page }) => {
     // Every combination of the filters and the empty result are asserted over HTTP (InstanceControllerTest).
     const one = uniqueLabel('fa');

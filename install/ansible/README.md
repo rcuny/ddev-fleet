@@ -19,3 +19,10 @@ The `fleet_drift` callback (`callback_plugins/fleet_drift.py`) collects those, t
 the failed tasks into one JSON report. Rules for roles: keep secrets out of diffs with `no_log: true` (the report shows
 "hidden" instead), and never rely on a `command` step to be seen: check mode skips it, so the report states that
 limit (firewall rules, for one).
+
+## Idempotency test (FLE-301)
+
+`ci/ansible-idempotency.sh` runs `site.yml` twice in a Debian 13 systemd container in Fleet CI and fails unless the
+second run reports `changed=0`. It skips the roles that cannot run in a container by tag (`docker`, `ddev`, `app_code`,
+`units`, `hardening`), so keep a new role's tag unique and decide there whether it can run in a container. Details:
+`docs/contributing/03-ci.md`.

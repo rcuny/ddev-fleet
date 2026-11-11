@@ -20,7 +20,7 @@ final readonly class JobPruner
         private JobRepository $jobs,
         private FleetPaths $paths,
         private ClockInterface $clock,
-        private ?ApiCallRepository $apiCalls = null,
+        private ApiCallRepository $apiCalls,
     ) {
     }
 
@@ -35,7 +35,7 @@ final readonly class JobPruner
         $before = $this->clock->now()->modify(\sprintf('-%d days', $days));
 
         // Terminal-input evidence (FLE-286) follows the same retention.
-        $this->apiCalls?->pruneBefore($before);
+        $this->apiCalls->pruneBefore($before);
 
         $instanceOf = $this->jobs->finishedBefore($before);
         $deleted = $this->jobs->pruneFinishedBefore($before);

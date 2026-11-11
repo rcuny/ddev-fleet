@@ -520,6 +520,7 @@ final readonly class ProjectImporter
             $project['display_submodule_branch'],
             $project['typesense'],
             $project['container_ssh'],
+            typesenseDashboard: $project['typesense_dashboard'],
         );
     }
 
@@ -536,6 +537,8 @@ final readonly class ProjectImporter
             $template['post_deploy']['tty2'],
             $template['ssh_keys'],
             sshIdentities: SshIdentities::from($template['ssh_identities']),
+            database: $template['database'],
+            agent: $template['agent'],
         );
     }
 

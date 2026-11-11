@@ -152,7 +152,7 @@
 
 {% block form_help -%}
     {%- if help is not empty -%}
-        <p id="{{ id }}_help" class="text-xs text-ink-muted">{{ help }}</p>
+        <p id="{{ id }}_help" class="text-xs text-ink-muted">{% if help_html|default(false) %}{{ help|raw }}{% else %}{{ help }}{% endif %}</p>
     {%- endif -%}
 {%- endblock form_help %}
 

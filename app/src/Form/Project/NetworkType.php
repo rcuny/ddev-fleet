@@ -34,6 +34,11 @@ final class NetworkType extends AbstractType
                 'label' => 'Run a Typesense search server for each instance',
                 'required' => false,
             ])
+            ->add('typesenseDashboard', CheckboxType::class, [
+                'label' => 'Also run the Typesense dashboard',
+                'required' => false,
+                'help' => 'The dashboard has no authentication of its own and is off by default. It is reachable only behind the Authelia gate; switch it on only when you need it.',
+            ])
             ->add('save', SubmitType::class, ['label' => 'Save network settings']);
     }
 

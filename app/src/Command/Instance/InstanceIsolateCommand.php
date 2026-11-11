@@ -9,7 +9,7 @@ use App\Domain\Instance\InstanceState;
 use App\Domain\Job\JobTrigger;
 use App\Fleet\Audit\AuditLog;
 use App\Fleet\FleetPaths;
-use App\Fleet\Instances\InstanceIsolationWriter;
+use App\Fleet\Instances\InstanceDbIsolationWriter;
 use App\Fleet\Projects\NotFound;
 use App\Fleet\Projects\Refused;
 use App\Fleet\Workspace\ClaudeTokenApplier;
@@ -52,7 +52,7 @@ final class InstanceIsolateCommand extends Command
         $running = [];
         foreach ($this->instances->all() as $instance) {
             $dir = $this->paths->instanceDir($instance->id());
-            if (!is_dir($dir.'/.ddev') || InstanceIsolationWriter::isIsolated($dir)) {
+            if (!is_dir($dir.'/.ddev') || InstanceDbIsolationWriter::isIsolated($dir)) {
                 continue;
             }
             $exposed[] = $instance->id();

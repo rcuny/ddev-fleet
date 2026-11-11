@@ -115,10 +115,13 @@ final class TypesenseDeployTest extends InstanceJobTestCase
     {
         $this->secretStore->putManaged('acme', 'TYPESENSE_API_KEY', 'operator-set-key', 'admin');
 
-        $keys = $this->keys->ensure($this->project);
+        $keys = $this->keys->forInstance($this->project, 'acme--main');
 
-        self::assertSame('operator-set-key', $keys->admin);
-        self::assertSame($keys->search, $this->secretStore->getManaged('acme', 'FLEET_TYPESENSE_SEARCH_KEY'));
+        // The operator's value is the project's master key; the instance key is derived from it (FLE-300).
+        self::assertSame('operator-set-key', $this->keys->ensure($this->project)->admin);
+        self::assertSame('operator-set-key', $this->secretStore->getManaged('acme', 'TYPESENSE_API_KEY'));
+        self::assertNotSame('operator-set-key', $keys->admin);
+        self::assertSame($keys->admin, $this->keys->forInstance($this->project, 'acme--main')->admin);
     }
 
     public function testAFlaggedProjectGetsTheEnvFileTheWebEnvironmentAndTheSearchKey(): void
@@ -127,7 +130,7 @@ final class TypesenseDeployTest extends InstanceJobTestCase
 
         $job = $this->deploy($this->searchStep([$this->emptyKeys(), new MockResponse('{}')]));
 
-        $keys = $this->keys->ensure($this->project);
+        $keys = $this->keys->forInstance($this->project, 'acme--main');
         $dir = $this->dir();
         self::assertSame('TYPESENSE_API_KEY='.$keys->admin."\n", file_get_contents($dir.'/.ddev/.env'));
         self::assertSame(0o640, fileperms($dir.'/.ddev/.env') & 0o777);
@@ -159,6 +162,52 @@ final class TypesenseDeployTest extends InstanceJobTestCase
         self::assertSame([], array_filter($this->runner->calls(), static fn ($c): bool => str_contains(implode(' ', $c->argv), 'fleet-search-only')));
     }
 
+    public function testEveryInstanceGetsItsOwnKeysDerivedFromTheProjectKeys(): void
+    {
+        $this->enable();
+
+        $main = $this->keys->forInstance($this->project, 'acme--main');
+        $other = $this->keys->forInstance($this->project, 'acme--other');
+        $master = $this->keys->ensure($this->project);
+
+        self::assertMatchesRegularExpression('/^[0-9a-f]{48}$/D', $main->admin);
+        self::assertNotSame($main->admin, $other->admin);
+        self::assertNotSame($main->search, $other->search);
+        self::assertNotSame($main->admin, $master->admin);
+        self::assertNotSame($main->admin, $main->search);
+        self::assertEquals($main, $this->keys->forInstance($this->project, 'acme--main'));
+    }
+
+    public function testAStaleSearchKeyOfAnOlderDeployIsReplaced(): void
+    {
+        $this->enable();
+        $keys = $this->keys->forInstance($this->project, 'acme--main');
+
+        $this->deploy($this->searchStep([
+            new MockResponse('{"keys":[{"id":7,"description":"fleet-search-only","value_prefix":"zzzz..."}]}'),
+            new MockResponse('{}'),
+            new MockResponse('{}'),
+        ]));
+
+        self::assertCount(3, $this->requests);
+        self::assertSame('DELETE', $this->requests[1]['method']);
+        self::assertSame('http://127.0.0.1:8108/keys/7', $this->requests[1]['url']);
+        self::assertSame('POST', $this->requests[2]['method']);
+        self::assertSame($keys->search, json_decode((string) $this->requests[2]['options']['body'], true)['value']);
+    }
+
+    public function testASearchKeyWhoseValuePrefixMatchesTheCurrentOneIsKept(): void
+    {
+        $this->enable();
+        $keys = $this->keys->forInstance($this->project, 'acme--main');
+        // Typesense lists the first four characters of a key's value followed by "...".
+        $prefix = substr($keys->search, 0, 4).'...';
+
+        $this->deploy($this->searchStep([new MockResponse('{"keys":[{"id":7,"description":"fleet-search-only","value_prefix":"'.$prefix.'"}]}')]));
+
+        self::assertCount(1, $this->requests);
+    }
+
     public function testAnExistingSearchKeyIsNotCreatedAgain(): void
     {
         $this->enable();
@@ -186,7 +235,7 @@ final class TypesenseDeployTest extends InstanceJobTestCase
 
         $job = $this->deploy($this->searchStep([], 20.0));
 
-        $keys = $this->keys->ensure($this->project);
+        $keys = $this->keys->forInstance($this->project, 'acme--main');
         $log = $this->logText($job);
         self::assertStringContainsString('WARNING: typesense: the search-only key was not registered', $log);
         self::assertStringNotContainsString($keys->admin, $log);
@@ -213,7 +262,7 @@ final class TypesenseDeployTest extends InstanceJobTestCase
     public function testAKeyInAnExceptionMessageIsMaskedInTheJobLog(): void
     {
         $this->enable();
-        $keys = $this->keys->ensure($this->project);
+        $keys = $this->keys->forInstance($this->project, 'acme--main');
         $client = new MockHttpClient(static function () use ($keys): never {
             throw new \RuntimeException('transport failed for X-TYPESENSE-API-KEY: '.$keys->admin.' and '.$keys->search);
         });
@@ -231,11 +280,11 @@ final class TypesenseDeployTest extends InstanceJobTestCase
     public function testASecondDeployReusesTheKeysAndRewritesTheSameValues(): void
     {
         $this->enable();
-        $before = $this->keys->ensure($this->project);
+        $before = $this->keys->forInstance($this->project, 'acme--main');
 
         $this->deploy($this->searchStep([$this->emptyKeys(), new MockResponse('{}')]));
 
-        self::assertEquals($before, $this->keys->ensure($this->project));
+        self::assertEquals($before, $this->keys->forInstance($this->project, 'acme--main'));
         self::assertSame('TYPESENSE_API_KEY='.$before->admin."\n", file_get_contents($this->dir().'/.ddev/.env'));
     }
 
@@ -250,7 +299,7 @@ final class TypesenseDeployTest extends InstanceJobTestCase
 
         new TypesenseEnvFileStep($this->keys, $this->masker)->run($context);
 
-        self::assertSame("A=1\nTYPESENSE_API_KEY=".$this->keys->ensure($this->project)->admin."\n", file_get_contents($dir.'/.ddev/.env'));
+        self::assertSame("A=1\nTYPESENSE_API_KEY=".$this->keys->forInstance($this->project, 'acme--main')->admin."\n", file_get_contents($dir.'/.ddev/.env'));
         self::assertContains('/.ddev/.env', $context->excluded());
     }
 }

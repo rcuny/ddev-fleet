@@ -60,6 +60,7 @@ final class ProjectOptions
             $command
                 ->addOption('default-template', null, InputOption::VALUE_REQUIRED, 'Template deployed when none is given (one of the project\'s templates)')
                 ->addOption('typesense', null, InputOption::VALUE_NEGATABLE, 'Give the project a Typesense search service (--no-typesense removes it)')
+                ->addOption('typesense-dashboard', null, InputOption::VALUE_NEGATABLE, 'Run the Typesense dashboard service too (off by default: it has no authentication of its own; --no-typesense-dashboard turns it off)')
                 ->addOption('container-ssh', null, InputOption::VALUE_NEGATABLE, 'Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it)')
                 ->addOption('unset', null, InputOption::VALUE_REQUIRED | InputOption::VALUE_IS_ARRAY, 'Clear a value: '.implode(', ', array_keys(self::UNSET)).' (repeat for several)')
             ;
@@ -117,6 +118,9 @@ final class ProjectOptions
             $changes['typesense'] = true;
         } elseif ($update && false === $input->getOption('typesense')) {
             $changes['typesense'] = false;
+        }
+        if ($update && null !== $input->getOption('typesense-dashboard')) {
+            $changes['typesenseDashboard'] = true === $input->getOption('typesense-dashboard');
         }
         if (true === $input->getOption('container-ssh')) {
             $changes['containerSsh'] = true;

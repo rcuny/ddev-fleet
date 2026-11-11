@@ -101,7 +101,7 @@ Steps that run a command, such as firewall rules, are not visible in check mode:
 
 ## Instance isolation (databases)
 
-DDEV puts every project's `db` container on the shared `ddev_default` network under the alias `db` (and the name `ddev-<project>-db`). Left alone, a container of one instance could resolve `db` to another project's database and use DDEV's default credentials (`db`/`db`). Fleet writes `.ddev/docker-compose.fleet-isolation.yaml` into each instance:
+DDEV puts every project's `db` container on the shared `ddev_default` network under the alias `db` (and the name `ddev-<project>-db`). Left alone, a container of one instance could resolve `db` to another project's database and use DDEV's default credentials (`db`/`db`). Fleet writes `.ddev/docker-compose.fleet-db-isolation.yaml` into each instance:
 
 - with a db service, `db` is attached to the instance's own network only (it leaves `ddev_default`; ddev-router only needs `web` there);
 - without one (`omit_containers: [db]`), `db` is pinned to `127.0.0.1` in the web container, so the name never reaches another project.

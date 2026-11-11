@@ -64,7 +64,8 @@ final class DeployWorkflow
         private readonly iterable $steps = [],
         private readonly ?InstanceCgroupWriter $cgroup = null,
         private readonly ?PushKeyCheck $pushCheck = null,
-        private readonly ?InstanceIsolationWriter $isolation = null,
+        private readonly ?InstanceIsolation $isolation = null,
+        private readonly ?InstanceDbIsolationWriter $dbIsolation = null,
     ) {
     }
 
@@ -166,7 +167,13 @@ final class DeployWorkflow
         }
         $written[] = $sshKnownHosts;
         $written[] = InstanceCgroupWriter::RELATIVE_PATH;
-        $written[] = InstanceIsolationWriter::RELATIVE_PATH;
+        $written[] = InstanceDbIsolationWriter::RELATIVE_PATH;
+        if (null !== $this->isolation) {
+            $override = $this->isolation->write($dir, $project, $log->line(...));
+            if (null !== $override) {
+                $written[] = $override;
+            }
+        }
         array_push($written, ...$this->setUpContainerAgent($instance, $project, $template, $dir, $log));
         GitExclude::add($dir, $written);
 
@@ -193,9 +200,9 @@ final class DeployWorkflow
             }
         }
         // FLE-297: the db container must not be reachable as "db" from other projects' containers.
-        if (null !== $this->isolation) {
+        if (null !== $this->dbIsolation) {
             try {
-                $this->isolation->write($dir, $log);
+                $this->dbIsolation->write($dir, $log);
             } catch (\RuntimeException $e) {
                 throw new JobFailed('The database isolation override could not be written: '.$e->getMessage());
             }

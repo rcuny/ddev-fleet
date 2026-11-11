@@ -36,6 +36,19 @@
 }
 
 {{ domain }} {
+{% if api_client_ca %}
+    # Opt-in mTLS for the token API (FLE-289; off unless {{ api_client_ca }} exists). The handshake asks for a client
+    # certificate and, when one is offered, verifies it against that CA. It is "verify_if_given" because this site also
+    # serves the browser UI, which has no certificate; the /api/v1/* handler below refuses a call with none. A bad
+    # certificate never completes the handshake. The bearer token is still required: this is a second factor.
+    tls {
+        client_auth {
+            mode verify_if_given
+            trust_pool file {{ api_client_ca }}
+        }
+    }
+
+{% endif %}
     header {
         X-Content-Type-Options nosniff
         Strict-Transport-Security "max-age=31536000"
@@ -75,6 +88,10 @@
         # TLS only: this site address is HTTPS, plain HTTP is redirected before any handler runs. Same body cap as the
         # hooks, a short upstream timeout, never cached (deferred set, so an upstream Cache-Control cannot override it), no CORS header (not called from a browser).
         handle /api/v1/* {
+{% if api_client_ca %}
+            @nocert expression {http.request.tls.client.subject} == ''
+            respond @nocert "A client certificate is required." 403
+{% endif %}
             request_body {
                 max_size 1MB
             }

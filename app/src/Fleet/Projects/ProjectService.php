@@ -338,6 +338,7 @@ final readonly class ProjectService
         $project->changeIssueIdRegexp($input->issueIdRegexp, $now);
         $project->changeDisplaySubmoduleBranch($input->displaySubmoduleBranch, $now);
         $project->changeTypesense($input->typesense, $now);
+        $project->changeTypesenseDashboard($input->typesenseDashboard, $now);
         $project->changeContainerSsh($input->containerSsh, $now);
         $project->changeCapacity($input->cpuThreads, $input->slots, $now);
     }
