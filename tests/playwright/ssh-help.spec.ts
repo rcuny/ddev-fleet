@@ -15,7 +15,8 @@ test.describe('git access help on the forms', () => {
       const field = page.locator('form').filter({ hasText: 'SSH identities' });
       await expect(field).toContainText('keeps the host');
       await expect(field).toContainText('push (write) key out of a narrow-purpose instance');
-      await expect(field).toContainText('docs/guides/10-git-access-and-ssh-keys.md');
+      await expect(field).toContainText('Read the guide');
+      await expect(field.getByRole('link', { name: 'Read the guide' })).toHaveAttribute('href', /10-git-access-and-ssh-keys\.md$/);
       expect(await hasHorizontalOverflow(page)).toBe(false);
     } finally {
       await deleteProjectViaUi(page, project);
@@ -26,7 +27,8 @@ test.describe('git access help on the forms', () => {
     await page.goto('/admin/projects/new');
     const row = page.locator('[data-slot=checkbox-row]').filter({ hasText: 'Git over SSH inside the container' });
     await expect(row).toContainText('agents in an instance push with the host');
-    await expect(row).toContainText('docs/guides/10-git-access-and-ssh-keys.md');
+    await expect(row).toContainText('Read the guide');
+    await expect(row.getByRole('link', { name: 'Read the guide' })).toHaveAttribute('href', /10-git-access-and-ssh-keys\.md$/);
     expect(await hasHorizontalOverflow(page)).toBe(false);
   });
 });

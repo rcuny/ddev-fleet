@@ -16,10 +16,10 @@ The private half of a key stays in a file on the host (mode 0600). It is never s
 
 ## What can and cannot happen to your code
 
-- **An instance can push only if container SSH is on and a key it holds is allowed on the git host.** With container SSH off, an instance holds no key at all and cannot push over SSH.
+- **An instance can push only if container SSH is on and a key it holds is allowed on the git host.** With container SSH off, Fleet gives the instance no key. (DDEV's shared agent is a separate matter, see "Why not DDEV's shared agent".)
 - **With "extras only", the push key never enters the instance.** The instance holds only the extra keys its template names, so a narrow-purpose instance cannot write to your main repositories.
-- **An instance never sees the deploy key.** Only the host reads with it.
-- **Other instances cannot use your instance's agent.** Each instance gets its own agent, mounted in that instance's container only.
+- **An instance never sees the deploy key.** Fleet never loads it anywhere but the host's own git commands.
+- **Other instances cannot use your instance's agent.** Fleet gives each instance its own agent, mounted in that instance's container only. The exception is DDEV's shared agent, below.
 - **Whatever is pushed is limited by what the key may do on the git host.** Fleet cannot grant more than the host allows. Register the push key with write access only on the repositories agents must push to, and turn on branch protection for `main` and `develop`, so an agent can push a branch but not rewrite or merge into the branches you release from.
 
 Inside an instance with container SSH on, any process in the container can use the loaded keys while the agent runs. Turn the setting on only for projects whose agents must push.
@@ -37,7 +37,7 @@ The check also runs by itself as a warning that never blocks: at the start of a 
 
 ## Rotate and revoke keys
 
-- **Rotate** (the button on the host key, behind your password) replaces the key. The old key stops working wherever it is registered, so register the new public key on the git host first or right after, then run **Check the push key**. Until you do, deploys that rely on it fail and instances cannot push.
+- **Rotate** (the button on the host key, behind your password) replaces the key. The old key stops working wherever it is registered, so register the new public key on the git host first or right after, then run **Check the push key**. Rotating the **deploy** key breaks the host's clones and pulls (deploys) until the new public key is registered. Rotating the **push** key breaks pushes from instances until then.
 - **Revoke** a key by removing its public half from the git host. The host refuses it at once; the copy in an instance's agent is useless from then on and expires within 24 hours.
 - **Delete** an extra key on the **SSH keys** tab. Fleet refuses while a template still names it.
 - Turning container SSH **off** stops new and restarted instances from getting the push key.
@@ -54,7 +54,7 @@ The check also runs by itself as a warning that never blocks: at the start of a 
 
 ## Why not DDEV's shared agent
 
-Older templates ran `ddev exec ssh-add -D` and `ddev auth ssh -f .../push_ed25519`. DDEV's agent is **shared**: every DDEV project on the host can use what it holds, and clearing it breaks the other instances. One template line would hand your write key to all of them. Fleet starts one agent per instance instead, so those lines are unnecessary. Fleet still saves a template that contains them, but warns. Remove the lines and use container SSH and extra keys.
+Older templates ran `ddev exec ssh-add -D` and `ddev auth ssh -f .../push_ed25519`. DDEV's agent is **shared**: every DDEV project on the host can use what it holds, and clearing it breaks the other instances. One template line would hand your write key to all of them. Fleet never loads a key into the shared agent, but DDEV still mounts its socket in every web container: anything put there by other means (a host user's `ddev auth ssh`, old template lines) is visible to every instance. Removing the shared agent from instances is planned, and this guide will be updated when it lands. Fleet starts one agent per instance instead, so those lines are unnecessary. Fleet still saves a template that contains them, but warns. Remove the lines and use container SSH and extra keys.
 
 ## Go further
 

@@ -10,7 +10,7 @@
                 <li><strong>push</strong> writes: agents in an instance push with it, only where the project has Git over SSH in the container on.</li>
                 <li><strong>extra keys</strong> reach other git hosts, from the instances whose template names them.</li>
             </ul>
-            <p class="mt-2 text-xs text-ink-muted">What a key can do is limited by what its git host allows it. <a href="https://github.com/rcuny/ddev-fleet/blob/main/docs/guides/10-git-access-and-ssh-keys.md" class="underline" rel="noopener" target="_blank">Read the guide</a>.</p>
+            <p class="mt-2 text-xs text-ink-muted">What a key can do is limited by what its git host allows it. <a href="{{ constant('App\\Fleet\\Ssh\\GuideLinks::GIT_ACCESS') }}" class="underline" rel="noopener" target="_blank">Read the guide</a>.</p>
         </twig:Card:Content>
     </twig:Card>
 
@@ -71,7 +71,7 @@
                                 </select>
                                 <twig:Button type="submit" variant="outline" class="h-11 w-full md:h-8 md:w-auto" data-testid="ssh-key-check-push">Check the push key</twig:Button>
                             {% endif %}
-                            <p class="text-xs text-ink-muted">Tests this key alone (not ~/.ssh/config, not an agent): is it registered on that git host? If the check fails, register the public key above on the git host with write access, then check again (<a href="https://github.com/rcuny/ddev-fleet/blob/main/docs/guides/10-git-access-and-ssh-keys.md#troubleshooting" class="underline" rel="noopener" target="_blank" data-testid="ssh-key-check-help">guide</a>).</p>
+                            <p class="text-xs text-ink-muted">Tests this key alone (not ~/.ssh/config, not an agent): is it registered on that git host? If the check fails, register the public key above on the git host with write access, then check again (<a href="{{ constant('App\\Fleet\\Ssh\\GuideLinks::TROUBLESHOOTING') }}" class="underline" rel="noopener" target="_blank" data-testid="ssh-key-check-help">guide</a>).</p>
                             
                         </form>
                     {% endif %}
