@@ -158,6 +158,8 @@ final class OpenApiContractTest extends AdminTestCase
             ['GET', '/api/v1/host', ''],
             ['GET', '/api/v1/host/capacity', ''],
             ['GET', '/api/v1/host/capacity?project=acme', ''],
+            ['GET', '/api/v1/host/capacity?project=acme', '', $this->writer->secret, [], 200],
+            ['GET', '/api/v1/host/capacity', '', $this->writer->secret, [], 403],
             ['GET', '/api/v1/upgrade', ''],
             ['GET', '/api/v1/webhooks/log', ''],
             ['GET', '/api/v1/projects', ''],

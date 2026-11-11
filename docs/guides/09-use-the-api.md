@@ -92,6 +92,22 @@ sudo fleet token:revoke <id>
 - **Audit.** Creation, rotation, revocation and every refused call (`api.denied`) are in the audit log, and each accepted write is recorded as `api.write` with the token id.
 - **Storage.** Keep the secret in a secrets manager or the CI's secret variables, or in an env file only the caller can read. Never commit it to a repository. Fleet stores only a hash, so a lost secret cannot be recovered: rotate it.
 
+## Let a project's orchestrator use it
+
+An agent that runs in one of your instances can watch and manage that project's instances through the API. The product ships a ready-made Claude skill for it, `skills/fleet-api/` (a `SKILL.md` and a client that needs only Python 3). Copy it into the skills folder your agent reads.
+
+Create a token limited to the project, with the scopes the orchestrator needs:
+
+```bash
+sudo fleet token:create website-orchestrator \
+  -s read -s lifecycle \
+  -p website \
+  --ip 203.0.113.10 \
+  --expires-in 30
+```
+
+Add `-s deploy` to let it deploy and redeploy, `-s lifecycle:destroy` to let it destroy, `-s terminal:read` to let it read panes. Give the agent the secret through its environment as `FLEET_API_TOKEN`, with `FLEET_API_URL` set to your Fleet address (https only); never commit either. The skill's commands and rules are in its `SKILL.md`.
+
 ## Where to go next
 
 - [The API reference](../reference/15-api.md)
