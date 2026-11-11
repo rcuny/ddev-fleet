@@ -230,12 +230,12 @@ input[type="range"].allot-range {
 input[type="range"].allot-range::-webkit-slider-runnable-track {
     height: 0.625rem;
     border-radius: 9999px;
-    background: linear-gradient(to right, var(--color-hairline) 0 50%, var(--color-signal) 50% 100%);
+    background: linear-gradient(to right, var(--color-hairline) 0 var(--zone, 50%), var(--color-signal) var(--zone, 50%) 100%);
 }
 input[type="range"].allot-range::-moz-range-track {
     height: 0.625rem;
     border-radius: 9999px;
-    background: linear-gradient(to right, var(--color-hairline) 0 50%, var(--color-signal) 50% 100%);
+    background: linear-gradient(to right, var(--color-hairline) 0 var(--zone, 50%), var(--color-signal) var(--zone, 50%) 100%);
 }
 input[type="range"].allot-range::-webkit-slider-thumb {
     appearance: none;

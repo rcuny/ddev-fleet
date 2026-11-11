@@ -108,6 +108,7 @@
                 <div class="flex flex-wrap items-center gap-2">
                     <span class="w-16 shrink-0 text-ink-muted" data-slots-label>Slots</span>
                     <button type="button" class="inline-flex size-11 items-center justify-center rounded-lg border border-input hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none md:size-8" data-slots-minus data-testid="allotments-slots-minus"><span aria-hidden="true">−</span><span class="sr-only">Fewer slots</span></button>
+                    <input type="range" min="1" step="1" class="allot-range h-11 min-w-24 flex-1 cursor-pointer md:h-6" data-slots-range data-testid="allotments-slots-range">
                     <input type="number" min="1" step="1" inputmode="numeric" class="h-11 w-20 rounded-lg border border-input bg-background px-2 text-center md:h-8" data-slots-number data-testid="allotments-slots-number">
                     <button type="button" class="inline-flex size-11 items-center justify-center rounded-lg border border-input hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none md:size-8" data-slots-plus data-testid="allotments-slots-plus"><span aria-hidden="true">+</span><span class="sr-only">More slots</span></button>
                     <label class="inline-flex min-h-11 items-center gap-2 md:min-h-8"><input type="checkbox" class="size-5 md:size-4" data-slots-unlimited data-testid="allotments-slots-unlimited"> unlimited</label>

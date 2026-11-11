@@ -18,6 +18,7 @@ export default class extends Controller {
     #state = [];
     #frame = 0;
     #saving = false;
+    #slotMax = 8;
 
     connect() {
         if (this.autoloadValue) {
@@ -45,6 +46,8 @@ export default class extends Controller {
             cur: { t: project.cpu_threads, s: project.slots },
         }));
         this.statusTarget.classList.add('hidden');
+        // No host-wide slot total exists: the slider reaches twice the largest value in play (at least 8).
+        this.#slotMax = Math.max(8, 2 * Math.max(0, ...this.#state.flatMap((p) => [p.saved.s ?? 0, p.floor.slots ?? 0])));
         this.#buildRows();
         this.#fillPriorities();
         const slices = this.#data.not_under_slice;
@@ -168,6 +171,11 @@ export default class extends Controller {
             });
             const slots = row.querySelector('[data-slots-number]');
             const unlimited = row.querySelector('[data-slots-unlimited]');
+            const slotsRange = row.querySelector('[data-slots-range]');
+            slotsRange.max = String(this.#slotMax);
+            slotsRange.style.setProperty('--zone', '100%');
+            slotsRange.setAttribute('aria-labelledby', `${id}-slots-label`);
+            slotsRange.addEventListener('input', () => { project.cur.s = Math.max(1, Number(slotsRange.value)); this.#afterEdit(project); });
             slots.addEventListener('input', () => { project.cur.s = Math.max(1, Math.round(Number(slots.value) || 1)); this.#afterEdit(project, slots); });
             row.querySelector('[data-slots-minus]').addEventListener('click', () => { project.cur.s = Math.max(1, (project.cur.s ?? 1) - 1); this.#afterEdit(project); });
             row.querySelector('[data-slots-plus]').addEventListener('click', () => { project.cur.s = Math.min(this.#data.max, (project.cur.s ?? 0) + 1); this.#afterEdit(project); });
@@ -204,7 +212,7 @@ export default class extends Controller {
             number.value = null === project.cur.t ? '' : String(project.cur.t);
         }
         number.placeholder = 'unlimited';
-        range.value = String(null === project.cur.t ? 0 : Math.min(project.cur.t, alloc));
+        range.value = String(null === project.cur.t ? 0 : Math.min(project.cur.t, alloc * 2));
         range.setAttribute('aria-valuetext', null === project.cur.t ? 'unlimited' : `${project.cur.t} threads of ${alloc}`);
         range.classList.toggle('opacity-50', null === project.cur.t);
         const beyond = null !== project.cur.t && project.cur.t > alloc;
@@ -220,6 +228,11 @@ export default class extends Controller {
             slots.value = null === project.cur.s ? '' : String(project.cur.s);
         }
         slots.disabled = null === project.cur.s;
+        const slotsRange = row.querySelector('[data-slots-range]');
+        slotsRange.disabled = null === project.cur.s;
+        slotsRange.value = String(Math.min(project.cur.s ?? 1, this.#slotMax));
+        slotsRange.style.setProperty('--thumb', 'var(--swatch)');
+        slotsRange.setAttribute('aria-valuetext', null === project.cur.s ? 'unlimited' : `${project.cur.s} slots`);
         row.querySelector('[data-slots-minus]').disabled = null === project.cur.s;
         row.querySelector('[data-slots-plus]').disabled = null === project.cur.s;
 

@@ -218,4 +218,42 @@ test.describe('capacity', () => {
     }
     expect(errors).toEqual([]);
   });
+
+  test('Adjust allotments: the thread slider keeps moving past the allocatable threads, up to twice the host @phone', async ({ page }) => {
+    test.slow();
+    const name = uniqueName('adj');
+    try {
+      await createProjectViaUi(page, name, undefined, 'overview');
+      await openHostTab(page, 'capacity');
+      const allocatable = await number(page, 'capacity-allocatable');
+      test.skip(allocatable < 2, 'a host with fewer than 2 allocatable threads has no orange zone to test');
+
+      await page.getByTestId('allotments-open').click();
+      const row = page.getByTestId('allotments-rows').locator('li', { hasText: name });
+      const range = row.getByTestId('allotments-threads-range');
+      const field = row.getByTestId('allotments-threads-number');
+      await expect(range).toHaveAttribute('max', String(allocatable * 2));
+
+      const beyond = Math.min(allocatable + 1, allocatable * 2);
+      await field.fill(String(beyond));
+      await expect(range).toHaveValue(String(beyond));
+      await field.fill(String(allocatable * 2));
+      await expect(range).toHaveValue(String(allocatable * 2));
+
+      await range.fill(String(allocatable + 1));
+      await expect(field).toHaveValue(String(allocatable + 1));
+
+      // Slots have a slider as well, kept in sync with the number.
+      const slots = row.getByTestId('allotments-slots-number');
+      const slotsRange = row.getByTestId('allotments-slots-range');
+      await row.getByTestId('allotments-slots-unlimited').uncheck();
+      await slots.fill('3');
+      await expect(slotsRange).toHaveValue('3');
+      await slotsRange.fill('5');
+      await expect(slots).toHaveValue('5');
+      await expect(page.getByTestId('allotments-save')).toBeEnabled();
+    } finally {
+      await deleteProjectViaUi(page, name).catch(() => undefined);
+    }
+  });
 });
