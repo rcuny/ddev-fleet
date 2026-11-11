@@ -1,0 +1,13 @@
+{#- FLE-289: the live alert for terminal input sent over the API. Administrators only; permanent across Turbo visits so the stream stays open. Text is set with textContent by the controller; the message never carries the typed text. -#}
+{% if is_granted('ROLE_ADMIN') %}
+    <div id="terminal-alert"
+         class="fixed right-4 bottom-[calc(var(--shell-bottom-bar)+env(safe-area-inset-bottom)+1rem)] z-40 grid w-[calc(100vw-2rem)] max-w-sm gap-2 md:bottom-4"
+         data-turbo-permanent
+         data-testid="terminal-alert"
+         data-controller="terminal-alert"
+         data-terminal-alert-mercure-value="{{ mercure() }}"
+         data-terminal-alert-topic-value="/alerts/terminal-write"
+         data-terminal-alert-audit-value="{{ path('audit') }}">
+        <div role="status" aria-live="assertive" class="grid gap-2" data-terminal-alert-target="list"></div>
+    </div>
+{% endif %}

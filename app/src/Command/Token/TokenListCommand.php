@@ -63,6 +63,13 @@ final class TokenListCommand extends Command
             'unused' => \in_array($t->id(), $unused, true),
         ], $shown);
 
+        // A warning on stderr so --json stays clean on stdout (FLE-289).
+        $errors = $output instanceof \Symfony\Component\Console\Output\ConsoleOutputInterface ? $output->getErrorOutput() : null;
+        $expiringCount = \count($expiring);
+        if ($expiringCount > 0 && null !== $errors) {
+            $errors->writeln(\sprintf('WARNING %d token(s) expire within %d days; run `fleet:token:rotate`.', $expiringCount, ApiTokenWatch::EXPIRING_DAYS));
+        }
+
         if (true === $input->getOption('json')) {
             $output->writeln(json_encode(['schema' => 1, 'tokens' => $rows], \JSON_PRETTY_PRINT | \JSON_UNESCAPED_SLASHES | \JSON_THROW_ON_ERROR));
 

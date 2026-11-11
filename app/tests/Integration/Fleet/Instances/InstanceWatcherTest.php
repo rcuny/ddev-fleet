@@ -39,7 +39,7 @@ final class InstanceWatcherTest extends InstanceJobTestCase
             $this->instances,
             $this->ddev,
             new JobReaper($jobs, $this->instances, $service, $locks, $this->clock),
-            new JobPruner($jobs, $this->paths, $this->clock),
+            new JobPruner($jobs, $this->paths, $this->clock, new \App\Domain\ApiCall\ApiCallRepository($this->em)),
             $feed,
             90,
             $withAgent ? $this->agent : null,

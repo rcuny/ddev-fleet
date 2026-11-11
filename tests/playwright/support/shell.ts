@@ -22,7 +22,8 @@ export const ADMIN_LABELS: string[] = ADMIN_NAV.map((item) => item.label);
 export function collectBrowserErrors(page: Page): string[] {
   const errors: string[] = [];
   page.on('console', (message) => {
-    if (message.type() === 'error') {
+    // The e2e server starts no Mercure hub (pages poll instead), so the admin shell's alert stream gets a 404 there (FLE-289).
+    if (message.type() === 'error' && !/\/\.well-known\/mercure/.test(message.location().url)) {
       errors.push(`console.error: ${message.text()} ${message.location().url}`.trimEnd());
     }
   });

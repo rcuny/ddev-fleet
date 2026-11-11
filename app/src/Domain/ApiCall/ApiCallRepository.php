@@ -35,6 +35,16 @@ final readonly class ApiCallRepository
         return $this->em->getRepository(ApiCall::class)->findBy([], ['id' => 'DESC'], $limit);
     }
 
+    /** How many terminal calls were recorded at or after $since. */
+    public function countSince(\DateTimeImmutable $since): int
+    {
+        return (int) $this->em->getConnection()->fetchOne(
+            'SELECT COUNT(*) FROM api_call WHERE created_at >= :since',
+            ['since' => $since],
+            ['since' => UtcDateTimeImmutableType::NAME],
+        );
+    }
+
     /** Deletes the evidence rows older than $before (the retention); returns how many. */
     public function pruneBefore(\DateTimeImmutable $before): int
     {
