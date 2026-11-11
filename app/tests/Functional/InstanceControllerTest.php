@@ -179,7 +179,8 @@ final class InstanceControllerTest extends AdminTestCase
     {
         $this->open('/instances');
 
-        self::assertSame(['/instances/acme', '/instances/demo'], $this->subscribeTopics($this->mercureClaims()));
+        // An administrator's cookie also carries the terminal write alert topic (FLE-289).
+        self::assertSame(['/alerts/terminal-write', '/instances/acme', '/instances/demo'], $this->subscribeTopics($this->mercureClaims()));
     }
 
     public function testMemberNeverSeesAForeignInstanceByUrl(): void

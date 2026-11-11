@@ -265,7 +265,7 @@ final class RenderedCaddyApiRouteTest extends TestCase
     }
 
     /** A minimal FastCGI responder: answers every request with the parameters it received, as JSON. */
-    private static function upstreamScript(): string
+    public static function upstreamScript(): string
     {
         return <<<'PHP'
             <?php

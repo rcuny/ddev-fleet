@@ -37,6 +37,35 @@ final class ApiTokenPageTest extends AdminTestCase
         self::assertResponseStatusCodeSame(403);
     }
 
+    private function hasMercureCookie(): bool
+    {
+        foreach ($this->client->getResponse()->headers->getCookies() as $cookie) {
+            if (str_contains($cookie->getName(), 'mercure')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public function testTheAdminShellListensForTerminalWriteAlertsAndAMemberDoesNot(): void
+    {
+        $crawler = $this->open('/admin/api-tokens');
+        $alert = $crawler->filter('[data-testid=terminal-alert]');
+        self::assertCount(1, $alert);
+        self::assertSame('/alerts/terminal-write', $alert->attr('data-terminal-alert-topic-value'));
+        self::assertSame('/admin/audit', $alert->attr('data-terminal-alert-audit-value'));
+        self::assertNotNull($alert->attr('data-turbo-permanent'));
+        self::assertTrue($this->hasMercureCookie(), 'the admin page sets the cookie that authorises the alert topic');
+
+        $this->as('member');
+        $crawler = $this->open('/');
+        self::assertResponseStatusCodeSame(200);
+        self::assertCount(0, $crawler->filter('[data-testid=terminal-alert]'));
+        self::assertStringNotContainsString('terminal-write', (string) $this->client->getResponse()->getContent());
+        self::assertFalse($this->hasMercureCookie());
+    }
+
     public function testCreatingNeedsAFreshReauthAndLeavesNothingBehind(): void
     {
         $this->post('/admin/api-tokens/create', self::FORM);

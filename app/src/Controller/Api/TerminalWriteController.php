@@ -145,11 +145,13 @@ final readonly class TerminalWriteController
             $this->tmux->sendToAgent($id, $target, $text, $enter);
         } catch (WorkspaceException) {
             $this->finish($call, ApiCall::FAILED);
+            // Keys may already have been typed before the send gave up: the owner is told all the same.
+            $this->notifier->written($call);
 
             throw ApiProblem::conflict('pane_changed', 'The pane stopped running the agent before the call completed; Enter was not sent.');
         }
         $this->finish($call, ApiCall::SENT);
-        $this->notifier->sent($call);
+        $this->notifier->written($call);
 
         return new JsonResponse([
             'instance' => $id,

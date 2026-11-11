@@ -28,7 +28,9 @@ final class TerminalWriteNotifierTest extends TestCase
             return 'id';
         });
 
-        new TerminalWriteNotifier($hub, new NullLogger())->sent(self::call());
+        $call = self::call();
+        $call->finish(ApiCall::SENT);
+        new TerminalWriteNotifier($hub, new NullLogger())->written($call);
 
         self::assertCount(1, $sent);
         self::assertSame([TerminalWriteNotifier::ALERT_TOPIC], $sent[0]->getTopics());
@@ -36,7 +38,25 @@ final class TerminalWriteNotifierTest extends TestCase
         $data = json_decode($sent[0]->getData(), true, flags: \JSON_THROW_ON_ERROR);
         self::assertSame('blog--main', $data['instance']);
         self::assertSame(11, $data['length']);
+        self::assertSame('sent', $data['outcome']);
         self::assertStringNotContainsString('secret', $sent[0]->getData());
+    }
+
+    public function testAFailedSendIsAnnouncedAsFailed(): void
+    {
+        $sent = [];
+        $hub = $this->createStub(HubInterface::class);
+        $hub->method('publish')->willReturnCallback(static function (Update $u) use (&$sent): string {
+            $sent[] = $u;
+
+            return 'id';
+        });
+        $call = self::call();
+        $call->finish(ApiCall::FAILED);
+
+        new TerminalWriteNotifier($hub, new NullLogger())->written($call);
+
+        self::assertSame('failed', json_decode($sent[0]->getData(), true, flags: \JSON_THROW_ON_ERROR)['outcome']);
     }
 
     public function testAHubThatIsDownNeverFailsTheCall(): void
@@ -44,7 +64,7 @@ final class TerminalWriteNotifierTest extends TestCase
         $hub = $this->createStub(HubInterface::class);
         $hub->method('publish')->willThrowException(new \RuntimeException('hub down'));
 
-        new TerminalWriteNotifier($hub, new NullLogger())->sent(self::call());
+        new TerminalWriteNotifier($hub, new NullLogger())->written(self::call());
 
         $this->expectNotToPerformAssertions();
     }
