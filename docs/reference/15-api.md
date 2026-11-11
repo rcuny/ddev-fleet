@@ -1,5 +1,7 @@
 # HTTP API: tokens and authentication
 
+New to the API? Start with the guide: [use the API](../guides/09-use-the-api.md).
+
 The API lives under `/api/v1/` on the same host name as the web interface and answers JSON. This page covers the foundation: how a caller authenticates and what a token may do. The endpoints are added release by release: the read endpoints are below (`GET` only, scope `read`) and so are the write endpoints.
 
 > **Status:** the firewall, the token store and the checks described here are in the app, and Caddy lets `/api/v1/*` through the login gate (see "Network path" below).
