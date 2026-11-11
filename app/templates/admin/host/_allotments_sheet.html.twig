@@ -1,0 +1,125 @@
+{# FLE-318: the "Adjust allotments" sheet. Rows, donut and totals are drawn by assets/controllers/allotments_controller.js. #}
+{% set open_on_load = app.request.query.getBoolean('adjust') %}
+<div class="mt-4" data-controller="dialog allotments" data-dialog-open-value="{{ open_on_load ? 'true' : 'false' }}"
+     data-allotments-url-value="{{ path('settings_allotments') }}" data-allotments-save-url-value="{{ path('settings_allotments_save') }}"
+     data-allotments-autoload-value="{{ open_on_load ? 'true' : 'false' }}"
+     data-action="allotments:close->dialog#close">
+    <input type="hidden" name="_csrf_token" value="{{ csrf_token('submit') }}" data-controller="csrf-protection">
+    <twig:Button type="button" variant="outline" class="min-h-11 md:min-h-8" data-dialog-target="trigger" data-action="click->dialog#open click->allotments#load" aria-haspopup="dialog" data-testid="allotments-open">
+        <twig:ux:icon name="lucide:sliders-horizontal" />
+        Adjust allotments
+    </twig:Button>
+
+    <dialog id="sheet-allotments" aria-labelledby="allotments-title" aria-describedby="allotments-description" data-slot="sheet-content"
+            data-dialog-target="dialog" data-side="right" data-testid="allotments-sheet"
+            data-action="keydown.esc->allotments#cancel:prevent click->dialog#closeOnClickOutside"
+            class="fixed inset-y-0 right-0 left-auto z-50 m-0 h-full max-h-none w-full max-w-none translate-x-full flex-col border-l bg-popover bg-clip-padding p-0 text-sm text-popover-foreground shadow-lg outline-none transition duration-200 ease-in-out open:flex open:translate-x-0 starting:open:translate-x-full data-closing:translate-x-full sm:max-w-2xl backdrop:bg-black/10 backdrop:opacity-0 backdrop:transition-opacity backdrop:duration-200 open:backdrop:opacity-100 starting:open:backdrop:opacity-0 data-closing:backdrop:opacity-0 motion-reduce:transition-none">
+        <header class="flex flex-col gap-0.5 border-b border-hairline p-4 pe-14">
+            <h2 id="allotments-title" class="font-heading text-base font-medium text-ink-display">Adjust allotments</h2>
+            <p id="allotments-description" class="text-sm text-ink-muted">Ceilings per project. Changes apply to running instances at once.</p>
+        </header>
+        <button type="button" class="absolute top-2 end-2 inline-flex size-11 items-center justify-center rounded-lg hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none" data-action="click->allotments#cancel" data-testid="allotments-close">
+            <twig:ux:icon name="lucide:x" />
+            <span class="sr-only">Close</span>
+        </button>
+
+        <div class="flex min-h-0 flex-1 flex-col overflow-y-auto" data-allotments-target="scroll">
+            <div class="sticky top-0 z-10 grid gap-3 border-b border-hairline bg-popover p-4" data-testid="allotments-totals">
+                <div class="flex items-center gap-4">
+                    <svg viewBox="0 0 100 100" class="size-28 shrink-0 sm:size-40" role="img" aria-label="" data-allotments-target="donut" data-testid="allotments-donut">
+                        <defs>
+                            <pattern id="allotments-hatch" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+                                <rect width="6" height="6" fill="var(--color-surface)"/>
+                                <rect width="3" height="6" fill="var(--color-ink-muted)"/>
+                            </pattern>
+                        </defs>
+                        <g data-allotments-target="ring" transform="rotate(-90 50 50)"></g>
+                        <text x="50" y="50" text-anchor="middle" dominant-baseline="central" class="fill-ink-display text-[14px] font-semibold" data-allotments-target="centre"></text>
+                    </svg>
+                    <div class="grid min-w-0 gap-1">
+                        <p class="text-ink-display" aria-live="polite" data-allotments-target="threadsLine" data-testid="allotments-threads-total"></p>
+                        <p class="text-ink-body" data-allotments-target="slotsLine" data-testid="allotments-slots-total"></p>
+                        <ul class="sr-only" data-allotments-target="legend"></ul>
+                    </div>
+                </div>
+                <div class="hidden" data-allotments-target="banner" data-testid="allotments-overallocation">
+                    <twig:Alert class="border-transparent bg-signal-faded text-signal-darker dark:text-signal">
+                        <twig:ux:icon name="lucide:triangle-alert" />
+                        <twig:Alert:Title data-allotments-target="bannerTitle"></twig:Alert:Title>
+                        <twig:Alert:Description class="text-ink-body">Allowed: allotments are ceilings enforced by CPU slices, not reservations. When projects peak together they share the host by weight and get throttled; lower a ceiling if a project needs a guarantee.</twig:Alert:Description>
+                    </twig:Alert>
+                </div>
+                <div class="hidden" data-allotments-target="errorBox" role="alert" data-testid="allotments-error">
+                    <twig:Alert variant="destructive">
+                        <twig:ux:icon name="lucide:circle-alert" />
+                        <twig:Alert:Title data-allotments-target="errorText"></twig:Alert:Title>
+                    </twig:Alert>
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 border-b border-hairline p-4" data-testid="allotments-quick">
+                <twig:Button type="button" variant="outline" class="min-h-11 md:min-h-8" data-action="click->allotments#evenSplit" data-testid="allotments-even">Even split</twig:Button>
+                <twig:Button type="button" variant="outline" class="min-h-11 md:min-h-8" data-action="click->allotments#restore" data-testid="allotments-restore">Restore saved</twig:Button>
+                <div class="flex flex-wrap items-center gap-2">
+                    <label for="allotments-prio-project" class="text-ink-muted">Prioritise</label>
+                    <select id="allotments-prio-project" class="min-h-11 rounded-lg border border-input bg-background px-2 md:min-h-8" data-allotments-target="prioProject" data-testid="allotments-prio-project"></select>
+                    <label for="allotments-prio-pct" class="sr-only">Share of the host</label>
+                    <select id="allotments-prio-pct" class="min-h-11 rounded-lg border border-input bg-background px-2 md:min-h-8" data-allotments-target="prioPct" data-testid="allotments-prio-pct">
+                        <option value="50">50 %</option>
+                        <option value="70" selected>70 %</option>
+                        <option value="90">90 %</option>
+                    </select>
+                    <twig:Button type="button" variant="outline" class="min-h-11 md:min-h-8" data-action="click->allotments#prioritise" data-testid="allotments-prio-apply">Apply</twig:Button>
+                </div>
+            </div>
+
+            <p class="p-4 text-ink-muted" data-allotments-target="status" role="status">Loading…</p>
+            <ul class="grid gap-0" data-allotments-target="rows" data-testid="allotments-rows"></ul>
+            <p class="hidden p-4 text-sm text-ink-muted" data-allotments-target="slices" data-testid="allotments-not-under-slice"></p>
+        </div>
+
+        <footer class="flex items-center justify-between gap-2 border-t border-hairline p-4">
+            <p class="text-ink-muted" aria-live="polite" data-allotments-target="changes" data-testid="allotments-changes">0 changes</p>
+            <div class="flex gap-2">
+                <twig:Button type="button" variant="outline" class="min-h-11 md:min-h-8" data-action="click->allotments#cancel" data-testid="allotments-cancel">Cancel</twig:Button>
+                <twig:Button type="button" class="min-h-11 md:min-h-8" data-action="click->allotments#save" data-allotments-target="save" disabled data-testid="allotments-save">Save allotments</twig:Button>
+            </div>
+        </footer>
+    </dialog>
+
+    <template data-allotments-target="rowTemplate">
+        <li class="grid gap-3 border-b border-hairline border-s-4 border-s-transparent p-4" data-row>
+            <div class="flex items-center justify-between gap-2">
+                <div class="flex min-w-0 items-center gap-2">
+                    <span class="inline-flex size-6 shrink-0 items-center justify-center rounded text-xs font-bold text-white" data-swatch aria-hidden="true"></span>
+                    <span class="truncate font-medium text-ink-display" data-name></span>
+                </div>
+                <button type="button" class="inline-flex min-h-11 items-center rounded-lg px-2 text-sm text-ink-muted hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none md:min-h-8" data-reset>Reset<span class="sr-only"> this project</span></button>
+            </div>
+            <div class="grid gap-1">
+                <div class="flex items-center gap-2">
+                    <label class="w-16 shrink-0 text-ink-muted" data-threads-label>Threads</label>
+                    <input type="range" min="0" step="1" class="allot-range h-11 min-w-0 flex-1 cursor-pointer md:h-6" data-threads-range data-testid="allotments-threads-range">
+                    <input type="number" min="0" step="1" inputmode="numeric" class="h-11 w-20 rounded-lg border border-input bg-background px-2 text-end md:h-8" data-threads-number data-testid="allotments-threads-number">
+                </div>
+                <p class="ps-[4.5rem] text-xs text-signal-darker dark:text-signal" data-threads-hint></p>
+                <p class="ps-[4.5rem] text-xs text-danger" data-threads-error role="alert"></p>
+            </div>
+            <div class="grid gap-1">
+                <div class="flex flex-wrap items-center gap-2">
+                    <span class="w-16 shrink-0 text-ink-muted" data-slots-label>Slots</span>
+                    <button type="button" class="inline-flex size-11 items-center justify-center rounded-lg border border-input hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none md:size-8" data-slots-minus data-testid="allotments-slots-minus"><span aria-hidden="true">−</span><span class="sr-only">Fewer slots</span></button>
+                    <input type="range" min="1" step="1" class="allot-range h-11 min-w-24 flex-1 cursor-pointer md:h-6" data-slots-range data-testid="allotments-slots-range">
+                    <input type="number" min="1" step="1" inputmode="numeric" class="h-11 w-20 rounded-lg border border-input bg-background px-2 text-center md:h-8" data-slots-number data-testid="allotments-slots-number">
+                    <button type="button" class="inline-flex size-11 items-center justify-center rounded-lg border border-input hover:bg-muted focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-none md:size-8" data-slots-plus data-testid="allotments-slots-plus"><span aria-hidden="true">+</span><span class="sr-only">More slots</span></button>
+                    <label class="inline-flex min-h-11 items-center gap-2 md:min-h-8"><input type="checkbox" class="size-5 md:size-4" data-slots-unlimited data-testid="allotments-slots-unlimited"> unlimited</label>
+                </div>
+                <p class="ps-[4.5rem] text-xs text-danger" data-slots-error role="alert"></p>
+            </div>
+            <details class="text-xs text-ink-muted" data-templates-box>
+                <summary class="inline-flex min-h-11 cursor-pointer items-center md:min-h-0" data-templates-summary></summary>
+                <ul class="grid gap-0.5 ps-4" data-templates-list></ul>
+            </details>
+        </li>
+    </template>
+</div>

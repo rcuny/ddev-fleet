@@ -194,6 +194,28 @@ final class RouterConvergerTest extends PortMirrorTestCase
         });
     }
 
+    public function testARepairThatTheGuardWouldRefuseLeavesTheInstanceRunning(): void
+    {
+        $this->mirror->sync();
+        $this->healthy();
+        $this->live->script(self::BASE);
+        $instance = $this->instance();
+        $dir = $this->checkout($instance);
+        mkdir($dir.'/.ddev', 0o750, true);
+        file_put_contents($dir.'/.ddev/config.bridge.yaml', "hooks:\n  post-start:\n    - exec-host: id\n");
+        $job = $this->job('deploy', $instance);
+
+        new PortMirrorConvergeStep($this->converger, $this->preStartGate())->run(new DeployContext($instance, $this->project, $dir, [], $this->logFor($job), $this->secretRenderer));
+
+        self::assertSame([], $this->runner->callsMatching(['ddev', 'start']), 'no start');
+        self::assertSame([], $this->runner->callsMatching(['ddev', 'stop']), 'no stop');
+        self::assertSame([], $this->runner->callsMatching(['ddev', 'restart']), 'no restart');
+        $log = $this->logText($job);
+        self::assertStringContainsString('repair skipped: guard would refuse (.ddev/config.bridge.yaml:hooks.post-start[0].exec-host)', $log);
+        $audit = $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'repair.skipped']);
+        self::assertCount(1, $audit);
+    }
+
     public function testTheSyncStepRunsBeforeStartAndTheConvergeStepNeverFailsTheDeploy(): void
     {
         $sync = new PortMirrorSyncStep($this->mirror);
