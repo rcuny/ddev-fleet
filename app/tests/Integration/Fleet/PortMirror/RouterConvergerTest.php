@@ -197,7 +197,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
     public function testTheSyncStepRunsBeforeStartAndTheConvergeStepNeverFailsTheDeploy(): void
     {
         $sync = new PortMirrorSyncStep($this->mirror);
-        $converge = new PortMirrorConvergeStep($this->converger, $this->isolation());
+        $converge = new PortMirrorConvergeStep($this->converger, $this->preStartGate());
         self::assertSame(StepPhase::BeforeStart, $sync->phase());
         self::assertSame(StepPhase::AfterStart, $converge->phase());
 
@@ -227,7 +227,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
         $instance = $this->instance();
         $job = $this->job('deploy', $instance);
 
-        new PortMirrorConvergeStep($this->converger, $this->isolation())->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
+        new PortMirrorConvergeStep($this->converger, $this->preStartGate())->run(new DeployContext($instance, $this->project, $this->checkout($instance), [], $this->logFor($job), $this->secretRenderer));
 
         self::assertStringNotContainsString('port mirror', $this->logText($job));
         self::assertSame([], $this->argvs());
@@ -245,7 +245,7 @@ final class RouterConvergerTest extends PortMirrorTestCase
         $job = $this->job('deploy', $instance);
         $context = new DeployContext($instance, $this->project, $dir, [], $this->logFor($job), $this->secretRenderer);
 
-        new PortMirrorConvergeStep($this->converger, $this->isolation())->run($context);
+        new PortMirrorConvergeStep($this->converger, $this->preStartGate())->run($context);
 
         self::assertNotContains('ddev start', $this->commandNames());
         self::assertStringContainsString('services.web.privileged', $this->logText($job));

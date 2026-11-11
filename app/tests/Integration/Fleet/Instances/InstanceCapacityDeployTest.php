@@ -234,7 +234,7 @@ final class InstanceCapacityDeployTest extends InstanceJobTestCase
             $this->ddev,
             $this->paths,
             $this->feed,
-            $this->isolation(),
+            $this->preStartGate(),
             $this->cgroupWriter(),
         );
         $job = $this->job('restart', $instance);
@@ -259,7 +259,7 @@ final class InstanceCapacityDeployTest extends InstanceJobTestCase
             $this->ddev,
             $this->paths,
             $this->feed,
-            $this->isolation(),
+            $this->preStartGate(),
         );
         $job = $this->job('restart', $instance);
 

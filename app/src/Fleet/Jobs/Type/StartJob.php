@@ -9,7 +9,7 @@ use App\Domain\Instance\InstanceState;
 use App\Domain\Job\Job;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\FleetPaths;
-use App\Fleet\Isolation\InstanceIsolation;
+use App\Fleet\Isolation\PreStartGate;
 use App\Fleet\Jobs\JobFailed;
 use App\Fleet\Jobs\JobFeed;
 use App\Fleet\Jobs\JobLog;
@@ -33,7 +33,7 @@ final readonly class StartJob implements JobType
         private JobFeed $feed,
         private ClockInterface $clock,
         private InstanceSshAgent $agent,
-        private InstanceIsolation $isolation,
+        private PreStartGate $preStart,
     ) {
     }
 
@@ -75,7 +75,7 @@ final readonly class StartJob implements JobType
             }
         }
 
-        $this->isolation->enforce($instance, $dir, $log);
+        $this->preStart->enforce($instance, $dir, $log);
         try {
             $result = $this->ddev->start($dir, $log->output(...), $timeout);
             if (!$result->isSuccess() && true === ($params['retryPortConflict'] ?? false) && Ddev::isPortConflict(self::output($result))) {

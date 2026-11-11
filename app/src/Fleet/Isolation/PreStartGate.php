@@ -16,7 +16,7 @@ use App\Fleet\Jobs\JobLog;
  * ComposeOverrideGuard and refuses, naming the file and key. A project an admin switched `allow_privileged_overrides` on for is
  * let through, and the violations are logged and audited.
  */
-final readonly class InstanceIsolation
+final readonly class PreStartGate
 {
     public function __construct(
         private ComposeOverrideGuard $guard,

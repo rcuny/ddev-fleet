@@ -118,9 +118,9 @@ abstract class InstanceJobTestCase extends KernelTestCase
         $this->template = $this->saveTemplate('full', []);
     }
 
-    protected function isolation(): \App\Fleet\Isolation\InstanceIsolation
+    protected function preStartGate(): \App\Fleet\Isolation\PreStartGate
     {
-        return new \App\Fleet\Isolation\InstanceIsolation(new \App\Fleet\Isolation\ComposeOverrideGuard(), new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock), $this->paths);
+        return new \App\Fleet\Isolation\PreStartGate(new \App\Fleet\Isolation\ComposeOverrideGuard(), new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock), $this->paths);
     }
 
     /**
@@ -147,7 +147,7 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->agent,
             $this->feed,
             $this->clock,
-            $this->isolation(),
+            $this->preStartGate(),
             $this->steps,
             $cgroup,
             $pushCheck,
