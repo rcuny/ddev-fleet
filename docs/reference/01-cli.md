@@ -565,12 +565,17 @@ fleet instance:destroy [--all] [--project PROJECT] [--state STATE] [-y|--yes] [-
 List instances whose db is still on the shared ddev network (--apply: restart the running ones).
 
 ```
-fleet instance:isolate [--apply] [-y|--yes]
+fleet instance:isolate [--apply] [--force-refused] [-y|--yes] [--] [<selectors>...]
 ```
+
+| Argument | Required | Description |
+|---|---|---|
+| `selectors...` | no | Instance ids or project names to consider (default: every instance) |
 
 | Option | Shortcut | Description | Default |
 |---|---|---|---|
 | `--apply` |  | Queue a restart for every running exposed instance (ends what runs in their containers) |  |
+| `--force-refused` |  | Also restart instances the deploy guard refuses (they stay down unless the guard passes; always asks to confirm) |  |
 | `--yes` | `-y` | Do not ask for confirmation (--apply) |  |
 
 ### fleet instance:list

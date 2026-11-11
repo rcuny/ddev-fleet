@@ -4,32 +4,30 @@ declare(strict_types=1);
 
 namespace App\Fleet\Instances;
 
+use App\Fleet\Audit\AuditLog;
 use App\Fleet\Ddev\Ddev;
+use App\Fleet\Ddev\DdevUnavailable;
 use App\Fleet\Ssh\AtomicFile;
-use Symfony\Component\Yaml\Tag\TaggedValue;
 use Symfony\Component\Yaml\Yaml;
 
 /**
- * Network isolation of an instance's database (FLE-297), as `.ddev/docker-compose.zzz-fleet-isolation.yaml`.
+ * Network isolation of an instance's service containers (FLE-297, reworked in FLE-307).
  *
  * DDEV attaches every `db` container to the shared `ddev_default` network with the alias `db` (and its container name),
  * so a web container of ANOTHER project, also on `ddev_default`, resolves `db` or `ddev-<project>-db` to someone else's
- * database and reaches it with DDEV's default credentials (db/db). Only `web` needs `ddev_default` (ddev-router routes to
- * it); the database is reached over the project's own `default` network. So:
+ * database and reaches it with DDEV's default credentials (db/db). Only `web` (and a service the router publishes) needs
+ * `ddev_default`.
  *
- *  - an instance WITH a db service: the db service's networks are replaced (`!override`, a plain merge would only add
- *    to DDEV's list) by the project network alone, so it leaves `ddev_default` and loses the generic alias there;
- *  - an instance WITHOUT one (`omit_containers: [db]`): `db` and `ddev-<project>-db` are pinned to 127.0.0.1 in EVERY
- *    service, so the names can never resolve to another project's database.
+ * The mechanism is {@see self::converge()}: after every start, restart and router repair, and on every watcher pass, it
+ * disconnects the project's non-web containers (db, mailpit, typesense, solr, redis...) from `ddev_default` when attached,
+ * except a non-db service carrying a traefik router label key (the db is always detached, whatever its labels). A compose override cannot do it: DDEV connects the db container to `ddev_default`
+ * itself, outside the compose merge (live finding FLE-307, DDEV 1.25.5, the `!override` file was ignored), so no override
+ * is written for an instance with a db and a stale one is removed. An instance WITHOUT a db (`omit_containers: [db]`)
+ * still gets a compose file that pins `db` and `ddev-<project>-db` to 127.0.0.1 in EVERY service, so the names can never
+ * resolve to another project's database.
  *
- * The file name sorts after other `docker-compose.*.yaml` files, but DDEV loads a project's `docker-compose.override.yaml`
- * last, so a project can still undo this file. That is why every start path calls {@see self::verify()} afterwards: it
- * reads the live networks of the db container, disconnects it from `ddev_default` when it is still there and fails the
- * job either way. `!override` needs docker compose >= {@see self::MIN_COMPOSE} and DDEV >= {@see self::MIN_DDEV}
- * ({@see self::assertSupported()}).
- *
- * Like the cgroup override the file carries no `#ddev-generated` marker, so DDEV never overwrites it. The service list
- * comes from `ddev debug compose-config`, which works on a stopped project.
+ * The disconnect is logged as an info line and audited once per event; the job fails only when the disconnect fails or the
+ * container is still attached afterwards.
  */
 final readonly class InstanceDbIsolationWriter
 {
@@ -37,11 +35,9 @@ final readonly class InstanceDbIsolationWriter
     /** The name of the first (FLE-297) version of the file; removed on every write. */
     public const string LEGACY_PATH = '.ddev/docker-compose.fleet-db-isolation.yaml';
     public const string MARKER = '# fleet-managed: instance database isolation (FLE-297)';
-    public const string MIN_DDEV = '1.24.0';
-    public const string MIN_COMPOSE = '2.24.4';
     public const string SHARED_NETWORK = 'ddev_default';
 
-    public function __construct(private Ddev $ddev)
+    public function __construct(private Ddev $ddev, private ?AuditLog $audit = null)
     {
     }
 
@@ -53,7 +49,7 @@ final readonly class InstanceDbIsolationWriter
     public static function render(array $services, string $project): array
     {
         if (\in_array('db', $services, true)) {
-            return ['services' => ['db' => ['networks' => new TaggedValue('override', ['default' => new \stdClass()])]]];
+            return [];
         }
         $pins = ['db:127.0.0.1', 'ddev-'.$project.'-db:127.0.0.1'];
         $document = [];
@@ -69,78 +65,91 @@ final readonly class InstanceDbIsolationWriter
      *
      * @param \Closure(string): void $log
      *
-     * @return string the path written, relative to $dir
+     * @return string|null the path written, relative to $dir (null: an instance with a db needs no file)
      *
-     * @throws \RuntimeException when DDEV or docker compose is too old, the services cannot be listed or the file cannot be written
+     * @throws \RuntimeException when the services cannot be listed or the file cannot be written
      */
-    public function write(string $dir, string $project, \Closure $log): string
+    public function write(string $dir, string $project, \Closure $log): ?string
     {
-        $this->assertSupported();
         $services = $this->ddev->composeServices($dir);
-        $yaml = self::MARKER."\n".Yaml::dump(self::render($services, $project), 6, 2, Yaml::DUMP_OBJECT_AS_MAP);
-        AtomicFile::write($dir.'/'.self::RELATIVE_PATH, $yaml, 0o640);
         if (is_file($dir.'/'.self::LEGACY_PATH)) {
             @unlink($dir.'/'.self::LEGACY_PATH);
         }
-        $log(\in_array('db', $services, true)
-            ? 'wrote '.self::RELATIVE_PATH.': the db container leaves the shared '.self::SHARED_NETWORK.' network'
-            : 'wrote '.self::RELATIVE_PATH.': no db container, "db" is pinned to 127.0.0.1 in '.\count($services).' service(s)');
+        $document = self::render($services, $project);
+        if ([] === $document) {
+            // A db instance: converge() does the work after the start; the FLE-297 override file did nothing (FLE-307).
+            if (is_file($dir.'/'.self::RELATIVE_PATH)) {
+                @unlink($dir.'/'.self::RELATIVE_PATH);
+                $log('removed '.self::RELATIVE_PATH.': the isolation is done by disconnecting the containers after each start');
+            }
+
+            return null;
+        }
+        AtomicFile::write($dir.'/'.self::RELATIVE_PATH, self::MARKER."\n".Yaml::dump($document, 6, 2, Yaml::DUMP_OBJECT_AS_MAP), 0o640);
+        $log('wrote '.self::RELATIVE_PATH.': no db container, "db" is pinned to 127.0.0.1 in '.\count($services).' service(s)');
 
         return self::RELATIVE_PATH;
     }
 
     /**
-     * Call it after EVERY successful start or restart. The proof that the override took effect: the db container must not
-     * be on ddev_default. If it is, it is disconnected at once and the job fails with a clear message.
+     * The containers of the project that are on ddev_default although only `web` (and a routed service) belongs there.
+     *
+     * @return list<string>
+     *
+     * @throws \RuntimeException when docker cannot be asked
+     */
+    public function exposed(string $project): array
+    {
+        try {
+            $containers = $this->ddev->projectContainers($project);
+        } catch (DdevUnavailable $e) {
+            throw new \RuntimeException('Cannot verify the isolation of '.$project.': '.$e->getMessage(), 0, $e);
+        }
+        $exposed = [];
+        foreach ($containers as $container) {
+            if ('web' === $container['service'] || ('db' !== $container['service'] && $container['routed'])) {
+                continue;
+            }
+            $networks = $this->ddev->containerNetworks($container['name']);
+            if (null !== $networks && \in_array(self::SHARED_NETWORK, $networks, true)) {
+                $exposed[] = $container['name'];
+            }
+        }
+
+        return $exposed;
+    }
+
+    /**
+     * The mechanism (FLE-307). Call it after EVERY successful start or restart, after a router repair start and on every
+     * watcher pass: every container of the project except `web` (and any container the router publishes) that is on
+     * ddev_default is disconnected, logged and audited once. Idempotent; a project without containers is a no-op.
      *
      * @param \Closure(string): void $log
      *
-     * @throws \RuntimeException when the db container is (or was) still on the shared network, or cannot be inspected
+     * @return list<string> the containers disconnected
+     *
+     * @throws \RuntimeException when a disconnect fails, a container is still attached after it, or docker cannot be asked
      */
-    public function verify(string $dir, string $project, \Closure $log): void
+    public function converge(string $project, \Closure $log): array
     {
-        $file = $dir.'/'.self::RELATIVE_PATH;
-        if (!is_file($file) || !str_contains((string) file_get_contents($file), '!override')) {
-            return; // no db service: nothing to inspect, the pins are static
+        $cut = [];
+        foreach ($this->exposed($project) as $name) {
+            if (!$this->ddev->disconnectNetwork(self::SHARED_NETWORK, $name)) {
+                $log('SECURITY: '.$name.' is on '.self::SHARED_NETWORK.' and could not be disconnected');
+                throw new \RuntimeException($name.' is attached to '.self::SHARED_NETWORK.' and disconnecting it failed: stop the instance or run "docker network disconnect '.self::SHARED_NETWORK.' '.$name.'".');
+            }
+            $left = $this->ddev->containerNetworks($name);
+            if (null !== $left && \in_array(self::SHARED_NETWORK, $left, true)) {
+                $log('SECURITY: '.$name.' is still on '.self::SHARED_NETWORK.' after the disconnect');
+                throw new \RuntimeException($name.' is still attached to '.self::SHARED_NETWORK.' after it was disconnected.');
+            }
+            $log('isolation: disconnected '.$name.' from '.self::SHARED_NETWORK.' (DDEV attaches it there itself)');
+            $cut[] = $name;
         }
-        $container = 'ddev-'.$project.'-db';
-        $networks = $this->ddev->containerNetworks($container);
-        if (null === $networks) {
-            throw new \RuntimeException('Cannot verify the database isolation: docker does not know the container '.$container.'.');
+        if ([] !== $cut) {
+            $this->audit?->record('system', AuditLog::DB_ISOLATION_DISCONNECT, $project.': '.implode(', ', $cut));
         }
-        if (!\in_array(self::SHARED_NETWORK, $networks, true)) {
-            $log('verified: '.$container.' is not on '.self::SHARED_NETWORK.' (networks: '.implode(', ', $networks).')');
 
-            return;
-        }
-        $cut = $this->ddev->disconnectNetwork(self::SHARED_NETWORK, $container);
-        $log('SECURITY: '.$container.' is on '.self::SHARED_NETWORK.' although the isolation override is in place (a project docker-compose file overrides it?)');
-
-        throw new \RuntimeException($container.' is attached to '.self::SHARED_NETWORK.', so other projects could reach its database. '.($cut ? 'It was disconnected from that network; the instance keeps running.' : 'Disconnecting it failed: stop the instance or run "docker network disconnect '.self::SHARED_NETWORK.' '.$container.'".').' Look for a project docker-compose.override.yaml that sets the networks of the db service.');
-    }
-
-    /**
-     * @throws \RuntimeException below the minimum versions, or when they cannot be read (fail closed)
-     */
-    public function assertSupported(): void
-    {
-        $ddev = $this->ddev->ddevVersion();
-        if (null === $ddev || version_compare($ddev, self::MIN_DDEV, '<')) {
-            throw new \RuntimeException(\sprintf('The database isolation needs DDEV >= %s (found %s).', self::MIN_DDEV, $ddev ?? 'no readable version'));
-        }
-        $compose = $this->ddev->composeVersion();
-        if (null === $compose || version_compare($compose, self::MIN_COMPOSE, '<')) {
-            throw new \RuntimeException(\sprintf('The database isolation needs docker compose >= %s for the !override tag (found %s).', self::MIN_COMPOSE, $compose ?? 'no readable version'));
-        }
-    }
-
-    /**
-     * The file exists AND has the content this version writes (the marker and either the network override or the pins).
-     */
-    public static function isIsolated(string $dir): bool
-    {
-        $text = @file_get_contents($dir.'/'.self::RELATIVE_PATH);
-
-        return \is_string($text) && str_starts_with($text, self::MARKER) && (str_contains($text, '!override') || str_contains($text, 'extra_hosts'));
+        return $cut;
     }
 }
