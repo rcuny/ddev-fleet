@@ -395,6 +395,7 @@ final class ProjectController extends AbstractController
         $form = $this->createForm(NetworkType::class, [
             'additionalHostnames' => implode("\n", $project->additionalHostnames()),
             'typesense' => $project->typesense(),
+            'typesenseDashboard' => $project->typesenseDashboard(),
         ]);
 
         if ($request->isMethod('POST')) {
@@ -412,7 +413,7 @@ final class ProjectController extends AbstractController
                 $data = $this->formData($form);
                 $hostnames = TextLines::split($form, 'additionalHostnames', $data);
                 if (null !== $hostnames) {
-                    $input = new NetworkInput($hostnames, true === ($data['typesense'] ?? false), $selected, $requested);
+                    $input = new NetworkInput($hostnames, true === ($data['typesense'] ?? false), $selected, $requested, true === ($data['typesenseDashboard'] ?? false));
                     try {
                         $this->network->validate($project, $input);
                         $changes = $this->network->plan($project, $input);
@@ -525,7 +526,7 @@ final class ProjectController extends AbstractController
 
     private function sameTypesense(Project $project, NetworkInput $input): bool
     {
-        return $project->typesense() === $input->typesense;
+        return $project->typesense() === $input->typesense && $project->typesenseDashboard() === ($input->typesense && $input->typesenseDashboard);
     }
 
     /**

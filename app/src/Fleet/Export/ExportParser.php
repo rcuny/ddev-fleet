@@ -85,7 +85,7 @@ final class ExportParser
     {
         $path = 'project';
         $keys = ['name', 'git', 'default_branch', 'default_template', 'additional_hostnames', 'ports', 'git_bot', 'issue_id_regexp', 'display_submodule_branch', 'typesense'];
-        if (!$this->keys($value, $path, $keys, ['container_ssh'])) {
+        if (!$this->keys($value, $path, $keys, ['container_ssh', 'typesense_dashboard'])) {
             return [];
         }
         \assert(\is_array($value));
@@ -115,6 +115,7 @@ final class ExportParser
             'display_submodule_branch' => $this->nullableString($value['display_submodule_branch'], 'project.display_submodule_branch'),
             'typesense' => $this->bool($value['typesense'], 'project.typesense'),
             // Optional, so a file from before the flag existed still imports (it means off, the safe default).
+            'typesense_dashboard' => \array_key_exists('typesense_dashboard', $value) && $this->bool($value['typesense_dashboard'], 'project.typesense_dashboard'),
             'container_ssh' => \array_key_exists('container_ssh', $value) && $this->bool($value['container_ssh'], 'project.container_ssh'),
         ];
     }

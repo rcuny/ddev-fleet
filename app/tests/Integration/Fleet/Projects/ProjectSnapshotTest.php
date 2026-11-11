@@ -77,6 +77,7 @@ final class ProjectSnapshotTest extends KernelTestCase
             'issue_id_regexp' => '(?:ABC|XYZ)-\d{1,6}',
             'display_submodule_branch' => 'web/modules/custom',
             'typesense' => true,
+            'typesense_dashboard' => false,
             'container_ssh' => false,
             'cpu_threads' => null,
             'slots' => null,
@@ -122,7 +123,7 @@ final class ProjectSnapshotTest extends KernelTestCase
         $data = ProjectSnapshot::fromProject($projects->findByName('blog') ?? self::fail())->toArray();
 
         self::assertSame(
-            ['name', 'git', 'default_branch', 'default_template', 'additional_hostnames', 'ports', 'git_bot', 'issue_id_regexp', 'display_submodule_branch', 'typesense', 'container_ssh', 'cpu_threads', 'slots', 'templates', 'created_at', 'updated_at'],
+            ['name', 'git', 'default_branch', 'default_template', 'additional_hostnames', 'ports', 'git_bot', 'issue_id_regexp', 'display_submodule_branch', 'typesense', 'typesense_dashboard', 'container_ssh', 'cpu_threads', 'slots', 'templates', 'created_at', 'updated_at'],
             array_keys($data),
         );
         self::assertNull($data['default_branch']);

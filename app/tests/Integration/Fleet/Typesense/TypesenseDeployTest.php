@@ -196,6 +196,18 @@ final class TypesenseDeployTest extends InstanceJobTestCase
         self::assertSame($keys->search, json_decode((string) $this->requests[2]['options']['body'], true)['value']);
     }
 
+    public function testASearchKeyWhoseValuePrefixMatchesTheCurrentOneIsKept(): void
+    {
+        $this->enable();
+        $keys = $this->keys->forInstance($this->project, 'acme--main');
+        // Typesense lists the first four characters of a key's value followed by "...".
+        $prefix = substr($keys->search, 0, 4).'...';
+
+        $this->deploy($this->searchStep([new MockResponse('{"keys":[{"id":7,"description":"fleet-search-only","value_prefix":"'.$prefix.'"}]}')]));
+
+        self::assertCount(1, $this->requests);
+    }
+
     public function testAnExistingSearchKeyIsNotCreatedAgain(): void
     {
         $this->enable();

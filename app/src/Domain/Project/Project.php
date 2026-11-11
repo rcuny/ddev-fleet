@@ -63,6 +63,10 @@ class Project
     #[ORM\Column(type: Types::BOOLEAN)]
     private bool $typesense = false;
 
+    /** FLE-300: opt-in to the Typesense dashboard service (off by default: it has no authentication of its own). */
+    #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
+    private bool $typesenseDashboard = false;
+
     /** Opt-in: a dedicated ssh-agent with the push key for git over SSH inside the web container (FLE-145). */
     #[ORM\Column(type: Types::BOOLEAN, options: ['default' => false])]
     private bool $containerSsh = false;
@@ -293,6 +297,17 @@ class Project
     {
         $this->cpuThreads = $cpuThreads;
         $this->slots = $slots;
+        $this->touch($now);
+    }
+
+    public function typesenseDashboard(): bool
+    {
+        return $this->typesenseDashboard;
+    }
+
+    public function changeTypesenseDashboard(bool $enabled, ?\DateTimeImmutable $now = null): void
+    {
+        $this->typesenseDashboard = $enabled;
         $this->touch($now);
     }
 

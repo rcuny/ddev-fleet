@@ -6,7 +6,7 @@ Moving a project to another host should take minutes, not an afternoon. Export w
 
 | Included | Not included |
 |---|---|
-| `project` settings and the names of its ports; `ports` (public and router numbers); every `templates` entry (including `ssh_keys` names and the optional `ssh_identities`, `push_and_extras` or `extras_only`, and the optional booleans `database` (default true) and `agent` (default false)); `webhooks` rules; `schedules` of its instances (by label, e.g. `main`); `secrets` only with a passphrase. | Assets, users, SSH keys, host settings, instance state, webhook URLs and secrets (the new host issues its own: use **Rotate** on the Integrations tab). |
+| `project` settings (including the optional `container_ssh` and `typesense_dashboard` flags, default off) and the names of its ports; `ports` (public and router numbers); every `templates` entry (including `ssh_keys` names and the optional `ssh_identities`, `push_and_extras` or `extras_only`, and the optional booleans `database` (default true) and `agent` (default false)); `webhooks` rules; `schedules` of its instances (by label, e.g. `main`); `secrets` only with a passphrase. | Assets, users, SSH keys, host settings, instance state, webhook URLs and secrets (the new host issues its own: use **Rotate** on the Integrations tab). |
 
 The file starts with `"format": "fleet-project-export"` and `"version": 1`. A host refuses a version it does not know.
 

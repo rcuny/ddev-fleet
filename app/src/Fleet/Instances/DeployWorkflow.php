@@ -167,7 +167,10 @@ final class DeployWorkflow
         $written[] = $sshKnownHosts;
         $written[] = InstanceCgroupWriter::RELATIVE_PATH;
         if (null !== $this->isolation) {
-            $written[] = $this->isolation->write($dir);
+            $override = $this->isolation->write($dir, $project, $log->line(...));
+            if (null !== $override) {
+                $written[] = $override;
+            }
         }
         array_push($written, ...$this->setUpContainerAgent($instance, $project, $template, $dir, $log));
         GitExclude::add($dir, $written);

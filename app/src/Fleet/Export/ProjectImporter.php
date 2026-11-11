@@ -520,6 +520,7 @@ final readonly class ProjectImporter
             $project['display_submodule_branch'],
             $project['typesense'],
             $project['container_ssh'],
+            typesenseDashboard: $project['typesense_dashboard'],
         );
     }
 

@@ -105,7 +105,7 @@
       - --router-https-port={{ fleet_ddev_router_https_port }}
       - --router-bind-all-interfaces=false
       - --instrumentation-opt-in=false
-      - --omit-containers=ddev-ssh-agent
+      - "--omit-containers={{ ((ddev_global.get('omit_containers', []) or []) + ['ddev-ssh-agent']) | unique | join(',') }}"
   become: true
   become_user: "{{ fleet_user }}"
   environment:

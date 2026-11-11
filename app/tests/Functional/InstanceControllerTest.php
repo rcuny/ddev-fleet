@@ -16,6 +16,7 @@ use App\Domain\Project\Project;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\Template;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Instances\InstanceIsolation;
 use App\Tests\Support\AdminTestCase;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\DomCrawler\Crawler;
@@ -403,6 +404,23 @@ final class InstanceControllerTest extends AdminTestCase
         yield 'dot dot' => ['..%2f..'];
         yield 'space' => ['a%20b'];
         yield 'too long' => [str_repeat('a', 30).'--'.str_repeat('b', 33)];
+    }
+
+    public function testTheMailpitLoginIsShownToOperatorsAndNeverToAForeignMember(): void
+    {
+        $this->seed('acme', [InstanceState::Running]);
+        $password = self::getContainer()->get(InstanceIsolation::class)->mailpitCredentials('acme--i1')['password'];
+
+        $this->as('admin');
+        $this->open('/instances/acme--i1');
+        self::assertResponseStatusCodeSame(200);
+        self::assertStringContainsString($password, $this->body());
+
+        // the stand-in member belongs to demo only: no page, and the password is nowhere in the answer
+        $this->as('member');
+        $this->open('/instances/acme--i1');
+        self::assertResponseStatusCodeSame(404);
+        self::assertStringNotContainsString($password, $this->body());
     }
 
     public function testDetailPageShowsTheInstance(): void

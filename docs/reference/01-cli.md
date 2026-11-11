@@ -136,7 +136,7 @@ fleet project:show [--format FORMAT] [--json] [--] <name>
 Change a project (only the options you give).
 
 ```
-fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--container-ssh|--no-container-ssh] [--unset UNSET] [--format FORMAT] [--json] [--] <name>
+fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname HOSTNAME] [--port PORT] [--git-bot GIT-BOT] [--git-bot-name GIT-BOT-NAME] [--git-bot-email GIT-BOT-EMAIL] [--issue-id-regexp ISSUE-ID-REGEXP] [--display-submodule-branch DISPLAY-SUBMODULE-BRANCH] [--cpu-threads CPU-THREADS] [--slots SLOTS] [--default-template DEFAULT-TEMPLATE] [--typesense|--no-typesense] [--typesense-dashboard|--no-typesense-dashboard] [--container-ssh|--no-container-ssh] [--unset UNSET] [--format FORMAT] [--json] [--] <name>
 ```
 
 | Argument | Required | Description |
@@ -158,6 +158,7 @@ fleet project:update [--git GIT] [--default-branch DEFAULT-BRANCH] [--hostname H
 | `--slots=VALUE` |  | Concurrent heavy runs across the project's templates: a number, or none for unlimited |  |
 | `--default-template=VALUE` |  | Template deployed when none is given (one of the project's templates) |  |
 | `--typesense / --no-typesense` |  | Give the project a Typesense search service (--no-typesense removes it) |  |
+| `--typesense-dashboard / --no-typesense-dashboard` |  | Run the Typesense dashboard service too (off by default: it has no authentication of its own; --no-typesense-dashboard turns it off) |  |
 | `--container-ssh / --no-container-ssh` |  | Give each instance its own ssh-agent with the push key for git over SSH in the web container (--no-container-ssh removes it) |  |
 | `--unset=VALUE (repeatable)` |  | Clear a value: default-branch, default-template, hostnames, ports, issue-id-regexp, display-submodule-branch (repeat for several) |  |
 | `--format=VALUE` |  | Output format: table (for people) or json (for scripts) | `table` |

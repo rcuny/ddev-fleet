@@ -45,6 +45,7 @@ final readonly class ProjectSnapshot
             'issue_id_regexp' => $project->issueIdRegexp(),
             'display_submodule_branch' => $project->displaySubmoduleBranch(),
             'typesense' => $project->typesense(),
+            'typesense_dashboard' => $project->typesenseDashboard(),
             'container_ssh' => $project->containerSsh(),
             'cpu_threads' => $project->cpuThreads(),
             'slots' => $project->slots(),
