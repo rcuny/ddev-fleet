@@ -104,6 +104,7 @@ final class HostSettingsController extends AbstractController
         private readonly AuditLog $audit,
         private readonly LoggerInterface $logger,
         private readonly ClockInterface $clock,
+        private readonly \App\Fleet\Host\Docker\DockerSocketCheck $dockerSocket,
     ) {
     }
 
@@ -575,6 +576,8 @@ final class HostSettingsController extends AbstractController
             // An identity saved before the rules were tightened (FLE-59) fails its next save: say so up front.
             'gitStoredInvalid' => 'git' === $tab && null === $submitted && [] !== GitIdentityRule::violations($host->gitUserName(), $host->gitUserEmail()),
             'workspace' => $this->workspace->run()->toArray(),
+            // FLE-298: a Docker socket that is not root:docker 0660 is warned about on every tab.
+            'dockerSocket' => $this->dockerSocket->check(),
             'tls' => 'certificates' === $tab ? $this->tlsStatus->read() : null,
             'mirror' => 'network' === $tab ? $this->mirrorView() : null,
             'capacity' => 'capacity' === $tab ? $this->capacity->report() : null,

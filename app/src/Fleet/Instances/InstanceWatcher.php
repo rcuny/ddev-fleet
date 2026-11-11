@@ -33,12 +33,14 @@ final class InstanceWatcher
     public const int RAM_SECONDS = 30;
     public const int PRUNE_SECONDS = 86400;
     public const int USAGE_SECONDS = 10;
+    public const int SOCKET_SECONDS = 60;
 
     private ?\DateTimeImmutable $listedAt = null;
     private ?\DateTimeImmutable $measuredAt = null;
     private ?\DateTimeImmutable $prunedAt = null;
     private ?\DateTimeImmutable $agentsAt = null;
     private ?\DateTimeImmutable $sampledAt = null;
+    private ?\DateTimeImmutable $socketAt = null;
 
     /** @var array<string, int> */
     private array $ram = [];
@@ -54,6 +56,7 @@ final class InstanceWatcher
         private readonly ?InstanceSshAgent $agent = null,
         private readonly LoggerInterface $logger = new NullLogger(),
         private readonly ?UsageSampler $usage = null,
+        private readonly ?\App\Fleet\Host\Docker\DockerSocketWatch $socket = null,
     ) {
     }
 
@@ -93,6 +96,16 @@ final class InstanceWatcher
                 $this->logger->warning('The capacity usage could not be sampled.', ['exception' => $e]);
             }
             $this->sampledAt = $now;
+        }
+
+        if (null !== $this->socket && (null === $this->socketAt || self::due($this->socketAt, $now, self::SOCKET_SECONDS))) {
+            // FLE-298: the Docker socket must stay root:docker 0660; a failure here must not stop the state updates.
+            try {
+                $this->socket->tick();
+            } catch (\Throwable $e) {
+                $this->logger->warning('The Docker socket could not be checked.', ['exception' => $e]);
+            }
+            $this->socketAt = $now;
         }
 
         return $changed;

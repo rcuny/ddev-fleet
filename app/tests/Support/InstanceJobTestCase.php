@@ -142,6 +142,8 @@ abstract class InstanceJobTestCase extends KernelTestCase
             $this->agent,
             $this->feed,
             $this->clock,
+            new \App\Fleet\Isolation\ComposeOverrideGuard(),
+            new \App\Fleet\Audit\AuditLog(new \App\Domain\Audit\AuditEntryRepository($this->em), $this->clock),
             $this->steps,
             $cgroup,
             $pushCheck,

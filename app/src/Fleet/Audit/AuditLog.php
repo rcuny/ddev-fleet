@@ -65,6 +65,13 @@ final readonly class AuditLog
     /** An admin turned a project's API terminal input on or off. */
     public const string PROJECT_API_TERMINAL = 'project.api-terminal';
 
+    /** An admin turned a project's privileged compose overrides on or off (FLE-298). */
+    public const string PROJECT_PRIVILEGED_OVERRIDES = 'project.privileged-overrides';
+    /** A deploy ran with the guard off for its project, with the violations it let through (FLE-298). */
+    public const string DEPLOY_OVERRIDES_ALLOWED = 'deploy.overrides-allowed';
+    /** The host's Docker socket was not root:docker 660 (FLE-298); the subject says what it was and whether it was restored. */
+    public const string HOST_DOCKER_SOCKET = 'host.docker-socket';
+
     public const string PROJECT_MEMBER_ADD = 'project.member.add';
     public const string PROJECT_MEMBER_REMOVE = 'project.member.remove';
 
