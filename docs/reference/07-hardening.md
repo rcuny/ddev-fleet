@@ -110,7 +110,7 @@ DDEV puts every project's `db` container on the shared `ddev_default` network un
 
 **Proof after each start.** DDEV loads a project's own `docker-compose.override.yaml` last, so a project file can undo ours. After every start or restart Fleet therefore inspects the live container (`docker inspect ddev-<project>-db`). If it is still on `ddev_default`, Fleet disconnects it, writes a `SECURITY:` line in the job log and fails the job. Nothing is silent.
 
-Instances deployed earlier keep the exposure until they restart: `fleet instance:isolate` lists them (it checks the file's content), `--apply` queues a restart of the running ones (opt-in, it ends what runs in the containers).
+Instances deployed earlier keep the exposure until they restart: `fleet instance:isolate` lists them (it checks the file's content), `--apply` queues a restart of the running ones (opt-in, it ends what runs in the containers). Pass instance ids or project names to narrow it. Instances the deploy guard refuses are skipped and reported (a restart would leave them stopped); `--force-refused` includes them after an interactive confirmation.
 
 Live check on a host (replace the project names): from a web container of a project **without** a db, `getent hosts db` must print `127.0.0.1`; from any web container, `mysql -hddev-<other>-db -udb -pdb -e 'show databases'` must fail; on the host `docker inspect ddev-<other>-db --format '{{json .NetworkSettings.Networks}}'` must not list `ddev_default`.
 
