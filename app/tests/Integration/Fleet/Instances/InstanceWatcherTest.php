@@ -22,7 +22,7 @@ final class InstanceWatcherTest extends InstanceJobTestCase
     /** @var list<string> */
     private array $published = [];
 
-    private function watcher(bool $withAgent = false): InstanceWatcher
+    private function watcher(bool $withAgent = false, bool $withIsolation = false, ?\Psr\Log\LoggerInterface $logger = null): InstanceWatcher
     {
         $hub = $this->createStub(HubInterface::class);
         $hub->method('publish')->willReturnCallback(function (Update $update): string {
@@ -43,6 +43,11 @@ final class InstanceWatcherTest extends InstanceJobTestCase
             $feed,
             90,
             $withAgent ? $this->agent : null,
+            $logger ?? new \Psr\Log\NullLogger(),
+            null,
+            null,
+            null,
+            $withIsolation ? new \App\Fleet\Instances\InstanceDbIsolationWriter($this->ddev) : null,
         );
     }
 
@@ -64,6 +69,58 @@ final class InstanceWatcherTest extends InstanceJobTestCase
         $this->em->clear();
 
         return $this->instances->find($instance->id())?->state() ?? self::fail('the instance vanished');
+    }
+
+    public function testTheWatcherRedisconnectsADbThatWasAttachedAgain(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $id = $instance->id();
+        $this->runner->expect(['ddev', 'list'], $this->ddevList([$id => 'running']));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
+
+        $this->watcher(false, true)->tick($this->clock->now());
+
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default', 'ddev-'.$id.'-db']));
+    }
+
+    public function testTheIsolationPassIsThrottledAndAFailureIsLoggedOncePerChange(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $id = $instance->id();
+        $logger = new class extends \Psr\Log\AbstractLogger {
+            public int $errors = 0;
+
+            public function log($level, \Stringable|string $message, array $context = []): void
+            {
+                if ('error' === $level) {
+                    ++$this->errors;
+                }
+            }
+        };
+        $this->runner->expect(['ddev', 'list'], $this->ddevList([$id => 'running']));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(1, '', 'denied'));
+        $watcher = $this->watcher(false, true, $logger);
+        $now = $this->clock->now();
+
+        $watcher->tick($now); // converge fails: only logged, tick does not throw
+        self::assertSame(1, $logger->errors);
+        $psCalls = \count($this->runner->callsMatching(['docker', 'ps']));
+
+        $watcher->tick($now->modify('+30 seconds')); // inside the 120 s throttle: no new pass
+        self::assertCount($psCalls, $this->runner->callsMatching(['docker', 'ps']));
+
+        $this->runner->expect(['ddev', 'list'], $this->ddevList([$id => 'running']));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(1, '', 'denied'));
+        $watcher->tick($now->modify('+121 seconds')); // same failure again: no second log
+        self::assertGreaterThan($psCalls, \count($this->runner->callsMatching(['docker', 'ps'])));
+        self::assertSame(1, $logger->errors);
     }
 
     public function testRunningAndStoppedFromDdevList(): void

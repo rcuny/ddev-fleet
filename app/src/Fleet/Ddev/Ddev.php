@@ -242,6 +242,75 @@ final readonly class Ddev
         return array_map('strval', array_keys($networks));
     }
 
+    /**
+     * The containers of a DDEV project, running or not (`docker ps -a`, matched by DDEV's own `com.ddev.site-name` label).
+     * `routed` is true for a non-web, non-db container carrying a traefik router label key or a non-empty HTTP_EXPOSE / HTTPS_EXPOSE env (the db is never routed, FLE-307 review): the router must reach it over ddev_default (FLE-307).
+     *
+     * @return list<array{name: string, service: string, routed: bool}>
+     */
+    public function projectContainers(string $project): array
+    {
+        try {
+            $result = $this->runner->run(['docker', 'ps', '-a', '--filter', 'label=com.ddev.site-name='.$project, '--format', '{{.Names}}|{{.Label "com.docker.compose.service"}}|{{.Labels}}'], null, [], null, self::STATS_TIMEOUT);
+        } catch (\Throwable $e) {
+            throw new DdevUnavailable('docker ps did not answer.', 0, $e);
+        }
+        if (!$result->isSuccess()) {
+            throw new DdevUnavailable('docker ps failed.');
+        }
+        $rows = [];
+        foreach (preg_split('/\R/', trim($result->stdout)) ?: [] as $line) {
+            $parts = explode('|', $line, 3);
+            if ('' === $parts[0] || 3 !== \count($parts)) {
+                continue;
+            }
+            $routed = 'db' !== $parts[1] && 'web' !== $parts[1] && (self::hasRouterLabel($parts[2]) || $this->hasExposeEnv($parts[0]));
+            $rows[] = ['name' => $parts[0], 'service' => $parts[1], 'routed' => $routed];
+        }
+
+        return $rows;
+    }
+
+    /**
+     * DDEV v1.25 configures the router from the container env (HTTP_EXPOSE / HTTPS_EXPOSE, through its traefik file config), not from docker labels.
+     * A container that cannot be inspected counts as not exposed (it is then detached, the safe side).
+     */
+    private function hasExposeEnv(string $container): bool
+    {
+        try {
+            $result = $this->runner->run(['docker', 'inspect', '--format', '{{json .Config.Env}}', $container], null, [], null, self::STATS_TIMEOUT);
+        } catch (\Throwable) {
+            return false;
+        }
+        $env = $result->isSuccess() ? json_decode(trim($result->stdout), true) : null;
+        if (!\is_array($env)) {
+            return false;
+        }
+        foreach ($env as $entry) {
+            if (\is_string($entry) && 1 === preg_match('/^(HTTP_EXPOSE|HTTPS_EXPOSE)=.+/', $entry)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * Whether a `docker ps` label list ("k=v,k=v") carries a traefik router label KEY (`traefik.enable`, `traefik.http.routers.*`).
+     * Only keys count: a value that merely contains "traefik." (or a spoofed label on a service that never needs the router) says nothing.
+     */
+    public static function hasRouterLabel(string $labels): bool
+    {
+        foreach (explode(',', $labels) as $pair) {
+            $key = trim(explode('=', $pair, 2)[0]);
+            if ('traefik.enable' === $key || str_starts_with($key, 'traefik.http.routers.') || str_starts_with($key, 'traefik.tcp.routers.')) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     public function disconnectNetwork(string $network, string $container): bool
     {
         try {

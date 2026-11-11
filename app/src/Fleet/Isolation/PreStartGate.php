@@ -44,15 +44,15 @@ final readonly class PreStartGate
     }
 
     /**
-     * FLE-297: call it after every successful `ddev start` or `ddev restart`. Proves that the db container is off the shared
-     * ddev_default network (see InstanceDbIsolationWriter::verify()).
+     * FLE-297: call it after every successful `ddev start` or `ddev restart`. Disconnects the db (and other non-web) containers
+     * from the shared ddev_default network, FLE-307 (see InstanceDbIsolationWriter::converge()).
      *
      * @throws JobFailed
      */
     public function verifyStarted(Instance $instance, string $dir, JobLog $log): void
     {
         try {
-            $this->dbIsolation?->verify($dir, $instance->id(), $log->line(...));
+            $this->dbIsolation?->converge($instance->id(), $log->line(...));
         } catch (\RuntimeException $e) {
             throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
         }
