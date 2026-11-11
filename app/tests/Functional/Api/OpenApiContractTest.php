@@ -265,7 +265,7 @@ final class OpenApiContractTest extends AdminTestCase
                     if ($read && !$isAll) {
                         $held = [ApiScope::Deploy];
                     }
-                    $token = $issuer->issue('sc'.++$n, 'test', $held, $read && $isAll ? ['*'] : ['acme'], [], [], new \DateTimeImmutable('+30 days'), 'cli');
+                    $token = $issuer->issue('sc'.++$n, 'test', $held, $read && $isAll ? ['*'] : ['acme'], ['*'], [], new \DateTimeImmutable('+30 days'), 'cli');
                     $this->call(strtoupper((string) $method), $uri, 'POST' === strtoupper((string) $method) ? '{}' : '', $token->secret, 'DELETE' === strtoupper((string) $method) ? ['HTTP_IF_MATCH' => 'x'] : []);
                     $status = $this->client->getResponse()->getStatusCode();
                     if ($isAll) {

@@ -272,6 +272,33 @@ final readonly class Tmux
     }
 
     /**
+     * The visible text and scrollback of tty1 or tty2 of the window (`capture-pane -p -J`, the last $lines lines), read only.
+     * The sidebar and the `general` window are never captured: the pane is found by position among the window's shells,
+     * and only an instance id (never `general`) names a window. Null when the window or the pane does not exist.
+     *
+     * @throws WorkspaceException
+     */
+    public function capture(string $instanceId, Pane $pane, int $lines): ?string
+    {
+        self::assertId($instanceId);
+        if (Pane::Sidebar === $pane) {
+            throw new WorkspaceException('Only tty1 or tty2 can be read, not the sidebar.');
+        }
+        if ($lines < 1 || $lines > 1000) {
+            throw new WorkspaceException('The line count is out of range.');
+        }
+        if (!\in_array($instanceId, $this->listWindows(), true)) {
+            return null;
+        }
+        $target = self::shells($this->panes($instanceId))[Pane::Tty1 === $pane ? 0 : 1] ?? null;
+        if (null === $target) {
+            return null;
+        }
+
+        return $this->must(['capture-pane', '-p', '-J', '-t', $target->id, '-S', '-'.$lines], 'capture the pane')->stdout;
+    }
+
+    /**
      * Rebuilds the window in place: every pane is respawned (fresh shells, a fresh sidebar), the tab keeps its index; a
      * missing window is created. Works for `general` too.
      *
