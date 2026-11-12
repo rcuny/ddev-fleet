@@ -16,6 +16,8 @@ final class RecordingHub implements HubInterface
     /** @var list<Update> */
     private array $updates = [];
 
+    private ?TokenFactoryInterface $factory = null;
+
     public function getUrl(): string
     {
         return 'http://hub.test/.well-known/mercure';
@@ -43,7 +45,13 @@ final class RecordingHub implements HubInterface
 
     public function getFactory(): ?TokenFactoryInterface
     {
-        return null;
+        return $this->factory;
+    }
+
+    /** A test that needs subscriber tokens (the stream-token endpoint) switches a real factory on; reset() switches it off. */
+    public function useFactory(?TokenFactoryInterface $factory): void
+    {
+        $this->factory = $factory;
     }
 
     public function publish(Update $update): string
@@ -62,5 +70,6 @@ final class RecordingHub implements HubInterface
     public function reset(): void
     {
         $this->updates = [];
+        $this->factory = null;
     }
 }

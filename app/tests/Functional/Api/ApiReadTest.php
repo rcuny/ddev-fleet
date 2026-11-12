@@ -28,8 +28,11 @@ use App\Fleet\FleetPaths;
 use App\Security\Api\ApiAccessDeniedHandler;
 use App\Security\Api\ApiTokenUser;
 use App\Tests\Support\AdminTestCase;
+use App\Tests\Support\RecordingHub;
 use PHPUnit\Framework\Attributes\DataProvider;
 use Symfony\Component\HttpFoundation\Request;
+use Symfony\Component\Mercure\Jwt\LcobucciFactory;
+use Symfony\Component\Mercure\ProtocolVersion;
 use Symfony\Component\Security\Core\Exception\AccessDeniedException;
 
 /**
@@ -418,6 +421,70 @@ final class ApiReadTest extends AdminTestCase
 
         self::assertResponseStatusCodeSame(400);
         self::assertSame('invalid_offset', $body['code']);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function postStreamToken(Job $job, IssuedToken $token): array
+    {
+        $this->client->request('POST', '/api/v1/jobs/'.$job->id().'/stream-token', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$token->secret, 'REMOTE_ADDR' => $this->clientIp, 'HTTP_X_FLEET_STAND_IN_ROLE' => 'none']);
+        $decoded = json_decode((string) $this->client->getResponse()->getContent(), true);
+
+        return \is_array($decoded) ? $decoded : [];
+    }
+
+    private function enableHubTokens(): void
+    {
+        $hub = self::getContainer()->get(RecordingHub::class);
+        self::assertInstanceOf(RecordingHub::class, $hub);
+        $hub->useFactory(new LcobucciFactory('test-only-stream-secret-0123456789abcdef', 'hmac.sha256', 0, '', ProtocolVersion::Legacy));
+    }
+
+    public function testStreamTokenIsSubscribeOnlyForThatJobsTopicAndExpires(): void
+    {
+        $this->enableHubTokens();
+        $job = $this->job('acme', JobStatus::Running);
+
+        $body = $this->postStreamToken($job, $this->issue([ApiScope::Read], ['acme']));
+
+        self::assertResponseStatusCodeSame(200);
+        self::assertSame('/jobs/'.$job->id(), $body['topic']);
+        self::assertStringEndsWith('/.well-known/mercure', (string) $body['hub_url']);
+        self::assertStringStartsWith('http', (string) $body['hub_url']);
+        $parts = explode('.', (string) $body['token']);
+        self::assertCount(3, $parts);
+        $claims = json_decode((string) base64_decode(strtr($parts[1], '-_', '+/'), true), true);
+        self::assertIsArray($claims);
+        self::assertSame(['/jobs/'.$job->id()], $claims['mercure']['subscribe']);
+        self::assertArrayNotHasKey('publish', $claims['mercure']);
+        self::assertGreaterThan(time(), $claims['exp']);
+        self::assertLessThanOrEqual(time() + 601, $claims['exp']);
+        $audit = $this->em()->getConnection()->fetchAllAssociative('SELECT * FROM audit_entry WHERE action = ?', [AuditLog::API_WRITE]);
+        self::assertStringContainsString('stream-token job='.$job->id(), (string) $audit[0]['subject']);
+        self::assertStringNotContainsString((string) $body['token'], (string) $audit[0]['subject']);
+    }
+
+    public function testStreamTokenFollowsTheJobVisibilityOfTheReadScope(): void
+    {
+        $this->enableHubTokens();
+        $other = $this->job('demo');
+
+        $this->postStreamToken($other, $this->issue([ApiScope::Read], ['acme']));
+        self::assertResponseStatusCodeSame(403);
+
+        $this->postStreamToken($other, $this->issue([ApiScope::Deploy], ['demo']));
+        self::assertResponseStatusCodeSame(403);
+    }
+
+    public function testStreamTokenAnswers503WithoutAHub(): void
+    {
+        $job = $this->job('acme', JobStatus::Running);
+
+        $body = $this->postStreamToken($job, $this->issue());
+
+        self::assertResponseStatusCodeSame(503);
+        self::assertSame('streaming_unavailable', $body['code']);
     }
 
     public function testUpgradeIsReadOnlyAndOffline(): void
