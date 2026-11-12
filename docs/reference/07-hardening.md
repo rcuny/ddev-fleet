@@ -114,3 +114,8 @@ Live check on a host (replace the project names): from a web container of a proj
 **Agent templates:** instances that run AI agents execute code you do not review. Treat any instance on a host as able to reach other containers on `ddev_default` (web containers); only the database is closed by this change, and the database credentials remain the DDEV defaults inside a project. Do not put secrets for other projects in an agent instance.
 
 **Database credentials.** The isolation is at the network level. The database user and root password stay DDEV's defaults inside each project: DDEV's tooling (`ddev import-db`, `ddev export-db`, `ddev mysql`, the generated Drupal settings) relies on them, and Fleet's database jobs use those commands. A container that cannot resolve or reach another project's `db` cannot log in to it, whatever the credentials are. Per-instance random credentials are planned as a separate change.
+
+## Container-to-host ports
+
+With [network isolation](17-instance-isolation.md#network-isolation-between-instances) in `enforce` mode, containers reach the host only on 80, 443, the public catalogue ports (`fleet port:firewall` lists them), DNS to the bridge gateway and ICMP. The host's `sshd` on port 22 is therefore no longer reachable from a container through the bridge gateway. Another port a project needs on the host (for example Xdebug's 9003 towards an IDE) is added under **Settings → Isolation**. The `--harden` option only keeps the `nftables` package and the boot unit available; it does not turn isolation on.
+

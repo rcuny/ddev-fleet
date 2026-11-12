@@ -86,7 +86,7 @@ another. What Fleet narrows:
 - **Global cache:** `.ddev/docker-compose.fleet-isolation.yaml` mounts the router's `traefik/` tree of the `ddev-global-cache` volume read-only into the web container, so it cannot rewrite the router's configuration. The mount is fail-safe: a `volume.subpath` mount needs Docker Engine 26+ and Compose 2.23+ and an existing `traefik/` in the volume, otherwise `web` would not start. Fleet checks both at deploy and, if either is missing (for example the very first deploy on a fresh host, before the router has written `traefik/`), skips the mount with a `WARNING: isolation` line in the job log; deploy again to apply it. Live check: inside an instance, `touch /mnt/ddev-global-cache/traefik/x` must fail with `Read-only file system`. The same volume still holds shared bash and MySQL history and the Composer and npm caches, writable from every container: a poisoned cache entry reaches other projects' builds.
 - **ssh-agent:** the installer sets `omit_containers: [ddev-ssh-agent]` in the fleet user's global DDEV config. Use the per-instance agent (Git over SSH in the container); a manual `ddev auth ssh` no longer works on a Fleet host. The installer merges `ddev-ssh-agent` into any `omit_containers` list already in the global config.
 
-Not covered here: reachability of other instances' databases and web containers (needs host firewall rules).
+Reachability of other instances' databases and web containers is closed by the optional host firewall table described in [network isolation between instances](17-instance-isolation.md#network-isolation-between-instances) (`fleet host:isolation:enable`).
 
 ## Checks on a live host
 

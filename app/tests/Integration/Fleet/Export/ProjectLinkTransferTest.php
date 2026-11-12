@@ -32,6 +32,22 @@ final class ProjectLinkTransferTest extends KernelTestCase
         parent::tearDown();
     }
 
+    private function projectsRepo(): ProjectRepository
+    {
+        $repo = $this->service(ProjectRepository::class);
+        \assert($repo instanceof ProjectRepository);
+
+        return $repo;
+    }
+
+    private function linkRepo(): ProjectLinkRepository
+    {
+        $repo = $this->service(ProjectLinkRepository::class);
+        \assert($repo instanceof ProjectLinkRepository);
+
+        return $repo;
+    }
+
     private function links(): ProjectLinkService
     {
         $service = $this->service(ProjectLinkService::class);
@@ -43,7 +59,7 @@ final class ProjectLinkTransferTest extends KernelTestCase
     public function testALinkIsExportedAndImportedWhenTheTargetExists(): void
     {
         $this->seedBlog();
-        $this->service(ProjectRepository::class)->save(new \App\Domain\Project\Project('cms', 'https://git.example.com/x/cms.git'));
+        $this->projectsRepo()->save(new \App\Domain\Project\Project('cms', 'https://git.example.com/x/cms.git'));
         $this->links()->create('blog', 'cms', 'typesense', 8108, 'same', 'search', 'admin');
         $exporter = $this->service(ProjectExporter::class);
         \assert($exporter instanceof ProjectExporter);
@@ -69,11 +85,11 @@ final class ProjectLinkTransferTest extends KernelTestCase
         self::assertSame('the target project is not on this host', $link[0]->note);
         self::assertSame([], $plan->errors);
 
-        $this->service(ProjectRepository::class)->save(new \App\Domain\Project\Project('cms', 'https://git.example.com/x/cms.git'));
+        $this->projectsRepo()->save(new \App\Domain\Project\Project('cms', 'https://git.example.com/x/cms.git'));
         $importer = $this->service(ProjectImporter::class);
         \assert($importer instanceof ProjectImporter);
         $importer->apply($text, null, 'admin');
-        $stored = $this->service(ProjectLinkRepository::class)->all();
+        $stored = $this->linkRepo()->all();
         self::assertCount(1, $stored);
         self::assertSame('typesense', $stored[0]->service());
     }

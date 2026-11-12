@@ -53,6 +53,7 @@ export const TAB_LABELS: Record<string, string> = {
   claude: 'Claude token',
   notifications: 'Notifications',
   network: 'Networking',
+  isolation: 'Isolation',
   certificates: 'Certificates',
   uploads: 'Uploads',
   jobs: 'Jobs',

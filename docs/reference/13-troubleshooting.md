@@ -88,6 +88,13 @@ Page-by-page detail: [05-upgrade.md](05-upgrade.md), [06-backup-and-restore.md](
 | Nothing runs | Instances did not restart. | `journalctl -u fleet-boot`. |
 | Portal answers 502 | Authelia secrets permission, see "Signing in". | Re-run the installer. |
 
+## Network isolation
+
+- **A link stays `pending`** (`fleet host:isolation:status`, instance page): the reason names what is missing, for example the target instance (`<target>--<label>` does not exist), or the target service (the compose service has another name, or the container is not created). Fix that, start the instance, wait for the next pass (two minutes).
+- **Every site answers 502 after `enforce`:** the router is not in the table. `fleet host:isolation:status` exits 1 and says "the router set is empty". Run `fleet host:isolation:enable --mode=enforce --yes` to force a pass; if it persists, `fleet host:isolation:disable` and look at `docker logs ddev-router`.
+- **A container cannot reach the host any more:** the port is not on the allow-list. `status` lists `container -> host` flows; add the port under **Settings → Isolation**.
+- **Roll back at once:** `fleet host:isolation:disable`, or as root `nft delete table inet fleet_isolation`.
+
 ## Still stuck
 
 `fleet <command> --help`, the job log, and:

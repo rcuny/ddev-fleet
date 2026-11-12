@@ -9,6 +9,7 @@ use App\Domain\Port\NamedPort;
 use App\Domain\Project\GitBotMode;
 use App\Domain\Project\Project;
 use App\Domain\Project\ProjectAccessRepository;
+use App\Domain\Project\ProjectLinkRepository;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\User\UserRepository;
 use App\Domain\Webhook\WebhookRepository;
@@ -35,6 +36,7 @@ use App\Fleet\Projects\ValidationFailed;
 use App\Fleet\Secrets\SecretStore;
 use App\Form\Project\CapacityType;
 use App\Form\Project\NetworkType;
+use App\Form\Project\ProjectLinkType;
 use App\Form\Project\ProjectType;
 use App\Form\Project\SourceType;
 use App\Form\Project\TextLines;
@@ -47,6 +49,7 @@ use Symfony\Component\Form\FormError;
 use Symfony\Component\Form\FormInterface;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\Session\FlashBagAwareSessionInterface;
 use Symfony\Component\HttpKernel\Exception\NotFoundHttpException;
 use Symfony\Component\Routing\Attribute\Route;
 
@@ -82,6 +85,7 @@ final class ProjectController extends AbstractController
         private readonly AdminGroup $admins,
         private readonly AuditLog $audit,
         private readonly ReauthGuard $reauth,
+        private readonly ProjectLinkRepository $linkRepository,
     ) {
     }
 
@@ -454,7 +458,47 @@ final class ProjectController extends AbstractController
             'errors' => $errors,
             'confirm' => $confirm,
             'changes' => $changes,
+            'links' => $this->linksContext($request, $project),
         ], new Response(status: $status));
+    }
+
+    /**
+     * FLE-299: the Links card of the Network tab. A refused create comes back through the session flash of
+     * ProjectLinkController (`link_errors`, `link_old`), so the form shows the message under its field.
+     *
+     * @return array<string, mixed>
+     */
+    private function linksContext(Request $request, Project $project): array
+    {
+        $session = $request->hasSession() ? $request->getSession() : null;
+        $bag = $session instanceof FlashBagAwareSessionInterface ? $session->getFlashBag() : null;
+        /** @var array<string, string> $errors */
+        $errors = null === $bag ? [] : ($bag->get('link_errors')[0] ?? []);
+        /** @var array<string, mixed> $old */
+        $old = null === $bag ? [] : ($bag->get('link_old')[0] ?? []);
+        $targets = [];
+        foreach ($this->projects->list() as $other) {
+            if ($other->name() !== $project->name()) {
+                $targets[$other->name()] = $other->name();
+            }
+        }
+        $form = $this->createForm(ProjectLinkType::class, $old + ['label' => 'same'], [
+            'targets' => $targets,
+            'action' => $this->generateUrl('project_link_create', ['name' => $project->name()]),
+        ]);
+        $errorList = [];
+        if ([] !== $errors) {
+            ValidationErrorMapper::add($form, new ValidationFailed($errors));
+            $errorList = array_values(array_filter($errors, static fn (string $field): bool => !$form->has($field), \ARRAY_FILTER_USE_KEY));
+        }
+
+        return [
+            'outgoing' => $this->linkRepository->outgoing($project),
+            'incoming' => $this->linkRepository->incoming($project),
+            'form' => $form->createView(),
+            'errors' => $errorList,
+            'hasTargets' => [] !== $targets,
+        ];
     }
 
     #[Route('/admin/projects/{name}/delete', name: 'project_delete', requirements: ['name' => self::NAME], methods: ['POST'])]

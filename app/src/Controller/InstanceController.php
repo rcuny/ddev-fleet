@@ -10,6 +10,7 @@ use App\Domain\Job\JobRepository;
 use App\Domain\Job\JobTrigger;
 use App\Domain\Project\ProjectRepository;
 use App\Domain\Template\TemplateRepository;
+use App\Fleet\Ddev\DdevUnavailable;
 use App\Fleet\Instances\DeployInput;
 use App\Fleet\Instances\InstanceHostnames;
 use App\Fleet\Instances\InstanceIsolation;
@@ -18,6 +19,8 @@ use App\Fleet\Instances\InstanceService;
 use App\Fleet\Instances\OperationOptions;
 use App\Fleet\Instances\Selector;
 use App\Fleet\Instances\VisibleInstances;
+use App\Fleet\Isolation\LinkResolver;
+use App\Fleet\Isolation\ResolvedLink;
 use App\Fleet\Jobs\InstanceTopics;
 use App\Fleet\Jobs\LiveFeedCookie;
 use App\Fleet\Projects\NotFound;
@@ -59,6 +62,7 @@ final class InstanceController extends AbstractController
         private readonly LiveFeedCookie $feedCookie,
         private readonly InstanceTopics $topics,
         private readonly InstanceIsolation $isolation,
+        private readonly LinkResolver $linkResolver,
     ) {
     }
 
@@ -223,7 +227,15 @@ final class InstanceController extends AbstractController
             // No domain yet, or an alias label that is too long: the primary URL (if any) is still shown.
         }
 
+        // FLE-299: the links this instance reaches (source side); nothing is shown when Docker does not answer.
+        $links = [];
+        try {
+            $links = array_values(array_filter($this->linkResolver->resolve(), static fn (ResolvedLink $link): bool => $link->sourceInstance === $id));
+        } catch (DdevUnavailable) {
+        }
+
         $response = $this->render('instances/show.html.twig', [
+            'links' => $links,
             'instance' => $instance,
             'url' => $this->siteUrl($instance),
             'aliases' => $aliases,

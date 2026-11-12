@@ -19,11 +19,10 @@ final class Version20261112210000 extends AbstractMigration
 
     public function up(Schema $schema): void
     {
-        $this->addSql('CREATE TABLE project_link (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, service VARCHAR(64) NOT NULL, port INTEGER NOT NULL, target_label VARCHAR(64) NOT NULL, note CLOB NOT NULL, created_by VARCHAR(128) NOT NULL, created_at DATETIME NOT NULL --(DC2Type:utc_datetime_immutable)
-        , source_id INTEGER NOT NULL, target_id INTEGER NOT NULL, CONSTRAINT FK_PROJECT_LINK_SOURCE FOREIGN KEY (source_id) REFERENCES project (id) ON DELETE CASCADE NOT DEFERRABLE INITIALLY IMMEDIATE, CONSTRAINT FK_PROJECT_LINK_TARGET FOREIGN KEY (target_id) REFERENCES project (id) ON DELETE CASCADE NOT DEFERRABLE INITIALLY IMMEDIATE)');
-        $this->addSql('CREATE INDEX IDX_PROJECT_LINK_SOURCE ON project_link (source_id)');
-        $this->addSql('CREATE INDEX IDX_PROJECT_LINK_TARGET ON project_link (target_id)');
+        $this->addSql('CREATE TABLE project_link (id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, service VARCHAR(64) NOT NULL, port INTEGER NOT NULL, target_label VARCHAR(64) NOT NULL, note CLOB NOT NULL, created_by VARCHAR(128) NOT NULL, created_at DATETIME NOT NULL, source_id INTEGER NOT NULL, target_id INTEGER NOT NULL, CONSTRAINT FK_PROJECT_LINK_SOURCE FOREIGN KEY (source_id) REFERENCES project (id) ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE INITIALLY IMMEDIATE, CONSTRAINT FK_PROJECT_LINK_TARGET FOREIGN KEY (target_id) REFERENCES project (id) ON UPDATE NO ACTION ON DELETE CASCADE NOT DEFERRABLE INITIALLY IMMEDIATE)');
         $this->addSql('CREATE UNIQUE INDEX uniq_project_link ON project_link (source_id, target_id, service, port, target_label)');
+        $this->addSql('CREATE INDEX IDX_F3D51E9953C1C61 ON project_link (source_id)');
+        $this->addSql('CREATE INDEX IDX_F3D51E9158E0B66 ON project_link (target_id)');
         $this->addSql("ALTER TABLE host_settings ADD COLUMN isolation_mode VARCHAR(16) DEFAULT 'off' NOT NULL");
         $this->addSql("ALTER TABLE host_settings ADD COLUMN isolation_host_ports CLOB DEFAULT '[]' NOT NULL");
     }
