@@ -267,4 +267,42 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         $writer->write($dir, $instance->id(), static function (string $l): void {});
         self::assertSame([], $writer->converge($instance->id(), static function (string $l): void {}));
     }
+
+    public function testRootIsLockedOverTheDbContainersSocketAndNothingElseChanges(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'web'), $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(0));
+        $lines = [];
+
+        self::assertTrue($this->converger()->lockRoot($id, static function (string $l) use (&$lines): void { $lines[] = $l; }));
+
+        $calls = $this->runner->callsMatching(['docker', 'exec', 'ddev-'.$id.'-db', 'mysql']);
+        self::assertCount(1, $calls);
+        self::assertContains(InstanceDbIsolationWriter::LOCK_ROOT_SQL, $calls[0]->argv);
+        self::assertStringContainsString('locked', implode("\n", $lines));
+        // db/db and root@localhost are never touched, and no password is involved
+        self::assertStringNotContainsString("'db'", InstanceDbIsolationWriter::LOCK_ROOT_SQL);
+        self::assertStringNotContainsString('IDENTIFIED', InstanceDbIsolationWriter::LOCK_ROOT_SQL);
+    }
+
+    public function testNoDbContainerMeansNothingToLock(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'web'), $this->psRow($id, 'mailpit'));
+
+        self::assertFalse($this->converger()->lockRoot($id, static function (string $l): void {}));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec']));
+    }
+
+    public function testAServerThatRefusesTheLockOnlyWarns(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', 'ERROR 1064 (42000): You have an error in your SQL syntax'));
+        $lines = [];
+
+        self::assertFalse($this->converger()->lockRoot($id, static function (string $l) use (&$lines): void { $lines[] = $l; }));
+        self::assertStringContainsString('WARNING', implode("\n", $lines));
+    }
 }

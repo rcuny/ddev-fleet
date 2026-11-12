@@ -126,6 +126,8 @@ final readonly class PreStartGate
         } catch (\RuntimeException $e) {
             throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
         }
+        // FLE-324: root of the database is closed to the network (db/db stays for DDEV's tooling). A warning, never a failure.
+        $this->dbIsolation?->lockRoot($instance->id(), $log->line(...));
     }
 
     /**
