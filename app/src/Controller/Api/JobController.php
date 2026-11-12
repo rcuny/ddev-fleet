@@ -8,6 +8,8 @@ use App\Api\Http\ApiProblem;
 use App\Api\Read\Cursor;
 use App\Api\Read\JobView;
 use App\Api\Read\ProjectVisibility;
+use App\Api\Stream\JobStreamToken;
+use App\Api\Write\WriteSupport;
 use App\Domain\ApiToken\ApiScope;
 use App\Domain\Job\Job;
 use App\Domain\Job\JobRepository;
@@ -32,6 +34,8 @@ final readonly class JobController
         private JobRepository $jobs,
         private LogReader $logs,
         private ProjectVisibility $visibility,
+        private JobStreamToken $streamTokens,
+        private WriteSupport $support,
     ) {
     }
 
@@ -98,6 +102,20 @@ final readonly class JobController
             'X-Job-State' => $job->status()->value,
             'X-Log-Done' => $chunk['done'] ? '1' : '0',
         ]);
+    }
+
+    /**
+     * `POST /api/v1/jobs/{id}/stream-token` (scope `read`, audited): a short-lived Mercure subscriber JWT for the job's
+     * topic only, no publish rights. `503 streaming_unavailable` when no hub is configured: poll the log instead.
+     */
+    #[Route('/api/v1/jobs/{id}/stream-token', name: 'api_v1_job_stream_token', methods: ['POST'], requirements: ['id' => '\d+'])]
+    public function streamToken(int $id, Request $request): JsonResponse
+    {
+        $job = $this->find($id);
+        $minted = $this->streamTokens->mint($id, $request) ?? throw ApiProblem::unavailable('streaming_unavailable', 'Live streaming is not available on this host. Poll GET /api/v1/jobs/{id}/log instead.');
+        $this->support->audit($this->authorizer->token(), 'stream-token', 'job='.$id, $job);
+
+        return new JsonResponse($minted);
     }
 
     /** 404 for a missing job (and a project-less one a limited token may not see), 403 `project_not_allowed` for a job of another project. */

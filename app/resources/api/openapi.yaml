@@ -532,6 +532,34 @@ paths:
           content:
             text/plain: {schema: {type: string}}
         default: {$ref: "#/components/responses/Problem"}
+  /api/v1/jobs/{id}/stream-token:
+    post:
+      operationId: createJobStreamToken
+      summary: A short-lived Mercure subscriber token for one job's live feed. Optional; polling the log always works.
+      description: The token grants `subscribe` on the single private topic `/jobs/{id}` and nothing else (no publish, no other topic) and expires after 10 minutes. Open an SSE connection to `hub_url` with `topic` and `Authorization&#58; Bearer <token>`. The updates carry the job id, status and log size, never the text.
+      tags: [jobs]
+      x-scope: read
+      parameters:
+        - {$ref: "#/components/parameters/JobId"}
+      responses:
+        "401": {$ref: "#/components/responses/Unauthorized"}
+        "403": {$ref: "#/components/responses/Forbidden"}
+        "404": {$ref: "#/components/responses/NotFound"}
+        "429": {$ref: "#/components/responses/RateLimited"}
+        "503": {$ref: "#/components/responses/StreamingUnavailable"}
+        "200":
+          description: The token
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [token, topic, hub_url, expires_at]
+                properties:
+                  token: {type: string, description: The Mercure subscriber JWT. Treat it as a secret until it expires.}
+                  topic: {type: string, example: /jobs/42}
+                  hub_url: {type: string, description: Absolute URL of the Mercure hub.}
+                  expires_at: {type: string, format: date-time}
+        default: {$ref: "#/components/responses/Problem"}
   /api/v1/jobs/{id}/retry:
     post:
       operationId: retryJob
@@ -608,6 +636,11 @@ components:
           schema: {$ref: "#/components/schemas/Problem"}
     PreconditionRequired:
       description: "`if_match_required`: destroying needs an `If-Match` header with the instance's `created_at`."
+      content:
+        application/problem+json:
+          schema: {$ref: "#/components/schemas/Problem"}
+    StreamingUnavailable:
+      description: "`streaming_unavailable`: no Mercure hub is configured on this host; poll `GET /api/v1/jobs/{id}/log` instead."
       content:
         application/problem+json:
           schema: {$ref: "#/components/schemas/Problem"}
