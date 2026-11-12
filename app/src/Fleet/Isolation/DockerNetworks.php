@@ -84,16 +84,7 @@ final readonly class DockerNetworks
      */
     public function sharedContainers(): array
     {
-        $out = $this->inspect(['network', 'inspect', '--format', '{{range .Containers}}{{.Name}}|{{.IPv4Address}}'."\n".'{{end}}', self::SHARED]);
-        $map = [];
-        foreach (preg_split('/\R/', trim((string) $out)) ?: [] as $line) {
-            [$name, $cidr] = array_pad(explode('|', $line, 2), 2, '');
-            if ('' !== $name && '' !== $cidr) {
-                $map[$name] = explode('/', $cidr)[0];
-            }
-        }
-
-        return $map;
+        return $this->addresses(self::SHARED);
     }
 
     /**
@@ -116,6 +107,27 @@ final readonly class DockerNetworks
         }
 
         return $networks;
+    }
+
+    /**
+     * The addresses of the containers on a network: container name => IPv4.
+     *
+     * @return array<string, string>
+     *
+     * @throws DdevUnavailable
+     */
+    public function addresses(string $network): array
+    {
+        $out = $this->inspect(['network', 'inspect', '--format', '{{range .Containers}}{{.Name}}|{{.IPv4Address}}'."\n".'{{end}}', $network]);
+        $map = [];
+        foreach (preg_split('/\R/', trim((string) $out)) ?: [] as $line) {
+            [$name, $cidr] = array_pad(explode('|', $line, 2), 2, '');
+            if ('' !== $name && '' !== $cidr) {
+                $map[$name] = explode('/', $cidr)[0];
+            }
+        }
+
+        return $map;
     }
 
     public function createLinkNetwork(ResolvedLink $link): bool

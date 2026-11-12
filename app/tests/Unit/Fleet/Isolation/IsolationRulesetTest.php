@@ -61,16 +61,35 @@ final class IsolationRulesetTest extends TestCase
         self::assertStringContainsString('elements = { 80, 443, 9003 }', $text);
     }
 
-    public function testALinkAddsOneDirectionBlockOnItsOwnBridge(): void
+    public function testALinkIsOneWayAtThePacketLevel(): void
     {
-        $link = $this->link();
+        $link = $this->link()->withAddresses('172.20.0.2', '172.20.0.3');
         $text = IsolationRuleset::render(new IsolationInput(IsolationMode::Enforce, 'br-0123456789ab', links: [$link]));
 
         $bridge = $link->bridge();
         self::assertMatchesRegularExpression('/^flk-[0-9a-f]{8}$/', $bridge);
         self::assertStringContainsString('# link app--staging -> cms--staging/typesense:8108', $text);
-        self::assertStringContainsString('iifname "'.$bridge.'" oifname "'.$bridge.'" tcp dport 8108 accept', $text);
+        // Only a NEW connection from the source address to the target address and port; the replies are "established".
+        self::assertStringContainsString('iifname "'.$bridge.'" oifname "'.$bridge.'" ip saddr 172.20.0.2 ip daddr 172.20.0.3 tcp dport 8108 ct state new accept', $text);
         self::assertStringContainsString('iifname "'.$bridge.'" oifname "'.$bridge.'" ct state new drop', $text);
+        self::assertLessThan(strpos($text, 'ct state new drop'), strpos($text, 'ct state new accept'), 'the accept comes before the drop');
+        self::assertStringContainsString('ct state established,related accept', $text);
+    }
+
+    public function testReportModeNeverDropsAnything(): void
+    {
+        $link = $this->link()->withAddresses('172.20.0.2', '172.20.0.3');
+        $text = IsolationRuleset::render(new IsolationInput(IsolationMode::Report, 'br-0123456789ab', ['172.18.0.2'], links: [$link]));
+
+        self::assertStringNotContainsString('drop', $text, 'a report ruleset has no drop at all');
+        self::assertStringNotContainsString($link->bridge(), $text, 'link networks are untouched in report mode');
+    }
+
+    public function testICmpV6StaysAcceptedSoNeighbourDiscoveryIsNotCut(): void
+    {
+        $text = IsolationRuleset::render(new IsolationInput(IsolationMode::Enforce, 'br-0123456789ab'));
+
+        self::assertStringContainsString('meta l4proto ipv6-icmp accept', $text);
     }
 
     public function testRecordedFlowsSurviveAReapplyButDoNotChangeTheHash(): void

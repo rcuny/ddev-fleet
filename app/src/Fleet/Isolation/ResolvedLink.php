@@ -21,7 +21,21 @@ final readonly class ResolvedLink
         public ?string $pending = null,
         public ?string $sourceContainer = null,
         public ?string $targetContainer = null,
+        public ?string $sourceIp = null,
+        public ?string $targetIp = null,
     ) {
+    }
+
+    /** The same link, not live: $why says what is missing. */
+    public function pending(string $why): self
+    {
+        return new self($this->sourceInstance, $this->sourceProject, $this->targetInstance, $this->targetProject, $this->service, $this->port, $why, $this->sourceContainer, $this->targetContainer);
+    }
+
+    /** The same link with the addresses the two containers have on the link network (the packet-level one-way rule needs both). */
+    public function withAddresses(string $sourceIp, string $targetIp): self
+    {
+        return new self($this->sourceInstance, $this->sourceProject, $this->targetInstance, $this->targetProject, $this->service, $this->port, null, $this->sourceContainer, $this->targetContainer, $sourceIp, $targetIp);
     }
 
     public function isLive(): bool

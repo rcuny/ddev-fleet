@@ -5,3 +5,20 @@
     state: present
     update_cache: true
     cache_valid_time: 3600
+
+# FLE-299: Debian's nftables.service flushes the whole ruleset (Docker's tables, ours) when it stops or reloads. The package
+# does not enable it and Fleet never does; this only reads its state, so an operator who enabled it hears about it.
+- name: Read the state of nftables.service (read only)
+  ansible.builtin.systemd_service:
+    name: nftables.service
+  register: packages_nftables_service
+  failed_when: false
+  changed_when: false
+
+- name: Warn when nftables.service is enabled
+  ansible.builtin.debug:
+    msg: >-
+      nftables.service is enabled on this host. Its stop and reload run "nft flush ruleset", which wipes Docker's tables and
+      the instance isolation table. Disable it (systemctl disable --now nftables.service) before turning isolation on;
+      Fleet refuses to turn isolation on while it is enabled.
+  when: (packages_nftables_service.status | default({})).UnitFileState | default('') == 'enabled'

@@ -16,6 +16,7 @@ use App\Fleet\System\Applier;
 use App\Fleet\System\ApplyTarget;
 use App\Fleet\System\SystemRenderer;
 use App\Fleet\System\TargetSupport;
+use Symfony\Component\Lock\LockFactory;
 
 /**
  * FLE-299: one host-wide pass of instance network isolation. In mode `off` it does nothing. Otherwise: (1) the link networks
@@ -38,49 +39,93 @@ final class IsolationConverger
         private readonly Applier $applier,
         private readonly FleetPaths $paths,
         private readonly AuditLog $audit,
+        private readonly LockFactory $locks,
+        private readonly NftablesServiceGuard $nftables,
     ) {
     }
 
     /**
+     * One pass. Never throws: whatever goes wrong (Docker, the helper, a rendering error) comes back as `error`, so isolation
+     * can never fail a deploy or a start. Two passes never run at once: a pass that finds another running does nothing.
+     *
      * @param (\Closure(string): void)|null $log
      */
     public function pass(?\Closure $log = null): IsolationPass
     {
         $log ??= static function (string $line): void {
         };
+        try {
+            $lock = $this->locks->createLock('isolation.pass', 120.0);
+            if (!$lock->acquire(false)) {
+                return new IsolationPass($this->mode());
+            }
+        } catch (\Throwable $e) {
+            return new IsolationPass($this->mode(), error: 'the pass lock failed: '.$e->getMessage());
+        }
+        try {
+            return $this->locked($log);
+        } catch (\Throwable $e) {
+            $log('isolation: '.$e->getMessage());
+
+            return new IsolationPass($this->mode(), error: $e->getMessage());
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function mode(): IsolationMode
+    {
+        try {
+            return $this->host->get()?->isolationMode() ?? IsolationMode::Off;
+        } catch (\Throwable) {
+            return IsolationMode::Off;
+        }
+    }
+
+    /**
+     * @param \Closure(string): void $log
+     */
+    private function locked(\Closure $log): IsolationPass
+    {
         $settings = $this->host->get();
         $mode = $settings?->isolationMode() ?? IsolationMode::Off;
         if (IsolationMode::Off === $mode) {
+            // A table left behind (a disable that failed half way) is removed here: the next pass retries it.
+            if (is_file($this->hashFile())) {
+                $this->install(IsolationRuleset::disabled());
+                @unlink($this->hashFile());
+                $log('isolation: removed the table left from an earlier mode');
+
+                return new IsolationPass($mode, applied: true);
+            }
+
             return new IsolationPass($mode);
         }
         if ($this->applier instanceof TargetSupport && !$this->applier->supports(ApplyTarget::Isolation)) {
             return new IsolationPass($mode, error: 'the installed root helper has no "isolation" target (run the installer of this release)');
         }
-        try {
-            $links = $this->reconcileLinks($log);
-            $bridge = $this->docker->bridgeName(DockerNetworks::SHARED);
-            if (null === $bridge) {
-                return new IsolationPass($mode, $links, applied: false);
-            }
-            $live = $this->report->read();
-            if (null === $live) {
-                return new IsolationPass($mode, $links, error: 'the live table could not be read through the root helper');
-            }
-            $input = $this->input($mode, $bridge, $settings, $links, $live);
-            $hash = IsolationRuleset::hash($input);
-            if ($this->appliedHash() === $hash && $live['installed']) {
-                return new IsolationPass($mode, $links, applied: false);
-            }
-            $this->install(IsolationRuleset::render($input));
-            $this->recordHash($hash);
-            $log('isolation: ruleset installed ('.$mode->value.' mode, '.\count($input->links).' link(s))');
-
-            return new IsolationPass($mode, $links, applied: true);
-        } catch (DdevUnavailable|\RuntimeException $e) {
-            $log('isolation: '.$e->getMessage());
-
-            return new IsolationPass($mode, error: $e->getMessage());
+        if (null !== $problem = $this->nftables->problem()) {
+            return new IsolationPass($mode, error: $problem);
         }
+        $links = $this->reconcileLinks($log);
+        $bridge = $this->docker->bridgeName(DockerNetworks::SHARED);
+        if (null === $bridge) {
+            return new IsolationPass($mode, $links, applied: false);
+        }
+        $live = $this->report->read();
+        if (null === $live) {
+            return new IsolationPass($mode, $links, error: 'the live table could not be read through the root helper');
+        }
+        $input = $this->input($mode, $bridge, $settings, $links, $live);
+        $hash = IsolationRuleset::hash($input);
+        if ($this->appliedHash() === $hash && $live['installed']) {
+            return new IsolationPass($mode, $links, applied: false);
+        }
+        $this->install(IsolationRuleset::render($input));
+        $this->recordHash($hash);
+        $log('isolation: ruleset installed ('.$mode->value.' mode, '.\count($input->links).' link(s))');
+
+        return new IsolationPass($mode, $links, applied: true);
     }
 
     /**
@@ -90,22 +135,58 @@ final class IsolationConverger
      */
     public function changeMode(IsolationMode $mode, string $actor, bool $removeLinks = false): IsolationPass
     {
+        $lock = $this->locks->createLock('isolation.pass', 120.0);
+        $lock->acquire(true);
+        try {
+            return $this->changeModeLocked($mode, $actor, $removeLinks);
+        } finally {
+            $lock->release();
+        }
+    }
+
+    private function changeModeLocked(IsolationMode $mode, string $actor, bool $removeLinks): IsolationPass
+    {
         $settings = $this->host->get() ?? throw new \RuntimeException('The host is not set up yet.');
+        if (IsolationMode::Off !== $mode && null !== $problem = $this->nftables->problem()) {
+            throw new \RuntimeException($problem);
+        }
         $before = $settings->isolationMode();
-        $settings->changeIsolationMode($mode, new \DateTimeImmutable());
-        $this->host->save($settings);
-        $this->audit->record($actor, AuditLog::ISOLATION_MODE, $before->value.' -> '.$mode->value);
         if (IsolationMode::Off === $mode) {
-            $this->install(IsolationRuleset::disabled());
-            @unlink($this->hashFile());
+            // Off removes the table whatever else fails: saving the mode, the audit entry and the link cleanup come after,
+            // each on its own, and the first error is reported at the end.
+            $error = null;
+            try {
+                $this->install(IsolationRuleset::disabled());
+                @unlink($this->hashFile());
+            } catch (\Throwable $e) {
+                $error = $e;
+            }
+            try {
+                $settings->changeIsolationMode($mode, new \DateTimeImmutable());
+                $this->host->save($settings);
+                $this->audit->record($actor, AuditLog::ISOLATION_MODE, $before->value.' -> '.$mode->value);
+            } catch (\Throwable $e) {
+                $error ??= $e;
+            }
             if ($removeLinks) {
                 $this->removeAllLinkNetworks();
+            }
+            if (null !== $error) {
+                throw new \RuntimeException('Turning isolation off was not completed: '.$error->getMessage(), 0, $error);
             }
 
             return new IsolationPass($mode, applied: true);
         }
+        $settings->changeIsolationMode($mode, new \DateTimeImmutable());
+        $this->host->save($settings);
+        $this->audit->record($actor, AuditLog::ISOLATION_MODE, $before->value.' -> '.$mode->value);
 
-        return $this->pass();
+        try {
+            return $this->locked(static function (string $line): void {
+            });
+        } catch (\Throwable $e) {
+            return new IsolationPass($mode, error: $e->getMessage());
+        }
     }
 
     /**
@@ -145,7 +226,7 @@ final class IsolationConverger
             $network = $link->network();
             if (!isset($existing[$network])) {
                 if (!$this->docker->createLinkNetwork($link)) {
-                    $final[] = $this->pending($link, 'the network '.$network.' could not be created');
+                    $final[] = $link->pending('the network '.$network.' could not be created');
                     continue;
                 }
                 $log('isolation: created '.$network);
@@ -160,7 +241,14 @@ final class IsolationConverger
                 $ok = $this->docker->connect($network, (string) $link->targetContainer, $link->alias());
             }
             $desired[$network] = true;
-            $final[] = $ok ? $link : $this->pending($link, 'a container could not be attached to '.$network);
+            if (!$ok) {
+                $final[] = $link->pending('a container could not be attached to '.$network);
+                continue;
+            }
+            $addresses = $this->docker->addresses($network);
+            $from = $addresses[(string) $link->sourceContainer] ?? null;
+            $to = $addresses[(string) $link->targetContainer] ?? null;
+            $final[] = null === $from || null === $to ? $link->pending('the addresses on '.$network.' are not known yet') : $link->withAddresses($from, $to);
         }
         foreach ($existing as $network => $members) {
             if (!isset($desired[$network])) {
@@ -191,11 +279,6 @@ final class IsolationConverger
             }
         } catch (DdevUnavailable) {
         }
-    }
-
-    private function pending(ResolvedLink $link, string $why): ResolvedLink
-    {
-        return new ResolvedLink($link->sourceInstance, $link->sourceProject, $link->targetInstance, $link->targetProject, $link->service, $link->port, $why, $link->sourceContainer, $link->targetContainer);
     }
 
     /**

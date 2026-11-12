@@ -14,6 +14,8 @@ use App\Domain\Host\IsolationMode;
  *  - forward: the router reaches every routed service; instances reach the router's HTTP and mirror ports; ICMP stays;
  *    every other new flow inside ddev_default is recorded in `observed` and (enforce) dropped. Per link bridge: only
  *    `source -> target:port` (new connections), nothing else.
+ *  - UDP, IPv6 and every other protocol: not listed flow by flow (only TCP is recorded). In enforce mode a new UDP or IPv6
+ *    flow between instances, or from a container to the host, is dropped like any other (DNS to the gateway and ICMP excepted).
  *  - input: containers reach the host only on 80/443, the public catalogue ports, the admin's extra ports, DNS and ICMP.
  */
 final class IsolationRuleset
@@ -51,9 +53,11 @@ final class IsolationRuleset
         $out .= "    iifname $b oifname $b ip saddr @routers accept\n";
         $out .= "    iifname $b oifname $b ip daddr @routers tcp dport @router_ports accept\n";
         $out .= "    iifname $b oifname $b ip protocol icmp accept\n";
+        $out .= "    iifname $b oifname $b meta l4proto ipv6-icmp accept\n";
         $out .= "    iifname $b oifname $b ct state new update @observed { ip saddr . ip daddr . tcp dport timeout 4h }\n";
         $out .= "    iifname $b oifname $b ct state new counter $verdict\n";
-        $links = $in->links;
+        // Report mode never drops anything: the link networks are plain Docker networks there, only recorded flows exist.
+        $links = IsolationMode::Enforce === $in->mode ? $in->links : [];
         usort($links, static fn (ResolvedLink $a, ResolvedLink $b): int => strcmp($a->bridge(), $b->bridge()));
         $seen = [];
         foreach ($links as $link) {
@@ -63,8 +67,11 @@ final class IsolationRuleset
                 continue;
             }
             $seen[$name] = true;
+            $from = self::address((string) $link->sourceIp);
+            $to = self::address((string) $link->targetIp);
+            // One way at the packet level: only a NEW connection source -> target:port; replies are "established" (accepted at the top).
             $out .= "    # link {$link->describe()}\n";
-            $out .= "    iifname \"$name\" oifname \"$name\" tcp dport {$link->port} accept\n";
+            $out .= "    iifname \"$name\" oifname \"$name\" ip saddr $from ip daddr $to tcp dport {$link->port} ct state new accept\n";
             $out .= "    iifname \"$name\" oifname \"$name\" ct state new drop\n";
         }
         $out .= "  }\n";
@@ -75,6 +82,7 @@ final class IsolationRuleset
             $out .= "    iifname $i tcp dport @host_ports accept\n";
             $out .= "    iifname $i udp dport 53 accept\n";
             $out .= "    iifname $i ip protocol icmp accept\n";
+            $out .= "    iifname $i meta l4proto ipv6-icmp accept\n";
             $out .= "    iifname $i ct state new update @observed_host { ip saddr . tcp dport timeout 4h }\n";
             $out .= "    iifname $i ct state new counter $verdict\n";
         }

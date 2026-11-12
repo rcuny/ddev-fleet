@@ -23,6 +23,7 @@ final readonly class IsolationStatus
         private LinkResolver $resolver,
         private DockerNetworks $docker,
         private IsolationReport $report,
+        private ?NftablesServiceGuard $nftables = null,
     ) {
     }
 
@@ -79,6 +80,9 @@ final readonly class IsolationStatus
             if (IsolationMode::Off === $mode && $live['installed']) {
                 $doc['problems'][] = 'the table exists although the mode is off (applied by hand?)';
             }
+        }
+        if (IsolationMode::Off !== $mode && null !== $problem = $this->nftables?->problem()) {
+            $doc['problems'][] = $problem;
         }
         $doc['ok'] = IsolationMode::Enforce !== $mode || [] === $doc['problems'];
 

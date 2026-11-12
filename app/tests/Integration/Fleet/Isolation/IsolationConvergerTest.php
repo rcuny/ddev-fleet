@@ -84,6 +84,8 @@ final class IsolationConvergerTest extends InstanceJobTestCase
             $applier,
             $this->paths,
             new AuditLog(new AuditEntryRepository($this->em), $this->clock),
+            new \Symfony\Component\Lock\LockFactory(new \Symfony\Component\Lock\Store\FlockStore($this->paths->locksDir())),
+            new \App\Fleet\Isolation\NftablesServiceGuard($this->runner),
         );
     }
 
@@ -184,6 +186,7 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         $this->mode(IsolationMode::Enforce);
         $this->containers('acme--staging', 'web', 'db');
         $this->containers('blog--staging', 'web', 'typesense');
+        $this->runner->expect(['docker', 'network', 'inspect', '--format', '{{range .Containers}}{{.Name}}|{{.IPv4Address}}'."\n".'{{end}}', 'fleet-link-acme--staging--blog--staging--typesense--8108'], new CommandResult(0, "ddev-acme--staging-web|172.20.0.2/16\nddev-blog--staging-typesense|172.20.0.3/16\n"));
         // acme--main has no blog--main: that pair is pending.
         $this->containers('acme--main', 'web');
 
@@ -200,7 +203,7 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         self::assertContains('com.docker.network.bridge.name='.$live[0]->bridge(), $create[0]->argv);
         self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'connect', $network, 'ddev-acme--staging-web']));
         self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'connect', '--alias', 'typesense.blog', $network, 'ddev-blog--staging-typesense']));
-        self::assertStringContainsString('iifname "'.$live[0]->bridge().'" oifname "'.$live[0]->bridge().'" tcp dport 8108 accept', $this->staged[0]);
+        self::assertStringContainsString('iifname "'.$live[0]->bridge().'" oifname "'.$live[0]->bridge().'" ip saddr 172.20.0.2 ip daddr 172.20.0.3 tcp dport 8108 ct state new accept', $this->staged[0]);
         $pending = array_values(array_filter($pass->links, static fn ($l): bool => !$l->isLive()));
         self::assertCount(1, $pending);
         self::assertStringContainsString('blog--main does not exist', (string) $pending[0]->pending);
@@ -273,5 +276,111 @@ final class IsolationConvergerTest extends InstanceJobTestCase
 
         self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'rm', 'fleet-link-acme--main--blog--main--typesense--8108']));
         self::assertSame([], $this->runner->callsMatching(['docker', 'network', 'rm', 'fleet-link-x--y--web--80']));
+    }
+
+    public function testAFailureAnywhereIsReturnedNeverThrown(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $this->applier->fails = new \LogicException('boom');
+        $pass = $this->converger->pass();
+
+        self::assertFalse($pass->ok());
+        self::assertSame('boom', $pass->error);
+    }
+
+    public function testReportModeStagesNoDropAtAll(): void
+    {
+        $this->mode(IsolationMode::Report);
+        $this->converger->pass();
+
+        self::assertStringNotContainsString('drop', $this->staged[0]);
+    }
+
+    public function testAnEnabledNftablesServiceStopsEnableAndPasses(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $this->runner->expect(['systemctl', 'is-enabled', 'nftables.service'], new CommandResult(0, "enabled\n"));
+        $pass = $this->converger->pass();
+
+        self::assertFalse($pass->ok());
+        self::assertStringContainsString('nftables.service is enabled', (string) $pass->error);
+        self::assertSame([], $this->applier->applied);
+
+        $this->runner->expect(['systemctl', 'is-enabled', 'nftables.service'], new CommandResult(0, "enabled\n"));
+        try {
+            $this->converger->changeMode(IsolationMode::Report, 'cli');
+            self::fail('enable must refuse');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('Fleet never enables it', $e->getMessage());
+        }
+        self::assertSame(IsolationMode::Enforce, $this->host->get()?->isolationMode(), 'the mode is unchanged');
+    }
+
+    public function testDisableRemovesTheTableEvenWhenALaterStepFails(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $this->converger->pass();
+        // The audit write fails after the table was deleted: the table is gone anyway, the error is reported.
+        $this->em->getConnection()->executeStatement('DROP TABLE audit_entry');
+
+        try {
+            $this->converger->changeMode(IsolationMode::Off, 'cli');
+            self::fail('the failed step must be reported');
+        } catch (\RuntimeException $e) {
+            self::assertStringContainsString('not completed', $e->getMessage());
+        }
+        self::assertSame(IsolationRuleset::disabled(), end($this->staged));
+    }
+
+    public function testAnOffHostRetriesARemovalThatFailedBefore(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $this->converger->pass();
+        $this->applier->fails = new \RuntimeException('helper down');
+        try {
+            $this->converger->changeMode(IsolationMode::Off, 'cli');
+        } catch (\RuntimeException) {
+        }
+        self::assertSame(IsolationMode::Off, $this->host->get()?->isolationMode(), 'the mode was still saved');
+        $this->applier->fails = null;
+        $staged = \count($this->staged);
+
+        $pass = $this->converger->pass();
+
+        self::assertTrue($pass->applied);
+        self::assertCount($staged + 1, $this->staged);
+        self::assertSame(IsolationRuleset::disabled(), end($this->staged));
+        // Nothing left to retry.
+        self::assertFalse($this->converger->pass()->applied);
+    }
+
+    public function testASecondPassWhileOneRunsDoesNothing(): void
+    {
+        $this->mode(IsolationMode::Report);
+        $lock = new \Symfony\Component\Lock\LockFactory(new \Symfony\Component\Lock\Store\FlockStore($this->paths->locksDir()))->createLock('isolation.pass', 120.0);
+        self::assertTrue($lock->acquire(false));
+        $this->runner->reset();
+
+        $pass = $this->converger->pass();
+
+        self::assertTrue($pass->ok());
+        self::assertFalse($pass->applied);
+        self::assertSame([], $this->runner->calls());
+        $lock->release();
+    }
+
+    public function testDeletingALinkRunsAPassAtOnceAndRemovesItsNetwork(): void
+    {
+        $this->declareLink();
+        $this->mode(IsolationMode::Enforce);
+        $service = new ProjectLinkService(new ProjectRepository($this->em), new ProjectLinkRepository($this->em), new AuditLog(new AuditEntryRepository($this->em), $this->clock), $this->converger);
+        // The network of the link exists; after the delete no link wants it.
+        $this->runner->expect(['docker', 'network', 'ls', '--filter', 'label=com.ddev-fleet.link'], new CommandResult(0, "fleet-link-acme--staging--blog--staging--typesense--8108\n"));
+        $this->runner->expect(['docker', 'network', 'inspect', '--format', self::MEMBERS_FORMAT], new CommandResult(0, 'ddev-acme--staging-web ddev-blog--staging-typesense '));
+
+        $service->delete('acme', 'blog', 'typesense', 8108, 'same', 'admin');
+
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'rm', 'fleet-link-acme--staging--blog--staging--typesense--8108']));
+        self::assertCount(2, $this->runner->callsMatching(['docker', 'network', 'disconnect', '--force']));
     }
 }

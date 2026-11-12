@@ -111,6 +111,16 @@ final class ApplyIsolationHelperTest extends TestCase
         yield 'second table' => [$head."table inet fleet_isolation {\n}\ntable ip nat {\n}\n"];
         yield 'shell metacharacters' => [$head."table inet fleet_isolation {\n  chain x { `id` }\n}\n"];
         yield 'missing delete' => ["table inet fleet_isolation {\n}\n"];
+        yield 'a bare chain line outside the table' => [$head."chain forward { type filter hook forward priority 0; }\n"];
+        yield 'a bare rule outside the table' => [$head."iifname \"br-0123456789ab\" drop\n"];
+        yield 'a bare element line outside the table' => [$head."elements = { 1.2.3.4 }\n"];
+        yield 'a rule against another table inside a chain' => [$head."table inet fleet_isolation {\n  chain forward {\n    type filter hook forward priority -10; policy accept;\n    iifname \"eth0\" oifname \"eth1\" ip saddr @routers accept\n    ip daddr 8.8.8.8 drop\n  }\n}\n"];
+        yield 'a hook of another priority' => [$head."table inet fleet_isolation {\n  chain forward {\n    type filter hook prerouting priority -300; policy drop;\n  }\n}\n"];
+        yield 'a jump to a foreign chain' => [$head."table inet fleet_isolation {\n  chain forward {\n    type filter hook forward priority -10; policy accept;\n    jump other\n  }\n}\n"];
+        yield 'a second table block after the first' => [$head."table inet fleet_isolation {\n}\ntable inet fleet_isolation {\n}\n"];
+        yield 'content after the closing brace' => [$head."table inet fleet_isolation {\n}\naccept\n"];
+        yield 'an unterminated block' => [$head."table inet fleet_isolation {\n  chain forward {\n"];
+        yield 'a set of an unknown name' => [$head."table inet fleet_isolation {\n  set evil {\n    type ipv4_addr;\n  }\n}\n"];
         yield 'a very long line' => [$head.'table inet fleet_isolation {'."\n  # ".str_repeat('a', 400)."\n}\n"];
     }
 
@@ -122,6 +132,36 @@ final class ApplyIsolationHelperTest extends TestCase
         self::assertSame(65, $status, $err);
         self::assertStringNotContainsString('nft -f', (string) file_get_contents($this->log), 'nothing was loaded');
         self::assertFileDoesNotExist($this->root.'/etc/ddev-fleet/fleet_isolation.nft');
+    }
+
+    public function testARulesetWithLinksAndEveryRenderedLineIsAccepted(): void
+    {
+        $link = new \App\Fleet\Isolation\ResolvedLink('app--staging', 'app', 'cms--staging', 'cms', 'typesense', 8108, null, 'ddev-app--staging-web', 'ddev-cms--staging-typesense')->withAddresses('172.20.0.2', '172.20.0.3');
+        $ruleset = IsolationRuleset::render(new IsolationInput(IsolationMode::Enforce, 'br-0123456789ab', ['172.18.0.2'], [9108], [9003], [$link], [['172.18.0.5', '172.18.0.6', 80]], [['172.18.0.5', 22]]));
+
+        [$status, , $err] = $this->apply($ruleset);
+
+        self::assertSame(0, $status, $err);
+        self::assertSame($ruleset, file_get_contents($this->root.'/etc/ddev-fleet/fleet_isolation.nft'));
+    }
+
+    public function testItRefusesToLoadWhileNftablesServiceIsEnabledButAlwaysAllowsTheDisableForm(): void
+    {
+        $stubs = $this->stubs(['nft' => "echo \"nft \$*\" >> {$this->log}", 'systemctl' => 'echo enabled']);
+        $run = function (string $staged) use ($stubs): array {
+            file_put_contents($this->root.'/srv/fleet/staging/isolation/fleet_isolation.nft', $staged);
+            $process = new Process(['bash', self::installDir().'/libexec/apply', 'isolation'], null, ['FLEET_APPLY_TEST_ROOT' => $this->root, 'PATH' => $stubs.':'.(string) getenv('PATH')], null, 60);
+            $process->run();
+
+            return [(int) $process->getExitCode(), $process->getErrorOutput()];
+        };
+
+        [$status, $err] = $run($this->ruleset());
+        self::assertSame(69, $status);
+        self::assertStringContainsString('nftables.service', $err);
+        self::assertStringNotContainsString('nft -f', (string) file_get_contents($this->log));
+        [$status] = $run(IsolationRuleset::disabled());
+        self::assertSame(0, $status, 'the disable form must always work');
     }
 
     public function testAFailedCheckLoadsNothing(): void

@@ -21,6 +21,7 @@ final readonly class ProjectLinkService
         private ProjectRepository $projects,
         private ProjectLinkRepository $links,
         private AuditLog $audit,
+        private ?\App\Fleet\Isolation\IsolationConverger $network = null,
     ) {
     }
 
@@ -79,6 +80,7 @@ final readonly class ProjectLinkService
         $link = new ProjectLink($sourceProject, $targetProject, $service, $port, $label, trim($note), $actor);
         $this->links->save($link);
         $this->audit->record($actor, AuditLog::PROJECT_LINK_CREATE, self::describe($link));
+        $this->network?->pass();
 
         return $link;
     }
@@ -94,6 +96,8 @@ final readonly class ProjectLinkService
             ?? throw new Refused('There is no such link.');
         $this->links->delete($link);
         $this->audit->record($actor, AuditLog::PROJECT_LINK_DELETE, self::describe($link));
+        // A deleted link closes at once, not at the next watcher pass (pass() never throws).
+        $this->network?->pass();
     }
 
     public static function describe(ProjectLink $link): string

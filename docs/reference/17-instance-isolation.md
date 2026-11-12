@@ -65,7 +65,7 @@ rolled back in one command.
   resolves to, Fleet creates one Docker network, `fleet-link-<source>--<target>--<service>--<port>`, with `--internal` (no
   NAT, no route to the Internet) and a stable bridge name `flk-<8 hex>`, attaches the source's `web` container and the
   target service with the alias `<service>.<target project>`, and adds one rule pair for that bridge: new connections to the
-  one port are accepted, anything else is dropped. A link is **one way**: the target cannot connect back.
+  one port are accepted, anything else is dropped. A link is **one way at the packet level**: the rule accepts only a *new* connection from the source container's address to the target container's address and port (replies are "established"); every other new flow on the link network, including one opened by the target, is dropped. In `report` mode nothing is dropped anywhere, link networks included.
 - **Modes:** `off` (no table), `report` (the table exists, records every flow, drops nothing) and `enforce` (drops what no
   link allows). The mode is a host setting, separate from `--harden`.
 
@@ -84,7 +84,7 @@ reaches that one instance from every source instance. Inside `app--staging`'s we
 `http://typesense.cms:8108`. Links are project-level, admin-only, audited (`project.link-create`, `project.link-delete`),
 shown on both projects (Network tab) and exported with the project (`links`, [export format](12-export-format.md)). A link
 whose target instance or service does not exist yet is `pending` and becomes live at the next pass; it is not an error.
-Links go live within about two minutes (the status watcher) or at the next start of either instance.
+Creating or deleting a link runs a pass at once, so a deleted link is closed immediately; a new instance or a restart is picked up at the next start of either side or by the watcher within about two minutes. A pass never fails a deploy or a start: errors are logged and the next pass retries. Two passes never run at the same time.
 
 ### Rolling it out
 
@@ -109,6 +109,14 @@ instance's web (80, 8025), database (3306) and Typesense (8108) where those cont
 reachable; `enforce` expects only the Internet and the link targets. Exit 0 = every probe behaved as expected, 1 = not,
 3 = Docker did not answer.
 
+### UDP, IPv6 and other protocols
+
+Only TCP flows are recorded and listed by `status`. In `enforce` mode a new UDP, IPv6 or other-protocol flow between instances, or from a container to the host, is dropped like any TCP flow, with these exceptions: ICMP and ICMPv6, and DNS (UDP 53) to the bridge gateway. A project that needs UDP between instances (or a UDP port on the host) has no link for it: leave it in `report`/`off`, or use a TCP service.
+
+### `nftables.service` must stay disabled
+
+Debian's `nftables.service`, when enabled, loads a file that begins with `flush ruleset` and flushes the whole ruleset when it stops or reloads, which would wipe Docker's tables, the firewall's and `fleet_isolation`. Fleet never enables it. `fleet host:isolation:enable` and the root helper refuse to load a ruleset while it is enabled or active (`systemctl disable --now nftables.service` first), `status` reports it as a problem, and the installer prints a warning when it finds it enabled.
+
 ### What it does not do
 
 - **The router stays reachable from instances.** An instance can still ask `ddev-router` for another instance's host name
@@ -125,9 +133,10 @@ reachable; `enforce` expects only the Internet and the link targets. Exit 0 = ev
 | A wrong ruleset keeps the router out of every web container | `nft -c -f` validates before install and both chains accept by default. Roll back: `fleet host:isolation:disable`, or as root `nft delete table inet fleet_isolation`. |
 | Something relied on cross-instance traffic | `report` mode lists it first. In `enforce`, add the link, or `disable`. |
 | The router's address changed and the table is stale | `fleet host:isolation:status` exits 1 in enforce mode (empty router set while instances run); the next pass fixes it, or `fleet host:isolation:enable --mode=enforce --yes` forces one. |
+| `fleet host:isolation:disable` failed half way | The table is removed first; if the helper was down, the mode is still saved as off and the next pass retries the removal. |
 | The host rebooted | `fleet-isolation.service` loads the last ruleset before `fleet-boot` starts the instances (the file `/etc/ddev-fleet/fleet_isolation.nft` exists only while the mode is not `off`). |
 
 The root helper's target is `sudo fleet-apply isolation`: the app stages `staging/isolation/fleet_isolation.nft`, the helper
-validates it line by line (only the table `inet fleet_isolation`), checks it with `nft -c -f` and loads it atomically. With
+validates it against an allowlist (the fixed header, then only `set` and `chain` blocks of the one table `inet fleet_isolation` whose every line is one of the rendered patterns; nothing outside the table, no other table, chain or rule), checks it with `nft -c -f` and loads it atomically. With
 nothing staged it prints the live table as JSON, which `status` reads (it is how the recorded flows are collected).
 

@@ -228,7 +228,18 @@ final class InstallerSafetyTest extends TestCase
         }
 
         return $file === self::installDir().'/libexec/apply'
-            && 1 === preg_match('/fleet_isolation|ISOLATION_TABLE|"nftables":\[\]|command -v nft /', $line);
+            && 1 === preg_match('/fleet_isolation|ISOLATION_TABLE|nftables\.service|"nftables":\[\]|command -v nft /', $line);
+    }
+
+    public function testNothingEnablesOrStartsNftablesService(): void
+    {
+        foreach (self::installFiles() as $file) {
+            $text = (string) file_get_contents($file);
+            self::assertDoesNotMatchRegularExpression('~systemctl\s+(enable|start|restart|reload)[^\n]*nftables~', $text, $file);
+            self::assertDoesNotMatchRegularExpression('~name:\s*nftables(\.service)?\n(\s+\w+:[^\n]*\n)*?\s+(enabled:\s*(true|yes)|state:\s*(started|restarted|reloaded))~', $text, $file);
+        }
+        $units = (string) file_get_contents(self::installDir().'/ansible/roles/units/defaults/main.yml');
+        self::assertStringNotContainsString('nftables', $units);
     }
 
     public function testTheIsolationExceptionStaysNarrow(): void
