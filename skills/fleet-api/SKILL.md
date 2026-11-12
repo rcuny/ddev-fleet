@@ -48,6 +48,15 @@ Run `python3 skills/fleet-api/bin/fleet_api.py <command>` (the path is where thi
 
 A write answers with a job; `--wait` polls it until final (`--timeout` seconds, default 600) and exits 3 when the job did not succeed. Without `--wait`, follow it with `job` and `job-log`.
 
+## Optional live feed (no polling)
+
+`job-log` polling is the baseline and always works. A host with a Mercure hub also offers a push wake-up for one job:
+
+1. `POST /api/v1/jobs/<id>/stream-token` with the same bearer token (scope `read`, same project rules as the log). It answers `{token, topic, hub_url, expires_at}`. `503 streaming_unavailable` means no hub on this host: keep polling.
+2. Open an SSE connection: `curl -N -H "Authorization: Bearer <token>" "<hub_url>?topic=<topic>"`. The Mercure token is a subscribe-only JWT for that one job, valid 10 minutes or until the API token expires, whichever is sooner. It is not the API token: never send one where the other is expected.
+3. Each event carries `id`, `status` and `size`, never the text. On an event, fetch the new text with `job-log <id> --offset N`. Stop when the status is final.
+4. When the stream ends or the token expires, mint a new one (the call is audited), or fall back to polling.
+
 ## Behaviour to rely on
 
 - Exit codes: 0 done, 1 API or network error, 2 usage or a local refusal (missing variable, plain `http`, destroy without `--confirm`), 3 a waited-for job failed.
