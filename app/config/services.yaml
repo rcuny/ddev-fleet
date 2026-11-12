@@ -78,6 +78,7 @@ services:
             - '../src/Domain/Job/Job.php'
             - '../src/Domain/Job/PendingRedeploy.php'
             - '../src/Domain/Port/NamedPort.php'
+            - '../src/Domain/Project/ProjectLink.php'
             - '../src/Domain/Project/Project.php'
             - '../src/Domain/Project/ProjectAccess.php'
             - '../src/Domain/Schedule/Schedule.php'

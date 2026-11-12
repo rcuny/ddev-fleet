@@ -69,6 +69,7 @@ final readonly class ProjectImporter
         private ProjectAccessRefresher $access,
         private InstanceSiteRefresher $sites,
         private ?SlicesApplier $slices = null,
+        private ?\App\Fleet\Projects\ProjectLinkService $linkService = null,
     ) {
     }
 
@@ -198,6 +199,7 @@ final readonly class ProjectImporter
         $this->planTemplates($document, $current, $knownTemplates, $items, $errors);
         $this->planWebhooks($document, $current, $knownTemplates, $items, $errors);
         $this->planSchedules($document, $existing, $current, $items, $errors);
+        $this->planLinks($document, $current, $items, $errors);
         $secrets = $this->planSecrets($document, $slug, $passphrase, $items, $errors, $warnings);
 
         return [new ImportPlan($slug, $items, $errors, $warnings), $secrets];
@@ -307,6 +309,59 @@ final readonly class ProjectImporter
                 $items[] = new ImportItem('webhook', $name, ImportItem::UPDATE, 'rules replaced');
             }
         }
+    }
+
+    /**
+     * FLE-299: declared links. A link whose target project is not on this host is skipped with a note (not an error): the
+     * target may be imported later and the file imported again.
+     *
+     * @param array<string, mixed>      $document
+     * @param array<string, mixed>|null $current
+     * @param list<ImportItem>          $items
+     * @param list<string>              $errors
+     */
+    private function planLinks(array $document, ?array $current, array &$items, array &$errors): void
+    {
+        $slug = $document['project']['name'];
+        $before = [];
+        foreach ($current['links'] ?? [] as $link) {
+            $before[self::linkName($link)] = $link;
+        }
+        foreach ($document['links'] ?? [] as $i => $link) {
+            $name = self::linkName($link);
+            if ($link['target'] === $slug) {
+                $errors[] = "links[$i].target: a project does not need a link to itself.";
+                $items[] = new ImportItem('link', $name, ImportItem::SKIPPED);
+                continue;
+            }
+            if (null !== $e = \App\Fleet\Projects\Rule\ResourceName::error($link['service'], false)) {
+                $errors[] = "links[$i].service: ".$e;
+            }
+            if ($link['port'] < 1 || $link['port'] > 65535) {
+                $errors[] = "links[$i].port: enter a TCP port between 1 and 65535.";
+            }
+            if ('same' !== $link['label'] && null !== $e = \App\Fleet\Projects\Rule\ResourceName::error($link['label'], false)) {
+                $errors[] = "links[$i].label: ".$e;
+            }
+            if (null !== $e = \App\Fleet\Projects\Rule\TextBlock::error($link['note'], 500)) {
+                $errors[] = "links[$i].note: ".$e;
+            }
+            if (isset($before[$name])) {
+                $items[] = self::compare('link', $name, $before[$name], $link);
+            } elseif (null === $this->projects->findByName($link['target']) && $link['target'] !== $slug) {
+                $items[] = new ImportItem('link', $name, ImportItem::SKIPPED, 'the target project is not on this host');
+            } else {
+                $items[] = new ImportItem('link', $name, ImportItem::CREATE);
+            }
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $link
+     */
+    private static function linkName(array $link): string
+    {
+        return \sprintf('%s/%s:%d (%s)', $link['target'], $link['service'], $link['port'], $link['label']);
     }
 
     /**
@@ -440,6 +495,11 @@ final readonly class ProjectImporter
         }
         foreach ($document['schedules'] as $schedule) {
             $this->writeSchedule($slug, $schedule, $plan, $by);
+        }
+        foreach ($document['links'] ?? [] as $link) {
+            if (ImportItem::CREATE === $this->actionOf($plan, 'link', self::linkName($link))) {
+                $this->linkService?->create($slug, $link['target'], $link['service'], $link['port'], $link['label'], $link['note'], $by);
+            }
         }
         foreach ($secrets ?? [] as $name => $value) {
             if (ImportItem::UNCHANGED !== $this->actionOf($plan, 'secret', (string) $name)) {

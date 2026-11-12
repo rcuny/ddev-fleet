@@ -1,7 +1,7 @@
 #!/bin/bash
 # Root helper of ddev-fleet: installs config that the app has rendered into its staging directory.
 #
-#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision|drift>
+#   sudo -n /usr/local/libexec/fleet/apply <caddy|authelia|slices|provision|drift|isolation>
 #
 # Installed by the Ansible role privileged as root:root 0755, reachable by the `fleet` user through one sudoers
 # line (install/etc/sudoers-fleet-apply). The only input is the target name; the files come from a fixed place,
@@ -50,6 +50,14 @@
 # `apply drift` (FLE-261) is the read-only twin of `provision`: the installed tag's playbook with --check --diff, nothing
 # staged, nothing installed, the report (JSON between marker lines) on stdout. See apply_drift below.
 #
+# `apply isolation` (FLE-299) installs the staged nftables ruleset of instance network isolation, or, with nothing staged,
+# prints the live table (`nft -j list table inet fleet_isolation`, read-only, `{"nftables":[]}` when it does not exist).
+# The staged fleet_isolation.nft is validated line by line (a closed character set; only the one table `inet fleet_isolation`
+# may be named; no include/flush/add/insert/create/replace/rename/destroy/define/export/import/reset/restore), checked with
+# `nft -c -f` and installed with `nft -f`, which is atomic: a failure leaves the previous table untouched. A ruleset with
+# content is also kept as /etc/ddev-fleet/fleet_isolation.nft for the boot unit fleet-isolation.service; the "disable" form
+# (the table is only deleted) removes that file. Roll back by hand: `nft delete table inet fleet_isolation`.
+#
 # Threat model, honestly: `fleet` is in the `docker` group, which is root-equivalent anyway. This helper keeps a
 # half-written or invalid config from reaching Caddy or Authelia; it is not a security boundary.
 #
@@ -58,7 +66,7 @@
 set -euo pipefail
 
 # The only targets. A repo test keeps this word list equal to App\Fleet\System\ApplyTarget and to the sudoers line.
-ALLOWED_TARGETS='caddy authelia slices provision drift'
+ALLOWED_TARGETS='caddy authelia slices provision drift isolation'
 readonly ALLOWED_TARGETS
 readonly MAX_BYTES=262144
 readonly CADDY_ENV_KEYS='FLEET_PROXY_SECRET OVH_APPLICATION_KEY OVH_APPLICATION_SECRET OVH_CONSUMER_KEY'
@@ -98,11 +106,11 @@ fail() {
 }
 
 # --- 1. arguments: exactly one known target -------------------------------------------------------------------
-[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices|provision|drift>' 64
+[ "$#" -eq 1 ] || fail 'usage: apply <caddy|authelia|slices|provision|drift|isolation>' 64
 TARGET=$1
 case " $ALLOWED_TARGETS " in
   *" $TARGET "*) ;;
-  *) fail 'unknown target (usage: apply <caddy|authelia|slices|provision|drift>)' 64 ;;
+  *) fail 'unknown target (usage: apply <caddy|authelia|slices|provision|drift|isolation>)' 64 ;;
 esac
 
 # --- 2. who may run this, and where the files are ---------------------------------------------------------------
@@ -150,6 +158,7 @@ case $TARGET in
   slices) STAGED_NAMES='slices.json' ;;
   provision) STAGED_NAMES='host-vars.yml' ;;
   drift) STAGED_NAMES='' ;;
+  isolation) STAGED_NAMES='fleet_isolation.nft' ;;
 esac
 readonly STAGED_NAMES
 
@@ -909,6 +918,58 @@ apply_drift() {
   fi
 }
 
+# --- isolation: the nftables table of instance network isolation (FLE-299) -------------------------------------------
+readonly ISOLATION_TABLE='inet fleet_isolation'
+readonly T_NFT=15
+
+# isolation_validate <file>: refuses anything but the ruleset IsolationRuleset renders. Comment lines are ignored by nft
+# but still have to be plain text.
+isolation_validate() {
+  local file=$1 body
+  if [ "$(wc -L <"$file")" -gt 300 ]; then
+    fail 'the staged ruleset has a very long line' 65
+  fi
+  if LC_ALL=C grep -Eqv '^[A-Za-z0-9 _.,;:#@{}()*"<>=!/-]*$' "$file"; then
+    fail 'the staged ruleset has an unacceptable character' 65
+  fi
+  [ "$(sed -n '1p' "$file")" = 'table inet fleet_isolation {}' ] || fail 'the staged ruleset must start with "table inet fleet_isolation {}"' 65
+  [ "$(sed -n '2p' "$file")" = 'delete table inet fleet_isolation' ] || fail 'the staged ruleset must delete the table on its second line' 65
+  body=$(sed -e '1,2d' -e '/^[[:space:]]*#/d' "$file")
+  if grep -Eiq '(^|[^a-z0-9_-])(include|flush|add|insert|create|replace|rename|destroy|define|export|import|reset|restore|delete|ruleset|redefine|undefine|monitor|list|describe)([^a-z0-9_-]|$)' <<<"$body"; then
+    fail 'the staged ruleset uses a statement that is not allowed' 65
+  fi
+  # Exactly one table definition, the table of this feature.
+  [ "$(grep -Ec '(^|[^a-z0-9_-])table([^a-z0-9_-]|$)' <<<"$body")" -le 1 ] || fail 'the staged ruleset names more than one table' 65
+  if grep -Eq '(^|[^a-z0-9_-])table([^a-z0-9_-]|$)' <<<"$body"; then
+    [ "$(grep -E '(^|[^a-z0-9_-])table([^a-z0-9_-]|$)' <<<"$body")" = 'table inet fleet_isolation {' ] || fail 'the staged ruleset names another table' 65
+  fi
+}
+
+apply_isolation() {
+  local conf="$ROOT$PROVISION_ETC/fleet_isolation.nft" lines
+  command -v nft >/dev/null 2>&1 || fail 'nft is not installed (apt install nftables)' 69
+  if ! stage_in fleet_isolation.nft "$PRIV/fleet_isolation.nft"; then
+    # Nothing staged: the read-only report.
+    if timeout "$T_NFT" nft -j list table $ISOLATION_TABLE 2>/dev/null </dev/null; then
+      return 0
+    fi
+    printf '{"nftables":[]}\n'
+    return 0
+  fi
+  isolation_validate "$PRIV/fleet_isolation.nft"
+  timeout "$T_NFT" nft -c -f "$PRIV/fleet_isolation.nft" </dev/null || fail 'nft refused the staged ruleset (nothing was changed)' 65
+  timeout "$T_NFT" nft -f "$PRIV/fleet_isolation.nft" </dev/null || fail 'nft could not load the ruleset (the previous table is unchanged)'
+  lines=$(sed -e '1,2d' -e '/^[[:space:]]*$/d' "$PRIV/fleet_isolation.nft" | wc -l)
+  mkdir -p "$ROOT$PROVISION_ETC"
+  if [ "$lines" -gt 0 ]; then
+    install -m 0644 "$PRIV/fleet_isolation.nft" "$conf.new" && mv -f "$conf.new" "$conf"
+    printf 'apply: isolation ruleset installed\n'
+  else
+    rm -f -- "$conf"
+    printf 'apply: isolation table removed\n'
+  fi
+}
+
 pin_staging || true
 case $TARGET in
   caddy) apply_caddy ;;
@@ -916,4 +977,5 @@ case $TARGET in
   slices) apply_slices ;;
   provision) apply_provision ;;
   drift) apply_drift ;;
+  isolation) apply_isolation ;;
 esac

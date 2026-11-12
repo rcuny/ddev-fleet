@@ -13,6 +13,7 @@ fleet_packages:
   - openssh-client
   - libnss3-tools
   - iproute2
+  - nftables
   - tmux
   - composer
   - php8.4-fpm

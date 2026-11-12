@@ -25,6 +25,7 @@ final readonly class PreStartGate
         private AuditLog $audit,
         private FleetPaths $paths,
         private ?InstanceDbIsolationWriter $dbIsolation = null,
+        private ?IsolationConverger $network = null,
     ) {
     }
 
@@ -125,6 +126,11 @@ final readonly class PreStartGate
             $this->dbIsolation?->converge($instance->id(), $log->line(...));
         } catch (\RuntimeException $e) {
             throw new JobFailed('The database isolation is not in effect: '.$e->getMessage());
+        }
+        // FLE-299: links and the host ruleset follow the new container addresses. A failure is only logged: the next pass retries.
+        $pass = $this->network?->pass($log->line(...));
+        if (null !== $pass && !$pass->ok()) {
+            $log->line('WARNING: network isolation pass failed: '.$pass->error);
         }
     }
 
