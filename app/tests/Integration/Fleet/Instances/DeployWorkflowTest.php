@@ -85,6 +85,132 @@ final class DeployWorkflowTest extends InstanceJobTestCase
         self::assertStringContainsString('deploy.overrides-allowed acme--main: .ddev/docker-compose.dockersock.yaml: services.web.privileged', implode("\n", $actions));
     }
 
+    public function testADeployDisconnectsTheDbFromTheSharedNetworkAfterTheStart(): void
+    {
+        // FLE-297 review gap: the deploy must run the isolation check right after `ddev start`, before the post-deploy lines.
+        $this->workflow = $this->workflowWith(preStart: $this->preStartGate(true));
+        $this->saveTemplate('full', ['ddev drush cr']);
+        $id = 'acme--main';
+        $this->runner->expect(['ddev', 'debug', 'compose-config'], new CommandResult(0, "services:\n  web: {}\n  db: {}\n"));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(0));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"x_default":{}}'));
+
+        $job = $this->deploy();
+
+        self::assertSame(InstanceState::Running, $this->instances->find($id)?->state());
+        self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'disconnect', 'ddev_default', 'ddev-'.$id.'-db']));
+        $names = $this->commandNames();
+        $disconnect = array_search('docker network', $names, true);
+        self::assertIsInt($disconnect, implode(', ', $names));
+        self::assertLessThan(array_search('ddev drush', $names, true), $disconnect);
+        self::assertStringContainsString('isolation: disconnected ddev-'.$id.'-db from ddev_default', $this->logText($job));
+    }
+
+    public function testAFailedDisconnectFailsTheDeployBeforeThePostDeployLines(): void
+    {
+        $this->workflow = $this->workflowWith(preStart: $this->preStartGate(true));
+        $this->saveTemplate('full', ['ddev drush cr']);
+        $id = 'acme--main';
+        $this->runner->expect(['ddev', 'debug', 'compose-config'], new CommandResult(0, "services:\n  web: {}\n  db: {}\n"));
+        $this->runner->expect(['docker', 'ps'], new CommandResult(0, 'ddev-'.$id.'-db|db|com.ddev.site-name='.$id."\n"));
+        $this->runner->expect(['docker', 'inspect'], new CommandResult(0, '{"ddev_default":{}}'));
+        $this->runner->expect(['docker', 'network', 'disconnect'], new CommandResult(1));
+
+        $e = $this->failedDeploy();
+
+        self::assertStringContainsString('The database isolation is not in effect', $e->getMessage());
+        self::assertNotContains('ddev drush', $this->commandNames());
+    }
+
+    public function testARedeployOfARunningInstanceWhoseNewCheckoutIsRefusedLeavesItRunning(): void
+    {
+        // FLE-319: the old checkout and containers must survive; nothing is torn down or started.
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $dir = $this->paths->instanceDir($instance->id());
+        mkdir($dir.'/.ddev', 0o750, true);
+        file_put_contents($dir.'/marker', 'old');
+        $this->runner->expect(['git'], new CommandResult(0, ''), static function (array $argv): void {
+            $target = end($argv);
+            mkdir($target.'/.ddev', 0o750, true);
+            file_put_contents($target.'/.ddev/docker-compose.dockersock.yaml', "services:\n  web:\n    privileged: true\n");
+        });
+        $job = $this->job('redeploy', $instance);
+
+        try {
+            $this->workflow->run($instance, $this->project, true, $this->logFor($job), false);
+            self::fail('expected a refusal');
+        } catch (JobFailed $e) {
+            self::assertStringContainsString('still running its old checkout', $e->getMessage());
+            self::assertStringContainsString('docker-compose.dockersock.yaml:services.web.privileged', $e->getMessage());
+        }
+
+        self::assertSame(InstanceState::Running, $this->instances->find($instance->id())?->state());
+        self::assertFileExists($dir.'/marker');
+        self::assertNotContains('ddev delete', $this->commandNames());
+        self::assertNotContains('ddev start', $this->commandNames());
+        self::assertDirectoryDoesNotExist($this->paths->stagingDir().'/redeploy-'.$instance->id());
+        self::assertStringContainsString('redeploy refused', $this->logText($job));
+        $audit = $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'redeploy.refused']);
+        self::assertCount(1, $audit);
+    }
+
+    public function testARedeployOfARunningInstanceWhoseBranchCannotBeClonedAbortsBeforeTeardown(): void
+    {
+        // FLE-323: a missing branch or an unreachable remote must not cost the running instance its checkout.
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $dir = $this->paths->instanceDir($instance->id());
+        mkdir($dir.'/.ddev', 0o750, true);
+        file_put_contents($dir.'/marker', 'old');
+        $this->runner->expect(['git'], new CommandResult(128, '', "fatal: Remote branch develop not found in upstream origin\n"));
+        $job = $this->job('redeploy', $instance);
+
+        try {
+            $this->workflow->run($instance, $this->project, true, $this->logFor($job), false);
+            self::fail('expected an abort');
+        } catch (JobFailed $e) {
+            self::assertStringContainsString('Redeploy aborted', $e->getMessage());
+            self::assertStringContainsString('still running its old checkout', $e->getMessage());
+            self::assertStringContainsString('exit code 128', $e->getMessage());
+        }
+
+        self::assertSame(InstanceState::Running, $this->instances->find($instance->id())?->state());
+        self::assertFileExists($dir.'/marker');
+        self::assertSame(['git clone'], $this->commandNames(), 'no ddev delete, no second clone');
+        self::assertDirectoryDoesNotExist($this->paths->stagingDir().'/redeploy-'.$instance->id());
+        self::assertStringContainsString('redeploy aborted', $this->logText($job));
+        $audit = $this->em->getRepository(\App\Domain\Audit\AuditEntry::class)->findBy(['action' => 'redeploy.aborted']);
+        self::assertCount(1, $audit);
+    }
+
+    public function testTheScanCloneUsesItsOwnShorterTimeout(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $this->workflow->run($instance, $this->project, true, $this->logFor($this->job('redeploy', $instance)), false);
+
+        $timeouts = [];
+        foreach ($this->runner->calls() as $call) {
+            if ('git' === $call->argv[0] && \in_array('clone', $call->argv, true)) {
+                $timeouts[] = $call->timeout;
+            }
+        }
+        self::assertSame([\App\Fleet\Git\GitClient::SCAN_CLONE_TIMEOUT, \App\Fleet\Git\GitClient::CLONE_TIMEOUT], $timeouts);
+    }
+
+    public function testARedeployOfARunningInstanceWithACleanNewCheckoutProceeds(): void
+    {
+        $instance = $this->instance('main', 'develop', InstanceState::Running);
+        $job = $this->job('redeploy', $instance);
+
+        $this->workflow->run($instance, $this->project, true, $this->logFor($job), false);
+
+        self::assertSame(2, \count(array_keys($this->commandNames(), 'git clone', true)), 'the scan clone, then the real one');
+        self::assertContains('ddev start', $this->commandNames());
+        self::assertSame(InstanceState::Running, $this->instances->find($instance->id())?->state());
+        self::assertDirectoryDoesNotExist($this->paths->stagingDir().'/redeploy-'.$instance->id());
+    }
+
     public function testHappyPathRunsTheStepsInOrder(): void
     {
         $this->saveTemplate('full', ['ddev init', 'ddev drush cr'], 'dev');

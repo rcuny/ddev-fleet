@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-11-12
+
+### Added
+- **FLE-306: try Fleet on a DigitalOcean Droplet.** `deploy/cloud-init/digitalocean.yaml` is a cloud-init file to paste when creating a Debian 13 Droplet: it installs the latest release with Let's Encrypt, enables a firewall for SSH, HTTP and HTTPS, and writes the one-time setup link to the root-only `/root/FLEET-READY.txt` (the console and `/etc/motd` say how to read it). The installer accepts `--domain=auto` (`<ip-with-dashes>.nip.io`, a test convenience). New guide `docs/guides/11-try-on-digitalocean.md` with `doctl` and Terraform (`deploy/terraform/digitalocean/`) samples.
+
+- **FLE-310: installer and upgrade pre-flight check the Docker Engine (26.0.0), docker compose (2.24.4) and DDEV (1.24.0) versions.** The instance isolation features need them; an older tool blocks with the command to upgrade it (ids `docker.version`, `docker.compose-version`, `ddev.version`). The `docker` Ansible role asserts Engine and compose after installing, and the General tab of `/admin/host` shows the three versions with a warning when one is too old.
+
+### Fixed
+- **FLE-302 (review gap of FLE-297): the deploy's database isolation is now covered by `DeployWorkflowTest`.** A deploy disconnects the db container from `ddev_default` right after `ddev start` and before the post-deploy lines, and a failed disconnect fails the deploy. (The router repair start already runs the same check, see FLE-307.) Per-instance random database credentials are not part of this change; they are a separate follow-up.
+
+- **FLE-319:** Redeploying a running instance whose new checkout would fail the compose-override guard is now refused before anything is torn down: the old instance keeps running and the job reports the files and keys (audit action `redeploy.refused`).
+- **FLE-319:** The router repair's skip message no longer claims `ddev start` was run again, and the guard is scanned once per repair instead of twice.
+
+- **FLE-323:** A redeploy of a running instance whose branch no longer exists, whose remote is unreachable or whose new checkout the guard cannot scan now stops before anything is torn down: the old instance keeps running, the job says why, and the audit log gets `redeploy.aborted`. The scan clone has its own shorter timeout (180 s), and a failed cleanup of its staging directory is logged.
+
+### Security
+- **FLE-314: the deploy guard also scans `.ddev/web-build/*`**: a Dockerfile that mentions `docker.sock`, installs a Docker CLI or engine package, or sets a setuid bit is refused before start (Fleet's own `Dockerfile.fleet-*` fragments are exempt). `fleet instance audit-overrides` reports the same files.
+- **FLE-320: the deploy guard's `.ddev/web-build/*` scan also refuses `apk add docker` (Alpine's bare `docker` package) and Docker's `get.docker.com` install script** (for example `curl -fsSL https://get.docker.com | sh`). Other packages with `docker` in the name (`docker-compose-doc`, `dockerize`) and registry-prefixed image references (`docker.io/library/node`) stay allowed.
+
+### Dependencies
+- Terraform DigitalOcean provider constraint in the `deploy/terraform/digitalocean` sample raised to `~> 2.107` (#294).
+
+#### Rollout
+- A host with an older Docker, compose or DDEV is blocked at the next `fleet upgrade`: upgrade the package first (`sudo apt-get install --only-upgrade docker-ce docker-ce-cli docker-compose-plugin ddev`).
+
 ## [1.9.2] - 2026-11-11
 
 ### Added
@@ -1506,7 +1531,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.9.2...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/rcuny/ddev-fleet/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/rcuny/ddev-fleet/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/rcuny/ddev-fleet/compare/v1.9.0...v1.9.1
 [1.9.0]: https://github.com/rcuny/ddev-fleet/compare/v1.8.0...v1.9.0

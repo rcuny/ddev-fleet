@@ -201,3 +201,28 @@
     - docker_merged is defined
     - docker_merged['default-address-pools'] is defined
     - fleet_docker_pool_base not in docker_live.stdout
+
+- name: Read the installed Docker Engine and compose versions
+  ansible.builtin.command: docker version --format '{% raw %}{{.Server.Version}}{% endraw %}'
+  register: docker_engine_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Read the docker compose version
+  ansible.builtin.command: docker compose version --short
+  register: docker_compose_version
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+- name: Refuse a Docker older than the isolation features need (FLE-310)
+  ansible.builtin.assert:
+    that:
+      - docker_engine_version.rc != 0 or (docker_engine_version.stdout | regex_replace('^v', '') | regex_replace('[-+~].*$', '')) is version(fleet_min_docker_version, '>=')
+      - docker_compose_version.rc != 0 or (docker_compose_version.stdout | regex_replace('^v', '') | regex_replace('[-+~].*$', '')) is version(fleet_min_compose_version, '>=')
+    fail_msg: >-
+      Docker Engine {{ docker_engine_version.stdout }} / docker compose {{ docker_compose_version.stdout }} is older than
+      Engine {{ fleet_min_docker_version }} / compose {{ fleet_min_compose_version }}, which the instance isolation
+      features need. Upgrade docker-ce and docker-compose-plugin (apt-get install --only-upgrade ...) and run again.
+  when: not ansible_check_mode
