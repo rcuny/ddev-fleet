@@ -130,11 +130,38 @@ final readonly class DockerNetworks
         return $map;
     }
 
+    /**
+     * The link networks that have this instance as their source or target, by their labels (an exact match: an instance id that
+     * is the prefix of another one never catches the other's networks).
+     *
+     * @return array<string, list<string>> network => members
+     *
+     * @throws DdevUnavailable
+     */
+    public function linkNetworksOf(string $instanceId): array
+    {
+        $format = '{{.Name}}|{{.Label "'.LinkIds::LABEL_SOURCE.'"}}|{{.Label "'.LinkIds::LABEL_TARGET.'"}}';
+        $out = $this->inspect(['network', 'ls', '--filter', 'label='.LinkIds::LABEL, '--format', $format]);
+        $networks = [];
+        foreach (preg_split('/\R/', trim((string) $out)) ?: [] as $line) {
+            [$name, $source, $target] = array_pad(explode('|', $line, 3), 3, '');
+            if (!str_starts_with($name, LinkIds::NETWORK_PREFIX) || ($source !== $instanceId && $target !== $instanceId)) {
+                continue;
+            }
+            $members = $this->inspect(['network', 'inspect', '--format', '{{range .Containers}}{{.Name}} {{end}}', $name]);
+            $networks[$name] = array_values(array_filter(explode(' ', trim((string) $members))));
+        }
+
+        return $networks;
+    }
+
     public function createLinkNetwork(ResolvedLink $link): bool
     {
         return $this->change([
             'network', 'create', '--driver', 'bridge', '--internal',
             '--label', LinkIds::LABEL.'='.$link->id(),
+            '--label', LinkIds::LABEL_SOURCE.'='.$link->sourceInstance,
+            '--label', LinkIds::LABEL_TARGET.'='.$link->targetInstance,
             '-o', 'com.docker.network.bridge.name='.$link->bridge(),
             $link->network(),
         ]);

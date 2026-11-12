@@ -24,6 +24,7 @@ final readonly class IsolationStatus
         private DockerNetworks $docker,
         private IsolationReport $report,
         private ?NftablesServiceGuard $nftables = null,
+        private ?BridgeNetfilterGuard $bridgeNf = null,
     ) {
     }
 
@@ -54,6 +55,9 @@ final readonly class IsolationStatus
         } catch (DdevUnavailable $e) {
             $doc['docker'] = false;
             $doc['problems'][] = 'docker did not answer: '.$e->getMessage();
+            if (IsolationMode::Off !== $mode && null !== $problem = $this->bridgeNf?->problem()) {
+                $doc['problems'][] = $problem;
+            }
             $doc['ok'] = IsolationMode::Enforce !== $mode;
 
             return $doc;
@@ -136,13 +140,15 @@ final readonly class IsolationStatus
         if (null === $container) {
             return null;
         }
+        // The longest matching id wins: "alpha--t1" is a prefix of "ddev-alpha--t1-1-web" as well as "alpha--t1-1" itself.
+        $best = null;
         foreach ($this->instances->all() as $instance) {
             $prefix = 'ddev-'.$instance->id().'-';
-            if (str_starts_with($container, $prefix)) {
-                return [$instance, substr($container, \strlen($prefix))];
+            if (str_starts_with($container, $prefix) && (null === $best || \strlen($prefix) > \strlen($best[2]))) {
+                $best = [$instance, substr($container, \strlen($prefix)), $prefix];
             }
         }
 
-        return null;
+        return null === $best ? null : [$best[0], $best[1]];
     }
 }

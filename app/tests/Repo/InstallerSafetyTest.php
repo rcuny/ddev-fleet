@@ -228,7 +228,7 @@ final class InstallerSafetyTest extends TestCase
         }
 
         return $file === self::installDir().'/libexec/apply'
-            && 1 === preg_match('/fleet_isolation|ISOLATION_TABLE|nftables\.service|"nftables":\[\]|command -v nft /', $line);
+            && 1 === preg_match('/fleet_isolation|ISOLATION_TABLE|nftables\.service|br_netfilter|bridge-nf-call|isolation_bridge_netfilter|"nftables":\[\]|command -v nft /', $line);
     }
 
     public function testNothingEnablesOrStartsNftablesService(): void
@@ -248,7 +248,7 @@ final class InstallerSafetyTest extends TestCase
         $helper = (string) file_get_contents(self::installDir().'/libexec/apply');
 
         foreach ([$unit, $helper] as $text) {
-            self::assertDoesNotMatchRegularExpression('/flush\s+ruleset|iptables|\bufw\b|sshd|fail2ban|DOCKER-USER|ip_forward/i', implode("\n", array_filter(explode("\n", $text), static fn (string $l): bool => !str_starts_with(ltrim($l), '#'))));
+            self::assertDoesNotMatchRegularExpression('/flush\s+ruleset|iptables|\bufw\b|sshd|fail2ban|DOCKER-USER|ip_forward/i', (string) preg_replace('/bridge-nf-call-ip6?tables/', '', implode("\n", array_filter(explode("\n", $text), static fn (string $l): bool => !str_starts_with(ltrim($l), '#')))));
         }
         self::assertStringContainsString('ConditionPathExists=/etc/ddev-fleet/fleet_isolation.nft', $unit, 'a host with isolation off does nothing at boot');
         // The ruleset the app renders only filters traffic that enters from container bridges.

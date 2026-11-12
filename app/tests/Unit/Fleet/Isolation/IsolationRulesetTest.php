@@ -44,13 +44,13 @@ final class IsolationRulesetTest extends TestCase
     {
         $text = IsolationRuleset::render(new IsolationInput(IsolationMode::Enforce, 'br-0123456789ab', ['172.18.0.3'], [9108]));
 
-        self::assertStringContainsString('elements = { 172.18.0.3 }', $text);
+        self::assertStringContainsString("elements = {\n      172.18.0.3\n    }", $text);
         self::assertStringContainsString('ip saddr @routers accept', $text);
         self::assertStringContainsString('ip daddr @routers tcp dport @router_ports accept', $text);
-        self::assertStringContainsString('elements = { 80, 443, 8025, 8026, 8080, 8443, 9108 }', $text);
+        self::assertStringContainsString("elements = {\n      80,\n      443,\n      8025,\n      8026,\n      8080,\n      8443,\n      9108\n    }", $text);
         self::assertStringNotContainsString('10999', $text);
         // The host: 80, 443 and the public catalogue ports only; ssh is never listed.
-        self::assertStringContainsString('elements = { 80, 443, 9108 }', $text);
+        self::assertStringContainsString("elements = {\n      80,\n      443,\n      9108\n    }", $text);
         self::assertStringNotContainsString(' 22', $text);
     }
 
@@ -58,7 +58,7 @@ final class IsolationRulesetTest extends TestCase
     {
         $text = IsolationRuleset::render(new IsolationInput(IsolationMode::Enforce, 'br-0123456789ab', [], [], [9003, 80]));
 
-        self::assertStringContainsString('elements = { 80, 443, 9003 }', $text);
+        self::assertStringContainsString("elements = {\n      80,\n      443,\n      9003\n    }", $text);
     }
 
     public function testALinkIsOneWayAtThePacketLevel(): void
@@ -97,8 +97,8 @@ final class IsolationRulesetTest extends TestCase
         $base = new IsolationInput(IsolationMode::Report, 'br-0123456789ab', ['172.18.0.3']);
         $with = new IsolationInput(IsolationMode::Report, 'br-0123456789ab', ['172.18.0.3'], observedFlows: [['172.18.0.5', '172.18.0.6', 80]], observedHost: [['172.18.0.5', 22]]);
 
-        self::assertStringContainsString('elements = { 172.18.0.5 . 172.18.0.6 . 80 }', IsolationRuleset::render($with));
-        self::assertStringContainsString('elements = { 172.18.0.5 . 22 }', IsolationRuleset::render($with));
+        self::assertStringContainsString("elements = {\n      172.18.0.5 . 172.18.0.6 . 80\n    }", IsolationRuleset::render($with));
+        self::assertStringContainsString("elements = {\n      172.18.0.5 . 22\n    }", IsolationRuleset::render($with));
         self::assertSame(IsolationRuleset::hash($base), IsolationRuleset::hash($with));
         self::assertNotSame(IsolationRuleset::hash($base), IsolationRuleset::hash(new IsolationInput(IsolationMode::Enforce, 'br-0123456789ab', ['172.18.0.3'])));
     }
@@ -128,5 +128,20 @@ final class IsolationRulesetTest extends TestCase
         self::assertSame(12, \strlen(LinkIds::bridge($id)));
         self::assertStringStartsWith('fleet-link-', LinkIds::network($id));
         self::assertNotSame(LinkIds::bridge($id), LinkIds::bridge($id.'1'));
+    }
+
+    public function testManyRecordedFlowsRenderOneElementPerLineAndAreCapped(): void
+    {
+        $flows = [];
+        for ($i = 0; $i < 3000; ++$i) {
+            $flows[] = ['172.18.'.intdiv($i, 250).'.'.(1 + $i % 250), '172.18.99.1', 80];
+        }
+        $text = IsolationRuleset::render(new IsolationInput(IsolationMode::Report, 'br-0123456789ab', observedFlows: $flows));
+
+        foreach (explode("\n", $text) as $line) {
+            self::assertLessThan(140, \strlen($line));
+        }
+        self::assertSame(IsolationRuleset::MAX_RECORDED_FLOWS, substr_count($text, ' . 172.18.99.1 . 80'));
+        self::assertLessThan(200_000, \strlen($text), 'well inside the helper\'s 256 KiB bound');
     }
 }

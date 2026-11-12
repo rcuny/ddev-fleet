@@ -86,7 +86,20 @@ final class IsolationConvergerTest extends InstanceJobTestCase
             new AuditLog(new AuditEntryRepository($this->em), $this->clock),
             new \Symfony\Component\Lock\LockFactory(new \Symfony\Component\Lock\Store\FlockStore($this->paths->locksDir())),
             new \App\Fleet\Isolation\NftablesServiceGuard($this->runner),
+            new \App\Fleet\Isolation\BridgeNetfilterGuard($this->bridgeDir()),
         );
+    }
+
+    private function bridgeDir(): string
+    {
+        $dir = $this->paths->home().'/proc-bridge';
+        if (!is_dir($dir)) {
+            mkdir($dir);
+            file_put_contents($dir.'/bridge-nf-call-iptables', "1\n");
+            file_put_contents($dir.'/bridge-nf-call-ip6tables', "1\n");
+        }
+
+        return $dir;
     }
 
     private function scriptDocker(string $table = '{"nftables":[]}'): void
@@ -137,7 +150,7 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         self::assertTrue($first->applied);
         self::assertSame([ApplyTarget::Isolation], $this->applier->applied);
         self::assertStringContainsString('iifname "br-0123456789ab"', $this->staged[0]);
-        self::assertStringContainsString('elements = { 172.18.0.2 }', $this->staged[0]);
+        self::assertStringContainsString("elements = {\n      172.18.0.2\n    }", $this->staged[0]);
         self::assertStringContainsString('ct state new counter accept', $this->staged[0]);
         // The staged file is gone afterwards.
         self::assertFileDoesNotExist($this->paths->stagingFile('isolation', 'fleet_isolation.nft'));
@@ -177,7 +190,7 @@ final class IsolationConvergerTest extends InstanceJobTestCase
 
         self::assertTrue($pass->ok(), (string) $pass->error);
         self::assertStringContainsString('ct state new counter drop', $this->staged[0]);
-        self::assertStringContainsString('elements = { 80, 443, 9003, 9108 }', $this->staged[0]);
+        self::assertStringContainsString("elements = {\n      80,\n      443,\n      9003,\n      9108\n    }", $this->staged[0]);
     }
 
     public function testADeclaredLinkCreatesAnInternalNetworkAttachesBothContainersAndAddsItsRule(): void
@@ -268,14 +281,14 @@ final class IsolationConvergerTest extends InstanceJobTestCase
 
     public function testForgettingAnInstanceRemovesItsLinkNetworks(): void
     {
-        $this->runner->expect(['docker', 'network', 'ls', '--filter', 'label=com.ddev-fleet.link'], new CommandResult(0, "fleet-link-acme--main--blog--main--typesense--8108\nfleet-link-x--y--web--80\n"));
+        // acme--main is the exact source of the first network; "acme--main-2" owns the second and must be left alone.
+        $this->runner->expect(['docker', 'network', 'ls', '--filter', 'label=com.ddev-fleet.link'], new CommandResult(0, "fleet-link-acme--main--blog--main--typesense--8108|acme--main|blog--main\nfleet-link-acme--main-2--blog--main-2--web--80|acme--main-2|blog--main-2\n"));
         $this->runner->expect(['docker', 'network', 'inspect', '--format', self::MEMBERS_FORMAT], new CommandResult(0, 'ddev-acme--main-web '));
-        $this->runner->expect(['docker', 'network', 'inspect', '--format', self::MEMBERS_FORMAT], new CommandResult(0, ''));
 
         $this->converger->forgetInstance('acme--main');
 
         self::assertCount(1, $this->runner->callsMatching(['docker', 'network', 'rm', 'fleet-link-acme--main--blog--main--typesense--8108']));
-        self::assertSame([], $this->runner->callsMatching(['docker', 'network', 'rm', 'fleet-link-x--y--web--80']));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'network', 'rm', 'fleet-link-acme--main-2--blog--main-2--web--80']));
     }
 
     public function testAFailureAnywhereIsReturnedNeverThrown(): void

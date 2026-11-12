@@ -12,6 +12,8 @@ final class LinkIds
 {
     public const string NETWORK_PREFIX = 'fleet-link-';
     public const string LABEL = 'com.ddev-fleet.link';
+    public const string LABEL_SOURCE = 'com.ddev-fleet.link.source';
+    public const string LABEL_TARGET = 'com.ddev-fleet.link.target';
 
     public static function id(string $sourceInstance, string $targetInstance, string $service, int $port): string
     {

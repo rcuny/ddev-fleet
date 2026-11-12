@@ -23,6 +23,9 @@ final class IsolationRuleset
     public const string TABLE = 'fleet_isolation';
     public const array ROUTER_PORTS = [80, 443, 8080, 8443, 8025, 8026];
     public const array HOST_PORTS = [80, 443];
+    /** Recorded flows carried into a re-render (one element per line; the helper reads at most 256 KiB). Older ones are dropped. */
+    public const int MAX_RECORDED_FLOWS = 2000;
+    public const int MAX_RECORDED_HOST_FLOWS = 500;
 
     public static function render(IsolationInput $in): string
     {
@@ -36,8 +39,8 @@ final class IsolationRuleset
         $hostPorts = self::ports([...self::HOST_PORTS, ...$in->publicPorts, ...$in->extraPorts]);
         $routerPorts = self::ports([...self::ROUTER_PORTS, ...$in->publicPorts]);
 
-        $observed = array_map(static fn (array $f): string => self::address($f[0]).' . '.self::address($f[1]).' . '.self::port($f[2]), $in->observedFlows);
-        $observedHost = array_map(static fn (array $f): string => self::address($f[0]).' . '.self::port($f[1]), $in->observedHost);
+        $observed = array_map(static fn (array $f): string => self::address($f[0]).' . '.self::address($f[1]).' . '.self::port($f[2]), \array_slice($in->observedFlows, -self::MAX_RECORDED_FLOWS));
+        $observedHost = array_map(static fn (array $f): string => self::address($f[0]).' . '.self::port($f[1]), \array_slice($in->observedHost, -self::MAX_RECORDED_HOST_FLOWS));
 
         $out = "table inet fleet_isolation {}\ndelete table inet fleet_isolation\n";
         $out .= "table inet fleet_isolation {\n";
@@ -161,6 +164,11 @@ final class IsolationRuleset
      */
     private static function elements(array $items): string
     {
-        return [] === $items ? '' : '    elements = { '.implode(', ', $items)." }\n";
+        if ([] === $items) {
+            return '';
+        }
+
+        // One element per line: a long list on one line would pass the helper's line-length bound after a few flows.
+        return "    elements = {\n      ".implode(",\n      ", $items)."\n    }\n";
     }
 }

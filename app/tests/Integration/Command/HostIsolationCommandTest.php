@@ -31,6 +31,9 @@ final class HostIsolationCommandTest extends KernelTestCase
     {
         $em = $this->setUpFleetDatabase();
         file_put_contents($this->tempHome.'/test-apply-helper', "#!/bin/bash\nALLOWED_TARGETS='caddy authelia slices provision drift isolation'\n");
+        mkdir($this->tempHome.'/test-bridge-nf', 0o700, true);
+        file_put_contents($this->tempHome.'/test-bridge-nf/bridge-nf-call-iptables', "1\n");
+        file_put_contents($this->tempHome.'/test-bridge-nf/bridge-nf-call-ip6tables', "1\n");
         new HostSettingsRepository($em)->getOrCreate('fleet.example.com', new \DateTimeImmutable());
         $projects = new ProjectRepository($em);
         foreach (['app', 'cms'] as $name) {
@@ -157,7 +160,9 @@ final class HostIsolationCommandTest extends KernelTestCase
 
         // Enforce expects the other instance and the gateway ssh to be blocked: every probe that "connects" is a failure.
         $this->docker();
-        $this->cli('fleet:host:isolation:enable', ['--mode' => 'enforce', '--yes' => true]);
+        $this->runner()->expect(['sudo', '-n', '--', PrivilegedApply::HELPER, 'isolation'], new CommandResult(0, '{"nftables":[]}'));
+        $go = $this->cli('fleet:host:isolation:enable', ['--mode' => 'enforce', '--yes' => true]);
+        self::assertSame(0, $go->getStatusCode(), $go->getDisplay());
         $this->runner()->expect(['docker', 'network', 'inspect', '--format', '{{range .IPAM.Config}}{{.Gateway}} {{end}}'], new CommandResult(0, "172.18.0.1 \n"));
         $enforced = $this->cli('fleet:host:isolation:check', ['--json' => true]);
         self::assertSame(1, $enforced->getStatusCode());
@@ -165,5 +170,36 @@ final class HostIsolationCommandTest extends KernelTestCase
         self::assertContains('host sshd 172.18.0.1', array_column($failed, 'to'));
         self::assertContains('router (traefik api)', array_column($failed, 'to'));
         self::assertNotContains('internet', array_column($failed, 'to'));
+        self::assertContains('cms--staging/web', array_column($failed, 'to'));
+    }
+
+    public function testCheckNeverFailsOnWhatOffAndReportDoNotPromiseAndNeverProbesDbOrTypesense(): void
+    {
+        $this->docker();
+        $report = $this->cli('fleet:host:isolation:check', ['--json' => true]);
+
+        self::assertSame(0, $report->getStatusCode(), $report->getDisplay());
+        $probes = (array) $this->json($report)['probes'];
+        $targets = implode(' ', array_column($probes, 'to'));
+        self::assertStringNotContainsString('/db', $targets);
+        self::assertStringNotContainsString('typesense', $targets);
+        foreach ($probes as $p) {
+            if ('internet' !== $p['to']) {
+                self::assertSame('any', $p['expected'], (string) $p['to']);
+            }
+        }
+    }
+
+    public function testBridgeNetfilterMissingFailsTheCheckAndRefusesEnable(): void
+    {
+        unlink($this->tempHome.'/test-bridge-nf/bridge-nf-call-iptables');
+        $this->docker();
+        $this->runner()->expect(['sudo', '-n', '--', PrivilegedApply::HELPER, 'isolation'], new CommandResult(0, '{"nftables":[]}'));
+
+        $enable = $this->cli('fleet:host:isolation:enable', ['--mode' => 'enforce', '--yes' => true]);
+
+        self::assertSame(1, $enable->getStatusCode());
+        self::assertStringContainsString('br_netfilter is not active', $enable->getDisplay());
+        self::assertSame(IsolationMode::Off, $this->mode(), 'the mode is unchanged');
     }
 }

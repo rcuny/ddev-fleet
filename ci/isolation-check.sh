@@ -8,7 +8,7 @@
 # Both projects need a running instance with the same label. The script walks the rollout of
 # docs/reference/17-instance-isolation.md: off -> report (flows recorded) -> enforce (probes) -> a declared link
 # (reachable) -> the four restart kinds (ddev restart of each side, docker restart ddev-router, systemctl restart docker)
-# -> disable. Every step runs `fleet host:isolation:check` and stops at the first failure. The router measurement
+# -> disable. Off and report promise no reachability, so their probes are listed but never fail. Every step runs `fleet host:isolation:check` and stops at the first failure. The router measurement
 # prints the seconds from `docker restart ddev-router` until the first answer through Caddy.
 # It changes the isolation mode of THIS host and leaves it `off` at the end (also on failure, via the trap).
 set -euo pipefail
@@ -42,7 +42,11 @@ trap cleanup EXIT
 
 step 'report mode: the table must load (nft -c -f runs inside the helper first)'
 fleet_as_fleet host:isolation:enable --mode=report
-nft list table inet fleet_isolation | head -n 40
+nft list table inet fleet_isolation | sed -n '1,40p'
+
+step 'br_netfilter and its sysctls are active and persisted (the table sees nothing inside a bridge without them)'
+[ "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables)" = 1 ] || { echo 'bridge-nf-call-iptables is not 1'; exit 1; }
+[ -f /etc/modules-load.d/fleet-isolation.conf ] && [ -f /etc/sysctl.d/90-fleet-isolation.conf ] || { echo 'br_netfilter is not persisted'; exit 1; }
 
 step 'status in report mode'
 fleet_as_fleet host:isolation:status
@@ -77,11 +81,13 @@ check 'after ddev restart (within the watcher backstop)'
 
 step 'router restart: seconds until the first answer through Caddy'
 URL=${ISOLATION_CHECK_URL:-}
-start=$(date +%s.%N)
+start_ms=$(($(date +%s%N) / 1000000))
 docker restart ddev-router >/dev/null
 if [ -n "$URL" ]; then
   until curl -fsS -o /dev/null --max-time 2 "$URL"; do sleep 0.5; done
-  printf 'router restart -> first 200: %.1f s\n' "$(echo "$(date +%s.%N) - $start" | bc)"
+  end_ms=$(($(date +%s%N) / 1000000))
+  # No bc on Debian 13: integer milliseconds, printed as seconds with one decimal.
+  printf 'router restart -> first 200: %d.%d s\n' $(((end_ms - start_ms) / 1000)) $((((end_ms - start_ms) % 1000) / 100))
 else
   echo '(set ISOLATION_CHECK_URL to an instance URL to time it)'
   sleep 10

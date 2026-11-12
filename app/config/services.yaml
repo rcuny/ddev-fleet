@@ -45,6 +45,8 @@ parameters:
     fleet.firewall_marker_file: '/etc/ddev-fleet/firewall-confirmed'
     fleet.provision_playbook_file: '/usr/local/lib/ddev-fleet-installer/install/ansible/site.yml'
     fleet.apply_helper_file: '/usr/local/libexec/fleet/apply'
+    # FLE-299: where the kernel shows whether br_netfilter is active (the isolation table needs it).
+    fleet.bridge_nf_dir: '/proc/sys/net/bridge'
 
 services:
     # symfony-design-system:start
@@ -192,6 +194,10 @@ services:
     App\Fleet\System\Applier:
         alias: App\Fleet\System\PrivilegedApply
 
+    App\Fleet\Isolation\BridgeNetfilterGuard:
+        arguments:
+            $dir: '%fleet.bridge_nf_dir%'
+
     # What a host name resolves to (the wizard's scan target check); the test environment swaps in a resolver without DNS.
     App\Setup\HostResolver:
         alias: App\Setup\DnsHostResolver
@@ -256,6 +262,7 @@ when@dev:
         fleet.firewall_marker_file: '%env(resolve:FLEET_HOME)%/test-firewall-confirmed'
         fleet.provision_playbook_file: '%env(resolve:FLEET_HOME)%/test-site.yml'
         fleet.apply_helper_file: '%env(resolve:FLEET_HOME)%/test-apply-helper'
+        fleet.bridge_nf_dir: '%env(resolve:FLEET_HOME)%/test-bridge-nf'
 
     services:
         # Never the developer's real ~/.ddev: a dev app that wrote router files there would change their DDEV router.
@@ -283,6 +290,7 @@ when@test:
         fleet.firewall_marker_file: '%env(resolve:FLEET_HOME)%/test-firewall-confirmed'
         fleet.provision_playbook_file: '%env(resolve:FLEET_HOME)%/test-site.yml'
         fleet.apply_helper_file: '%env(resolve:FLEET_HOME)%/test-apply-helper'
+        fleet.bridge_nf_dir: '%env(resolve:FLEET_HOME)%/test-bridge-nf'
 
     services:
         # Public so the registry wiring test can read it from the container (the upgrade commands inject it).

@@ -33,6 +33,9 @@ final class ApplyIsolationHelperTest extends TestCase
             mkdir($this->root.'/'.$dir, 0o700, true);
         }
         touch($this->log);
+        mkdir($this->root.'/proc/sys/net/bridge', 0o700, true);
+        file_put_contents($this->root.'/proc/sys/net/bridge/bridge-nf-call-iptables', "1\n");
+        file_put_contents($this->root.'/proc/sys/net/bridge/bridge-nf-call-ip6tables', "1\n");
     }
 
     /**
@@ -43,7 +46,7 @@ final class ApplyIsolationHelperTest extends TestCase
         if (null !== $staged) {
             file_put_contents($this->root.'/srv/fleet/staging/isolation/fleet_isolation.nft', $staged);
         }
-        $stubs = $this->stubs(['nft' => "echo \"nft \$*\" >> {$this->log}\n{$nft}"]);
+        $stubs = $this->stubs(['nft' => "echo \"nft \$*\" >> {$this->log}\n{$nft}", 'modprobe' => "echo \"modprobe \$*\" >> {$this->log}", 'sysctl' => "echo \"sysctl \$*\" >> {$this->log}"]);
         $process = new Process(['bash', self::installDir().'/libexec/apply', 'isolation'], null, ['FLEET_APPLY_TEST_ROOT' => $this->root, 'PATH' => $stubs.':'.(string) getenv('PATH')], null, 60);
         $process->run();
 
@@ -62,11 +65,16 @@ final class ApplyIsolationHelperTest extends TestCase
         self::assertSame(0, $status, $err);
         self::assertStringContainsString('isolation ruleset installed', $out);
         $calls = array_values(array_filter(explode("\n", (string) file_get_contents($this->log))));
+        self::assertSame(['modprobe br_netfilter', 'sysctl -q -w net.bridge.bridge-nf-call-iptables=1 net.bridge.bridge-nf-call-ip6tables=1'], \array_slice($calls, 0, 2));
+        $calls = \array_slice($calls, 2);
         self::assertCount(2, $calls);
         self::assertMatchesRegularExpression('~^nft -c -f \S+/fleet_isolation\.nft$~', $calls[0]);
         self::assertMatchesRegularExpression('~^nft -f \S+/fleet_isolation\.nft$~', $calls[1]);
         self::assertSame($this->ruleset(), file_get_contents($this->root.'/etc/ddev-fleet/fleet_isolation.nft'));
         self::assertFileDoesNotExist($this->root.'/srv/fleet/staging/isolation/fleet_isolation.nft', 'the staged file is consumed');
+        // br_netfilter and its sysctls survive a reboot.
+        self::assertStringContainsString("br_netfilter\n", (string) file_get_contents($this->root.'/etc/modules-load.d/fleet-isolation.conf'));
+        self::assertStringContainsString('net.bridge.bridge-nf-call-iptables = 1', (string) file_get_contents($this->root.'/etc/sysctl.d/90-fleet-isolation.conf'));
     }
 
     public function testTheDisableFormRemovesTheCopyAndDeletesTheTable(): void
@@ -78,6 +86,8 @@ final class ApplyIsolationHelperTest extends TestCase
         self::assertSame(0, $status);
         self::assertStringContainsString('isolation table removed', $out);
         self::assertFileDoesNotExist($this->root.'/etc/ddev-fleet/fleet_isolation.nft');
+        self::assertFileDoesNotExist($this->root.'/etc/modules-load.d/fleet-isolation.conf');
+        self::assertFileDoesNotExist($this->root.'/etc/sysctl.d/90-fleet-isolation.conf');
     }
 
     public function testNothingStagedPrintsTheLiveTableAndChangesNothing(): void
@@ -121,6 +131,7 @@ final class ApplyIsolationHelperTest extends TestCase
         yield 'content after the closing brace' => [$head."table inet fleet_isolation {\n}\naccept\n"];
         yield 'an unterminated block' => [$head."table inet fleet_isolation {\n  chain forward {\n"];
         yield 'a set of an unknown name' => [$head."table inet fleet_isolation {\n  set evil {\n    type ipv4_addr;\n  }\n}\n"];
+        yield 'an element line with a comment injected' => [$head."table inet fleet_isolation {\n  set routers {\n    type ipv4_addr;\n    elements = {\n      1.2.3.4; flush ruleset\n    }\n  }\n}\n"];
         yield 'a very long line' => [$head.'table inet fleet_isolation {'."\n  # ".str_repeat('a', 400)."\n}\n"];
     }
 
@@ -162,6 +173,36 @@ final class ApplyIsolationHelperTest extends TestCase
         self::assertStringNotContainsString('nft -f', (string) file_get_contents($this->log));
         [$status] = $run(IsolationRuleset::disabled());
         self::assertSame(0, $status, 'the disable form must always work');
+    }
+
+    public function testItRefusesWhenBridgeNetfilterIsNotActiveAndChangesNothing(): void
+    {
+        file_put_contents($this->root.'/proc/sys/net/bridge/bridge-nf-call-iptables', "0\n");
+
+        [$status, , $err] = $this->apply($this->ruleset());
+
+        self::assertSame(69, $status);
+        self::assertStringContainsString('br_netfilter is not active', $err);
+        self::assertStringNotContainsString('nft -f', (string) file_get_contents($this->log));
+        self::assertFileDoesNotExist($this->root.'/etc/ddev-fleet/fleet_isolation.nft');
+        self::assertFileDoesNotExist($this->root.'/etc/modules-load.d/fleet-isolation.conf');
+        // The disable form never needs it.
+        [$status] = $this->apply(IsolationRuleset::disabled());
+        self::assertSame(0, $status);
+    }
+
+    public function testTheRecordedFlowsOfAManyFlowRulesetPassTheAllowlistOneElementPerLine(): void
+    {
+        $flows = [];
+        for ($i = 0; $i < 500; ++$i) {
+            $flows[] = ['172.18.'.intdiv($i, 250).'.'.(1 + $i % 250), '172.18.9.'.(1 + $i % 250), 80 + $i];
+        }
+        $ruleset = IsolationRuleset::render(new IsolationInput(IsolationMode::Report, 'br-0123456789ab', ['172.18.0.2'], [], [], [], $flows, [['172.18.0.5', 22]]));
+        self::assertLessThan(300, max(array_map('strlen', explode("\n", $ruleset))), 'no line is long');
+
+        [$status, , $err] = $this->apply($ruleset);
+
+        self::assertSame(0, $status, $err);
     }
 
     public function testAFailedCheckLoadsNothing(): void

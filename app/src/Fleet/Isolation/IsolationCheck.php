@@ -13,9 +13,12 @@ use App\Fleet\Ddev\DdevUnavailable;
 
 /**
  * FLE-299: the live probe the orchestrator runs after each rollout step (`fleet host:isolation check`). From the web
- * container of one running instance per project it opens TCP connections to every other project's instance, the router's
- * Traefik API, the bridge gateway's ssh port and the Internet, and compares each answer with what the mode expects:
- * off and report reach everything, enforce reaches only the Internet and the targets of live links.
+ * container of one running instance per project it opens TCP connections to every other project's web container (80 and the
+ * Mailpit port), the router's Traefik API, the bridge gateway's ssh port and the Internet, plus every live link. It asserts
+ * only what the mode promises: enforce blocks the first four and allows the Internet and the links; off and report promise
+ * nothing about reachability (a host firewall may block ssh, a stopped service answers nothing), so those probes are listed as
+ * "any" and never fail. The Internet and live links must be reachable in every mode. In report and enforce mode br_netfilter
+ * must be active, or the table sees no traffic inside a bridge.
  */
 final readonly class IsolationCheck
 {
@@ -27,7 +30,7 @@ final readonly class IsolationCheck
         private InstanceRepository $instances,
         private LinkResolver $resolver,
         private DockerNetworks $docker,
-        private \App\Fleet\Ddev\Ddev $ddev,
+        private ?BridgeNetfilterGuard $bridgeNf = null,
     ) {
     }
 
@@ -42,6 +45,10 @@ final readonly class IsolationCheck
         $enforce = IsolationMode::Enforce === $mode;
         $links = array_filter($this->resolver->resolve(), static fn (ResolvedLink $l): bool => $l->isLive());
         $gateway = $this->docker->gateway();
+        $rows = [];
+        if (IsolationMode::Off !== $mode && null !== $problem = $this->bridgeNf?->problem()) {
+            $rows[] = ['from' => 'host', 'to' => 'br_netfilter', 'port' => 0, 'expected' => 'active', 'actual' => 'inactive: '.$problem, 'ok' => false];
+        }
 
         $perProject = [];
         foreach ($this->instances->all() as $instance) {
@@ -49,25 +56,21 @@ final readonly class IsolationCheck
                 $perProject[$instance->project()->name()] = $instance;
             }
         }
-        $rows = [];
         foreach ($perProject as $from) {
             $web = 'ddev-'.$from->id().'-web';
             foreach ($this->instances->all() as $other) {
                 if (InstanceState::Running !== $other->state() || $other->project()->name() === $from->project()->name()) {
                     continue;
                 }
-                $present = array_column($this->ddev->projectContainers($other->id()), 'service');
-                foreach ([['web', 80], ['web', 8025], ['db', 3306], ['typesense', 8108]] as [$service, $port]) {
-                    if (!\in_array($service, $present, true)) {
-                        continue;
-                    }
-                    $allowed = $this->linked($links, $from, $other, $service, $port);
-                    $rows[] = $this->probe($web, $from->id(), 'ddev-'.$other->id().'-'.$service, $other->id().'/'.$service, $port, !$enforce || $allowed);
+                // Only the web container is on the shared network: db, Typesense and the like sit on the project network and are never reachable across projects.
+                foreach ([80, 8025] as $port) {
+                    $allowed = $this->linked($links, $from, $other, 'web', $port);
+                    $rows[] = $this->probe($web, $from->id(), 'ddev-'.$other->id().'-web', $other->id().'/web', $port, $enforce ? $allowed : null);
                 }
             }
-            $rows[] = $this->probe($web, $from->id(), DockerNetworks::ROUTER, 'router (traefik api)', 10999, !$enforce);
+            $rows[] = $this->probe($web, $from->id(), DockerNetworks::ROUTER, 'router (traefik api)', 10999, $enforce ? false : null);
             if (null !== $gateway) {
-                $rows[] = $this->probe($web, $from->id(), $gateway, 'host sshd '.$gateway, 22, !$enforce);
+                $rows[] = $this->probe($web, $from->id(), $gateway, 'host sshd '.$gateway, 22, $enforce ? false : null);
             }
             $rows[] = $this->probe($web, $from->id(), self::INTERNET_HOST, 'internet', self::INTERNET_PORT, true);
         }
@@ -95,9 +98,12 @@ final readonly class IsolationCheck
     /**
      * @return array{from: string, to: string, port: int, expected: string, actual: string, ok: bool}
      */
-    private function probe(string $container, string $from, string $host, string $label, int $port, bool $shouldReach): array
+    private function probe(string $container, string $from, string $host, string $label, int $port, ?bool $shouldReach): array
     {
         $reached = $this->docker->canConnect($container, $host, $port);
+        if (null === $shouldReach) {
+            return ['from' => $from, 'to' => $label, 'port' => $port, 'expected' => 'any', 'actual' => $reached ? 'reachable' : 'blocked', 'ok' => true];
+        }
 
         return [
             'from' => $from, 'to' => $label, 'port' => $port,

@@ -41,6 +41,7 @@ final class IsolationConverger
         private readonly AuditLog $audit,
         private readonly LockFactory $locks,
         private readonly NftablesServiceGuard $nftables,
+        private readonly BridgeNetfilterGuard $bridgeNf,
     ) {
     }
 
@@ -124,6 +125,9 @@ final class IsolationConverger
         $this->install(IsolationRuleset::render($input));
         $this->recordHash($hash);
         $log('isolation: ruleset installed ('.$mode->value.' mode, '.\count($input->links).' link(s))');
+        if (null !== $problem = $this->bridgeNf->problem()) {
+            return new IsolationPass($mode, $links, applied: true, error: $problem);
+        }
 
         return new IsolationPass($mode, $links, applied: true);
     }
@@ -182,11 +186,21 @@ final class IsolationConverger
         $this->audit->record($actor, AuditLog::ISOLATION_MODE, $before->value.' -> '.$mode->value);
 
         try {
-            return $this->locked(static function (string $line): void {
+            $pass = $this->locked(static function (string $line): void {
             });
         } catch (\Throwable $e) {
-            return new IsolationPass($mode, error: $e->getMessage());
+            $pass = new IsolationPass($mode, error: $e->getMessage());
         }
+        if (!$pass->ok()) {
+            // Refuse: the mode goes back to what it was (a table the failed pass left behind is re-rendered or removed by the next pass).
+            $settings->changeIsolationMode($before, new \DateTimeImmutable());
+            $this->host->save($settings);
+            $this->audit->record($actor, AuditLog::ISOLATION_MODE, $mode->value.' refused, mode stays '.$before->value);
+
+            throw new \RuntimeException('Isolation was not turned on ('.$mode->value.'): '.$pass->error);
+        }
+
+        return $pass;
     }
 
     /**
@@ -195,10 +209,8 @@ final class IsolationConverger
     public function forgetInstance(string $instanceId): void
     {
         try {
-            foreach ($this->docker->linkNetworks() as $network => $members) {
-                if (str_contains($network, LinkIds::NETWORK_PREFIX.$instanceId.'--') || str_contains($network, '--'.$instanceId.'--')) {
-                    $this->dropNetwork($network, $members);
-                }
+            foreach ($this->docker->linkNetworksOf($instanceId) as $network => $members) {
+                $this->dropNetwork($network, $members);
             }
         } catch (DdevUnavailable) {
             // The next pass removes the orphan.

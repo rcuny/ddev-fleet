@@ -104,10 +104,17 @@ the projects have seen the list. Containers that must reach the host on another 
 need that port in **Settings → Isolation → extra host ports** (`HostSettings.isolation_host_ports`).
 
 `fleet host:isolation:check` runs from the `web` container of one running instance per project and tries every other
-instance's web (80, 8025), database (3306) and Typesense (8108) where those containers exist, the router's Traefik API
-(10999), the gateway's port 22 and the Internet (port 443 of a public address), plus every live link. `off` and `report` expect everything
-reachable; `enforce` expects only the Internet and the link targets. Exit 0 = every probe behaved as expected, 1 = not,
+instance's web container (80, 8025), the router's Traefik API (10999), the gateway's port 22 and the Internet (port 443 of a public
+address), plus every live link, and checks that `br_netfilter` is active. Databases and search servers are never probed: they sit on
+the project's own network and are never reachable from another project in any mode. It asserts only what the mode promises:
+`enforce` expects the web containers, the router API and ssh blocked, and the Internet and the link targets reachable; `off` and
+`report` promise no reachability (a host firewall may block ssh), so those probes are listed as `any` and never fail, while the
+Internet and live links must be reachable in every mode. Exit 0 = every probe behaved as expected, 1 = not,
 3 = Docker did not answer.
+
+### `br_netfilter` is required
+
+The table filters traffic between two containers of one bridge, and the kernel shows that traffic to nftables only when the module `br_netfilter` is loaded and `net.bridge.bridge-nf-call-iptables` and `-ip6tables` are `1`. A stock Debian host has neither, so without them `enforce` would look active and filter nothing between instances. Turning isolation on makes the root helper load the module, set both sysctls and keep them across reboots (`/etc/modules-load.d/fleet-isolation.conf`, `/etc/sysctl.d/90-fleet-isolation.conf`); it refuses to install the ruleset when they are not active, and then `fleet host:isolation:enable` fails with a clear message and the mode stays as it was. `fleet host:isolation:check` and `status` report it, and `fleet-isolation.service` refuses to start at boot without it. `host:isolation:disable` removes the two files (the module stays loaded until the next reboot).
 
 ### UDP, IPv6 and other protocols
 
@@ -117,13 +124,17 @@ Only TCP flows are recorded and listed by `status`. In `enforce` mode a new UDP,
 
 Debian's `nftables.service`, when enabled, loads a file that begins with `flush ruleset` and flushes the whole ruleset when it stops or reloads, which would wipe Docker's tables, the firewall's and `fleet_isolation`. Fleet never enables it. `fleet host:isolation:enable` and the root helper refuse to load a ruleset while it is enabled or active (`systemctl disable --now nftables.service` first), `status` reports it as a problem, and the installer prints a warning when it finds it enabled.
 
+### After a plain `docker restart ddev-router`
+
+A restart that Fleet does itself refreshes the router's address in the table at once. A restart done by hand (or by DDEV) gives the router a new address that the table learns at the next pass: the status watcher notices the change within about two minutes, and in `enforce` mode the sites answer 502 from Caddy until then (measured on a throwaway host: up to about 3 minutes, mostly the watcher interval). This is the accepted window; the Docker events listener (a planned follow-up) closes it. Restart the router through Fleet (a start of any instance), or run `fleet host:isolation:enable --mode=enforce --yes` to force a pass.
+
 ### What it does not do
 
 - **The router stays reachable from instances.** An instance can still ask `ddev-router` for another instance's host name
   and get it without the Authelia check (closing that needs a Traefik allow-list per instance; planned).
 - Network changes (a recreated container, a router restart) are caught by the two-minute watcher, a start, and the router
-  converge; a Docker events listener is planned. After a router restart, instances answer 502 from Caddy until
-  the router's new address reaches the table (the same pass does it right after `docker restart ddev-router`).
+  converge; a Docker events listener is planned. After a router restart, instances answer 502 from Caddy until the
+  router's new address reaches the table (immediately for a restart Fleet does, within about two minutes otherwise: see above).
 - No egress filtering to the Internet, and no isolation inside one instance.
 
 ### Risks and how to roll back
@@ -134,6 +145,7 @@ Debian's `nftables.service`, when enabled, loads a file that begins with `flush 
 | Something relied on cross-instance traffic | `report` mode lists it first. In `enforce`, add the link, or `disable`. |
 | The router's address changed and the table is stale | `fleet host:isolation:status` exits 1 in enforce mode (empty router set while instances run); the next pass fixes it, or `fleet host:isolation:enable --mode=enforce --yes` forces one. |
 | `fleet host:isolation:disable` failed half way | The table is removed first; if the helper was down, the mode is still saved as off and the next pass retries the removal. |
+| Recorded flows | A re-apply carries at most the last 2000 TCP flows and 500 host flows (one element per line); older ones are forgotten. |
 | The host rebooted | `fleet-isolation.service` loads the last ruleset before `fleet-boot` starts the instances (the file `/etc/ddev-fleet/fleet_isolation.nft` exists only while the mode is not `off`). |
 
 The root helper's target is `sudo fleet-apply isolation`: the app stages `staging/isolation/fleet_isolation.nft`, the helper
