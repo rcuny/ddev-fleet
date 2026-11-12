@@ -17,7 +17,8 @@
 - name: Gather service states (for the resolved handler)
   ansible.builtin.service_facts:
 
-- name: Directories for the drop-ins (before any file lands in them: the OVH Debian 13 image has no resolved.conf.d)
+# Must run before any file lands in them: the OVH Debian 13 image has no resolved.conf.d (FLE-325).
+- name: Directories for the drop-ins
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
