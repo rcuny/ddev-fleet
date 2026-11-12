@@ -129,6 +129,8 @@ final readonly class PreStartGate
         }
         // FLE-324: root of the database is closed to the network (db/db stays for DDEV's tooling). A warning, never a failure.
         $this->dbIsolation?->lockRoot($instance->id(), $log->line(...));
+        // FLE-331: uid 999 (fleet) is `mysql` in the db image; without this account ddev mysql / export-db / import-db fail with 1044.
+        $this->dbIsolation?->ensureSocketUser($instance->id(), $log->line(...));
         // FLE-299: links and the host ruleset follow the new container addresses. A failure is only logged: the next pass retries.
         $pass = $this->network?->pass($log->line(...));
         if (null !== $pass && !$pass->ok()) {

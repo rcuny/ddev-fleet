@@ -305,4 +305,45 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
         self::assertFalse($this->converger()->lockRoot($id, static function (string $l) use (&$lines): void { $lines[] = $l; }));
         self::assertStringContainsString('WARNING', implode("\n", $lines));
     }
+
+    public function testTheSocketUserOfUid999IsCreatedWithAllPrivileges(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'web'), $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(0));
+
+        self::assertTrue($this->converger()->ensureSocketUser($id, static function (string $l): void {}));
+
+        $calls = $this->runner->callsMatching(['docker', 'exec', 'ddev-'.$id.'-db', 'mysql']);
+        self::assertCount(1, $calls);
+        self::assertContains(InstanceDbIsolationWriter::SOCKET_USER_SQL_MARIADB, $calls[0]->argv);
+        self::assertStringContainsString("'mysql'@'localhost'", InstanceDbIsolationWriter::SOCKET_USER_SQL_MARIADB);
+        self::assertStringContainsString('unix_socket', InstanceDbIsolationWriter::SOCKET_USER_SQL_MARIADB);
+        self::assertStringContainsString('ON *.*', InstanceDbIsolationWriter::SOCKET_USER_SQL_MARIADB);
+        self::assertStringNotContainsString('IDENTIFIED BY', InstanceDbIsolationWriter::SOCKET_USER_SQL_MARIADB);
+    }
+
+    public function testTheSocketUserFallsBackToMysqlSyntaxAndOnlyWarnsWhenBothFail(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', 'ERROR 1064 (42000)'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', 'ERROR 1064 (42000)'));
+        $lines = [];
+
+        self::assertFalse($this->converger()->ensureSocketUser($id, static function (string $l) use (&$lines): void { $lines[] = $l; }));
+
+        self::assertCount(2, $this->runner->callsMatching(['docker', 'exec']));
+        self::assertContains(InstanceDbIsolationWriter::SOCKET_USER_SQL_MYSQL, $this->runner->callsMatching(['docker', 'exec'])[1]->argv);
+        self::assertStringContainsString('WARNING', implode("\n", $lines));
+    }
+
+    public function testNoDbContainerMeansNoSocketUser(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'web'));
+
+        self::assertFalse($this->converger()->ensureSocketUser($id, static function (string $l): void {}));
+        self::assertSame([], $this->runner->callsMatching(['docker', 'exec']));
+    }
 }
