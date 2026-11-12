@@ -277,7 +277,7 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
 
         self::assertTrue($this->converger()->lockRoot($id, static function (string $l) use (&$lines): void { $lines[] = $l; }));
 
-        $calls = $this->runner->callsMatching(['docker', 'exec', 'ddev-'.$id.'-db', 'mysql']);
+        $calls = $this->runner->callsMatching(['docker', 'exec', '-e', 'MYSQL_PWD=root', 'ddev-'.$id.'-db', 'mysql']);
         self::assertCount(1, $calls);
         self::assertContains(InstanceDbIsolationWriter::LOCK_ROOT_SQL, $calls[0]->argv);
         self::assertStringContainsString('locked', implode("\n", $lines));
@@ -314,7 +314,7 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
 
         self::assertTrue($this->converger()->ensureSocketUser($id, static function (string $l): void {}));
 
-        $calls = $this->runner->callsMatching(['docker', 'exec', 'ddev-'.$id.'-db', 'mysql']);
+        $calls = $this->runner->callsMatching(['docker', 'exec', '-e', 'MYSQL_PWD=root', 'ddev-'.$id.'-db', 'mysql']);
         self::assertCount(1, $calls);
         self::assertContains(InstanceDbIsolationWriter::SOCKET_USER_SQL_MARIADB, $calls[0]->argv);
         self::assertStringContainsString("'mysql'@'localhost'", InstanceDbIsolationWriter::SOCKET_USER_SQL_MARIADB);
@@ -345,5 +345,34 @@ final class InstanceDbIsolationTest extends InstanceJobTestCase
 
         self::assertFalse($this->converger()->ensureSocketUser($id, static function (string $l): void {}));
         self::assertSame([], $this->runner->callsMatching(['docker', 'exec']));
+    }
+
+    public function testThePasswordTravelsInTheEnvironmentNotOnTheCommandLine(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(0));
+
+        $this->converger()->lockRoot($id, static function (string $l): void {});
+
+        $argv = $this->runner->callsMatching(['docker', 'exec'])[0]->argv;
+        self::assertNotContains('-proot', $argv);
+        self::assertContains('MYSQL_PWD=root', $argv);
+    }
+
+    public function testTheClientsPasswordNoticeIsNotShownAsTheReason(): void
+    {
+        $id = 'blog--main';
+        $this->ps($id, $this->psRow($id, 'db'));
+        $notice = 'mysql: [Warning] Using a password on the command line interface can be insecure.';
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', $notice."\nERROR 1064 (42000): syntax"));
+        $this->runner->expect(['docker', 'exec'], new CommandResult(1, '', $notice));
+        $lines = [];
+
+        $this->converger()->ensureSocketUser($id, static function (string $l) use (&$lines): void { $lines[] = $l; });
+
+        $out = implode("\n", $lines);
+        self::assertStringContainsString('WARNING', $out);
+        self::assertStringNotContainsString('Using a password', $out);
     }
 }
