@@ -17,16 +17,7 @@
 - name: Gather service states (for the resolved handler)
   ansible.builtin.service_facts:
 
-- name: LLMNR off
-  ansible.builtin.copy:
-    src: resolved-llmnr.conf
-    dest: /etc/systemd/resolved.conf.d/fleet-llmnr.conf
-    mode: "0644"
-    owner: root
-    group: root
-  notify: Restart systemd-resolved
-
-- name: Directories for the drop-ins
+- name: Directories for the drop-ins (before any file lands in them: the OVH Debian 13 image has no resolved.conf.d)
   ansible.builtin.file:
     path: "{{ item.path }}"
     state: directory
@@ -37,6 +28,15 @@
     - {path: /etc/systemd/resolved.conf.d, mode: "0755"}
     - {path: /etc/sysctl.d, mode: "0755"}
     - {path: /etc/audit/rules.d, mode: "0750"}
+
+- name: LLMNR off
+  ansible.builtin.copy:
+    src: resolved-llmnr.conf
+    dest: /etc/systemd/resolved.conf.d/fleet-llmnr.conf
+    mode: "0644"
+    owner: root
+    group: root
+  notify: Restart systemd-resolved
 
 - name: Sysctl drop-in
   ansible.builtin.copy:
