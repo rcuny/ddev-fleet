@@ -311,6 +311,15 @@ final readonly class Ddev
         return false;
     }
 
+    /**
+     * Runs one SQL statement as root inside a DDEV db container (`docker exec`, the unix socket, so it works whatever the
+     * root account's network host is). The statement must carry no secret: it is on the command line (FLE-324).
+     */
+    public function dbSql(string $container, string $sql): CommandResult
+    {
+        return $this->runner->run(['docker', 'exec', $container, 'mysql', '-uroot', '-proot', '-e', $sql], null, [], null, self::STATS_TIMEOUT);
+    }
+
     public function disconnectNetwork(string $network, string $container): bool
     {
         try {

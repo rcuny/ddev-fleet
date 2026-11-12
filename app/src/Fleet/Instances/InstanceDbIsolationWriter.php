@@ -36,6 +36,7 @@ final readonly class InstanceDbIsolationWriter
     public const string LEGACY_PATH = '.ddev/docker-compose.fleet-db-isolation.yaml';
     public const string MARKER = '# fleet-managed: instance database isolation (FLE-297)';
     public const string SHARED_NETWORK = 'ddev_default';
+    public const string LOCK_ROOT_SQL = "ALTER USER IF EXISTS 'root'@'%' ACCOUNT LOCK";
 
     public function __construct(private Ddev $ddev, private ?AuditLog $audit = null)
     {
@@ -151,5 +152,46 @@ final readonly class InstanceDbIsolationWriter
         }
 
         return $cut;
+    }
+
+    /**
+     * FLE-324 (owner decision 2026-11-12, option 2): DDEV's `db` user (db/db) stays, because settings.ddev.php, `ddev mysql`,
+     * import-db, export-db, the healthcheck and snapshots assume it. Only root is closed to the network: the account
+     * `root@'%'` (password "root" in every DDEV db container) is locked, so nothing that reaches the database over the
+     * network, or from the host's published port, gets DBA rights. `root@localhost`, used inside the db container
+     * (healthcheck, `ddev mysql`, snapshot, import-db's DROP/CREATE), is left alone. No password is chosen or stored: a
+     * locked account needs none. Idempotent, so it runs after every start. Never fatal: a database server that does not know
+     * ACCOUNT LOCK (MariaDB before 10.4) only logs a warning.
+     *
+     * @param \Closure(string): void $log
+     *
+     * @return bool true when the lock statement ran
+     */
+    public function lockRoot(string $project, \Closure $log): bool
+    {
+        try {
+            $container = null;
+            foreach ($this->ddev->projectContainers($project) as $row) {
+                if ('db' === $row['service']) {
+                    $container = $row['name'];
+                }
+            }
+            if (null === $container) {
+                return false; // no db container (omit_containers: [db]): nothing to lock
+            }
+            $result = $this->ddev->dbSql($container, self::LOCK_ROOT_SQL);
+        } catch (\Throwable $e) {
+            $log('WARNING: isolation: root@% of the database was not locked: '.$e->getMessage());
+
+            return false;
+        }
+        if (!$result->isSuccess()) {
+            $log('WARNING: isolation: root@% of the database was not locked (exit code '.$result->exitCode.'): '.trim(substr($result->stderr, 0, 300)));
+
+            return false;
+        }
+        $log('isolation: database account root@% is locked (db/db and root@localhost are unchanged)');
+
+        return true;
     }
 }
