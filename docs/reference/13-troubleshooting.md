@@ -33,6 +33,7 @@ Find your symptom, read the likely cause, apply the fix. Tables are grouped by w
 | Job `interrupted` | A worker or the host stopped. | Read the log, Retry. |
 | Job stays `queued` | Instance busy, job slots full, or no worker. | `systemctl status fleet-worker@1`. |
 | "port is already allocated" | Another project uses the port. | Stop that one, or `--retry-port-conflict`. |
+| `ddev mysql`, `export-db`, `import-db` or a snapshot fail with `ERROR 1044 ... ''@'localhost'` | The `fleet` user is uid 999, which is `mysql` inside DDEV's db image, so the client connects as `mysql@localhost`, an account that did not exist (the anonymous `''@localhost` answers, with no rights). | Fleet creates `mysql@localhost` (unix_socket only) after each start. Restart or redeploy the instance. |
 | Deploy fails after start | A post-deploy line failed, or a token is unresolved. | The job log shows the line; fix the line or the secret. |
 | A terminal command did not run | Unresolved token or unsafe value in a `tty1`/`tty2` line. | Skipped with a `WARNING` in the job log; the deploy still succeeds. |
 | Webhook returns 401 / 404 | Wrong signature, or no such project or secret yet. | `fleet webhook:secret`; re-enter it in the sender. |
