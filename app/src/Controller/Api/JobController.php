@@ -112,7 +112,7 @@ final readonly class JobController
     public function streamToken(int $id, Request $request): JsonResponse
     {
         $job = $this->find($id);
-        $minted = $this->streamTokens->mint($id, $request) ?? throw ApiProblem::unavailable('streaming_unavailable', 'Live streaming is not available on this host. Poll GET /api/v1/jobs/{id}/log instead.');
+        $minted = $this->streamTokens->mint($id, $request, $this->authorizer->token()->token()->expiresAt()) ?? throw ApiProblem::unavailable('streaming_unavailable', 'Live streaming is not available on this host. Poll GET /api/v1/jobs/{id}/log instead.');
         $this->support->audit($this->authorizer->token(), 'stream-token', 'job='.$id, $job);
 
         return new JsonResponse($minted);

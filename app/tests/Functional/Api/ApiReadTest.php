@@ -477,6 +477,47 @@ final class ApiReadTest extends AdminTestCase
         self::assertResponseStatusCodeSame(403);
     }
 
+    public function testStreamTokenIsCappedAtTheApiTokensOwnExpiry(): void
+    {
+        $this->enableHubTokens();
+        $job = $this->job('acme', JobStatus::Running);
+        $issued = $this->issue();
+        $this->em()->getConnection()->executeStatement('UPDATE api_token SET expires_at = ? WHERE id = ?', [gmdate('Y-m-d H:i:s', time() + 120), $issued->token->id()]);
+        $this->em()->clear();
+
+        $body = $this->postStreamToken($job, $issued);
+
+        self::assertResponseStatusCodeSame(200);
+        $parts = explode('.', (string) $body['token']);
+        $claims = json_decode((string) base64_decode(strtr($parts[1], '-_', '+/'), true), true);
+        self::assertIsArray($claims);
+        self::assertLessThanOrEqual(time() + 121, $claims['exp']);
+        self::assertGreaterThan(time(), $claims['exp']);
+        self::assertLessThanOrEqual(time() + 121, strtotime((string) $body['expires_at']));
+    }
+
+    public function testStreamTokenIsRefusedForAnExpiredOrRevokedApiTokenAndAnUnknownJob(): void
+    {
+        $this->enableHubTokens();
+        $job = $this->job('acme', JobStatus::Running);
+
+        $expired = $this->issue();
+        $this->em()->getConnection()->executeStatement('UPDATE api_token SET expires_at = ? WHERE id = ?', ['2020-01-01 00:00:00', $expired->token->id()]);
+        $this->em()->clear();
+        $this->postStreamToken($job, $expired);
+        self::assertResponseStatusCodeSame(401);
+
+        $revoked = $this->issue();
+        $stored = $this->em()->find($revoked->token::class, $revoked->token->id());
+        self::assertNotNull($stored);
+        self::getContainer()->get(ApiTokenIssuer::class)->revoke($stored, 'cli');
+        $this->postStreamToken($job, $revoked);
+        self::assertResponseStatusCodeSame(401);
+
+        $this->client->request('POST', '/api/v1/jobs/999999/stream-token', server: ['HTTP_AUTHORIZATION' => 'Bearer '.$this->issue()->secret, 'REMOTE_ADDR' => $this->clientIp, 'HTTP_X_FLEET_STAND_IN_ROLE' => 'none']);
+        self::assertResponseStatusCodeSame(404);
+    }
+
     public function testStreamTokenAnswers503WithoutAHub(): void
     {
         $job = $this->job('acme', JobStatus::Running);
