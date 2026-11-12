@@ -188,7 +188,7 @@ final readonly class InstanceDbIsolationWriter
             return false;
         }
         if (!$result->isSuccess()) {
-            $log('WARNING: isolation: root@% of the database was not locked (exit code '.$result->exitCode.'): '.trim(substr($result->stderr, 0, 300)));
+            $log('WARNING: isolation: root@% of the database was not locked (exit code '.$result->exitCode.'): '.self::reason($result->stderr));
 
             return false;
         }
@@ -232,12 +232,23 @@ final readonly class InstanceDbIsolationWriter
             return false;
         }
         if (!$result->isSuccess()) {
-            $log('WARNING: database account mysql@localhost was not ensured, ddev export-db / import-db / mysql may fail with ERROR 1044 (exit code '.$result->exitCode.'): '.trim(substr($result->stderr, 0, 300)));
+            $log('WARNING: database account mysql@localhost was not ensured, ddev export-db / import-db / mysql may fail with ERROR 1044 (exit code '.$result->exitCode.'): '.self::reason($result->stderr));
 
             return false;
         }
         $log('database account mysql@localhost (unix_socket) is in place: ddev mysql, export-db and import-db work for the fleet user (uid 999)');
 
         return true;
+    }
+
+    /** The client's "password on the command line" notice is noise (FLE-332); keep only the real error, 300 characters at most. */
+    private static function reason(string $stderr): string
+    {
+        $lines = array_filter(
+            array_map('trim', explode("\n", $stderr)),
+            static fn (string $l): bool => '' !== $l && !str_contains($l, 'Using a password on the command line'),
+        );
+
+        return substr(implode(' ', $lines), 0, 300);
     }
 }

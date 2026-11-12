@@ -317,7 +317,7 @@ final readonly class Ddev
      */
     public function dbSql(string $container, string $sql): CommandResult
     {
-        return $this->runner->run(['docker', 'exec', $container, 'mysql', '-uroot', '-proot', '-e', $sql], null, [], null, self::STATS_TIMEOUT);
+        return $this->runner->run(['docker', 'exec', '-e', 'MYSQL_PWD=root', $container, 'mysql', '-uroot', '-e', $sql], null, [], null, self::STATS_TIMEOUT);
     }
 
     public function disconnectNetwork(string $network, string $container): bool
