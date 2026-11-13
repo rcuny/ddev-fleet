@@ -135,13 +135,14 @@ A restart that Fleet does itself refreshes the router's address in the table at 
   for every instance a Traefik router (HTTP and HTTPS, priority 100000, bound to the router's live entry points except the mirror's `fleet-mirror-*` ones: an HTTP TLS router on the `:443` mirror would terminate TLS there and answer 404 for an instance's own name) that answers `noop@internal` (not the site) to a request
   for the instance's host names unless the source is the `ddev_default` gateway (Caddy), the loopback, one of the instance's own
   containers, or the web container of a live link's source. When the `:443` site mirror is active the same rule is applied by
-  SNI on its TCP entry point: it forwards an instance's names only for that instance's allowed sources (these routers have priority 200000, above the
-  HTTP deny routers at 100000, so an instance's own name keeps working) and drops every other
-  connection (another SNI, or none), because that entry point re-enters the router from the loopback and would hide the caller.
-  DDEV copies `custom-global-config` into the router's own volume only at a `ddev start`, so Fleet also puts the file into
+  SNI on its TCP entry point: it forwards an instance's names only for that instance's allowed sources (priority 200000) and
+  drops every other connection (another SNI, or none). The mirror passes the connection through to the router's https entry point
+  with a PROXY protocol v2 header, accepted from the loopback only (09-networking.md), so the HTTP deny routers there still see the
+  real client: `ClientIP(A)` with `Host: A` is served, `ClientIP(A)` with `Host: B` answers 418 even when the SNI is A's. Until the
+  mirror has been re-applied after an upgrade the re-entry still looks local and that last case is open (see the upgrade note). DDEV copies `custom-global-config` into the router's own volume only at a `ddev start`, so Fleet also puts the file into
   `ddev-router` itself (`/mnt/ddev-global-cache/traefik/config/`, copied under a temporary name and renamed) on every isolation pass
   and compares the router's copy with the host file; Traefik's file watcher loads it without a restart (measured live: enable, link
-  changes and disable take effect without any instance restart). The check `host:isolation:check` has a row for that copy. `report` and `off` always remove it (every pass, even when no ruleset is recorded). A declared link opens **all ports** of the target through the router for the link's source web container (the allow-list is by source address and host name, not by port); the link's own port limit applies only to the direct link network. Residuals: the TLS-terminating named-port mirrors
+  changes and disable take effect without any instance restart). The check `host:isolation:check` has a row for that copy. `report` and `off` always remove it (every pass, even when no ruleset is recorded). A declared link opens **all ports** of the target through the router for the link's source web container (the allow-list is by source address and host name, not by port); the link's own port limit applies only to the direct link network. If the Traefik API does not answer during a pass, the entry points of the last good file are kept (a warning is logged; with no earlier file the deny routers bind to every entry point, closed, and an instance's own name over `:443` may answer 404 until the API is back). Residuals: the TLS-terminating named-port mirrors
   (for example Typesense on 9108) still re-enter from the loopback, so an instance can reach another instance's *exposed service*
   by `Host` there; and for about a second after a container gets a new address, its own request for its own host name through the
   router is denied.

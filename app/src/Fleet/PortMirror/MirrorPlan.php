@@ -28,6 +28,15 @@ final readonly class MirrorPlan
     ) {
     }
 
+    /**
+     * DDEV's name for the router's https entry point (`http-<port>`, also for TLS), where the :443 site mirror re-enters the router.
+     * FLE-326: that entry point trusts a PROXY header from the loopback so the client's address survives the passthrough.
+     */
+    public static function siteTargetEntrypoint(int $httpsPort): string
+    {
+        return 'http-'.$httpsPort;
+    }
+
     public static function entrypoint(int $public): string
     {
         return self::ENTRYPOINT_PREFIX.$public;

@@ -95,6 +95,47 @@ final class RouterAccessTest extends InstanceJobTestCase
         self::assertStringNotContainsString('fleet-mirror', $text);
     }
 
+    public function testWhenTheTraefikApiIsDownTheLastGoodEntryPointsAreKeptAndTheInstancesStillRefresh(): void
+    {
+        $this->docker();
+        $live = new \App\Tests\Support\FakeLiveEntrypoints(['http-8080', 'http-8443', 'fleet-mirror-443']);
+        $access = new RouterAccess($this->instances, $this->instanceHostnames, new DockerNetworks($this->runner), $this->ddev, $this->traefik, $live);
+        self::assertNull($access->sync(IsolationMode::Enforce, []));
+        $good = (string) file_get_contents($access->file());
+
+        // The API stops answering: same file, no rewrite without entryPoints, a warning.
+        $this->runner->reset();
+        $this->docker();
+        $down = new RouterAccess($this->instances, $this->instanceHostnames, new DockerNetworks($this->runner), $this->ddev, $this->traefik, new \App\Tests\Support\FakeLiveEntrypoints(null));
+        $problem = $down->sync(IsolationMode::Enforce, []);
+
+        self::assertNotNull($problem);
+        self::assertStringContainsString('last good file', $problem);
+        self::assertSame($good, (string) file_get_contents($access->file()));
+        self::assertStringContainsString('entryPoints: [http-8080, http-8443]', (string) file_get_contents($access->file()));
+
+        // A new instance while the API is down still gets its routers, on the same entry points.
+        $this->instance('extra', state: InstanceState::Running);
+        $this->runner->reset();
+        $this->docker();
+        $this->runner->expect(['docker', 'ps', '-a', '--filter', 'label=com.ddev.site-name=acme--extra'], new CommandResult(0, "ddev-acme--extra-web|web|\n"));
+        $down->sync(IsolationMode::Enforce, []);
+        $text = (string) file_get_contents($access->file());
+        self::assertStringContainsString('Host(`acme--extra.', $text);
+        self::assertSame(2 * 3, substr_count($text, 'entryPoints: [http-8080, http-8443]'));
+    }
+
+    public function testWithNoLastFileAndTheApiDownTheDenyRoutersAreBoundToEveryEntryPoint(): void
+    {
+        $this->docker();
+        $down = new RouterAccess($this->instances, $this->instanceHostnames, new DockerNetworks($this->runner), $this->ddev, $this->traefik, new \App\Tests\Support\FakeLiveEntrypoints(null));
+
+        self::assertNotNull($down->sync(IsolationMode::Enforce, []));
+
+        self::assertFileExists($down->file());
+        self::assertStringNotContainsString('entryPoints: [http', (string) file_get_contents($down->file()));
+    }
+
     public function testReportAndOffRemoveTheFile(): void
     {
         $this->docker();

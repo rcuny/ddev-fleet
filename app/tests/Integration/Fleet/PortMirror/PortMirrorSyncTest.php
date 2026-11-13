@@ -12,6 +12,10 @@ final class PortMirrorSyncTest extends PortMirrorTestCase
     private const string GOLDEN_STATIC = <<<'YAML'
         # Managed by ddev-fleet: do not edit.
         entryPoints:
+          http-8443:
+            proxyProtocol:
+              trustedIPs:
+                - "127.0.0.1/32"
           fleet-mirror-443:
             address: ":443"
           fleet-mirror-9108:
@@ -46,6 +50,8 @@ final class PortMirrorSyncTest extends PortMirrorTestCase
               loadBalancer:
                 servers:
                   - address: "127.0.0.1:8443"
+                proxyProtocol:
+                  version: 2
             fleet-mirror-9108:
               loadBalancer:
                 servers:

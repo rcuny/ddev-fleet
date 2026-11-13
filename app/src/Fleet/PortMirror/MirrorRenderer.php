@@ -26,6 +26,12 @@ final class MirrorRenderer
     {
         $out = [self::HEADER, "entryPoints:\n"];
         if (null !== $plan->siteTarget) {
+            // FLE-326: the passthrough sends a PROXY protocol v2 header (dynamic config) and the router's https entry point accepts it
+            // from the loopback only, so the HTTP routers see the instance that connected, not 127.0.0.1.
+            $out[] = '  '.MirrorPlan::siteTargetEntrypoint(ConfigValue::port($plan->siteTarget)).":\n";
+            $out[] = "    proxyProtocol:\n";
+            $out[] = "      trustedIPs:\n";
+            $out[] = "        - \"127.0.0.1/32\"\n";
             $out[] = '  '.MirrorPlan::SITE_ENTRYPOINT.":\n";
             $out[] = '    address: ":'.MirrorPlan::SITE_PUBLIC_PORT."\"\n";
         }
@@ -67,6 +73,8 @@ final class MirrorRenderer
             $out[] = "      loadBalancer:\n";
             $out[] = "        servers:\n";
             $out[] = '          - address: "127.0.0.1:'.ConfigValue::port($plan->siteTarget)."\"\n";
+            $out[] = "        proxyProtocol:\n";
+            $out[] = "          version: 2\n";
         }
         foreach ($plan->ports as $port) {
             $out[] = '    '.self::name($port).":\n";

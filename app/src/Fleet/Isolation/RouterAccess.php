@@ -69,7 +69,17 @@ final readonly class RouterAccess
                 $entries[$id] = new RouterAccessEntry($id, [$this->hostnames->primary($id), ...$this->hostnames->aliases($instance->project(), $id)], $ips);
             }
             ksort($entries);
-            $text = RouterAccessRenderer::render(array_values($entries), $this->siteMirror(), $this->httpEntryPoints());
+            $entryPoints = $this->httpEntryPoints();
+            $warning = null;
+            if (null === $entryPoints) {
+                // The router's API does not answer. Rendering without entry points would bind the deny routers to the :443 mirror again
+                // (an instance's own name answers 404), so the entry points of the last good file are reused (the instances are still
+                // refreshed); with no usable last file the deny routers bind to every entry point (closed, an own name over :443 may
+                // answer 404) until the API answers again.
+                $entryPoints = $this->lastEntryPoints();
+                $warning = 'router access: the Traefik API did not answer, '.([] === $entryPoints ? 'the deny routers are bound to every entry point' : 'the entry points of the last good file are kept').' (retry on the next pass)';
+            }
+            $text = RouterAccessRenderer::render(array_values($entries), $this->siteMirror(), $entryPoints);
             if ('' === $text) {
                 return $this->withdraw();
             }
@@ -82,7 +92,7 @@ final readonly class RouterAccess
                 AtomicFile::write($file, $text, 0o644);
             }
 
-            return $this->push($text);
+            return $this->push($text) ?? $warning;
         } catch (DdevUnavailable $e) {
             return 'router access: Docker did not answer ('.$e->getMessage().'), the allow-list is left as it was';
         } catch (\Throwable $e) {
@@ -178,18 +188,40 @@ final readonly class RouterAccess
 
     /**
      * The router's entry points without the mirror's TCP ones (`fleet-mirror-*`): the HTTP deny routers must not sit on the `:443`
-     * mirror, where they would terminate TLS for an instance's own name and answer 404. Empty when the API does not answer.
+     * mirror, where they would terminate TLS for an instance's own name and answer 404.
      *
-     * @return list<string>
+     * @return list<string>|null null when the API does not answer (or there is no source for it)
      */
-    private function httpEntryPoints(): array
+    private function httpEntryPoints(): ?array
     {
-        $names = $this->live?->names();
-        if (null === $names) {
+        if (null === $this->live) {
             return [];
+        }
+        $names = $this->live->names();
+        if (null === $names) {
+            return null;
         }
 
         return array_values(array_filter($names, static fn (string $n): bool => !str_starts_with($n, 'fleet-mirror-')));
+    }
+
+    /**
+     * The HTTP deny routers' entry points in the file written last (empty: none, or the file did not restrict them).
+     *
+     * @return list<string>
+     */
+    private function lastEntryPoints(): array
+    {
+        $text = @file_get_contents($this->file());
+        if (!\is_string($text)) {
+            return [];
+        }
+        $http = explode("\ntcp:\n", $text, 2)[0];
+        if (1 !== preg_match('/^      entryPoints: \[([A-Za-z0-9_, -]+)\]$/m', $http, $m)) {
+            return [];
+        }
+
+        return array_values(array_filter(array_map('trim', explode(',', $m[1])), static fn (string $n): bool => '' !== $n && !str_starts_with($n, 'fleet-mirror-')));
     }
 
     /** The `:443` site mirror exists while the port mirror's static fragment declares its entry point. */
