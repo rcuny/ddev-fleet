@@ -1,0 +1,24 @@
+# Installed by ddev-fleet (the Ansible role units) as /etc/systemd/system/fleet-isolation-watch.service.
+# FLE-327 (follow-up of FLE-299): the Docker events listener of the instance network isolation. It runs an isolation pass about a
+# second after a ddev container or the ddev_default / fleet-link-* networks change, so a router that came back with a new address
+# is let through again at once. The status watcher's 120 s pass stays the backstop when this unit is down.
+[Unit]
+Description=ddev-fleet instance network isolation (Docker events listener)
+After=network.target docker.service
+Wants=docker.service
+
+[Service]
+User=fleet
+Group=fleet
+EnvironmentFile=/etc/ddev-fleet/fleet.env
+Environment=HOME=/home/fleet
+WorkingDirectory=/opt/ddev-fleet/app
+ExecStart=/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:host:isolation:watch
+Restart=always
+RestartSec=5
+# Same sandbox as the status watcher: the pass runs `sudo apply isolation`, which inherits this mount namespace.
+ProtectSystem=full
+ReadWritePaths=/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var -/etc/ddev-fleet -/etc/modules-load.d -/etc/sysctl.d
+
+[Install]
+WantedBy=multi-user.target

@@ -1,6 +1,6 @@
 # CLI reference
 
-Every public `fleet` command (110), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
+Every public `fleet` command (111), with its arguments and options. Run `fleet <group>:<verb>` on the host as an administrator; `fleet x:y` is short for `fleet:x:y`, and `fleet <group> <verb>` works too. Commands that need root are marked **sudo**. Add `--help` to any command for the live text. Symfony adds global options (`-h`, `-q`, `-v`, `-V`, `--ansi`, `--no-ansi`, `-n`, `--env`, `--no-debug`, `--profile`, `--silent`), which the tables below leave out.
 
 Most commands accept `--format=table|json` and `--json`. In JSON mode an error is printed as `{"error": "...", "fields": {...}}`.
 
@@ -1554,6 +1554,14 @@ fleet host:isolation:status [--json]
 | Option | Shortcut | Description | Default |
 |---|---|---|---|
 | `--json` |  | Print the status as JSON |  |
+
+### fleet host:isolation:watch
+
+Re-apply the instance isolation rules within about a second of a Docker container or network event.
+
+```
+fleet host:isolation:watch
+```
 
 ### fleet host:job-concurrency
 

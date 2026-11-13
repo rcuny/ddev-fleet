@@ -165,6 +165,22 @@ final class UnitsTest extends TestCase
         self::assertSame(['multi-user.target'], $this->unit('fleet-status.service')['Install']['WantedBy']);
     }
 
+    public function testIsolationWatchUnitRunsTheEventsListenerAsFleetAndIsInstalled(): void
+    {
+        // FLE-327.
+        $service = $this->unit('fleet-isolation-watch.service')['Service'];
+
+        self::assertSame(['fleet'], $service['User']);
+        self::assertSame(['/usr/bin/php8.4 /opt/ddev-fleet/app/bin/console fleet:host:isolation:watch'], $service['ExecStart']);
+        self::assertSame(['always'], $service['Restart']);
+        self::assertSame($this->unit('fleet-status.service')['Service']['ReadWritePaths'], $service['ReadWritePaths'], 'the pass runs apply isolation inside this unit\'s mount namespace');
+        self::assertSame(['multi-user.target'], $this->unit('fleet-isolation-watch.service')['Install']['WantedBy']);
+        $defaults = self::unitsRole('defaults/main.yml');
+        self::assertStringContainsString('fleet-isolation-watch.service]', $defaults);
+        self::assertMatchesRegularExpression('/^  - fleet-isolation-watch$/m', $defaults);
+        self::assertStringContainsString('fleet-isolation-watch.service', self::unitsRole('tasks/start.yml'));
+    }
+
     public function testBootUnitIsSequentialWithTimeoutAndRetry(): void
     {
         $unit = $this->unit('fleet-boot.service');

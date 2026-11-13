@@ -58,7 +58,7 @@ final class IsolationConverger
         try {
             $lock = $this->locks->createLock('isolation.pass', 120.0);
             if (!$lock->acquire(false)) {
-                return new IsolationPass($this->mode());
+                return new IsolationPass($this->mode(), busy: true);
             }
         } catch (\Throwable $e) {
             return new IsolationPass($this->mode(), error: 'the pass lock failed: '.$e->getMessage());
