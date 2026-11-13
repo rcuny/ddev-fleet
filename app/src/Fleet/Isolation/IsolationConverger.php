@@ -42,6 +42,7 @@ final class IsolationConverger
         private readonly LockFactory $locks,
         private readonly NftablesServiceGuard $nftables,
         private readonly BridgeNetfilterGuard $bridgeNf,
+        private readonly ?RouterAccess $routerAccess = null,
     ) {
     }
 
@@ -97,6 +98,7 @@ final class IsolationConverger
             if (is_file($this->hashFile())) {
                 $this->install(IsolationRuleset::disabled());
                 @unlink($this->hashFile());
+                $this->routerAccess?->sync($mode, []);
                 $log('isolation: the mode is off and an earlier ruleset is recorded (applied hash file present): table removed');
 
                 return new IsolationPass($mode, applied: true);
@@ -111,6 +113,9 @@ final class IsolationConverger
             return new IsolationPass($mode, error: $problem);
         }
         $links = $this->reconcileLinks($log);
+        if (null !== $problem = $this->routerAccess?->sync($mode, array_values(array_filter($links, static fn (ResolvedLink $l): bool => $l->isLive())))) {
+            $log('isolation: '.$problem);
+        }
         $bridge = $this->docker->bridgeName(DockerNetworks::SHARED);
         if (null === $bridge) {
             return new IsolationPass($mode, $links, applied: false);
@@ -164,6 +169,7 @@ final class IsolationConverger
             try {
                 $this->install(IsolationRuleset::disabled());
                 @unlink($this->hashFile());
+                $this->routerAccess?->sync($mode, []);
             } catch (\Throwable $e) {
                 $error = $e;
             }
