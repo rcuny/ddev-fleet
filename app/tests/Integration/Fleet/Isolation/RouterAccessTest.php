@@ -68,7 +68,7 @@ final class RouterAccessTest extends InstanceJobTestCase
         self::assertSame($mtime - 100, filemtime($this->access->file()));
     }
 
-    public function testALiveLinkAllowsTheSourcesWebAndTheSiteMirrorAddsTcpRouters(): void
+    public function testALiveLinkAllowsTheSourcesWebAndNeverRendersTcpRouters(): void
     {
         $this->docker();
         @mkdir($this->traefik->dir(), 0o755, true);
@@ -79,7 +79,9 @@ final class RouterAccessTest extends InstanceJobTestCase
 
         $text = (string) file_get_contents($this->access->file());
         self::assertStringContainsString('ClientIP(`172.18.0.5/32`) || ClientIP(`172.18.0.6/32`) || ClientIP(`172.18.0.7/32`))', $text);
-        self::assertStringContainsString('entryPoints: [fleet-mirror-443]', $text);
+        // The :443 mirror is untouched by the isolation: no TCP router, even when the mirror exists.
+        self::assertStringNotContainsString('tcp:', $text);
+        self::assertStringNotContainsString('fleet-mirror-443', $text);
     }
 
     public function testTheHttpDenyRoutersSkipTheMirrorEntryPoints(): void

@@ -102,27 +102,6 @@ final class RouterConverger
     }
 
     /**
-     * FLE-326: one restart of the router so a changed static configuration (pushed into its own copy by RouterCopies) goes live.
-     * Under the mirror lock; every instance blinks for the restart, so callers log it.
-     *
-     * @return string|null null when the router is back and healthy, else why not
-     */
-    public function restartForConfig(): ?string
-    {
-        try {
-            return $this->lock->run(function (): ?string {
-                if (!$this->restartRouter()) {
-                    return 'docker restart '.self::ROUTER.' failed';
-                }
-
-                return $this->routerHealthy() ? null : \sprintf('%s was not healthy within %gs after the restart', self::ROUTER, $this->healthWait);
-            });
-        } catch (MirrorLockBusy $e) {
-            return $e->getMessage().'; the restart was skipped';
-        }
-    }
-
-    /**
      * @param list<string> $wanted
      *
      * @return string|null null when the router is back with the wanted entrypoints, else why not

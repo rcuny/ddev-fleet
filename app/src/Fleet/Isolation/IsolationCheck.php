@@ -32,7 +32,6 @@ final readonly class IsolationCheck
         private DockerNetworks $docker,
         private ?BridgeNetfilterGuard $bridgeNf = null,
         private ?RouterAccess $routerAccess = null,
-        private ?\App\Fleet\PortMirror\RouterCopies $routerCopies = null,
     ) {
     }
 
@@ -55,11 +54,6 @@ final readonly class IsolationCheck
         if (null !== $copy = $this->routerAccess?->verify($mode)) {
             // FLE-326: the router reads its own copy of the allow-list; a host file it never received protects nothing.
             $rows[] = ['from' => 'host', 'to' => 'router access file in ddev-router', 'port' => 0, ...$copy];
-        }
-
-        foreach ($this->routerCopies?->check() ?? [] as $row) {
-            // FLE-326: what the router really runs against what Fleet wrote for it (needed in enforce; informative otherwise).
-            $rows[] = ['from' => 'host', 'to' => $row['what'], 'port' => 0, 'expected' => $row['expected'], 'actual' => $row['actual'], 'ok' => $row['ok'] || !$enforce];
         }
 
         $perProject = [];

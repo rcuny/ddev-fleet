@@ -39,21 +39,6 @@ final class RouterConvergerTest extends PortMirrorTestCase
         $this->runner->expect(['docker', 'inspect'], new CommandResult(0, "healthy\n"));
     }
 
-    public function testARestartForAChangedStaticConfigurationRestartsOnceAndWaitsForHealth(): void
-    {
-        $this->healthy();
-
-        self::assertNull($this->converger->restartForConfig());
-        self::assertSame(['docker restart', 'docker inspect'], $this->commands());
-    }
-
-    public function testAFailedRestartForTheStaticConfigurationIsReported(): void
-    {
-        $this->runner->expect(['docker', 'restart'], new CommandResult(1, 'boom'));
-
-        self::assertSame('docker restart ddev-router failed', $this->converger->restartForConfig());
-    }
-
     public function testTheRouterIsLeftAloneWhenItAlreadyMatches(): void
     {
         $this->mirror->sync();

@@ -130,26 +130,20 @@ A restart that Fleet does itself refreshes the router's address in the table at 
 
 ### What it does not do
 
-- **The router path is allow-listed per instance (`enforce` mode only).** An instance can still *connect* to `ddev-router`
-  (the port mirror and in-container tests need it), but Fleet writes `~/.ddev/traefik/custom-global-config/fleet-router-access.yaml`:
-  for every instance a Traefik router (HTTP and HTTPS, priority 100000, bound to the router's live entry points except the mirror's `fleet-mirror-*` ones: an HTTP TLS router on the `:443` mirror would terminate TLS there and answer 404 for an instance's own name) that answers `noop@internal` (not the site) to a request
+- **The router path is allow-listed per instance on `:8080` and `:8443` (`enforce` mode only), and stays OPEN on `:443`.** An instance can still *connect* to
+  `ddev-router` (the port mirror and in-container tests need it), but Fleet writes `~/.ddev/traefik/custom-global-config/fleet-router-access.yaml`:
+  for every instance a Traefik router (HTTP and HTTPS, priority 100000, bound to the router's live entry points except the mirror's `fleet-mirror-*` ones) that answers `noop@internal` (not the site) to a request
   for the instance's host names unless the source is the `ddev_default` gateway (Caddy), the loopback, one of the instance's own
-  containers, or the web container of a live link's source. When the `:443` site mirror is active the same rule is applied by
-  SNI on its TCP entry point: it forwards an instance's names only for that instance's allowed sources (priority 200000) and
-  drops every other connection (another SNI, or none). The mirror passes the connection through to the router's https entry point
-  with a PROXY protocol v2 header, accepted from the loopback only (09-networking.md), so the HTTP deny routers there still see the
-  real client: `ClientIP(A)` with `Host: A` is served, `ClientIP(A)` with `Host: B` answers 418 even when the SNI is A's. Until the
-  router holds the new mirror files (next paragraph) the re-entry still looks local and that last case is open. DDEV copies `custom-global-config` into the router's own volume only at a `ddev start`, so Fleet also puts the file into
+  containers, or the web container of a live link's source. DDEV copies `custom-global-config` into the router's own volume only at a `ddev start`, so Fleet also puts the file into
   `ddev-router` itself (`/mnt/ddev-global-cache/traefik/config/`, copied under a temporary name and renamed) on every isolation pass
-  and compares the router's copy with the host file; Traefik's file watcher loads it without a restart (measured live: enable, link
+  and compares the router's copy with the host file; Traefik's file watcher loads it without a restart (enable, link
   changes and disable take effect without any instance restart). The check `host:isolation:check` has a row for that copy.
-  The router keeps its own copies of the port mirror files too (its static configuration and the dynamic file), refreshed by DDEV only at a
-  `ddev start`, and a static change needs a router restart. `fleet port:refresh` (the installer runs it after every upgrade) and
-  `host:isolation:enable` push both copies into the router when they differ (the static fragment is merged into the router's own static file,
-  found from `/etc/traefik/traefik.yaml`, a symlink to `.static_config.yaml`, or a `--configFile` argument) and restart `ddev-router` once if the static part changed or the PROXY trust is not live yet, and only after the API shows the trust do they switch the `:443` mirror to send the PROXY header (until then it works without it and isolation is not enforced on `:443`) (every instance
-  blinks for a few seconds; the command says so). The two-minute isolation pass pushes the files but never restarts, and logs that a restart is
-  pending. `host:isolation:check` compares the router's copies with the host files and the live PROXY trust. `report` and `off` always remove it (every pass, even when no ruleset is recorded). A declared link opens **all ports** of the target through the router for the link's source web container (the allow-list is by source address and host name, not by port); the link's own port limit applies only to the direct link network. If the Traefik API does not answer during a pass, the entry points of the last good file are kept (a warning is logged; with no earlier file the deny routers bind to every entry point, closed, and an instance's own name over `:443` may answer 404 until the API is back). Residuals: the TLS-terminating named-port mirrors
-  (for example Typesense on 9108) still re-enter from the loopback, so an instance can reach another instance's *exposed service*
+  `report` and `off` always remove it (every pass, even when no ruleset is recorded). **The `:443` site mirror is not covered:** it passes
+  connections through to the router's https entry point from the loopback, so the router sees the loopback, not the caller, and an
+  instance can still reach another instance by `Host` over `:443`; closing that (PROXY protocol on the re-entry and the router's static
+  configuration) is a separate ticket. The port mirror and the router's static configuration are unchanged by instance isolation, and
+  isolation never restarts the router. A declared link opens **all ports** of the target through the router for the link's source web container (the allow-list is by source address and host name, not by port); the link's own port limit applies only to the direct link network. If the Traefik API does not answer during a pass, the entry points of the last good file are kept (a warning is logged; with no earlier file the deny routers bind to every entry point until the API is back). Residuals: the TLS-terminating named-port mirrors
+  (for example Typesense on 9108) and `:443` still re-enter from the loopback, so an instance can reach another instance's site or *exposed service*
   by `Host` there; and for about a second after a container gets a new address, its own request for its own host name through the
   router is denied.
 - Network changes (a recreated container, a router restart) are caught by the Docker events listener (`fleet-isolation-watch`,

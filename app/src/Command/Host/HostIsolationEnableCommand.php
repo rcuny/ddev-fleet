@@ -21,7 +21,7 @@ use Symfony\Component\Console\Output\OutputInterface;
 #[AsCommand(name: 'fleet:host:isolation:enable', description: 'Turn instance network isolation on in report mode (records flows, cuts nothing) or enforce mode (drops what no link allows)')]
 final class HostIsolationEnableCommand extends Command
 {
-    public function __construct(private readonly IsolationConverger $converger, private readonly IsolationStatus $status, private readonly ?\App\Fleet\PortMirror\RouterRefresh $router = null)
+    public function __construct(private readonly IsolationConverger $converger, private readonly IsolationStatus $status)
     {
         parent::__construct();
     }
@@ -69,19 +69,6 @@ final class HostIsolationEnableCommand extends Command
             return Command::FAILURE;
         }
         $output->writeln('Isolation mode: '.$mode->value.($pass->applied ? ' (ruleset installed)' : ''));
-        if (IsolationMode::Enforce === $mode && null !== $this->router) {
-            // FLE-326: the router's own copies must hold the current mirror files (the PROXY trust of the :443 mirror) before enforce is real.
-            $router = $this->router->run();
-            foreach ($router['lines'] as $line) {
-                $output->writeln($line);
-            }
-            foreach ($router['problems'] as $problem) {
-                $output->writeln('<error>router: '.$problem.'</error>');
-            }
-            if ([] !== $router['problems']) {
-                return Command::FAILURE;
-            }
-        }
         $output->writeln('Roll back at any time: fleet host:isolation:disable');
 
         return Command::SUCCESS;

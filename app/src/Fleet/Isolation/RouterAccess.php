@@ -72,14 +72,13 @@ final readonly class RouterAccess
             $entryPoints = $this->httpEntryPoints();
             $warning = null;
             if (null === $entryPoints) {
-                // The router's API does not answer. Rendering without entry points would bind the deny routers to the :443 mirror again
-                // (an instance's own name answers 404), so the entry points of the last good file are reused (the instances are still
-                // refreshed); with no usable last file the deny routers bind to every entry point (closed, an own name over :443 may
-                // answer 404) until the API answers again.
+                // The router's API does not answer. Rendering without entry points would bind the deny routers to the mirror's entry points
+                // as well, so the entry points of the last good file are reused (the instances are still
+                // refreshed); with no usable last file the deny routers bind to every entry point (closed) until the API answers again.
                 $entryPoints = $this->lastEntryPoints();
                 $warning = 'router access: the Traefik API did not answer, '.([] === $entryPoints ? 'the deny routers are bound to every entry point' : 'the entry points of the last good file are kept').' (retry on the next pass)';
             }
-            $text = RouterAccessRenderer::render(array_values($entries), $this->siteMirror(), $entryPoints);
+            $text = RouterAccessRenderer::render(array_values($entries), $entryPoints);
             if ('' === $text) {
                 return $this->withdraw();
             }
@@ -216,19 +215,10 @@ final readonly class RouterAccess
         if (!\is_string($text)) {
             return [];
         }
-        $http = explode("\ntcp:\n", $text, 2)[0];
-        if (1 !== preg_match('/^      entryPoints: \[([A-Za-z0-9_, -]+)\]$/m', $http, $m)) {
+        if (1 !== preg_match('/^      entryPoints: \[([A-Za-z0-9_, -]+)\]$/m', $text, $m)) {
             return [];
         }
 
         return array_values(array_filter(array_map('trim', explode(',', $m[1])), static fn (string $n): bool => '' !== $n && !str_starts_with($n, 'fleet-mirror-')));
-    }
-
-    /** The `:443` site mirror exists while the port mirror's static fragment declares its entry point. */
-    private function siteMirror(): bool
-    {
-        $static = @file_get_contents($this->traefik->staticFile());
-
-        return \is_string($static) && str_contains($static, RouterAccessRenderer::SITE_ENTRYPOINT);
     }
 }

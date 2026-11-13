@@ -14,9 +14,6 @@ final class FakeLiveEntrypoints implements LiveEntrypoints
 {
     public int $reads = 0;
 
-    /** What the API says about an entry point's PROXY trust (null: unreachable). */
-    public ?bool $proxyTrusted = true;
-
     /** @var list<list<string>|null> */
     private array $answers;
 
@@ -44,10 +41,5 @@ final class FakeLiveEntrypoints implements LiveEntrypoints
         }
 
         return $this->answers[0] ?? null;
-    }
-
-    public function proxyTrusted(string $name): ?bool
-    {
-        return $this->proxyTrusted;
     }
 }
