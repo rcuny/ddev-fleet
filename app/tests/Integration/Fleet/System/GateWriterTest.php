@@ -86,7 +86,7 @@ final class GateWriterTest extends TestCase
         $gate = (string) file_get_contents($this->gate($this->root.'/srv/caddy'));
         self::assertStringContainsString("@fleet_gated {\n    not path /health /hooks/* /api/v1/*\n", $gate);
         // FLE-330: a bearer request to the hub skips the login (the hub checks the JWT), a bare one does not.
-        self::assertStringContainsString("    not {\n        path /.well-known/mercure*\n        header Authorization \"Bearer *\"\n    }\n}\n", $gate);
+        self::assertStringContainsString("    not {\n        path /.well-known/mercure\n        header Authorization \"Bearer *\"\n    }\n}\n", $gate);
         self::assertStringContainsString("forward_auth @fleet_gated 127.0.0.1:9091 {\n    uri /api/authz/forward-auth\n    copy_headers Remote-User Remote-Groups Remote-Name Remote-Email\n}\n", $gate);
         self::assertStringNotContainsString('redir', $gate);
     }

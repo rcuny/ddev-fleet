@@ -8,7 +8,7 @@
 @fleet_gated {
     not path /health /hooks/* /api/v1/*
     not {
-        path /.well-known/mercure*
+        path /.well-known/mercure
         header Authorization "Bearer *"
     }
 }
