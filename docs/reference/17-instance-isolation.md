@@ -132,7 +132,7 @@ A restart that Fleet does itself refreshes the router's address in the table at 
 
 - **The router path is allow-listed per instance (`enforce` mode only).** An instance can still *connect* to `ddev-router`
   (the port mirror and in-container tests need it), but Fleet writes `~/.ddev/traefik/custom-global-config/fleet-router-access.yaml`:
-  for every instance a Traefik router (HTTP and HTTPS, priority 100000) that answers `noop@internal` (not the site) to a request
+  for every instance a Traefik router (HTTP and HTTPS, priority 100000, bound to the router's live entry points except the mirror's `fleet-mirror-*` ones: an HTTP TLS router on the `:443` mirror would terminate TLS there and answer 404 for an instance's own name) that answers `noop@internal` (not the site) to a request
   for the instance's host names unless the source is the `ddev_default` gateway (Caddy), the loopback, one of the instance's own
   containers, or the web container of a live link's source. When the `:443` site mirror is active the same rule is applied by
   SNI on its TCP entry point: it forwards an instance's names only for that instance's allowed sources (these routers have priority 200000, above the

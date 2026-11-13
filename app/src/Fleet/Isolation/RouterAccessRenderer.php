@@ -34,20 +34,28 @@ final class RouterAccessRenderer
     }
 
     /**
-     * @param list<RouterAccessEntry> $entries sorted by instance id by the caller
+     * @param list<RouterAccessEntry> $entries         sorted by instance id by the caller
+     * @param list<string>            $httpEntryPoints the router's entry points the HTTP deny routers attach to: every one except the mirror's
+     *                                                 TCP entry points (an HTTP TLS router there would terminate the passthrough, FLE-326 live check 3).
+     *                                                 Empty: no restriction (the entry points are unknown)
      */
-    public static function render(array $entries, bool $siteMirror): string
+    public static function render(array $entries, bool $siteMirror, array $httpEntryPoints = []): string
     {
         $entries = array_values(array_filter($entries, static fn (RouterAccessEntry $e): bool => [] !== self::hosts($e) && 1 === preg_match('/^[a-z0-9][a-z0-9-]*$/D', $e->instanceId)));
         if ([] === $entries) {
             return '';
         }
+        $httpEntryPoints = array_values(array_unique(array_filter($httpEntryPoints, static fn (string $n): bool => 1 === preg_match('/^[A-Za-z0-9][A-Za-z0-9_-]*$/D', $n))));
+        sort($httpEntryPoints);
         $out = [self::HEADER];
         $out[] = "http:\n  routers:\n";
         foreach ($entries as $entry) {
             $rule = self::rule($entry);
             foreach ([['', false], ['-tls', true]] as [$suffix, $tls]) {
                 $out[] = '    fleet-iso-'.$entry->instanceId.$suffix.":\n";
+                if ([] !== $httpEntryPoints) {
+                    $out[] = '      entryPoints: ['.implode(', ', $httpEntryPoints)."]\n";
+                }
                 $out[] = '      rule: "'.$rule."\"\n";
                 $out[] = '      priority: '.self::PRIORITY."\n";
                 $out[] = "      service: noop@internal\n";

@@ -9,6 +9,7 @@ use App\Domain\Instance\InstanceRepository;
 use App\Fleet\Ddev\Ddev;
 use App\Fleet\Ddev\DdevUnavailable;
 use App\Fleet\Instances\InstanceHostnames;
+use App\Fleet\PortMirror\LiveEntrypoints;
 use App\Fleet\PortMirror\TraefikDirectory;
 use App\Fleet\Ssh\AtomicFile;
 
@@ -31,6 +32,7 @@ final readonly class RouterAccess
         private DockerNetworks $docker,
         private Ddev $ddev,
         private TraefikDirectory $traefik,
+        private ?LiveEntrypoints $live = null,
     ) {
     }
 
@@ -67,7 +69,7 @@ final readonly class RouterAccess
                 $entries[$id] = new RouterAccessEntry($id, [$this->hostnames->primary($id), ...$this->hostnames->aliases($instance->project(), $id)], $ips);
             }
             ksort($entries);
-            $text = RouterAccessRenderer::render(array_values($entries), $this->siteMirror());
+            $text = RouterAccessRenderer::render(array_values($entries), $this->siteMirror(), $this->httpEntryPoints());
             if ('' === $text) {
                 return $this->withdraw();
             }
@@ -172,6 +174,22 @@ final readonly class RouterAccess
         } catch (\Throwable) {
             return null;
         }
+    }
+
+    /**
+     * The router's entry points without the mirror's TCP ones (`fleet-mirror-*`): the HTTP deny routers must not sit on the `:443`
+     * mirror, where they would terminate TLS for an instance's own name and answer 404. Empty when the API does not answer.
+     *
+     * @return list<string>
+     */
+    private function httpEntryPoints(): array
+    {
+        $names = $this->live?->names();
+        if (null === $names) {
+            return [];
+        }
+
+        return array_values(array_filter($names, static fn (string $n): bool => !str_starts_with($n, 'fleet-mirror-')));
     }
 
     /** The `:443` site mirror exists while the port mirror's static fragment declares its entry point. */

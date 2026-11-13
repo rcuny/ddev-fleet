@@ -82,6 +82,19 @@ final class RouterAccessTest extends InstanceJobTestCase
         self::assertStringContainsString('entryPoints: [fleet-mirror-443]', $text);
     }
 
+    public function testTheHttpDenyRoutersSkipTheMirrorEntryPoints(): void
+    {
+        $this->docker();
+        $live = new \App\Tests\Support\FakeLiveEntrypoints(['http-8080', 'http-8443', 'fleet-mirror-443', 'fleet-mirror-9108']);
+        $access = new RouterAccess($this->instances, $this->instanceHostnames, new DockerNetworks($this->runner), $this->ddev, $this->traefik, $live);
+
+        self::assertNull($access->sync(IsolationMode::Enforce, []));
+
+        $text = (string) file_get_contents($access->file());
+        self::assertStringContainsString("      entryPoints: [http-8080, http-8443]\n", $text);
+        self::assertStringNotContainsString('fleet-mirror', $text);
+    }
+
     public function testReportAndOffRemoveTheFile(): void
     {
         $this->docker();

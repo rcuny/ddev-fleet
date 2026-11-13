@@ -30,6 +30,22 @@ final class RouterAccessRendererTest extends TestCase
         self::assertStringNotContainsString('tcp:', $out);
     }
 
+    public function testTheHttpDenyRoutersAreBoundToTheGivenEntryPointsOnly(): void
+    {
+        $entry = new RouterAccessEntry('a', ['a.x.test'], ['172.18.0.1']);
+
+        $bound = RouterAccessRenderer::render([$entry], true, ['http-8080', 'http-8443', 'bad name`', 'http-8080']);
+
+        // Both HTTP routers (plain and tls) are bound; the TCP routers keep their own entry point; the mirror entry point is never listed for HTTP.
+        self::assertSame(2, substr_count($bound, "      entryPoints: [http-8080, http-8443]\n"));
+        self::assertSame(2, substr_count($bound, 'entryPoints: [fleet-mirror-443]'));
+        self::assertStringNotContainsString('bad name', $bound);
+        $http = substr($bound, 0, (int) strpos($bound, 'tcp:'));
+        self::assertStringNotContainsString('fleet-mirror-443', $http);
+        // Unknown entry points: no restriction (the safe side for the deny, not for the own name).
+        self::assertStringNotContainsString('entryPoints: [http', RouterAccessRenderer::render([$entry], false, []));
+    }
+
     public function testTheSiteMirrorForwardsOnlyAnInstancesNamesForItsSourcesAndDropsEverythingElse(): void
     {
         $out = RouterAccessRenderer::render([
