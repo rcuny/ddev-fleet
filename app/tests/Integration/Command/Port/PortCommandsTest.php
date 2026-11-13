@@ -272,7 +272,8 @@ final class PortCommandsTest extends KernelTestCase
         self::assertSame(0, $human->getStatusCode());
         self::assertStringContainsString('router mirror: live', $human->getDisplay());
         self::assertStringContainsString('port "mail" (public 8025) not mirrored', $human->getDisplay());
-        self::assertSame([], $this->recorded(), 'port:refresh never restarts the router');
+        // FLE-326: it reads the router (is it running, its copies); with the router not running it changes nothing and restarts nothing.
+        self::assertSame([], array_values(array_filter($this->recorded(), static fn (array $argv): bool => 'inspect' !== ($argv[1] ?? ''))), 'port:refresh never restarts the router');
     }
 
     /**

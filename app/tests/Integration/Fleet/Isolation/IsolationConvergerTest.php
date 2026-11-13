@@ -176,6 +176,19 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         self::assertFileDoesNotExist($this->routerFile());
     }
 
+    /** FLE-326: a router-access problem (the API down, Docker unreadable) reaches the log the caller passes, so the journal shows it. */
+    public function testARouterAccessProblemIsLoggedThroughTheCallersLog(): void
+    {
+        $this->mode(IsolationMode::Enforce);
+        $lines = [];
+
+        $this->converger->pass(static function (string $line) use (&$lines): void {
+            $lines[] = $line;
+        });
+
+        self::assertNotSame([], array_filter($lines, static fn (string $l): bool => str_contains($l, 'router access')), implode("\n", $lines));
+    }
+
     public function testModeOffDoesNothingAtAll(): void
     {
         $this->runner->reset();

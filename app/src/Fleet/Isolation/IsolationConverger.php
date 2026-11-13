@@ -43,6 +43,7 @@ final class IsolationConverger
         private readonly NftablesServiceGuard $nftables,
         private readonly BridgeNetfilterGuard $bridgeNf,
         private readonly ?RouterAccess $routerAccess = null,
+        private readonly ?\App\Fleet\PortMirror\RouterCopies $routerCopies = null,
     ) {
     }
 
@@ -120,6 +121,20 @@ final class IsolationConverger
         $links = $this->reconcileLinks($log);
         if (null !== $problem = $this->routerAccess?->sync($mode, array_values(array_filter($links, static fn (ResolvedLink $l): bool => $l->isLive())))) {
             $log('isolation: '.$problem);
+        }
+        if (null !== $this->routerCopies) {
+            // The router keeps the mirror files it was started with; the dynamic one goes live by itself, the static one waits for
+            // `fleet port:refresh` (a restart is never done by a pass).
+            $repair = $this->routerCopies->repair();
+            foreach ($repair['pushed'] as $what) {
+                $log('isolation: pushed '.$what.' into ddev-router');
+            }
+            foreach ($repair['problems'] as $problem) {
+                $log('isolation: '.$problem);
+            }
+            if ($repair['restartNeeded']) {
+                $log('isolation: ddev-router has not restarted since its static configuration changed (the PROXY trust of the :443 mirror is not live): run "fleet port:refresh"');
+            }
         }
         $bridge = $this->docker->bridgeName(DockerNetworks::SHARED);
         if (null === $bridge) {

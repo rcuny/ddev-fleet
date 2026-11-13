@@ -22,6 +22,7 @@ final class PortRefreshCommand extends Command
         private readonly ProjectService $projects,
         private readonly InstanceSiteRefresher $sites,
         private readonly PortMirror $mirror,
+        private readonly \App\Fleet\PortMirror\RouterRefresh $router,
     ) {
         parent::__construct();
     }
@@ -58,7 +59,18 @@ final class PortRefreshCommand extends Command
                 $failed = true;
             }
 
-            $out->emit(['rewritten' => $result->rewritten, 'failed' => (object) $result->failed, 'mirror' => $mirror], static function (JsonOutput $out) use ($result, $mirror, $mirrorError): void {
+            // FLE-326: the router reads its own copies of the mirror files; push them and restart it once if the static part changed.
+            $router = ['lines' => [], 'restarted' => false, 'problems' => []];
+            if (null === $mirrorError) {
+                $router = $this->router->run();
+                $failed = $failed || [] !== $router['problems'];
+                if ($router['restarted']) {
+                    $mirror['state'] = $this->mirror->isLive() ? 'live' : 'pending';
+                }
+            }
+            $mirror['router'] = $router;
+
+            $out->emit(['rewritten' => $result->rewritten, 'failed' => (object) $result->failed, 'mirror' => $mirror], static function (JsonOutput $out) use ($result, $mirror, $mirrorError, $router): void {
                 $out->success(\sprintf('%d Caddy site(s) rewritten.', $result->rewritten));
                 foreach ($result->failed as $id => $reason) {
                     $out->fail(\sprintf('%s: %s', $id, $reason), JsonOutput::REFUSED);
@@ -66,6 +78,12 @@ final class PortRefreshCommand extends Command
                 $out->success('router mirror: '.$mirror['state']);
                 foreach ($mirror['skipped'] as $reason) {
                     $out->success('  '.$reason);
+                }
+                foreach ($router['lines'] as $line) {
+                    $out->success($line);
+                }
+                foreach ($router['problems'] as $problem) {
+                    $out->fail('router: '.$problem, JsonOutput::REFUSED);
                 }
                 if (null !== $mirrorError) {
                     $out->fail($mirrorError, JsonOutput::REFUSED);
