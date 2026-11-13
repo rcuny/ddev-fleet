@@ -17,6 +17,8 @@
         <server name="APP_ENV" value="test" force="true" />
         <env name="APP_ENV" value="test" force="true" />
         <server name="SHELL_VERBOSITY" value="-1" />
+        <!-- A key of its own for subscriber tokens (FLE-330); .env.test only sets the publisher one. -->
+        <env name="MERCURE_SUBSCRIBER_JWT_SECRET" value="test-only-mercure-subscriber-secret-0123456789abcdef" force="true" />
     </php>
 
     <testsuites>

@@ -6,6 +6,7 @@ php_app_env_keys:
   - {key: APP_DEBUG, value: "0"}
   - {key: APP_SECRET, value: "@secret"}
   - {key: MERCURE_JWT_SECRET, value: "@secret"}
+  - {key: MERCURE_SUBSCRIBER_JWT_SECRET, value: "@secret"}
   - {key: FLEET_PROXY_SECRET, value: "@secret"}
   - {key: FLEET_HOME, value: "{{ fleet_srv_dir }}"}
   - {key: FLEET_RUNNER, value: process}
