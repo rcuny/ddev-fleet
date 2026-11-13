@@ -84,7 +84,7 @@ reaches that one instance from every source instance. Inside `app--staging`'s we
 `http://typesense.cms:8108`. Links are project-level, admin-only, audited (`project.link-create`, `project.link-delete`),
 shown on both projects (Network tab) and exported with the project (`links`, [export format](12-export-format.md)). A link
 whose target instance or service does not exist yet is `pending` and becomes live at the next pass; it is not an error.
-Creating or deleting a link runs a pass at once, so a deleted link is closed immediately; a new instance or a restart is picked up at the next start of either side or by the watcher within about two minutes. A pass never fails a deploy or a start: errors are logged and the next pass retries. Two passes never run at the same time.
+Creating or deleting a link runs a pass at once, so a deleted link is closed immediately; a new instance or a restart is picked up at the next start of either side or by the watcher within about two minutes. A pass never fails a deploy or a start: errors are logged and the next pass retries. Two passes never run at the same time, not even in two processes (the CLI and the watcher share a lock file), and each pass reads the stored mode again, so a mode set from the CLI is seen by the running watcher at once. The root helper writes the files under `/etc` (`/etc/ddev-fleet`, `/etc/modules-load.d`, `/etc/sysctl.d`) before it loads the table and only when their content changed; when a write fails the live table is left exactly as it was. The watcher, the workers and php-fpm run in a read-only `/etc` sandbox, so their units list those three paths as writable.
 
 ### Rolling it out
 

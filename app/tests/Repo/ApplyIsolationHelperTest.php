@@ -77,6 +77,48 @@ final class ApplyIsolationHelperTest extends TestCase
         self::assertStringContainsString('net.bridge.bridge-nf-call-iptables = 1', (string) file_get_contents($this->root.'/etc/sysctl.d/90-fleet-isolation.conf'));
     }
 
+    public function testAnUnchangedRulesetWritesNothingUnderEtc(): void
+    {
+        $this->apply($this->ruleset());
+        $files = [$this->root.'/etc/modules-load.d/fleet-isolation.conf', $this->root.'/etc/sysctl.d/90-fleet-isolation.conf'];
+        foreach ($files as $file) {
+            touch($file, 1_000_000_000);
+            clearstatcache();
+        }
+        // Read-only directories (what the watcher's sandbox looks like): a rewrite would fail.
+        foreach (['/etc/modules-load.d', '/etc/sysctl.d'] as $dir) {
+            chmod($this->root.$dir, 0o555);
+        }
+
+        [$status, , $err] = $this->apply($this->ruleset());
+
+        foreach (['/etc/modules-load.d', '/etc/sysctl.d'] as $dir) {
+            chmod($this->root.$dir, 0o755);
+        }
+        clearstatcache();
+        self::assertSame(0, $status, $err);
+        foreach ($files as $file) {
+            self::assertSame(1_000_000_000, filemtime($file), 'a pass that changes nothing never rewrites the files');
+        }
+    }
+
+    public function testAFailedFileWriteLeavesTheTableUntouched(): void
+    {
+        mkdir($this->root.'/etc/modules-load.d', 0o755, true);
+        chmod($this->root.'/etc/modules-load.d', 0o555);
+
+        [$status, , $err] = $this->apply($this->ruleset());
+
+        chmod($this->root.'/etc/modules-load.d', 0o755);
+        if (0 === posix_geteuid()) {
+            self::markTestSkipped('root ignores directory modes');
+        }
+        self::assertNotSame(0, $status);
+        self::assertStringContainsString('nothing was changed', $err);
+        $calls = (string) file_get_contents($this->log);
+        self::assertStringNotContainsString('nft -f ', $calls, 'nft -f never ran');
+    }
+
     public function testTheDisableFormRemovesTheCopyAndDeletesTheTable(): void
     {
         file_put_contents($this->root.'/etc/ddev-fleet/fleet_isolation.nft', 'old');

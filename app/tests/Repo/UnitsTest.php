@@ -99,7 +99,7 @@ final class UnitsTest extends TestCase
 
         self::assertSame(['/etc/ddev-fleet/fleet.env'], $unit['Service']['EnvironmentFile']);
         // Debian's unit has ProtectSystem=full: /etc is read-only for the pool and the sudo child unless listed here.
-        self::assertSame(['-/etc/caddy -/etc/authelia'], $unit['Service']['ReadWritePaths'], '"-": the unit still starts if a package was removed by hand');
+        self::assertSame(['-/etc/caddy -/etc/authelia -/etc/ddev-fleet -/etc/modules-load.d -/etc/sysctl.d'], $unit['Service']['ReadWritePaths'], '"-": the unit still starts if a package was removed by hand');
         self::assertSame(['no'], $unit['Service']['NoNewPrivileges'], 'the pool calls sudo');
     }
 
@@ -116,7 +116,7 @@ final class UnitsTest extends TestCase
         self::assertSame(['5'], $service['RestartSec']);
         self::assertGreaterThanOrEqual(600, (int) $service['TimeoutStopSec'][0], 'a restart on upgrade lets the running job finish');
         self::assertSame(['full'], $service['ProtectSystem']);
-        self::assertSame(['/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var'], $service['ReadWritePaths']);
+        self::assertSame(['/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var -/etc/ddev-fleet -/etc/modules-load.d -/etc/sysctl.d'], $service['ReadWritePaths']);
         self::assertSame(['/opt/ddev-fleet/app'], $service['WorkingDirectory']);
         self::assertSame(['multi-user.target'], $unit['Install']['WantedBy']);
 
@@ -528,6 +528,17 @@ final class UnitsTest extends TestCase
         foreach (['php-fpm-env.conf', 'fleet-worker@.service', 'fleet-backup.service', 'fleet-upgrade-check.service', 'fleet-tls-check.service', 'fleet-scheduler.service', 'fleet-mercure.service', 'caddy-sandbox.conf', 'caddy-env.conf', 'authelia-secrets.conf'] as $file) {
             $unit = $this->unit($file);
             self::assertArrayHasKey('Service', $unit, $file);
+        }
+    }
+
+    /** FLE-299 N1: the helper runs inside the caller's mount namespace, so every unit that can start a pass lists what it writes. */
+    public function testEveryUnitThatRunsAnIsolationPassCanWriteWhatTheHelperWrites(): void
+    {
+        foreach (['fleet-worker@.service', 'fleet-status.service', 'php-fpm-env.conf'] as $file) {
+            $paths = explode(' ', $this->unit($file)['Service']['ReadWritePaths'][0]);
+            foreach (['-/etc/ddev-fleet', '-/etc/modules-load.d', '-/etc/sysctl.d'] as $needed) {
+                self::assertContains($needed, $paths, $file);
+            }
         }
     }
 

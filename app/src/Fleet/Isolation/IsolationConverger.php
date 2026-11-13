@@ -77,7 +77,7 @@ final class IsolationConverger
     private function mode(): IsolationMode
     {
         try {
-            return $this->host->get()?->isolationMode() ?? IsolationMode::Off;
+            return $this->host->fresh()?->isolationMode() ?? IsolationMode::Off;
         } catch (\Throwable) {
             return IsolationMode::Off;
         }
@@ -88,14 +88,16 @@ final class IsolationConverger
      */
     private function locked(\Closure $log): IsolationPass
     {
-        $settings = $this->host->get();
+        // The row as stored now, under the lock: the watcher is one long process and its identity map would still hold the mode
+        // from its first read, so a CLI `enable` made after that looked like `off` (and its table was removed). FLE-299 N2.
+        $settings = $this->host->fresh();
         $mode = $settings?->isolationMode() ?? IsolationMode::Off;
         if (IsolationMode::Off === $mode) {
             // A table left behind (a disable that failed half way) is removed here: the next pass retries it.
             if (is_file($this->hashFile())) {
                 $this->install(IsolationRuleset::disabled());
                 @unlink($this->hashFile());
-                $log('isolation: removed the table left from an earlier mode');
+                $log('isolation: the mode is off and an earlier ruleset is recorded (applied hash file present): table removed');
 
                 return new IsolationPass($mode, applied: true);
             }
@@ -150,7 +152,7 @@ final class IsolationConverger
 
     private function changeModeLocked(IsolationMode $mode, string $actor, bool $removeLinks): IsolationPass
     {
-        $settings = $this->host->get() ?? throw new \RuntimeException('The host is not set up yet.');
+        $settings = $this->host->fresh() ?? throw new \RuntimeException('The host is not set up yet.');
         if (IsolationMode::Off !== $mode && null !== $problem = $this->nftables->problem()) {
             throw new \RuntimeException($problem);
         }

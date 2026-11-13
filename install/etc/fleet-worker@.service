@@ -29,7 +29,9 @@ TimeoutStopSec=600
 # `-/etc/caddy -/etc/authelia` to ReadWritePaths (php-fpm's drop-in already lists them): the helper inherits this unit's
 # mount namespace, so those paths are read-only to it and the install would fail with EROFS.
 ProtectSystem=full
-ReadWritePaths=/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var
+# FLE-299: the isolation pass (watcher, jobs) runs `sudo apply isolation`, which inherits this mount namespace and writes
+# /etc/ddev-fleet/fleet_isolation.nft, /etc/modules-load.d and /etc/sysctl.d ("-": the unit starts without them).
+ReadWritePaths=/srv/fleet /etc/caddy/fleet /home/fleet /opt/ddev-fleet/app/var -/etc/ddev-fleet -/etc/modules-load.d -/etc/sysctl.d
 
 [Install]
 WantedBy=multi-user.target

@@ -1041,9 +1041,24 @@ isolation_bridge_netfilter() {
     [ "$(cat "$ROOT/proc/sys/net/bridge/$key" 2>/dev/null || true)" = 1 ] ||
       fail "br_netfilter is not active (net.bridge.$key is not 1): without it the table cannot see traffic inside a bridge, so enforce would filter nothing. Nothing was changed" 69
   done
-  mkdir -p "$ROOT/etc/modules-load.d" "$ROOT/etc/sysctl.d"
-  printf '# Managed by ddev-fleet (apply isolation).\nbr_netfilter\n' >"$ROOT/etc/modules-load.d/fleet-isolation.conf"
-  printf '# Managed by ddev-fleet (apply isolation).\nnet.bridge.bridge-nf-call-iptables = 1\nnet.bridge.bridge-nf-call-ip6tables = 1\n' >"$ROOT/etc/sysctl.d/90-fleet-isolation.conf"
+}
+
+# isolation_write_if_changed <path> <mode> <content>: replaces the file atomically, and only when its content differs, so a
+# pass that changes nothing (the watcher's) never writes under /etc. A failed write stops the apply BEFORE the table is touched.
+isolation_write_if_changed() {
+  local path="$1" mode="$2" content="$3"
+  [ "$(cat "$path" 2>/dev/null || true)" = "$content" ] && return 0
+  mkdir -p -- "$(dirname -- "$path")" 2>/dev/null || fail "cannot create $(dirname -- "$path") (nothing was changed)" 70
+  printf '%s\n' "$content" >"$path.new" 2>/dev/null || fail "cannot write $path (nothing was changed)" 70
+  chmod "$mode" "$path.new" && mv -f -- "$path.new" "$path" || fail "cannot install $path (nothing was changed)" 70
+}
+
+isolation_persist() {
+  isolation_write_if_changed "$ROOT/etc/modules-load.d/fleet-isolation.conf" 0644 '# Managed by ddev-fleet (apply isolation).
+br_netfilter'
+  isolation_write_if_changed "$ROOT/etc/sysctl.d/90-fleet-isolation.conf" 0644 '# Managed by ddev-fleet (apply isolation).
+net.bridge.bridge-nf-call-iptables = 1
+net.bridge.bridge-nf-call-ip6tables = 1'
 }
 
 apply_isolation() {
@@ -1063,14 +1078,25 @@ apply_isolation() {
     isolation_bridge_netfilter
   fi
   timeout "$T_NFT" nft -c -f "$PRIV/fleet_isolation.nft" </dev/null || fail 'nft refused the staged ruleset (nothing was changed)' 65
-  timeout "$T_NFT" nft -f "$PRIV/fleet_isolation.nft" </dev/null || fail 'nft could not load the ruleset (the previous table is unchanged)'
   lines=$(sed -e '1,2d' -e '/^[[:space:]]*$/d' "$PRIV/fleet_isolation.nft" | wc -l)
-  mkdir -p "$ROOT$PROVISION_ETC"
+  # Every file first (a failure here leaves the live table exactly as it was), then the one atomic nft transaction.
   if [ "$lines" -gt 0 ]; then
-    install -m 0644 "$PRIV/fleet_isolation.nft" "$conf.new" && mv -f "$conf.new" "$conf"
+    isolation_persist
+    mkdir -p -- "$ROOT$PROVISION_ETC" 2>/dev/null || fail "cannot create $ROOT$PROVISION_ETC (nothing was changed)" 70
+    install -m 0644 "$PRIV/fleet_isolation.nft" "$conf.new" 2>/dev/null || fail "cannot write $conf (nothing was changed)" 70
+  else
+    rm -f -- "$conf" "$ROOT/etc/modules-load.d/fleet-isolation.conf" "$ROOT/etc/sysctl.d/90-fleet-isolation.conf" ||
+      fail 'cannot remove the isolation files under /etc (the live table was left as it is)' 70
+  fi
+  timeout "$T_NFT" nft -f "$PRIV/fleet_isolation.nft" </dev/null || {
+    rm -f -- "$conf.new"
+    fail 'fleet_isolation: nft could not load the ruleset (the previous table is unchanged)'
+  }
+  # The boot copy replaces the old one only after the load worked (it was written beside it above, so this is a rename).
+  [ "$lines" -gt 0 ] && mv -f -- "$conf.new" "$conf"
+  if [ "$lines" -gt 0 ]; then
     printf 'apply: isolation ruleset installed\n'
   else
-    rm -f -- "$conf" "$ROOT/etc/modules-load.d/fleet-isolation.conf" "$ROOT/etc/sysctl.d/90-fleet-isolation.conf"
     printf 'apply: isolation table removed\n'
   fi
 }

@@ -367,6 +367,25 @@ final class IsolationConvergerTest extends InstanceJobTestCase
         self::assertFalse($this->converger->pass()->applied);
     }
 
+    /** FLE-299 N2: a long-lived process (the watcher) must see a mode another process saved, not its identity map's copy. */
+    public function testAPassSeesAModeSavedByAnotherProcessAndNeverRemovesItsTable(): void
+    {
+        // This process already holds the row (mode off), as the watcher does after its first pass.
+        self::assertSame(IsolationMode::Off, $this->host->get()?->isolationMode());
+        $this->converger->pass();
+        // The CLI enables enforce in its own process: the row changes and the applied-hash file is written.
+        $this->em->getConnection()->executeStatement("UPDATE host_settings SET isolation_mode = 'enforce'");
+        file_put_contents($this->paths->home().'/isolation-applied.sha256', "stale\n");
+        $before = \count($this->staged);
+
+        $pass = $this->converger->pass();
+
+        self::assertSame(IsolationMode::Enforce, $pass->mode);
+        foreach (\array_slice($this->staged, $before) as $ruleset) {
+            self::assertNotSame(IsolationRuleset::disabled(), $ruleset, 'an enforce host never gets the table removed');
+        }
+    }
+
     public function testASecondPassWhileOneRunsDoesNothing(): void
     {
         $this->mode(IsolationMode::Report);
