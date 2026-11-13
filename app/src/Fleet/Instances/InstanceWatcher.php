@@ -67,6 +67,7 @@ final class InstanceWatcher
         private readonly ?\App\Fleet\Host\Docker\DockerSocketWatch $socket = null,
         private readonly ?\App\Api\Token\ApiTokenReminder $reminder = null,
         private readonly ?InstanceDbIsolationWriter $isolation = null,
+        private readonly ?\App\Fleet\Isolation\IsolationConverger $network = null,
     ) {
     }
 
@@ -128,7 +129,7 @@ final class InstanceWatcher
             $this->socketAt = $now;
         }
 
-        if (null !== $this->isolation && (null === $this->isolatedAt || self::due($this->isolatedAt, $now, self::ISOLATION_SECONDS))) {
+        if ((null !== $this->isolation || null !== $this->network) && (null === $this->isolatedAt || self::due($this->isolatedAt, $now, self::ISOLATION_SECONDS))) {
             $this->reconverge();
             $this->isolatedAt = $now;
         }
@@ -142,12 +143,16 @@ final class InstanceWatcher
      */
     private function reconverge(): void
     {
+        $this->reconvergeNetwork();
+        if (null === $this->isolation) {
+            return;
+        }
         foreach ($this->instances->all() as $instance) {
             if (InstanceState::Running !== $instance->state()) {
                 continue;
             }
             try {
-                $this->isolation?->converge($instance->id(), function (string $line) use ($instance): void {
+                $this->isolation->converge($instance->id(), function (string $line) use ($instance): void {
                     $this->logger->warning($instance->id().': '.$line);
                 });
                 unset($this->isolationFailed[$instance->id()]);
@@ -158,6 +163,29 @@ final class InstanceWatcher
                     $this->logger->error('The network isolation of an instance could not be enforced.', ['instance' => $instance->id(), 'exception' => $e]);
                 }
             }
+        }
+    }
+
+    /**
+     * FLE-299: the host-wide network isolation pass (link networks, ruleset); a failure is only logged, once per change.
+     */
+    private function reconvergeNetwork(): void
+    {
+        if (null === $this->network) {
+            return;
+        }
+        try {
+            $pass = $this->network->pass();
+        } catch (\Throwable $e) {
+            $this->logger->error('The network isolation pass failed.', ['exception' => $e]);
+
+            return;
+        }
+        if (!$pass->ok() && ($this->isolationFailed['*network'] ?? null) !== $pass->error) {
+            $this->isolationFailed['*network'] = $pass->error ?? '';
+            $this->logger->error('The network isolation pass failed: '.$pass->error);
+        } elseif ($pass->ok()) {
+            unset($this->isolationFailed['*network']);
         }
     }
 

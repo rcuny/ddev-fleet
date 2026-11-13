@@ -17,4 +17,6 @@ enum ApplyTarget: string
     case Provision = 'provision';
     /** The read-only twin of provision (FLE-261): the installed playbook with --check --diff; stages nothing, prints a JSON report. */
     case Drift = 'drift';
+    /** FLE-299: installs the staged nftables ruleset of instance network isolation; with nothing staged it prints the live table as JSON (read-only). */
+    case Isolation = 'isolation';
 }

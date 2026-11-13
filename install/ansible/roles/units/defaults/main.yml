@@ -7,6 +7,7 @@ units_mercure: [fleet-mercure.service]
 # the operators' panes: a changed unit takes effect at the next `systemctl restart fleet-tmux`).
 units_plain:
   - fleet-boot.service
+  - fleet-isolation.service
   - fleet-backup.service
   - fleet-backup.timer
   - fleet-upgrade-check.service
@@ -21,6 +22,7 @@ units_enable:
   - fleet-worker@1
   - fleet-scheduler
   - fleet-status
+  - fleet-isolation
   - fleet-boot
   - caddy
 units_timers: [fleet-backup.timer, fleet-upgrade-check.timer, fleet-tls-check.timer]

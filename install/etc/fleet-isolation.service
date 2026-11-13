@@ -1,0 +1,40 @@
+# Installed by ddev-fleet (the Ansible role units) as /etc/systemd/system/fleet-isolation.service.
+# FLE-299: puts the last installed instance-isolation ruleset back after a reboot, before fleet-boot starts the instances.
+# `apply isolation` keeps the ruleset it installed as /etc/ddev-fleet/fleet_isolation.nft; the file exists only while the
+# mode is report or enforce (disable removes it), so a host with isolation off does nothing here. The router's address
+# differs after a reboot: the first pass of the app (fleet-boot's start, then the watcher) refreshes it.
+[Unit]
+Description=ddev-fleet instance network isolation (restore the ruleset at boot)
+After=docker.service systemd-modules-load.service systemd-sysctl.service
+Before=fleet-boot.service
+ConditionPathExists=/etc/ddev-fleet/fleet_isolation.nft
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+# br_netfilter and its sysctls (written by apply isolation into modules-load.d and sysctl.d) must be active: without them the
+# table sees no traffic inside a bridge. The unit refuses to start rather than pretend to isolate.
+ExecStartPre=/bin/sh -c 'test "$(cat /proc/sys/net/bridge/bridge-nf-call-iptables)" = 1 && test "$(cat /proc/sys/net/bridge/bridge-nf-call-ip6tables)" = 1'
+ExecStart=/usr/sbin/nft -f /etc/ddev-fleet/fleet_isolation.nft
+ExecStop=/usr/sbin/nft delete table inet fleet_isolation
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+RestrictAddressFamilies=AF_NETLINK AF_UNIX
+CapabilityBoundingSet=CAP_NET_ADMIN
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+
+[Install]
+WantedBy=multi-user.target

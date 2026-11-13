@@ -6,6 +6,8 @@ namespace App\Fleet\Export;
 
 use App\Domain\Port\NamedPort;
 use App\Domain\Project\Project;
+use App\Domain\Project\ProjectLink;
+use App\Domain\Project\ProjectLinkRepository;
 use App\Domain\Schedule\Schedule;
 use App\Domain\Schedule\ScheduleRepository;
 use App\Domain\Template\Template;
@@ -29,6 +31,7 @@ final readonly class ProjectExporter
         private ProjectService $projects,
         private TemplateRepository $templates,
         private WebhookRepository $webhooks,
+        private ProjectLinkRepository $links,
         private ScheduleRepository $schedules,
         private SecretStore $secrets,
         private PassphraseSealer $sealer,
@@ -64,7 +67,7 @@ final readonly class ProjectExporter
     {
         $ports = $project->ports();
 
-        return [
+        $document = [
             'format' => ExportFormat::NAME,
             'version' => ExportFormat::VERSION,
             'project' => [
@@ -107,6 +110,27 @@ final readonly class ProjectExporter
             'webhooks' => $this->webhookSection($project),
             'schedules' => $this->scheduleSection($project),
         ];
+        // FLE-299: declared network links (outgoing). An additive key, present only when the project declares some.
+        $links = $this->linkSection($project);
+        if ([] !== $links) {
+            $document['links'] = $links;
+        }
+
+        return $document;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function linkSection(Project $project): array
+    {
+        return array_map(static fn (ProjectLink $link): array => [
+            'target' => $link->target()->name(),
+            'service' => $link->service(),
+            'port' => $link->port(),
+            'label' => $link->targetLabel(),
+            'note' => $link->note(),
+        ], $this->links->outgoing($project));
     }
 
     /**

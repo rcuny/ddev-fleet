@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-11-13
+
+### Added
+- **FLE-287:** API: `POST /api/v1/jobs/{id}/stream-token` returns a short-lived (10 minutes) Mercure subscriber token limited to one job's topic, with no publish rights, for clients that prefer a live feed to polling the log (scope `read`, audited).
+- **FLE-299: network isolation between instances (opt-in per host).** An nftables table `inet fleet_isolation` cuts new flows between the containers of different instances and from containers to the host (ssh included), except what is declared: the router, the instances' HTTP ports on the router, 80/443 and the public catalogue ports on the host, DNS and ICMP. `report` mode records the flows and cuts nothing, `enforce` drops what no link allows. Links are declared per project (`fleet project:link:create|list|delete`, the project's Network tab, the export file key `links`) and carried by one internal Docker network per instance pair with the alias `<service>.<target project>`; they are one way and audited. New commands: `fleet host:isolation:status|enable|disable|check`, a Settings → Isolation tab (extra host ports), the root helper target `apply isolation`, the boot unit `fleet-isolation.service` and the `nftables` package.
+
+### Changed
+- **FLE-329:** API: the Mercure token from `POST /api/v1/jobs/{id}/stream-token` now expires no later than the API token that requested it (still 10 minutes at most). The `fleet-api` skill documents the live feed.
+
+### Fixed
+- **FLE-325: `install.sh --harden` no longer fails at "LLMNR off" on images without `/etc/systemd/resolved.conf.d`** (OVH Debian 13). The hardening role now creates the drop-in directories before writing the LLMNR, sysctl and audit files. The resolved restart handler already skips hosts where `systemd-resolved` is not running.
+- **FLE-331: `ddev export-db`, `ddev import-db`, `ddev mysql` and Fleet snapshots work on Fleet hosts again.** They failed with `ERROR 1044 ... ''@'localhost'` because the host `fleet` user is uid 999, which is the `mysql` account inside DDEV's db image: the client connected as `mysql@localhost`, an account that did not exist. After each start Fleet now creates `mysql@localhost` (unix_socket only, usable by the OS user inside the db container) with ALL privileges. A server that refuses the statement only logs a warning.
+
+- **FLE-332: quieter database account steps in the deploy log.** The lock and socket-user statements now pass the password through `MYSQL_PWD` instead of `-proot`, so the client's "password on the command line" notice no longer appears as the reason of a WARNING (seen on `mysql:8.0`); that notice is also filtered from any error text. A deploy no longer logs the `root@%` lock and `mysql@localhost` lines twice (the router-repair pass only re-checks the network).
+
+- The a11y sweep test "the list with no match" deploys its own instance instead of relying on instances left by other tests (FLE-335).
+
+### Security
+- **FLE-324: the database account `root@%` of every instance is locked after each start.** DDEV's db container ships root/root reachable over the network; Fleet now runs `ALTER USER IF EXISTS 'root'@'%' ACCOUNT LOCK` through the unix socket (start, restart, deploy, redeploy). DDEV's `db`/`db` user and `root@localhost` stay, so `ddev mysql`, import-db, export-db, the healthcheck and snapshots keep working. No password is chosen or stored. A database server that refuses the statement only logs a warning.
+
+#### Rollout
+- ACTION: none required. Isolation stays off on every host after the upgrade (`fleet host:isolation:status` says `mode: off`); the installer, `fleet upgrade` and deploys never turn it on.
+- To adopt it: `fleet host:isolation:enable --mode=report`, wait a few days, read `fleet host:isolation:status`, declare the links it lists, then `fleet host:isolation:enable --mode=enforce --yes`. Roll back with `fleet host:isolation:disable`.
+- On a host with colleagues stay in `report` until the project owners agree to `enforce`.
+- The router is still reachable from instances (Traefik allow-list: FLE-326); the Docker events listener is a follow-up (FLE-327), so link changes take up to two minutes.
+- `nftables.service` must stay disabled on a host that uses isolation: it flushes the whole ruleset when it stops or reloads. `fleet host:isolation:enable` refuses while it is enabled or active; the installer only warns.
+- Enforce needs `br_netfilter` (loaded and persisted by the root helper; enable refuses and the boot unit refuses to start without it); `host:isolation:check` asserts only what the mode promises; recorded flows are rendered one per line (capped).
+- The units of the status watcher, the workers and php-fpm list `/etc/ddev-fleet`, `/etc/modules-load.d` and `/etc/sysctl.d` as writable (a pass started from them writes the boot copy and the `br_netfilter` files; a rollout through the installer or `fleet upgrade` restarts them). A pass re-reads the stored mode, so a running watcher never removes the table of a host that was just switched to `enforce`.
+- Instances pick the lock up at their next start or redeploy; nothing to do. Verify with `docs/reference/07-hardening.md` (database section) or the FLE-324 checklist.
+- Instances pick it up at their next start or redeploy; nothing to do.
+
 ## [1.10.0] - 2026-11-12
 
 ### Added
@@ -1531,7 +1562,8 @@ Initial deploy engine: registry (`fleet.yml`), CLI (`deploy`/`destroy`/
 `start`/`stop`/`list`), Ansible provisioning (Docker, DDEV, Caddy,
 `fleet.service`), asset/secret management, web UI (FastAPI + HTMX).
 
-[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/rcuny/ddev-fleet/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/rcuny/ddev-fleet/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/rcuny/ddev-fleet/compare/v1.9.2...v1.10.0
 [1.9.2]: https://github.com/rcuny/ddev-fleet/compare/v1.9.1...v1.9.2
 [1.9.1]: https://github.com/rcuny/ddev-fleet/compare/v1.9.0...v1.9.1

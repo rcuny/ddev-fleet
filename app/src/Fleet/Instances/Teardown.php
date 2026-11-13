@@ -26,6 +26,7 @@ final readonly class Teardown
         private InstanceSiteWriter $sites,
         private Tmux $tmux,
         private InstanceSshAgent $agent,
+        private ?\App\Fleet\Isolation\IsolationConverger $network = null,
     ) {
     }
 
@@ -41,6 +42,8 @@ final readonly class Teardown
 
         $this->closeWindow($instance, $log);
         $this->agent->stop($instance->id());
+        // FLE-299: the link networks of this instance go before its containers do (nothing stays attached to a dead network).
+        $this->network?->forgetInstance($instance->id());
         if (is_dir($dir)) {
             try {
                 $result = $this->ddev->delete($dir, $instance->id(), $log->output(...));

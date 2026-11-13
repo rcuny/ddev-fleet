@@ -26,6 +26,7 @@ final class HostSettingsMatrixTest extends HostPageTestCase
         'claude' => 'Claude token',
         'notifications' => 'Notifications',
         'network' => 'Networking',
+        'isolation' => 'Isolation',
         'certificates' => 'Certificates',
         'uploads' => 'Uploads',
         'jobs' => 'Jobs',

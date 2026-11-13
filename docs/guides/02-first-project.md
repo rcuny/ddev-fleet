@@ -53,3 +53,12 @@ More: [troubleshooting](../reference/13-troubleshooting.md).
 - [Automate deploys](03-automate-deploys.md) from Jira, Bitbucket or a timer
 - [Share and access](06-share-and-access.md)
 - [Configuration reference](../reference/02-configuration.md)
+
+## Isolation between instances (optional)
+
+By default the instances of a host can reach each other's containers. To close that, record what actually talks to what first:
+`fleet host:isolation:enable --mode=report`, work normally for a few days, then read `fleet host:isolation:status`. It lists
+each flow with the `fleet project:link:create` line that would allow it. When the list holds only what you want,
+`fleet host:isolation:enable --mode=enforce --yes` cuts the rest, and `fleet host:isolation:disable` undoes it. The choice of
+hosts, the timing and the links are yours; nothing turns it on by itself. See [network isolation](../reference/17-instance-isolation.md#network-isolation-between-instances).
+

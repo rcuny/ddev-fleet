@@ -33,6 +33,7 @@ Find your symptom, read the likely cause, apply the fix. Tables are grouped by w
 | Job `interrupted` | A worker or the host stopped. | Read the log, Retry. |
 | Job stays `queued` | Instance busy, job slots full, or no worker. | `systemctl status fleet-worker@1`. |
 | "port is already allocated" | Another project uses the port. | Stop that one, or `--retry-port-conflict`. |
+| `ddev mysql`, `export-db`, `import-db` or a snapshot fail with `ERROR 1044 ... ''@'localhost'` | The `fleet` user is uid 999, which is `mysql` inside DDEV's db image, so the client connects as `mysql@localhost`, an account that did not exist (the anonymous `''@localhost` answers, with no rights). | Fleet creates `mysql@localhost` (unix_socket only) after each start. Restart or redeploy the instance. |
 | Deploy fails after start | A post-deploy line failed, or a token is unresolved. | The job log shows the line; fix the line or the secret. |
 | A terminal command did not run | Unresolved token or unsafe value in a `tty1`/`tty2` line. | Skipped with a `WARNING` in the job log; the deploy still succeeds. |
 | Webhook returns 401 / 404 | Wrong signature, or no such project or secret yet. | `fleet webhook:secret`; re-enter it in the sender. |
@@ -87,6 +88,13 @@ Page-by-page detail: [05-upgrade.md](05-upgrade.md), [06-backup-and-restore.md](
 |---|---|---|
 | Nothing runs | Instances did not restart. | `journalctl -u fleet-boot`. |
 | Portal answers 502 | Authelia secrets permission, see "Signing in". | Re-run the installer. |
+
+## Network isolation
+
+- **A link stays `pending`** (`fleet host:isolation:status`, instance page): the reason names what is missing, for example the target instance (`<target>--<label>` does not exist), or the target service (the compose service has another name, or the container is not created). Fix that, start the instance, wait for the next pass (two minutes).
+- **Every site answers 502 after `enforce`:** the router is not in the table. `fleet host:isolation:status` exits 1 and says "the router set is empty". Run `fleet host:isolation:enable --mode=enforce --yes` to force a pass; if it persists, `fleet host:isolation:disable` and look at `docker logs ddev-router`.
+- **A container cannot reach the host any more:** the port is not on the allow-list. `status` lists `container -> host` flows; add the port under **Settings → Isolation**.
+- **Roll back at once:** `fleet host:isolation:disable`, or as root `nft delete table inet fleet_isolation`.
 
 ## Still stuck
 

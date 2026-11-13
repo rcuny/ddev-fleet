@@ -20,6 +20,7 @@ final class ExportParser
 {
     public const int MAX_WEBHOOK_RULES = 100;
     public const int MAX_SCHEDULES = 200;
+    public const int MAX_LINKS = 100;
     public const int MAX_LINES = 500;
 
     /** @var list<string> */
@@ -58,7 +59,7 @@ final class ExportParser
         }
 
         $this->problems = [];
-        $this->keys($data, '', ['format', 'version', 'project', 'ports', 'templates', 'webhooks', 'schedules'], ['secrets']);
+        $this->keys($data, '', ['format', 'version', 'project', 'ports', 'templates', 'webhooks', 'schedules'], ['secrets', 'links']);
         $document = [
             'format' => ExportFormat::NAME,
             'version' => ExportFormat::VERSION,
@@ -67,6 +68,7 @@ final class ExportParser
             'templates' => $this->templates($data['templates'] ?? null),
             'webhooks' => $this->webhooks($data['webhooks'] ?? null),
             'schedules' => $this->schedules($data['schedules'] ?? null),
+            'links' => \array_key_exists('links', $data) ? $this->links($data['links']) : [],
             'secrets' => \array_key_exists('secrets', $data) ? $this->secrets($data['secrets']) : null,
         ];
         $this->crossChecks($document);
@@ -218,6 +220,30 @@ final class ExportParser
         }
 
         return $endpoints;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    private function links(mixed $value): array
+    {
+        $links = [];
+        foreach ($this->items($value, 'links', self::MAX_LINKS) as $i => $item) {
+            $path = "links[$i]";
+            if (!$this->keys($item, $path, ['target', 'service', 'port', 'label', 'note'])) {
+                continue;
+            }
+            \assert(\is_array($item));
+            $links[] = [
+                'target' => $this->string($item['target'], "$path.target") ?? '',
+                'service' => $this->string($item['service'], "$path.service") ?? '',
+                'port' => $this->int($item['port'], "$path.port"),
+                'label' => $this->string($item['label'], "$path.label") ?? '',
+                'note' => $this->string($item['note'], "$path.note") ?? '',
+            ];
+        }
+
+        return $links;
     }
 
     /**

@@ -93,6 +93,9 @@ test.describe('axe sweep: instance list and deploy form', () => {
   });
 
   test('the list with no match', async ({ page }) => {
+    // The "no match" card only shows when at least one instance exists (total > 0); with none it is "No instances yet".
+    // Own an instance instead of relying on rows left by other tests (parallel workers, FLE-335).
+    await ownInstance(page);
     await page.goto(`/instances?q=${uniqueLabel('nomatch')}&state=stopped`);
     await expect(page.getByTestId('instances-empty')).toContainText('No instance matches');
     await expectNoBlockingViolations(page, 'the list with no match');

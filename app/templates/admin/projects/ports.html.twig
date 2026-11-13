@@ -83,6 +83,8 @@
             </div>
         {{ form_end(form) }}
 
+        {{ include('admin/projects/_links.html.twig', {project: project, links: links}) }}
+
         {% if confirm %}
             <twig:Dialog id="network-confirm" :open="true" data-testid="network-confirm">
                 <twig:Dialog:Content :showCloseButton="false">

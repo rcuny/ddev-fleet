@@ -36,6 +36,9 @@ final readonly class InstanceDbIsolationWriter
     public const string LEGACY_PATH = '.ddev/docker-compose.fleet-db-isolation.yaml';
     public const string MARKER = '# fleet-managed: instance database isolation (FLE-297)';
     public const string SHARED_NETWORK = 'ddev_default';
+    public const string LOCK_ROOT_SQL = "ALTER USER IF EXISTS 'root'@'%' ACCOUNT LOCK";
+    public const string SOCKET_USER_SQL_MARIADB = "CREATE USER IF NOT EXISTS 'mysql'@'localhost' IDENTIFIED VIA unix_socket; GRANT ALL ON *.* TO 'mysql'@'localhost' WITH GRANT OPTION";
+    public const string SOCKET_USER_SQL_MYSQL = "CREATE USER IF NOT EXISTS 'mysql'@'localhost' IDENTIFIED WITH auth_socket; GRANT ALL ON *.* TO 'mysql'@'localhost' WITH GRANT OPTION";
 
     public function __construct(private Ddev $ddev, private ?AuditLog $audit = null)
     {
@@ -151,5 +154,101 @@ final readonly class InstanceDbIsolationWriter
         }
 
         return $cut;
+    }
+
+    /**
+     * FLE-324 (owner decision 2026-11-12, option 2): DDEV's `db` user (db/db) stays, because settings.ddev.php, `ddev mysql`,
+     * import-db, export-db, the healthcheck and snapshots assume it. Only root is closed to the network: the account
+     * `root@'%'` (password "root" in every DDEV db container) is locked, so nothing that reaches the database over the
+     * network, or from the host's published port, gets DBA rights. `root@localhost`, used inside the db container
+     * (healthcheck, `ddev mysql`, snapshot, import-db's DROP/CREATE), is left alone. No password is chosen or stored: a
+     * locked account needs none. Idempotent, so it runs after every start. Never fatal: a database server that does not know
+     * ACCOUNT LOCK (MariaDB before 10.4) only logs a warning.
+     *
+     * @param \Closure(string): void $log
+     *
+     * @return bool true when the lock statement ran
+     */
+    public function lockRoot(string $project, \Closure $log): bool
+    {
+        try {
+            $container = null;
+            foreach ($this->ddev->projectContainers($project) as $row) {
+                if ('db' === $row['service']) {
+                    $container = $row['name'];
+                }
+            }
+            if (null === $container) {
+                return false; // no db container (omit_containers: [db]): nothing to lock
+            }
+            $result = $this->ddev->dbSql($container, self::LOCK_ROOT_SQL);
+        } catch (\Throwable $e) {
+            $log('WARNING: isolation: root@% of the database was not locked: '.$e->getMessage());
+
+            return false;
+        }
+        if (!$result->isSuccess()) {
+            $log('WARNING: isolation: root@% of the database was not locked (exit code '.$result->exitCode.'): '.self::reason($result->stderr));
+
+            return false;
+        }
+        $log('isolation: database account root@% is locked (db/db and root@localhost are unchanged)');
+
+        return true;
+    }
+
+    /**
+     * FLE-331: the host user `fleet` is uid 999, which is the `mysql` account inside DDEV's db image. DDEV runs `ddev mysql`,
+     * export-db and import-db in the db container as the host uid, so they connect over the socket as `mysql@localhost`; that
+     * account does not exist, MariaDB falls back to the anonymous `''@localhost` (no privileges) and answers ERROR 1044.
+     * The fix is the missing account: `mysql@localhost`, unix_socket only (usable by the OS user `mysql` inside the db
+     * container, the same power as the `root@localhost` socket account that already exists, so no new network exposure), with
+     * ALL on `*.*` because import-db drops and creates the database. MariaDB syntax first, then MySQL's auth_socket. The
+     * anonymous users are left alone: dropping them only turns 1044 into 1045. Idempotent, runs after every start, never fatal.
+     *
+     * @param \Closure(string): void $log
+     *
+     * @return bool true when the account exists after the call
+     */
+    public function ensureSocketUser(string $project, \Closure $log): bool
+    {
+        try {
+            $container = null;
+            foreach ($this->ddev->projectContainers($project) as $row) {
+                if ('db' === $row['service']) {
+                    $container = $row['name'];
+                }
+            }
+            if (null === $container) {
+                return false; // no db container (omit_containers: [db])
+            }
+            $result = $this->ddev->dbSql($container, self::SOCKET_USER_SQL_MARIADB);
+            if (!$result->isSuccess()) {
+                $result = $this->ddev->dbSql($container, self::SOCKET_USER_SQL_MYSQL);
+            }
+        } catch (\Throwable $e) {
+            $log('WARNING: database account mysql@localhost was not ensured: '.$e->getMessage());
+
+            return false;
+        }
+        if (!$result->isSuccess()) {
+            $log('WARNING: database account mysql@localhost was not ensured, ddev export-db / import-db / mysql may fail with ERROR 1044 (exit code '.$result->exitCode.'): '.self::reason($result->stderr));
+
+            return false;
+        }
+        $log('database account mysql@localhost (unix_socket) is in place: ddev mysql, export-db and import-db work for the fleet user (uid 999)');
+
+        return true;
+    }
+
+    /** The client's "password on the command line" notice is noise (FLE-332); keep only the real error, 300 characters at most. */
+    private static function reason(string $stderr): string
+    {
+        $lines = array_filter(
+            array_map('trim', explode("\n", $stderr)),
+            static fn (string $l): bool => '' !== $l && !str_contains($l, 'Using a password on the command line'),
+        );
+
+        return substr(implode(' ', $lines), 0, 300);
     }
 }

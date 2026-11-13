@@ -59,7 +59,7 @@ final class ExportParserTest extends TestCase
     {
         $parsed = new ExportParser()->parse(ExportFormat::encode(self::document()));
 
-        self::assertSame(self::document() + ['secrets' => null], $parsed);
+        self::assertSame(self::document() + ['links' => [], 'secrets' => null], $parsed);
     }
 
     public function testEncodingIsStableAndEndsWithANewline(): void

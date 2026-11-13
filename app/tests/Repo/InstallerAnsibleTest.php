@@ -35,6 +35,20 @@ final class InstallerAnsibleTest extends TestCase
         self::assertSame(['packages', 'docker', 'fleet_user', 'shell', 'ddev', 'caddy', 'authelia', 'php_app', 'app_code', 'privileged', 'units', 'hardening'], $m[1]);
     }
 
+    public function testHardeningCreatesTheDropInDirectoriesBeforeWritingIntoThem(): void
+    {
+        // FLE-325: the OVH Debian 13 image has no /etc/systemd/resolved.conf.d; the LLMNR copy failed.
+        $tasks = (string) file_get_contents(\dirname(__DIR__, 3).'/install/ansible/roles/hardening/tasks/system.yml');
+        $dirs = strpos($tasks, '- name: Directories for the drop-ins');
+        self::assertNotFalse($dirs);
+        foreach (['LLMNR off', 'Sysctl drop-in', 'Scoped auditd rules'] as $task) {
+            $pos = strpos($tasks, '- name: '.$task);
+            self::assertNotFalse($pos, $task);
+            self::assertGreaterThan($dirs, $pos, $task.' must run after the directories exist');
+        }
+        self::assertStringContainsString('path: /etc/systemd/resolved.conf.d', $tasks);
+    }
+
     public function testShellRoleWritesTheHookBlockBetweenItsMarkers(): void
     {
         $root = \dirname(__DIR__, 3).'/install';

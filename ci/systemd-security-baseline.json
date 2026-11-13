@@ -8,6 +8,7 @@
         "firewall-sync.service": 9.4,
         "fleet-backup.service": 1.4,
         "fleet-boot.service": 9.0,
+        "fleet-isolation.service": 3.5,
         "fleet-mercure.service": 8.2,
         "fleet-scheduler.service": 8.3,
         "fleet-status.service": 8.9,
@@ -369,6 +370,35 @@
             "UMask": 0.1
           },
           "score": 9.0
+        },
+        "fleet-isolation.service": {
+          "directives": {
+            "CapabilityBoundingSet_CAP_NET_ADMIN": 0.2,
+            "DeviceAllow": 0.1,
+            "IPAddressDeny": 0.2,
+            "PrivateNetwork": 0.5,
+            "PrivateUsers": 0.2,
+            "ProcSubset": 0.1,
+            "ProtectKernelTunables": 0.2,
+            "ProtectProc": 0.2,
+            "RestrictAddressFamilies_AF_NETLINK": 0.1,
+            "RestrictAddressFamilies_AF_UNIX": 0.1,
+            "RootDirectoryOrRootImage": 0.1,
+            "SystemCallFilter_clock": 0.2,
+            "SystemCallFilter_cpu_emulation": 0.1,
+            "SystemCallFilter_debug": 0.2,
+            "SystemCallFilter_module": 0.2,
+            "SystemCallFilter_mount": 0.2,
+            "SystemCallFilter_obsolete": 0.1,
+            "SystemCallFilter_privileged": 0.2,
+            "SystemCallFilter_raw_io": 0.2,
+            "SystemCallFilter_reboot": 0.2,
+            "SystemCallFilter_resources": 0.2,
+            "SystemCallFilter_swap": 0.2,
+            "UMask": 0.1,
+            "UserOrDynamicUser": 0.4
+          },
+          "score": 3.5
         },
         "fleet-mercure.service": {
           "directives": {

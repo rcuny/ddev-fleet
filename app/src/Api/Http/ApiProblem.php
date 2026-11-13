@@ -81,6 +81,12 @@ final class ApiProblem extends \RuntimeException implements HttpExceptionInterfa
         return new self(409, $code, $detail);
     }
 
+    /** A feature the host does not have set up (`streaming_unavailable`): the caller falls back to the plain endpoint. */
+    public static function unavailable(string $code, string $detail): self
+    {
+        return new self(503, $code, $detail);
+    }
+
     public static function ifMatchRequired(): self
     {
         return new self(428, 'if_match_required', 'Destroying needs an If-Match header with the instance\'s created_at, so a stale id never removes a newer instance.');
